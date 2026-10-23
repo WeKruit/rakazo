@@ -1,0 +1,604 @@
+import { createHash } from "node:crypto";
+import type {
+  Actor,
+  RecruitingSchedulingPlan,
+  RecruitingSchedulingPlanInput,
+} from "@rakazo/contracts";
+import {
+  RecruitingSchedulingPlanInputSchema,
+  RecruitingSchedulingPlanSchema,
+  RecruitingSchedulingSlotSchema,
+} from "@rakazo/contracts";
+import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
+import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import type { PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
+import { getRecruitingWorkspace } from "./recruiting.js";
+import { IsolationError, requireMembership } from "./scope.js";
+
+type Tx = Prisma.TransactionClient;
+const KIND = "recruiting_scheduling_plan";
+const LIMIT = 100;
+const obj = (value: unknown): Record<string, unknown> | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+function call(request: unknown) {
+  const direct = boundDirectApprovalDetails(request, "__rakazoCatalogTool");
+  const catalog = catalogApprovalDetails(request, "__rakazoCatalogTool");
+  const route = direct?.route ?? catalog?.route;
+  const args = obj(direct?.args ?? catalog?.args.arguments);
+  if (
+    !route ||
+    route.connectorId !== "mcp" ||
+    typeof route.resourceId !== "string" ||
+    typeof route.resourceRevision !== "number" ||
+    !args
+  )
+    throw new IsolationError();
+  return {
+    route: { ...route, resourceId: route.resourceId, resourceRevision: route.resourceRevision },
+    args,
+  };
+}
+function successful(effect: { status: string; result: unknown }) {
+  const envelope = obj(effect.result);
+  const body = envelope && mcpObject(envelope);
+  if (
+    effect.status !== "completed" ||
+    !envelope ||
+    envelope.error ||
+    envelope.isError ||
+    envelope.uncertain ||
+    !body ||
+    body.error ||
+    body.isError ||
+    body.uncertain
+  )
+    throw new IsolationError();
+  return obj(body.result) ?? body;
+}
+async function scope(prisma: PrismaClient, actor: Actor, threadId: string) {
+  await requireMembership(prisma, actor.userId, actor.spaceId);
+  const workspace = await getRecruitingWorkspace(prisma, actor, { threadId });
+  if (!workspace) throw new IsolationError();
+  return workspace;
+}
+async function lockScope(
+  tx: Tx,
+  actor: Actor,
+  input: { threadId: string; roleId: string; expectedRoleRevision: number },
+) {
+  await requireMembership(tx, actor.userId, actor.spaceId);
+  await tx.$queryRaw(
+    Prisma.sql`SELECT id FROM threads WHERE id=${input.threadId} AND "spaceId"=${actor.spaceId} AND "userId"=${actor.userId} FOR UPDATE`,
+  );
+  const thread = await tx.thread.findFirst({
+    where: {
+      id: input.threadId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      activeRecruitingRoleId: input.roleId,
+    },
+  });
+  const role = await tx.recruitingRole.findFirst({
+    where: {
+      id: input.roleId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      revision: input.expectedRoleRevision,
+      archivedAt: null,
+    },
+  });
+  if (!thread || !role) throw new IsolationError();
+}
+async function effect(tx: Tx, actor: Actor, threadId: string, id: string) {
+  const row = await tx.externalEffect.findFirst({
+    where: {
+      id,
+      spaceId: actor.spaceId,
+      run: { spaceId: actor.spaceId, userId: actor.userId, threadId },
+    },
+    include: { run: true },
+  });
+  if (!row) throw new IsolationError();
+  return row;
+}
+async function grant(
+  tx: Tx,
+  actor: Actor,
+  row: Awaited<ReturnType<typeof effect>>,
+  tools?: string[],
+) {
+  const native = call(row.request);
+  const server = await tx.mcpServer.findFirst({
+    where: {
+      id: native.route.resourceId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      enabled: true,
+      revision: native.route.resourceRevision,
+    },
+  });
+  const assignment = await tx.botMcpServer.findFirst({
+    where: {
+      serverId: native.route.resourceId,
+      botId: row.run.botId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+    },
+  });
+  const allowed = assignment?.allowedTools;
+  if (
+    !server ||
+    !assignment ||
+    (!assignment.allowAllTools &&
+      (!Array.isArray(allowed) ||
+        !(tools ?? [native.route.toolName]).every((tool) => allowed.includes(tool))))
+  )
+    throw new IsolationError();
+  return native;
+}
+function slots(row: Awaited<ReturnType<typeof effect>>) {
+  const { route, args } = call(row.request);
+  if (
+    route.toolName !== "get_availability" ||
+    args.format !== "range" ||
+    !Number.isSafeInteger(args.duration) ||
+    Number(args.duration) <= 0
+  )
+    return [];
+  const body = successful(row);
+  if (body.status !== "success" || !obj(body.data)) return [];
+  return Object.values(obj(body.data)!)
+    .flatMap((value) => (Array.isArray(value) ? value : []))
+    .flatMap((value) => {
+      const slot = obj(value);
+      const parsed = RecruitingSchedulingSlotSchema.safeParse({
+        sourceId: route.resourceId,
+        sourceRevision: route.resourceRevision,
+        eventTypeId: args.eventTypeId,
+        availabilityEffectId: row.id,
+        start: slot?.start,
+        end: slot?.end,
+        lengthInMinutes: args.duration,
+      });
+      return parsed.success &&
+        typeof args.start === "string" &&
+        typeof args.end === "string" &&
+        Date.parse(parsed.data.start) >= Date.parse(args.start) &&
+        Date.parse(parsed.data.end) <= Date.parse(args.end)
+        ? [parsed.data]
+        : [];
+    });
+}
+async function verify(
+  tx: Tx,
+  actor: Actor,
+  input: RecruitingSchedulingPlanInput,
+  workspace: Awaited<ReturnType<typeof scope>>,
+  retained?: Pick<RecruitingSchedulingPlan, "mailRead" | "mailSourceId" | "mailSourceRevision">,
+) {
+  await lockScope(tx, actor, input);
+  if (
+    workspace.role.id !== input.roleId ||
+    workspace.role.revision !== input.expectedRoleRevision ||
+    input.originalEmail.roleId !== input.roleId ||
+    input.originalEmail.threadId !== input.threadId
+  )
+    throw new IsolationError();
+  const availability = await effect(tx, actor, input.threadId, input.calendar.availabilityEffectId);
+  if (availability.run.initialRecruitingRoleRevisionId !== workspace.role.currentRevisionId)
+    throw new IsolationError();
+  await grant(tx, actor, availability, ["get_availability", "create_booking", "get_booking"]);
+  if (
+    !slots(availability).some((slot) => stableJsonValue(slot) === stableJsonValue(input.calendar))
+  )
+    throw new IsolationError();
+  const saved = retained?.mailRead ?? input.originalEmail.savedRead;
+  let mail: Awaited<ReturnType<typeof effect>>;
+  if (saved) mail = await effect(tx, actor, input.threadId, saved.effectId);
+  else {
+    const target = workspace.crmTarget?.target;
+    if (!input.originalEmail.crm || !target || input.originalEmail.sourceId !== target.mcpServerId)
+      throw new IsolationError("Read the original email before preparing a scheduling plan");
+    const rows = await tx.externalEffect.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        run: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          threadId: input.threadId,
+          initialRecruitingRoleRevisionId: workspace.role.currentRevisionId,
+        },
+      },
+      include: { run: true },
+      orderBy: { createdAt: "desc" },
+      take: LIMIT + 1,
+    });
+    if (rows.length > LIMIT) throw new IsolationError("Original email proof search is incomplete");
+    const matches: typeof rows = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      try {
+        const candidate = call(row.request);
+        if (
+          !["get_email", "native_instantly_get_email"].includes(candidate.route.toolName) ||
+          candidate.args.id !== input.originalEmail.providerMessageId ||
+          seen.has(candidate.route.resourceId)
+        )
+          continue;
+        seen.add(candidate.route.resourceId);
+        await grant(tx, actor, row);
+        const value = successful(row);
+        if (
+          value.id === input.originalEmail.providerMessageId &&
+          value.thread_id === input.originalEmail.providerThreadId &&
+          value.eaccount === input.originalEmail.eaccount &&
+          value.from_address_email === input.candidate.email &&
+          value.campaign_id === input.originalEmail.campaignId
+        )
+          matches.push(row);
+      } catch (error) {
+        if (!(error instanceof IsolationError)) throw error;
+      }
+    }
+    if (matches.length !== 1)
+      throw new IsolationError("The original email needs one exact authorized native read");
+    mail = matches[0]!;
+  }
+  if (mail.run.initialRecruitingRoleRevisionId !== workspace.role.currentRevisionId)
+    throw new IsolationError();
+  const native = await grant(tx, actor, mail);
+  if (
+    !["get_email", "native_instantly_get_email"].includes(native.route.toolName) ||
+    native.args.id !== input.originalEmail.providerMessageId ||
+    (saved && (mail.runId !== saved.linkedRunId || mail.run.sourceMessageId !== saved.messageId)) ||
+    (!input.originalEmail.crm && native.route.resourceId !== input.originalEmail.sourceId)
+  )
+    throw new IsolationError();
+  const email = successful(mail);
+  if (
+    email.id !== input.originalEmail.providerMessageId ||
+    typeof email.thread_id !== "string" ||
+    email.thread_id !== input.originalEmail.providerThreadId ||
+    typeof email.eaccount !== "string" ||
+    email.eaccount !== input.originalEmail.eaccount ||
+    input.candidate.email !== email.from_address_email ||
+    (input.originalEmail.campaignId && email.campaign_id !== input.originalEmail.campaignId)
+  )
+    throw new IsolationError();
+  const crm = input.originalEmail.crm;
+  if (crm) {
+    const target = workspace.crmTarget?.target;
+    if (
+      !target ||
+      target.organizationId !== crm.organizationId ||
+      target.crmRoleId !== crm.crmRoleId ||
+      target.serverRevision !== crm.serverRevision ||
+      crm.candidateId !== input.candidate.candidateKey
+    )
+      throw new IsolationError();
+    const contact = await tx.recruitingCrmContact.findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        mcpServerId: target.mcpServerId,
+        organizationId: target.organizationId,
+        crmCandidateId: crm.candidateId,
+        email: input.candidate.email,
+        archivedAt: null,
+        roles: {
+          some: {
+            archivedAt: null,
+            role: {
+              crmRoleId: target.crmRoleId,
+              organizationId: target.organizationId,
+              mcpServerId: target.mcpServerId,
+              archivedAt: null,
+            },
+          },
+        },
+      },
+    });
+    if (!contact) throw new IsolationError();
+    if (!input.originalEmail.savedRead) {
+      const message = await tx.recruitingCrmMessage.findFirst({
+        where: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          mcpServerId: target.mcpServerId,
+          organizationId: target.organizationId,
+          crmRoleId: target.crmRoleId,
+          crmCandidateId: crm.candidateId,
+          crmMessageId: input.originalEmail.providerMessageId,
+          threadId: input.originalEmail.providerThreadId,
+        },
+      });
+      if (!message)
+        throw new IsolationError("The selected original email is not saved for this CRM role");
+    }
+  } else {
+    const candidate = await tx.recruitingCandidate.findUnique({
+      where: {
+        roleId_candidateKey: { roleId: input.roleId, candidateKey: input.candidate.candidateKey },
+      },
+    });
+    if (!candidate || input.candidate.candidateKey !== input.candidate.email.toLowerCase())
+      throw new IsolationError("An exact saved contact/email identity is required");
+  }
+  return {
+    availability,
+    mailSourceRevision: native.route.resourceRevision,
+    mailSourceId: native.route.resourceId,
+    mailRead: { effectId: mail.id, linkedRunId: mail.runId, messageId: mail.run.sourceMessageId },
+  };
+}
+function projection(row: {
+  id: string;
+  request: unknown;
+  result: unknown;
+  createdAt: Date;
+}): RecruitingSchedulingPlan {
+  const links = obj(row.result);
+  return RecruitingSchedulingPlanSchema.parse({
+    ...RecruitingSchedulingPlanInputSchema.parse(obj(row.request)?.input),
+    id: row.id,
+    createdAt: row.createdAt.toISOString(),
+    roleTitle: obj(row.request)?.roleTitle,
+    mailSourceRevision: obj(row.request)?.mailSourceRevision,
+    mailSourceId: obj(row.request)?.mailSourceId,
+    mailRead: obj(row.request)?.mailRead,
+    bookingStatus: null,
+    confirmationStatus: null,
+    bookingEffectId: links?.bookingEffectId ?? null,
+    confirmationEffectId: links?.confirmationEffectId ?? null,
+  });
+}
+async function outcome(tx: Tx, actor: Actor, plan: RecruitingSchedulingPlan) {
+  const status = async (id: string | null) => {
+    if (!id) return null;
+    const row = await effect(tx, actor, plan.threadId, id);
+    await grant(tx, actor, row);
+    if (row.status === "uncertain" || obj(row.result)?.uncertain) return "uncertain" as const;
+    if (row.status === "failed") return "failed" as const;
+    if (row.status !== "completed") return "pending" as const;
+    try {
+      successful(row);
+      return "completed" as const;
+    } catch {
+      return "failed" as const;
+    }
+  };
+  return {
+    ...plan,
+    bookingStatus: await status(plan.bookingEffectId),
+    confirmationStatus: await status(plan.confirmationEffectId),
+  };
+}
+export async function createRecruitingSchedulingPlan(
+  prisma: PrismaClient,
+  actor: Actor,
+  raw: RecruitingSchedulingPlanInput,
+) {
+  const input = RecruitingSchedulingPlanInputSchema.parse(raw);
+  const workspace = await scope(prisma, actor, input.threadId);
+  return prisma.$transaction(async (tx) => {
+    const read = await verify(tx, actor, input, workspace);
+    const key = `recruiting-scheduling:${actor.spaceId}:${actor.userId}:${createHash("sha256").update(stableJsonValue(input)).digest("hex")}`;
+    const prior = await tx.externalEffect.findUnique({ where: { idempotencyKey: key } });
+    if (prior) return projection(prior);
+    return projection(
+      await tx.externalEffect.create({
+        data: {
+          spaceId: actor.spaceId,
+          runId: read.availability.runId,
+          kind: KIND,
+          idempotencyKey: key,
+          status: "draft",
+          request: {
+            input,
+            roleTitle: workspace.role.title,
+            mailSourceRevision: read.mailSourceRevision,
+            mailSourceId: read.mailSourceId,
+            mailRead: read.mailRead,
+          } as Prisma.InputJsonValue,
+          result: { bookingEffectId: null, confirmationEffectId: null },
+        },
+      }),
+    );
+  });
+}
+export async function loadVerifiedRecruitingSchedulingPlan(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string; planId: string },
+) {
+  const workspace = await scope(prisma, actor, input.threadId);
+  return prisma.$transaction(async (tx) => {
+    const row = await effect(tx, actor, input.threadId, input.planId);
+    if (row.kind !== KIND || row.status !== "draft") throw new IsolationError();
+    const plan = projection(row);
+    const verified = await verify(
+      tx,
+      actor,
+      RecruitingSchedulingPlanInputSchema.parse(obj(row.request)?.input),
+      workspace,
+      plan,
+    );
+    if (
+      verified.mailSourceRevision !== plan.mailSourceRevision ||
+      verified.mailSourceId !== plan.mailSourceId
+    )
+      throw new IsolationError();
+    return outcome(tx, actor, plan);
+  });
+}
+export async function listRecruitingSchedulingPlans(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+) {
+  const workspace = await scope(prisma, actor, input.threadId);
+  const rows = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      run: { userId: actor.userId, spaceId: actor.spaceId, threadId: input.threadId },
+    },
+    include: { run: true },
+    orderBy: { createdAt: "desc" },
+    take: LIMIT + 1,
+  });
+  const plans: RecruitingSchedulingPlan[] = [];
+  const available: Array<ReturnType<typeof slots>[number] & { observedAt: string }> = [];
+  for (const row of rows.slice(0, LIMIT)) {
+    try {
+      if (row.kind === KIND)
+        plans.push(
+          await loadVerifiedRecruitingSchedulingPlan(prisma, actor, {
+            threadId: input.threadId,
+            planId: row.id,
+          }),
+        );
+      else if (row.run.initialRecruitingRoleRevisionId === workspace.role.currentRevisionId) {
+        await prisma.$transaction((tx) =>
+          grant(tx, actor, row, ["get_availability", "create_booking", "get_booking"]),
+        );
+        available.push(
+          ...slots(row).map((slot) => ({ ...slot, observedAt: row.updatedAt.toISOString() })),
+        );
+      }
+    } catch (error) {
+      if (!(error instanceof IsolationError)) throw error;
+    }
+  }
+  const current = await scope(prisma, actor, input.threadId);
+  if (current.role.id !== workspace.role.id || current.role.revision !== workspace.role.revision)
+    throw new IsolationError();
+  return { plans, slots: available, partial: rows.length > LIMIT };
+}
+export async function bindRecruitingSchedulingOperation(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string; planId: string; operation: "book" | "confirm"; effectId: string },
+) {
+  const workspace = await scope(prisma, actor, input.threadId);
+  return prisma.$transaction(async (tx) => {
+    await lockScope(tx, actor, {
+      threadId: input.threadId,
+      roleId: workspace.role.id,
+      expectedRoleRevision: workspace.role.revision,
+    });
+    await tx.$queryRaw(
+      Prisma.sql`SELECT id FROM external_effects WHERE id=${input.planId} FOR UPDATE`,
+    );
+    const row = await effect(tx, actor, input.threadId, input.planId);
+    if (row.kind !== KIND) throw new IsolationError();
+    const plan = projection(row);
+    const verified = await verify(
+      tx,
+      actor,
+      RecruitingSchedulingPlanInputSchema.parse(obj(row.request)?.input),
+      workspace,
+      plan,
+    );
+    if (
+      verified.mailSourceRevision !== plan.mailSourceRevision ||
+      verified.mailSourceId !== plan.mailSourceId
+    )
+      throw new IsolationError();
+    const operation = await effect(tx, actor, input.threadId, input.effectId);
+    if (
+      operation.run.initialRecruitingRoleRevisionId !== workspace.role.currentRevisionId ||
+      !["intended", "approved", "executing", "completed", "uncertain", "failed"].includes(
+        operation.status,
+      )
+    )
+      throw new IsolationError();
+    const native = await grant(tx, actor, operation);
+    const key = input.operation === "book" ? "bookingEffectId" : "confirmationEffectId";
+    if (!plan[key] && !["intended", "approved"].includes(operation.status))
+      throw new IsolationError("Only a new reviewed operation may be linked");
+    if (plan[key] && plan[key] !== operation.id)
+      throw new IsolationError(
+        "This plan already has an operation; reconcile its existing outcome",
+      );
+    if (input.operation === "book") {
+      const attendee = obj(native.args.attendee);
+      if (
+        native.route.toolName !== "create_booking" ||
+        native.route.resourceId !== plan.calendar.sourceId ||
+        native.route.resourceRevision !== plan.calendar.sourceRevision ||
+        native.args.eventTypeId !== plan.calendar.eventTypeId ||
+        native.args.start !== plan.calendar.start ||
+        native.args.lengthInMinutes !== plan.calendar.lengthInMinutes ||
+        attendee?.email !== plan.candidate.email ||
+        attendee?.timeZone !== plan.candidate.timeZone
+      )
+        throw new IsolationError();
+    } else {
+      if (!plan.bookingEffectId) throw new IsolationError();
+      const booking = await effect(tx, actor, input.threadId, plan.bookingEffectId);
+      const booked = obj(successful(booking).data);
+      if (!booked || typeof booked.uid !== "string") throw new IsolationError();
+      const reads = await tx.externalEffect.findMany({
+        where: {
+          spaceId: actor.spaceId,
+          status: "completed",
+          createdAt: { gte: booking.updatedAt },
+          run: { spaceId: actor.spaceId, userId: actor.userId, threadId: input.threadId },
+        },
+        include: { run: true },
+        orderBy: { createdAt: "desc" },
+        take: LIMIT,
+      });
+      let readback = false;
+      for (const read of reads) {
+        try {
+          const callRead = await grant(tx, actor, read);
+          const actual = obj(successful(read).data);
+          if (
+            callRead.route.toolName === "get_booking" &&
+            callRead.route.resourceId === plan.calendar.sourceId &&
+            callRead.route.resourceRevision === plan.calendar.sourceRevision &&
+            callRead.args.bookingUid === booked.uid &&
+            actual?.uid === booked.uid &&
+            actual.status === "accepted" &&
+            Date.parse(String(actual.start)) === Date.parse(plan.calendar.start) &&
+            Date.parse(String(actual.end)) === Date.parse(plan.calendar.end) &&
+            Array.isArray(actual.attendees) &&
+            actual.attendees.some((value) => obj(value)?.email === plan.candidate.email) &&
+            Array.isArray(actual.hosts) &&
+            actual.hosts.some((value) => obj(value)?.email === plan.interviewer.email)
+          ) {
+            readback = true;
+            break;
+          }
+        } catch (error) {
+          if (!(error instanceof IsolationError)) throw error;
+        }
+      }
+      if (
+        !readback ||
+        !["reply_to_email", "native_instantly_reply_to_email"].includes(native.route.toolName) ||
+        native.route.resourceId !== plan.mailSourceId ||
+        native.route.resourceRevision !== plan.mailSourceRevision ||
+        native.args.reply_to_uuid !== plan.originalEmail.providerMessageId ||
+        native.args.eaccount !== plan.originalEmail.eaccount
+      )
+        throw new IsolationError();
+    }
+    return projection(
+      await tx.externalEffect.update({
+        where: { id: row.id },
+        data: {
+          result: {
+            bookingEffectId: plan.bookingEffectId,
+            confirmationEffectId: plan.confirmationEffectId,
+            [key]: operation.id,
+          },
+        },
+      }),
+    );
+  });
+}

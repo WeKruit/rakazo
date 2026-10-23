@@ -169,6 +169,11 @@ import {
   UpdateRecruitingReminderInput,
 } from "./recruiting.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
+import {
+  RecruitingSchedulingPlanInputSchema,
+  RecruitingSchedulingPlanSchema,
+  RecruitingSchedulingSlotSchema,
+} from "./recruiting-scheduling.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
@@ -634,6 +639,18 @@ export const appContract = {
     crmData: oc
       .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
       .output(RecruitingCrmDataOutputSchema),
+    schedulingPlans: oc
+      .input(z.object({ threadId: Id }))
+      .output(
+        z.object({
+          plans: z.array(RecruitingSchedulingPlanSchema),
+          slots: z.array(RecruitingSchedulingSlotSchema.safeExtend({ observedAt: IsoDate })),
+          partial: z.boolean(),
+        }),
+      ),
+    saveSchedulingPlan: oc
+      .input(RecruitingSchedulingPlanInputSchema)
+      .output(RecruitingSchedulingPlanSchema),
     correspondence: oc
       .input(
         threadTarget.safeExtend({

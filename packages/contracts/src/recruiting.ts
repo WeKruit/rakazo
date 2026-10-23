@@ -1563,12 +1563,16 @@ const ChatContextText = z.string().trim().min(1).max(200);
 /** Bounded workbench selection a role chat turn carries; never evidence or authorization. */
 export const RecruitingChatContextSchema = z
   .strictObject({
+    schedulingPlanId: Id.max(200).optional(),
     roleTitle: ChatContextText.optional(),
     contact: z
       .strictObject({ name: ChatContextText, reference: ChatContextText.optional() })
       .optional(),
   })
-  .refine((value) => value.roleTitle || value.contact, "Chat context is empty");
+  .refine(
+    (value) => value.roleTitle || value.contact || value.schedulingPlanId,
+    "Chat context is empty",
+  );
 export type RecruitingChatContext = z.infer<typeof RecruitingChatContextSchema>;
 
 /** Opaque token for offset-paged reads; callers pass back the previous page's `nextCursor` unchanged. */

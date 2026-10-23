@@ -324,6 +324,10 @@ import {
   updateRecruitingReminder,
 } from "./recruiting.js";
 import { syncRecruitingCrm } from "./recruiting-crm-sync.js";
+import {
+  getRecruitingSchedulingPlans,
+  saveRecruitingSchedulingPlan,
+} from "./recruiting-scheduling.js";
 import { listRoutineRuns } from "./routine-runs.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
@@ -3655,6 +3659,24 @@ export function createRouter(deps: RouterDeps) {
           await resolveThreadTarget(deps.prisma, context.actor, input),
           input,
         ),
+      ),
+      schedulingPlans: authed.recruiting.schedulingPlans.handler(async ({ context, input }) => {
+        return getRecruitingSchedulingPlans(
+          deps.prisma,
+          context.actor,
+          input,
+          context.stillAuthorized,
+        );
+      }),
+      saveSchedulingPlan: authed.recruiting.saveSchedulingPlan.handler(
+        async ({ context, input }) => {
+          return saveRecruitingSchedulingPlan(
+            deps.prisma,
+            context.actor,
+            input,
+            context.stillAuthorized,
+          );
+        },
       ),
       correspondence: authed.recruiting.correspondence.handler(async ({ context, input }) =>
         getRecruitingCorrespondence(
