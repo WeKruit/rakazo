@@ -95,8 +95,8 @@ import { InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
 import { ContactsTab } from "./recruiting/ContactsTab";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
-import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
 import { RetryNotice } from "./recruiting/RetryNotice";
+import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -2322,7 +2322,8 @@ function RoleAgentSection({ crmBrowse, roleConversation: _, correspondence, ...p
     <NativeRecruitingPanel
       {...props}
       presentation="workspace"
-      view={view === "shortlist" || view === "contacts" ? view : "results"}
+      // Search results and CRM contacts are one list.
+      view={view === "shortlist" ? view : view === "workflow" ? "results" : "contacts"}
       tab={view === "workflow" ? "dashboard" : "evidence"}
     />
   );
