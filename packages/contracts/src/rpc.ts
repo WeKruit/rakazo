@@ -130,6 +130,7 @@ import {
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateReportSchema,
   RecruitingChatContextSchema,
+  RecruitingCorrespondenceInputPage,
   RecruitingCorrespondenceReferenceSchema,
   RecruitingCorrespondenceSchema,
   RecruitingCrmDataInputSchema,
@@ -607,7 +608,12 @@ export const appContract = {
       .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
       .output(RecruitingCrmDataOutputSchema),
     correspondence: oc
-      .input(threadTarget.safeExtend({ view: z.enum(["inbox", "interview", "contacts"]) }))
+      .input(
+        threadTarget.safeExtend({
+          view: z.enum(["inbox", "interview", "contacts"]),
+          ...RecruitingCorrespondenceInputPage,
+        }),
+      )
       .output(RecruitingCorrespondenceSchema),
     listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
     readSource: oc.input(ReadRecruitingSourceInput).output(

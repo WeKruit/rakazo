@@ -1566,6 +1566,7 @@ describe("saved recruiting correspondence", () => {
     body: unknown,
     previous?: { tool: string; args: Record<string, unknown>; body: unknown },
     failed = false,
+    page?: { limit?: number; cursor?: string },
   ) {
     const { client, prisma, retained } = fixture();
     client.mcpServer.findMany.mockResolvedValueOnce([
@@ -1604,7 +1605,15 @@ describe("saved recruiting correspondence", () => {
       .mockReset()
       .mockResolvedValueOnce(rows)
       .mockResolvedValueOnce(results);
-    return api.getRecruitingCorrespondence(prisma, actor, target, "inbox");
+    return api.getRecruitingCorrespondence(
+      prisma,
+      actor,
+      target,
+      "inbox",
+      undefined,
+      undefined,
+      page,
+    );
   }
   const gmailMessage = {
     id: "gmail-message",
@@ -1766,6 +1775,34 @@ describe("saved recruiting correspondence", () => {
     );
     expect(thread.emails).toHaveLength(50);
     expect(thread.partial).toBe(true);
+    expect(thread.nextCursor).toBe("50");
+  });
+  it("pages inbox emails by opaque cursor without overlap or skips", async () => {
+    const body = {
+      id: gmailMessage.threadId,
+      messages: Array.from({ length: 5 }, (_, index) => ({ ...gmailMessage, id: `m-${index}` })),
+    };
+    const read = (page: { limit?: number; cursor?: string }) =>
+      gmailObservation(
+        "get_thread",
+        { threadId: gmailMessage.threadId },
+        body,
+        undefined,
+        false,
+        page,
+      );
+    const ids = (page: { emails: Array<{ providerMessageId: string }> }) =>
+      page.emails.map((email) => email.providerMessageId);
+    const first = await read({ limit: 2 });
+    expect(ids(first)).toEqual(["m-4", "m-3"]);
+    expect(first.nextCursor).toBe("2");
+    const second = await read({ limit: 2, cursor: first.nextCursor! });
+    expect(ids(second)).toEqual(["m-2", "m-1"]);
+    expect(second.nextCursor).toBe("4");
+    const last = await read({ limit: 2, cursor: second.nextCursor! });
+    expect(ids(last)).toEqual(["m-0"]);
+    expect(last).toMatchObject({ nextCursor: null, status: "ready" });
+    expect(ids(await read({}))).toEqual(["m-4", "m-3", "m-2", "m-1", "m-0"]);
   });
   it.each([
     { ...gmailMessage, date: "not-a-date" },
@@ -3895,6 +3932,38 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it.each([
+    ["candidates", ["list_crm_roles", "get_crm_role"]],
+    ["candidateDetails", ["list_crm_candidate_messages", "get_crm_candidate_review"]],
+    ["mail", ["list_crm_candidate_messages", "list_crm_candidate_correspondence"]],
+  ] as const)(
+    "overlaps the independent CRM reads of one %s request after the membership gate",
+    async (operation, pair) => {
+      const f = browserFixture();
+      f.results.get_crm_candidate_review = details();
+      const original = f.execute.getMockImplementation()!;
+      let inFlight = 0;
+      let overlapped = false;
+      f.execute.mockImplementation(async function* (call, context) {
+        const tracked = (pair as readonly string[]).includes(call.route!.toolName);
+        if (tracked && ++inFlight === pair.length) overlapped = true;
+        // Each provider read takes real wall time; sequential reads never overlap.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        if (tracked) inFlight--;
+        yield* original(call, context);
+      });
+      await api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        operation === "candidates"
+          ? { operation, ...pinned, crmRoleId: roleId }
+          : { operation, ...pinned, candidateId },
+      );
+      expect(f.execute.mock.calls[0]![0].route!.toolName).toBe("list_crm_memberships");
+      expect(overlapped).toBe(true);
+    },
+  );
   it("freshly reads one exact canonical role for native conversation creation without scanning candidates or the role catalog", async () => {
     const f = browserFixture("existing-personal-oauth");
     const reference = {
@@ -4191,6 +4260,61 @@ describe("live CRM browser reads", () => {
         ([call]) => !/import|bind|send|reply|update/.test(call.route!.toolName),
       ),
     ).toBe(true);
+  });
+  it("pages CRM candidates through an opaque offset cursor passed to the CRM tool", async () => {
+    const f = browserFixture();
+    const row = f.results.list_crm_candidates.rows[0]!;
+    const ids = [
+      "11111111-1111-4111-8111-111111111111",
+      "22222222-2222-4222-8222-222222222222",
+      "33333333-3333-4333-8333-333333333333",
+    ];
+    f.execute.mockImplementation(async function* (call) {
+      const data =
+        call.route?.toolName === "list_crm_candidates"
+          ? {
+              total: ids.length,
+              rows: ids
+                .slice(
+                  call.args.p_offset as number,
+                  (call.args.p_offset as number) + (call.args.p_limit as number),
+                )
+                .map((candidate_id) => ({ ...row, candidate_id })),
+            }
+          : f.results[call.route!.toolName];
+      yield { type: "result" as const, data: { structuredContent: { data } } };
+    });
+    const page = (extra: { limit?: number; cursor?: string; offset?: number }) =>
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "candidates",
+        serverId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        ...extra,
+      });
+    const first = await page({ limit: 2 });
+    expect(first).toMatchObject({ total: 3, offset: 0, nextOffset: 2, nextCursor: "2" });
+    const second = await page({ limit: 2, cursor: "2" });
+    expect(second).toMatchObject({ total: 3, offset: 2, nextOffset: null, nextCursor: null });
+    const seen = [first, second].flatMap((value) =>
+      "items" in value
+        ? value.items.map((item) => (item as { candidateId: string }).candidateId)
+        : [],
+    );
+    expect(seen).toEqual(ids);
+    expect(
+      f.execute.mock.calls
+        .filter(([call]) => call.route?.toolName === "list_crm_candidates")
+        .map(([call]) => [call.args.p_limit, call.args.p_offset]),
+    ).toEqual([
+      [2, 0],
+      [2, 2],
+    ]);
+    await expect(page({ limit: 2, cursor: "2", offset: 1 })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
+    await expect(page({ limit: 51 })).rejects.toThrow();
+    await expect(page({ cursor: "01" })).rejects.toThrow();
   });
   it("discovers only assigned first-party sources and returns actual stored correspondence identities", async () => {
     const f = browserFixture();
