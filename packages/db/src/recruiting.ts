@@ -6451,6 +6451,7 @@ async function indexRecruitingCandidateRows(
     skipDuplicates: true,
   });
   await tx.recruitingCandidateOccurrence.createMany({ data: rows });
+  await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${effect.id}`);
   return rows.map(({ rowIndex, candidateKey }) => ({ rowIndex, candidateKey }));
 }
 
@@ -6822,6 +6823,7 @@ export async function saveRecruitingCandidateCsvImport(
         skipDuplicates: true,
       });
       await tx.recruitingCandidateOccurrence.createMany({ data: rows });
+      await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
     }
     const result = {
       status: "saved",
@@ -7142,6 +7144,54 @@ function writeCandidateCursor(scope: string, value: string, key: string): string
   return Buffer.from(JSON.stringify({ version: 1, scope, value, key })).toString("base64url");
 }
 
+// The saved provider envelope of `effect`: structuredContent, else the first JSON text block.
+const savedProviderBody = Prisma.sql`COALESCE(effect."result"->'structuredContent', (
+  SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
+  FROM jsonb_array_elements(CASE WHEN jsonb_typeof(effect."result"->'content') = 'array'
+    THEN effect."result"->'content' ELSE '[]'::jsonb END) block
+  WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
+))`;
+// Occurrence `o`'s own saved row inside `body`; {} when the row is absent or not an object.
+const savedProviderRow = (body: Prisma.Sql) =>
+  Prisma.sql`CASE WHEN jsonb_typeof(${body}->'rows'->o."rowIndex") = 'object'
+    THEN ${body}->'rows'->o."rowIndex" ELSE '{}'::jsonb END`;
+const candidateMatchKeys = [
+  "updated_rank",
+  "overall_rank",
+  "rank",
+  "batch_rank",
+  "rank_this_batch_only",
+  "match_tier",
+  "match_score",
+  "score",
+];
+/**
+ * Copies each saved provider row's match cells onto its occurrence, once. Rows without such
+ * cells get {} so NULL always means "not filled yet". Idempotent; `scope` filters alias `o`.
+ */
+async function fillCandidateMatchFields(db: Pick<Tx, "$executeRaw">, scope: Prisma.Sql) {
+  await db.$executeRaw(Prisma.sql`WITH bodies AS MATERIALIZED (
+    SELECT page."effectId", ${savedProviderBody} AS body
+    FROM "recruiting_candidate_pages" page
+    JOIN "external_effects" effect ON effect."id" = page."effectId"
+    WHERE page."effectId" IN (
+      SELECT o."pageId" FROM "recruiting_candidate_occurrences" o
+      WHERE ${scope} AND o."matchFields" IS NULL
+    )
+  ), filled AS (
+    SELECT o."pageId", o."rowIndex", COALESCE((
+      SELECT jsonb_object_agg(cell.key, cell.value)
+      FROM jsonb_each(${savedProviderRow(Prisma.sql`b.body`)}) cell
+      WHERE cell.key IN (${Prisma.join(candidateMatchKeys)})
+    ), '{}'::jsonb) AS "matchFields"
+    FROM "recruiting_candidate_occurrences" o JOIN bodies b ON b."effectId" = o."pageId"
+    WHERE ${scope} AND o."matchFields" IS NULL
+  )
+  UPDATE "recruiting_candidate_occurrences" o SET "matchFields" = filled."matchFields"
+  FROM filled
+  WHERE o."pageId" = filled."pageId" AND o."rowIndex" = filled."rowIndex" AND o."matchFields" IS NULL`);
+}
+
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
 function candidateIndexQuery(
   roleId: string,
@@ -7149,7 +7199,6 @@ function candidateIndexQuery(
   rankDomainPageId?: string,
   displayScope?: Pick<CandidatesInput, "sourceEffectId" | "actionId">,
 ) {
-  // ponytail: parse each saved page once; persist match fields only if large pools outgrow this projection.
   const includeMatches = sort !== undefined;
   const matchSort = sort === "rank" || sort === "tier" || sort === "score";
   const explicitSource =
@@ -7193,39 +7242,6 @@ function candidateIndexQuery(
         ) rank_pages)`
         : Prisma.sql`${rankDomainPageId}::text`
     } AS "pageId"
-  ), match_rows AS MATERIALIZED (
-    SELECT page."effectId" AS "pageId", page."observedAt", (returned.ordinality - 1)::int AS "rowIndex",
-      source.kind, ${matchValue} AS value
-    FROM "recruiting_candidate_pages" page
-    JOIN "external_effects" effect ON effect."id" = page."effectId"
-    CROSS JOIN LATERAL (
-      SELECT COALESCE(effect."result"->'structuredContent', (
-        SELECT CASE WHEN block->>'text' IS JSON OBJECT THEN (block->>'text')::jsonb END
-        FROM jsonb_array_elements(CASE WHEN jsonb_typeof(effect."result"->'content') = 'array'
-          THEN effect."result"->'content' ELSE '[]'::jsonb END) block
-        WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
-      )) AS body
-    ) envelope
-    CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(envelope.body->'rows') = 'array'
-      THEN envelope.body->'rows' ELSE '[]'::jsonb END) WITH ORDINALITY returned(value, ordinality)
-    CROSS JOIN rank_scope
-    CROSS JOIN LATERAL (VALUES
-      ('rank', ${rankCell},
-        (rank_scope."pageId" IS NULL OR page."effectId" = rank_scope."pageId") AND
-        (returned.value ? 'updated_rank' OR returned.value ? 'overall_rank' OR
-          (rank_scope."pageId" IS NOT NULL AND
-            (returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')))),
-      ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"}),
-      ('score', CASE WHEN returned.value ? 'match_score' THEN returned.value -> 'match_score'
-        ELSE returned.value -> 'score' END,
-        (returned.value ? 'match_score' OR returned.value ? 'score') AND
-        rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId")
-    ) source(kind, cell, present)
-    CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
-      THEN source.cell->'value' ELSE source.cell END AS "value") match
-    WHERE page."roleId" = ${roleId}
-      ${sourceScope}
-      AND source.present
   ),`
       : Prisma.empty
   } base AS (
@@ -7296,9 +7312,35 @@ function candidateIndexQuery(
           FILTER (WHERE m.kind = 'tier'))[1] AS "tierPageId",
         (array_agg(m."pageId" ORDER BY m."observedAt" DESC, m."pageId" COLLATE "C" DESC, m."rowIndex" DESC)
           FILTER (WHERE m.kind = 'score'))[1] AS "scorePageId"
-      FROM "recruiting_candidate_occurrences" o
-      JOIN match_rows m ON m."pageId" = o."pageId" AND m."rowIndex" = o."rowIndex"
-      WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+      FROM (
+        -- Reads the match cells stored on each occurrence; saved page JSON is never parsed here.
+        SELECT o."pageId", page."observedAt", o."rowIndex", source.kind, ${matchValue} AS value
+        FROM "recruiting_candidate_occurrences" o
+        JOIN "recruiting_candidate_pages" page ON page."effectId" = o."pageId"
+        -- ponytail: rows saved before matchFields parse their own page once until backfilled.
+        CROSS JOIN LATERAL (SELECT COALESCE(o."matchFields", (
+          SELECT ${savedProviderRow(savedProviderBody)} FROM "external_effects" effect
+          WHERE effect."id" = o."pageId"
+        )) AS value) returned
+        CROSS JOIN rank_scope
+        CROSS JOIN LATERAL (VALUES
+          ('rank', ${rankCell},
+            (rank_scope."pageId" IS NULL OR page."effectId" = rank_scope."pageId") AND
+            (returned.value ? 'updated_rank' OR returned.value ? 'overall_rank' OR
+              (rank_scope."pageId" IS NOT NULL AND
+                (returned.value ? 'rank' OR returned.value ? 'batch_rank' OR returned.value ? 'rank_this_batch_only')))),
+          ('tier', returned.value -> ${"match_tier"}, returned.value ? ${"match_tier"}),
+          ('score', CASE WHEN returned.value ? 'match_score' THEN returned.value -> 'match_score'
+            ELSE returned.value -> 'score' END,
+            (returned.value ? 'match_score' OR returned.value ? 'score') AND
+            rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId")
+        ) source(kind, cell, present)
+        CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
+          THEN source.cell->'value' ELSE source.cell END AS "value") match
+        WHERE o."roleId" = c."roleId" AND o."candidateKey" = c."candidateKey"
+          ${sourceScope}
+          AND source.present
+      ) m
     ) match ON true`
         : Prisma.empty
     }
@@ -9544,6 +9586,7 @@ export async function listRecruitingCandidates(
 ): Promise<CandidatesOutput> {
   const input = ListRecruitingCandidatesInput.parse(raw);
   const afterRead: Array<() => void> = [];
+  let backfillRoleId: string | undefined;
   const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
@@ -9641,6 +9684,7 @@ export async function listRecruitingCandidates(
             rankAvailable: boolean;
             tierAvailable: boolean;
             scoreAvailable: boolean;
+            matchBackfill?: boolean;
           } & (CandidateQueryRow | { [Key in keyof CandidateQueryRow]: null })
         >
       >(Prisma.sql`${filtered}, ordered AS (
@@ -9656,6 +9700,8 @@ export async function listRecruitingCandidates(
           count(*) FILTER (WHERE "countIdentified") AS "identifiedCandidates",
           count(*) FILTER (WHERE "assessmentVersion" IS NULL) AS "unassessed",
           count(*) FILTER (WHERE "assessmentVersion" IS NOT NULL) AS "assessed",
+          EXISTS (SELECT 1 FROM "recruiting_candidate_occurrences" o
+            WHERE o."roleId" = ${role.id} AND o."matchFields" IS NULL) AS "matchBackfill",
           count(*) FILTER (WHERE "shortlisted") AS "shortlistedCount" FROM base
       ) SELECT totals.*, candidate_page.* FROM totals LEFT JOIN candidate_page ON true
         ORDER BY ${order}`);
@@ -9671,6 +9717,7 @@ export async function listRecruitingCandidates(
           rankAvailable: _rankAvailable,
           tierAvailable: _tierAvailable,
           scoreAvailable: _scoreAvailable,
+          matchBackfill: _matchBackfill,
           ...row
         }) => (row.candidateKey === null ? [] : [row]),
       );
@@ -9689,7 +9736,9 @@ export async function listRecruitingCandidates(
         unassessed,
         assessed,
         shortlistedCount,
+        matchBackfill,
       } = result[0]!;
+      if (matchBackfill) backfillRoleId = role.id;
       const counts = {
         sourceRows,
         candidates,
@@ -9791,6 +9840,10 @@ export async function listRecruitingCandidates(
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
   for (const verify of afterRead) verify();
+  // One-time lazy backfill, after authorization and outside the RepeatableRead snapshot so it
+  // can never conflict with it; idempotent, so concurrent first reads simply both no-op/fill.
+  if (backfillRoleId)
+    await fillCandidateMatchFields(prisma, Prisma.sql`o."roleId" = ${backfillRoleId}`);
   return result;
 }
 
