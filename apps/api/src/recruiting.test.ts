@@ -5358,6 +5358,7 @@ describe("role campaign read", () => {
     const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
     expect(setup).toEqual({
       ready: true,
+      playbookStage: { stage: "intake", label: "岗位录入", nextStep: null },
       attention: null,
       items: [
         {

@@ -487,6 +487,7 @@ import {
 } from "./ticket-tools.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
+import { guardRecruitingTurnEnd } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
 import {
   botMessageOutcomeFromMidTurn,
@@ -9933,6 +9934,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
+          } else if (thread.activeRecruitingRoleId && !messagingChannelRun) {
+            // Turn-end guard: a recruiting turn must end with a deliverable, a question, a card
+            // or a handoff; otherwise push the next playbook step instead of going quiet.
+            await guardRecruitingTurnEnd(deps, {
+              run: { ...run, threadId: thread.id, userId: run.userId },
+              roleId: thread.activeRecruitingRoleId,
+              blocks: finalBlocks.length ? finalBlocks : blocks,
+              handedOff,
+              pendingApproval: approvalPausePending,
+              postAssistant: (text) =>
+                publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
+            }).catch((error) => getLogger().error("run.autocontinue guard", error));
           }
           if (botMessageOutcome) {
             // Prefer the final reply. If the turn only posted mid-turn progress, return that
