@@ -3599,9 +3599,11 @@ describe("live CRM browser reads", () => {
         "get_crm_candidate_review",
         "list_crm_candidates",
         "list_crm_candidate_correspondence",
+        "list_crm_candidate_messages",
       ],
     };
     const results: Record<string, unknown> = {
+      list_crm_candidate_messages: [],
       list_crm_memberships: [
         { organization_id: org, role: "recruiter", organizations: { name: "Example" } },
       ],
@@ -3689,6 +3691,91 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it.each(["mail", "candidateDetails"] as const)(
+    "reads original CRM outbox records separately for %s without redispatch",
+    async (operation) => {
+      const f = browserFixture();
+      f.results.get_crm_candidate_review = details();
+      f.results.list_crm_candidate_messages = ["pending", "processing", "failed", "sent"].map(
+        (status, index) => ({
+          id: `50000000-0000-4000-8000-00000000000${index}`,
+          organization_id: org,
+          candidate_id: candidateId,
+          author_user_id: "60000000-0000-4000-8000-000000000006",
+          body: `Original ${status}`,
+          status,
+          polished_body: status === "sent" ? "Actual polished body" : null,
+          instantly_email_id: status === "sent" ? "actual-provider-mail" : null,
+          error: status === "failed" ? "No inbound anchor" : null,
+          created_at: timestamp,
+          sent_at: status === "sent" ? timestamp : null,
+        }),
+      );
+      const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation,
+        ...pinned,
+        candidateId,
+      });
+      expect(result).toMatchObject({
+        outbox: [
+          { status: "pending", body: "Original pending", sentAt: null },
+          { status: "processing", sentAt: null },
+          { status: "failed", error: "No inbound anchor", sentAt: null },
+          {
+            status: "sent",
+            body: "Original sent",
+            polishedBody: "Actual polished body",
+            providerMessageId: "actual-provider-mail",
+            sentAt: timestamp,
+          },
+        ],
+      });
+      expect(
+        f.execute.mock.calls.filter(
+          ([call]) => call.route?.toolName === "list_crm_candidate_messages",
+        ),
+      ).toHaveLength(1);
+      expect(
+        f.execute.mock.calls.every(
+          ([call]) => call.route?.toolName !== "crm_post_candidate_message",
+        ),
+      ).toBe(true);
+      expect(
+        f.execute.mock.calls.find(
+          ([call]) => call.route?.toolName === "list_crm_candidate_messages",
+        )?.[0].args,
+      ).toEqual({ p_org: org, p_candidate: candidateId });
+      if (operation === "mail")
+        expect(result).toMatchObject({ items: [{ body: "Stored actual body" }] });
+      (f.results.list_crm_candidate_messages as Array<Record<string, unknown>>)[0]!.candidate_id =
+        roleId;
+      await expect(
+        api.getRecruitingCrmData(f.deps, actor, target, { operation, ...pinned, candidateId }),
+      ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    },
+  );
+  it.each(["mail", "candidateDetails"] as const)(
+    "rechecks the CRM outbox grant after the other %s read completes",
+    async (operation) => {
+      const f = browserFixture();
+      f.results.get_crm_candidate_review = details();
+      const lastTool =
+        operation === "mail" ? "list_crm_candidate_correspondence" : "get_crm_candidate_review";
+      f.execute.mockImplementation(async function* (call) {
+        if (call.route?.toolName === lastTool)
+          f.assignment.allowedTools = f.assignment.allowedTools.filter(
+            (tool) => tool !== "list_crm_candidate_messages",
+          );
+        yield {
+          type: "result" as const,
+          data: { structuredContent: { data: f.results[call.route!.toolName] } },
+        };
+      });
+      await expect(
+        api.getRecruitingCrmData(f.deps, actor, target, { operation, ...pinned, candidateId }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    },
+  );
   it("reads canonical role metadata and the unchanged legacy candidate filter without a run or copied records", async () => {
     const f = browserFixture();
     const response = await api.getRecruitingCrmData(f.deps, actor, target, {

@@ -96,6 +96,21 @@ export type CrmBrowseSelection = Pick<
   "serverId" | "serverRevision" | "organizationId" | "crmRoleId"
 >;
 
+export type CrmReplyDraftContext = {
+  threadId: string;
+  candidateId: string;
+  candidateName?: string;
+  candidateEmail?: string | null;
+  email: {
+    sender: string | null;
+    recipients: string[];
+    subject: string | null;
+    date: string | null;
+  };
+  source: { serverId: string; serverRevision: number; organizationId: string };
+  crmRoleId?: string;
+};
+
 export type CandidateDiscussionContext = Pick<
   RecruitingCandidate,
   "name" | "title" | "company" | "linkedinUrl" | "resumeUrl"
@@ -123,6 +138,7 @@ type Props = {
     candidateId?: string;
     onSelectCandidate: (id: string, view?: RecruitingWorkspaceView) => void;
     onStartRecruiting?: (description: string) => void;
+    onDraftReply?: (context: CrmReplyDraftContext) => void;
   };
   threadId: string;
   botId?: string;
@@ -2159,10 +2175,12 @@ export function RecruitingPanel(props: Props) {
 
 function CrmRecruitingPanel({
   browse,
+  threadId,
   botId,
   groupId,
   readCache,
   readCacheScope,
+  showDiagnostics = false,
   refreshSignal = 0,
 }: Props & { browse: NonNullable<Props["crmBrowse"]> }) {
   const { t } = useLingui();
@@ -2251,12 +2269,20 @@ function CrmRecruitingPanel({
     ...(mailCursor ? { cursor: mailCursor } : {}),
   };
   const mailKey = JSON.stringify([readCacheScope, mailInput, refreshSignal, refresh]);
-  const [mail, setMail] = useState<{ key: string; data?: MailPage; failed?: boolean }>();
+  const [mail, setMail] = useState<{
+    key: string;
+    data?: MailPage;
+    failed?: boolean;
+    validated?: boolean;
+  }>();
   useEffect(() => {
     setSelectedMail(undefined);
   }, [browse.candidateId]);
   useEffect(() => {
-    if (browse.view !== "inbox" || !browse.candidateId) return;
+    if (browse.view !== "inbox" || !browse.candidateId) {
+      setMail(undefined);
+      return;
+    }
     let cancelled = false;
     const epoch = readCache?.epoch;
     const savedKey = readCacheScope
@@ -2279,7 +2305,7 @@ function CrmRecruitingPanel({
         )
           throw new Error("CRM scope changed");
         rememberRecruitingRead(readCache, savedKey, value, epoch);
-        setMail({ key: mailKey, data: value });
+        setMail({ key: mailKey, data: value, validated: true });
       })
       .catch((error) => {
         if (cancelled) return;
@@ -2296,6 +2322,9 @@ function CrmRecruitingPanel({
   }, [mailKey, browse.view, readCache, readCacheScope]);
   const currentMail = mail?.key === mailKey ? mail : undefined;
   const mailPage = currentMail?.data;
+  const draftEmail = currentMail?.validated
+    ? (mailPage?.items.find((item) => item.id === selectedMail) ?? mailPage?.items[0])
+    : undefined;
   const people = page?.items ?? [];
   const selectedPerson = people.find((person) => person.candidateId === browse.candidateId);
   const importantView = ["shortlist", "interview", "workflow"].includes(browse.view);
@@ -2469,6 +2498,69 @@ function CrmRecruitingPanel({
   const contactHeadingId = useId();
   const revealedContact = useRef<string | null>(null);
   const contactRead = browse.view === "inbox" ? currentMail : currentDetails;
+  const outbox = contactRead?.data?.outbox;
+  const queueStatusLabels = {
+    pending: t`Saved, not sent`,
+    processing: t`Previously processing`,
+    sent: t`Marked as sent`,
+    failed: t`Send failed`,
+  };
+  const outboxContent = outbox ? (
+    <section className="my-6 space-y-3" aria-label={t`Recruiter messages`}>
+      <h3 className="font-semibold">
+        <Trans>Recruiter messages</Trans>
+      </h3>
+      {outbox.length ? (
+        outbox.map((message) => (
+          <article key={message.id} className="space-y-2 border-t pt-3">
+            <p>
+              {queueStatusLabels[message.status]} ·{" "}
+              <time dateTime={message.createdAt}>
+                {new Date(message.createdAt).toLocaleString()}
+              </time>
+            </p>
+            <h4 className="font-semibold">
+              <Trans>Original message</Trans>
+            </h4>
+            <p className="whitespace-pre-wrap">{message.body}</p>
+            {message.polishedBody !== null ? (
+              <>
+                <h4 className="font-semibold">
+                  <Trans>Polished message</Trans>
+                </h4>
+                <p className="whitespace-pre-wrap">{message.polishedBody}</p>
+              </>
+            ) : null}
+            {message.error !== null ? (
+              <>
+                <p>
+                  <Trans>There was a problem sending this message.</Trans>
+                </p>
+                {showDiagnostics ? (
+                  <details>
+                    <summary>
+                      <Trans>Error details</Trans>
+                    </summary>
+                    <pre className="whitespace-pre-wrap">{message.error}</pre>
+                  </details>
+                ) : null}
+              </>
+            ) : null}
+            {message.sentAt !== null ? (
+              <p>
+                <Trans>Sent at</Trans>:{" "}
+                <time dateTime={message.sentAt}>{new Date(message.sentAt).toLocaleString()}</time>
+              </p>
+            ) : null}
+          </article>
+        ))
+      ) : (
+        <p>
+          <Trans>No recruiter messages were found.</Trans>
+        </p>
+      )}
+    </section>
+  ) : null;
   const contactReady = Boolean(contactRead?.data || contactRead?.failed);
   const contactKey = JSON.stringify([
     readCacheScope,
@@ -3066,6 +3158,7 @@ function CrmRecruitingPanel({
                   </div>
                 </>
               ) : null}
+              {outboxContent}
             </section>
           ) : null}
           {browse.view === "inbox" ? (
@@ -3073,6 +3166,40 @@ function CrmRecruitingPanel({
               <h2 id={contactHeadingId} className="mb-3 font-semibold">
                 {selectedPerson?.name ?? t`Candidate messages`}
               </h2>
+              {browse.onDraftReply && draftEmail && browse.candidateId ? (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    const person =
+                      read?.key === key && !read.loading && !read.failed
+                        ? selectedPerson
+                        : undefined;
+                    browse.onDraftReply?.({
+                      threadId,
+                      candidateId: browse.candidateId!,
+                      ...(person
+                        ? { candidateName: person.name, candidateEmail: person.email }
+                        : {}),
+                      email: {
+                        sender: draftEmail.sender,
+                        recipients: draftEmail.recipients,
+                        subject: draftEmail.subject,
+                        date: draftEmail.date,
+                      },
+                      source: {
+                        serverId: browse.selection.serverId,
+                        serverRevision: browse.selection.serverRevision,
+                        organizationId: browse.selection.organizationId,
+                      },
+                      ...(browse.selection.crmRoleId
+                        ? { crmRoleId: browse.selection.crmRoleId }
+                        : {}),
+                    });
+                  }}
+                >
+                  <Trans>Draft reply</Trans>
+                </Button>
+              ) : null}
               {!browse.candidateId ? (
                 <p>
                   <Trans>Select a contact to read their stored messages.</Trans>
@@ -3119,6 +3246,7 @@ function CrmRecruitingPanel({
                   ) : null}
                 </>
               ) : null}
+              {outboxContent}
             </section>
           ) : null}
         </>

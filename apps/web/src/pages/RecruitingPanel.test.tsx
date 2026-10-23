@@ -103,6 +103,17 @@ it("browses scoped CRM contacts and stored mail without inventing a native recru
     input.operation === "mail"
       ? {
           operation: "mail",
+          outbox: ["pending", "processing", "failed", "sent"].map((status) => ({
+            id: status,
+            status,
+            body: `Original ${status}`,
+            polishedBody: status === "sent" ? "Polished actual reply" : null,
+            providerMessageId: status === "sent" ? "actual-linked-mail" : null,
+            error:
+              status === "failed" ? "Missing inbound anchor run_private_123 p_org=internal" : null,
+            createdAt: "2026-10-21T00:00:00Z",
+            sentAt: status === "sent" ? "2026-10-21T01:00:00Z" : null,
+          })),
           source,
           checkedAt: "2026-10-22T00:00:00Z",
           scope: "stored_candidate_correspondence",
@@ -162,7 +173,8 @@ it("browses scoped CRM contacts and stored mail without inventing a native recru
         },
   );
   const onSelectCandidate = vi.fn();
-  const crmBrowse = { selection, view: "contacts" as const, onSelectCandidate };
+  const onDraftReply = vi.fn();
+  const crmBrowse = { selection, view: "contacts" as const, onSelectCandidate, onDraftReply };
   const view = await mounted("thread-1", undefined, false, undefined, {
     groupId: "group-1",
     crmBrowse,
@@ -179,6 +191,52 @@ it("browses scoped CRM contacts and stored mail without inventing a native recru
     crmBrowse: { ...crmBrowse, view: "inbox", candidateId: "crm-person" },
   });
   expect(view.container.textContent).toContain("Full stored reply");
+  await view.click("Draft reply");
+  expect(onDraftReply).toHaveBeenCalledWith({
+    threadId: "thread-1",
+    candidateId: "crm-person",
+    candidateName: "Existing CRM person",
+    candidateEmail: "person@example.test",
+    email: {
+      sender: "person@example.test",
+      recipients: ["team@example.test"],
+      subject: "Original reply",
+      date: "2026-10-21T00:00:00Z",
+    },
+    source: { serverId: "crm-source", serverRevision: 2, organizationId: "org-1" },
+    crmRoleId: "crm-role",
+  });
+  expect(JSON.stringify(onDraftReply.mock.calls)).not.toMatch(
+    /stored-mail|provider-mail|original-thread|Full stored reply/,
+  );
+  expect(view.container.textContent).toContain("Recruiter messages");
+  for (const status of [
+    "Saved, not sent",
+    "Previously processing",
+    "Marked as sent",
+    "Send failed",
+  ])
+    expect(view.container.textContent).toContain(status);
+  expect(view.container.textContent).toContain("Original pending");
+  expect(view.container.textContent).toContain("Original sent");
+  expect(view.container.textContent).toContain("Polished actual reply");
+  expect(view.container.textContent).toContain("There was a problem sending this message.");
+  expect(view.container.textContent).not.toContain("run_private_123");
+  expect(view.container.textContent).not.toContain("p_org=internal");
+  expect(view.container.textContent).not.toContain("Queue status");
+  await view.render("thread-1", 0, true, undefined, {
+    groupId: "group-1",
+    crmBrowse: { ...crmBrowse, view: "inbox", candidateId: "crm-person" },
+  });
+  expect(view.container.textContent).toContain(
+    "Missing inbound anchor run_private_123 p_org=internal",
+  );
+  await view.render("thread-1", 0, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: { ...crmBrowse, view: "inbox", candidateId: "crm-person" },
+  });
+  expect(view.container.textContent).toContain("Sent at");
+  expect(view.container.textContent).not.toContain("actual-linked-mail");
   expect(view.container.textContent).not.toContain("provider-mail");
   expect(view.container.textContent).not.toContain("original-thread");
   await view.click("Older messages");
@@ -208,6 +266,7 @@ it("reveals selected CRM mail from contact clicks and Inbox navigation without s
     const pending = new Map<string, (value: MailPage) => void>();
     const mail = (candidateId: string, body: string): MailPage => ({
       operation: "mail",
+      outbox: [],
       source,
       checkedAt: "2026-10-22T00:00:00Z",
       scope: "stored_candidate_correspondence",
@@ -362,6 +421,7 @@ it.each(["feedback", "sequence"] as const)(
           ? {
               ...common,
               operation: "candidateDetails",
+              outbox: [],
               scope: "stored_candidate_details",
               candidateId: input.candidateId,
               review: {
@@ -701,6 +761,18 @@ it("shows Important role rows, sourced interest, internal notes and stored campa
       return {
         ...common,
         scope: "stored_candidate_details",
+        outbox: [
+          {
+            id: "failed-request",
+            status: "failed",
+            body: "Original recruiter request",
+            polishedBody: null,
+            providerMessageId: null,
+            error: "Original send failure",
+            createdAt: checkedAt,
+            sentAt: null,
+          },
+        ],
         candidateId: input.candidateId,
         review: {
           id: "review",
@@ -802,6 +874,9 @@ it("shows Important role rows, sourced interest, internal notes and stored campa
     crmBrowse: { ...browse, view: "feedback", candidateId: "crm-person" },
   });
   expect(view.container.textContent).toContain("Internal review note");
+  expect(view.container.textContent).toContain("Original recruiter request");
+  expect(view.container.textContent).toContain("There was a problem sending this message.");
+  expect(view.container.textContent).not.toContain("Original send failure");
   expect(view.container.textContent).toContain("Human-entered");
   expect(view.container.textContent).toContain("AI interpretation");
   expect(view.container.textContent).toContain("Instantly");
@@ -837,6 +912,7 @@ it("keeps CRM detail reads scoped to the selected person and rejects a mismatche
   const detail = (candidateId: string, notes: string) => ({
     ...common,
     operation: "candidateDetails",
+    outbox: [],
     scope: "stored_candidate_details",
     candidateId,
     review: {

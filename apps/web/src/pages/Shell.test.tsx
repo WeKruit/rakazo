@@ -740,6 +740,111 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
   expect(shellApi.createGroup).not.toHaveBeenCalled();
 });
 
+it("opens an editable CRM reply draft without sending or crossing a changed candidate scope", async () => {
+  const source = {
+    serverId: "crm-source",
+    serverRevision: 2,
+    organizationId: "org-1",
+    name: "CRM",
+  };
+  shellApi.recruiting.crmData.mockImplementation(async (input) =>
+    input.operation === "mail"
+      ? {
+          operation: "mail",
+          source,
+          checkedAt: "2026-10-22T00:00:00Z",
+          scope: "stored_candidate_correspondence",
+          candidateId: input.candidateId,
+          outbox: [],
+          items: [
+            {
+              id: "stored-mail-only",
+              providerMessageId: "stored-mail-only",
+              threadId: "stored-thread-only",
+              direction: "received",
+              sender: "avery@example.test",
+              recipients: ["recruiter@example.test"],
+              subject: "Interview availability",
+              body: "Tuesday works.",
+              date: "2026-10-22T00:00:00Z",
+              partial: false,
+            },
+          ],
+          nextCursor: null,
+        }
+      : {
+          operation: "candidates",
+          source,
+          checkedAt: "2026-10-22T00:00:00Z",
+          scope: "legacy_role_labels",
+          selectedRole: {
+            crmRoleId: "crm-role",
+            clientId: "client-1",
+            clientLabel: "Example client",
+            roleLabel: "Existing role",
+            summary: null,
+          },
+          items: [
+            {
+              candidateId: "crm-person",
+              name: "Synthetic Avery",
+              email: "avery@example.test",
+              phone: null,
+              linkedinUrl: null,
+              title: "Engineer",
+              location: null,
+              stage: null,
+              contactStatus: "replied",
+              outreachStatus: "replied",
+            },
+          ],
+          total: 1,
+          offset: 0,
+          nextOffset: null,
+        },
+  );
+  const path = "/app/g/group-1?view=inbox&crmCandidate=crm-person";
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: path,
+    crmTarget: boundCrmTarget,
+  });
+  const card = document.body.querySelector('[data-message-id="pending-main"]');
+  const draft = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  type(draft, "Keep my separate draft");
+  pickAttachment();
+  const workspace = await shellApi.recruiting.getWorkspace({ threadId: view.thread.threadId });
+  let finish!: (value: typeof workspace) => void;
+  shellApi.recruiting.getWorkspace.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  await view.click("Draft reply");
+  await view.navigate("/app/g/group-1?view=inbox&crmCandidate=another-person");
+  await act(async () => finish(workspace));
+  expect(draft.value).toBe("Keep my separate draft");
+  await view.navigate(path);
+  await view.click("Draft reply");
+  expect(draft.value).toContain("Keep my separate draft");
+  expect(draft.value).toContain("Synthetic Avery");
+  expect(draft.value).toContain("avery@example.test");
+  expect(draft.value).toContain("Interview availability");
+  expect(draft.value).toContain("2026-10-22T00:00:00Z");
+  expect(draft.value).toContain("do not send");
+  for (const id of ["stored-mail-only", "stored-thread-only", "crm-person", "crm-source"])
+    expect(draft.value).not.toContain(id);
+  expect(draft.closest<HTMLElement>('section[aria-label="Role conversation"]')?.hidden).toBe(false);
+  expect(document.body.textContent).toContain("notes.txt");
+  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
+  expect(view.getPath()).toBe(path);
+  expect(shellApi.send).not.toHaveBeenCalled();
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+  expect(shellApi.answer).not.toHaveBeenCalled();
+  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+});
+
 it.each(["inbox", "feedback", "sequence"])(
   "keeps CRM history and the current native %s task in the same role",
   async (section) => {

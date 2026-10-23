@@ -34,6 +34,7 @@ import {
   RecruitingCrmImportReceiptSchema,
   RecruitingCrmMailReadSchema,
   RecruitingCrmMembershipRowsSchema,
+  RecruitingCrmMessagesReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleReadSchema,
 } from "@rakazo/contracts";
@@ -1674,6 +1675,32 @@ export async function getRecruitingCrmData(
       statusChangedAt: row.status_changed_at,
       updatedAt: row.updated_at,
     });
+    const outbox = async (candidateId: string) => {
+      const rows = parse(
+        RecruitingCrmMessagesReadSchema,
+        await read(server, "list_crm_candidate_messages", {
+          p_org: input.organizationId,
+          p_candidate: candidateId,
+        }),
+      );
+      if (
+        rows.some(
+          (row) => row.organization_id !== input.organizationId || row.candidate_id !== candidateId,
+        ) ||
+        new Set(rows.map((row) => row.id)).size !== rows.length
+      )
+        throw unavailable();
+      return rows.map((row) => ({
+        id: row.id,
+        body: row.body,
+        status: row.status,
+        polishedBody: row.polished_body,
+        providerMessageId: row.instantly_email_id,
+        error: row.error,
+        createdAt: row.created_at,
+        sentAt: row.sent_at,
+      }));
+    };
     if (input.operation === "important") {
       const offset = input.offset ?? 0;
       const limit = input.limit ?? 25;
@@ -1720,6 +1747,7 @@ export async function getRecruitingCrmData(
       });
     }
     if (input.operation === "candidateDetails") {
+      const messages = await outbox(input.candidateId);
       const offset = input.offset ?? 0;
       const limit = input.limit ?? 25;
       const page = parse(
@@ -1764,9 +1792,11 @@ export async function getRecruitingCrmData(
           clientId: row.client_id,
           syncedAt: row.synced_at,
         };
+      await sourceFence(server, "list_crm_candidate_messages");
       return finish({
         operation: input.operation,
         scope: "stored_candidate_details",
+        outbox: messages,
         candidateId: input.candidateId,
         review: page.review && {
           id: page.review.id,
@@ -1922,6 +1952,7 @@ export async function getRecruitingCrmData(
         input.cursor.p_candidate !== input.candidateId)
     )
       throw new IsolationError();
+    const messages = await outbox(input.candidateId);
     const page = parse(
       RecruitingCrmMailReadSchema,
       await read(server, "list_crm_candidate_correspondence", {
@@ -1951,9 +1982,11 @@ export async function getRecruitingCrmData(
             (input.cursor?.linked_offset ?? 0) + (input.cursor?.unlinked_offset ?? 0)))
     )
       throw unavailable();
+    await sourceFence(server, "list_crm_candidate_messages");
     return finish({
       operation: input.operation,
       scope: "stored_candidate_correspondence",
+      outbox: messages,
       candidateId: input.candidateId,
       items: page.messages.map((row) => ({
         id: row.id,
