@@ -4734,6 +4734,10 @@ async function researchContextInTransaction(
   actor: Actor,
   input: RecruitingResearchContextInput,
   requireLive = false,
+  // Internal only (never from caller input): page-provenance reads skip re-validating the
+  // action's request/context/receipt/output artifacts; run, thread, role, task, action, source
+  // message and effect isolation checks below still run.
+  skipActionArtifacts = false,
 ) {
   const live =
     input.historical && !requireLive ? null : await lockLiveRecruitingRun(tx, actor, input.runId);
@@ -4875,13 +4879,14 @@ async function researchContextInTransaction(
         !input.historical,
       );
     const snapshot = recruitingResearchSnapshot(task, action).action;
-    for (const ref of [
-      snapshot.requestArtifact,
-      snapshot.contextArtifact,
-      ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
-      ...snapshot.outputArtifacts,
-    ])
-      await validateArtifact(tx, actor, ref, { run, thread });
+    if (!skipActionArtifacts)
+      for (const ref of [
+        snapshot.requestArtifact,
+        snapshot.contextArtifact,
+        ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
+        ...snapshot.outputArtifacts,
+      ])
+        await validateArtifact(tx, actor, ref, { run, thread });
     requestArtifact = await tx.artifact.findUniqueOrThrow({
       where: { id: action.requestArtifactId },
     });
@@ -5937,6 +5942,7 @@ async function researchReadBinding(
   effect: ResearchEffectRow,
   lease?: ResearchLease,
   memo: ProofMemo = unmemoized,
+  pageOnly = false,
 ) {
   const owner = await memo(`run:${effect.runId}`, () => requireRun(tx, actor, effect.runId));
   const events = await memo(`read-events:${owner.id}:${effect.id}`, () =>
@@ -5966,8 +5972,8 @@ async function researchReadBinding(
     toolName: binding.toolName,
     historical: !lease,
   };
-  const saved = await memo(`context:${stableJsonValue(context)}`, () =>
-    researchContextInTransaction(tx, actor, context),
+  const saved = await memo(`context:${pageOnly}:${stableJsonValue(context)}`, () =>
+    researchContextInTransaction(tx, actor, context, false, pageOnly),
   );
   if (lease) requireResearchLease(saved.run, lease);
   if (!saved.task || !saved.action || saved.task.id !== binding.taskId) throw new IsolationError();
@@ -7055,6 +7061,7 @@ async function candidatePageArtifact(
   page: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>,
   canonical = false,
   memo: ProofMemo = unmemoized,
+  pageOnly = false,
 ) {
   if (page.taskId === null && page.actionId === null) {
     const artifacts = await candidatePageArtifacts(tx, actor, [page], canonical);
@@ -7070,7 +7077,7 @@ async function candidatePageArtifact(
     }),
   );
   if (effect?.status !== "completed") throw new IsolationError();
-  const read = await researchReadBinding(tx, actor, effect, undefined, memo);
+  const read = await researchReadBinding(tx, actor, effect, undefined, memo, pageOnly);
   if (
     read?.toolName !== "get_rows" ||
     read.binding.taskId !== page.taskId ||
@@ -7092,6 +7099,7 @@ async function candidatePageArtifacts(
   pages: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>[],
   canonical = false,
   afterRead?: Array<() => void>,
+  pageOnly = false,
 ): Promise<Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>> {
   const nativeIds = pages
     .filter((page) => page.taskId === null && page.actionId === null)
@@ -7199,7 +7207,10 @@ async function candidatePageArtifacts(
   );
   for (const page of pages) {
     if (page.taskId !== null || page.actionId !== null) {
-      artifacts.set(page.effectId, await candidatePageArtifact(tx, actor, page, canonical, memo));
+      artifacts.set(
+        page.effectId,
+        await candidatePageArtifact(tx, actor, page, canonical, memo, pageOnly),
+      );
       continue;
     }
     const effect = byEffect.get(page.effectId);
@@ -7581,6 +7592,7 @@ async function candidateProfilePages(
   roleId: string,
   rows: Pick<CandidateQueryRow, "sourcePageId" | "profileSourcePageIds">[],
   afterRead?: Array<() => void>,
+  pageOnly = false,
 ) {
   const pageIds = [
     ...new Set(
@@ -7603,7 +7615,7 @@ async function candidateProfilePages(
   for (const page of pages.values()) {
     if (page.roleId !== roleId) throw new IsolationError();
   }
-  await candidatePageArtifacts(tx, actor, [...pages.values()], false, afterRead);
+  await candidatePageArtifacts(tx, actor, [...pages.values()], false, afterRead, pageOnly);
   return pages;
 }
 
@@ -9907,7 +9919,8 @@ export async function listRecruitingCandidates(
         }) => (row.candidateKey === null ? [] : [row]),
       );
       const selected = rows.slice(0, limit);
-      const pages = await candidateProfilePages(tx, actor, role.id, selected, afterRead);
+      // The list renders match fields and page provenance only, never action artifacts.
+      const pages = await candidateProfilePages(tx, actor, role.id, selected, afterRead, true);
 
       const last = selected.at(-1);
       const {
