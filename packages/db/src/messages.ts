@@ -14,6 +14,7 @@ export type SourceMessage = Prisma.MessageGetPayload<{ include: typeof humanMess
 export function isNativeHumanMessage(message: SourceMessage): boolean {
   return (
     message.role === "user" &&
+    !message.clientNonce?.startsWith("autocontinue:") &&
     message.botId === null &&
     message.externalTranscriptFor === null &&
     Array.isArray(message.blocks) &&

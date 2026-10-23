@@ -15,7 +15,14 @@ const run = {
   trigger: "user",
 };
 
-function fixture(options: { priorAutoContinues?: number; savedRows?: number } = {}) {
+function fixture(
+  options: {
+    priorAutoContinues?: number;
+    savedRows?: number;
+    savedCandidates?: number;
+    stage?: string;
+  } = {},
+) {
   const sendUserMessage = vi.fn(async () => ({
     messageId: "m-2",
     seq: 9,
@@ -37,13 +44,15 @@ function fixture(options: { priorAutoContinues?: number; savedRows?: number } = 
       recruitingRole: {
         findUnique: vi.fn(async () => ({
           title: "后端工程师",
-          playbookStage: "intake",
+          playbookStage: options.stage ?? "intake",
           currentRevisionId: "rev-1",
           archivedAt: null,
         })),
       },
       recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: null })) },
-      recruitingCandidate: { count: vi.fn(async () => 0) },
+      recruitingCandidate: {
+        count: vi.fn(async () => options.savedCandidates ?? options.savedRows ?? 0),
+      },
     },
     events: { sendUserMessage },
     jobs: { enqueue },
@@ -71,6 +80,7 @@ describe("guardRecruitingTurnEnd", () => {
     expect(f.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         trigger: "follow_up",
+        internal: true,
         clientNonce: "autocontinue:run-1:1",
         prompt: expect.stringContaining("继续下一步："),
       }),
@@ -78,6 +88,31 @@ describe("guardRecruitingTurnEnd", () => {
     expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
     expect(f.postAssistant).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [1, 1, "continued"],
+    [9, 9, "continued"],
+    [1, 10, "ended"],
+    [10, 1, "continued"],
+  ])(
+    "calibration needs ten distinct cumulative candidates (%s writes, %s saved)",
+    async (savedRows, savedCandidates, action) => {
+      const f = fixture({
+        savedRows: Number(savedRows),
+        savedCandidates: Number(savedCandidates),
+        stage: "calibration_10",
+      });
+      const result = await guardRecruitingTurnEnd(f.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: f.postAssistant,
+      });
+      expect(result.action).toBe(action);
+    },
+  );
 
   it("lets a question end the turn", async () => {
     const f = fixture();

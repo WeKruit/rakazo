@@ -646,3 +646,50 @@ describe("createGroup", () => {
     expect(group.members.map((member) => member.botId)).toEqual(["lead", "build"]);
   });
 });
+
+describe("group pending attention", () => {
+  it.each([false, true])("classifies pending card metadata (approval=%s)", async (approval) => {
+    const group = {
+      id: "group",
+      spaceId: "space",
+      userId: "human",
+      name: "Role",
+      pinned: false,
+      sectionId: null,
+      archivedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      thread: { id: "thread", unread: false, messages: [], runs: [{ id: "run" }] },
+      members: ["a", "b"].map((id) => ({ bot: { id, name: id, color: "ink", runs: [] } })),
+    };
+    const findMany = vi.fn(async () => [
+      {
+        threadId: "thread",
+        blocks: [
+          { kind: "ask", status: "pending", ...(approval ? { approvalEffectId: "effect" } : {}) },
+        ],
+      },
+    ]);
+    const prisma = {
+      chatGroup: { findMany: vi.fn(async () => [group]) },
+      message: { findMany },
+      $queryRaw: vi.fn(async () => []),
+    };
+    const actor = {
+      spaceId: "space",
+      userId: "human",
+      email: "human@example.test",
+      isDeploymentOwner: false,
+    };
+    const result = await createGroupRepos(prisma as unknown as PrismaClient).listGroups(actor);
+    expect(result[0]).toMatchObject({
+      needsInput: true,
+      attention: approval ? "approval" : "question",
+    });
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ thread: { spaceId: "space", userId: "human" } }),
+      }),
+    );
+  });
+});

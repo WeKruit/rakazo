@@ -725,6 +725,8 @@ export const ReplyPreviewSchema = z.object({
 export type ReplyPreview = z.infer<typeof ReplyPreviewSchema>;
 
 export const ThreadMessageSchema = z.object({
+  /** Server-generated continuation; retained for history but hidden in conversation views. */
+  internal: z.boolean().optional(),
   id: Id,
   threadId: Id,
   seq: z.number().int().nonnegative(),

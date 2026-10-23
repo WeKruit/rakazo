@@ -3394,6 +3394,34 @@ describe("sendUserMessage", () => {
     return { tx, prisma, input };
   }
 
+  it("persists internal follow-ups as system messages without inventing a human author", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    const owner = { spaceId: input.spaceId, userId: input.userId };
+    tx.thread.findFirst.mockResolvedValue({
+      ...owner,
+      id: input.threadId,
+      botId: input.botId,
+    } as never);
+    Object.assign(tx, { bot: { findFirst: vi.fn(async () => owner) } });
+    await sendUserMessage(prisma as unknown as PrismaClient, {
+      ...input,
+      routineEvent: undefined,
+      trigger: "follow_up",
+      internal: true,
+      clientNonce: "autocontinue:run:1",
+    });
+    expect(tx.message.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: "system", clientNonce: "autocontinue:run:1" }),
+      }),
+    );
+    expect(tx.event.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ payload: expect.objectContaining({ role: "system" }) }),
+      }),
+    );
+  });
+
   it("persists authored candidate feedback in the native message transaction and rejects stale metadata before steering", async () => {
     const { tx, prisma, input } = routineDeliveryFixture();
     const owner = { spaceId: input.spaceId, userId: input.userId };

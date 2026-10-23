@@ -815,3 +815,22 @@ describe("sanitizeUtf16ForJson", () => {
     });
   });
 });
+
+it("retains the internal wake marker in live projections", () => {
+  const messages = projectMessages([
+    {
+      id: "event",
+      seq: 1,
+      type: "thread.message.created",
+      threadId: "thread",
+      createdAt: "2026-10-23T00:00:00Z",
+      payload: {
+        messageId: "wake",
+        role: "system",
+        internal: true,
+        blocks: [{ kind: "text", text: "Continue the saved task" }],
+      },
+    },
+  ]);
+  expect(messages[0]).toMatchObject({ role: "system", internal: true });
+});

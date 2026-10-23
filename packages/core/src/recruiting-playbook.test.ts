@@ -481,6 +481,20 @@ describe("playbook stage machine", () => {
 });
 
 describe("classifyTurnEnd", () => {
+  it("requires saved evidence during calibration even when progress is a list", () => {
+    expect(
+      classifyTurnEnd(
+        { blocks: [{ kind: "text", text: "- Read role\n- Checked sources\n- Saved candidates" }] },
+        { savedRows: 9, deliverableRows: 10 },
+      ),
+    ).toBe("none");
+    expect(
+      classifyTurnEnd({ blocks: [{ kind: "candidate" }] }, { savedRows: 1, deliverableRows: 10 }),
+    ).toBe("none");
+    expect(
+      classifyTurnEnd({ blocks: [{ kind: "ask", text: "Location", status: "answered" }] }),
+    ).toBe("none");
+  });
   const text = (t: string) => ({ blocks: [{ kind: "text", text: t }] });
   it("treats a saved-and-stopped status note as none", () => {
     expect(classifyTurnEnd(text("已将公司暂用名保存为 X。尚未启动搜寻。"))).toBe("none");

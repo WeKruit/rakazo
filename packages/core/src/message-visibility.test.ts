@@ -33,6 +33,17 @@ const peerExchange = [
 ];
 
 describe("user-visible messages", () => {
+  it("hides synthetic continuations but preserves their pending cards", () => {
+    const wake = {
+      ...message("wake", "run", [{ kind: "text", text: "Continue" }]),
+      internal: true,
+    };
+    const card = {
+      ...message("card", "run", [{ kind: "ask", text: "Which location?", status: "pending" }]),
+      internal: true,
+    };
+    expect(userVisibleMessages([wake, card])).toEqual([card]);
+  });
   it("hides peer activity but keeps the bot's text reply to the user", () => {
     expect(userVisibleMessages(peerExchange).map((item) => item.id)).toEqual([
       "user",

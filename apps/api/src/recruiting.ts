@@ -55,6 +55,7 @@ import {
   catalogApprovalDetails,
   INSTANTLY_MCP_ENDPOINT,
   isRecruitingPlaybookStage,
+  pendingInputAttention,
   type RecruitingPlaybookStage,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
@@ -732,10 +733,10 @@ async function roleAttention(
       blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
     },
     orderBy: { seq: "desc" },
-    select: { id: true, createdAt: true },
+    select: { id: true, createdAt: true, blocks: true },
   });
   return {
-    kind: "approval",
+    kind: pendingInputAttention(card?.blocks) ?? "question",
     threadId: run.threadId,
     cardId: card?.id ?? null,
     createdAt: (card?.createdAt ?? run.createdAt).toISOString(),
