@@ -63,6 +63,23 @@ export function detailKey(target: RecruitingDetailTarget) {
   return `${target.view}.${target.person.candidateId}`;
 }
 
+/** Restore only a known tab for this exact list person; candidate keys may contain dots. */
+export function pendingDetailTarget(
+  target: RecruitingDetailTarget,
+  pending: string,
+): RecruitingDetailTarget | undefined {
+  const views: readonly RecruitingDetailView[] = [
+    "contact",
+    "thread",
+    "interview",
+    "activity",
+    "tasks",
+    "notes",
+  ];
+  const view = views.find((view) => pending === `${view}.${target.person.candidateId}`);
+  return view ? { ...target, view } : undefined;
+}
+
 export type RecruitingDetailController = {
   stack: readonly RecruitingDetailTarget[];
   current?: RecruitingDetailTarget;

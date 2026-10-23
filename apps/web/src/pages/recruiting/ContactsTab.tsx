@@ -5,7 +5,7 @@ import { Bookmark, Mail, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CandidateDirectory } from "./CandidateDirectory";
 import type { RecruitingDetailTarget } from "./detail";
-import { detailKey, useRecruitingDetail } from "./detail";
+import { pendingDetailTarget, useRecruitingDetail } from "./detail";
 import { candidateSections } from "./profile";
 import { RetryNotice } from "./RetryNotice";
 import { linkedinIdentity } from "./roleCandidates";
@@ -157,7 +157,8 @@ export function ContactsTab(
     if (!pendingDetail || !detail) return;
     for (let index = 0; index < rows.length; index += 1) {
       const candidate = target(index);
-      if (candidate && detailKey(candidate) === pendingDetail) return detail.restore(candidate);
+      const restored = candidate && pendingDetailTarget(candidate, pendingDetail);
+      if (restored) return detail.restore(restored);
     }
   }, [pendingDetail, rows]);
 
