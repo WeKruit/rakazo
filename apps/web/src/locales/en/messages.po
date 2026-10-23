@@ -1052,7 +1052,6 @@ msgstr "Calendar booking details are not included in these manual CRM workflow r
 msgid "Calendar event"
 msgstr "Calendar event"
 
-#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
@@ -1126,10 +1125,6 @@ msgid "Candidate assessment"
 msgstr "Candidate assessment"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Candidate CRM"
-msgstr "Candidate CRM"
-
-#: src/pages/RecruitingPanel.tsx
 msgid "Candidate details"
 msgstr "Candidate details"
 
@@ -1144,6 +1139,10 @@ msgstr "Candidate feedback"
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate messages"
 msgstr "Candidate messages"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate pipeline"
+msgstr "Candidate pipeline"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Candidate question"
@@ -1260,6 +1259,10 @@ msgstr "Check your email"
 msgid "Checking availability"
 msgstr "Checking availability"
 
+#: src/components/LiveWork.tsx
+msgid "Checking candidate records"
+msgstr "Checking candidate records"
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr "Checking computer setup…"
@@ -1275,10 +1278,6 @@ msgstr "Checking email"
 #: src/components/LiveWork.tsx
 msgid "Checking saved context"
 msgstr "Checking saved context"
-
-#: src/components/LiveWork.tsx
-msgid "Checking the CRM"
-msgstr "Checking the CRM"
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/components/DesktopUpdates.tsx
@@ -1299,13 +1298,13 @@ msgstr "Choose a bot shape, color, or upload an image"
 msgid "Choose a bot…"
 msgstr "Choose a bot…"
 
-#: src/pages/Shell.tsx
-msgid "Choose a CRM role again."
-msgstr "Choose a CRM role again."
-
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
 msgstr "Choose a new password"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Choose a role to see its outreach."
+msgstr "Choose a role to see its outreach."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Choose feedback"
@@ -1314,6 +1313,10 @@ msgstr "Choose feedback"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
 msgstr "Choose file"
+
+#: src/pages/Shell.tsx
+msgid "Choose the role again."
+msgstr "Choose the role again."
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Choose which connected model WeKruit Headhunter uses."
@@ -1628,7 +1631,6 @@ msgstr "Conflicting information"
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/PluginsOverlay.tsx
-#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Connect"
@@ -2046,6 +2048,18 @@ msgstr "Could not load billing"
 msgid "Could not load bots. Reload to try again."
 msgstr "Could not load bots. Reload to try again."
 
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load candidate records"
+msgstr "Could not load candidate records"
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/recruiting/shared.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidate records. Try refreshing."
+msgstr "Could not load candidate records. Try refreshing."
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load candidate sources"
 msgstr "Could not load candidate sources"
@@ -2065,18 +2079,6 @@ msgstr "Could not load contact details"
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
 msgstr "Could not load credentials."
-
-#: src/pages/recruiting/ContactsTab.tsx
-msgid "Could not load CRM records"
-msgstr "Could not load CRM records"
-
-#: src/pages/recruiting/InboxTab.tsx
-#: src/pages/recruiting/InterviewTab.tsx
-#: src/pages/recruiting/SequenceTab.tsx
-#: src/pages/recruiting/shared.tsx
-#: src/pages/RecruitingPanel.tsx
-msgid "Could not load CRM records. Try refreshing."
-msgstr "Could not load CRM records. Try refreshing."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not load feedback"
@@ -2150,8 +2152,8 @@ msgid "Could not load this file."
 msgstr "Could not load this file."
 
 #: src/pages/Shell.tsx
-msgid "Could not load this role’s CRM connection."
-msgstr "Could not load this role’s CRM connection."
+msgid "Could not load this role’s candidate records."
+msgstr "Could not load this role’s candidate records."
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
@@ -2210,8 +2212,8 @@ msgid "Could not reach the server"
 msgstr "Could not reach the server"
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Could not read a CRM connection."
-msgstr "Could not read a CRM connection."
+msgid "Could not read candidate records."
+msgstr "Could not read candidate records."
 
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
@@ -2497,15 +2499,6 @@ msgstr "Criterion"
 #: src/pages/RecruitingPanel.tsx
 msgid "Criterion {0}"
 msgstr "Criterion {0}"
-
-#: src/pages/recruiting/RoleSetup.tsx
-#: src/pages/RecruitingPanel.tsx
-msgid "CRM"
-msgstr "CRM"
-
-#: src/pages/RecruitingPanel.tsx
-msgid "CRM contacts"
-msgstr "CRM contacts"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
@@ -2881,6 +2874,10 @@ msgstr "Duplicate"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "e.g. Hivenet Agent, Presales, Timesheets bot"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Earlier history"
+msgstr "Earlier history"
+
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
 msgstr "Edit"
@@ -3096,8 +3093,8 @@ msgid "Export conversation"
 msgstr "Export conversation"
 
 #: src/components/teach/TeachComputerOverlay.tsx
-msgid "Export this week's list from the CRM and drop it in the shared folder"
-msgstr "Export this week's list from the CRM and drop it in the shared folder"
+msgid "Export this week's candidate list and drop it in the shared folder"
+msgstr "Export this week's candidate list and drop it in the shared folder"
 
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -3714,10 +3711,6 @@ msgstr "Latest messages"
 msgid "Launched {app}"
 msgstr "Launched {app}"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Leads"
-msgstr "Leads"
-
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "Leave"
@@ -3802,8 +3795,8 @@ msgid "Loading activity…"
 msgstr "Loading activity…"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Loading CRM records…"
-msgstr "Loading CRM records…"
+msgid "Loading candidate records…"
+msgstr "Loading candidate records…"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
@@ -4147,7 +4140,6 @@ msgstr "minute"
 msgid "minutes"
 msgstr "minutes"
 
-#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Missing"
 msgstr "Missing"
@@ -4429,6 +4421,10 @@ msgstr "No bots"
 msgid "No bots match"
 msgstr "No bots match"
 
+#: src/pages/recruiting/shared.tsx
+msgid "No candidate records for this role yet."
+msgstr "No candidate records for this role yet."
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "No chat apps linked yet."
@@ -4437,19 +4433,15 @@ msgstr "No chat apps linked yet."
 msgid "No contact campaign associations were returned."
 msgstr "No contact campaign associations were returned."
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "No credentials saved for this bot."
-msgstr "No credentials saved for this bot."
-
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
-msgid "No CRM contacts for this role yet."
-msgstr "No CRM contacts for this role yet."
+msgid "No contacts for this role yet."
+msgstr "No contacts for this role yet."
 
-#: src/pages/RecruitingPanel.tsx
-msgid "No CRM records matched this search."
-msgstr "No CRM records matched this search."
+#: src/pages/shell/bot-credentials.tsx
+msgid "No credentials saved for this bot."
+msgstr "No credentials saved for this bot."
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
@@ -4526,6 +4518,10 @@ msgstr "No outreach files loaded"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "No providers found."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No records matched this search."
+msgstr "No records matched this search."
 
 #: src/pages/RecruitingPanel.tsx
 msgid "No recruiter messages were found."
@@ -4706,7 +4702,6 @@ msgid "Not checked yet"
 msgstr "Not checked yet"
 
 #: src/pages/ModelBackupsSettings.tsx
-#: src/pages/recruiting/RoleSetup.tsx
 msgid "Not connected"
 msgstr "Not connected"
 
@@ -4868,8 +4863,8 @@ msgid "Open the conversation to review its history, or ask WeKruit to prepare dr
 msgstr "Open the conversation to review its history, or ask WeKruit to prepare drafts from saved candidate evidence."
 
 #: src/pages/recruiting/shared.tsx
-msgid "Open the role conversation to read its CRM records."
-msgstr "Open the role conversation to read its CRM records."
+msgid "Open the role conversation to see its candidates."
+msgstr "Open the role conversation to see its candidates."
 
 #: src/pages/Shell.tsx
 msgid "Open the saved sequence before editing it."
@@ -5107,6 +5102,10 @@ msgstr "Pick a model from the list or enter a model id served by this endpoint."
 msgid "Pin"
 msgstr "Pin"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Pipeline"
+msgstr "Pipeline"
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Playing…"
 msgstr "Playing…"
@@ -5310,8 +5309,8 @@ msgid "Read the latest candidate email replies for this role using the connected
 msgstr "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
 
 #: src/pages/Shell.tsx
-msgid "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
-msgstr "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgstr "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 
 #: src/components/LiveWork.tsx
 msgid "Reading a page"
@@ -5320,10 +5319,6 @@ msgstr "Reading a page"
 #: src/components/LiveWork.tsx
 msgid "Reading files"
 msgstr "Reading files"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Ready"
-msgstr "Ready"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
@@ -5878,13 +5873,13 @@ msgstr "Role interest"
 msgid "Role revision"
 msgstr "Role revision"
 
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Role setup"
-msgstr "Role setup"
-
 #: src/pages/RecruitingPanel.tsx
 msgid "Role sources"
 msgstr "Role sources"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Role stage"
+msgstr "Role stage"
 
 #. placeholder {0}: record.feedback.expectedRoleRevision
 #: src/pages/RecruitingPanel.tsx
@@ -6189,12 +6184,12 @@ msgid "Search candidates"
 msgstr "Search candidates"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Search Criteria"
-msgstr "Search Criteria"
+msgid "Search contacts"
+msgstr "Search contacts"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Search CRM contacts"
-msgstr "Search CRM contacts"
+msgid "Search Criteria"
+msgstr "Search Criteria"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Search filter"
@@ -6281,10 +6276,6 @@ msgid "Select a contact to read their stored messages."
 msgstr "Select a contact to read their stored messages."
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Select a CRM role to read its campaign associations."
-msgstr "Select a CRM role to read its campaign associations."
-
-#: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
 msgstr "Selected recipient unavailable"
 
@@ -6335,10 +6326,6 @@ msgstr "Send to"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "Send with Enter"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Sender mailbox"
-msgstr "Sender mailbox"
 
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
@@ -6405,10 +6392,6 @@ msgstr "Server URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "Service connections"
-
-#: src/pages/recruiting/RoleSetup.tsx
-msgid "Set up"
-msgstr "Set up"
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -6533,8 +6516,8 @@ msgid "Showing the first {0}"
 msgstr "Showing the first {0}"
 
 #: src/pages/recruiting/InterviewTab.tsx
-msgid "Showing the most recent CRM records."
-msgstr "Showing the most recent CRM records."
+msgid "Showing the most recent records."
+msgstr "Showing the most recent records."
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Sidebar density"
@@ -6794,10 +6777,6 @@ msgstr "Stopped"
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
 msgstr "Stopped."
-
-#: src/pages/RecruitingPanel.tsx
-msgid "Stored CRM history"
-msgstr "Stored CRM history"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Stored encrypted"
@@ -7075,10 +7054,6 @@ msgstr "This result cannot be displayed yet"
 #: src/pages/Shell.tsx
 msgid "This role changed. Select the candidate again."
 msgstr "This role changed. Select the candidate again."
-
-#: src/pages/recruiting/shared.tsx
-msgid "This role is not linked to a CRM role yet."
-msgstr "This role is not linked to a CRM role yet."
 
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."

@@ -22,45 +22,26 @@ import { RoleSetup } from "./RoleSetup";
 let container: HTMLDivElement | undefined;
 afterEach(() => container?.remove());
 
-async function mount(status: RoleSetupStatus | undefined, handlers = {}) {
-  const props = { onAsk: vi.fn(), onConnect: vi.fn(), ...handlers };
+async function mount(status: RoleSetupStatus | undefined) {
   container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
-  await act(async () => root.render(<RoleSetup status={status} {...props} />));
-  return props;
+  await act(async () => root.render(<RoleSetup status={status} />));
 }
-const button = (label: string) =>
-  [...container!.querySelectorAll("button")].find((item) => item.textContent === label)!;
 
-it("shows nothing for a ready role", async () => {
-  await mount({ ready: true, attention: null, items: [{ key: "campaign", state: "ready" }] });
-  expect(container!.textContent).toBe("");
-});
-
-it("offers each missing step's own fix", async () => {
-  const props = await mount({
+it("never shows the setup the agent does on its own", async () => {
+  await mount({
     ready: false,
     attention: null,
     items: [
-      {
-        key: "campaign",
-        state: "missing",
-        action: { kind: "ask_agent", prompt: "为这个岗位准备 outreach campaign" },
-      },
-      { key: "sender", state: "ready", label: "recruiter@example.com" },
-      { key: "crm", state: "ready", label: "Data Infra" },
-      { key: "leads", state: "unavailable", action: { kind: "connect", serverId: "instantly" } },
+      { key: "crm", state: "missing", action: { kind: "ask_agent", prompt: "Link it" } },
+      { key: "leads", state: "unavailable", action: { kind: "connect", serverId: "mail" } },
     ],
   });
-  expect(container!.textContent).toContain("recruiter@example.com");
-  await act(async () => button("Set up").click());
-  expect(props.onAsk).toHaveBeenCalledWith("为这个岗位准备 outreach campaign");
-  await act(async () => button("Connect").click());
-  expect(props.onConnect).toHaveBeenCalledWith("instantly");
+  expect(container!.textContent).toBe("");
 });
 
-it("shows a ready role's playbook stage and next step", async () => {
+it("shows the role's playbook stage and next step", async () => {
   await mount({
     ready: true,
     attention: null,
