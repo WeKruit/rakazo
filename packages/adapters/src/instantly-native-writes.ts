@@ -1,6 +1,7 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 
@@ -127,7 +128,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     CampaignIdInput,
     false,
-    "Starts or resumes sending a campaign. Needs the user's one-time confirmation.",
+    "Sends the campaign's first email to its leads by activating it (also resumes a paused one). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
@@ -283,15 +284,37 @@ async function ensureRoleCampaign(
   const role = await requireRole(prisma, context, input.role_id);
   const key = bindingKey(serverId, role.id);
   const existing = await readBinding(prisma, context, key);
+  let stale: string | null = null;
   if (existing) {
-    const campaign = await rest("GET", `/campaigns/${existing.binding.campaignId}`);
-    const patched = campaign.stop_on_reply !== true;
-    if (patched)
-      await rest("PATCH", `/campaigns/${existing.binding.campaignId}`, { stop_on_reply: true });
-    return { created: false, stopOnReplyPatched: patched, ...existing.binding };
+    const mappedId = existing.binding.campaignId;
+    let campaign: Record<string, unknown> | null = null;
+    try {
+      campaign = await rest("GET", `/campaigns/${mappedId}`);
+    } catch (error) {
+      if (!(error instanceof InstantlyRestError && error.status === 404)) throw error;
+    }
+    // Repair: a deleted mapping, or an empty one beside a same-title campaign that has the leads.
+    const better =
+      campaign && (await hasLeads(rest, mappedId))
+        ? undefined
+        : (await sameTitleCampaigns(rest, role)).find(
+            (entry) => entry.campaign.id !== mappedId && (!campaign || entry.leads),
+          );
+    if (campaign && !better) {
+      const patched = campaign.stop_on_reply !== true;
+      if (patched) await rest("PATCH", `/campaigns/${mappedId}`, { stop_on_reply: true });
+      return { created: false, stopOnReplyPatched: patched, ...existing.binding };
+    }
+    stale = existing.effect.id;
+    getLogger().info("instantly.role_campaign.repaired", {
+      roleId: role.id,
+      from: mappedId,
+      reason: campaign ? "empty_mapped_campaign" : "mapped_campaign_missing",
+      to: better ? String(better.campaign.id) : null,
+    });
   }
   if (!context.runId) throw new IsolationError("A run is required to bind a role campaign");
-  let eaccount = input.eaccount;
+  let eaccount = input.eaccount ?? (stale ? existing!.binding.eaccount : undefined);
   if (!eaccount) {
     const accounts = await rest("GET", "/accounts?limit=2");
     const items = Array.isArray(accounts.items) ? (accounts.items as { email?: string }[]) : [];
@@ -299,9 +322,11 @@ async function ensureRoleCampaign(
       throw new Error("Pass eaccount: the sending mailbox is ambiguous or none is connected");
     eaccount = items[0].email;
   }
-  // The role id in the name lets a retry adopt a campaign whose create outcome was lost.
-  const name = `${role.title} [role ${role.id}]`;
-  const adopt = await adoptableRoleCampaign(rest, role);
+  // The user-visible name is the role title; the role id lives in the stored mapping's request.
+  const name = role.title;
+  const adopt = (await sameTitleCampaigns(rest, role)).find(
+    (entry) => entry.campaign.id !== existing?.binding.campaignId,
+  )?.campaign;
   const campaign = adopt ?? (await createCampaign(rest, { ...input, eaccount, name }));
   if (adopt && adopt.stop_on_reply !== true)
     await rest("PATCH", `/campaigns/${String(adopt.id)}`, { stop_on_reply: true });
@@ -312,7 +337,12 @@ async function ensureRoleCampaign(
     eaccount,
     leads: {},
   };
-  await recordBinding(prisma, context, key, role.id, serverId, binding);
+  if (stale)
+    await prisma.externalEffect.update({
+      where: { id: stale },
+      data: { result: binding as unknown as Prisma.InputJsonValue },
+    });
+  else await recordBinding(prisma, context, key, role.id, serverId, binding);
   return { created: !adopt, adopted: Boolean(adopt), ...binding };
 }
 
@@ -340,32 +370,33 @@ async function recordBinding(
 }
 
 /** An unbound draft/paused campaign already made for this role: named "<title>…" or "…[role <id>]". */
-async function adoptableRoleCampaign(rest: InstantlyRest, role: { id: string; title: string }) {
-  const items = new Map<string, Record<string, unknown>>();
-  for (const search of new Set([role.id, role.title])) {
-    const found = await rest("GET", `/campaigns?search=${encodeURIComponent(search)}&limit=100`);
-    for (const item of Array.isArray(found.items) ? (found.items as Record<string, unknown>[]) : [])
-      if (typeof item.id === "string") items.set(item.id, item);
-  }
+async function hasLeads(rest: InstantlyRest, campaignId: unknown) {
+  const leads = await rest("POST", "/leads/list", { campaign: campaignId, limit: 1 });
+  return Array.isArray(leads.items) && leads.items.length > 0;
+}
+
+/**
+ * Draft/paused campaigns titled exactly like the role (case-insensitive; a legacy " [role <id>]"
+ * suffix is ignored), ordered best first: with leads, then newest.
+ */
+async function sameTitleCampaigns(rest: InstantlyRest, role: { id: string; title: string }) {
+  const found = await rest("GET", `/campaigns?search=${encodeURIComponent(role.title)}&limit=100`);
   const title = role.title.trim().toLowerCase();
-  const matches = [...items.values()].filter(
-    (campaign) =>
-      (campaign.status === 0 || campaign.status === 2) &&
-      typeof campaign.name === "string" &&
-      (campaign.name.trim().toLowerCase().startsWith(title) ||
-        campaign.name.includes(`[role ${role.id}]`)),
-  );
-  if (matches.length < 2) return matches[0];
-  const withLeads = [];
-  for (const campaign of matches) {
-    const leads = await rest("POST", "/leads/list", { campaign: campaign.id, limit: 1 });
-    if (Array.isArray(leads.items) && leads.items.length) withLeads.push(campaign);
-  }
-  const newest = (list: Record<string, unknown>[]) =>
-    list.toSorted((a, b) =>
+  const matches = (Array.isArray(found.items) ? (found.items as Record<string, unknown>[]) : [])
+    .filter(
+      (campaign) =>
+        typeof campaign.id === "string" &&
+        (campaign.status === 0 || campaign.status === 2) &&
+        typeof campaign.name === "string" &&
+        campaign.name.replace(` [role ${role.id}]`, "").trim().toLowerCase() === title,
+    )
+    .toSorted((a, b) =>
       String(b.timestamp_created ?? "").localeCompare(String(a.timestamp_created ?? "")),
-    )[0];
-  return newest(withLeads.length ? withLeads : matches);
+    );
+  const ranked = [];
+  for (const campaign of matches)
+    ranked.push({ campaign, leads: await hasLeads(rest, campaign.id) });
+  return ranked.toSorted((a, b) => Number(b.leads) - Number(a.leads));
 }
 
 /** A campaign created inside a role conversation becomes that role's campaign if it has none. */

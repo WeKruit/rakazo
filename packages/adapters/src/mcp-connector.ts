@@ -8,7 +8,7 @@ import type {
   SecretStore,
 } from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
-import { isLocalMcpHost } from "@rakazo/contracts";
+import { isLocalMcpHost, RecruitingCrmTargetSchema } from "@rakazo/contracts";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -101,6 +101,83 @@ const MailboxEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
   min_timestamp_created: CreatedAt.describe("ISO datetime; only mail created at or after it."),
   max_timestamp_created: CreatedAt.describe("ISO datetime; only mail created at or before it."),
 });
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type CrmBinding = { organizationId: string; clientLabel: string; roleLabel: string };
+/**
+ * Agent calls to list_crm_candidates get the Contacts tab's arguments: contacted people included
+ * (p_not_reviewed false unless set), the CRM organization from the role's verified binding (never a
+ * user id), and the binding's client/role LABELS, which is what this tool filters on. A role id is
+ * translated via get_crm_role; free-text labels that are not a binding's are replaced by the one
+ * binding's labels, or dropped for a name-only search when the role is ambiguous.
+ */
+export async function agentCrmCandidatesArgs(
+  args: Record<string, unknown>,
+  readRole: (args: { p_org: string; p_role: string }) => Promise<unknown>,
+  bindings: CrmBinding[] = [],
+) {
+  const next: Record<string, unknown> = { p_not_reviewed: false, ...args };
+  const orgs = [...new Set(bindings.map((binding) => binding.organizationId))];
+  if (orgs.length === 1) next.p_org = orgs[0];
+  const sameLabels = (binding: CrmBinding) =>
+    binding.clientLabel.trim() === String(next.p_client ?? "").trim() &&
+    binding.roleLabel.trim() === String(next.p_role ?? "").trim();
+  if (typeof next.p_org === "string" && typeof next.p_role === "string" && UUID.test(next.p_role)) {
+    try {
+      const result = (await readRole({ p_org: next.p_org, p_role: next.p_role })) as {
+        isError?: boolean;
+        structuredContent?: { data?: Record<string, unknown> };
+      };
+      const role = result?.isError ? undefined : result?.structuredContent?.data;
+      if (
+        role?.role_spec_id === next.p_role &&
+        typeof role.client_label === "string" &&
+        role.client_label.trim() &&
+        typeof role.role_label === "string" &&
+        role.role_label.trim()
+      )
+        return { ...next, p_client: role.client_label, p_role: role.role_label };
+    } catch {
+      // The original call still runs; its own result reports any problem.
+    }
+  } else if (
+    (next.p_client !== undefined || next.p_role !== undefined) &&
+    !bindings.some(sameLabels)
+  ) {
+    if (bindings.length === 1) {
+      next.p_client = bindings[0]!.clientLabel;
+      next.p_role = bindings[0]!.roleLabel;
+    } else if (bindings.length > 1 || next.p_q !== undefined) {
+      delete next.p_client;
+      delete next.p_role;
+    }
+  }
+  if (JSON.stringify(next) !== JSON.stringify({ p_not_reviewed: false, ...args }))
+    getLogger().info("crm.list_candidates.args_rewritten", {
+      orgReplaced: next.p_org !== args.p_org,
+      labels:
+        next.p_client === args.p_client && next.p_role === args.p_role
+          ? "kept"
+          : next.p_client === undefined
+            ? "dropped"
+            : "replaced",
+    });
+  return next;
+}
+
+const EMAIL_PAGE_BOUND = 4_000_000; // 100 full bodies can pass 1 MB
+/** Instantly's short error code only (never the body): a bare token from `error`/`code`. */
+function instantlyErrorCode(text: string) {
+  try {
+    const body = JSON.parse(text) as Record<string, unknown>;
+    const code = [body.code, body.error].find(
+      (value) => typeof value === "string" && /^[\w.-]{1,64}$/.test(value),
+    );
+    return typeof code === "string" ? code : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const nativeInstantlyReads = [
   {
     name: "get_thread_history",
@@ -586,8 +663,19 @@ export class McpConnector implements ConnectorProvider {
       const session = await this.sessionFor(assignment.server, context);
       material = this.sessions.get(sessionKey)?.material;
       context.signal.throwIfAborted();
+      const args =
+        call.route.toolName === "list_crm_candidates" && context.runId
+          ? await agentCrmCandidatesArgs(
+              call.args,
+              async (roleArgs) => {
+                await requireMcpToolAssignment(this.prisma, context, call.route!, "get_crm_role");
+                return session.callTool("get_crm_role", roleArgs, { signal: context.signal });
+              },
+              await this.crmBindings(context, call.route.resourceId),
+            )
+          : call.args;
       callStarted = true;
-      const result = await session.callTool(call.route.toolName, call.args, {
+      const result = await session.callTool(call.route.toolName, args, {
         signal: context.signal,
       });
       const secrets = material ? oauthMaterialSecrets(material) : [];
@@ -701,6 +789,47 @@ export class McpConnector implements ConnectorProvider {
     return { server, key, secretId: secret.id, digest: credentialDigest(plaintext) };
   }
 
+  /** Verified CRM bindings on this server: the run's active role, else all of this user's roles. */
+  private async crmBindings(context: AdapterContext, serverId: string) {
+    const run = await this.prisma.run.findFirst({
+      where: { id: context.runId, spaceId: context.spaceId, userId: context.userId },
+      select: {
+        thread: { select: { activeRecruitingRole: { select: { crmBindingEffectId: true } } } },
+      },
+    });
+    const active = run?.thread.activeRecruitingRole;
+    const effectIds = active
+      ? [active.crmBindingEffectId]
+      : (
+          await this.prisma.recruitingRole.findMany({
+            where: {
+              spaceId: context.spaceId,
+              userId: context.userId,
+              archivedAt: null,
+              crmBindingEffectId: { not: null },
+            },
+            select: { crmBindingEffectId: true },
+          })
+        ).map((role) => role.crmBindingEffectId);
+    const ids = effectIds.filter((id): id is string => Boolean(id));
+    if (!ids.length) return [];
+    const effects = await this.prisma.externalEffect.findMany({
+      where: {
+        id: { in: ids },
+        spaceId: context.spaceId,
+        status: "completed",
+        kind: "recruiting_crm_target",
+      },
+      select: { result: true },
+    });
+    return effects.flatMap((effect) => {
+      const target = RecruitingCrmTargetSchema.safeParse(
+        (effect.result as { target?: unknown } | null)?.target,
+      );
+      return target.success && target.data.mcpServerId === serverId ? [target.data] : [];
+    });
+  }
+
   private async *readInstantlyEmails(
     call: ConnectorCall,
     context: AdapterContext,
@@ -720,6 +849,8 @@ export class McpConnector implements ConnectorProvider {
       }
     }
     let rejectedStatus: number | undefined;
+    let rejectedCode: string | undefined;
+    let reason = "";
     let hint = "";
     const redactions: string[] = [];
     const safeFetch = createSafeRemoteFetch(
@@ -764,6 +895,24 @@ export class McpConnector implements ConnectorProvider {
           !sameInstantlyAddresses(anchor.eaccount, anchor.eaccount))
       )
         throw new Error("The current native email anchor is invalid");
+      if (contactInput && !contactInput.eaccount) {
+        // Same rule as ensure_role_campaign: one connected mailbox is the default sending side.
+        phase = "default mailbox";
+        const accounts = await safeFetch(
+          new URL("https://api.instantly.ai/api/v2/accounts?limit=2"),
+          {
+            method: "GET",
+            headers: { authorization: `Bearer ${credential.key}` },
+            signal: context.signal,
+          },
+        );
+        const { text } = await readBoundedText(accounts, 100_000);
+        const items = accounts.ok
+          ? (JSON.parse(text) as { items?: { email?: unknown }[] }).items
+          : [];
+        if (items?.length === 1 && typeof items[0]?.email === "string")
+          contactInput.eaccount = items[0].email;
+      }
       const url = new URL("https://api.instantly.ai/api/v2/emails");
       url.search = new URLSearchParams({
         ...(anchor
@@ -802,14 +951,20 @@ export class McpConnector implements ConnectorProvider {
         headers: { authorization: `Bearer ${credential.key}` },
         signal: context.signal,
       });
-      const { text, truncated } = await readBoundedText(response, 1_000_000);
+      const { text, truncated } = await readBoundedText(response, EMAIL_PAGE_BOUND);
       if (!response.ok) {
         rejectedStatus = response.status;
+        rejectedCode = instantlyErrorCode(text);
         throw new Error("Email read request rejected");
       }
-      if (truncated) throw new Error("Email read response exceeded its bound");
+      if (truncated) {
+        reason = " The page exceeded the size bound; retry with a smaller limit.";
+        throw new Error("Email read response exceeded its bound");
+      }
+      reason = " Instantly returned an unreadable page.";
       const rawPage: unknown = JSON.parse(text);
       const page = readInstantlyEmailPage(rawPage);
+      if (page) reason = " Instantly returned emails outside the requested scope.";
       if (
         !page ||
         page.items.length > input.limit ||
@@ -837,6 +992,7 @@ export class McpConnector implements ConnectorProvider {
         )
       )
         throw new Error("Email page does not match the requested scope");
+      reason = "";
       if (contactInput && page.items.length === 0) {
         // An empty page is the symptom of contact/mailbox arguments passed the wrong way round.
         phase = "argument check";
@@ -978,7 +1134,7 @@ export class McpConnector implements ConnectorProvider {
     } catch {
       yield {
         type: "error",
-        message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}.` : " Check the current assigned connection and requested scope."}${hint}`,
+        message: `Instantly ${operation} read failed during ${phase}.${rejectedStatus ? ` HTTP ${rejectedStatus}${rejectedCode ? ` (${rejectedCode})` : ""}.` : reason || " Check the current assigned connection and requested scope."}${hint}`,
       };
     } finally {
       await safeFetch.close().catch(() => undefined);
