@@ -20,6 +20,7 @@ export * from "./model-backups.js";
 export * from "./model-credentials.js";
 export * from "./recruiting.js";
 export * from "./recruiting-bootstrap.js";
+export * from "./recruiting-reminders.js";
 export * from "./repos.js";
 export * from "./scope.js";
 export * from "./sessions.js";

@@ -23,6 +23,7 @@ model AiDataConsent {
 
 model User {
   aiDataConsents AiDataConsent[]
+  recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
@@ -197,6 +198,7 @@ model Member {
 
 model Space {
   aiDataConsents AiDataConsent[]
+  recruitingReminders RecruitingReminder[]
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   organizationId              String
@@ -1524,6 +1526,7 @@ model RecruitingRole {
   sourcePages RecruitingCandidatePage[]
   researchTasks RecruitingResearchTask[]
   assessments RecruitingAssessment[]
+  reminders RecruitingReminder[]
 
   @@index([spaceId, userId])
   @@map("recruiting_roles")
@@ -1730,4 +1733,35 @@ model RecruitingReply {
   @@index([crmImportEffectId])
   @@index([roleRevisionId])
   @@map("recruiting_replies")
+}
+
+enum RecruitingReminderStatus {
+  open
+  done
+  dismissed
+}
+
+/// Owner-scoped (spaceId + ownerUserId) follow-up reminder, optionally tied to a role and/or candidate.
+model RecruitingReminder {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingReminderOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  roleId String?
+  role RecruitingRole? @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  /// "autumn:<key>" | "crm:<id>", same key space as roleCandidates items.
+  candidateKey String?
+  title String
+  note String?
+  dueAt DateTime
+  status RecruitingReminderStatus @default(open)
+  completedAt DateTime?
+  createdByBotId String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerUserId, status, dueAt])
+  @@index([candidateKey])
+  @@map("recruiting_reminders")
 }
