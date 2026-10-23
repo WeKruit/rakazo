@@ -14,6 +14,7 @@ import {
   TabLoading,
   TabNotice,
   tabCacheSlot,
+  useCrmCandidateCounts,
   useCrmData,
   useCrmPages,
   useKeyedRead,
@@ -123,9 +124,13 @@ export function SequenceTab(props: RecruitingTabProps) {
     props,
   );
   const details = useCrmData(crm, "candidateDetails", candidateId ? { candidateId } : null, props);
-  const counts = new Map<string, number>();
-  for (const person of people.data?.items ?? [])
-    counts.set(person.outreachStatus, (counts.get(person.outreachStatus) ?? 0) + 1);
+  const totals = useCrmCandidateCounts(
+    crm,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
+    props,
+    (person) => person.outreachStatus,
+  );
+  const counts = totals.data?.counts ?? new Map<string, number>();
   const selected = people.data?.items.find((person) => person.candidateId === candidateId);
   return (
     <section aria-label={t`Sequence`}>
@@ -166,7 +171,7 @@ export function SequenceTab(props: RecruitingTabProps) {
                 </tbody>
               </table>
             </div>
-          ) : (
+          ) : roleCampaign.data?.campaign ? null : (
             <TabNotice>
               <Trans>No stored campaign associations were returned for this role.</Trans>
             </TabNotice>
@@ -189,7 +194,7 @@ export function SequenceTab(props: RecruitingTabProps) {
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : people.data.items.length ? null : (
             <TabNotice>
               <Trans>No CRM contacts for this role yet.</Trans>
             </TabNotice>

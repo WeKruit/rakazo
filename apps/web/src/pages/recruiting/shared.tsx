@@ -244,6 +244,49 @@ export function useCrmPages<O extends PagedOperation>(
   };
 }
 
+/** Most rows a tab reads to total a status; past this the counts say they are partial. */
+const COUNT_ROWS = 1_000;
+const COUNT_PAGE = 50;
+
+/**
+ * Totals the role's CRM candidates by a field over every page (the list itself stays paged),
+ * because the CRM returns no per-status totals.
+ */
+export function useCrmCandidateCounts(
+  crm: RoleCrm,
+  input: { crmRoleId: string } | null,
+  scope: CrmScope,
+  field: (
+    item: Extract<RecruitingCrmDataOutput, { operation: "candidates" }>["items"][number],
+  ) => string,
+) {
+  const request = crmRequest(crm, "candidates", input ? { ...input, limit: COUNT_PAGE } : null);
+  return useKeyedRead(
+    request
+      ? JSON.stringify(["counts", scope.spaceId, request, scope.refreshSignal, scope.reload])
+      : null,
+    async () => {
+      const counts = new Map<string, number>();
+      let rows = 0;
+      let next: NextPage = null;
+      do {
+        const page: Extract<RecruitingCrmDataOutput, { operation: "candidates" }> = await readCrm({
+          ...request!,
+          ...next,
+        } as CrmRequest<"candidates">);
+        for (const item of page.items) {
+          const key = field(item);
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+        }
+        rows += page.items.length;
+        next = page.items.length ? nextPage(page as unknown as PagedPage) : null;
+      } while (next && rows < COUNT_ROWS);
+      return { counts, complete: next === null };
+    },
+    request ? tabCacheSlot(scope, ["crm-counts", scope.spaceId, request]) : {},
+  );
+}
+
 /** "Load more" for a paged list; nothing once every row is shown. */
 export function LoadMore({
   pages,
