@@ -310,6 +310,7 @@ async function renderFeedbackShell(
     crmTarget?: ListRecruitingCandidatesOutput["crmTarget"];
     groupName?: string;
     groupNeedsInput?: boolean;
+    groupAttention?: "approval" | "question";
     crmRoleReference?: {
       sourceId: string;
       serverRevision: number;
@@ -371,6 +372,7 @@ async function renderFeedbackShell(
     spaceId: "space-1",
     name: options.groupName ?? "Recruiting crew",
     ...(options.groupNeedsInput ? { needsInput: true } : {}),
+    ...(options.groupAttention ? { attention: options.groupAttention } : {}),
     crmRoleReference: options.crmRoleReference,
     pinned: false,
     sectionId: null,
@@ -5452,6 +5454,14 @@ it("marks a role that waits on the recruiter in the sidebar", async () => {
   await renderFeedbackShell("group", undefined, { openFeedback: false, groupNeedsInput: true });
   const nav = container!.querySelector('[data-testid="recruiting-navigation"]')!;
   expect(nav.textContent).toContain("Needs input");
+});
+
+it("tells a confirmation apart from a question in the sidebar", async () => {
+  setToolActivityPreference("off");
+  await renderFeedbackShell("group", undefined, { openFeedback: false, groupAttention: "approval" });
+  const nav = container!.querySelector('[data-testid="recruiting-navigation"]')!;
+  expect(nav.textContent).toContain("Needs confirmation");
+  expect(nav.textContent).not.toContain("Needs input");
 });
 
 it("refreshes a new role's sidebar name when its title is saved", async () => {

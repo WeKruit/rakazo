@@ -128,6 +128,8 @@ export const GroupSchema = z.object({
   unread: z.boolean(),
   /** A reply in this conversation is waiting on the user's answer or approval. */
   needsInput: z.boolean().optional(),
+  /** What the user owes: a confirmation of an exact action, or an answer to a question. */
+  attention: z.enum(["approval", "question"]).nullable().optional(),
   updatedAt: z.string(),
   createdAt: z.string(),
 });

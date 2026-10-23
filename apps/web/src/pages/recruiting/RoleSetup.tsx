@@ -26,43 +26,64 @@ function useItemNames() {
 export function RoleSetup({ status, onAsk, onConnect }: Props) {
   const { t } = useLingui();
   const names = useItemNames();
-  if (!status || status.ready || !status.items.length) return null;
+  const stage = status?.playbookStage;
+  const setup = status && !status.ready && status.items.length > 0;
+  if (!stage && !setup) return null;
   return (
-    <section aria-label={t`Role setup`} className="border-b border-border px-6 py-3 text-sm">
-      <ul className="flex flex-wrap gap-x-6 gap-y-2">
-        {status.items.map((item) => {
-          const action = item.action;
-          return (
-            <li key={item.key} className="flex flex-wrap items-center gap-2">
-              <span className="font-medium">{names[item.key]}</span>
-              {item.state === "ready" ? (
-                <Badge variant="secondary" className="max-w-56 truncate" title={item.label}>
-                  {item.label ?? <Trans>Ready</Trans>}
-                </Badge>
-              ) : (
-                <>
-                  <Badge variant="outline">
-                    {item.state === "missing" ? (
-                      <Trans>Missing</Trans>
-                    ) : (
-                      <Trans>Not connected</Trans>
-                    )}
+    <section
+      aria-label={t`Role setup`}
+      className="space-y-2 border-b border-border px-6 py-3 text-sm"
+    >
+      {stage ? (
+        <p className="flex flex-wrap items-center gap-2">
+          <Badge variant="outline">{stage.label}</Badge>
+          {stage.nextStep ? (
+            <span className="text-muted-foreground">
+              <Trans>Next: {stage.nextStep}</Trans>
+            </span>
+          ) : null}
+        </p>
+      ) : null}
+      {setup ? (
+        <ul className="flex flex-wrap gap-x-6 gap-y-2">
+          {status.items.map((item) => {
+            const action = item.action;
+            return (
+              <li key={item.key} className="flex flex-wrap items-center gap-2">
+                <span className="font-medium">{names[item.key]}</span>
+                {item.state === "ready" ? (
+                  <Badge variant="secondary" className="max-w-56 truncate" title={item.label}>
+                    {item.label ?? <Trans>Ready</Trans>}
                   </Badge>
-                  {action?.kind === "connect" && action.serverId ? (
-                    <Button size="sm" variant="outline" onClick={() => onConnect(action.serverId!)}>
-                      <Trans>Connect</Trans>
-                    </Button>
-                  ) : action?.prompt ? (
-                    <Button size="sm" variant="outline" onClick={() => onAsk(action.prompt!)}>
-                      <Trans>Set up</Trans>
-                    </Button>
-                  ) : null}
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+                ) : (
+                  <>
+                    <Badge variant="outline">
+                      {item.state === "missing" ? (
+                        <Trans>Missing</Trans>
+                      ) : (
+                        <Trans>Not connected</Trans>
+                      )}
+                    </Badge>
+                    {action?.kind === "connect" && action.serverId ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onConnect(action.serverId!)}
+                      >
+                        <Trans>Connect</Trans>
+                      </Button>
+                    ) : action?.prompt ? (
+                      <Button size="sm" variant="outline" onClick={() => onAsk(action.prompt!)}>
+                        <Trans>Set up</Trans>
+                      </Button>
+                    ) : null}
+                  </>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : null}
     </section>
   );
 }

@@ -1560,6 +1560,26 @@ export const RecruitingRoleSetupSchema = z.strictObject({
       createdAt: IsoDate,
     })
     .nullable(),
+  /** Where the role is in the recruiting playbook; label and next step are display text. */
+  playbookStage: z
+    .strictObject({
+      stage: z.enum([
+        "intake",
+        "calibration_10",
+        "feedback",
+        "scale",
+        "enrichment",
+        "outreach",
+        "replies",
+        "screening",
+        "submission",
+        "interview",
+        "closed",
+      ]),
+      label: z.string(),
+      nextStep: z.string().nullable().optional(),
+    })
+    .optional(),
   items: z.array(
     z.strictObject({
       key: z.enum(["campaign", "sender", "crm", "leads"]),
