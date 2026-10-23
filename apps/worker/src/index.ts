@@ -276,6 +276,7 @@ async function main() {
     deploymentModelConfigured,
     messaging,
     cloudAgent,
+    connector: stack.connector,
     shutdownSignal: shutdown.signal,
   });
   // graphile-worker run() connects through the shared pool. createPool already

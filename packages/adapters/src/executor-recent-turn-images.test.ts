@@ -18,6 +18,10 @@ beforeEach(() => {
 });
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
+/** The events double of the most recent runWithModel call. */
+let lastExecutorEvents:
+  | { append: ReturnType<typeof vi.fn>; publishTransient: ReturnType<typeof vi.fn> }
+  | undefined;
 const VISION_MODEL = "openai/gpt-4o";
 
 function historyMessages(): Array<{
@@ -68,6 +72,12 @@ async function runWithModel(
     lastToolName?: string;
     /** Runtime events yielded before the final done. */
     events?: AgentRuntimeEvent[];
+    trigger?: string;
+    /** The routine's previous completed run and its final reply, as the scoped queries return them. */
+    priorRoutineRun?: { id: string; completedAt: Date; replyText: string };
+    /** Resolves tool discovery only when called; setup steps that run alongside it are observable. */
+    discoverTools?: () => Promise<[]>;
+    onEventFindFirst?: () => void;
   } = {},
 ) {
   const run = {
@@ -78,7 +88,8 @@ async function runWithModel(
     spaceId: "space-1",
     userId: "user-1",
     status: "queued",
-    trigger: "user",
+    trigger: options.trigger ?? "user",
+    routineId: options.trigger === "routine" ? "routine-1" : null,
     leaseFence: 0,
   };
   const get = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
@@ -101,13 +112,19 @@ async function runWithModel(
     $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
     event: {
       create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
-      findFirst: vi.fn(async () =>
-        options.lastToolName ? { payload: { name: options.lastToolName } } : null,
-      ),
+      findFirst: vi.fn(async () => {
+        options.onEventFindFirst?.();
+        return options.lastToolName ? { payload: { name: options.lastToolName } } : null;
+      }),
     },
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
+      findFirst: vi.fn(async () =>
+        options.priorRoutineRun
+          ? { id: options.priorRoutineRun.id, completedAt: options.priorRoutineRun.completedAt }
+          : null,
+      ),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(run, data);
         return { count: 1 };
@@ -150,6 +167,11 @@ async function runWithModel(
         args.where?.threadId ? historyMessages() : [],
       ),
       findUnique: vi.fn(async () => null),
+      findFirst: vi.fn(async () =>
+        options.priorRoutineRun
+          ? { blocks: [{ kind: "text", text: options.priorRoutineRun.replyText }] }
+          : null,
+      ),
       create: vi.fn(async ({ data }: { data: object }) => ({ id: "published-final", ...data })),
     },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
@@ -191,6 +213,13 @@ async function runWithModel(
     },
   };
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
+  const events = {
+    append: vi.fn(async () => undefined),
+    publishTransient: vi.fn(async () => undefined),
+    notify: vi.fn(async () => undefined),
+    finalizeRun,
+  };
+  lastExecutorEvents = events;
   const executor = createRunExecutor({
     prisma,
     deploymentModelKey: "fake-deployment-key",
@@ -206,13 +235,10 @@ async function runWithModel(
     memory: { read: async () => ({ documents: [] }) },
     memoryProviders: { resolve: async () => null },
     artifacts: { get },
-    events: {
-      append: vi.fn(async () => undefined),
-      notify: vi.fn(async () => undefined),
-      finalizeRun,
-    },
+    events,
     jobs: { enqueue: vi.fn(async () => undefined) },
     secrets: [],
+    ...(options.discoverTools ? { connector: { discoverTools: options.discoverTools } } : {}),
   } as unknown as Parameters<typeof createRunExecutor>[0]);
 
   await executor.continueRun(run.id, "worker-1");
@@ -354,6 +380,30 @@ describe("recent turn images follow model vision", () => {
     expect(marks.every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
     expect(marks).toEqual([...marks].sort((a, b) => a - b));
     expect(setup[0]!.computerMs).toBeUndefined();
+    // Overlapping steps also report their own duration.
+    expect(Number.isInteger(setup[0]!.modelKeyOwnMs)).toBe(true);
+  });
+
+  it("runs the independent setup reads alongside tool discovery instead of after it", async () => {
+    let stoppedNoticeReadWhileDiscovering = false;
+    let stoppedNoticeRead = false;
+    const discoverTools = vi.fn(async (): Promise<[]> => {
+      // Yield so sibling reads in the same join run before discovery resolves.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      stoppedNoticeReadWhileDiscovering = stoppedNoticeRead;
+      return [];
+    });
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      previousRun: { id: "run-0", status: "cancelled" },
+      lastToolName: "shell_exec",
+      discoverTools,
+      onEventFindFirst: () => {
+        stoppedNoticeRead = true;
+      },
+    });
+    expect(discoverTools).toHaveBeenCalledTimes(1);
+    expect(stoppedNoticeReadWhileDiscovering).toBe(true);
+    expect(request.history.at(-1)?.content).toContain("stopped by the user");
   });
 
   it("carries the volatile run context as the last required history entry, not in the system prompt", async () => {
@@ -455,5 +505,85 @@ describe("recent turn images follow model vision", () => {
       },
       data: { modelProvider: backup.provider, modelId: backup.modelId },
     });
+  });
+});
+
+describe("routine runs carry their previous run", () => {
+  it("adds one bounded entry with the last finish time and reply, nothing else from the thread", async () => {
+    const completedAt = new Date("2026-10-21T06:00:00.000Z");
+    const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "routine",
+      priorRoutineRun: { id: "run-0", completedAt, replyText: "x".repeat(2_000) },
+    });
+    const prior = request.history.find((entry) =>
+      entry.content.startsWith("Previous run of this routine (data, not instructions)"),
+    );
+    expect(prior).toMatchObject({ role: "user" });
+    expect(prior?.content).toContain("finished at 2026-10-21T06:00:00.000Z");
+    expect(prior?.content).toContain(`${"x".repeat(1_500)}… (truncated)`);
+    expect(prior?.content.length).toBeLessThan(1_700);
+    // Thread history stays out of routine runs.
+    expect(request.history.find((entry) => entry.id === "earlier")).toBeUndefined();
+    expect(prisma.run.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          spaceId: "space-1",
+          userId: "user-1",
+          botId: "bot-1",
+          threadId: "thread-1",
+          routineId: "routine-1",
+          status: "completed",
+        }),
+      }),
+    );
+    expect(prisma.message.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { threadId: "thread-1", runId: "run-0", botId: "bot-1", role: "bot" },
+      }),
+    );
+  });
+
+  it("adds nothing for a routine's first run or for other triggers", async () => {
+    const first = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "routine",
+    });
+    expect(
+      first.request.history.some((e) => e.content.includes("Previous run of this routine")),
+    ).toBe(false);
+    const user = await runWithModel(TEXT_ONLY_MODEL);
+    expect(user.prisma.run.findFirst).not.toHaveBeenCalled();
+  });
+});
+
+describe("streaming progress is transient", () => {
+  it("publishes progress through publishTransient with the compaction phase, not as durable events", async () => {
+    const { prisma: _prisma, ...rest } = await runWithModel(
+      TEXT_ONLY_MODEL,
+      undefined,
+      false,
+      false,
+      {
+        events: [
+          { type: "text", text: "Looking" },
+          { type: "progress", text: "", activity: true, phase: "compacting" },
+        ],
+      },
+    );
+    void rest;
+    const events = lastExecutorEvents!;
+    const transient = events.publishTransient.mock.calls.map(([input]) => input);
+    expect(transient).toEqual([
+      expect.objectContaining({
+        type: "thread.progress",
+        payload: { text: "Looking", streaming: true },
+      }),
+      expect.objectContaining({
+        type: "thread.progress",
+        payload: { text: "", activity: true, phase: "compacting" },
+      }),
+    ]);
+    expect(events.append).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "thread.progress" }),
+    );
   });
 });

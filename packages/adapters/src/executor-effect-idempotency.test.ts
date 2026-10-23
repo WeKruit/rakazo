@@ -33,10 +33,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
+import type * as BotSecretsModule from "./bot-secrets.js";
+import { shellCommandEnvironment } from "./bot-secrets.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
-import { createRunExecutor, selectBuiltinToolsForRun } from "./executor.js";
+import {
+  createRunExecutor,
+  resumeBriefForRun,
+  selectBuiltinToolsForRun,
+  toolArgsSummary,
+} from "./executor.js";
 import {
   CATALOG_EXECUTE,
   catalogEntries,
@@ -119,6 +126,11 @@ vi.mock("./computer-workspace.js", async (importOriginal) => ({
   checkpointRunComputerWorkspace: checkpointWorkspace,
 }));
 beforeEach(() => checkpointWorkspace.mockClear());
+
+vi.mock("./bot-secrets.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof BotSecretsModule>();
+  return { ...actual, shellCommandEnvironment: vi.fn(actual.shellCommandEnvironment) };
+});
 
 vi.mock("./auto-review.js", async (importOriginal) => ({
   ...(await importOriginal<typeof AutoReviewModule>()),
@@ -368,7 +380,10 @@ function fixture(
     actionApprovalRule: { findMany: vi.fn(async (): Promise<ActionApprovalRule[]> => []) },
     actionAutoReviewPreference: { findUnique: vi.fn(async () => ({ enabled: false })) },
     externalEffect,
-    artifact: { findFirst: vi.fn(), findMany: vi.fn(async () => []) },
+    artifact: {
+      findFirst: vi.fn(),
+      findMany: vi.fn(async (): Promise<Array<{ id: string; name: string }>> => []),
+    },
   };
   const pauseRunForInput = vi.fn<ThreadEvents["pauseRunForInput"]>(async () => {
     run.status = "waiting_input";
@@ -423,6 +438,7 @@ function fixture(
     artifacts: options.attachmentStore === false ? undefined : artifacts,
     events: {
       append: vi.fn(async () => undefined),
+      publishTransient: vi.fn(async () => undefined),
       notify: vi.fn(async () => undefined),
       pauseRunForInput,
       finalizeRun,
@@ -719,12 +735,51 @@ describe("worker shutdown recovery", () => {
       expect.objectContaining({ data: { status: "interrupted", finishedAt: expect.any(Date) } }),
     );
     f.setCalls([{ name: "remember", args, executionId: "after-restart" }]);
+    // Durable audit of the first attempt: a paid research call whose output was stored.
+    const researchDigest = createHash("sha256").update("research-1").digest("hex").slice(0, 12);
+    // Other scoped reads share this mock; only the audit query sees the first attempt's events.
+    const auditEvents = [
+      {
+        seq: 1,
+        type: "agent.tool.called",
+        payload: {
+          name: "recruiting_research",
+          executionId: "research-1",
+          argsSummary: "query=senior backend engineer",
+        },
+      },
+      {
+        seq: 2,
+        type: "agent.tool.completed",
+        payload: { name: "recruiting_research", executionId: "research-1", outcome: "succeeded" },
+      },
+      {
+        seq: 3,
+        type: "thread.message.created",
+        payload: { role: "bot", blocks: [{ kind: "text", text: "Found 12 profiles so far." }] },
+      },
+    ];
+    f.prisma.event.findMany.mockImplementation(
+      async (query?: { where?: { type?: { in?: string[] } } }) =>
+        query?.where?.type?.in?.includes("agent.tool.completed") ? auditEvents : [],
+    );
+    f.prisma.artifact.findMany.mockResolvedValueOnce([
+      { id: "art-research", name: `recruiting_research-${researchDigest}.txt` },
+    ]);
     await createRunExecutor({
       ...f.executorDeps,
       shutdownSignal: new AbortController().signal,
     }).continueRun(f.runData.id, "worker-2");
     expect(f.runData).toMatchObject({ status: "completed", taskId, leaseFence: 2 });
     expect(f.runtimeRun).toHaveBeenCalledTimes(2);
+    const firstTurn = f.runtimeRun.mock.calls[0]![0].history.at(-1)?.content ?? "";
+    const resumedTurn = f.runtimeRun.mock.calls[1]![0].history.at(-1)?.content ?? "";
+    expect(firstTurn).not.toContain("interrupted and resumed");
+    expect(resumedTurn).toContain("This run was interrupted and resumed.");
+    expect(resumedTurn).toContain(
+      "- recruiting_research(query=senior backend engineer) completed; full output saved as artifact art-research (artifact_read)",
+    );
+    expect(resumedTurn).toContain("- Found 12 profiles so far.");
     expect(f.results).toEqual([{ uncertain: true }]);
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.effects).toEqual(before);
@@ -3884,7 +3939,9 @@ describe("native recruiting research executor integration", () => {
       yield { type: "result", data: rawResult };
     });
     vi.mocked(completeRecruitingResearchCall).mockImplementation(
-      async (_deps, _trusted, _admission, result) => {
+      async (researchDeps, _trusted, _admission, result) => {
+        // Still-working research is handed to the poll job through the executor's publisher.
+        expect(researchDeps).toEqual(expect.objectContaining({ jobs: f.executorDeps.jobs }));
         expect(result).toEqual(rawResult);
         expect(effect).toEqual(expect.objectContaining({ status: "completed", result: rawResult }));
         return completed as never;
@@ -5603,5 +5660,159 @@ describe("final reply before the terminal workspace checkpoint", () => {
         blocks: expect.arrayContaining([expect.objectContaining({ kind: "text", text: "Done" })]),
       }),
     );
+  });
+});
+
+describe("resume brief", () => {
+  const prismaWith = (
+    events: Array<{ type: string; payload: unknown }>,
+    artifacts: unknown[] = [],
+  ) =>
+    ({
+      event: { findMany: vi.fn(async () => events) },
+      artifact: { findMany: vi.fn(async () => artifacts) },
+    }) as never;
+  const run = { id: "run-1", spaceId: "space-1", threadId: "thread-1" };
+
+  it("keeps secrets and payloads out of the argument summary", () => {
+    expect(
+      toolArgsSummary({ query: "find x", api_key: "sk-live-123", nested: { a: 1 }, limit: 5 }, [
+        "sk-live-123",
+      ]),
+    ).toBe("query=find x, limit=5");
+    expect(toolArgsSummary({ note: "token sk-live-123 inside" }, ["sk-live-123"])).not.toContain(
+      "sk-live-123",
+    );
+    expect(toolArgsSummary("plain")).toBeUndefined();
+  });
+
+  it("is empty without durable work and bounded with a lot of it", async () => {
+    expect(await resumeBriefForRun(prismaWith([]), run)).toBeUndefined();
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      type: "agent.tool.completed",
+      payload: { name: `mcp_search_${i}`, executionId: `x${i}`, outcome: "succeeded" },
+    }));
+    const brief = (await resumeBriefForRun(prismaWith(many), run))!;
+    expect(brief.length).toBeLessThanOrEqual(2_100);
+    expect(brief.split("\n- ").length - 1).toBeLessThanOrEqual(20);
+    expect(brief).toContain("(40 more entries omitted)");
+  });
+
+  it("reports failures and redacts secrets from stored error text", async () => {
+    const brief = (await resumeBriefForRun(
+      prismaWith([
+        {
+          type: "agent.tool.completed",
+          payload: {
+            name: "mcp_search",
+            executionId: "s1",
+            outcome: "error",
+            error: "401 for token sk-live-123",
+          },
+        },
+        {
+          type: "agent.tool.completed",
+          payload: { name: "ask", executionId: "p", outcome: "paused" },
+        },
+      ]),
+      run,
+      ["sk-live-123"],
+    ))!;
+    expect(brief).toContain("- mcp_search() failed: 401 for token");
+    expect(brief).not.toContain("sk-live-123");
+    expect(brief).not.toContain("ask(");
+  });
+});
+
+describe("integration hunks: shell scope, external-text refusal, interject, memory edit", () => {
+  it("scopes bot command variables to the shell command text", async () => {
+    const f = fixture("shell-scope");
+    vi.mocked(shellCommandEnvironment).mockClear();
+    f.setCalls([{ name: "shell", args: { command: "echo $CLI_TOKEN" }, executionId: "sh-1" }]);
+    // The fixture sandbox cannot execute; the environment scope is read before that step.
+    await createRunExecutor(f.executorDeps).continueRun(f.runData.id, "worker-1");
+    expect(shellCommandEnvironment).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ command: "echo $CLI_TOKEN" }),
+    );
+  });
+
+  it("refuses an irreversible connector tool on a run opened by external text", async () => {
+    const f = fixture("external-text");
+    f.runData.trigger = "messaging";
+    f.connector.discoverTools.mockResolvedValue([
+      {
+        name: "gmail_send_email",
+        description: "Send mail",
+        inputSchema: { type: "object", properties: {} },
+        readOnly: false,
+        route: { connectorId: "composio", toolName: "GMAIL_SEND_EMAIL" },
+      } as never,
+    ]);
+    f.setCalls([{ name: "gmail_send_email", args: { to: "a@example.test" }, executionId: "s1" }]);
+    await f.run();
+    expect(f.results).toEqual([
+      { error: expect.stringContaining("opened by an external message") },
+    ]);
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+  });
+
+  it("forwards the interject flag of a claimed steering message to the runtime", async () => {
+    const f = fixture("interject");
+    f.claimSteering.mockResolvedValue([
+      {
+        id: "steering-1",
+        messageId: "human-2",
+        text: "Stop, use the other role.",
+        blocks: [{ kind: "text", text: "Stop, use the other role." }],
+        interrupt: true,
+      },
+      {
+        id: "steering-2",
+        messageId: "human-3",
+        text: "Also check the inbox.",
+        blocks: [{ kind: "text", text: "Also check the inbox." }],
+      },
+    ]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      const steering = await request.claimSteering!([]);
+      expect(steering.map((item) => item.interrupt)).toEqual([true, undefined]);
+      yield { type: "done" as const, text: "Done" };
+    });
+    await f.run();
+  });
+
+  it("merges a memory edit into the current document and commits it against the read revision", async () => {
+    const f = fixture("memory-edit");
+    f.memoryRead.mockResolvedValue({
+      documents: [{ path: "MEMORY.md", content: "Likes tea.\nMeets Mondays.", revision: 4 }],
+    } as never);
+    f.setCalls([
+      {
+        name: "remember",
+        args: { edit: { find: "Mondays", replace: "Tuesdays" }, expectedRevision: 4 },
+        executionId: "edit-1",
+      },
+      {
+        name: "remember",
+        args: { edit: { find: "Fridays", replace: "x" }, expectedRevision: 4 },
+        executionId: "edit-2",
+      },
+    ]);
+    await f.run();
+    expect(f.memoryCommit).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        scope: "bot",
+        path: "MEMORY.md",
+        content: "Likes tea.\nMeets Tuesdays.",
+        expectedRevision: 4,
+      }),
+      expect.anything(),
+    );
+    expect(f.results[0]).toMatchObject({ ok: true });
+    expect(f.results[1]).toMatchObject({
+      error: expect.stringContaining("edit.find was not found"),
+      currentRevision: 4,
+    });
   });
 });
