@@ -1570,6 +1570,11 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                 "ask_user requires two to four unique, non-empty options or a valid requestedSchema",
               );
             const { question } = parsed.data;
+            // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
+            if ((question.match(/\?/g)?.length ?? 0) > 1 || /(^|\n)\s*2[.)]\s/.test(question))
+              throw new Error(
+                "Ask one question at a time: ask only the single most decision-affecting question first, with options.",
+              );
             const options = "options" in parsed.data ? parsed.data.options : undefined;
             const requestedSchema =
               "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
