@@ -52,8 +52,14 @@ function fixture() {
   const tx = {
     $queryRaw: vi.fn(async (_query: unknown) => [] as unknown[]),
     $executeRaw: vi.fn(async (_query: unknown) => 0),
+    recruitingCrmWorkspaceAttachment: {
+      findUnique: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+    },
     recruitingRole: {
-      findFirst: vi.fn(async () => role),
+      findFirst: vi.fn(async ({ where }) =>
+        typeof where.id === "object" && where.id.not === role.id ? null : role,
+      ),
       updateMany: vi.fn(async () => ({ count: 0 })),
     },
     thread: {
@@ -950,7 +956,13 @@ describe("candidate listing and shortlist boundaries", () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([
-        { name: "Synthetic Avery", linkedinUrl: null, resumeUrl: "r", sourcePageId: null, profileSourcePageIds: [] },
+        {
+          name: "Synthetic Avery",
+          linkedinUrl: null,
+          resumeUrl: "r",
+          sourcePageId: null,
+          profileSourcePageIds: [],
+        },
       ]);
     await recruiting.setRecruitingCandidateShortlist(f.prisma, actor, {
       threadId: "thread",
@@ -1108,6 +1120,10 @@ function observationFixture(rows: readonly unknown[] | undefined) {
   );
   const tx = {
     ...f.tx,
+    recruitingCrmWorkspaceAttachment: {
+      findUnique: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+    },
     recruitingRole: {
       findFirst: vi.fn(async () => ({ ...f.role, title: "Example engineer" })),
       updateMany: vi.fn(async () => ({ count: 0 })),
@@ -1410,8 +1426,14 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
         return run;
       }),
     },
+    recruitingCrmWorkspaceAttachment: {
+      findUnique: vi.fn(async () => null),
+      findMany: vi.fn(async () => []),
+    },
     recruitingRole: {
-      findFirst: vi.fn(async () => role),
+      findFirst: vi.fn(async ({ where }) =>
+        typeof where.id === "object" && where.id.not === role.id ? null : role,
+      ),
       updateMany: vi.fn(async ({ where, data }) => {
         if (
           where.crmBindingEffectId !== role.crmBindingEffectId ||
@@ -3680,6 +3702,28 @@ describe("native CRM binding and source import", () => {
       );
     },
   );
+  it("refuses a native binding that duplicates an attached canonical workspace", async () => {
+    const f = crmFixture();
+    f.role.crmBindingEffectId = null;
+    f.binding.status = "executing";
+    f.tx.recruitingCrmWorkspaceAttachment.findMany.mockResolvedValue([
+      {
+        roleId: "another-native-role",
+        mcpServerId: f.target.mcpServerId,
+        organizationId: f.target.organizationId,
+        crmRoleId: f.target.crmRoleId,
+      },
+    ] as never);
+    await expect(
+      recruiting.executeRecruitingCrmBinding(
+        f.prisma,
+        actor,
+        { ...f.trusted, effectId: f.binding.id, effectRequest: f.bindingInput },
+        f.bindingInput,
+      ),
+    ).rejects.toThrow(recruiting.RecruitingConflictError);
+    expect(f.tx.recruitingRole.updateMany).not.toHaveBeenCalled();
+  });
   it("binds and replays an internal CRM target without a human approval card", async () => {
     const f = crmFixture();
     f.role.crmBindingEffectId = null;

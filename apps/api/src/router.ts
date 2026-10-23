@@ -195,7 +195,6 @@ import {
   deleteUnreferencedCredentialSecret,
   ensureBoard,
   ensureRecruitingWorkspace,
-  openVerifiedRecruitingCrmWorkspace,
   findDefaultModelCredential,
   findDefaultVoiceCredential,
   findModelCredential,
@@ -211,6 +210,7 @@ import {
   lockOwnedGroup,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
+  openVerifiedRecruitingCrmWorkspace,
   Prisma,
   parseComputerMode,
   pushSessionExpiresAt,
@@ -3679,14 +3679,26 @@ export function createRouter(deps: RouterDeps) {
       ),
       roleCampaign: authed.recruiting.roleCampaign.handler(async ({ context, input }) =>
         getRecruitingRoleCampaign(
-          { prisma: deps.prisma, connectors: deps.connectors, signal: context.signal },
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            signal: context.signal,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
         ),
       ),
       roleSetup: authed.recruiting.roleSetup.handler(async ({ context, input }) =>
         getRecruitingRoleSetup(
-          { prisma: deps.prisma, connectors: deps.connectors, signal: context.signal },
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            signal: context.signal,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
         ),

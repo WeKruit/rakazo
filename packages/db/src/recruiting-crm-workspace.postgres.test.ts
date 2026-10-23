@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { boundDirectApprovalRequest } from "@rakazo/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "./client.js";
 import {
@@ -6,6 +7,7 @@ import {
   getRecruitingWorkspaceCrmTarget,
   openVerifiedRecruitingCrmWorkspace,
 } from "./recruiting.js";
+
 const suite = process.env.VERIFY_DATABASE ? describe.sequential : describe.skip;
 suite("verified legacy CRM workspace", () => {
   const db = createDb(process.env.DATABASE_URL!);
@@ -114,6 +116,122 @@ suite("verified legacy CRM workspace", () => {
       data: { allowedTools: ["get_crm_role"] },
     });
   });
+  async function fixtureBinding(
+    workspace: { roleId: string; threadId: string },
+    selected: typeof target,
+  ) {
+    const task = await prisma.task.create({
+      data: {
+        spaceId,
+        userId,
+        botId: bots[0]!,
+        threadId: workspace.threadId,
+        prompt: "Synthetic",
+        status: "running",
+      },
+    });
+    const run = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId: bots[0]!,
+        threadId: workspace.threadId,
+        taskId: task.id,
+        status: "running",
+        trigger: "user",
+      },
+    });
+    const read = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: run.id,
+        kind: "mcp__crm__get_crm_role",
+        idempotencyKey: randomUUID(),
+        status: "completed",
+        request: boundDirectApprovalRequest(
+          {
+            connectorId: "mcp",
+            resourceId: serverId,
+            resourceRevision: 1,
+            toolName: "get_crm_role",
+          },
+          { p_org: selected.organizationId, p_role: selected.crmRoleId },
+          "__rakazoCatalogTool",
+        ) as never,
+        result: {
+          structuredContent: {
+            data: {
+              role_spec_id: selected.crmRoleId,
+              client_id: selected.crmClientId,
+              client_label: selected.clientLabel,
+              role_label: selected.roleLabel,
+            },
+          },
+        },
+      },
+    });
+    const effectId = randomUUID();
+    await prisma.externalEffect.create({
+      data: {
+        id: effectId,
+        spaceId,
+        runId: run.id,
+        kind: "recruiting_crm_target",
+        idempotencyKey: randomUUID(),
+        status: "completed",
+        request: {
+          operation: "bind",
+          roleId: workspace.roleId,
+          expectedRoleRevision: 1,
+          expectedBindingEffectId: null,
+          crmRoleReadEffectId: read.id,
+        },
+        result: {
+          status: "connected",
+          roleId: workspace.roleId,
+          bindingEffectId: effectId,
+          target: selected,
+        },
+      },
+    });
+    await prisma.recruitingRole.update({
+      where: { id: workspace.roleId },
+      data: { crmBindingEffectId: effectId },
+    });
+  }
+  it("rejects a conflicting native binding without reassigning the existing attachment", async () => {
+    const a = await open();
+    const different = { ...target, crmRoleId: "00000000-0000-4000-8000-000000000009" };
+    await fixtureBinding(a, different);
+    await expect(open(different.crmRoleId)).rejects.toThrow();
+    await expect(
+      getRecruitingWorkspaceCrmTarget(prisma, actor, { threadId: a.threadId }),
+    ).rejects.toThrow();
+    expect(
+      (
+        await prisma.recruitingCrmWorkspaceAttachment.findUniqueOrThrow({
+          where: { roleId: a.roleId },
+        })
+      ).crmRoleId,
+    ).toBe(target.crmRoleId);
+    await prisma.recruitingRole.update({
+      where: { id: a.roleId },
+      data: { crmBindingEffectId: null },
+    });
+  });
+  it("rejects an archived legacy binding even without an attachment", async () => {
+    const crmRoleId = "00000000-0000-4000-8000-000000000008";
+    const a = await open(crmRoleId);
+    await fixtureBinding(a, { ...target, crmRoleId });
+    await prisma.recruitingCrmWorkspaceAttachment.delete({ where: { roleId: a.roleId } });
+    await prisma.recruitingRole.update({
+      where: { id: a.roleId },
+      data: { archivedAt: new Date() },
+    });
+    const count = await prisma.recruitingRole.count({ where: { userId, spaceId } });
+    await expect(open(crmRoleId)).rejects.toThrow();
+    expect(await prisma.recruitingRole.count({ where: { userId, spaceId } })).toBe(count);
+  });
   it("does not restore archived canonical roles", async () => {
     const a = await open();
     await prisma.recruitingRole.update({
@@ -121,6 +239,6 @@ suite("verified legacy CRM workspace", () => {
       data: { archivedAt: new Date() },
     });
     await expect(open()).rejects.toThrow();
-    expect(await prisma.recruitingRole.count({ where: { userId, spaceId } })).toBe(2);
+    expect(await prisma.recruitingRole.count({ where: { userId, spaceId } })).toBe(3);
   });
 });

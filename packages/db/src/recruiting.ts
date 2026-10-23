@@ -125,6 +125,7 @@ import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import type { AnswerRunInput, PauseRunForInput } from "./events.js";
 import { appendEventInTransaction } from "./events.js";
+import { createGroupInTransaction } from "./groups.js";
 import type { SourceMessage } from "./messages.js";
 import {
   createThreadMessageInTransaction,
@@ -134,7 +135,6 @@ import {
   validateRunHumanSourceRows,
 } from "./messages.js";
 import { IsolationError, scoped } from "./scope.js";
-import { createGroupInTransaction } from "./groups.js";
 
 type Tx = Prisma.TransactionClient;
 type RoleSnapshot = {
@@ -8414,13 +8414,14 @@ export async function getRecruitingCrmTarget(
     const thread = await requireThread(tx, actor, run.threadId);
     const role = await requireRole(tx, actor, input.roleId);
     if (thread.activeRecruitingRoleId !== role.id) throw new IsolationError();
+    const attached = await attachedCrmTarget(tx, actor, role.id, thread.id);
     const bound = role.crmBindingEffectId
       ? await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId)
       : null;
     return {
       roleId: role.id,
       bindingEffectId: bound?.bindingEffectId ?? null,
-      target: bound?.target ?? null,
+      target: attached ?? bound?.target ?? null,
     };
   });
 }
@@ -8443,6 +8444,48 @@ async function prepareCrmBinding(
     throw new RecruitingConflictError();
   const target = await crmReadTarget(tx, actor, run, input.crmRoleReadEffectId);
   await currentCrmServer(tx, actor, run, target);
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${JSON.stringify([actor.userId, actor.spaceId, target.mcpServerId, target.organizationId, target.crmRoleId])}, 3))`;
+  const attachments = await tx.recruitingCrmWorkspaceAttachment.findMany({
+    where: {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      OR: [
+        { roleId: role.id },
+        {
+          mcpServerId: target.mcpServerId,
+          organizationId: target.organizationId,
+          crmRoleId: target.crmRoleId,
+        },
+      ],
+    },
+  });
+  if (
+    attachments.some(
+      (row) =>
+        row.roleId !== role.id ||
+        row.mcpServerId !== target.mcpServerId ||
+        row.organizationId !== target.organizationId ||
+        row.crmRoleId !== target.crmRoleId,
+    )
+  )
+    throw new RecruitingConflictError();
+  const duplicate = await tx.recruitingRole.findFirst({
+    where: {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      id: { not: role.id },
+      crmBindingEffect: {
+        status: "completed",
+        kind: "recruiting_crm_target",
+        AND: [
+          { result: { path: ["target", "mcpServerId"], equals: target.mcpServerId } },
+          { result: { path: ["target", "organizationId"], equals: target.organizationId } },
+          { result: { path: ["target", "crmRoleId"], equals: target.crmRoleId } },
+        ],
+      },
+    },
+  });
+  if (duplicate) throw new RecruitingConflictError();
   return { target, roleTitle: role.title, role, run };
 }
 

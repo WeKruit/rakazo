@@ -809,6 +809,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
   });
   afterAll(async () => {
     if (!prisma) return;
+    await prisma.recruitingReply.deleteMany({
+      where: { effect: { spaceId: { in: [spaceId, otherSpaceId] } } },
+    });
+    await prisma.recruitingCrmImport.deleteMany({
+      where: { effect: { spaceId: { in: [spaceId, otherSpaceId] } } },
+    });
     await prisma.organization.deleteMany({ where: { id: organizationId } });
     await prisma.user.deleteMany({ where: { id: { in: [userId, otherUserId] } } });
     await close();

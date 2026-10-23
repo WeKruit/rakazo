@@ -38,6 +38,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     getRecruitingWorkspace: vi.fn(),
     getRecruitingWorkspaceCrmTarget: vi.fn(),
     getRecruitingWorkspaceRoleId: vi.fn(),
+    getRecruitingWorkspaceCrmTarget: vi.fn(),
     listRecruitingCandidateLinkedinUrls: vi.fn(),
     listSyncedRecruitingCrmRoleContacts: vi.fn(),
     getRecruitingCrmTarget: vi.fn(),
@@ -4264,6 +4265,85 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it.each(["ready", "multiple", "revoked", "no-provider", "wrong-provider-id"])(
+    "reads imported campaign without creating a receipt: %s",
+    async (mode) => {
+      const f = browserFixture();
+      const selected = {
+        mcpServerId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        crmRoleId: roleId,
+        crmClientId: clientId,
+        clientLabel: "Actual client",
+        roleLabel: "Actual role",
+      };
+      vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+        role: { id: "native-role" },
+        crmTarget: { ...selected, bindingEffectId: null },
+      } as never);
+      vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue(selected);
+      const campaignId = "50000000-0000-4000-8000-000000000005";
+      f.results.get_crm_role = {
+        organization_id: org,
+        role_spec_id: roleId,
+        campaigns: [
+          { id: campaignId, name: "Existing", status: 1, synced_at: "2026-10-23T00:00:00Z" },
+        ],
+        pagination: "offset",
+        offset: 0,
+        next_offset: mode === "multiple" ? 1 : null,
+      };
+      if (mode === "revoked") f.results.list_crm_memberships = [];
+      const originalAssignment = f.mockPrisma.botMcpServer.findFirst;
+      f.mockPrisma.botMcpServer.findFirst = vi.fn(async (args: any) =>
+        args.where?.server?.endpoint === "https://mcp.instantly.ai/mcp"
+          ? mode === "no-provider"
+            ? null
+            : {
+                botId: "coordinator",
+                allowAllTools: false,
+                allowedTools: ["get_email", "list_emails"],
+                server: { id: "instantly", revision: 4 },
+              }
+          : originalAssignment(),
+      ) as never;
+      const crmExecute = f.execute.getMockImplementation()!;
+      f.execute.mockImplementation(async function* (call, context) {
+        if (call.route?.resourceId === "instantly")
+          yield {
+            type: "result",
+            data: {
+              structuredContent: {
+                result:
+                  call.route.toolName === "native_instantly_get_campaign"
+                    ? {
+                        id: mode === "wrong-provider-id" ? "other" : campaignId,
+                        name: "Existing",
+                        status: 1,
+                      }
+                    : { items: [] },
+              },
+            },
+          };
+        else yield* crmExecute(call, context);
+      });
+      if (mode === "multiple" || mode === "revoked") {
+        await expect(api.getRecruitingRoleCampaign(f.deps, actor, target)).rejects.toThrow();
+        expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
+          false,
+        );
+      } else {
+        const output = await api.getRecruitingRoleCampaign(f.deps, actor, target);
+        expect(output.status).toBe(mode === "ready" ? "ready" : "unavailable");
+        expect(output.campaign?.id).toBe(campaignId);
+        expect(output.campaign?.eaccount).toBeNull();
+        expect(
+          f.execute.mock.calls.every(([call]) => !/create|send|ensure/.test(call.route!.toolName)),
+        ).toBe(true);
+      }
+    },
+  );
   it("reads owner-scoped projected role contacts without requesting live candidate pages", async () => {
     const f = browserFixture();
     const stored = {

@@ -457,6 +457,9 @@ export async function getRecruitingRoleCampaign(
     prisma: PrismaClient;
     connectors: Pick<ConnectorProvider, "execute">;
     signal?: AbortSignal;
+    firstPartyMcpUrl?: string;
+    reauthorize?: () => Promise<ThreadTarget>;
+    stillAuthorized?: () => Promise<boolean>;
   },
   actor: Actor,
   target: ThreadTarget,
@@ -472,6 +475,39 @@ export async function getRecruitingRoleCampaign(
       threadId: target.threadId,
     });
     if (!workspace) return none;
+    let imported: { id: string; name: string } | null = null;
+    if (workspace.crmTarget && workspace.crmTarget.bindingEffectId === null) {
+      if (!deps.reauthorize)
+        throw new ORPCError("FORBIDDEN", {
+          message: "Current CRM role authorization is required.",
+        });
+      const selected = await recruiting.getRecruitingWorkspaceCrmTarget(deps.prisma, actor, {
+        threadId: target.threadId,
+      });
+      if (!selected) throw new IsolationError();
+      const page = await getRecruitingCrmData(
+        { ...deps, reauthorize: deps.reauthorize },
+        actor,
+        target,
+        {
+          operation: "roleCampaigns",
+          serverId: selected.mcpServerId,
+          serverRevision: selected.serverRevision,
+          organizationId: selected.organizationId,
+          crmRoleId: selected.crmRoleId,
+          limit: 2,
+          offset: 0,
+        },
+      );
+      if (page.operation !== "roleCampaigns") throw new IsolationError();
+      if (page.nextOffset !== null || page.items.length > 1)
+        throw new ORPCError("CONFLICT", {
+          message:
+            "This CRM role has multiple campaigns. Select an exact campaign in CRM before using a single campaign workspace.",
+        });
+      imported = page.items[0] ?? null;
+      if (!imported) return none;
+    }
     const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
     const assignment = await deps.prisma.botMcpServer.findFirst({
       where: {
@@ -498,24 +534,37 @@ export async function getRecruitingRoleCampaign(
       !assignment ||
       !["get_email", "list_emails"].every((tool) => correspondenceAllows(assignment, tool))
     )
-      return none;
+      return imported
+        ? {
+            ...none,
+            status: "unavailable",
+            campaign: { ...imported, eaccount: null, status: null, stopOnReply: null },
+          }
+        : none;
     none.serverId = assignment.server.id;
-    const effect = await deps.prisma.externalEffect.findUnique({
-      where: {
-        idempotencyKey: `instantly-role-campaign:${assignment.server.id}:${workspace.role.id}`,
-      },
-      select: { spaceId: true, status: true, result: true },
-    });
-    const binding = correspondenceRecord(effect?.result);
-    if (
-      !effect ||
-      effect.spaceId !== actor.spaceId ||
-      effect.status !== "completed" ||
-      typeof binding?.campaignId !== "string" ||
-      typeof binding.campaignName !== "string"
-    )
-      return none;
-    const campaignId = binding.campaignId;
+    let binding: Record<string, unknown>;
+    if (imported) {
+      binding = { campaignId: imported.id, campaignName: imported.name };
+    } else {
+      const effect = await deps.prisma.externalEffect.findUnique({
+        where: {
+          idempotencyKey: `instantly-role-campaign:${assignment.server.id}:${workspace.role.id}`,
+        },
+        select: { spaceId: true, status: true, result: true },
+      });
+      const nativeBinding = correspondenceRecord(effect?.result);
+      if (
+        !effect ||
+        effect.spaceId !== actor.spaceId ||
+        effect.status !== "completed" ||
+        typeof nativeBinding?.campaignId !== "string" ||
+        typeof nativeBinding.campaignName !== "string"
+      )
+        return none;
+      binding = nativeBinding;
+    }
+    const campaignId = binding.campaignId as string;
+    const campaignName = binding.campaignName as string;
     const eaccount = typeof binding.eaccount === "string" ? binding.eaccount : null;
     const context: AdapterContext = {
       operationId: randomUUID(),
@@ -558,7 +607,7 @@ export async function getRecruitingRoleCampaign(
         serverId: assignment.server.id,
         campaign: {
           id: campaignId,
-          name: binding.campaignName,
+          name: campaignName,
           eaccount,
           status: null,
           stopOnReply: null,
@@ -576,7 +625,7 @@ export async function getRecruitingRoleCampaign(
       serverId: assignment.server.id,
       campaign: {
         id: campaignId,
-        name: typeof campaign.name === "string" ? campaign.name : binding.campaignName,
+        name: typeof campaign.name === "string" ? campaign.name : campaignName,
         eaccount,
         status: integer(campaign.status),
         stopOnReply: typeof campaign.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
@@ -617,17 +666,7 @@ export async function getRecruitingRoleSetup(
       roleAttention(deps.prisma, actor, workspace.role.id),
     ]);
     const items: RecruitingRoleSetup["items"] = [];
-    if (!campaign.serverId) {
-      const server = await deps.prisma.mcpServer.findFirst({
-        where: { userId: actor.userId, spaceId: actor.spaceId, endpoint: INSTANTLY_MCP_ENDPOINT },
-        select: { id: true },
-      });
-      const action = { kind: "connect" as const, ...(server ? { serverId: server.id } : {}) };
-      items.push(
-        { key: "campaign", state: "unavailable", label: "Instantly is not connected", action },
-        { key: "sender", state: "unavailable", label: "Instantly is not connected", action },
-      );
-    } else if (campaign.campaign) {
+    if (campaign.campaign) {
       items.push({
         key: "campaign",
         state: campaign.status === "ready" ? "ready" : "unavailable",
@@ -644,6 +683,16 @@ export async function getRecruitingRoleSetup(
         email
           ? { key: "sender", state: "ready", label: email, detail: { email } }
           : { key: "sender", state: "unavailable", label: "Sender unknown" },
+      );
+    } else if (!campaign.serverId) {
+      const server = await deps.prisma.mcpServer.findFirst({
+        where: { userId: actor.userId, spaceId: actor.spaceId, endpoint: INSTANTLY_MCP_ENDPOINT },
+        select: { id: true },
+      });
+      const action = { kind: "connect" as const, ...(server ? { serverId: server.id } : {}) };
+      items.push(
+        { key: "campaign", state: "unavailable", label: "Instantly is not connected", action },
+        { key: "sender", state: "unavailable", label: "Instantly is not connected", action },
       );
     } else {
       items.push({
