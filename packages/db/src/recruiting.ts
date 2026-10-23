@@ -108,6 +108,7 @@ import {
   normalizeRecruitingCandidateRow,
   parseRecruitingCrmImportReceipt,
   projectRecruitingCandidateReport,
+  RECRUITING_PLAYBOOK_STAGES,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingBriefClarifications,
@@ -145,17 +146,20 @@ export async function advanceRecruitingPlaybookStage(
   tx: Pick<Tx, "recruitingRole">,
   roleId: string,
   next: RecruitingPlaybookStage,
-): Promise<RecruitingPlaybookStage> {
-  const row = await tx.recruitingRole.findUnique({
-    where: { id: roleId },
-    select: { playbookStage: true },
+): Promise<void> {
+  // One conditional write: only a role still at an earlier stage moves.
+  const earlier = RECRUITING_PLAYBOOK_STAGES.slice(0, RECRUITING_PLAYBOOK_STAGES.indexOf(next));
+  if (!earlier.length) return;
+  await tx.recruitingRole.updateMany({
+    where: { id: roleId, playbookStage: { in: [...earlier] } },
+    data: { playbookStage: next },
   });
-  if (!row) return next;
-  const current = isRecruitingPlaybookStage(row.playbookStage) ? row.playbookStage : "intake";
-  const target = laterPlaybookStage(current, next);
-  if (target !== current)
-    await tx.recruitingRole.update({ where: { id: roleId }, data: { playbookStage: target } });
-  return target;
+}
+
+/** In-memory monotonic step for writers that already hold the role row and its CAS write. */
+function stageAfter(role: { playbookStage?: string }, next: RecruitingPlaybookStage) {
+  const current = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
+  return laterPlaybookStage(current, next);
 }
 
 const CALIBRATION_FEEDBACK_THRESHOLD = 10;
@@ -553,15 +557,7 @@ async function roleSnapshot(
     crmBindingEffectId?: string | null;
     archivedAt?: Date | null;
   };
-  const playbook = await readRecruitingPlaybookStep(tx, role.id);
-  return {
-    role: RecruitingRoleSchema.parse({
-      ...publicRole,
-      playbookStage: playbook?.stage ?? (publicRole as { playbookStage?: string }).playbookStage,
-    }),
-    revision,
-    nextStep: playbook?.step?.label ?? null,
-  };
+  return { role: RecruitingRoleSchema.parse(publicRole), revision };
 }
 
 /**
@@ -618,6 +614,7 @@ async function createRoleInTransaction(
       title: input.title,
       revision: 1,
       currentRevisionId: randomUUID(),
+      playbookStage: input.brief && input.title ? "calibration_10" : "intake",
     },
   });
   await tx.recruitingRoleRevision.create({
@@ -627,8 +624,6 @@ async function createRoleInTransaction(
     where: { id: input.sourceThreadId },
     data: { activeRecruitingRoleId: role.id },
   });
-  if (input.brief && input.title)
-    await advanceRecruitingPlaybookStage(tx, role.id, "calibration_10");
   await syncRoleGroupName(tx, actor, thread, input.title);
   await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, role);
@@ -819,7 +814,10 @@ export async function getRecruitingRoleSnapshot(
       const thread = await requireThread(tx, actor, input.threadId);
       if (!thread.activeRecruitingRoleId) return null;
       const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
-      return roleSnapshot(tx, actor, role, thread);
+      const snapshot = await roleSnapshot(tx, actor, role, thread);
+      // Additive display hint; a partial test double without the candidate delegate still snapshots.
+      const playbook = await readRecruitingPlaybookStep(tx, role.id).catch(() => null);
+      return { ...snapshot, nextStep: playbook?.step?.label ?? null };
     },
     { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
   );
@@ -889,6 +887,8 @@ async function reviseRoleInTransaction(
   const revision = await tx.recruitingRoleRevision.create({
     data: { roleId: role.id, revision: role.revision + 1, ...definitionData(input) },
   });
+  const revisedStage =
+    input.brief && input.title ? stageAfter(role, "calibration_10") : role.playbookStage;
   const changed = await tx.recruitingRole.updateMany({
     where: {
       id: role.id,
@@ -897,11 +897,14 @@ async function reviseRoleInTransaction(
       revision: input.expectedRevision,
       currentRevisionId: role.currentRevisionId,
     },
-    data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
+    data: {
+      title: input.title,
+      revision: revision.revision,
+      currentRevisionId: revision.id,
+      playbookStage: revisedStage,
+    },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
-  if (input.brief && input.title)
-    await advanceRecruitingPlaybookStage(tx, role.id, "calibration_10");
   const sourceThread = authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId));
   await syncRoleGroupName(tx, actor, sourceThread, input.title, role.title);
   await recordRecruitingChange(tx, actor, sourceThread, role.id);
@@ -913,6 +916,7 @@ async function reviseRoleInTransaction(
       title: input.title,
       revision: revision.revision,
       currentRevisionId: revision.id,
+      playbookStage: revisedStage,
     },
     authorizedThread,
   );
@@ -1013,6 +1017,7 @@ async function confirmRecruitingBriefInTransaction(
       brief: brief as Prisma.InputJsonValue,
     },
   });
+  const confirmedStage = stageAfter(role, "calibration_10");
   const changed = await tx.recruitingRole.updateMany({
     where: {
       id: role.id,
@@ -1021,15 +1026,15 @@ async function confirmRecruitingBriefInTransaction(
       revision: role.revision,
       currentRevisionId: role.currentRevisionId,
     },
-    data: { revision: nextRevision, currentRevisionId: saved.id },
+    data: { revision: nextRevision, currentRevisionId: saved.id, playbookStage: confirmedStage },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
-  await advanceRecruitingPlaybookStage(tx, role.id, "calibration_10");
   await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, {
     ...role,
     revision: nextRevision,
     currentRevisionId: saved.id,
+    playbookStage: confirmedStage,
   });
 }
 

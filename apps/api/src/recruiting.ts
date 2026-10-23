@@ -686,17 +686,17 @@ export async function getRecruitingRoleSetup(
           },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
-    const playbook = await recruiting.readRecruitingPlaybookStep(deps.prisma, workspace.role.id);
+    const playbook = await recruiting
+      .readRecruitingPlaybookStep(deps.prisma, workspace.role.id)
+      .catch(() => null);
+    const stage = playbook?.stage ?? workspace.role.playbookStage ?? "intake";
     return {
       ready: ready("campaign") && ready("sender") && ready("leads"),
       attention,
       items,
       playbookStage: {
-        stage: playbook?.stage ?? workspace.role.playbookStage,
-        label:
-          recruitingPlaybookStageLabels[
-            (playbook?.stage ?? workspace.role.playbookStage) as RecruitingPlaybookStage
-          ] ?? workspace.role.playbookStage,
+        stage,
+        label: recruitingPlaybookStageLabels[stage as RecruitingPlaybookStage] ?? stage,
         nextStep: playbook?.step?.label ?? null,
       },
     };
