@@ -7503,6 +7503,30 @@ async function fillCandidateMatchFields(db: Pick<Tx, "$executeRaw">, scope: Pris
   WHERE o."pageId" = filled."pageId" AND o."rowIndex" = filled."rowIndex" AND o."matchFields" IS NULL`);
 }
 
+/**
+ * One stored score cell (match_score, else score; a {value} object is unwrapped) as numeric.
+ * "plain" is a bare number or numeric string on the result's own scale; "fraction" is an
+ * explicit "8/10" or "72%" already converted to 0–100. Anything else is NULL.
+ */
+function scoreCellPart(fields: Prisma.Sql, part: "plain" | "fraction") {
+  const cell = Prisma.sql`(CASE WHEN jsonb_typeof(cell.c) = 'object' AND cell.c ? 'value'
+    THEN cell.c->'value' ELSE cell.c END)`;
+  const text = Prisma.sql`(${cell} #>> '{}')`;
+  const num = "[[:space:]]*-?[0-9]{1,30}([.][0-9]{1,30})?[[:space:]]*";
+  const value =
+    part === "plain"
+      ? Prisma.sql`CASE WHEN jsonb_typeof(${cell}) = 'number' OR (jsonb_typeof(${cell}) = 'string'
+          AND ${text} ~ ${`^${num}$`}) THEN trim(${text})::numeric END`
+      : Prisma.sql`CASE WHEN jsonb_typeof(${cell}) <> 'string' THEN NULL
+          WHEN ${text} ~ ${`^${num}/${num}$`} THEN CASE
+            WHEN trim(split_part(${text}, '/', 2))::numeric > 0
+            THEN 100 * trim(split_part(${text}, '/', 1))::numeric
+              / trim(split_part(${text}, '/', 2))::numeric END
+          WHEN ${text} ~ ${`^${num}%[[:space:]]*$`} THEN trim(replace(${text}, '%', ''))::numeric END`;
+  return Prisma.sql`(SELECT ${value} FROM (SELECT CASE WHEN ${fields} ? 'match_score'
+    THEN ${fields}->'match_score' ELSE ${fields}->'score' END AS c) cell)`;
+}
+
 /** Latest source projection is selected by native read completion, never by backfill arrival. */
 function candidateIndexQuery(
   roleId: string,
@@ -7533,9 +7557,10 @@ function candidateIndexQuery(
       CASE WHEN ${numericCell} BETWEEN 1 AND 9007199254740991
         AND trunc(${numericCell}) = ${numericCell}
         THEN (${numericCell})::bigint END
-      WHEN source.kind = 'score' THEN
-        CASE WHEN abs(${numericCell}) <= ${Number.MAX_VALUE}::numeric
-          THEN ${numericCell} END
+      WHEN source.kind = 'score' THEN (SELECT round(LEAST(100, GREATEST(0, s.v))) FROM (SELECT COALESCE(
+        ${scoreCellPart(Prisma.sql`returned.value`, "fraction")},
+        ${scoreCellPart(Prisma.sql`returned.value`, "plain")} * rank_scope."scoreScale") AS v) s
+        WHERE s.v IS NOT NULL)
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
   const fields = [
@@ -7549,7 +7574,7 @@ function candidateIndexQuery(
   ] as const;
   return Prisma.sql`WITH ${
     includeMatches
-      ? Prisma.sql`rank_scope AS MATERIALIZED (
+      ? Prisma.sql`rank_page AS MATERIALIZED (
     SELECT ${
       displayScope?.sourceEffectId === undefined
         ? Prisma.sql`COALESCE((
@@ -7569,6 +7594,17 @@ function candidateIndexQuery(
         ) rank_pages)`
         : Prisma.sql`${rankDomainPageId}::text`
     }${displayScope?.sourceEffectId === undefined ? Prisma.sql`)` : Prisma.empty} AS "pageId"
+  ), rank_scope AS MATERIALIZED (
+    -- Scores are shown on 0–100. A saved result whose plain scores all fit 0–10 (or 0–1 with a
+    -- fraction) was answered on that scale; this converts units only and never rescores.
+    SELECT rank_page."pageId", COALESCE((
+      SELECT CASE WHEN max(plain.v) <= 1 AND bool_or(plain.v <> trunc(plain.v)) THEN 100
+        WHEN max(plain.v) <= 10 THEN 10 ELSE 1 END
+      FROM "recruiting_candidate_occurrences" scored
+      CROSS JOIN LATERAL (SELECT ${scoreCellPart(Prisma.sql`scored."matchFields"`, "plain")} AS v) plain
+      WHERE scored."pageId" = rank_page."pageId" AND plain.v IS NOT NULL
+    ), 1) AS "scoreScale"
+    FROM rank_page
   ),`
       : Prisma.empty
   } base AS (

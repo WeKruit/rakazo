@@ -5,6 +5,7 @@ import {
   RecruitingCandidateOutputRowSchema,
   RecruitingCandidateProfileSchema,
 } from "@rakazo/contracts";
+import { isMatchScoreKey, matchScore100, matchScoreScale } from "./match-score.js";
 import { recruitingCalibrationIdentity } from "./recruiting-playbook.js";
 
 export const RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS = [
@@ -12,6 +13,7 @@ export const RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS = [
   JSON.stringify(RECRUITING_CANDIDATE_OUTPUT_JSON_SCHEMA),
   "Return one person per row with these exact column names. Keep additional requested role signals in additional columns. Native sourced cells may retain {value, source_id} and _sources metadata.",
   "Use null for unknown fields, including unknown evidence_urls; an empty evidence_urls array means no evidence links were supplied. Do not invent identities, resumes or emails. Do not collect phone numbers. linkedin_url must identify the person's HTTPS LinkedIn /in/ profile. evidence_urls and resume_url must be actual supplied HTTP(S) links.",
+  "match_score is a number from 0 to 100 (100 = strongest fit). Never use a 0–10 or 0–1 scale.",
   "All returned rows are provider_report observations. Provider labels do not establish qualification; preserve source links for subsequent evidence assessment.",
 ].join("\n");
 
@@ -166,10 +168,19 @@ export function isRecruitingCandidateReportField(key: string): boolean {
   return !key.startsWith("_") && !reportMetadata.has(key.replace(/[_-]/g, "").toLowerCase());
 }
 
-/** Display supplied scalar observations only; the original artifact remains authoritative. */
-export function projectRecruitingCandidateReport(raw: unknown): RecruitingCandidateReport {
+/**
+ * Display supplied scalar observations only; the original artifact remains authoritative.
+ * Score cells are shown on 0–100; `pageRows` (the row's whole saved result) decides whether its
+ * plain numbers were on 0–10.
+ */
+export function projectRecruitingCandidateReport(
+  raw: unknown,
+  pageRows?: readonly unknown[],
+): RecruitingCandidateReport {
   const row = record(raw) ? raw : undefined;
   if (!row) throw new Error("Retained candidate row is invalid");
+  const scoreScale = (key: string) =>
+    matchScoreScale((pageRows ?? [row]).map((other) => (record(other) ? other[key] : undefined)));
   const sources = record(row._sources) ? row._sources : undefined;
   const links = (value: unknown): string[] => {
     const values = Array.isArray(value) ? value : [value];
@@ -228,10 +239,20 @@ export function projectRecruitingCandidateReport(raw: unknown): RecruitingCandid
       .replace(/[_-]+/g, " ")
       .trim();
     if (!label) continue;
+    const score =
+      !absent && !providerStatus && isMatchScoreKey(displayKey)
+        ? matchScore100(value, scoreScale(key))
+        : null;
     fields.push({
       label: label[0]!.toUpperCase() + label.slice(1) + (absent ? " absent" : ""),
       value:
-        value === null ? null : Array.isArray(value) ? value.map(String).join("\n") : String(value),
+        score !== null
+          ? String(score)
+          : value === null
+            ? null
+            : Array.isArray(value)
+              ? value.map(String).join("\n")
+              : String(value),
       ...(providerStatus ? { providerStatus } : {}),
       ...(typeof cell?.evidence === "string" ? { evidence: cell.evidence } : {}),
       ...(typeof cell?.reasoning === "string" ? { reasoning: cell.reasoning } : {}),
