@@ -1,6 +1,7 @@
+import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { ORPCError } from "@orpc/server";
-import type { ArtifactStore } from "@rakazo/adapter-kit";
+import type { AdapterContext, ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
 import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import type { McpOAuthBroker } from "@rakazo/adapters";
 import {
@@ -17,12 +18,21 @@ import type {
   RecruitingAssessmentSourceRef,
   RecruitingCandidateSource,
   RecruitingCorrespondence,
+  RecruitingCrmDataInput,
+  RecruitingCrmDataOutput,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
 import {
   RecruitingCorrespondenceSchema,
+  RecruitingCrmCandidatesReadSchema,
+  RecruitingCrmClientsReadSchema,
+  RecruitingCrmDataInputSchema,
+  RecruitingCrmDataOutputSchema,
   RecruitingCrmImportReceiptSchema,
+  RecruitingCrmMailReadSchema,
+  RecruitingCrmMembershipRowsSchema,
+  RecruitingCrmRoleReadSchema,
 } from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
@@ -1360,3 +1370,421 @@ export const setRecruitingCandidateShortlist = (
   actor: Actor,
   input: Parameters<typeof recruiting.setRecruitingCandidateShortlist>[2],
 ) => authenticated(() => recruiting.setRecruitingCandidateShortlist(prisma, actor, input));
+
+/** Live read-only CRM view. The CRM remains the store; browsing creates no agent work. */
+export async function getRecruitingCrmData(
+  deps: {
+    prisma: PrismaClient;
+    connectors: Pick<ConnectorProvider, "execute">;
+    firstPartyMcpUrl?: string;
+    signal?: AbortSignal;
+    stillAuthorized?: () => Promise<boolean>;
+    reauthorize: () => Promise<ThreadTarget>;
+  },
+  actor: Actor,
+  target: ThreadTarget,
+  raw: RecruitingCrmDataInput,
+): Promise<RecruitingCrmDataOutput> {
+  return authenticated(async () => {
+    const input = RecruitingCrmDataInputSchema.parse(raw);
+    const signal = deps.signal ?? AbortSignal.timeout(30_000);
+    const coordinator = (value: ThreadTarget) =>
+      value.kind === "bot" ? value.botId : value.memberBotIds[0];
+    const targetKey = (value: ThreadTarget) =>
+      stableJsonValue(
+        value.kind === "bot"
+          ? [value.kind, value.threadId, value.botId]
+          : [value.kind, value.threadId, value.groupId, value.memberBotIds],
+      );
+    const botId = coordinator(target);
+    const targetScope = targetKey(target);
+    if (!botId || !deps.firstPartyMcpUrl) throw new IsolationError();
+    const context: AdapterContext = {
+      operationId: randomUUID(),
+      traceId: randomUUID(),
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      botId,
+      signal,
+    };
+    const serverSelect = {
+      id: true,
+      name: true,
+      revision: true,
+      endpoint: true,
+      transport: true,
+      enabled: true,
+      secretId: true,
+      userId: true,
+      spaceId: true,
+    } as const;
+    type Server = {
+      id: string;
+      name: string;
+      revision: number;
+      endpoint: string | null;
+      transport: string;
+      enabled: boolean;
+      secretId: string | null;
+      userId: string;
+      spaceId: string;
+    };
+    const allowed = (
+      assignment: { allowAllTools: boolean; allowedTools: unknown } | null,
+      tool: string,
+    ) =>
+      assignment &&
+      (assignment.allowAllTools ||
+        (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(tool)));
+    const actorFence = async () => {
+      signal.throwIfAborted();
+      if (deps.stillAuthorized && !(await deps.stillAuthorized())) throw new IsolationError();
+      const freshActor = await recruiting.requireMembership(
+        deps.prisma,
+        actor.userId,
+        actor.spaceId,
+      );
+      if (
+        freshActor.userId !== actor.userId ||
+        freshActor.spaceId !== actor.spaceId ||
+        targetKey(await deps.reauthorize()) !== targetScope
+      )
+        throw new IsolationError();
+    };
+    const sourceFence = async (server: Server, tool: string) => {
+      await actorFence();
+      const current = await deps.prisma.mcpServer.findFirst({
+        where: { id: server.id, userId: actor.userId, spaceId: actor.spaceId },
+        select: serverSelect,
+      });
+      const assignment = await deps.prisma.botMcpServer.findFirst({
+        where: { serverId: server.id, botId, userId: actor.userId, spaceId: actor.spaceId },
+      });
+      if (
+        !current?.enabled ||
+        current.userId !== actor.userId ||
+        current.spaceId !== actor.spaceId ||
+        current.id !== server.id ||
+        current.revision !== server.revision ||
+        current.secretId !== server.secretId ||
+        current.endpoint !== deps.firstPartyMcpUrl ||
+        current.endpoint !== server.endpoint ||
+        current.transport !== "streamable_http" ||
+        !allowed(assignment, tool)
+      )
+        throw new IsolationError();
+      signal.throwIfAborted();
+    };
+    const unavailable = () =>
+      new ORPCError("SERVICE_UNAVAILABLE", {
+        message: "CRM records could not be loaded. Try again.",
+      });
+    const parse = <T>(
+      schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+      value: unknown,
+    ): T => {
+      const result = schema.safeParse(value);
+      if (!result.success) throw unavailable();
+      return result.data;
+    };
+    const read = async (server: Server, tool: string, args: Record<string, unknown>) => {
+      await sourceFence(server, tool);
+      const results: unknown[] = [];
+      let failed = false;
+      try {
+        for await (const event of deps.connectors.execute(
+          {
+            tool,
+            route: {
+              connectorId: "mcp",
+              resourceId: server.id,
+              resourceRevision: server.revision,
+              toolName: tool,
+            },
+            args,
+            executionId: randomUUID(),
+          },
+          context,
+        )) {
+          if (event.type === "result") results.push(event.data);
+          if (event.type === "error") failed = true;
+        }
+      } catch {
+        failed = true;
+      }
+      await sourceFence(server, tool);
+      const result = correspondenceRecord(results[0]);
+      const payload = mcpObject(result);
+      if (
+        failed ||
+        results.length !== 1 ||
+        !result ||
+        "error" in result ||
+        (result.isError !== undefined && result.isError !== false) ||
+        !payload ||
+        !("data" in payload)
+      )
+        throw unavailable();
+      return payload.data;
+    };
+    const membershipRows = async (server: Server) =>
+      parse(RecruitingCrmMembershipRowsSchema, await read(server, "list_crm_memberships", {}));
+    const where = {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      endpoint: deps.firstPartyMcpUrl,
+      transport: "streamable_http",
+      enabled: true,
+    };
+    await actorFence();
+    if (input.operation === "memberships") {
+      const servers = await deps.prisma.mcpServer.findMany({
+        where: { ...where, ...(input.serverId ? { id: input.serverId } : {}) },
+        select: {
+          ...serverSelect,
+          assignments: {
+            where: { botId, userId: actor.userId, spaceId: actor.spaceId },
+            select: { allowAllTools: true, allowedTools: true },
+          },
+        },
+        orderBy: { id: "asc" },
+      });
+      const sources = [];
+      const pinnedSources = [];
+      for (const row of servers) {
+        const server = { ...row };
+        if (
+          server.userId !== actor.userId ||
+          server.spaceId !== actor.spaceId ||
+          server.endpoint !== deps.firstPartyMcpUrl ||
+          !server.enabled ||
+          server.transport !== "streamable_http"
+        )
+          throw new IsolationError();
+        if (
+          input.serverId &&
+          (server.id !== input.serverId || server.revision !== input.serverRevision)
+        )
+          throw new IsolationError();
+        if (!server.assignments.some((assignment) => allowed(assignment, "list_crm_memberships")))
+          continue;
+        pinnedSources.push(server);
+        try {
+          const rows = await membershipRows(server);
+          sources.push({
+            serverId: server.id,
+            serverRevision: server.revision,
+            name: server.name,
+            status: "ready" as const,
+            memberships: rows.map((row) => ({
+              organizationId: row.organization_id,
+              name: row.organizations?.name ?? null,
+              role: row.role,
+            })),
+          });
+        } catch (error) {
+          if (!(error instanceof ORPCError) || error.code !== "SERVICE_UNAVAILABLE") throw error;
+          sources.push({
+            serverId: server.id,
+            serverRevision: server.revision,
+            name: server.name,
+            status: "unavailable" as const,
+            memberships: [],
+          });
+        }
+      }
+      if (input.serverId && !sources.length) throw new IsolationError();
+      for (const source of pinnedSources) await sourceFence(source, "list_crm_memberships");
+      return RecruitingCrmDataOutputSchema.parse({
+        operation: input.operation,
+        checkedAt: new Date().toISOString(),
+        sources,
+      });
+    }
+    const selectedServer = await deps.prisma.mcpServer.findFirst({
+      where: { ...where, id: input.serverId },
+      select: serverSelect,
+    });
+    if (
+      !selectedServer ||
+      selectedServer.id !== input.serverId ||
+      selectedServer.revision !== input.serverRevision
+    )
+      throw new IsolationError();
+    const server = { ...selectedServer };
+    if (!(await membershipRows(server)).some((row) => row.organization_id === input.organizationId))
+      throw new IsolationError();
+    const source = {
+      serverId: server.id,
+      serverRevision: server.revision,
+      name: server.name,
+      organizationId: input.organizationId,
+    };
+    const roles = async () =>
+      parse(
+        RecruitingCrmClientsReadSchema,
+        await read(server, "list_crm_roles", { p_org: input.organizationId }),
+      ).flatMap((client) =>
+        client.roles.map((role) => ({
+          crmRoleId: role.role_spec_id,
+          clientId: client.client_id,
+          clientLabel: client.client_label,
+          roleLabel: role.role_label,
+          summary: role.summary,
+        })),
+      );
+    const finish = (value: Record<string, unknown>) =>
+      RecruitingCrmDataOutputSchema.parse({
+        ...value,
+        source,
+        checkedAt: new Date().toISOString(),
+      });
+    if (input.operation === "roles")
+      return finish({ operation: input.operation, items: await roles() });
+    if (input.operation === "candidates") {
+      const trim = (text: string) => text.replace(/^ +| +$/g, "");
+      let selectedRole = null;
+      if (input.crmRoleId) {
+        const choices = await roles();
+        const row = parse(
+          RecruitingCrmRoleReadSchema,
+          await read(server, "get_crm_role", {
+            p_org: input.organizationId,
+            p_role: input.crmRoleId,
+          }),
+        );
+        const sameLabels = choices.filter(
+          (role) =>
+            trim(role.clientLabel) === trim(row.client_label) &&
+            trim(role.roleLabel) === trim(row.role_label),
+        );
+        if (
+          !trim(row.client_label) ||
+          !trim(row.role_label) ||
+          row.role_spec_id !== input.crmRoleId ||
+          sameLabels.length !== 1 ||
+          sameLabels[0]!.crmRoleId !== input.crmRoleId ||
+          sameLabels[0]!.clientId !== row.client_id
+        )
+          throw new ORPCError("CONFLICT", {
+            message: "This CRM role could not be matched unambiguously. Refresh the roles.",
+          });
+        selectedRole = {
+          crmRoleId: row.role_spec_id,
+          clientId: row.client_id,
+          clientLabel: row.client_label,
+          roleLabel: row.role_label,
+          summary: row.summary,
+          description: row.description,
+          jdText: row.jd_text,
+          jdUrl: row.jd_url,
+        };
+      }
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmCandidatesReadSchema,
+        await read(server, "list_crm_candidates", {
+          p_org: input.organizationId,
+          p_not_reviewed: false,
+          p_limit: limit,
+          p_offset: offset,
+          ...(input.query ? { p_q: input.query } : {}),
+          ...(selectedRole
+            ? { p_client: selectedRole.clientLabel, p_role: selectedRole.roleLabel }
+            : {}),
+        }),
+      );
+      if (
+        page.rows.length > limit ||
+        (selectedRole &&
+          page.rows.some(
+            (row) =>
+              trim(row.client_label) !== trim(selectedRole.clientLabel) ||
+              trim(row.role_label) !== trim(selectedRole.roleLabel),
+          )) ||
+        new Set(page.rows.map((row) => row.candidate_id)).size !== page.rows.length
+      )
+        throw unavailable();
+      return finish({
+        operation: input.operation,
+        scope: selectedRole ? "legacy_role_labels" : "organization",
+        selectedRole,
+        items: page.rows.map((row) => ({
+          candidateId: row.candidate_id,
+          name: row.full_name,
+          email: row.email,
+          phone: row.phone,
+          linkedinUrl: row.linkedin_url,
+          location: row.location ?? null,
+          title: row.headline ?? null,
+          stage: row.stage,
+          contactStatus: row.contact_status,
+          outreachStatus: row.outreach_status,
+          roleSpecId: row.role_spec_id,
+          legacyClientLabel: row.client_label,
+          legacyRoleLabel: row.role_label,
+        })),
+        total: page.total,
+        offset,
+        nextOffset:
+          page.rows.length && offset + page.rows.length < page.total
+            ? offset + page.rows.length
+            : null,
+      });
+    }
+    if (
+      input.cursor &&
+      (input.cursor.p_org !== input.organizationId ||
+        input.cursor.p_candidate !== input.candidateId)
+    )
+      throw new IsolationError();
+    const page = parse(
+      RecruitingCrmMailReadSchema,
+      await read(server, "list_crm_candidate_correspondence", {
+        p_org: input.organizationId,
+        p_candidate: input.candidateId,
+        p_limit: input.limit ?? 25,
+        ...(input.cursor ? { p_cursor: input.cursor } : {}),
+      }),
+    );
+    if (
+      page.messages.length > (input.limit ?? 25) ||
+      page.organization_id !== input.organizationId ||
+      page.candidate_id !== input.candidateId ||
+      page.messages.some(
+        (row) =>
+          row.organization_id !== input.organizationId ||
+          (row.candidate_id !== null && row.candidate_id !== input.candidateId) ||
+          (row.candidate_id === null && !row.lead_email),
+      ) ||
+      new Set(page.messages.map((row) => row.id)).size !== page.messages.length ||
+      (page.next_cursor &&
+        (page.next_cursor.p_org !== input.organizationId ||
+          page.next_cursor.p_candidate !== input.candidateId ||
+          page.next_cursor.linked_offset < (input.cursor?.linked_offset ?? 0) ||
+          page.next_cursor.unlinked_offset < (input.cursor?.unlinked_offset ?? 0) ||
+          page.next_cursor.linked_offset + page.next_cursor.unlinked_offset <=
+            (input.cursor?.linked_offset ?? 0) + (input.cursor?.unlinked_offset ?? 0)))
+    )
+      throw unavailable();
+    return finish({
+      operation: input.operation,
+      scope: "stored_candidate_correspondence",
+      candidateId: input.candidateId,
+      items: page.messages.map((row) => ({
+        id: row.id,
+        providerMessageId: row.id,
+        threadId: row.thread_id,
+        direction: row.direction,
+        sender: row.from_address,
+        recipients: row.to_address === null ? [] : [row.to_address],
+        subject: row.subject,
+        body: row.body_text,
+        date: row.timestamp_email,
+        partial: row.body_text === null,
+      })),
+      nextCursor: page.next_cursor,
+    });
+  });
+}

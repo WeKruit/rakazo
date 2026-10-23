@@ -1366,3 +1366,205 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
   partial: z.boolean(),
 });
 export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;
+
+const CrmBrowseSource = z.strictObject({
+  serverId: Id,
+  serverRevision: Revision,
+  name: z.string(),
+});
+const CrmBrowseRole = z.strictObject({
+  crmRoleId: z.uuid(),
+  clientId: z.uuid(),
+  clientLabel: z.string(),
+  roleLabel: z.string(),
+  summary: z.string().nullable(),
+  description: z.string().nullable().optional(),
+  jdText: z.string().nullable().optional(),
+  jdUrl: z.string().nullable().optional(),
+});
+const CrmBrowseCursor = z.strictObject({
+  p_org: z.uuid(),
+  p_candidate: z.uuid(),
+  linked_offset: z
+    .number()
+    .int()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER - 51),
+  unlinked_offset: z
+    .number()
+    .int()
+    .min(0)
+    .max(Number.MAX_SAFE_INTEGER - 51),
+});
+const crmBrowsePinned = { serverId: Id, serverRevision: Revision, organizationId: z.uuid() };
+const crmBrowsePage = { limit: z.number().int().min(1).max(50).optional() };
+/** Live authorized CRM reads; these IDs are never local role, group, run or effect IDs. */
+export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
+  z
+    .object({
+      operation: z.literal("memberships"),
+      serverId: Id.optional(),
+      serverRevision: Revision.optional(),
+    })
+    .refine(
+      (value) => Boolean(value.serverId) === (value.serverRevision !== undefined),
+      "Pin both source ID and revision",
+    ),
+  z.object({ operation: z.literal("roles"), ...crmBrowsePinned }),
+  z.object({
+    operation: z.literal("candidates"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    crmRoleId: z.uuid().optional(),
+    query: z.string().max(500).optional(),
+    offset: z.number().int().min(0).max(1_000_000).optional(),
+  }),
+  z.object({
+    operation: z.literal("mail"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    candidateId: z.uuid(),
+    cursor: CrmBrowseCursor.optional(),
+  }),
+]);
+export type RecruitingCrmDataInput = z.infer<typeof RecruitingCrmDataInputSchema>;
+export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
+  z.strictObject({
+    operation: z.literal("memberships"),
+    checkedAt: IsoDate,
+    sources: z.array(
+      CrmBrowseSource.extend({
+        status: z.enum(["ready", "unavailable"]),
+        memberships: z.array(
+          z.strictObject({
+            organizationId: z.uuid(),
+            name: z.string().nullable(),
+            role: z.string(),
+          }),
+        ),
+      }),
+    ),
+  }),
+  z.strictObject({
+    operation: z.literal("roles"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    items: z.array(CrmBrowseRole),
+  }),
+  z.strictObject({
+    operation: z.literal("candidates"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    scope: z.enum(["organization", "legacy_role_labels"]),
+    selectedRole: CrmBrowseRole.nullable(),
+    items: z.array(
+      z.strictObject({
+        candidateId: z.uuid(),
+        name: z.string(),
+        email: z.string().nullable(),
+        phone: z.string().nullable(),
+        linkedinUrl: z.string().nullable(),
+        location: z.string().nullable(),
+        title: z.string().nullable(),
+        stage: z.string().nullable(),
+        contactStatus: z.string(),
+        outreachStatus: z.string(),
+        roleSpecId: z.uuid().nullable(),
+        legacyClientLabel: z.string(),
+        legacyRoleLabel: z.string(),
+      }),
+    ),
+    total: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+  }),
+  z.strictObject({
+    operation: z.literal("mail"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    scope: z.literal("stored_candidate_correspondence"),
+    candidateId: z.uuid(),
+    items: z.array(
+      z.strictObject({
+        id: Id,
+        providerMessageId: Id,
+        threadId: z.string().nullable(),
+        direction: z.enum(["sent", "received", "manual"]).nullable(),
+        sender: z.string().nullable(),
+        recipients: z.array(z.string()),
+        subject: z.string().nullable(),
+        body: z.string().nullable(),
+        date: IsoDate.nullable(),
+        partial: z.boolean(),
+      }),
+    ),
+    nextCursor: CrmBrowseCursor.nullable(),
+  }),
+]);
+export type RecruitingCrmDataOutput = z.infer<typeof RecruitingCrmDataOutputSchema>;
+
+/** Existing first-party CRM MCP payloads, validated before projecting the live read view. */
+export const RecruitingCrmMembershipRowsSchema = z.array(
+  z.object({
+    organization_id: z.uuid(),
+    role: z.string(),
+    organizations: z.object({ name: z.string() }).nullable(),
+  }),
+);
+const CrmNativeRole = z.object({
+  role_spec_id: z.uuid(),
+  role_label: z.string(),
+  summary: z.string().nullable(),
+});
+export const RecruitingCrmClientsReadSchema = z.array(
+  z.object({ client_id: z.uuid(), client_label: z.string(), roles: z.array(CrmNativeRole) }),
+);
+export const RecruitingCrmRoleReadSchema = CrmNativeRole.extend({
+  client_id: z.uuid(),
+  client_label: z.string(),
+  description: z.string().nullable(),
+  jd_text: z.string().nullable(),
+  jd_url: z.string().nullable(),
+});
+export const RecruitingCrmCandidatesReadSchema = z.object({
+  total: z.number().int().nonnegative(),
+  rows: z.array(
+    z.object({
+      candidate_id: z.uuid(),
+      full_name: z.string(),
+      email: z.string().nullable(),
+      phone: z.string().nullable(),
+      linkedin_url: z.string().nullable(),
+      location: z.string().nullable().optional(),
+      headline: z.string().nullable().optional(),
+      stage: z.string().nullable(),
+      contact_status: z.string(),
+      outreach_status: z.string(),
+      role_spec_id: z.uuid().nullable(),
+      client_label: z.string(),
+      role_label: z.string(),
+    }),
+  ),
+});
+export const RecruitingCrmMailReadSchema = z.object({
+  organization_id: z.uuid(),
+  candidate_id: z.uuid(),
+  pagination: z.literal("offset"),
+  messages: z.array(
+    z.object({
+      id: z.string().min(1),
+      organization_id: z.uuid(),
+      candidate_id: z.uuid().nullable(),
+      lead_email: z.string().nullable(),
+      thread_id: z.string().nullable(),
+      direction: z.enum(["sent", "received", "manual"]).nullable(),
+      timestamp_email: IsoDate.nullable(),
+      campaign_id: z.string().nullable(),
+      from_address: z.string().nullable(),
+      to_address: z.string().nullable(),
+      subject: z.string().nullable(),
+      body_text: z.string().nullable(),
+    }),
+  ),
+  next_cursor: CrmBrowseCursor.nullable(),
+});

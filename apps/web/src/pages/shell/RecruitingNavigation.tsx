@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Group } from "@rakazo/contracts";
+import type { Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { Button, Input } from "@rakazo/ui-web";
 import {
   Bookmark,
@@ -15,7 +15,13 @@ import {
   Users,
   WandSparkles,
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import type { ArtifactTarget } from "../../lib/artifact-open";
+import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
+import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
+import { rpc } from "../../lib/rpc";
 import type { ContextMenuPosition } from "../BotContextMenu";
+import type { CrmBrowseSelection } from "../RecruitingPanel";
 
 export type RecruitingWorkspaceView =
   | "conversation"
@@ -49,7 +55,18 @@ export function RecruitingNavigation({
   onRoleMenu,
   onToggleArchived,
   onRestoreRole,
+  crmContext,
+  crmSelection,
+  onOpenCrmRole,
 }: {
+  crmContext?: {
+    target: ArtifactTarget;
+    scope: string;
+    cache: RecruitingReadCache;
+    refreshSignal?: number;
+  };
+  crmSelection?: CrmBrowseSelection;
+  onOpenCrmRole?: (selection: CrmBrowseSelection) => void;
   groups: Group[];
   archivedGroups: Group[];
   archivedOpen: boolean;
@@ -70,6 +87,88 @@ export function RecruitingNavigation({
   onRestoreRole: (id: string) => void;
 }) {
   const { t } = useLingui();
+  const [crmOpen, setCrmOpen] = useState(Boolean(crmSelection));
+  const [crmRetry, setCrmRetry] = useState(0);
+  type CrmRole = Extract<RecruitingCrmDataOutput, { operation: "roles" }>["items"][number] & {
+    selection: CrmBrowseSelection;
+    organizationName: string;
+  };
+  const crmKey = JSON.stringify([
+    crmContext?.scope,
+    crmContext?.target,
+    crmContext?.refreshSignal,
+    crmRetry,
+  ]);
+  const [crm, setCrm] = useState<{
+    key: string;
+    roles: CrmRole[];
+    loading?: boolean;
+    failed?: boolean;
+    unavailable?: boolean;
+  }>();
+  useEffect(() => {
+    if (!crmOpen || !crmContext) return;
+    let cancelled = false;
+    const { cache, scope, target } = crmContext;
+    const epoch = cache.epoch;
+    const cacheKey = `${scope}:crm:roles`;
+    setCrm({
+      key: crmKey,
+      roles: (cache.entries.get(cacheKey) as CrmRole[] | undefined) ?? [],
+      loading: true,
+    });
+    void rpc.recruiting
+      .crmData({ ...target, operation: "memberships" })
+      .then(async (result) => {
+        if (cancelled || cache.epoch !== epoch) return;
+        if (result.operation !== "memberships") throw new Error("Unexpected CRM response");
+        const lists = await Promise.all(
+          result.sources.flatMap((source) =>
+            source.status === "ready"
+              ? source.memberships.map(async (membership) => {
+                  const selection = {
+                    serverId: source.serverId,
+                    serverRevision: source.serverRevision,
+                    organizationId: membership.organizationId,
+                  };
+                  const roles = await rpc.recruiting.crmData({
+                    ...target,
+                    ...selection,
+                    operation: "roles",
+                  });
+                  if (
+                    roles.operation !== "roles" ||
+                    roles.source.serverId !== source.serverId ||
+                    roles.source.serverRevision !== source.serverRevision ||
+                    roles.source.organizationId !== membership.organizationId
+                  )
+                    throw new Error("CRM scope changed");
+                  return roles.items.map((role) => ({
+                    ...role,
+                    selection: { ...selection, crmRoleId: role.crmRoleId },
+                    organizationName: membership.name ?? source.name,
+                  }));
+                })
+              : [],
+          ),
+        );
+        if (cancelled || cache.epoch !== epoch) return;
+        const roles = lists.flat();
+        rememberRecruitingRead(cache, cacheKey, roles, epoch);
+        setCrm({
+          key: crmKey,
+          roles,
+          unavailable: result.sources.some((source) => source.status === "unavailable"),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setCrm({ key: crmKey, roles: [], failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [crmOpen, crmKey]);
+  const currentCrm = crm?.key === crmKey ? crm : undefined;
   const visibleGroups = groups.filter((group) =>
     group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
@@ -158,6 +257,72 @@ export function RecruitingNavigation({
         />
       </div>
       <div className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto">
+        {crmContext ? (
+          <section className="mb-3 border-b border-border pb-3">
+            <Button
+              variant="ghost"
+              className="w-full justify-between"
+              aria-expanded={crmOpen}
+              onClick={() => setCrmOpen((value) => !value)}
+            >
+              <Trans>CRM roles</Trans>
+            </Button>
+            {crmOpen ? (
+              <>
+                {currentCrm?.loading ? (
+                  <p role="status" className="px-3 text-xs text-muted-foreground">
+                    <Trans>Loading CRM roles…</Trans>
+                  </p>
+                ) : null}
+                {currentCrm?.failed || currentCrm?.unavailable ? (
+                  <p role="alert" className="px-3 text-xs">
+                    <Trans>Could not read a CRM connection.</Trans>{" "}
+                    <button
+                      type="button"
+                      className="underline"
+                      onClick={() => setCrmRetry((value) => value + 1)}
+                    >
+                      <Trans>Try again</Trans>
+                    </button>
+                  </p>
+                ) : null}
+                {currentCrm?.roles
+                  .filter((role) =>
+                    `${role.roleLabel} ${role.clientLabel}`
+                      .toLocaleLowerCase()
+                      .includes(query.trim().toLocaleLowerCase()),
+                  )
+                  .map((role) => (
+                    <Button
+                      key={JSON.stringify(role.selection)}
+                      variant="ghost"
+                      className="hire-role-button h-auto w-full justify-start whitespace-normal text-start"
+                      disabled={currentCrm.loading}
+                      aria-current={
+                        crmSelection?.serverId === role.selection.serverId &&
+                        crmSelection.organizationId === role.selection.organizationId &&
+                        crmSelection.crmRoleId === role.crmRoleId
+                          ? "page"
+                          : undefined
+                      }
+                      onClick={() => onOpenCrmRole?.(role.selection)}
+                    >
+                      {role.roleLabel} · {role.clientLabel}
+                    </Button>
+                  ))}
+                {currentCrm &&
+                !currentCrm.loading &&
+                !currentCrm.failed &&
+                !currentCrm.unavailable &&
+                !currentCrm.roles.length ? (
+                  <p className="px-3 text-xs text-muted-foreground">
+                    <Trans>No CRM roles were returned.</Trans>
+                  </p>
+                ) : null}
+              </>
+            ) : null}
+          </section>
+        ) : null}
         <nav aria-label={t`Role conversations`} className="space-y-1">
           {visibleGroups.map((group) => (
             <div key={group.id} className="flex items-center gap-1">
