@@ -1553,10 +1553,6 @@ export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema
 /** Role setup checklist: what a role still needs before its first outreach works out of the box. */
 export const RecruitingRoleSetupSchema = z.strictObject({
   ready: z.boolean(),
-  /** Playbook stage, its Chinese label and what the agent does next (additive). */
-  playbookStage: z
-    .strictObject({ stage: z.string(), label: z.string(), nextStep: z.string().nullable() })
-    .optional(),
   /** A run in this role's conversation is waiting for the human (e.g. the send confirmation). */
   attention: z
     .strictObject({

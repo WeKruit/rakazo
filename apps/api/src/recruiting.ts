@@ -54,6 +54,7 @@ import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   INSTANTLY_MCP_ENDPOINT,
+  isRecruitingPlaybookStage,
   type RecruitingPlaybookStage,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
@@ -689,14 +690,17 @@ export async function getRecruitingRoleSetup(
     const playbook = await recruiting
       .readRecruitingPlaybookStep(deps.prisma, workspace.role.id)
       .catch(() => null);
-    const stage = playbook?.stage ?? workspace.role.playbookStage ?? "intake";
+    const rawStage = playbook?.stage ?? workspace.role.playbookStage;
+    const stage: RecruitingPlaybookStage = isRecruitingPlaybookStage(rawStage)
+      ? rawStage
+      : "intake";
     return {
       ready: ready("campaign") && ready("sender") && ready("leads"),
       attention,
       items,
       playbookStage: {
         stage,
-        label: recruitingPlaybookStageLabels[stage as RecruitingPlaybookStage] ?? stage,
+        label: recruitingPlaybookStageLabels[stage],
         nextStep: playbook?.step?.label ?? null,
       },
     };
