@@ -49,6 +49,8 @@ export type RecruitingDetailTarget = {
 
 /** Search parameter holding the open detail; history entries make browser Back close it. */
 export const DETAIL_PARAM = "detail";
+/** How long a loaded link waits for its list before the URL drops it. */
+const PENDING_DETAIL_MS = 20_000;
 
 export function detailKey(target: RecruitingDetailTarget) {
   return `${target.view}.${target.person.candidateId}`;
@@ -63,6 +65,10 @@ export type RecruitingDetailController = {
   replace: (target: RecruitingDetailTarget) => void;
   back: () => void;
   close: () => void;
+  /** A detail named by the URL on load, waiting for its list to show that person. */
+  pending: string | null;
+  /** Shows the person a loaded URL names, without adding a history entry. */
+  restore: (target: RecruitingDetailTarget) => void;
 };
 
 const DetailContext = createContext<RecruitingDetailController | null>(null);
@@ -86,15 +92,21 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
   stackRef.current = stack;
   const returnFocus = useRef<HTMLElement | null>(null);
   const param = searchParams.get(DETAIL_PARAM);
+  // A shared or reloaded link names a person but carries no row; the list restores it once loaded.
+  const [pending, setPending] = useState<string | null>(param);
+  const pendingRef = useRef(pending);
+  pendingRef.current = pending;
 
   useEffect(() => {
     const current = stackRef.current;
     if (!param) {
       if (current.length) setStack([]);
+      if (pendingRef.current) setPending(null);
       return;
     }
     let index = current.length - 1;
     while (index >= 0 && detailKey(current[index]!) !== param) index -= 1;
+    if (index === -1 && !current.length && param === pendingRef.current) return;
     if (index === -1) {
       // A reloaded or shared URL carries no row snapshot to show; drop the stale entry.
       setSearchParams(
@@ -123,6 +135,25 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
       { replace: true },
     );
   }, [stack]);
+
+  // A link no list can show (another view, a person no longer listed) is dropped.
+  useEffect(() => {
+    if (!pending) return;
+    const timer = setTimeout(() => {
+      if (pendingRef.current !== pending) return;
+      setPending(null);
+      if (stackRef.current.length) return;
+      setSearchParams(
+        (previous) => {
+          const next = new URLSearchParams(previous);
+          if (next.get(DETAIL_PARAM) === pending) next.delete(DETAIL_PARAM);
+          return next;
+        },
+        { replace: true },
+      );
+    }, PENDING_DETAIL_MS);
+    return () => clearTimeout(timer);
+  }, [pending]);
 
   const lastReset = useRef(resetKey);
   useEffect(() => {
@@ -177,6 +208,12 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
     },
     [setSearchParams],
   );
+  const restore = useCallback((target: RecruitingDetailTarget) => {
+    if (pendingRef.current !== detailKey(target) || stackRef.current.length) return;
+    setPending(null);
+    stackRef.current = [target];
+    setStack([target]);
+  }, []);
   const back = useCallback(() => navigate(-1), [navigate]);
   const close = useCallback(() => {
     const depth = stackRef.current.length;
@@ -192,7 +229,7 @@ export function useRecruitingDetailController(resetKey?: string): RecruitingDeta
   }, [empty]);
 
   return useMemo(
-    () => ({ stack, current: stack.at(-1), open, replace, back, close }),
-    [stack, open, replace, back, close],
+    () => ({ stack, current: stack.at(-1), open, replace, back, close, pending, restore }),
+    [stack, open, replace, back, close, pending, restore],
   );
 }
