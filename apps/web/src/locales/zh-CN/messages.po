@@ -204,6 +204,14 @@ msgstr "{name} 已停止"
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "剩余 {remaining} · Bot 只看不操作"
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mo"
+msgstr "{rest} 个月"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mos"
+msgstr "{rest} 个月"
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "{seats, plural, one {# seat} other {# seats}}"
 msgstr ""
@@ -227,6 +235,14 @@ msgstr "{title}，{label}"
 #: src/pages/PluginsOverlay.tsx
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yr"
+msgstr "{years} 年"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yrs"
+msgstr "{years} 年"
 
 #. placeholder {0}: mention.name
 #: src/pages/Shell.tsx
@@ -853,6 +869,10 @@ msgstr "头像工作室"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Avatars"
 msgstr "头像"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Avg tenure"
+msgstr "平均任期"
 
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -2466,6 +2486,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
 msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current tenure"
+msgstr "当前任期"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Custom header"
@@ -4987,6 +5011,10 @@ msgstr ""
 msgid "Preparing a question"
 msgstr "正在准备问题"
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Present"
+msgstr "至今"
+
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
@@ -6944,6 +6972,10 @@ msgstr "工具源"
 #: src/pages/PluginsOverlay.tsx
 msgid "Tools"
 msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Total experience"
+msgstr "总工作年限"
 
 #: src/components/call/CallCard.tsx
 msgid "Transcript"

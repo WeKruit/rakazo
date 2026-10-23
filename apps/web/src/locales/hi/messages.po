@@ -204,6 +204,14 @@ msgstr "{name} रोक दिया गया"
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} शेष · बॉट देख रहा है, कार्रवाई नहीं कर रहा"
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mo"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mos"
+msgstr ""
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "{seats, plural, one {# seat} other {# seats}}"
 msgstr ""
@@ -226,6 +234,14 @@ msgstr "{title}, {label}"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yr"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yrs"
 msgstr ""
 
 #. placeholder {0}: mention.name
@@ -852,6 +868,10 @@ msgstr "अवतार स्टूडियो"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Avatars"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Avg tenure"
 msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
@@ -2465,6 +2485,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current tenure"
 msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
@@ -4987,6 +5011,10 @@ msgstr ""
 msgid "Preparing a question"
 msgstr ""
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Present"
+msgstr ""
+
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
@@ -6943,6 +6971,10 @@ msgstr "टूल स्रोत"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Tools"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Total experience"
 msgstr ""
 
 #: src/components/call/CallCard.tsx

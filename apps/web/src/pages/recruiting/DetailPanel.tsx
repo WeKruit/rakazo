@@ -20,6 +20,7 @@ import type { RecruitingDetailController, RecruitingDetailView } from "./detail"
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
+import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import { candidateSections, initials, linkedinHandle, sourceLabel } from "./profile";
 import { statusText } from "./shared";
 
@@ -368,12 +369,12 @@ export function RecruitingDetailPanel({
               ) : null}
               {sections.experience.length ? (
                 <Section id={anchorId("experience")} title={<Trans>Experience</Trans>}>
-                  <FieldList fields={sections.experience} />
+                  <ExperienceTimeline fields={sections.experience} Sources={Sources} />
                 </Section>
               ) : null}
               {sections.education.length ? (
                 <Section id={anchorId("education")} title={<Trans>Education</Trans>}>
-                  <FieldList fields={sections.education} />
+                  <EducationTimeline fields={sections.education} Sources={Sources} />
                 </Section>
               ) : null}
               {sections.skills.length ? (

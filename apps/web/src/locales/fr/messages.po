@@ -204,6 +204,14 @@ msgstr "{name} arrêté"
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} restant · le bot observe, il n'agit pas"
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mo"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mos"
+msgstr ""
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "{seats, plural, one {# seat} other {# seats}}"
 msgstr ""
@@ -227,6 +235,14 @@ msgstr "{title}, {label}"
 #: src/pages/PluginsOverlay.tsx
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr "{toolCount, plural, one {# outil} other {# outils}}"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yr"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yrs"
+msgstr ""
 
 #. placeholder {0}: mention.name
 #: src/pages/Shell.tsx
@@ -853,6 +869,10 @@ msgstr "Studio d'avatars"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Avatars"
 msgstr "Avatars"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Avg tenure"
+msgstr ""
 
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -2465,6 +2485,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current tenure"
 msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
@@ -4987,6 +5011,10 @@ msgstr ""
 msgid "Preparing a question"
 msgstr ""
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Present"
+msgstr ""
+
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
@@ -6944,6 +6972,10 @@ msgstr "Sources d'outils"
 #: src/pages/PluginsOverlay.tsx
 msgid "Tools"
 msgstr "Outils"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Total experience"
+msgstr ""
 
 #: src/components/call/CallCard.tsx
 msgid "Transcript"

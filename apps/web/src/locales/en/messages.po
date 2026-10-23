@@ -204,6 +204,14 @@ msgstr "{name} stopped"
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} left · bot is watching, not acting"
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mo"
+msgstr "{rest} mo"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mos"
+msgstr "{rest} mos"
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "{seats, plural, one {# seat} other {# seats}}"
 msgstr "{seats, plural, one {# seat} other {# seats}}"
@@ -227,6 +235,14 @@ msgstr "{title}, {label}"
 #: src/pages/PluginsOverlay.tsx
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr "{toolCount, plural, one {# tool} other {# tools}}"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yr"
+msgstr "{years} yr"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yrs"
+msgstr "{years} yrs"
 
 #. placeholder {0}: mention.name
 #: src/pages/Shell.tsx
@@ -853,6 +869,10 @@ msgstr "Avatar Studio"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Avatars"
 msgstr "Avatars"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Avg tenure"
+msgstr "Avg tenure"
 
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -2466,6 +2486,10 @@ msgstr "Current role"
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role not returned"
 msgstr "Current role not returned"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current tenure"
+msgstr "Current tenure"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Custom header"
@@ -4987,6 +5011,10 @@ msgstr "Prepared"
 msgid "Preparing a question"
 msgstr "Preparing a question"
 
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Present"
+msgstr "Present"
+
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
@@ -6944,6 +6972,10 @@ msgstr "Tool sources"
 #: src/pages/PluginsOverlay.tsx
 msgid "Tools"
 msgstr "Tools"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Total experience"
+msgstr "Total experience"
 
 #: src/components/call/CallCard.tsx
 msgid "Transcript"
