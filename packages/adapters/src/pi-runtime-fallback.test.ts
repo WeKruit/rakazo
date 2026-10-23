@@ -3191,14 +3191,14 @@ it("publishes a safe thinking progress at most once per 5 seconds", async () => 
       result.push({ type: "thinking_delta", contentIndex: 0, delta, partial });
     void (async () => {
       result.push({ type: "start", partial });
-      think("secret plan step one");
-      think("secret plan step two");
+      think("**Checking the Instantly campaign via write_effect**");
+      think("\n\nsecret plan step two for id ck9x2m4q8p0000abcd1234efgh");
       await new Promise((resolve) => setTimeout(resolve, 20));
       clock += 4_999;
       think("still within the window");
       await new Promise((resolve) => setTimeout(resolve, 20));
       clock += 1;
-      think("window elapsed");
+      think("\nwindow elapsed");
       await new Promise((resolve) => setTimeout(resolve, 20));
       result.push({ type: "done", reason: "stop", message: response });
       result.end(response);
@@ -3215,7 +3215,8 @@ it("publishes a safe thinking progress at most once per 5 seconds", async () => 
       text: "",
       activity: true,
       phase: "thinking",
-      summary: "Thinking",
+      summary: "Checking the campaign via",
+      thought: "Checking the campaign via",
       at: new Date(1_000_000).toISOString(),
     },
     {
@@ -3223,11 +3224,13 @@ it("publishes a safe thinking progress at most once per 5 seconds", async () => 
       text: "",
       activity: true,
       phase: "thinking",
-      summary: "Thinking",
+      summary: "Checking the campaign via",
+      thought: "Checking the campaign via",
       at: new Date(1_005_000).toISOString(),
     },
   ]);
-  expect(JSON.stringify(thinking)).not.toContain("secret");
+  // Vendor names, tool names and ids never reach the thread; only the first line is shown.
+  expect(JSON.stringify(thinking)).not.toMatch(/Instantly|write_effect|ck9x2m4q8p|secret/);
 });
 
 it("derives the thinking summary from the last tool category only", () => {

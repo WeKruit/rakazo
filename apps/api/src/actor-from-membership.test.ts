@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@rakazo/db";
-import { requireMembership } from "@rakazo/db";
-import { describe, expect, it, vi } from "vitest";
+import { invalidateMembershipCache, requireMembership } from "@rakazo/db";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { actorFromMembership } from "./app.js";
 
 const actor = {
@@ -17,6 +17,8 @@ function prisma(options: { membership: boolean; lookup?: () => Promise<Array<typ
 }
 
 describe("actorFromMembership", () => {
+  afterEach(() => invalidateMembershipCache());
+
   it("returns no actor when the user is not a member of the requested Space", async () => {
     await expect(
       actorFromMembership(

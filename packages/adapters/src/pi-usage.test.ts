@@ -203,6 +203,8 @@ describe("Pi model stream timing", () => {
         provider: model.provider,
         model: model.id,
         operationKind: "answer",
+        routed: "configured",
+        routeReason: null,
         outcome: "completed",
         streamOutcome: "completed",
         firstStreamEventMs: 3,

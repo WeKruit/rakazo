@@ -1,7 +1,7 @@
 import { createLogger, createTestSink, installLogger, runWithLogContext } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
-import { IsolationError, requireMembership } from "./scope.js";
+import { IsolationError, invalidateMembershipCache, requireMembership } from "./scope.js";
 
 function prismaForMembership(found: boolean) {
   return {
@@ -22,10 +22,12 @@ function prismaForMembership(found: boolean) {
 
 describe("requireMembership", () => {
   afterEach(() => {
+    invalidateMembershipCache();
+    vi.useRealTimers();
     installLogger(createLogger({ service: "rakazo-test", level: "off", sinks: [] }));
   });
 
-  it("records each lookup separately in the existing request context", async () => {
+  it("records each lookup in the existing request context and serves repeats from cache", async () => {
     const sink = createTestSink();
     installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
     const prisma = prismaForMembership(true);
@@ -35,13 +37,16 @@ describe("requireMembership", () => {
       await requireMembership(prisma, "user-1", "space-support");
     });
 
+    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
     expect(sink.events).toHaveLength(2);
+    expect(sink.events[0]).toMatchObject({ cache: "miss", queryMs: expect.any(Number) });
+    expect(sink.events[1]).toMatchObject({ cache: "hit" });
+    expect(sink.events[1]).not.toHaveProperty("queryMs");
     for (const event of sink.events) {
       expect(event).toMatchObject({
         message: "membership.lookup.timing",
         "trace.id": "trace-test",
         "rpc.procedure": "me",
-        queryMs: expect.any(Number),
         totalMs: expect.any(Number),
         outcome: "ok",
       });
@@ -49,6 +54,40 @@ describe("requireMembership", () => {
       expect(event).not.toHaveProperty("userId");
       expect(event).not.toHaveProperty("requestedSpaceId");
     }
+  });
+
+  it("keys the cache by user and requested space, expires after 60s, and invalidates on writes", async () => {
+    vi.useFakeTimers();
+    const prisma = prismaForMembership(true);
+
+    await requireMembership(prisma, "user-1", "space-a");
+    await requireMembership(prisma, "user-1", "space-b");
+    await requireMembership(prisma, "user-2", "space-a");
+    await requireMembership(prisma, "user-1", null);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(4);
+
+    await requireMembership(prisma, "user-1", "space-a");
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(4);
+
+    invalidateMembershipCache("user-1");
+    await requireMembership(prisma, "user-1", "space-a");
+    await requireMembership(prisma, "user-2", "space-a");
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(5);
+
+    vi.advanceTimersByTime(60_001);
+    await requireMembership(prisma, "user-2", "space-a");
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(6);
+  });
+
+  it("does not cache a missing membership", async () => {
+    const prisma = prismaForMembership(false);
+    await expect(requireMembership(prisma, "user-1", "space-x")).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    await expect(requireMembership(prisma, "user-1", "space-x")).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
   });
 
   it("rejects a missing membership after one joined lookup", async () => {

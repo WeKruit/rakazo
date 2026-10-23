@@ -89,6 +89,7 @@ import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
+import { sanitizeThought } from "./thought.js";
 import { textContentArg } from "./tool-text.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
@@ -400,7 +401,11 @@ export class PiAgentRuntime implements AgentRuntime {
                   preparedOptions,
                   (event) => queue.push(event),
                   this.modelCallObserver,
-                  { operationKind: request.usageOperationKind ?? "answer" },
+                  {
+                    operationKind: request.usageOperationKind ?? "answer",
+                    routed: target.config.routed,
+                    routeReason: target.config.routeReason,
+                  },
                   {
                     ...usageHooks,
                     prepareContext: (ctx, m) => contextPolicy.prepareContext(ctx, m),
@@ -547,7 +552,11 @@ export class PiAgentRuntime implements AgentRuntime {
         // it counts as the final reply, including when the completed message omits it.
         let streamedBeforePendingFinal = 0;
         let lastToolName: string | undefined;
+        let lastToolArgs: unknown;
         let lastThinkingAt = Number.NEGATIVE_INFINITY;
+        // Reasoning summary of the current thinking stretch; reset per assistant message.
+        let thinkingText = "";
+        const toolNames = tools.map((tool) => tool.name);
         agent.subscribe(async (event) => {
           auditUndispatchedToolFailure(event, host, tools);
           if (event.type === "message_end") {
@@ -557,6 +566,7 @@ export class PiAgentRuntime implements AgentRuntime {
             if (host.toolCallBudget.exceeded) return;
             toolCalls += 1;
             lastToolName = event.toolName;
+            lastToolArgs = event.args;
             // Live activity feedback: without this the thread shows a bare
             // "working…" for the whole tool call with nothing actionable.
             toolActivityShowing = true;
@@ -568,6 +578,7 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           if (event.type === "message_start" && event.message.role === "assistant") {
             currentMessageStreamed = "";
+            thinkingText = "";
             modelStreaming = true;
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
@@ -578,17 +589,26 @@ export class PiAgentRuntime implements AgentRuntime {
             event.assistantMessageEvent.type === "thinking_delta" &&
             event.assistantMessageEvent.delta
           ) {
-            // Transient "still thinking" signal. Never forwards reasoning text: the summary
-            // comes only from the last tool's closed category.
+            // Transient "still thinking" signal. The thought is the sanitized reasoning
+            // summary (Codex emits one), else the last tool's intent; never raw reasoning.
+            thinkingText += event.assistantMessageEvent.delta;
             const now = Date.now();
             if (now - lastThinkingAt >= THINKING_PROGRESS_INTERVAL_MS) {
               lastThinkingAt = now;
+              const thought =
+                sanitizeThought(thinkingText, toolNames) ||
+                (lastToolName
+                  ? sanitizeThought(describeToolActivity(lastToolName, lastToolArgs), toolNames)
+                  : "");
               queue.push({
                 type: "progress",
                 text: "",
                 activity: true,
                 phase: "thinking",
-                summary: thinkingSummary(lastToolName),
+                summary: thought
+                  ? thought.split(" ").slice(0, 8).join(" ")
+                  : thinkingSummary(lastToolName),
+                ...(thought ? { thought } : {}),
                 at: new Date(now).toISOString(),
               });
             }

@@ -429,6 +429,9 @@ export interface AgentRunModel {
   cacheCapabilities?: CacheCapabilities;
   provider: string;
   id: string;
+  /** Per-turn routing outcome, for stream timing logs only. */
+  routed?: "fast" | "configured";
+  routeReason?: string;
   apiKey?: string;
   /** Cloudflare account id stored with a gateway BYOK credential. */
   accountId?: string;
@@ -595,6 +598,8 @@ export type AgentRuntimeEvent =
       phase?: "compacting" | "thinking";
       /** ≤8-word user-safe label for a thinking phase; never raw reasoning. */
       summary?: string;
+      /** ≤200-char user-safe thinking line: sanitized reasoning summary or last tool intent. */
+      thought?: string;
       /** ISO time the phase update was produced. */
       at?: string;
     }
