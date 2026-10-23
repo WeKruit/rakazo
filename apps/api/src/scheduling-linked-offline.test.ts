@@ -409,6 +409,13 @@ describe("linked offline scheduling receipts", () => {
     "confirmation_rejected",
     "dst_first_0130",
     "dst_second_0130",
+    "reschedule_success",
+    "cancel_success",
+    "reschedule_changed_original",
+    "reschedule_slot_conflict",
+    "reschedule_timeout",
+    "cancel_timeout",
+    "reschedule_confirmation_rejected",
   ] as const)("links native approvals, receipts and Interview for %s", async (scenario) => {
     const f = fixture("linked-scheduling");
     const db = f.prisma as unknown as PrismaClient;
@@ -463,6 +470,11 @@ describe("linked offline scheduling receipts", () => {
       nextMessageSeq: ++sequence,
       nextEventSeq: ++sequence,
     }));
+    f.prisma.event.findMany.mockImplementation(async ({ where }) =>
+      where?.type === "effect.approval.answered"
+        ? (events.filter((event) => event.type === where.type) as never)
+        : [],
+    );
     f.prisma.event.create.mockImplementation(async ({ data }) => {
       const row = { ...data, seq: sequence };
       events.push(row);
@@ -479,7 +491,13 @@ describe("linked offline scheduling receipts", () => {
         {
           botId: f.runData.botId,
           allowAllTools: false,
-          allowedTools: ["create_booking", "get_booking", "get_availability"],
+          allowedTools: [
+            "create_booking",
+            "get_booking",
+            "get_availability",
+            "reschedule_booking",
+            "cancel_booking",
+          ],
         },
       ],
     };
@@ -508,7 +526,12 @@ describe("linked offline scheduling receipts", () => {
       },
     });
     const createBooking = cal("create_booking");
-    const getBooking = cal("get_booking");
+    const getBooking = {
+      ...cal("get_booking"),
+      inputSchema: { type: "object", properties: { bookingUid: { type: "string" } } },
+    };
+    const rescheduleBooking = cal("reschedule_booking");
+    const cancelBooking = cal("cancel_booking");
     const availability = {
       ...cal("get_availability"),
       inputSchema: {
@@ -520,10 +543,18 @@ describe("linked offline scheduling receipts", () => {
           timeZone: { type: "string" },
           duration: { type: "number" },
           format: { type: "string" },
+          bookingUidToReschedule: { type: "string" },
         },
       },
     };
-    f.connector.discoverTools.mockResolvedValue([mail, createBooking, getBooking, availability]);
+    f.connector.discoverTools.mockResolvedValue([
+      mail,
+      createBooking,
+      getBooking,
+      availability,
+      rescheduleBooking,
+      cancelBooking,
+    ]);
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
       { effect: "require_approval", matchKind: "tool", matchValue: mail.name },
     ]);
@@ -584,24 +615,33 @@ describe("linked offline scheduling receipts", () => {
     f.connector.execute.mockImplementation(async function* (call) {
       let data: unknown;
       if (call.route?.toolName === "get_availability") {
+        const changing = call.args.bookingUidToReschedule !== undefined;
+        const slot = changing ? "2026-10-28T15:00:00Z" : selected;
+        const slotEnd = new Date(Date.parse(slot) + 30 * 60_000).toISOString();
         expect(call.args).toEqual({
           eventTypeId: 42,
-          start: selected,
-          end,
+          start: slot,
+          end: slotEnd,
           timeZone: "UTC",
           duration: 30,
           format: "range",
+          ...(changing ? { bookingUidToReschedule: "synthetic-booking-42" } : {}),
         });
         data = {
           status: "success",
           data: {
-            [selected.slice(0, 10)]:
-              scenario === "booking_conflict" ? [] : [{ start: selected, end }],
+            [slot.slice(0, 10)]:
+              scenario === "booking_conflict" ||
+              (changing && scenario === "reschedule_slot_conflict")
+                ? []
+                : [{ start: slot, end: slotEnd }],
           },
         };
       } else if (call.route?.toolName === "create_booking") {
         providerBooking = {
           uid: "synthetic-booking-42",
+          eventTypeId: 42,
+          hosts: [{ email: "interviewer@example.test", timeZone: "America/New_York" }],
           title: "Candidate interview",
           status: "accepted",
           start: call.args.start,
@@ -610,12 +650,34 @@ describe("linked offline scheduling receipts", () => {
           location: "https://meeting.example.test/synthetic-42",
         };
         data = { status: "success", data: providerBooking };
+      } else if (["reschedule_booking", "cancel_booking"].includes(call.route?.toolName ?? "")) {
+        expect(call.args.bookingUid).toBe("synthetic-booking-42");
+        if (scenario.endsWith("timeout")) {
+          yield {
+            type: "error",
+            message: "Synthetic calendar acknowledgement lost",
+            outcome: "uncertain",
+          };
+          return;
+        }
+        if (call.route?.toolName === "reschedule_booking") {
+          providerBooking = {
+            ...providerBooking,
+            uid: "synthetic-replacement-43",
+            rescheduledFromUid: call.args.bookingUid,
+            start: call.args.start,
+            end: new Date(Date.parse(String(call.args.start)) + 30 * 60_000).toISOString(),
+          };
+        } else providerBooking = { ...providerBooking, status: "cancelled" };
+        data = { status: "success", data: providerBooking };
       } else if (call.route?.toolName === "get_booking") {
         expect(call.args).toEqual({ bookingUid: providerBooking!.uid });
         data = { status: "success", data: providerBooking };
       } else if (
-        (scenario === "confirmation_uncertain" || scenario === "confirmation_rejected") &&
-        call.args.subject === "Interview confirmed"
+        ((scenario === "confirmation_uncertain" || scenario === "confirmation_rejected") &&
+          call.args.subject === "Interview confirmed") ||
+        (scenario === "reschedule_confirmation_rejected" &&
+          call.args.subject === "Interview changed")
       ) {
         yield {
           type: "error",
@@ -778,13 +840,13 @@ describe("linked offline scheduling receipts", () => {
           const call = (effect.request as unknown[])[2] as { route?: { toolName?: string } };
           return (
             effect.status === "completed" &&
-            call?.route?.toolName ===
-              (request.where.run.initialRecruitingRoleRevision
-                ? "create_booking"
-                : "get_booking") &&
+            (request.where.run.initialRecruitingRoleRevision
+              ? ["create_booking", "reschedule_booking"].includes(call?.route?.toolName ?? "")
+              : call?.route?.toolName === "get_booking") &&
             (!request.where.id || request.where.id.in.includes(effect.id))
           );
         })
+        .toReversed()
         .map((effect) => ({
           ...effect,
           updatedAt: new Date("2026-10-23T18:00:00Z"),
@@ -906,6 +968,158 @@ describe("linked offline scheduling receipts", () => {
       f.connector.execute.mock.calls.filter(([call]) => call.route?.toolName === "create_booking"),
     ).toHaveLength(1);
     expect((await project()).events).toEqual(projected.events);
+    // Public Cal contracts: /docs/api-reference/v2/bookings/reschedule-a-booking and
+    // /cancel-a-booking. The schemas/provider here are synthetic; actual assigned
+    // schemas and fresh authorization remain required by the production helpers.
+    if (scenario.startsWith("reschedule_") || scenario.startsWith("cancel_")) {
+      const cancelling = scenario.startsWith("cancel_");
+      const mutation = cancelling ? cancelBooking : rescheduleBooking;
+      const changeArgs = cancelling
+        ? { bookingUid: returned.uid, cancellationReason: "Participant requested cancellation" }
+        : { bookingUid: returned.uid, start: "2026-10-28T15:00:00Z", lengthInMinutes: 30 };
+      const beforeChange = f.connector.execute.mock.calls.length;
+      f.setCalls([{ name: mutation.name, args: changeArgs, executionId: "change-request" }]);
+      await f.run();
+      expect(
+        f.connector.execute.mock.calls.slice(beforeChange).map(([call]) => call.route?.toolName),
+      ).toEqual(["get_booking"]);
+      const changeEffect = f.effects.at(-1)!;
+      const approvalRequest = structuredClone(changeEffect.request);
+      expect(changeEffect.result).toMatchObject({
+        calendarApprovalEvidence: {
+          snapshot: {
+            uid: returned.uid,
+            eventTypeId: 42,
+            start: selected,
+            end,
+            status: "accepted",
+          },
+        },
+      });
+      const card = messages.at(-1)!;
+      expect(JSON.stringify(card.blocks)).toContain("originalBooking");
+      const input = {
+        spaceId: f.runData.spaceId,
+        threadId: f.runData.threadId,
+        runId: f.runData.id,
+        messageId: card.id,
+        answeredByUserId: f.runData.userId,
+        answer: "allow",
+      };
+      expect(await answerRunInput(db, input)).toBe(true);
+      expect(await answerRunInput(db, input)).toBe(false);
+      expect(events.at(-1)).toMatchObject({
+        type: "effect.approval.answered",
+        payload: {
+          effectId: changeEffect.id,
+          requestHash: createHash("sha256").update(stableJsonValue(approvalRequest)).digest("hex"),
+          approvalEvidenceHash: expect.any(String),
+        },
+      });
+      if (scenario === "reschedule_changed_original")
+        providerBooking!.attendees = [{ email: "different@example.test" }];
+      const beforeReplay = f.connector.execute.mock.calls.length;
+      f.setCalls([
+        {
+          name: mutation.name,
+          args: { ...changeArgs, bookingUid: "wrong-booking", start: slots[2] },
+          executionId: "change-resume",
+        },
+      ]);
+      await f.run();
+      const replayCalls = f.connector.execute.mock.calls
+        .slice(beforeReplay)
+        .map(([call]) => call.route?.toolName);
+      expect(replayCalls[0]).toBe("get_booking");
+      const blocked =
+        scenario === "reschedule_changed_original" || scenario === "reschedule_slot_conflict";
+      if (blocked) {
+        expect(changeEffect.status).toBe("approved");
+        expect(f.results.at(-1)).toMatchObject({ dispatched: false });
+        expect(replayCalls).not.toContain(mutation.route.toolName);
+        expect(providerBooking!.uid).toBe(returned.uid);
+        return;
+      }
+      expect(replayCalls).toEqual(
+        cancelling
+          ? ["get_booking", "cancel_booking"]
+          : ["get_booking", "get_availability", "reschedule_booking"],
+      );
+      expect(f.connector.execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({ args: changeArgs }),
+        expect.anything(),
+      );
+      const callCount = f.connector.execute.mock.calls.length;
+      f.setCalls([{ name: mutation.name, args: changeArgs, executionId: "change-retry" }]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenCalledTimes(callCount);
+      expect(
+        f.connector.execute.mock.calls.filter(
+          ([call]) => call.route?.toolName === "create_booking",
+        ),
+      ).toHaveLength(1);
+      if (scenario.endsWith("timeout")) {
+        expect(changeEffect).toMatchObject({ status: "uncertain", result: { uncertain: true } });
+        expect((await project()).events).toEqual(projected.events);
+        return;
+      }
+      expect(changeEffect.status).toBe("completed");
+      const mutationReceipt = changeEffect.result as { content: Array<{ text: string }> };
+      const changedUid = JSON.parse(mutationReceipt.content[0]!.text).data.uid as string;
+      expect(changedUid).toBe(cancelling ? returned.uid : "synthetic-replacement-43");
+      f.setCalls([
+        { name: getBooking.name, args: { bookingUid: changedUid }, executionId: "change-readback" },
+      ]);
+      await f.run();
+      expect(f.connector.execute).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          route: expect.objectContaining({ toolName: "get_booking" }),
+          args: { bookingUid: changedUid },
+        }),
+        expect.anything(),
+      );
+      expect(f.results.at(-1)).toMatchObject({
+        content: [
+          {
+            type: "text",
+            text: expect.stringContaining(cancelling ? "cancelled" : "synthetic-replacement-43"),
+          },
+        ],
+      });
+      const changedProjection = await project();
+      expect(changedProjection.events).toContainEqual(
+        expect.objectContaining({
+          id: `cal-1:booking:${changedUid}`,
+          status: cancelling ? "cancelled" : "accepted",
+          start: cancelling ? selected : "2026-10-28T15:00:00Z",
+        }),
+      );
+      if (scenario === "reschedule_confirmation_rejected") {
+        await approveAndExecute(
+          mail.name,
+          {
+            reply_to_uuid: originalEmail.id,
+            eaccount: originalEmail.eaccount,
+            subject: "Interview changed",
+            body: { text: `Changed to ${providerBooking!.start}` },
+          },
+          5,
+        );
+        expect(f.effects.at(-1)).toMatchObject({
+          status: "completed",
+          result: { error: "Synthetic provider rejected confirmation" },
+        });
+        expect(changeEffect.status).toBe("completed");
+        expect((await project()).events).toEqual(changedProjection.events);
+        expect(
+          f.connector.execute.mock.calls.filter(
+            ([call]) => call.route?.toolName === "reschedule_booking",
+          ),
+        ).toHaveLength(1);
+      }
+      await renderSchedulingProjection(changedProjection);
+      return;
+    }
     await renderSchedulingProjection(projected);
   });
 });
