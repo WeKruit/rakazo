@@ -36,7 +36,10 @@ describe("maintained recruiting defaults", () => {
 
   it.each(RECRUITING_DEFAULT_BOTS)("$name requests a missing connection in chat", (bot) => {
     expect(bot.instructions).toContain(
-      "call request_connection instead of telling the user to open settings",
+      "When the user names a service that is not connected, call request_connection with that provider before answering",
+    );
+    expect(bot.instructions).toContain(
+      "when a connected service blocks the task, say so explicitly",
     );
   });
 
