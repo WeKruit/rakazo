@@ -36,7 +36,9 @@ export function AvailabilityRanges({ slots }: { slots: readonly AvailabilitySlot
           <div key={timeZone ?? ""} className="space-y-1 [&+&]:mt-3">
             <strong className="block">
               {t`Available time`}
-              {timeZone ? <span className="font-normal text-muted-foreground"> · {timeZone}</span> : null}
+              {timeZone ? (
+                <span className="font-normal text-muted-foreground"> · {timeZone}</span>
+              ) : null}
             </strong>
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
               {days.map(({ day, ranges }) => (

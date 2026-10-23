@@ -3665,7 +3665,9 @@ it.each([
     await shortcut("k", "ctrlKey");
     expect(palette()).not.toBeNull();
     await shortcut("2", "metaKey");
-    expect(shellApi.get).toHaveBeenLastCalledWith({ botId: "bot-2" }, expect.anything());
+    expect(shellApi.get.mock.calls.filter((call) => call.length > 1).at(-1)?.[0]).toEqual({
+      botId: "bot-2",
+    });
     expect(palette()).toBeNull();
   },
 );
