@@ -233,7 +233,11 @@ import {
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { quoteDraftForSelection } from "../lib/quote-selection";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
-import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
+import {
+  clearRecruitingReads,
+  rememberRecruitingRead,
+  revalidateRecruitingReads,
+} from "../lib/recruiting-read-cache";
 import { getResponseStreamingEnabled, subscribeResponseStreaming } from "../lib/response-streaming";
 import type { Panel, RecruitingPanelState, RightPanelState } from "../lib/right-panel-state";
 import {
@@ -595,10 +599,6 @@ export function ShellPage() {
   const roleChatTrigger = useRef<HTMLButtonElement>(null);
   const roleChatSection = useRef<HTMLElement>(null);
   const recruitingReadCache = useRef<RecruitingReadCache>({ entries: new Map(), epoch: 0 });
-  useEffect(() => {
-    const cache = recruitingReadCache.current;
-    return () => clearRecruitingReads(cache);
-  }, []);
   const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
   const panelStorageKeyRef = useRef<string | null>(null);
   const observedPanelKey = useRef<string | null>(null);
@@ -821,6 +821,11 @@ export function ShellPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
   const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
+  useEffect(() => {
+    const cache = recruitingReadCache.current;
+    // Saved reads belong to one account and Space; drop them on unmount or when either changes.
+    return () => clearRecruitingReads(cache);
+  }, [userId, bootstrapMe?.spaceId]);
   const call = useCallSession(userId, bootstrapMe?.spaceId);
   const showToolActivity = useSyncExternalStore(
     subscribeToolActivity,
@@ -1029,10 +1034,7 @@ export function ShellPage() {
           : current?.botId !== activeBotId.current)
       )
         return;
-      clearRecruitingReads(
-        recruitingReadCache.current,
-        JSON.stringify([userId, spaceId, current.threadId]),
-      );
+      revalidateRecruitingReads(recruitingReadCache.current);
       setRecruitingRefresh((value) => value + 1);
     },
     [bootstrapMe?.spaceId, userId],
@@ -2283,7 +2285,10 @@ export function ShellPage() {
       (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
       snapshotRef.current?.threadId === threadId &&
       activeGroupId.current === groupId;
-    setBindingRead({ key: bindingReadKey });
+    const cached = cache.entries.get(`${recruitingCacheScope}:workspace`) as
+      | { workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
+      | undefined;
+    setBindingRead({ key: bindingReadKey, workspace: cached?.workspace });
     void rpc.recruiting
       .getWorkspace({ threadId })
       .then((workspace) => {
