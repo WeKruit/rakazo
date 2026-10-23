@@ -460,9 +460,9 @@ describePostgres("CRM sync (PostgreSQL)", () => {
     await runAll(actor, crm.read);
     const scope = { mcpServerId: serverId, organizationId: ORG };
     const rows = await listSyncedRecruitingCrmRoleContacts(prisma, actor, scope, ROLE_A);
-    expect(rows.map((row) => row.candidateId).sort()).toEqual([person(1), person(2)]);
-    expect(rows[0]).toMatchObject({ company: "Example Company", profile: contact(1).profile });
-    expect(await listSyncedRecruitingCrmRoleContacts(prisma, other, scope, ROLE_A)).toEqual([]);
+    expect(rows!.map((row) => row.candidateId).sort()).toEqual([person(1), person(2)]);
+    expect(rows![0]).toMatchObject({ company: "Example Company", profile: contact(1).profile });
+    expect(await listSyncedRecruitingCrmRoleContacts(prisma, other, scope, ROLE_A)).toBeNull();
     expect(
       await listSyncedRecruitingCrmRoleContacts(
         prisma,
@@ -470,16 +470,22 @@ describePostgres("CRM sync (PostgreSQL)", () => {
         { ...scope, organizationId: person(99) },
         ROLE_A,
       ),
-    ).toEqual([]);
+    ).toBeNull();
     await prisma.recruitingCrmRoleContact.updateMany({
       where: { contact: { crmCandidateId: person(1) } },
       data: { archivedAt: new Date() },
     });
     expect(
-      (await listSyncedRecruitingCrmRoleContacts(prisma, actor, scope, ROLE_A)).map(
+      (await listSyncedRecruitingCrmRoleContacts(prisma, actor, scope, ROLE_A))!.map(
         (row) => row.candidateId,
       ),
     ).toEqual([person(2)]);
+    await prisma.recruitingCrmRoleContact.updateMany({
+      where: { contact: { crmCandidateId: person(2) } },
+      data: { archivedAt: new Date() },
+    });
+    // A known synced role with no active links is empty; absent scope remains unknown above.
+    expect(await listSyncedRecruitingCrmRoleContacts(prisma, actor, scope, ROLE_A)).toEqual([]);
   });
 
   it("rejects forged, cross-owner, cross-thread, superseded and replayed cursors", async () => {
