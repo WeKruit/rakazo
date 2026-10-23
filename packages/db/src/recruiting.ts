@@ -175,7 +175,11 @@ async function advanceStageAfterSave(tx: Tx, roleId: string) {
 export async function readRecruitingPlaybookStep(
   tx: Pick<Tx, "recruitingRole" | "recruitingRoleRevision" | "recruitingCandidate">,
   roleId: string,
-): Promise<{ stage: RecruitingPlaybookStage; step: RecruitingPlaybookStep | null } | null> {
+): Promise<{
+  stage: RecruitingPlaybookStage;
+  step: RecruitingPlaybookStep | null;
+  savedCandidates: number;
+} | null> {
   const role = await tx.recruitingRole.findUnique({
     where: { id: roleId },
     select: { title: true, playbookStage: true, currentRevisionId: true, archivedAt: true },
@@ -193,6 +197,7 @@ export async function readRecruitingPlaybookStep(
   const openClarifications = brief?.success ? recruitingBriefClarifications(brief.data).length : 0;
   return {
     stage,
+    savedCandidates,
     step: nextPlaybookStep(stage, {
       title: role.title,
       hasBrief: Boolean(revision?.brief),

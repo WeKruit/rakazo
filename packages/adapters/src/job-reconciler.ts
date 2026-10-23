@@ -7,6 +7,7 @@ import { getLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
+import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
 import { isLoopGuardStopText } from "./tool-loop.js";
 import { isUserProgressClientNonce } from "./user-progress.js";
@@ -114,6 +115,7 @@ export function createJobReconciler(
   let timer: ReturnType<typeof setInterval> | undefined;
   let reconciling: Promise<void> | undefined;
   let stuckCursor: Cursor | undefined;
+  let questionCursor: Cursor | undefined;
   let runCursor: Cursor | undefined;
   let routineCursor: Cursor | undefined;
   let controlCursor: ControlCursor | undefined;
@@ -135,6 +137,16 @@ export function createJobReconciler(
       }
 
       const now = new Date();
+      try {
+        questionCursor = await reconcileRecruitingQuestions({
+          ...deps,
+          now,
+          batchSize,
+          cursor: questionCursor,
+        });
+      } catch (error) {
+        getLogger().error("recruiting question reconciliation", error);
+      }
       try {
         stuckCursor = await reconcileStuckWork({
           prisma: deps.prisma,

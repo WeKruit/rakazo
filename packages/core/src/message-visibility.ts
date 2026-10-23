@@ -2,6 +2,7 @@ import type { MessageBlock } from "@rakazo/contracts";
 
 type PresentableMessage = {
   runId?: string;
+  internal?: boolean;
   blocks: readonly MessageBlock[];
 };
 
@@ -57,6 +58,7 @@ export function userVisibleMessages<T extends PresentableMessage>(
   const backgroundRunIds = new Set(options.backgroundRunIds ?? []);
 
   return messages.filter((message) => {
+    if (message.internal) return message.blocks.some(isBackgroundInputBlock);
     if (message.runId && backgroundRunIds.has(message.runId)) {
       return message.blocks.some(isBackgroundInputBlock);
     }

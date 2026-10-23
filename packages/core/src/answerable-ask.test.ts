@@ -7,6 +7,7 @@ import {
   askFormDefaults,
   askFormOptions,
   latestAnswerableAskMessageId,
+  pendingInputAttention,
   resolveAskChoice,
   selectedAskActionLabel,
 } from "./answerable-ask.js";
@@ -181,5 +182,17 @@ describe("resolveAskChoice", () => {
 
   it("leaves unmatched free-text as a custom answer", () => {
     expect(resolveAskChoice("Toronto", actions)).toBeUndefined();
+  });
+});
+
+describe("pending input attention", () => {
+  it("uses native approval metadata, not question wording", () => {
+    const question = { kind: "ask", status: "pending", text: "Confirm location?" };
+    expect(pendingInputAttention([question])).toBe("question");
+    expect(pendingInputAttention([question, { ...question, approvalEffectId: "effect" }])).toBe(
+      "approval",
+    );
+    expect(pendingInputAttention([{ ...question, status: "answered" }])).toBeNull();
+    expect(pendingInputAttention(null)).toBeNull();
   });
 });

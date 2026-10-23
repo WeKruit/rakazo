@@ -5704,6 +5704,14 @@ msgstr "Parolanızı sıfırlayın"
 msgid "Resetting…"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Resize chat"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Resize navigation"
+msgstr ""
+
 #: src/pages/ResizableSidePanel.tsx
 msgid "Resize panel"
 msgstr "Paneli yeniden boyutlandır"
@@ -7622,4 +7630,16 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
 msgstr ""

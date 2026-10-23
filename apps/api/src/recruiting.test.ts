@@ -1477,6 +1477,96 @@ describe("saved recruiting correspondence", () => {
       });
     },
   );
+  it.each([
+    [{ structuredContent: { items: [] } }, "empty"],
+    [{ isError: true }, "failed"],
+    [{ structuredContent: { items: "malformed" } }, "unsupported"],
+  ])("does not revive older unscoped mail after a campaign check: %j", async (result, status) => {
+    const { client, prisma, retained } = fixture();
+    const older = {
+      ...retained,
+      id: "older-unscoped",
+      updatedAt: new Date("2026-10-21T01:00:00Z"),
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          ...(retained.request[2] as object),
+          args: { email_type: "all", limit: 10 },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([retained, older])
+      .mockResolvedValueOnce([
+        { id: retained.id, result },
+        { id: older.id, result: { structuredContent: { items: [email] } } },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status,
+      emails: [],
+    });
+  });
+  it("keeps a newer unscoped observation after an older empty campaign check", async () => {
+    const { client, prisma, retained } = fixture();
+    const newer = {
+      ...retained,
+      id: "newer-unscoped",
+      updatedAt: new Date("2026-10-23T01:00:00Z"),
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          ...(retained.request[2] as object),
+          args: { email_type: "all", limit: 10 },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([newer, retained])
+      .mockResolvedValueOnce([
+        { id: retained.id, result: { structuredContent: { items: [] } } },
+        { id: newer.id, result: { structuredContent: { items: [email] } } },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "ready",
+      emails: [{ providerMessageId: email.id }],
+    });
+  });
+  it("prefers a newer unscoped body over an older campaign snapshot of the same mail", async () => {
+    const { client, prisma, retained } = fixture();
+    const newer = {
+      ...retained,
+      id: "newer-unscoped",
+      updatedAt: new Date("2026-10-23T01:00:00Z"),
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          ...(retained.request[2] as object),
+          args: { email_type: "all", limit: 10 },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([newer, retained])
+      .mockResolvedValueOnce([
+        { id: retained.id, result: { structuredContent: { items: [email] } } },
+        {
+          id: newer.id,
+          result: {
+            structuredContent: { items: [{ ...email, body: { text: "Latest preview" } }] },
+          },
+        },
+      ]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "ready",
+      emails: [{ body: "Latest preview" }],
+    });
+  });
   it("does not let an unrelated detail failure turn a checked-empty role snapshot into a failure", async () => {
     const { client, prisma, retained } = fixture();
     client.mcpServer.findMany.mockResolvedValueOnce([
@@ -5419,38 +5509,52 @@ describe("role campaign read", () => {
     expect(f.calls).toEqual([]);
   });
 
-  it("role setup surfaces the waiting approval card of the role's conversation", async () => {
-    const f = fixture(null);
-    const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
-    const at = new Date("2026-10-23T10:00:00.000Z");
-    prisma.run.findFirst = vi.fn(async () => ({
-      id: "run-9",
-      threadId: "role-thread",
-      createdAt: at,
-    }));
-    prisma.message.findFirst = vi.fn(async () => ({ id: "msg-ask", createdAt: at }));
-    prisma.externalEffect.findFirst = vi.fn(async () => null);
-    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
-    expect(setup.attention).toEqual({
-      kind: "approval",
-      threadId: "role-thread",
-      cardId: "msg-ask",
-      createdAt: at.toISOString(),
-    });
-    expect(prisma.run.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          status: "waiting_input",
-          thread: expect.objectContaining({ activeRecruitingRoleId: "role" }),
+  it.each(["approval", "question"] as const)(
+    "role setup surfaces the waiting %s card of the role's conversation",
+    async (kind) => {
+      const f = fixture(null);
+      const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+      const at = new Date("2026-10-23T10:00:00.000Z");
+      prisma.run.findFirst = vi.fn(async () => ({
+        id: "run-9",
+        threadId: "role-thread",
+        createdAt: at,
+      }));
+      prisma.message.findFirst = vi.fn(async () => ({
+        id: "msg-ask",
+        createdAt: at,
+        blocks: [
+          {
+            kind: "ask",
+            text: "Confirm the role requirements",
+            status: "pending",
+            ...(kind === "approval" ? { approvalEffectId: "approval-effect" } : {}),
+          },
+        ],
+      }));
+      prisma.externalEffect.findFirst = vi.fn(async () => null);
+      const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+      expect(setup.attention).toEqual({
+        kind,
+        threadId: "role-thread",
+        cardId: "msg-ask",
+        createdAt: at.toISOString(),
+      });
+      expect(prisma.run.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: "waiting_input",
+            thread: expect.objectContaining({ activeRecruitingRoleId: "role" }),
+          }),
         }),
-      }),
-    );
-    expect(prisma.message.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ runId: "run-9", role: "bot" }),
-      }),
-    );
-  });
+      );
+      expect(prisma.message.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ runId: "run-9", role: "bot" }),
+        }),
+      );
+    },
+  );
 
   it("role setup marks campaign and sender unavailable when Instantly is not assigned", async () => {
     const f = fixture(null);

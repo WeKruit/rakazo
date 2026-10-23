@@ -7,6 +7,7 @@ import {
   type RecruitingCrmRoleReference,
   type SpaceGroup,
 } from "@rakazo/contracts";
+import { pendingInputAttention } from "@rakazo/core";
 import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
 import { expireComputerExecutionLeases } from "./computers.js";
@@ -145,12 +146,16 @@ function memberRowsInOrder(groupId: string, botIds: string[], base = Date.now())
 
 const groupMemberOrder = [{ createdAt: "asc" as const }, { botId: "asc" as const }];
 
+const visibleMessageWhere = {
+  OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
+};
+
 const groupInclude = {
   thread: {
     include: {
-      messages: { orderBy: { seq: "desc" as const }, take: 1 },
+      messages: { where: visibleMessageWhere, orderBy: { seq: "desc" as const }, take: 1 },
       // A run paused on the user's answer or approval in this conversation.
-      runs: { where: { status: "waiting_input" }, take: 1, select: { id: true } },
+      runs: { where: { status: "waiting_input" }, select: { id: true } },
     },
   },
   members: {
@@ -337,6 +342,7 @@ export function createGroupRepos(prisma: PrismaClient) {
           select: {
             unread: true,
             messages: {
+              where: visibleMessageWhere,
               orderBy: { seq: "desc" },
               take: 1,
               select: { blocks: true },
@@ -363,6 +369,20 @@ export function createGroupRepos(prisma: PrismaClient) {
         include: groupInclude,
         orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
       });
+      const waitingRunIds = groups.flatMap(
+        (group) => group.thread?.runs.map((run) => run.id) ?? [],
+      );
+      const pendingCards = waitingRunIds.length
+        ? await prisma.message.findMany({
+            where: {
+              runId: { in: waitingRunIds },
+              role: "bot",
+              thread: { spaceId: actor.spaceId, userId: actor.userId },
+              blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+            },
+            select: { threadId: true, blocks: true },
+          })
+        : [];
       const references = await getRecruitingGroupCrmReferences(
         prisma,
         actor,
@@ -372,6 +392,14 @@ export function createGroupRepos(prisma: PrismaClient) {
         .filter((group) => hasMinimumActiveMembers(group.members))
         .map((group) => ({
           ...mapGroup(group as GroupRecord),
+          attention: pendingCards
+            .filter((card) => card.threadId === group.thread?.id)
+            .map((card) => pendingInputAttention(card.blocks))
+            .reduce<"approval" | "question" | null>(
+              (kind, next) =>
+                kind === "approval" || next === "approval" ? "approval" : (next ?? kind),
+              null,
+            ),
           ...(references.has(group.id) ? { crmRoleReference: references.get(group.id)! } : {}),
         }));
     },

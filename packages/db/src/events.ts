@@ -277,6 +277,8 @@ export interface SendUserMessageInput {
   trigger: "user" | "follow_up" | "webhook" | "messaging";
   clientNonce?: string;
   linkMessageToRun?: boolean;
+  /** Server-only wake: never a human statement or an approval source. */
+  internal?: boolean;
   /** When false, persist the user message without starting a run (team-chat transcript). */
   createRun?: boolean;
   /** When true, start a new run even if the bot is already busy (team-chat delivery). */
@@ -574,7 +576,7 @@ export async function sendUserMessage(
       // message without its event.
       const message = await createThreadMessageInTransaction(tx, {
         threadId: input.threadId,
-        role: "user",
+        role: input.internal ? "system" : "user",
         blocks: input.blocks,
         clientNonce: input.clientNonce,
       });
@@ -680,11 +682,12 @@ export async function sendUserMessage(
         runId: run?.id ?? busy?.id,
         payload: {
           messageId: message.id,
-          role: "user",
+          role: input.internal ? "system" : "user",
           blocks: input.blocks,
           // Carries the call id on the live event so a spoken turn groups into the
           // call card immediately, instead of after a refetch reads the nonce.
           callId: callIdFromClientNonce(message.clientNonce),
+          ...(message.clientNonce?.startsWith("autocontinue:") ? { internal: true } : {}),
         },
       });
       return { message, task, run, busy, event };

@@ -75,20 +75,32 @@ export async function guardRecruitingTurnEnd(
     where: { roleId: input.roleId, effect: { runId: run.id } },
     _sum: { rowCount: true },
   });
+  const playbook = await readRecruitingPlaybookStep(deps.prisma, input.roleId);
   const classification = classifyTurnEnd(
     { blocks: input.blocks },
     {
       handedOff: input.handedOff,
       pendingApproval: input.pendingApproval,
-      savedRows: savedRows._sum.rowCount ?? 0,
+      savedRows:
+        playbook?.stage === "calibration_10"
+          ? (savedRows._sum.rowCount ?? 0) > 0
+            ? playbook.savedCandidates
+            : 0
+          : (savedRows._sum.rowCount ?? 0),
+      deliverableRows: playbook?.stage === "calibration_10" ? 10 : 1,
     },
   );
   if (classification !== "none") return { action: "ended", classification };
-  const playbook = await readRecruitingPlaybookStep(deps.prisma, input.roleId);
   if (!playbook?.step) return { action: "ended", classification };
   const { stage, step } = playbook;
   const recent = await deps.prisma.message.findMany({
-    where: { threadId: run.threadId, role: "user" },
+    where: {
+      threadId: run.threadId,
+      OR: [
+        { role: "user" },
+        { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
+      ],
+    },
     orderBy: { seq: "desc" },
     take: max + 1,
     select: { clientNonce: true },
@@ -124,6 +136,7 @@ export async function guardRecruitingTurnEnd(
     blocks: [{ kind: "text", text }],
     prompt: text,
     trigger: "follow_up",
+    internal: true,
     clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:${count}`,
   });
   if (sent.runId)

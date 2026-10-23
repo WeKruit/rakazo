@@ -123,3 +123,11 @@ export function resolveAskChoice(
   const lower = trimmed.toLowerCase();
   return actions.find((action) => action.label.trim().toLowerCase() === lower);
 }
+
+/** Pending approval metadata takes precedence over ordinary clarification cards. */
+export function pendingInputAttention(blocks: unknown): "approval" | "question" | null {
+  if (!Array.isArray(blocks)) return null;
+  const pending = blocks.filter((block) => block?.kind === "ask" && block.status === "pending");
+  if (pending.some((block) => typeof block.approvalEffectId === "string")) return "approval";
+  return pending.length ? "question" : null;
+}

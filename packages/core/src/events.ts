@@ -70,6 +70,7 @@ export function projectMessages(
         seq: event.seq,
         role,
         blocks,
+        ...(payload.internal === true ? { internal: true } : {}),
         botId: event.botId ?? undefined,
         runId: event.runId ?? undefined,
         createdAt,

@@ -5704,6 +5704,14 @@ msgstr "重置你的密码"
 msgid "Resetting…"
 msgstr "正在重置…"
 
+#: src/pages/Shell.tsx
+msgid "Resize chat"
+msgstr "调整聊天宽度"
+
+#: src/pages/Shell.tsx
+msgid "Resize navigation"
+msgstr "调整导航宽度"
+
 #: src/pages/ResizableSidePanel.tsx
 msgid "Resize panel"
 msgstr "调整面板大小"
@@ -7623,3 +7631,15 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "你的任务"
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr "确认岗位要求"
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr "确认招聘材料"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr "确认候选人校准"

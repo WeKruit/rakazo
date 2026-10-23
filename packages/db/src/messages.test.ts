@@ -4,6 +4,7 @@ import type { Prisma, PrismaClient } from "./client.js";
 import {
   createThreadMessage,
   createThreadMessageInTransaction,
+  isNativeHumanMessage,
   loadRunHistoryMessages,
   loadRunHumanSources,
   RunHistoryWriteError,
@@ -308,4 +309,16 @@ describe("run history isolation", () => {
       expect(call[0].where.threadId).toEqual(expect.any(String));
     }
   });
+});
+
+it("never treats a synthetic continuation as human approval evidence", () => {
+  const row = {
+    role: "user",
+    botId: null,
+    externalTranscriptFor: null,
+    blocks: [{ kind: "text", text: "Continue" }],
+  };
+  expect(isNativeHumanMessage(row as never)).toBe(true);
+  expect(isNativeHumanMessage({ ...row, clientNonce: "autocontinue:run:1" } as never)).toBe(false);
+  expect(isNativeHumanMessage({ ...row, role: "system" } as never)).toBe(false);
 });

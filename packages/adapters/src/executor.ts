@@ -9930,6 +9930,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             timing: runTiming,
           });
           if (!completed) return;
+          let recruitingContinued = false;
           if (completed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
@@ -9937,7 +9938,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           } else if (thread.activeRecruitingRoleId && !messagingChannelRun) {
             // Turn-end guard: a recruiting turn must end with a deliverable, a question, a card
             // or a handoff; otherwise push the next playbook step instead of going quiet.
-            await guardRecruitingTurnEnd(deps, {
+            const guard = await guardRecruitingTurnEnd(deps, {
               run: { ...run, threadId: thread.id, userId: run.userId },
               roleId: thread.activeRecruitingRoleId,
               blocks: finalBlocks.length ? finalBlocks : blocks,
@@ -9946,6 +9947,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               postAssistant: (text) =>
                 publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
             }).catch((error) => getLogger().error("run.autocontinue guard", error));
+            recruitingContinued = guard?.action === "continued";
           }
           if (botMessageOutcome) {
             // Prefer the final reply. If the turn only posted mid-turn progress, return that
@@ -9962,9 +9964,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           const notifyBody = completionNotificationPreview(text);
           if (
-            runSendsFinishNotification(run.trigger) &&
-            notifyBody &&
-            !completed.continuationRunId
+            runSendsFinishNotification(
+              run.trigger,
+              Boolean(completed.continuationRunId) || recruitingContinued,
+            ) &&
+            notifyBody
           ) {
             await notifyRun(deps, run, {
               kind: "completion",
@@ -10952,8 +10956,8 @@ export function runIdentityInstruction(
   ].join("\n");
 }
 
-export function runSendsFinishNotification(trigger: string): boolean {
-  return trigger !== "created" && !isBackgroundRunTrigger(trigger);
+export function runSendsFinishNotification(trigger: string, continuationPending = false): boolean {
+  return !continuationPending && trigger !== "created" && !isBackgroundRunTrigger(trigger);
 }
 
 /** Open the model only while this worker still owns the running lease. */

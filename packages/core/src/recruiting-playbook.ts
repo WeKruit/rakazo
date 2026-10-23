@@ -413,7 +413,7 @@ export function nextPlaybookStep(
 
 export type TurnEndClass = "deliverable" | "question" | "card" | "handoff" | "none";
 
-type TurnEndBlock = { kind: string; text?: string; steps?: unknown };
+type TurnEndBlock = { kind: string; text?: string; steps?: unknown; status?: string };
 
 const DELIVERABLE_BLOCKS = new Set(["candidate", "report", "artifact", "chart", "assessment"]);
 const CARD_BLOCKS = new Set(["approval", "mcp_approval", "connect", "app_connect", "choice"]);
@@ -438,10 +438,13 @@ export function classifyTurnEnd(
   if (events.handedOff) return "handoff";
   if (events.pendingApproval) return "card";
   const blocks = message.blocks;
-  if (blocks.some((block) => block.kind === "ask")) return "question";
+  if (blocks.some((block) => block.kind === "ask" && block.status !== "answered"))
+    return "question";
   if (blocks.some((block) => CARD_BLOCKS.has(block.kind))) return "card";
   if ((events.savedRows ?? 0) >= (events.deliverableRows ?? 1)) return "deliverable";
-  if (blocks.some((block) => DELIVERABLE_BLOCKS.has(block.kind))) return "deliverable";
+  const requiresSavedRows = (events.deliverableRows ?? 1) > 1;
+  if (!requiresSavedRows && blocks.some((block) => DELIVERABLE_BLOCKS.has(block.kind)))
+    return "deliverable";
   const text = blocks
     .filter((block) => block.kind === "text" && typeof block.text === "string")
     .map((block) => block.text as string)
@@ -449,6 +452,6 @@ export function classifyTurnEnd(
     .trim();
   if (!text) return "none";
   if (QUESTION_RE.test(text)) return "question";
-  if ((text.match(LIST_ROW_RE)?.length ?? 0) >= 3) return "deliverable";
+  if (!requiresSavedRows && (text.match(LIST_ROW_RE)?.length ?? 0) >= 3) return "deliverable";
   return "none";
 }

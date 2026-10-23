@@ -6,6 +6,16 @@
 @source "../../packages/ui-web/src/**/*.{ts,tsx}";
 @source "./src/**/*.{ts,tsx}";
 
+/* While a pane is dragged, panes follow the pointer instead of easing toward it. */
+html[data-pane-resizing] {
+  cursor: col-resize;
+  user-select: none;
+}
+html[data-pane-resizing] * {
+  /* biome-ignore lint/complexity/noImportantStyles: must override the pane's own transition classes */
+  transition: none !important;
+}
+
 html,
 body,
 #root {

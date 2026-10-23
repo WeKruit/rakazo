@@ -494,3 +494,9 @@ describe("subagentMarksUnread", () => {
     expect(subagentMarksUnread("bot_message", "completed", true)).toBe(true);
   });
 });
+
+it("does not announce completion while an automatic continuation is pending", () => {
+  expect(runSendsFinishNotification("user", true)).toBe(false);
+  expect(runSendsFinishNotification("follow_up", true)).toBe(false);
+  expect(runSendsFinishNotification("follow_up", false)).toBe(true);
+});

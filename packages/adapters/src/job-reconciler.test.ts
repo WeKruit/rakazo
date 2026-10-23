@@ -10,6 +10,10 @@ import {
 } from "./job-reconciler.js";
 import { loopGuardStopText } from "./tool-loop.js";
 
+vi.mock("./recruiting-question-nudge.js", () => ({
+  reconcileRecruitingQuestions: vi.fn(async () => undefined),
+}));
+
 vi.mock("./bot-messages.js", () => ({ returnBotMessageOutcome: vi.fn() }));
 
 function publisher() {

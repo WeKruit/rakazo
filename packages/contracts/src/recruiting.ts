@@ -1556,7 +1556,7 @@ export const RecruitingRoleSetupSchema = z.strictObject({
   /** A run in this role's conversation is waiting for the human (e.g. the send confirmation). */
   attention: z
     .strictObject({
-      kind: z.literal("approval"),
+      kind: z.enum(["approval", "question"]),
       threadId: Id,
       cardId: Id.nullable(),
       createdAt: IsoDate,
