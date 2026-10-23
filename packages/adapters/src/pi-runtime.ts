@@ -2081,19 +2081,8 @@ function builtinParameters(tool: ConnectorTool) {
     return Type.Unsafe(tool.inputSchema) as unknown as ReturnType<typeof Type.Object>;
   }
   if (tool.name === "remember") {
-    return Type.Object({
-      content: Type.String(),
-      path: Type.Optional(Type.String()),
-      expectedRevision: Type.Integer({ minimum: 0 }),
-      recruitingFeedback: Type.Optional(
-        Type.Unsafe(
-          (tool.inputSchema.properties as Record<string, unknown>).recruitingFeedback as Record<
-            string,
-            unknown
-          >,
-        ),
-      ),
-    });
+    // The built-in schema carries the edit:{find,replace} mode and its descriptions.
+    return Type.Unsafe(tool.inputSchema) as unknown as ReturnType<typeof Type.Object>;
   }
   if (tool.name === "shell") {
     return Type.Object({
