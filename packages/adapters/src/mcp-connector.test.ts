@@ -1,3 +1,4 @@
+import { toolRequiresApproval } from "@rakazo/core";
 import { IsolationError } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -85,6 +86,441 @@ const TEST_NETWORK = {
   fetch: (input: string | URL | Request, init?: RequestInit) => globalThis.fetch(input, init),
   resolveHostname: async () => [{ address: "203.0.113.10", family: 4 }],
 };
+
+describe("local native Instantly thread history", () => {
+  const route = {
+    connectorId: "mcp",
+    resourceId: SERVER.id,
+    resourceRevision: 1,
+    toolName: "native_instantly_get_thread_history",
+  };
+  const anchor = {
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    organization_id: "123e4567-e89b-42d3-a456-426614174001",
+    campaign_id: "123e4567-e89b-42d3-a456-426614174002",
+    timestamp_created: "2026-10-22T10:00:00Z",
+    timestamp_email: "2026-10-22T10:00:00Z",
+    message_id: "<original@example.test>",
+    thread_id: "opaque:thread + original",
+    eaccount: "team@example.test",
+    from_address_email: "person@example.test",
+    to_address_email_list: "team@example.test",
+    subject: "Original reply",
+    body: { text: "Full original reply" },
+    ue_type: 2,
+  };
+  function fixture(endpoint = "https://mcp.instantly.ai/mcp") {
+    const context = {
+      userId: "u1",
+      spaceId: "w1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    };
+    const server = {
+      ...SERVER,
+      userId: context.userId,
+      spaceId: context.spaceId,
+      enabled: true,
+      endpoint,
+      secretId: "key-1",
+    };
+    const assignment = {
+      ...ASSIGNMENT,
+      server,
+      allowAllTools: false,
+      allowedTools: ["get_email", "list_emails"],
+    };
+    const state = {
+      key: "fixture-private-api-key",
+      material: undefined as Record<string, unknown> | undefined,
+      available: true,
+      failNext: false,
+      initializations: 0,
+      calls: [] as string[],
+      tools: ["get_email", "list_emails"].map((name) => ({
+        name,
+        inputSchema: { type: "object" },
+      })),
+      callResult: { content: [], structuredContent: structuredClone(anchor) },
+      page: { items: [structuredClone(anchor)] } as Record<string, unknown>,
+      status: 200,
+      afterAnchor: () => {},
+      afterRest: () => {},
+    };
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn(async () => (state.available ? [assignment] : [])),
+        findFirst: vi.fn(async ({ where }) =>
+          state.available &&
+          where.userId === context.userId &&
+          where.spaceId === context.spaceId &&
+          where.botId === context.botId &&
+          where.serverId === server.id &&
+          server.enabled !== false
+            ? assignment
+            : null,
+        ),
+      },
+      secret: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.id === server.secretId &&
+          where.userId === context.userId &&
+          where.spaceId === context.spaceId
+            ? { id: server.secretId, ciphertext: "encrypted-record" }
+            : null,
+        ),
+      },
+      mcpServer: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.id === server.id &&
+          where.userId === context.userId &&
+          where.spaceId === context.spaceId &&
+          where.endpoint === server.endpoint &&
+          where.transport === server.transport
+            ? server
+            : null,
+        ),
+      },
+    };
+    const secrets = {
+      load: vi.fn(async () => JSON.stringify(state.material ?? { secret: state.key })),
+    };
+    const native = mcpFetch(state, server.endpoint);
+    const rest = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init);
+      expect(request.method).toBe("GET");
+      expect(new URL(request.url).origin).toBe("https://api.instantly.ai");
+      expect(new URL(request.url).pathname).toBe("/api/v2/emails");
+      expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
+      state.afterRest();
+      return new Response(JSON.stringify(state.page), { status: state.status });
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if (new URL(logicalHref(input, init)).origin === "https://api.instantly.ai")
+          return rest(input, init);
+        const response = await native(input, init);
+        const request = new Request(input, init);
+        if (request.method === "POST") {
+          const rpc = await request.json();
+          if (rpc.method === "tools/call") state.afterAnchor();
+        }
+        return response;
+      }),
+    );
+    const connector = new McpConnector(prisma as never, secrets as never, {
+      network: TEST_NETWORK,
+    });
+    const collect = async (
+      args: Record<string, unknown> = { anchor_id: anchor.id },
+      callRoute = route,
+      actor = context,
+    ) => {
+      const events = [];
+      for await (const event of connector.execute(
+        {
+          tool: "instantly__demo__get_thread_history",
+          route: callRoute,
+          args,
+          executionId: "thread-read",
+        },
+        actor as never,
+      ))
+        events.push(event);
+      return events;
+    };
+    return { connector, context, state, server, assignment, prisma, secrets, rest, collect };
+  }
+  it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {
+    const f = fixture();
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const tool = tools.find((tool) => tool.route?.toolName === route.toolName);
+      expect(tool).toMatchObject({
+        name: "instantly__demo__get_thread_history",
+        readOnly: true,
+        route,
+      });
+      expect(tool?.description).toMatch(/local native REST integration/i);
+      expect(tool!.inputSchema.required).toEqual(["anchor_id"]);
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
+      const events = await f.collect({ anchor_id: anchor.id, limit: 5 });
+      expect(events).toEqual([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              anchor: f.state.callResult,
+              page: f.state.page,
+              query: {
+                search: `thread:${anchor.thread_id}`,
+                eaccount: anchor.eaccount,
+                mode: "emode_all",
+                latest_of_thread: "false",
+                preview_only: "false",
+                limit: "5",
+              },
+              coverage: {
+                scope: "exact_thread",
+                anchorId: anchor.id,
+                organizationId: anchor.organization_id,
+                account: anchor.eaccount,
+                threadId: anchor.thread_id,
+                startingAfter: null,
+                nextStartingAfter: null,
+                anchorPresent: true,
+                pageExhausted: true,
+                bodiesComplete: true,
+                returnedCount: 1,
+                checkedAt: expect.any(String),
+              },
+            },
+          },
+        },
+      ]);
+      expect(f.rest).toHaveBeenCalledOnce();
+      expect(new URL(logicalHref(...f.rest.mock.calls[0]!)).searchParams.get("search")).toBe(
+        `thread:${anchor.thread_id}`,
+      );
+      expect(f.state.calls).toEqual(["get_email"]);
+      expect(JSON.stringify(events)).not.toContain(f.state.key);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each(["too_large", "unavailable", "missing-body", "cursor", "empty"])(
+    "retains honest %s page coverage without claiming an entire thread",
+    async (kind) => {
+      const f = fixture();
+      if (kind === "too_large" || kind === "unavailable")
+        f.state.page = { items: [{ ...anchor, body_fallback_reason: kind }] };
+      if (kind === "missing-body") f.state.page = { items: [{ ...anchor, body: {} }] };
+      if (kind === "cursor") f.state.page = { items: [anchor], next_starting_after: "opaque-next" };
+      if (kind === "empty") f.state.page = { items: [] };
+      try {
+        const events = await f.collect({
+          anchor_id: anchor.id,
+          starting_after: "opaque-prior",
+          limit: 100,
+        });
+        expect(events[0]).toMatchObject({
+          type: "result",
+          data: {
+            structuredContent: {
+              page: f.state.page,
+              coverage: {
+                startingAfter: "opaque-prior",
+                nextStartingAfter: kind === "cursor" ? "opaque-next" : null,
+                anchorPresent: kind !== "empty",
+                pageExhausted: kind !== "cursor",
+                bodiesComplete: !["too_large", "unavailable", "missing-body"].includes(kind),
+              },
+            },
+          },
+        });
+        expect(JSON.stringify(events)).not.toContain('"complete":true');
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each([
+    "get_email",
+    "list_emails",
+    "actor",
+    "revision",
+    "endpoint",
+    "disabled",
+    "oauth",
+    "ambiguous-key",
+  ])("denies invalid %s before the REST read", async (kind) => {
+    const f = fixture();
+    if (kind === "get_email" || kind === "list_emails")
+      f.assignment.allowedTools = f.assignment.allowedTools.filter((name) => name !== kind);
+    if (kind === "revision") f.server.revision++;
+    if (kind === "endpoint") f.server.endpoint = "https://other.example.test/mcp";
+    if (kind === "disabled") Object.assign(f.server, { enabled: false });
+    if (kind === "oauth")
+      f.state.material = { oauth: { tokens: { access_token: "unrelated-audience" } } };
+    if (kind === "ambiguous-key")
+      f.state.material = {
+        secret: f.state.key,
+        headers: { Authorization: "Bearer conflicting-private-key" },
+      };
+    try {
+      const events = await f.collect(
+        undefined,
+        route,
+        kind === "actor" ? { ...f.context, userId: "foreign" } : f.context,
+      );
+      expect(events).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      expect(JSON.stringify(events)).not.toMatch(
+        /fixture-private-api-key|conflicting-private-key|unrelated-audience/,
+      );
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each(["after-anchor", "after-rest"])(
+    "fences changed grants, revision and credentials %s",
+    async (phase) => {
+      for (const kind of ["grant", "revision", "credential", "pointer"]) {
+        const f = fixture();
+        const change = () => {
+          if (kind === "grant") f.assignment.allowedTools = [];
+          if (kind === "revision") f.server.revision++;
+          if (kind === "credential") f.state.key = "changed-private-key";
+          if (kind === "pointer") f.server.secretId = "changed-secret";
+        };
+        if (phase === "after-anchor") f.state.afterAnchor = change;
+        else f.state.afterRest = change;
+        try {
+          expect(await f.collect()).toMatchObject([{ type: "error" }]);
+          expect(f.rest).toHaveBeenCalledTimes(phase === "after-rest" ? 1 : 0);
+        } finally {
+          await f.connector.close();
+        }
+      }
+    },
+  );
+  it.each(["thread_id", "organization_id", "eaccount", "id", "shape", "http", "oversize"])(
+    "rejects %s response without inventing an empty successful page",
+    async (kind) => {
+      const f = fixture();
+      if (["thread_id", "organization_id", "eaccount"].includes(kind))
+        f.state.page = {
+          items: [
+            { ...anchor, [kind]: kind === "organization_id" ? anchor.campaign_id : "foreign" },
+          ],
+        };
+      if (kind === "id") f.state.callResult.structuredContent.id = anchor.campaign_id;
+      if (kind === "shape") f.state.page = { items: "invalid" };
+      if (kind === "http") f.state.status = 401;
+      if (kind === "oversize") f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
+      try {
+        expect(await f.collect()).toMatchObject([{ type: "error" }]);
+        expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each(["get_thread_history", route.toolName])(
+    "handles offered remote %s explicitly without routing it to REST",
+    async (toolName) => {
+      const f = fixture();
+      f.state.tools.push({ name: toolName, inputSchema: { type: "object" } });
+      f.assignment.allowedTools.push(toolName);
+      try {
+        const tools = await f.connector.discoverTools(f.context as never);
+        expect(tools.some((tool) => tool.name === "instantly__demo__get_thread_history")).toBe(
+          false,
+        );
+        expect(await f.collect()).toMatchObject([{ type: "error" }]);
+        expect(f.rest).not.toHaveBeenCalled();
+        const remote = tools.find((tool) => tool.name === `mcp__demo__${toolName}`)!;
+        expect(remote.readOnly).not.toBe(true);
+        if (toolName === "get_thread_history") {
+          expect(await f.collect({}, remote.route as typeof route)).toMatchObject([
+            { type: "result" },
+          ]);
+          expect(f.state.calls).toEqual([toolName]);
+        }
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each(["get_thread_history", route.toolName])(
+    "does not intercept a third-party remote %s",
+    async (toolName) => {
+      const f = fixture("https://unrelated.example.test/mcp");
+      f.assignment.allowedTools = [toolName];
+      f.state.tools = [{ name: toolName, inputSchema: { type: "object" } }];
+      try {
+        const tools = await f.connector.discoverTools(f.context as never);
+        expect(tools).toHaveLength(1);
+        expect(tools[0]!.readOnly).not.toBe(true);
+        expect(await f.collect({}, tools[0]!.route as typeof route)).toMatchObject([
+          { type: "result" },
+        ]);
+        expect(f.state.calls).toEqual([toolName]);
+        expect(f.rest).not.toHaveBeenCalled();
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it("preserves local read-only classification through the native lazy catalog without trusting remote hints", async () => {
+    const f = fixture();
+    const write = {
+      name: "send_email",
+      inputSchema: { type: "object" },
+      annotations: { readOnlyHint: true },
+    };
+    f.state.tools.push(
+      write,
+      ...Array.from({ length: 20 }, (_, index) => ({
+        name: `extra_${index}`,
+        inputSchema: { type: "object" },
+      })),
+    );
+    f.assignment.allowAllTools = true;
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const execute = tools.find((tool) => tool.route?.toolName === "__catalog_execute")!;
+      expect(execute).toBeDefined();
+      const resolve = async (toolName: string, args: Record<string, unknown>) =>
+        f.connector.resolveCall(
+          {
+            tool: execute.name,
+            route: execute.route,
+            executionId: "lazy-history",
+            args: { id: `${SERVER.id}:${toolName}`, arguments: args },
+          },
+          f.context as never,
+        );
+      const local = await resolve(route.toolName, { anchor_id: anchor.id });
+      expect(local!.tool.readOnly).toBe(true);
+      expect(toolRequiresApproval(local!.tool.name, true, local!.tool.readOnly)).toBe(false);
+      const remote = await resolve("send_email", {});
+      expect(remote!.tool.readOnly).not.toBe(true);
+      expect(toolRequiresApproval(remote!.tool.name, true, remote!.tool.readOnly)).toBe(true);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each([
+    {},
+    { anchor_id: "not-a-uuid" },
+    { anchor_id: anchor.id, limit: 0 },
+    { anchor_id: anchor.id, limit: 101 },
+    { anchor_id: anchor.id, starting_after: " " },
+    { anchor_id: anchor.id, search: "anything" },
+  ])("rejects malformed input before reading provider data: %j", async (args) => {
+    const f = fixture();
+    try {
+      expect(await f.collect(args)).toMatchObject([{ type: "error" }]);
+      expect(f.state.calls).toEqual([]);
+      expect(f.rest).not.toHaveBeenCalled();
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("reuses a raw Authorization API key only in the official REST bearer header", async () => {
+    const f = fixture();
+    f.state.material = { headers: { Authorization: f.state.key } };
+    try {
+      expect(await f.collect()).toMatchObject([{ type: "result" }]);
+      expect(f.rest).toHaveBeenCalledOnce();
+    } finally {
+      await f.connector.close();
+    }
+  });
+});
 
 function logicalHref(input: string | URL | Request, init?: RequestInit): string {
   const url = new URL(

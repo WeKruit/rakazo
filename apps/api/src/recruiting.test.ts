@@ -851,12 +851,22 @@ describe("saved recruiting correspondence", () => {
     });
     expect(JSON.stringify(result)).not.toContain(row.thread_id);
   });
-  it.each(["list_emails", "get_email"])(
-    "projects an HTML-only %s body as safe readable text with honest preview status",
-    async (toolName) => {
+  it.each([
+    ["list_emails", null],
+    ["get_email", null],
+    ["get_email", "too_large"],
+    ["get_email", "unavailable"],
+  ] as const)(
+    "projects an HTML-only %s body with %s fallback as safe readable text with honest preview status",
+    async (toolName, fallbackReason) => {
       const html =
         '<p>Hello &amp; welcome, Avery &#128075;</p><p>Can we speak Thursday? <a href="https://cal.com/example/intro">Book time</a> or <a href="mailto:avery@example.test">email me</a>.</p><p><a href="https://example.test/job">https://example.test/job</a> <a href="javascript:unsafeLink()">Original label</a> <a href="data:text/html,unsafeData">Data label</a></p><div>Regards,<br>Avery</div><script>unsafeScript()</script><style>unsafeStyle{}</style>';
-      const row = { ...email, body: { html }, content_preview: "Short provider preview" };
+      const row = {
+        ...email,
+        body: { html },
+        content_preview: "Short provider preview",
+        body_fallback_reason: fallbackReason,
+      };
       const { client, prisma, retained } = fixture({
         result: { structuredContent: { items: [row] } },
       });
@@ -906,7 +916,8 @@ describe("saved recruiting correspondence", () => {
       expect(result.emails[0]!.body).not.toMatch(
         /unsafeScript|unsafeStyle|<\/?(?:p|a|script|style)\b/,
       );
-      expect(result.emails[0]!.snippet).toBe(toolName === "list_emails");
+      expect(result.emails[0]!.snippet).toBe(toolName === "list_emails" || fallbackReason !== null);
+      if (fallbackReason !== null) expect(result.partial).toBe(true);
       expect(row.body.html).toBe(html);
     },
   );

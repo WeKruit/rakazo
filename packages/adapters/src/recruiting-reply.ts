@@ -82,11 +82,39 @@ const Route = z.object({
   resourceRevision: z.number().int().positive(),
   toolName: z.string().min(1),
 });
+const ThreadHistory = z.strictObject({
+  source: z.literal("local_native_instantly_rest"),
+  anchor: z.unknown(),
+  page: z.unknown(),
+  query: z.record(z.string(), z.string()),
+  coverage: z.strictObject({
+    scope: z.literal("exact_thread"),
+    anchorId: z.uuid(),
+    organizationId: z.uuid(),
+    account: z.string().min(1),
+    threadId: z.string().min(1),
+    startingAfter: z.string().min(1).nullable(),
+    nextStartingAfter: z.string().min(1).nullable(),
+    anchorPresent: z.boolean(),
+    pageExhausted: z.boolean(),
+    bodiesComplete: z.boolean(),
+    returnedCount: z.number().int().nonnegative(),
+    checkedAt: Time,
+  }),
+});
+function completeBody(email: InstantlyEmail): boolean {
+  return (
+    email.body_fallback_reason == null &&
+    (typeof email.body.text === "string" || typeof email.body.html === "string")
+  );
+}
 type PinnedRoute = z.infer<typeof Route>;
 export type RecruitingReplyContent = z.infer<typeof Content>;
 export type RecruitingReplySelection = {
   target: RecruitingCrmTarget;
-  receipt: RecruitingCrmImportReceipt;
+  receipt?: RecruitingCrmImportReceipt | null;
+  candidateId?: string;
+  membershipProof?: unknown;
   emailProof: unknown;
   crmProof: unknown;
 };
@@ -110,7 +138,7 @@ export type RecruitingReplyRead = Readonly<{
 export type RecruitingReplyPreflight = {
   status: "blocked" | "incomplete" | "clear";
   scope: "crm_and_instantly";
-  gaps: readonly ["legacy_hold_sources", "gmail_history"];
+  gaps: readonly string[];
   reasons: readonly string[];
   reads: readonly RecruitingReplyRead[];
   prepared?: PreparedRecruitingReply;
@@ -134,13 +162,35 @@ function payload(raw: unknown): Record<string, unknown> | undefined {
 
 function targetAndReceipt(selection: RecruitingReplySelection) {
   const target = RecruitingCrmTargetSchema.safeParse(selection?.target);
-  const receipt = RecruitingCrmImportReceiptSchema.safeParse(selection?.receipt);
-  return target.success &&
-    receipt.success &&
-    target.data.organizationId === receipt.data.organization_id &&
-    target.data.crmRoleId === receipt.data.role_spec_id
-    ? { target: target.data, receipt: receipt.data }
-    : null;
+  if (!target.success) return null;
+  if (selection.receipt) {
+    const receipt = RecruitingCrmImportReceiptSchema.safeParse(selection.receipt);
+    return receipt.success &&
+      target.data.organizationId === receipt.data.organization_id &&
+      target.data.crmRoleId === receipt.data.role_spec_id
+      ? { target: target.data, candidateId: receipt.data.candidate_id, receipt: receipt.data }
+      : null;
+  }
+  const rows = payload(selection.membershipProof)?.data;
+  const candidateId = selection.candidateId;
+  if (
+    !z.uuid().safeParse(candidateId).success ||
+    !Array.isArray(rows) ||
+    !rows.every(
+      (row) =>
+        row &&
+        typeof row === "object" &&
+        row.organization_id === target.data.organizationId &&
+        row.candidate_id === candidateId &&
+        z.uuid().safeParse(row.membership_id).success,
+    ) ||
+    !rows.some(
+      (row) =>
+        row.role_spec_id === target.data.crmRoleId && row.client_id === target.data.crmClientId,
+    )
+  )
+    return null;
+  return { target: target.data, candidateId: candidateId!, receipt: null };
 }
 
 // Same btrim/default semantics as the existing CRM crm_role_key SQL function.
@@ -157,13 +207,13 @@ export function prepareRecruitingReply(
   const bound = targetAndReceipt(selection);
   const parsed = CrmContext.safeParse(payload(selection?.crmProof)?.data);
   if (!bound || !parsed.success) return { status: "incomplete", reasons: ["crm_context_invalid"] };
-  const { target, receipt } = bound;
+  const { target, receipt, candidateId } = bound;
   const crm = parsed.data;
   if (
-    crm.candidate.id !== receipt.candidate_id ||
+    crm.candidate.id !== candidateId ||
     crm.candidate.organization_id !== target.organizationId ||
     (crm.pipeline &&
-      (crm.pipeline.candidate_id !== receipt.candidate_id ||
+      (crm.pipeline.candidate_id !== candidateId ||
         crm.pipeline.organization_id !== target.organizationId))
   )
     return { status: "incomplete", reasons: ["crm_identity_mismatch"] };
@@ -188,25 +238,21 @@ export function prepareRecruitingReply(
               "do_not_contact",
             ].includes(crm.pipeline.stage.trim().toLowerCase())
           ? "crm_pipeline_blocked"
-          : crm.pipeline?.review_result === "rejected"
+          : crm.pipeline?.review_result === "rejected" &&
+              (crm.pipeline.role_spec_id === null || crm.pipeline.role_spec_id === target.crmRoleId)
             ? "crm_review_rejected"
             : interests.some((entry) => entry.interest === "declined")
               ? "crm_role_declined"
               : null;
   if (block) return { status: "blocked", reasons: [block] };
   if (
-    crm.candidate.linkedin_identity !== receipt.linkedin_identity ||
-    !crm.candidate.linkedin_identity
+    receipt &&
+    (crm.candidate.linkedin_identity !== receipt.linkedin_identity ||
+      !crm.candidate.linkedin_identity)
   )
     return { status: "incomplete", reasons: ["crm_identity_mismatch"] };
   if (crm.suppressed !== false || !crm.candidate.email || /[\r\n\0]/.test(crm.candidate.email))
     return { status: "incomplete", reasons: ["crm_suppression_unknown"] };
-  if (
-    !crm.pipeline ||
-    ((crm.pipeline.role_spec_id === null || crm.pipeline.role_spec_id === target.crmRoleId) &&
-      !["Interested", "Screening", "Interview", "Offer", "Hired"].includes(crm.pipeline.stage))
-  )
-    return { status: "incomplete", reasons: ["crm_pipeline_unknown"] };
   if (
     interests.length > 1 ||
     interests.some(
@@ -220,6 +266,8 @@ export function prepareRecruitingReply(
   const message = Content.safeParse(content);
   if (!anchor || !message.success)
     return { status: "incomplete", reasons: ["native_email_invalid"] };
+  if (!completeBody(anchor))
+    return { status: "incomplete", reasons: ["provider_anchor_body_incomplete"] };
   const body = message.data.body;
   const request = readInstantlyReplyRequest({
     reply_to_uuid: anchor.id,
@@ -242,7 +290,7 @@ export function prepareRecruitingReply(
       account: request.eaccount,
       threadId: anchor.thread_id!,
       anchorId: anchor.id,
-      crmCandidateId: receipt.candidate_id,
+      crmCandidateId: candidateId,
     },
   });
 }
@@ -258,6 +306,7 @@ function historyFingerprint(email: InstantlyEmail) {
       direction: email.ue_type ?? null,
       subject: email.subject,
       body: email.body,
+      bodyFallbackReason: email.body_fallback_reason ?? null,
     }),
     addresses: [
       email.eaccount,
@@ -353,7 +402,7 @@ export async function runRecruitingReplyPreflight(input: {
       status,
       reasons,
       scope: "crm_and_instantly",
-      gaps: ["legacy_hold_sources", "gmail_history"],
+      gaps: [],
       reads,
       ...(prepared ? { prepared } : {}),
     });
@@ -407,27 +456,8 @@ export async function runRecruitingReplyPreflight(input: {
           throw new Error("read_route_changed");
         return resolved;
       };
-      let readArgs = args;
-      let resolved = await resolve(readArgs);
-      if (operation === "list_emails") {
-        const controlsDeclared = (schema: Record<string, unknown>) => {
-          const properties = schema.properties;
-          return (
-            properties !== null &&
-            typeof properties === "object" &&
-            !Array.isArray(properties) &&
-            ["mode", "latest_of_thread", "preview_only"].every((key) =>
-              Object.hasOwn(properties, key),
-            )
-          );
-        };
-        if (!controlsDeclared(resolved.tool.inputSchema))
-          throw new Error("provider_history_scope_unknown");
-        readArgs = { ...args, mode: "emode_all", latest_of_thread: false, preview_only: false };
-        resolved = await resolve(readArgs);
-        if (!controlsDeclared(resolved.tool.inputSchema))
-          throw new Error("provider_history_scope_unknown");
-      }
+      const readArgs = args;
+      const resolved = await resolve(readArgs);
       const events: ConnectorEvent[] = [];
       try {
         input.context.signal.throwIfAborted();
@@ -447,13 +477,20 @@ export async function runRecruitingReplyPreflight(input: {
     };
     const crmProof = await read(crmRoute.data, "get_crm_candidate_outreach_context", {
       p_org: bound.target.organizationId,
-      p_candidate: bound.receipt.candidate_id,
+      p_candidate: bound.candidateId,
     });
-    const initial = prepareRecruitingReply({ ...selection, crmProof }, content);
+    const membershipProof = selection.receipt
+      ? selection.membershipProof
+      : await read(crmRoute.data, "list_crm_candidate_roles", {
+          p_org: bound.target.organizationId,
+          p_candidate: bound.candidateId,
+        });
+    const currentSelection = { ...selection, crmProof, membershipProof };
+    const initial = prepareRecruitingReply(currentSelection, content);
     if (initial.status !== "ready") return done(initial.status, initial.reasons);
     const emailProof = await read(mailRoute.data, "get_email", { id: original.id });
     const anchor = readInstantlyEmail(payload(emailProof));
-    const prepared = prepareRecruitingReply({ ...selection, crmProof, emailProof }, content);
+    const prepared = prepareRecruitingReply({ ...currentSelection, emailProof }, content);
     if (prepared.status !== "ready") return done(prepared.status, prepared.reasons);
     if (
       !anchor ||
@@ -467,14 +504,72 @@ export async function runRecruitingReplyPreflight(input: {
     let cursor: string | undefined;
     let anchorSeen = false;
     for (let pageIndex = 0; pageIndex < maxPages; pageIndex++) {
-      const raw = await read(mailRoute.data, "list_emails", {
-        eaccount: prepared.identity.account,
+      const raw = await read(mailRoute.data, "native_instantly_get_thread_history", {
+        anchor_id: original.id,
         limit: 100,
         ...(cursor ? { starting_after: cursor } : {}),
       });
-      const page = readInstantlyEmailPage(payload(raw));
-      if (!page) return done("incomplete", ["provider_history_invalid"]);
-      for (const email of page.items) {
+      const history = ThreadHistory.safeParse(payload(raw));
+      const page = history.success ? readInstantlyEmailPage(history.data.page) : null;
+      if (!history.success || !page) return done("incomplete", ["provider_history_invalid"]);
+      const currentAnchor = readInstantlyEmail(payload(history.data.anchor));
+      if (
+        !currentAnchor ||
+        !completeBody(currentAnchor) ||
+        !sameHistoryFingerprint(historyFingerprint(anchor), historyFingerprint(currentAnchor))
+      )
+        return done("incomplete", ["provider_anchor_changed"]);
+      const { coverage, query } = history.data;
+      const expectedQuery = {
+        search: `thread:${prepared.identity.threadId}`,
+        eaccount: prepared.identity.account,
+        mode: "emode_all",
+        latest_of_thread: "false",
+        preview_only: "false",
+        limit: "100",
+        ...(cursor ? { starting_after: cursor } : {}),
+      };
+      if (
+        stableJsonValue(query) !== stableJsonValue(expectedQuery) ||
+        coverage.anchorId !== anchor.id ||
+        coverage.organizationId !== anchor.organization_id ||
+        !sameInstantlyAddresses(coverage.account, anchor.eaccount) ||
+        coverage.threadId !== anchor.thread_id ||
+        coverage.startingAfter !== (cursor ?? null) ||
+        coverage.nextStartingAfter !== (page.next_starting_after ?? null) ||
+        coverage.returnedCount !== page.items.length ||
+        coverage.pageExhausted !== !page.next_starting_after ||
+        coverage.anchorPresent !== page.items.some((email) => email.id === anchor.id) ||
+        coverage.bodiesComplete !== page.items.every(completeBody) ||
+        page.items.some(
+          (email) =>
+            email.organization_id !== anchor.organization_id ||
+            email.thread_id !== anchor.thread_id ||
+            !sameInstantlyAddresses(email.eaccount, anchor.eaccount),
+        )
+      )
+        return done("incomplete", ["provider_history_scope_mismatch"]);
+      for (const listed of page.items) {
+        let email = listed;
+        if (!completeBody(listed)) {
+          const full = readInstantlyEmail(
+            payload(await read(mailRoute.data, "get_email", { id: listed.id })),
+          );
+          if (!full || !completeBody(full))
+            return done("incomplete", ["provider_history_body_incomplete"]);
+          if (
+            !sameHistoryFingerprint(
+              historyFingerprint({
+                ...listed,
+                body: full.body,
+                body_fallback_reason: full.body_fallback_reason,
+              }),
+              historyFingerprint(full),
+            )
+          )
+            return done("incomplete", ["provider_history_conflict"]);
+          email = full;
+        }
         const fingerprint = historyFingerprint(email);
         const previous = seenEmails.get(email.id);
         if (previous && !sameHistoryFingerprint(previous, fingerprint))
@@ -494,13 +589,7 @@ export async function runRecruitingReplyPreflight(input: {
       cursor = page.next_starting_after;
     }
     return done("incomplete", ["history_page_limit"]);
-  } catch (error) {
-    return done("incomplete", [
-      input.context.signal.aborted
-        ? "read_aborted"
-        : error instanceof Error && error.message === "provider_history_scope_unknown"
-          ? error.message
-          : "read_failed",
-    ]);
+  } catch {
+    return done("incomplete", [input.context.signal.aborted ? "read_aborted" : "read_failed"]);
   }
 }
