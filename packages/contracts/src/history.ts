@@ -14,10 +14,16 @@ export const HistorySearchInputSchema = z.object({
   after: HistoryDateBoundary.optional(),
   beforeSeq: z.number().int().nonnegative().optional(),
   limit: z.number().int().min(1).max(20).optional(),
+  /** "mine" searches this user's other conversations in the Space; never other users'. */
+  scope: z.enum(["conversation", "mine"]).optional(),
+  /** Cursor for scope "mine", paired with before (createdAt of the last result). */
+  beforeMessageId: Id.optional(),
 });
 export const HistoryReadInputSchema = z
   .object({
     messageId: Id,
+    /** Another conversation of the same user, as returned by a scope "mine" search. */
+    threadId: Id.optional(),
     linkedRunId: Id.optional(),
     effectId: Id.optional(),
     effectAfterId: Id.optional(),
