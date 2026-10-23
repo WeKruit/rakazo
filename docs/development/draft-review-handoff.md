@@ -111,3 +111,15 @@ No corresponding real raw artifact was identified in the available repository ha
 | Reply intent → available slot/two zones → approved booking → specific confirmation | Linked offline service/approval/receipt tests and mutation freshness fix pass | Autonomous interpretation and actual provider booking/confirmation loop unverified |
 
 Therefore email and interview scheduling must not be reported as live closed-loop complete. The latest owner report remains the stopped dry run, not a successful synchronization. A past connected provider or successful send on another code/role does not establish this current chain.
+
+## Independent frontend and historical mail verification
+
+The following product defects are confirmed by comparing `e740fa44` with this branch, not inferred from unknown source data:
+
+- `apps/web/src/pages/recruiting/DetailPanel.tsx`: old `PersonAvatar` accepted only name/size and rendered initials. It could not display a supplied photograph. Current `PersonAvatar` accepts `src` and renders `ProfileImage` with initials only as fallback.
+- `apps/web/src/pages/recruiting/ProfileTimeline.tsx`: old `CompanyLogo` accepted a source host and constructed `/favicon.ico`; it did not consume an explicit company/school logo URL. Current component consumes the supplied `src` through `ProfileImage`.
+- `packages/core/src/recruiting-candidates.ts`: old scalar-only projection dropped nested history/logo records. Scalar avatar URL fields could already pass the projection, so nested-value loss does **not** prove that avatar URLs were dropped. The old avatar renderer is a separate confirmed defect.
+
+Thus this is not merely an unproven Autumn-data problem: concrete projection and rendering gaps existed in our code and are corrected locally. Their presence on the reported deployment and the exact candidate's available assets still require the scoped raw row, `latestSource.report`, deployed SHA and actual image `src`/network response. Do not substitute a different candidate's Notes URL or synthetic fixture for those identities.
+
+Historical provider evidence is also more precise than a blanket “untested”: [acceptance handoff, sections 3–4](../handoff/2026-10-23/acceptance.md) records at 15:55 UTC that a controlled first email was sent and received, the recipient replied, and the product read the reply. It also records that the test-role Inbox projection and product-side same-thread reply confirmation/send remained open. This is partial real-provider evidence on the historical revision, not a completed current mail loop. No newer live interview-booking/confirmation chain was supplied. Later stopped CRM dryRun evidence concerns historical-mail ingestion and must not erase or overextend that earlier controlled-mail proof.
