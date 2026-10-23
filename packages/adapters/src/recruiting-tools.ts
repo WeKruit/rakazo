@@ -11,6 +11,7 @@ import type { Actor, RecruitingResearchToolInput } from "@rakazo/contracts";
 import {
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   RecruitingCrmCandidatesReadSchema,
+  RecruitingCrmRoleMailReadSchema,
   RecruitingResearchReadArtifactSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
@@ -1038,35 +1039,17 @@ export async function resolveRecruitingContact(
   else if (target)
     try {
       for (let offset = 0; offset < 1000; ) {
-        let data: unknown;
-        for await (const event of deps.connector!.execute(
-          {
-            tool: "list_crm_candidates",
-            route: {
-              connectorId: "mcp",
-              resourceId: target.mcpServerId,
-              resourceRevision: target.serverRevision,
-              toolName: "list_crm_candidates",
-            },
-            // list_crm_candidates filters by client/role LABELS, not role_spec_id; unreviewed-only is its default.
-            args: {
-              p_org: target.organizationId,
-              p_client: target.clientLabel,
-              p_role: target.roleLabel,
-              p_not_reviewed: false,
-              p_limit: 50,
-              p_offset: offset,
-            },
-            executionId: randomUUID(),
-          },
-          context,
-        )) {
-          if (event.type === "error") throw new Error(event.message);
-          if (event.type === "result")
-            data = (event.data as { structuredContent?: { data?: unknown } } | null)
-              ?.structuredContent?.data;
-        }
-        const page = RecruitingCrmCandidatesReadSchema.parse(data);
+        // list_crm_candidates filters by client/role LABELS, not role_spec_id; unreviewed-only is its default.
+        const page = RecruitingCrmCandidatesReadSchema.parse(
+          await crmData(deps.connector!, target, context, "list_crm_candidates", {
+            p_org: target.organizationId,
+            p_client: target.clientLabel,
+            p_role: target.roleLabel,
+            p_not_reviewed: false,
+            p_limit: 50,
+            p_offset: offset,
+          }),
+        );
         crmRows.push(
           ...page.rows.filter(
             (row) =>
@@ -1084,7 +1067,103 @@ export async function resolveRecruitingContact(
     }
   const result = matchRecruitingContacts(input.nameOrEmail, crmRows, pool);
   if (context.runId) rememberResolvedContactEmails(context.runId, result.matches);
-  return { ...result, crm };
+  const contacts = result.matches.filter((match) => match.crmCandidateId);
+  if (!target || crm !== "read" || !contacts.length) return { ...result, crm };
+  // The Inbox's source: the role's stored correspondence is the primary "latest mail" answer.
+  let messages: ReturnType<typeof RecruitingCrmRoleMailReadSchema.parse>["messages"] = [];
+  let correspondence: "read" | "unavailable" = "read";
+  try {
+    // ponytail: first 1,000 stored role messages; page further if roles outgrow it.
+    for (let offset: number | null = 0, page = 0; offset !== null && page < 20; page++) {
+      const read = RecruitingCrmRoleMailReadSchema.parse(
+        await crmData(deps.connector!, target, context, "list_crm_role_correspondence", {
+          p_org: target.organizationId,
+          p_role: target.crmRoleId,
+          p_limit: 50,
+          p_offset: offset,
+        }),
+      );
+      messages.push(...read.messages.filter((m) => m.organization_id === target.organizationId));
+      offset = read.next_offset !== null && read.next_offset > offset ? read.next_offset : null;
+    }
+  } catch (error) {
+    context.signal.throwIfAborted();
+    getLogger().warn("recruiting.contact.resolve.correspondence_unavailable", {
+      error: String(error),
+    });
+    correspondence = "unavailable";
+    messages = [];
+  }
+  const summary = (message: (typeof messages)[number] | undefined) =>
+    message
+      ? {
+          direction: message.direction,
+          at: message.timestamp_email,
+          from: message.from_address,
+          to: message.to_address,
+          subject: message.subject,
+          preview: message.body_text?.slice(0, 500) ?? null,
+        }
+      : null;
+  return {
+    ...result,
+    crm,
+    matches: result.matches.map((match) => {
+      if (!match.crmCandidateId) return match;
+      const email = match.email ? fold(match.email) : null;
+      const mine = messages
+        .filter(
+          (m) =>
+            m.candidate_id === match.crmCandidateId ||
+            (email !== null &&
+              [m.lead_email, m.from_address, m.to_address].some(
+                (address) => address && fold(address).includes(email),
+              )),
+        )
+        .toSorted((a, b) =>
+          String(b.timestamp_email ?? "").localeCompare(String(a.timestamp_email ?? "")),
+        );
+      return {
+        ...match,
+        correspondence: {
+          source: "crm_role_correspondence" as const,
+          status: correspondence,
+          latest: summary(mine[0]),
+          latestReceived: summary(mine.find((m) => m.direction === "received")),
+        },
+      };
+    }),
+  };
+}
+
+async function crmData(
+  connector: Pick<ConnectorProvider, "execute">,
+  target: { mcpServerId: string; serverRevision: number },
+  context: AdapterContext,
+  tool: string,
+  args: Record<string, unknown>,
+) {
+  let data: unknown;
+  for await (const event of connector.execute(
+    {
+      tool,
+      route: {
+        connectorId: "mcp",
+        resourceId: target.mcpServerId,
+        resourceRevision: target.serverRevision,
+        toolName: tool,
+      },
+      args,
+      executionId: randomUUID(),
+    },
+    context,
+  )) {
+    if (event.type === "error") throw new Error(event.message);
+    if (event.type === "result")
+      data = (event.data as { structuredContent?: { data?: unknown } } | null)?.structuredContent
+        ?.data;
+  }
+  return data;
 }
 
 /** A chat without a role: resolve across this user's active roles, each read with its own role checks. */

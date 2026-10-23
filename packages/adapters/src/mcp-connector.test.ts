@@ -175,6 +175,7 @@ describe("local native Instantly thread history", () => {
       page: { items: [structuredClone(anchor)] } as Record<string, unknown>,
       status: 200,
       accounts: [] as string[],
+      mailboxes: [] as string[],
       campaigns: {} as Record<string, unknown>,
       afterAnchor: () => {},
       afterRest: () => {},
@@ -223,6 +224,8 @@ describe("local native Instantly thread history", () => {
       expect(request.method).toBe("GET");
       expect(new URL(request.url).origin).toBe("https://api.instantly.ai");
       expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
+      if (new URL(request.url).pathname === "/api/v2/accounts")
+        return Response.json({ items: state.mailboxes.map((email) => ({ email })) });
       const account = new URL(request.url).pathname.match(/^\/api\/v2\/accounts\/(.+)$/);
       if (account)
         return new Response("{}", {
@@ -417,6 +420,30 @@ describe("local native Instantly thread history", () => {
           },
         },
       ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("defaults the contact lookup to the one connected mailbox and reports HTTP status + code", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    f.state.mailboxes = ["team@example.test"];
+    f.state.page = { items: [] };
+    try {
+      await f.connector.discoverTools(f.context as never);
+      await f.collect({ email: "sumeetparekh1@gmail.com" }, contactRoute);
+      const emails = f.rest.mock.calls
+        .map((call) => new URL(logicalHref(...call)))
+        .find((url) => url.pathname === "/api/v2/emails")!;
+      expect(emails.searchParams.get("eaccount")).toBe("team@example.test");
+      expect(emails.searchParams.get("lead")).toBe("sumeetparekh1@gmail.com");
+      f.state.status = 400;
+      f.state.page = { error: "invalid_query", message: "private provider detail" } as never;
+      const failed = await f.collect({ email: "sumeetparekh1@gmail.com" }, contactRoute);
+      expect(failed).toMatchObject([
+        { type: "error", message: expect.stringContaining("HTTP 400 (invalid_query).") },
+      ]);
+      expect(JSON.stringify(failed)).not.toContain("private provider detail");
     } finally {
       await f.connector.close();
     }
@@ -703,7 +730,8 @@ describe("local native Instantly thread history", () => {
           kind === "actor" ? { ...f.context, spaceId: "foreign" } : f.context,
         );
         expect(events).toMatchObject([{ type: "error" }]);
-        expect(f.rest).toHaveBeenCalledTimes(before ? 0 : 1);
+        // Default-mailbox lookup, then the contact page.
+        expect(f.rest).toHaveBeenCalledTimes(before ? 0 : 2);
         expect(JSON.stringify(events)).not.toMatch(/private-key|fixture-private-api-key/);
       } finally {
         await f.connector.close();
