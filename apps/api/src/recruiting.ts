@@ -1534,6 +1534,11 @@ export const reviseRecruitingRole = (
   input: Parameters<typeof recruiting.reviseRecruitingRole>[2],
   material?: RecruitingRoleMaterialContext,
 ) => authenticated(() => recruiting.reviseRecruitingRole(prisma, actor, input, material));
+export const archiveRecruitingRole = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.setRecruitingRoleArchived>[2],
+) => authenticated(() => recruiting.setRecruitingRoleArchived(prisma, actor, input));
 export const listRecruitingAssessments = (
   prisma: PrismaClient,
   actor: Actor,
@@ -1748,30 +1753,55 @@ export async function getRecruitingCrmData(
       assignment &&
       (assignment.allowAllTools ||
         (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(tool)));
-    const actorFence = async () => {
+    // Authorization lookups are memoized inside this one request only, never across requests.
+    // Every provider read or native capture invalidates them, so the fence after it is fresh;
+    // only back-to-back checks with no read in between share one lookup.
+    let actorChecked: Promise<void> | undefined;
+    const invalidateFences = () => {
+      actorChecked = undefined;
+      grants.clear();
+    };
+    const actorFence = () => {
       signal.throwIfAborted();
-      if (deps.stillAuthorized && !(await deps.stillAuthorized())) throw new IsolationError();
-      const freshActor = await recruiting.requireMembership(
-        deps.prisma,
-        actor.userId,
-        actor.spaceId,
-      );
-      if (
-        freshActor.userId !== actor.userId ||
-        freshActor.spaceId !== actor.spaceId ||
-        targetKey(await deps.reauthorize()) !== targetScope
-      )
-        throw new IsolationError();
+      actorChecked ??= (async () => {
+        if (deps.stillAuthorized && !(await deps.stillAuthorized())) throw new IsolationError();
+        const freshActor = await recruiting.requireMembership(
+          deps.prisma,
+          actor.userId,
+          actor.spaceId,
+        );
+        if (
+          freshActor.userId !== actor.userId ||
+          freshActor.spaceId !== actor.spaceId ||
+          targetKey(await deps.reauthorize()) !== targetScope
+        )
+          throw new IsolationError();
+      })();
+      return actorChecked;
+    };
+    const grants = new Map<
+      string,
+      Promise<[Server | null, { allowAllTools: boolean; allowedTools: unknown } | null]>
+    >();
+    const serverGrant = (serverId: string) => {
+      let grant = grants.get(serverId);
+      if (!grant) {
+        grant = Promise.all([
+          deps.prisma.mcpServer.findFirst({
+            where: { id: serverId, userId: actor.userId, spaceId: actor.spaceId },
+            select: serverSelect,
+          }),
+          deps.prisma.botMcpServer.findFirst({
+            where: { serverId, botId, userId: actor.userId, spaceId: actor.spaceId },
+          }),
+        ]);
+        grants.set(serverId, grant);
+      }
+      return grant;
     };
     const sourceFence = async (server: Server, tool: string) => {
       await actorFence();
-      const current = await deps.prisma.mcpServer.findFirst({
-        where: { id: server.id, userId: actor.userId, spaceId: actor.spaceId },
-        select: serverSelect,
-      });
-      const assignment = await deps.prisma.botMcpServer.findFirst({
-        where: { serverId: server.id, botId, userId: actor.userId, spaceId: actor.spaceId },
-      });
+      const [current, assignment] = await serverGrant(server.id);
       if (
         !current?.enabled ||
         current.userId !== actor.userId ||
@@ -1823,9 +1853,7 @@ export async function getRecruitingCrmData(
     ) {
       if (options?.allowMissing) {
         await actorFence();
-        const assignment = await deps.prisma.botMcpServer.findFirst({
-          where: { serverId: server.id, botId, userId: actor.userId, spaceId: actor.spaceId },
-        });
+        const [, assignment] = await serverGrant(server.id);
         if (assignment && !allowed(assignment, tool)) return missingTool;
       }
       await sourceFence(server, tool);
@@ -1856,6 +1884,7 @@ export async function getRecruitingCrmData(
       } catch {
         failed = true;
       }
+      invalidateFences();
       await sourceFence(server, tool);
       const result = correspondenceRecord(results[0]);
       const payload = mcpObject(result);
@@ -1885,8 +1914,20 @@ export async function getRecruitingCrmData(
         throw unavailable();
       return payload.data;
     }
-    const membershipRows = async (server: Server) =>
-      parse(RecruitingCrmMembershipRowsSchema, await read(server, "list_crm_memberships", {}));
+    const memberships = new Map<
+      string,
+      Promise<ReturnType<typeof RecruitingCrmMembershipRowsSchema.parse>>
+    >();
+    const membershipRows = (server: Server) => {
+      let rows = memberships.get(server.id);
+      if (!rows) {
+        rows = read(server, "list_crm_memberships", {}).then((value) =>
+          parse(RecruitingCrmMembershipRowsSchema, value),
+        );
+        memberships.set(server.id, rows);
+      }
+      return rows;
+    };
     const where = {
       userId: actor.userId,
       spaceId: actor.spaceId,
@@ -2410,6 +2451,7 @@ export async function getRecruitingCrmData(
           crmEndpoint: deps.firstPartyMcpUrl,
         })
       : { items: [], partial: false, assertCurrent: null };
+    if (input.crmRoleId) invalidateFences();
     await sourceFence(server, "list_crm_candidate_messages");
     await native.assertCurrent?.();
     return finish({
