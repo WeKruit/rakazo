@@ -765,6 +765,15 @@ export async function getRecruitingRoleSetup(
           ? { key: "sender", state: "ready", label: email, detail: { email } }
           : { key: "sender", state: "unavailable", label: "Sender unknown" },
       );
+    } else if (campaign.selectionRequired) {
+      items.push(
+        { key: "campaign", state: "unavailable", label: "Select an existing campaign in Sequence" },
+        {
+          key: "sender",
+          state: "unavailable",
+          label: "Sender unknown until a campaign is selected",
+        },
+      );
     } else if (!campaign.serverId) {
       const server = await deps.prisma.mcpServer.findFirst({
         where: { userId: actor.userId, spaceId: actor.spaceId, endpoint: INSTANTLY_MCP_ENDPOINT },

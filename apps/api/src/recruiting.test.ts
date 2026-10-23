@@ -4530,6 +4530,19 @@ describe("live CRM browser reads", () => {
       expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
         false,
       );
+      Object.assign(f.mockPrisma, { run: { findFirst: vi.fn(async () => null) } });
+      const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+      expect(setup.items).toContainEqual({
+        key: "campaign",
+        state: "unavailable",
+        label: "Select an existing campaign in Sequence",
+      });
+      expect(
+        setup.items
+          .filter((item) => item.key === "campaign" || item.key === "sender")
+          .every((item) => !item.action),
+      ).toBe(true);
+      expect(JSON.stringify(setup)).not.toContain("not connected");
     } else if (mode === "wrong-selected" || mode === "revoked") {
       await expect(
         api.getRecruitingRoleCampaign(f.deps, actor, target, selection),
