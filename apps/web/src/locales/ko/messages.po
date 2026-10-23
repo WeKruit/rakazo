@@ -472,6 +472,10 @@ msgstr "고급..."
 msgid "Agent"
 msgstr ""
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Agent assessment"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Agent computer"
 msgstr "Agent 컴퓨터"
@@ -737,6 +741,10 @@ msgstr ""
 
 #: src/components/LiveWork.tsx
 msgid "Asking a specialist"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Assessment"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2716,7 +2724,6 @@ msgid "Docker limits access to your computer for added security. Using {hostLabe
 msgstr "Docker는 보안을 위해 컴퓨터 접근을 제한합니다. {hostLabel}에서는 Bot이 로컬 파일과 도구로 작업할 수 있습니다."
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Does not match"
 msgstr ""
@@ -3107,7 +3114,6 @@ msgid "Finishing MCP connection…"
 msgstr "MCP 연결을 마무리하는 중…"
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 msgid "Fit"
 msgstr ""
 
@@ -3147,6 +3153,10 @@ msgstr ""
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "전체 화면"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Gap"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3827,8 +3837,8 @@ msgstr "읽지 않음으로 표시"
 msgid "Marked as sent"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
 msgstr ""
@@ -4838,6 +4848,10 @@ msgstr "PagerDuty 인시던트"
 #: src/pages/ScratchpadSection.tsx
 msgid "Park"
 msgstr "보류"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Partial match"
+msgstr ""
 
 #: src/components/AskCard.tsx
 #: src/pages/AccountSettingsOverlay.tsx
@@ -6429,6 +6443,7 @@ msgstr ""
 msgid "Source unavailable"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sources"
 msgstr ""
@@ -6983,7 +6998,6 @@ msgid "Unavailable"
 msgstr "사용할 수 없음"
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unclear"
 msgstr ""

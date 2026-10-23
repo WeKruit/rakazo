@@ -1,11 +1,12 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Badge, Button } from "@rakazo/ui-web";
+import { Badge, Button, buttonVariants } from "@rakazo/ui-web";
 import {
   ArrowLeft,
   Bookmark,
   BriefcaseBusiness,
   ChevronLeft,
   ChevronRight,
+  Download,
   Mail,
   MapPin,
   Phone,
@@ -14,6 +15,7 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
+import { AssessmentCard } from "./AssessmentCard";
 import type { RecruitingDetailController, RecruitingDetailView } from "./detail";
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
@@ -116,6 +118,7 @@ export function RecruitingDetailPanel({
   const company = person.company ?? candidate?.company;
   const role =
     person.title && company ? t`${person.title} at ${company}` : (person.title ?? company);
+  const resumeUrl = candidate?.resumeUrl ?? sections.resumeUrl;
   const handle = linkedinHandle(person.linkedinUrl);
   const previous = current.walk?.(-1);
   const next = current.walk?.(1);
@@ -131,15 +134,13 @@ export function RecruitingDetailPanel({
     { label: t`Outreach status`, value: person.outreachStatus },
   ].filter((item) => item.value);
   const anchors = [
-    candidate && (sections.fit || sections.criteria.length || sections.summary)
-      ? { id: "fit", label: t`Fit` }
+    candidate && (sections.fit || sections.requirements.length || sections.summary)
+      ? { id: "fit", label: t`Assessment` }
       : null,
     sections.experience.length ? { id: "experience", label: t`Experience` } : null,
     sections.education.length ? { id: "education", label: t`Education` } : null,
     sections.skills.length ? { id: "skills", label: t`Skills` } : null,
-    sections.findings.length || candidate?.resumeUrl
-      ? { id: "findings", label: t`Research findings` }
-      : null,
+    sections.findings.length ? { id: "findings", label: t`Research findings` } : null,
     stage.length ? { id: "outreach", label: t`Outreach` } : null,
   ].filter((anchor): anchor is { id: string; label: string } => anchor !== null);
   const anchorId = (id: string) => `recruiting-detail-${id}`;
@@ -262,7 +263,7 @@ export function RecruitingDetailPanel({
               <dd className="break-all">{phone || "—"}</dd>
             </dl>
           </details>
-          {emailDraft || shortlist || actions?.openEvidence ? (
+          {emailDraft || shortlist || resumeUrl || actions?.openEvidence ? (
             <div className="flex flex-wrap gap-2">
               {emailDraft ? (
                 <Button size="sm" onClick={emailDraft}>
@@ -284,6 +285,17 @@ export function RecruitingDetailPanel({
                   <Bookmark size={15} aria-hidden fill={isShortlisted ? "currentColor" : "none"} />
                   {isShortlisted ? <Trans>Shortlisted</Trans> : <Trans>Shortlist</Trans>}
                 </Button>
+              ) : null}
+              {resumeUrl ? (
+                <a
+                  href={resumeUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={buttonVariants({ size: "sm", variant: "outline" })}
+                >
+                  <Download size={15} aria-hidden />
+                  <Trans>Resume</Trans>
+                </a>
               ) : null}
               {actions?.openEvidence ? (
                 <Button
@@ -343,48 +355,15 @@ export function RecruitingDetailPanel({
           ) : view === "contact" ? (
             <div className="text-sm">
               {anchors.some((anchor) => anchor.id === "fit") ? (
-                <Section id={anchorId("fit")} title={<Trans>Fit</Trans>}>
-                  <div className="mb-3 flex flex-wrap items-center gap-2">
-                    {fitBadge ? <Badge variant="secondary">{fitBadge}</Badge> : null}
-                    {sections.fit?.rank ? (
-                      <span className="text-xs text-muted-foreground">
-                        {sections.fit.rank.label} {sections.fit.rank.value}
-                      </span>
-                    ) : null}
-                  </div>
-                  {sections.summary ? (
-                    <p className="mb-3 whitespace-pre-wrap">{sections.summary}</p>
-                  ) : null}
-                  <ul className="space-y-3">
-                    {sections.criteria.map((field) => (
-                      <li key={field.label} className="space-y-1">
-                        <p className="flex items-start justify-between gap-2">
-                          <span>{field.label}</span>
-                          <Badge
-                            variant={
-                              field.providerStatus === "match"
-                                ? "secondary"
-                                : field.providerStatus === "miss"
-                                  ? "destructive"
-                                  : "outline"
-                            }
-                          >
-                            {field.providerStatus === "match"
-                              ? t`Match`
-                              : field.providerStatus === "miss"
-                                ? t`Does not match`
-                                : t`Unclear`}
-                          </Badge>
-                        </p>
-                        {field.evidence || field.reasoning ? (
-                          <p className="line-clamp-3 text-xs text-muted-foreground">
-                            {field.evidence ?? field.reasoning}
-                          </p>
-                        ) : null}
-                        <Sources urls={field.sourceUrls} />
-                      </li>
-                    ))}
-                  </ul>
+                <Section id={anchorId("fit")} title={<Trans>Agent assessment</Trans>}>
+                  <AssessmentCard
+                    score={fitBadge || null}
+                    rank={sections.fit?.rank ?? null}
+                    summary={sections.summary}
+                    scope={sections.scope}
+                    rows={sections.requirements}
+                    sourceUrls={sections.requirementSources}
+                  />
                 </Section>
               ) : null}
               {sections.experience.length ? (
@@ -422,16 +401,6 @@ export function RecruitingDetailPanel({
               ) : null}
               {anchors.some((anchor) => anchor.id === "findings") ? (
                 <Section id={anchorId("findings")} title={<Trans>Research findings</Trans>}>
-                  {candidate?.resumeUrl ? (
-                    <a
-                      href={candidate.resumeUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="mb-3 inline-block underline"
-                    >
-                      <Trans>Resume</Trans>
-                    </a>
-                  ) : null}
                   <FieldList fields={sections.findings} />
                 </Section>
               ) : null}

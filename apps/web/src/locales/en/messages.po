@@ -472,6 +472,10 @@ msgstr "Advanced..."
 msgid "Agent"
 msgstr "Agent"
 
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Agent assessment"
+msgstr "Agent assessment"
+
 #: src/pages/Shell.tsx
 msgid "Agent computer"
 msgstr "Agent computer"
@@ -738,6 +742,10 @@ msgstr "Ask the server owner to configure this provider."
 #: src/components/LiveWork.tsx
 msgid "Asking a specialist"
 msgstr "Asking a specialist"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Assessment"
+msgstr "Assessment"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Assessment date"
@@ -2716,7 +2724,6 @@ msgid "Docker limits access to your computer for added security. Using {hostLabe
 msgstr "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Does not match"
 msgstr "Does not match"
@@ -3107,7 +3114,6 @@ msgid "Finishing MCP connection…"
 msgstr "Finishing MCP connection…"
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 msgid "Fit"
 msgstr "Fit"
 
@@ -3147,6 +3153,10 @@ msgstr "From this role’s saved requirements"
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "Fullscreen"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Gap"
+msgstr "Gap"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3827,8 +3837,8 @@ msgstr "Mark as Unread"
 msgid "Marked as sent"
 msgstr "Marked as sent"
 
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
 msgstr "Match"
@@ -4838,6 +4848,10 @@ msgstr "PagerDuty incident"
 #: src/pages/ScratchpadSection.tsx
 msgid "Park"
 msgstr "Park"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Partial match"
+msgstr "Partial match"
 
 #: src/components/AskCard.tsx
 #: src/pages/AccountSettingsOverlay.tsx
@@ -6429,6 +6443,7 @@ msgstr "Source text"
 msgid "Source unavailable"
 msgstr "Source unavailable"
 
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Sources"
 msgstr "Sources"
@@ -6983,7 +6998,6 @@ msgid "Unavailable"
 msgstr "Unavailable"
 
 #: src/pages/recruiting/ContactsTab.tsx
-#: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Unclear"
 msgstr "Unclear"
