@@ -96,6 +96,7 @@ function fixture(
     leaseExpiresAt: null as Date | null,
     checkpoint: null as string | null,
     sourceMessageId: null as string | null,
+    initialRecruitingRoleRevision: { roleId: "role-1" },
   };
   const thread = {
     id: run.threadId,
@@ -667,7 +668,11 @@ describe("linked offline scheduling receipts", () => {
     f.prisma.externalEffect.findMany.mockImplementation(async (query) => {
       if (!projecting) return originalFindMany(query);
       const request = query as unknown as {
-        where: { id?: { in: string[] }; run: { threadId: string }; spaceId: string };
+        where: {
+          id?: { in: string[] };
+          run: { threadId: string; initialRecruitingRoleRevision?: { roleId: string } };
+          spaceId: string;
+        };
         select: { result?: boolean };
       };
       expect(request.where.spaceId).toBe(actor.spaceId);
@@ -677,14 +682,17 @@ describe("linked offline scheduling receipts", () => {
           const call = (effect.request as unknown[])[2] as { route?: { toolName?: string } };
           return (
             effect.status === "completed" &&
-            call?.route?.toolName === "get_booking" &&
+            call?.route?.toolName ===
+              (request.where.run.initialRecruitingRoleRevision
+                ? "create_booking"
+                : "get_booking") &&
             (!request.where.id || request.where.id.in.includes(effect.id))
           );
         })
         .map((effect) => ({
           ...effect,
           updatedAt: new Date("2026-10-23T18:00:00Z"),
-          run: { id: f.runData.id, botId: f.runData.botId },
+          run: { ...f.runData },
         }));
     });
     const project = async () => {

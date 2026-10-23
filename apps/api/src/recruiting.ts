@@ -1287,6 +1287,88 @@ export async function getRecruitingCorrespondence(
       select: { id: true, result: true },
     });
     const byId = new Map(results.map((result) => [result.id, result.result]));
+    // A read made in this role's run can contain the whole calendar. Only an actual
+    // completed creation in this exact role establishes ownership of a booking UID.
+    const bookingProofs = new Set<string>();
+    if (
+      reads.some(
+        ({ provider, call }) =>
+          provider.kind === "cal" && call.route.toolName !== "get_availability",
+      )
+    ) {
+      const receipts = await prisma.externalEffect.findMany({
+        where: {
+          ...scope,
+          status: "completed",
+          run: {
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            threadId: target.threadId,
+            botId: { in: botIds },
+            initialRecruitingRoleRevision: { roleId: workspace.role.id },
+          },
+          OR: querySources
+            .filter((source) => source.provider?.kind === "cal")
+            .flatMap((source) => [
+              {
+                AND: [
+                  { request: { path: ["2", "route", "resourceId"], equals: source.id } },
+                  { request: { path: ["2", "route", "toolName"], equals: "create_booking" } },
+                ],
+              },
+              {
+                AND: [
+                  { request: { path: ["3", "resourceId"], equals: source.id } },
+                  { request: { path: ["3", "toolName"], equals: "create_booking" } },
+                ],
+              },
+            ]),
+        },
+        orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+        take: 201,
+        select: {
+          request: true,
+          result: true,
+          status: true,
+          run: {
+            select: {
+              userId: true,
+              spaceId: true,
+              threadId: true,
+              botId: true,
+              initialRecruitingRoleRevision: { select: { roleId: true } },
+            },
+          },
+        },
+      });
+      output.partial ||= receipts.length > 200;
+      for (const receipt of receipts.slice(0, 200)) {
+        const call = correspondenceCall(receipt.request);
+        const source = querySources.find((source) => source.id === call?.route.resourceId);
+        const result = correspondenceRecord(receipt.result);
+        const body = mcpObject(receipt.result);
+        const booking = correspondenceRecord(body?.data);
+        if (
+          receipt.status !== "completed" ||
+          receipt.run.userId !== actor.userId ||
+          receipt.run.spaceId !== actor.spaceId ||
+          receipt.run.threadId !== target.threadId ||
+          !botIds.includes(receipt.run.botId) ||
+          receipt.run.initialRecruitingRoleRevision?.roleId !== workspace.role.id ||
+          call?.route.connectorId !== "mcp" ||
+          call.route.toolName !== "create_booking" ||
+          source?.provider?.kind !== "cal" ||
+          call.route.resourceRevision !== source.revision ||
+          result?.isError === true ||
+          result?.error !== undefined ||
+          body?.status !== "success" ||
+          typeof booking?.uid !== "string" ||
+          !booking.uid.trim()
+        )
+          continue;
+        bookingProofs.add(stableJsonValue([source.id, source.revision, booking.uid]));
+      }
+    }
     const candidateKeys = new Set(
       view === "contacts"
         ? (
@@ -1678,6 +1760,13 @@ export async function getRecruitingCorrespondence(
             (typeof row?.uid !== "string" ||
               !row.uid.trim() ||
               (call.route.toolName === "get_booking" && row.uid !== call.args.bookingUid))
+          ) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          if (
+            !availability &&
+            !bookingProofs.has(stableJsonValue([source.id, source.revision, row!.uid]))
           ) {
             checkIssue(source.id, effect.updatedAt);
             continue;

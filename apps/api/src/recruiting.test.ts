@@ -2268,7 +2268,8 @@ describe("saved recruiting correspondence", () => {
               ],
             },
           },
-        ]);
+        ])
+        .mockResolvedValueOnce([]);
       const result = await api.getRecruitingCorrespondence(prisma, actor, target, "interview");
       expect(result).toMatchObject({
         status: "empty",
@@ -2279,11 +2280,87 @@ describe("saved recruiting correspondence", () => {
       });
     },
   );
+  function calBookingProof() {
+    return {
+      status: "completed",
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "calendar",
+            resourceRevision: 2,
+            toolName: "create_booking",
+          },
+          args: { start: "2026-10-23T13:00:00Z", attendee: { email: "person@example.test" } },
+        },
+      ],
+      result: { structuredContent: { status: "success", data: { uid: "booking-one" } } },
+      run: {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        threadId: target.threadId,
+        botId: "main",
+        initialRecruitingRoleRevision: { roleId: "role" },
+      },
+    };
+  }
+  it.each([
+    "missing",
+    "other-role",
+    "legacy-run",
+    "other-user",
+    "other-space",
+    "other-thread",
+    "other-server",
+    "old-epoch",
+    "failed",
+    "error-result",
+    "other-uid",
+  ])("withholds calendar PII without exact role provenance: %s", async (reason) => {
+    const proof = calBookingProof();
+    if (reason === "other-role") proof.run.initialRecruitingRoleRevision.roleId = "other-role";
+    if (reason === "legacy-run") proof.run.initialRecruitingRoleRevision = null as never;
+    if (reason === "other-user") proof.run.userId = "other-user";
+    if (reason === "other-space") proof.run.spaceId = "other-space";
+    if (reason === "other-thread") proof.run.threadId = "other-thread";
+    const request = proof.request[2] as { route: { resourceId: string; resourceRevision: number } };
+    if (reason === "other-server") request.route.resourceId = "other-calendar";
+    if (reason === "old-epoch") request.route.resourceRevision = 1;
+    if (reason === "failed") proof.status = "failed";
+    if (reason === "error-result") Object.assign(proof.result, { isError: true });
+    if (reason === "other-uid") proof.result.structuredContent.data.uid = "another-booking";
+    const result = await calObservation(
+      "get_bookings",
+      {},
+      {
+        status: "success",
+        pagination: { hasNextPage: false, hasPreviousPage: false },
+        data: [
+          {
+            uid: "booking-one",
+            title: "Private other-role meeting",
+            start: "2026-10-23T13:00:00Z",
+            end: "2026-10-23T13:30:00Z",
+            attendees: [{ email: "person@example.test" }],
+          },
+        ],
+      },
+      undefined,
+      reason === "missing" ? [] : [proof],
+    );
+    // The same candidate can appear in two roles: attendee identity is not booking ownership.
+    expect(result).toMatchObject({ status: "unsupported", partial: true, events: [] });
+    expect(JSON.stringify(result)).not.toContain("Private other-role meeting");
+    expect(JSON.stringify(result)).not.toContain("person@example.test");
+  });
   async function calObservation(
     tool: string,
     args: Record<string, unknown>,
     body: unknown,
     previous?: { args: Record<string, unknown>; body: unknown },
+    proofs: unknown[] = [],
   ) {
     const { client, prisma, retained } = fixture();
     client.mcpServer.findMany.mockResolvedValueOnce([
@@ -2324,8 +2401,23 @@ describe("saved recruiting correspondence", () => {
     client.externalEffect.findMany
       .mockReset()
       .mockResolvedValueOnce(retainedRows)
-      .mockResolvedValueOnce(resultRows);
-    return api.getRecruitingCorrespondence(prisma, actor, target, "interview");
+      .mockResolvedValueOnce(resultRows)
+      .mockResolvedValueOnce(proofs);
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "interview");
+    if (tool !== "get_availability") {
+      expect(client.externalEffect.findMany.mock.calls[2]?.[0]).toMatchObject({
+        where: {
+          status: "completed",
+          run: {
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+            threadId: target.threadId,
+            initialRecruitingRoleRevision: { roleId: "role" },
+          },
+        },
+      });
+    }
+    return result;
   }
   it("replaces an earlier availability window with the latest empty observation for that event type", async () => {
     const result = await calObservation(
@@ -2432,7 +2524,7 @@ describe("saved recruiting correspondence", () => {
     expect(result.partial).toBe(true);
     expect(result.events).toHaveLength(1);
   });
-  it("projects a native Cal booking without inventing its role association", async () => {
+  it("projects a native Cal booking only with its completed current-role creation", async () => {
     const result = await calObservation(
       "get_booking",
       { bookingUid: "booking-one" },
@@ -2449,6 +2541,8 @@ describe("saved recruiting correspondence", () => {
           privateNotes: "never displayed",
         },
       },
+      undefined,
+      [calBookingProof()],
     );
     expect(result).toMatchObject({
       status: "ready",
@@ -2467,6 +2561,33 @@ describe("saved recruiting correspondence", () => {
       ],
     });
     expect(JSON.stringify(result)).not.toContain("never displayed");
+  });
+  it("retains only the proven booking from an account-wide calendar page", async () => {
+    const booking = {
+      uid: "booking-one",
+      title: "Role interview",
+      start: "2026-10-23T13:00:00Z",
+      end: "2026-10-23T13:30:00Z",
+      attendees: [{ email: "person@example.test" }],
+    };
+    const result = await calObservation(
+      "get_bookings",
+      {},
+      {
+        status: "success",
+        pagination: { hasNextPage: false, hasPreviousPage: false },
+        data: [booking, { ...booking, uid: "personal-booking", title: "Private personal meeting" }],
+      },
+      undefined,
+      [calBookingProof()],
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: true,
+      events: [{ title: "Role interview" }],
+    });
+    expect(result.events).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain("Private personal meeting");
   });
   it("does not claim a complete Cal booking page when earlier pages were skipped", async () => {
     const result = await calObservation(
