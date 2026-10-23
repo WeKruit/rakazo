@@ -209,7 +209,11 @@ import {
   settleUncertainEffect,
   uncertainEffectResult,
 } from "./approval-effect.js";
-import { artifactReadFromTool, readActorArtifact } from "./artifact-read.js";
+import {
+  artifactReadFromTool,
+  INTERNAL_ARTIFACT_ERROR,
+  readActorArtifact,
+} from "./artifact-read.js";
 import {
   autoReviewTimeoutMs,
   deploymentAutoReviewDefault,
@@ -6653,7 +6657,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return finish({
                   error:
                     error instanceof IsolationError
-                      ? "Artifact is unavailable."
+                      ? error.message === INTERNAL_ARTIFACT_ERROR
+                        ? INTERNAL_ARTIFACT_ERROR
+                        : "Artifact is unavailable."
                       : "Saved artifact could not be read or verified.",
                 });
               }
