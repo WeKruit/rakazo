@@ -479,7 +479,7 @@ describe("linked offline scheduling receipts", () => {
         {
           botId: f.runData.botId,
           allowAllTools: false,
-          allowedTools: ["create_booking", "get_booking"],
+          allowedTools: ["create_booking", "get_booking", "get_availability"],
         },
       ],
     };
@@ -509,7 +509,21 @@ describe("linked offline scheduling receipts", () => {
     });
     const createBooking = cal("create_booking");
     const getBooking = cal("get_booking");
-    f.connector.discoverTools.mockResolvedValue([mail, createBooking, getBooking]);
+    const availability = {
+      ...cal("get_availability"),
+      inputSchema: {
+        type: "object",
+        properties: {
+          eventTypeId: { type: "number" },
+          start: { type: "string" },
+          end: { type: "string" },
+          timeZone: { type: "string" },
+          duration: { type: "number" },
+          format: { type: "string" },
+        },
+      },
+    };
+    f.connector.discoverTools.mockResolvedValue([mail, createBooking, getBooking, availability]);
     f.prisma.actionApprovalRule.findMany.mockResolvedValue([
       { effect: "require_approval", matchKind: "tool", matchValue: mail.name },
     ]);
@@ -569,11 +583,23 @@ describe("linked offline scheduling receipts", () => {
     let providerBooking: Record<string, unknown> | undefined;
     f.connector.execute.mockImplementation(async function* (call) {
       let data: unknown;
-      if (call.route?.toolName === "create_booking") {
-        if (scenario === "booking_conflict") {
-          yield { type: "error", message: "Synthetic provider rejected slot: already occupied" };
-          return;
-        }
+      if (call.route?.toolName === "get_availability") {
+        expect(call.args).toEqual({
+          eventTypeId: 42,
+          start: selected,
+          end,
+          timeZone: "UTC",
+          duration: 30,
+          format: "range",
+        });
+        data = {
+          status: "success",
+          data: {
+            [selected.slice(0, 10)]:
+              scenario === "booking_conflict" ? [] : [{ start: selected, end }],
+          },
+        };
+      } else if (call.route?.toolName === "create_booking") {
         providerBooking = {
           uid: "synthetic-booking-42",
           title: "Candidate interview",
@@ -664,15 +690,34 @@ describe("linked offline scheduling receipts", () => {
         },
       ]);
       await f.run();
-      expect(f.connector.execute).toHaveBeenCalledTimes(count + 1);
-      expect(f.connector.execute).toHaveBeenLastCalledWith(
-        expect.objectContaining({ args }),
-        expect.anything(),
-      );
+      const isBooking = name === createBooking.name;
+      const blockedBooking = isBooking && scenario === "booking_conflict";
+      const dispatchCount = isBooking && !blockedBooking ? 2 : 1;
+      expect(f.connector.execute).toHaveBeenCalledTimes(count + dispatchCount);
+      if (!blockedBooking)
+        expect(f.connector.execute).toHaveBeenLastCalledWith(
+          expect.objectContaining({ args }),
+          expect.anything(),
+        );
+      if (isBooking) {
+        expect(f.connector.execute.mock.calls[count]?.[0].route?.toolName).toBe("get_availability");
+        if (!blockedBooking)
+          expect(f.connector.execute.mock.calls[count + 1]?.[0].route?.toolName).toBe(
+            "create_booking",
+          );
+      }
+      if (blockedBooking) {
+        expect(effect).toMatchObject({ status: "approved", request });
+        expect(f.results.at(-1)).toMatchObject({
+          code: "CALENDAR_SLOT_CONFLICT",
+          dispatched: false,
+        });
+        return effect;
+      }
       expect(effect).toMatchObject({ status: outcome, request });
       f.setCalls([{ name, args, executionId: `retry-${index}` }]);
       await f.run();
-      expect(f.connector.execute).toHaveBeenCalledTimes(count + 1);
+      expect(f.connector.execute).toHaveBeenCalledTimes(count + dispatchCount);
       return effect;
     }
     await approveAndExecute(
@@ -689,6 +734,7 @@ describe("linked offline scheduling receipts", () => {
       createBooking.name,
       {
         eventTypeId: 42,
+        lengthInMinutes: 30,
         start: selected,
         attendee: { name: "Synthetic candidate", email: recipient, timeZone },
       },
@@ -755,22 +801,20 @@ describe("linked offline scheduling receipts", () => {
     };
     expect((await project()).events).toEqual([]);
     if (scenario === "booking_conflict") {
-      expect(booked.result).toEqual({
-        error: "Synthetic provider rejected slot: already occupied",
-      });
+      expect(booked.status).toBe("approved");
       expect(providerBooking).toBeUndefined();
       expect(
         f.connector.execute.mock.calls.filter(
           ([call]) => call.route?.toolName === "create_booking",
         ),
-      ).toHaveLength(1);
+      ).toHaveLength(0);
       expect(
         f.connector.execute.mock.calls.some(
           ([call]) => call.args.subject === "Interview confirmed",
         ),
       ).toBe(false);
       expect(messages).toHaveLength(2);
-      // This is provider rejection, not an executor availability preflight guarantee.
+      // The real executor preflight blocks the mutation before provider dispatch.
       return;
     }
     const receipt = booked.result as { content: Array<{ text: string }> };
