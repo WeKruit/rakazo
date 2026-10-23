@@ -1925,3 +1925,4 @@ model RecruitingCandidateNote {
 
   @@index([spaceId, candidateKey, createdAt])
   @@map("recruiting_candidate_notes")
+}

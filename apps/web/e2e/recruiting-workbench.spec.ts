@@ -141,3 +141,4 @@ test("profile notes save and tasks render at desktop and phone widths", async ({
     await captureScreenshot(page, testInfo, `profile-tasks-${width}`);
     await noHorizontalScroll(page);
   }
+});
