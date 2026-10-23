@@ -106,9 +106,11 @@ export function campaignStages(campaign: RecruitingRoleCampaign | null) {
   };
 }
 
-/** Replied from the merged role read's CRM outreach counts; unknown without a readable CRM. */
+/** An exact reply total requires both authorized CRM data and complete count coverage. */
 export function crmReplied(candidates: RecruitingRoleCandidatesOutput | null) {
-  return candidates?.crmStatus === "ok" ? candidates.counts.replied : null;
+  return candidates?.crmStatus === "ok" && candidates.crmCountsComplete === true
+    ? candidates.counts.replied
+    : null;
 }
 
 export function roleSummary(

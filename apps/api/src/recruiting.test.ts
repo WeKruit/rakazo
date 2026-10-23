@@ -6413,6 +6413,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       ),
     );
     expect(page.counts).toEqual({ shortlisted: 1, replied: 2, bounced: 1 });
+    expect(page.crmCountsComplete).toBe(false);
     expect(page.crmStatus).toBe("ok");
   });
 

@@ -3338,6 +3338,9 @@ export async function mergeRoleCandidates(
     total: autumn.total + visibleCrmOnly.length,
     counts: { ...outreach, shortlisted: autumn.counts.shortlisted, replied: outreach.replied ?? 0 },
     crmStatus: crm.status,
+    // Stored role/contact rows do not prove a completed CRM pass. Keep observed counts,
+    // but never label them exact solely because source authorization succeeded.
+    crmCountsComplete: false,
   };
 }
 
@@ -3359,6 +3362,7 @@ export async function getRecruitingRoleCandidates(
       total: 0,
       counts: { shortlisted: 0, replied: 0 },
       crmStatus: "not_bound",
+      crmCountsComplete: false,
     };
   const sort = input.sort ?? "score";
   return mergeRoleCandidates(input, {

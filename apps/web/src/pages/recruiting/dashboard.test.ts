@@ -135,7 +135,27 @@ describe("source mapping", () => {
       interested: null,
     });
     const counts = { shortlisted: 1, replied: 4 };
-    expect(crmReplied({ items: [], nextCursor: null, total: 0, counts, crmStatus: "ok" })).toBe(4);
+    for (const crmCountsComplete of [undefined, false])
+      expect(
+        crmReplied({
+          items: [],
+          nextCursor: null,
+          total: 0,
+          counts,
+          crmStatus: "ok",
+          crmCountsComplete,
+        }),
+      ).toBeNull();
+    expect(
+      crmReplied({
+        items: [],
+        nextCursor: null,
+        total: 0,
+        counts,
+        crmStatus: "ok",
+        crmCountsComplete: true,
+      }),
+    ).toBe(4);
     expect(
       crmReplied({ items: [], nextCursor: null, total: 0, counts, crmStatus: "not_bound" }),
     ).toBeNull();

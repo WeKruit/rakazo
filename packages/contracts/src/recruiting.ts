@@ -1425,6 +1425,8 @@ export const RecruitingRoleCandidatesOutputSchema = z.strictObject({
     })
     .catchall(z.number().int().nonnegative()),
   crmStatus: z.enum(["ok", "not_bound", "unavailable"]),
+  /** Readability is not completeness: absent/false means CRM counts are observed partial data. */
+  crmCountsComplete: z.boolean().optional(),
 });
 export type RecruitingRoleCandidatesOutput = z.infer<typeof RecruitingRoleCandidatesOutputSchema>;
 
