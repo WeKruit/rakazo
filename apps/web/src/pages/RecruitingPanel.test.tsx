@@ -8838,6 +8838,8 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
       spaceId: role.spaceId,
       conversation: { groupId: "group-1" },
       refreshSignal: 1,
+      // The panel's binding read is handed over so the tab does not read it again.
+      crmTarget: crmTarget.target,
     });
   }
   // The role tabs own their CRM reads; the hidden stored CRM views read nothing.

@@ -7,11 +7,13 @@ import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
   formatDate,
+  LoadMore,
   statusText,
   TabHeader,
   TabLoading,
   TabNotice,
   useCrmData,
+  useCrmPages,
   useRoleCrm,
 } from "./shared";
 
@@ -114,16 +116,16 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
   const ready = crm.status === "ready" ? crm.target : null;
   const [candidateId, setCandidateId] = useState<string>();
   const [emailId, setEmailId] = useState<string>();
-  const people = useCrmData(
+  const people = useCrmPages(
     crm,
     "candidates",
-    ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
   );
-  const roleMail = useCrmData(
+  const roleMail = useCrmPages(
     crm,
     "roleMail",
-    ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
   );
   const roleWideSupported = roleMail.data?.supported !== false;
@@ -232,6 +234,11 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
                 </button>
               </li>
             ))}
+            {people.data.nextOffset !== null ? (
+              <li className="px-3 pb-3">
+                <LoadMore pages={people} />
+              </li>
+            ) : null}
           </ul>
           <section aria-label={t`Emails`} className="rounded-lg border border-border">
             <div className="flex items-center justify-between gap-2 border-b border-border p-3">
@@ -313,9 +320,9 @@ export function InboxTab({ onSelectEmail, ...props }: InboxProps) {
               </button>
             ))}
             {roleWide && roleMail.data?.nextOffset != null ? (
-              <p className="p-3 text-xs text-muted-foreground">
-                <Trans>Showing the most recent CRM records.</Trans>
-              </p>
+              <div className="px-3 pb-3">
+                <LoadMore pages={roleMail} />
+              </div>
             ) : null}
           </section>
           <section aria-label={t`Email content`} className="rounded-lg border border-border p-4">

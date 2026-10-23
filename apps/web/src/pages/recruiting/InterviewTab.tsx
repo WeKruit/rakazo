@@ -5,11 +5,13 @@ import {
   CrmGate,
   crmRoleKey,
   formatDate,
+  LoadMore,
   statusText,
   TabHeader,
   TabLoading,
   TabNotice,
   useCrmData,
+  useCrmPages,
   useRoleCrm,
   useSavedCorrespondence,
 } from "./shared";
@@ -25,10 +27,10 @@ export function InterviewTab(props: RecruitingTabProps) {
   const ready = crm.status === "ready" ? crm.target : null;
   // The CRM's own Interview stage for this role; CRMs without the stage filter fall back to the
   // organization-wide interview workflow statuses, matched to this role below.
-  const staged = useCrmData(
+  const staged = useCrmPages(
     crm,
     "candidates",
-    ready ? { crmRoleId: ready.crmRoleId, stage: "Interview", limit: 50 } : null,
+    ready ? { crmRoleId: ready.crmRoleId, stage: "Interview" } : null,
     props,
   );
   const fallback = staged.failed;
@@ -51,9 +53,7 @@ export function InterviewTab(props: RecruitingTabProps) {
   const loading = staged.loading || (fallback && reads.some(({ read }) => read.loading));
   const failed = fallback && reads.some(({ read }) => read.failed);
   const loaded = fallback ? reads.every(({ read }) => read.data) : Boolean(staged.data);
-  const truncated = fallback
-    ? reads.some(({ read }) => read.data?.nextOffset != null)
-    : staged.data?.nextOffset != null;
+  const truncated = fallback && reads.some(({ read }) => read.data?.nextOffset != null);
   const rows: { status: string; item: Row }[] = fallback
     ? reads.flatMap(({ status, read }) =>
         forRole(read.data?.items ?? []).map((item) => ({ status, item })),
@@ -103,6 +103,7 @@ export function InterviewTab(props: RecruitingTabProps) {
           </table>
         </div>
       ) : null}
+      {fallback ? null : <LoadMore pages={staged} />}
       {truncated ? (
         <p className="mt-2 text-xs text-muted-foreground">
           <Trans>Showing the most recent CRM records.</Trans>

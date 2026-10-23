@@ -5,11 +5,13 @@ import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
   formatDate,
+  LoadMore,
   statusText,
   TabHeader,
   TabLoading,
   TabNotice,
   useCrmData,
+  useCrmPages,
   useRoleCrm,
 } from "./shared";
 
@@ -33,16 +35,16 @@ export function SequenceTab(props: RecruitingTabProps) {
   const outboxStatus = useOutboxStatus();
   const [candidateId, setCandidateId] = useState<string>();
   const ready = crm.status === "ready" ? crm.target : null;
-  const campaigns = useCrmData(
+  const campaigns = useCrmPages(
     crm,
     "roleCampaigns",
-    ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
   );
-  const people = useCrmData(
+  const people = useCrmPages(
     crm,
     "candidates",
-    ready ? { crmRoleId: ready.crmRoleId, limit: 50 } : null,
+    ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
   );
   const details = useCrmData(crm, "candidateDetails", candidateId ? { candidateId } : null, props);
@@ -93,6 +95,7 @@ export function SequenceTab(props: RecruitingTabProps) {
               <Trans>No stored campaign associations were returned for this role.</Trans>
             </TabNotice>
           )}
+          <LoadMore pages={campaigns} />
         </section>
       ) : null}
       {people.data ? (
@@ -134,6 +137,11 @@ export function SequenceTab(props: RecruitingTabProps) {
                   </button>
                 </li>
               ))}
+              {people.data.nextOffset !== null ? (
+                <li className="px-3 pb-3">
+                  <LoadMore pages={people} />
+                </li>
+              ) : null}
             </ul>
             {selected ? (
               <section aria-label={t`Messages`} className="space-y-3">
