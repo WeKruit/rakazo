@@ -1114,7 +1114,7 @@ function observationFixture(rows: readonly unknown[] | undefined) {
   };
 }
 
-function crmFixture() {
+function crmFixture(additionalRows: readonly unknown[] = []) {
   const raw = {
     name: "Example",
     linkedin_url: "https://www.linkedin.com/in/example",
@@ -1124,7 +1124,7 @@ function crmFixture() {
     resume_url: null,
     evidence_urls: [],
   };
-  const f = observationFixture([raw]);
+  const f = observationFixture([raw, ...additionalRows]);
   Object.assign(f.run, {
     status: "running",
     leaseOwner: "worker",
@@ -1210,7 +1210,7 @@ function crmFixture() {
     requestCursor: null,
     outputId: null,
     observedAt: f.now,
-    rowCount: 1,
+    rowCount: 1 + additionalRows.length,
   };
   const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(raw, {
     schemaKnown: true,
@@ -4087,8 +4087,8 @@ describe("native candidate shortlist", () => {
   });
 });
 
-async function nativeSourceFixture() {
-  const f = crmFixture();
+async function nativeSourceFixture(additionalRows: readonly unknown[] = []) {
+  const f = crmFixture(additionalRows);
   const read = f.effects.get("read")!;
   const bytes = Buffer.from(
     stableJsonValue({ request: read.request, providerResult: read.result }),
@@ -4142,8 +4142,8 @@ async function nativeSourceFixture() {
 }
 
 describe("native candidate source provenance", () => {
-  async function nativeImportReadFixture() {
-    const f = await nativeSourceFixture();
+  async function nativeImportReadFixture(additionalRows: readonly unknown[] = []) {
+    const f = await nativeSourceFixture(additionalRows);
     const resolved = (await recruiting.resolveRecruitingCrmImport(
       f.prisma,
       actor,
@@ -4216,6 +4216,160 @@ describe("native candidate source provenance", () => {
       limit: 1,
     });
   }
+  it("batches exact current-binding imports and verifies their shared native page once after the read snapshot", async () => {
+    const row = {
+      name: "Second Example",
+      linkedin_url: "https://www.linkedin.com/in/second-example",
+    };
+    const f = await nativeImportReadFixture([row]);
+    const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
+      schemaKnown: true,
+    });
+    const occurrence = { ...f.occurrence, ...profile, candidateKey: candidateKey!, rowIndex: 1 };
+    const args = {
+      p_org: f.target.organizationId,
+      p_role: f.target.crmRoleId,
+      p_name: row.name,
+      p_linkedin_url: row.linkedin_url,
+      p_source_file: `rakazo:artifact:${f.page.artifactId}:sha256:${f.page.artifactHash}:row:1`,
+    };
+    const effect = {
+      ...f.importEffect,
+      id: "second-import",
+      idempotencyKey: `recruiting-crm-import:${stableJsonValue([f.binding.id, f.page.effectId, 1])}`,
+      request: boundDirectApprovalRequest(
+        {
+          connectorId: "mcp",
+          resourceId: f.target.mcpServerId,
+          resourceRevision: 2,
+          toolName: "crm_import_candidate",
+        },
+        args,
+        "__rakazoCatalogTool",
+      ),
+      status: "completed",
+      result: {
+        structuredContent: {
+          data: {
+            candidate_id: "40000000-0000-4000-8000-000000000004",
+            source_id: "50000000-0000-4000-8000-000000000005",
+            membership_id: "60000000-0000-4000-8000-000000000006",
+            organization_id: f.target.organizationId,
+            role_spec_id: f.target.crmRoleId,
+            linkedin_identity: "/in/second-example",
+            source_file: args.p_source_file,
+          },
+        },
+      },
+    };
+    f.tx.recruitingCrmImport.findMany.mockResolvedValue([
+      { ...f.links[0]!, effect: f.importEffect, occurrence: f.occurrence },
+      {
+        effectId: effect.id,
+        bindingEffectId: f.binding.id,
+        pageId: f.page.effectId,
+        rowIndex: 1,
+        effect,
+        occurrence,
+      },
+    ] as never);
+    f.tx.run.findMany.mockClear();
+    let inTransaction = false;
+    const prisma = {
+      $transaction: vi.fn(async (read: (tx: typeof f.tx) => Promise<unknown>) => {
+        inTransaction = true;
+        try {
+          return await read(f.tx);
+        } finally {
+          inTransaction = false;
+        }
+      }),
+    } as unknown as PrismaClient;
+    const json = JSON.stringify(f.read.result);
+    const parse = JSON.parse;
+    let byteChecks = 0;
+    const spy = vi.spyOn(JSON, "parse").mockImplementation((text, reviver) => {
+      if (text === json) {
+        byteChecks += 1;
+        expect(inTransaction).toBe(false);
+      }
+      return parse(text, reviver);
+    });
+    try {
+      const result = await recruiting.getRecruitingCrmCandidateSyncs(prisma, actor, {
+        roleId: f.role.id,
+        effectIds: [f.importEffect.id, effect.id, f.importEffect.id],
+      });
+      expect(result).toMatchObject([
+        { effectId: f.importEffect.id, status: "pending", receipt: null },
+        { effectId: effect.id, status: "synced", receipt: { source_file: args.p_source_file } },
+      ]);
+      expect(f.nativeProofs).toHaveBeenCalledOnce();
+      expect(byteChecks).toBe(1);
+      expect(f.tx.run.findMany).toHaveBeenCalledOnce();
+      expect(f.tx.recruitingCrmImport.findMany).toHaveBeenCalledExactlyOnceWith({
+        where: {
+          effectId: { in: [f.importEffect.id, effect.id] },
+          bindingEffectId: f.binding.id,
+          occurrence: { roleId: f.role.id },
+          effect: { spaceId: actor.spaceId, run: { spaceId: actor.spaceId, userId: actor.userId } },
+        },
+        include: { effect: true, occurrence: { include: { page: true } } },
+      });
+      expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
+        isolationLevel: "RepeatableRead",
+      });
+      expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  it.each([
+    "actor",
+    "space",
+    "missing",
+    "binding",
+    "role",
+    "source-role",
+    "effect-identity",
+    "effect-space",
+    "owner",
+    "bytes",
+  ])("rejects an invalid exact import batch %s without exposing receipts", async (boundary) => {
+    const f = await nativeImportReadFixture();
+    const link = { ...f.links[0]!, effect: f.importEffect, occurrence: f.occurrence };
+    let caller = actor;
+    if (boundary === "actor") caller = { ...actor, userId: "another-owner" };
+    if (boundary === "space") caller = { ...actor, spaceId: "another-space" };
+    if (boundary === "binding") link.bindingEffectId = "another-binding";
+    if (boundary === "role") link.occurrence = { ...link.occurrence, roleId: "another-role" };
+    if (boundary === "source-role")
+      link.occurrence = { ...link.occurrence, page: { ...f.page, roleId: "another-role" } };
+    if (boundary === "effect-identity") link.effect = { ...link.effect, id: "another-import" };
+    if (boundary === "effect-space") link.effect = { ...link.effect, spaceId: "another-space" };
+    if (boundary === "owner")
+      f.tx.run.findMany.mockResolvedValue([{ ...f.run, userId: "another-owner" }]);
+    if (boundary === "bytes") f.read.result = { changed: true } as never;
+    f.tx.recruitingCrmImport.findMany.mockResolvedValue(boundary === "missing" ? [] : [link]);
+    await expect(
+      recruiting.getRecruitingCrmCandidateSyncs(f.prisma, caller, {
+        roleId: f.role.id,
+        effectIds: [f.importEffect.id],
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.tx.externalEffect.updateMany).not.toHaveBeenCalled();
+  });
+  it("bounds exact import batches before starting a snapshot", async () => {
+    const f = await nativeImportReadFixture();
+    vi.mocked(f.prisma.$transaction).mockClear();
+    await expect(
+      recruiting.getRecruitingCrmCandidateSyncs(f.prisma, actor, {
+        roleId: f.role.id,
+        effectIds: Array.from({ length: 201 }, (_, index) => `import-${index}`),
+      }),
+    ).rejects.toThrow(IsolationError);
+    expect(f.prisma.$transaction).not.toHaveBeenCalled();
+  });
   it.each(["candidates", "sources", "research"] as const)(
     "releases the read snapshot before verifying full native result bytes for %s",
     async (operation) => {
