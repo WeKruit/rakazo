@@ -1,313 +1,300 @@
-# PR-driven staging and production releases
+# PR-driven validation, restricted staging and production eligibility
 
-This change prepares a release path; it does not activate a hosted staging
-environment or authorize a deployment. Keep the existing deployment and Autumn
-holds until the assigned deployment owner verifies and lifts them. Creating a PR,
-passing a test or supplying workflow inputs is not that authorization.
+This change supplies synthetic release validation, an explicitly activated hosted
+staging path, and production eligibility checks. **Production promotion always
+stops before any Modal mutation:** no enforceable deployment pause/drain mechanism
+has been found or implemented. A quiet-session snapshot cannot prevent a new run
+from starting during the build or cutover. Keep all deployment and Autumn holds.
 
-Read the [development delivery](../handoff/2026-10-23/development-delivery.md),
+No workflow was deployed or activated by this development task. Read the
+[development delivery](../handoff/2026-10-23/development-delivery.md),
 [CRM delivery](crm-sync-delivery-2026-10-23.md) and
-[Modal runtime instructions](../../infra/modal/README.md) before activation.
+[Modal runtime instructions](../../infra/modal/README.md) before owner activation.
 
-## Release path
+## Three distinct stages
 
-1. Review product changes through a PR. Existing broad CI continues to cover lint,
-   typechecking, builds, unit tests, database journeys and Web E2E. This release
-   change adds focused checks; it does not describe skipped CI as passed.
-2. The explicit ephemeral [`staging.yml`](../../.github/workflows/staging.yml)
-   workflow runs for PRs and after completed `ci` runs. It uses a native
-   disposable PostgreSQL instance, the existing Pi emulator and synthetic
-   CRM fixtures. It receives no production database, CRM, model, mail, sandbox or
-   deployment credentials. It does not copy production data, run Docker, call the
-   real CRM, send email or create a hosted staging URL.
-3. After successful CI for a push to `main`, staging can produce the release
-   candidate: an immutable source archive and manifest tied to that exact tested
-   SHA. A PR staging result alone is not eligible for production promotion.
-4. The separate
-   [`promote-production.yml`](../../.github/workflows/promote-production.yml)
-   workflow is manually dispatched with `staging_run_id` and `expected_sha`. It
-   consumes the successful staging run and verifies the repository, workflow,
-   event, commit, successful CI
-   and staging jobs, artifact identity and checksums before using the archive.
-   Missing, expired, ambiguous or mismatched evidence fails closed. It must never
-   substitute the latest branch head or another run's artifact.
-5. Once separately activated and authorized, production serializes the existing
-   Modal `recreate` deployment. It retains one container and one file-store writer,
-   the existing app/Secret/Volume and the established provider boundaries. No
-   rolling strategy, extra replica, new resource or platform is introduced.
+| Stage | What it establishes | What it does not establish |
+| --- | --- | --- |
+| [Release validation](../../.github/workflows/release-validation.yml) | Disposable native PostgreSQL, existing Pi emulator and synthetic CRM tests; exact-source candidate archive after successful main CI. | A hosted environment, live provider behavior or business acceptance. |
+| [Restricted hosted staging](../../.github/workflows/staging.yml) | Authorized deployment of the candidate to existing isolated Modal resources, database-backed readiness, source revision, web shell and rejected mutation requests. | Interactive product use, agent execution, real CRM sync, email or recruiting acceptance. |
+| [Production eligibility](../../.github/workflows/promote-production.yml) | Validation/staging provenance, receipt and artifact identity, live read-only staging smoke, environment protections and release prerequisites. | Permission or an implementation to cut over production; the missing pause/drain mechanism remains a hard blocker. |
 
-Modal supports `--strategy recreate`; it terminates the previous containers at
-cutover and can retry their in-flight inputs on the replacement. The quiet-session
-and single-writer prerequisites therefore remain necessary. See the
-[deploy CLI](https://modal.com/docs/cli/latest/deploy) and
-[deployment strategy documentation](https://modal.com/docs/guide/managing-deployments).
+Existing broad PR CI retains lint, typechecks, builds, unit tests, database
+journeys and Web E2E. `release-validation.yml` runs synthetic checks for PRs and
+after completed CI. Only a successful CI push to `main` can produce a promotable
+candidate; a PR result cannot. Skipped CI is never treated as passed.
 
-Release packaging, retrieval and promotion live in
-[`infra/release/release.py`](../../infra/release/release.py) (`package`, `fetch`
-and `promote`). The isolated native database checks live in
-[`infra/release/staging.py`](../../infra/release/staging.py). To run the staging
-checks locally against the current full SHA, with dependencies installed, native
-PostgreSQL binaries available, and a clean checkout without dotenv files:
+Hosted staging is manual and disabled by default. Dispatch uses
+`validation_run_id` and `expected_sha`; the workflow fetches that exact validation
+artifact and uses the existing Modal `recreate` strategy. It uploads `staging.json`
+only after its restricted smoke succeeds. Production takes `staging_run_id` and
+`expected_sha`, verifies the hosted run and receipt against the original
+validation artifact, and repeats a live read-only staging smoke. Missing, expired,
+ambiguous or mismatched evidence fails closed. No step substitutes latest `main`.
+
+The manifest records the full Rakazo SHA, archive checksum, CI/validation run
+identity, pinned headhunter source and every product migration's full name and SQL
+checksum in lexical order. The current source pin is
+`11ca9c2df226782eee241fc5b36ba15600f4efcb`. This records a dependency; it does not
+prove source SQL or MCP deployment. The candidate is an exact source archive,
+not a promoted prebuilt Modal image. Modal rebuilds it using the pinned source and
+lockfile; byte-identical images are not claimed.
+
+[`release.py`](../../infra/release/release.py) implements `package`,
+`fetch-validation`, `stage`, `fetch` and `promote`. Deployment entrypoints re-fetch
+and verify trusted provenance before consuming the candidate; an arbitrary local
+release directory is not accepted as trusted evidence.
+
+## Synthetic validation and hosted isolation
+
+Run synthetic validation locally with dependencies installed, native PostgreSQL
+binaries available, and a clean checkout without dotenv files:
 
 ```sh
-python3 infra/release/staging.py --sha "$(git rev-parse HEAD)"
-# If native PostgreSQL binaries are outside PATH, add --pg-bin <binary-directory>.
+python3 infra/release/validate.py --sha "$(git rev-parse HEAD)"
+# Add --pg-bin <binary-directory> if native PostgreSQL binaries are outside PATH.
 ```
 
-Production's supported entrypoint is the dispatch workflow. Its trusted `fetch`
-step authenticates the staging artifact before `promote` rechecks the source and
-prerequisites. `promote` is an internal second step, not an independent way to
-authenticate an arbitrary locally assembled release directory.
+The [validation runner](../../infra/release/validate.py) creates its own loopback
+database and temporary home, rejects dotenv files and discards inherited live
+credentials through an allowlisted subprocess environment. It uses no Docker,
+production-data copy, deployment credentials or real CRM/provider connection.
+The existing Pi test exercises a real executor persisting a file and completed
+run. CRM fixtures cover scoped reads, dry-run separation, incomplete reads,
+cursor integrity and isolation. These are implementation checks.
 
-The release candidate is pinned source plus lockfile and migration evidence. It
-is not a previously built Modal image, and rebuilding it is not a claim of
-byte-for-byte image reproducibility. Record the resulting platform deployment
-revision alongside the source manifest in the owner's private release record.
+Hosted staging runs the native Web/API/worker entrypoints in a restricted mode.
+The API permits only the health/readiness GET endpoints; product mutation routes
+are denied. The worker does not start job processing or providers. The web shell
+can load, but this is deliberately not an interactive recruiting environment.
+The smoke checks `/ready`, database readiness, the exact `x-rakazo-revision`, the
+web document and rejection of a mutation request. The denied probe must not create
+an account, start a run, synchronize CRM data or send mail. Public `/health`
+remains constant liveness and is insufficient on its own.
 
-## Release evidence and prerequisites
+Staging's existing Modal runtime Secret must contain the distinct prefixed values
+`STAGING_DATABASE_URL`, `STAGING_BETTER_AUTH_SECRET` and
+`STAGING_ENCRYPTION_KEY`. The sanitizer maps only the approved staging values into
+an allowlisted runtime environment; generic database/auth/provider credentials
+are not forwarded. The database name and username must both be `rakazo_staging`,
+and the connection must require TLS. The owner must verify the role cannot read
+production databases, the database contains only synthetic data, and the dedicated
+staging Volume is fresh and contains no production files or credentials. Naming
+checks alone do not prove those access boundaries.
 
-The manifest records the full Rakazo commit SHA, archive checksum, originating CI
-and staging runs, the source dependency SHA, and every product migration's full
-directory name and SQL checksum in lexical order. The current headhunter source
-dependency is `11ca9c2df226782eee241fc5b36ba15600f4efcb`. Recording that value does
-not prove the source SQL or MCP service has been deployed.
+Use an existing isolated staging app, environment, Secret, database and Volume.
+App, Secret and Volume names must each match
+`^rakazo-staging(?:-[a-z0-9-]+)?$`; the Modal environment is fixed to `staging`.
+No workflow creates the resources, copies production data or borrows the
+production Secret. Staging startup can apply product schema migrations to its
+isolated database; that future operation requires explicit staging activation.
+If any resource or credential is absent, stop for separately authorized setup.
 
-Before each production promotion, the authorized owner must establish all of the
-following for that candidate:
+## Activation and approval controls
 
-- CI and isolated staging passed for the exact source revision; the downloaded
-  artifact matches the manifest and is still available.
-- Production activation and the separate release approval are explicit. Verify
-  the repository's actual environment controls and plan capabilities; an
-  `environment: production` declaration is not a required-reviewer gate by itself.
-  No branch-protection or dashboard setting is changed by this PR.
-- The active sourcing run has ended, Autumn's pause/hold is respected, outreach is
-  stopped, and no run or file-store writer will be interrupted. Check current
-  state immediately before replacement; a prior quiet-session report can expire.
-- The actual source revision, ordered source migrations and existing MCP protocol
-  version meet the CRM delivery requirements. Source migrations
-  `20261023180000_crm_candidate_presence` and
-  `20261023181000_crm_candidate_presence_secondary_roles` precede any later real
-  CRM sync. Vercel deployment success is not source SQL/MCP evidence.
-- The actual product migration ledger is compared with the manifest by full
-  name and checksum, and the candidate's schema changes and backup/recovery plan
-  are approved. A date-prefix match is insufficient. In particular,
-  `20261023172000_recruiting_calibration_rounds` and
-  `20261023172000_recruiting_crm_sync_progress` are two distinct migrations, in
-  that order. Earlier same-prefix migrations also remain distinct.
-- The exact previous release artifact and its migration compatibility are
-  recorded, with a tested recovery procedure and an owner responsible for it.
+Both workflows verify a main-only deployment branch policy and environment-scoped
+credential/approval names through GitHub's APIs. Production additionally verifies
+a required-reviewer rule with `prevent_self_review=true`. Unsupported or unreadable
+controls fail closed. The environment GET response does not expose the
+administrator-bypass setting; the script does not verify it. The owner must
+verify in GitHub's dashboard that administrators cannot bypass protection before
+installing any environment-scoped credentials. See the
+[environment API](https://docs.github.com/en/rest/deployments/environments#get-an-environment).
 
-The production job uses the `production` environment and `production` concurrency
-group, with `cancel-in-progress: false`. It requires
-`MODAL_PROMOTION_ENABLED=true` and `PRODUCTION_DEPLOYMENT_HOLD=clear`; neither is
-configured by this PR. A per-release `PRODUCTION_RELEASE_APPROVAL` repository or
-environment variable must contain an owner-verified JSON record:
+Verify those protections before credential installation: an in-job check runs
+after job startup and cannot make a misconfigured environment safe for secrets.
+An environment label or repository JSON variable is not an approval gate, and
+private-repository plan support must not be assumed. This PR does not change
+environment policies, branch protection or dashboard settings. Production's
+unconditional cutover stop remains even if eligibility checks pass.
 
-```json
-{
-  "sha": "<exact 40-character candidate SHA>",
-  "staging_run_id": 123456789,
-  "expires_at": "<UTC ISO timestamp ending in Z, at most 30 minutes ahead>",
-  "previous_sha": "<exact 40-character previous accepted SHA>",
-  "active_runs": 0,
-  "autumn_paused": true,
-  "source_sha": "11ca9c2df226782eee241fc5b36ba15600f4efcb",
-  "source_migrations_verified": true,
-  "product_migrations_approved": true,
-  "rollback_compatible": true
-}
-```
+| Setting | Restricted staging | Production eligibility |
+| --- | --- | --- |
+| GitHub environment | `staging` | `production` |
+| Activation/hold variables | `STAGING_DEPLOY_ENABLED=true`, `STAGING_DEPLOYMENT_HOLD=clear` | `MODAL_PROMOTION_ENABLED=true`, `PRODUCTION_DEPLOYMENT_HOLD=clear` |
+| Existing Modal resource variables | `STAGING_MODAL_APP_NAME`, `STAGING_MODAL_SECRET_NAME`, `STAGING_MODAL_VOLUME_NAME`; Modal environment fixed to `staging` | `MODAL_APP_NAME`, `MODAL_SECRET_NAME`, `MODAL_VOLUME_NAME`, `MODAL_ENVIRONMENT` |
+| Origin variable | `STAGING_ORIGIN` | `PRODUCTION_ORIGIN` |
+| Environment-scoped Modal credential names | `STAGING_MODAL_TOKEN_ID`, `STAGING_MODAL_TOKEN_SECRET` | `PRODUCTION_MODAL_TOKEN_ID`, `PRODUCTION_MODAL_TOKEN_SECRET` (metadata checks only; values are not injected) |
+| Environment-scoped approval secret | `STAGING_RELEASE_APPROVAL` | `PRODUCTION_RELEASE_APPROVAL` |
+| Environment-scoped metadata-read secret | `ENVIRONMENT_AUDIT_TOKEN` | `ENVIRONMENT_AUDIT_TOKEN` |
 
-The example run number and placeholders are not an approval; `staging_run_id`
-must be the actual successful run ID as a JSON number. The authorized owner supplies current
-evidence and a fresh record for the exact candidate/run. Expiry bounds stale
-assertions but does not replace checking current run state. Configure approval
-variable write access and workflow dispatch access as part of the separately
-authorized activation review; a boolean or JSON document is not independent
-enforcement of a human reviewer.
+Production also requires trusted copies of `STAGING_MODAL_APP_NAME`,
+`STAGING_MODAL_SECRET_NAME`, `STAGING_MODAL_VOLUME_NAME` and `STAGING_ORIGIN` in its
+environment variables to compare the hosted staging receipt with the expected
+target. Its workflow neither installs Modal nor injects Modal credential values;
+the eligibility check only verifies the required secret names exist.
 
-The existing Modal runtime applies product migrations during startup. Activating
-the production workflow therefore authorizes a migration-capable release, not
-just an HTTP restart. Workflow prerequisite variables record owner assertions;
-they do not query production to prove that a run is quiet, a backup is usable or
-a migration has been approved.
+Listing environment secret names requires repository `Environments: read`
+permission, which the ordinary workflow `github.token` cannot be assumed to have.
+The owner-supplied `ENVIRONMENT_AUDIT_TOKEN` is used only for that metadata API;
+it reads no secret values. Missing access or HTTP 403 fails closed without a
+broader-token fallback. See
+[List environment secrets](https://docs.github.com/en/rest/actions/secrets#list-environment-secrets).
+Creating or installing this token is a separate access/credential decision; it
+has not been done here.
 
-The local owner has separately reported `e740fa441b1db2d1bc64cb546a623f4f99982042`
-healthy/ready, source migrations applied, existing MCP v11, and a dry run underway.
-This is an attributed report, not validation performed by this CI/CD task, not a
-completed real sync, and not permission to change the deployment hold. Obtain
-current owner evidence before activation.
+Staging pins the existing Modal CLI version `1.6.2`; missing resources must not
+be created implicitly. Any credential installation, secret creation, access
+change, resource, subscription or additional cost requires separate confirmation.
+Keep both activation gates off until that review is complete.
 
-## Isolation and smoke coverage
+Staging's approval secret contains the exact full `sha`, numeric
+`validation_run_id`, `isolated_resources_verified: true`,
+`synthetic_data_only: true` and `expires_at` as a UTC ISO timestamp ending in `Z`,
+no more than 30 minutes ahead. The owner must establish those facts before setting
+the secret; the record is not itself evidence that isolation has been tested.
 
-Ephemeral staging is a deterministic integration environment. Its native local
-database is newly initialized with synthetic identities; cleanup belongs to the
-same runner. Test setup rejects dotenv files and builds a small allowlisted
-subprocess environment, discarding inherited database URLs and live-service
-credentials. It creates its own loopback database URL and temporary home instead
-of accepting an existing database. It must never restore production data or
-borrow the production Modal Secret.
+Production's approval secret records the exact `sha`, numeric `staging_run_id`,
+`previous_sha`, pinned `source_sha`, the same expiry bound, `active_runs: 0`,
+`autumn_paused: true`, `source_migrations_verified: true`,
+`product_migrations_approved: true` and `rollback_compatible: true`. These are
+release assertions behind the verified environment gate. **They cannot unlock
+production cutover in this implementation.** An `active_runs: 0` snapshot and an
+expiring JSON record are not a lock or a deployment drain.
 
-The existing Pi emulator test covers a real executor persisting a file and a
-completed run. The CRM tests cover scoped reads, dry-run separation,
-failed/incomplete source reads, cursor integrity and isolation. Fake responses are test
-fixtures, not real recruiting acceptance. A successful smoke cannot establish
-live provider behavior, real two-user acceptance or a successful sourcing outcome.
+Before production can be implemented safely, a separately reviewed mechanism must
+prevent new runs and provider/worker work throughout image build, replacement and
+readiness verification, while preserving the real Autumn pause and active state.
+It must fail safely if the drain cannot be maintained and retain one file-store
+writer. Do not remove the unconditional production stop or enable a legacy path
+to work around this blocker.
 
-After an authorized promotion, safe probes check `GET /ready`, its
-`x-rakazo-revision` header against the manifest SHA, and the `GET /` document.
-These checks do not start a run, perform CRM sync or send mail. `/health` remains
-constant public liveness and is insufficient alone. `/ready` checks readiness
-without disclosing database details. Its revision header exposes only the source
-SHA; keep richer health details on the existing operator-only path. Readiness and
-a document response are limited smoke evidence, not full signed-in acceptance.
+Modal's `recreate` strategy terminates old containers at cutover and can retry
+in-flight inputs on replacements. See the [deploy CLI](https://modal.com/docs/cli/latest/deploy)
+and [deployment strategy documentation](https://modal.com/docs/guide/managing-deployments).
+The intended production concurrency group remains `production`, with cancellation
+disabled; serialization between release jobs does not prevent application runs.
 
-CRM sync remains a separate, explicitly authorized operational step. Follow the
-CRM delivery procedure for `dryRun: true`, inspect incomplete-read reports, then
-start a fresh-cursor `false` pass only with the required authorization. No release
-hook, smoke test, rollback or monitoring check may invoke either real sync mode
-implicitly. Do not replay outreach, interview invitations or historical approvals.
+## Source, schema and business prerequisites
+
+The authorized owner must inspect actual source and product migration ledgers by
+full name and checksum. Source migrations
+`20261023180000_crm_candidate_presence` and
+`20261023181000_crm_candidate_presence_secondary_roles`, and the existing MCP's
+corrected protocol, precede any later real CRM sync. Vercel success does not prove
+SQL/MCP deployment. Product migrations
+`20261023172000_recruiting_calibration_rounds` and
+`20261023172000_recruiting_crm_sync_progress` are distinct, in that order; earlier
+same-prefix names also remain distinct. Do not infer ledger completeness from a
+date prefix.
+
+The normal Modal runtime applies product migrations at startup, so any eventual
+production cutover is a migration-capable release. Require schema review,
+backup/recovery evidence, the exact previous accepted source and verified rollback
+compatibility. Workflow assertions do not query production to establish these
+facts or authorize database changes.
+
+The owner separately reported `e740fa441b1db2d1bc64cb546a623f4f99982042` healthy and
+ready, source migrations applied, existing MCP v11, and a dry run underway. This
+is attributed evidence, not validation by this CI/CD task, a completed real sync
+or permission to change the hold. Obtain current owner evidence before release.
+
+CRM sync stays separate from release. Follow the CRM delivery procedure only with
+its own authorization: `dryRun: true`, inspect incomplete-read reports, then a new
+cursor for an approved `false` pass. No release, smoke, rollback or monitoring hook
+invokes either mode against the real CRM. Do not replay outreach, invitations or
+historical approvals. Restricted staging does not constitute business acceptance.
 
 ## Monitoring with existing facilities
 
-Use existing structured logs and native state before proposing a new service:
-
-| Signal | Existing evidence and limit |
+| Signal | Evidence and limit |
 | --- | --- |
-| Revision and readiness | Release manifest/platform metadata, `/ready` with `x-rakazo-revision`, and operator-only health details; public `/health` proves liveness only. |
-| API errors and latency | Structured HTTP completion status/duration and RPC timing fields; compare failure rate and latency around the recorded release time. |
-| Startup failure and latency | API/worker `boot.phase` and Modal startup/readiness phases; retain migration and process-exit failures. |
-| Run status | Native run lifecycle events and persisted status, including waiting, failed and completed states; waiting on a person is not automatically a failure. |
-| CRM failures and freshness | `crm.sync.failed` and `crm.sync.incomplete` events, `crm.sync.slice` progress and `crm.sync.completed` with `dry_run=false`; row `syncedAt` measures row freshness, not completion of an entire sync. |
+| Revision/readiness | Manifest and deployment metadata, `/ready` and `x-rakazo-revision`; public `/health` proves liveness only. |
+| API errors/latency | Existing structured HTTP status/duration and RPC timing fields around the release time. |
+| Startup | API/worker `boot.phase`, Modal startup/readiness phases, migration failures and process exits. |
+| Run status | Native lifecycle events and persisted status; waiting on a person is not automatically a failure. |
+| CRM | `crm.sync.failed`, `crm.sync.incomplete`, `crm.sync.slice` and `crm.sync.completed` with `dry_run=false`. |
 
-Sync events reuse `@rakazo/logging` and the configured sink. They are emitted after
-each transaction commits; rejected transactions emit only a failure event, without
-the raw error. A final report emits `crm.sync.completed` only when `nextCursor` is
-null and no reads were skipped. Filter on `dry_run=false` before treating it as a
-successful real pass. The timestamp of the last such event supports full-sync
-recency in the existing retained log sink, from activation onward. These aggregate
-events establish service-wide recency, not a lag guarantee for every user,
-connection or organization. There is no historical backfill or new durable
-sync-history table.
+Sync events reuse `@rakazo/logging` and the configured sink. Success events follow
+transaction commit; a rejected transaction emits a failure event without its raw
+error. Completion requires `nextCursor=null` and no skipped reads. Only completion
+with `dry_run=false` indicates a real successful pass. The latest such event
+supports service-wide recency from activation onward, not a lag guarantee for
+every user, connection or organization. No historical backfill or new durable
+sync-history table is supplied; row `syncedAt` is not whole-sync completion.
 
-Event bindings contain aggregate counts, flags and a duration capped at the
-transaction's 125-second wait/execution budget. Counts are cumulative for the
-pass, so do not sum them across slice events; `skipped_count` is the bounded
-report count, capped at 50. No actor, provider, role or contact
-ID, cursor, skipped reason, URL, contact data or raw error is added. Existing log
-correlation and redaction still apply. Do not label the newest row timestamp, a
-rotated cursor or a dry run as a successful full sync. Alert routing and thresholds
-remain activation work; this PR does not install a monitoring backend or
-periodically invoke CRM sync.
+Event fields contain aggregate counts, flags and duration capped at 125 seconds.
+Counts are cumulative across slices; do not sum them. The skipped count is capped
+at 50. No new IDs, cursors, skipped reasons, URLs, contacts or raw errors are added;
+existing log correlation/redaction still applies. Keep credentials, candidate
+identities and message/provider payloads out of public CI artifacts and PRs.
+Alert thresholds and routing remain owner setup; no new monitoring platform,
+production-data copy or periodic sync is introduced.
 
-Keep credentials, cookies, tokens, candidate identities, addresses, message
-bodies, connection strings and provider payloads out of public CI artifacts and
-PRs. Reuse existing log redaction, and retain only aggregate outcomes and bounded
-timings in release summaries. Monitoring production data requires its own
-authorized access; staging never receives a copy of that data.
+## Remaining delivery and setup blockers
 
-## Activation work that remains
+- Publication: repository webhook reads returned HTTP 403. Empty deployment/status
+  lists do not prove external preview apps absent. Preserve local commits, patch
+  and draft PR text until the complete push/PR-trigger audit is possible.
+- Hosted validation: publish/merge only with the relevant authority, then run CI,
+  candidate validation and explicitly authorized restricted staging. Inspect the
+  exact-SHA artifacts, receipt and smoke evidence. Local checks are not those runs.
+- Staging activation: verify all existing isolated resources, runtime values,
+  account/billing access, main-only environment controls, administrator-bypass
+  settings and scoped secrets before installing credentials. Separately authorize
+  the environment-metadata read token if absent; no missing resource, credential
+  or access grant is created by this task.
+- Production activation: verify enforceable environment approval controls and
+  separately implement/review the real pause/drain boundary. Eligibility checks
+  intentionally fail before deployment until that mechanism exists.
+- Business acceptance: current source/schema evidence, authorized real-provider
+  testing and eventual CRM acceptance remain separate owner work. Product bug
+  fixes, full interactive staging and alert setup are outside this change.
 
-- Verify external push/PR deployment integrations before publishing this branch.
-  The current repository webhook read returned HTTP 403. Empty GitHub deployment
-  and status lists do not establish that no external app can deploy a preview.
-  Until that audit is possible, preserve local commits, patch and draft PR text.
-- Review and merge this code only under separate merge authority. Run hosted CI
-  and isolated staging, inspect their exact-SHA artifacts and retain a known-good
-  previous release. Locally passing checks do not substitute for those runs.
-- Verify the existing Modal account/app/Secret/Volume, billing, access and runtime
-  configuration without creating replacements. Any new credential, CI secret,
-  access grant, resource, subscription or cost setup needs separate confirmation.
-  The workflow uses existing-resource variables `MODAL_APP_NAME`,
-  `MODAL_SECRET_NAME`, `MODAL_VOLUME_NAME`, `MODAL_ENVIRONMENT` and
-  `PRODUCTION_ORIGIN`, with `PRODUCTION_MODAL_TOKEN_ID` and
-  `PRODUCTION_MODAL_TOKEN_SECRET` secrets. It pins the existing Modal CLI to
-  `1.6.2` and refuses implicit resource creation (`create_if_missing=False`).
-  Do not supply the existing production runtime Secret to staging.
-- Configure production workflow activation, authorized dispatchers and real
-  approval controls only after owner review. Do not assume GitHub required
-  reviewers or branch protection are enabled. Keep all deploy holds in force
-  until the assigned owner lifts them for the exact release.
-- Validate the current source/product migration evidence, quiet session, recovery
-  point and readiness checks. Perform the first production promotion and real
-  business acceptance only under explicit deployment/data authorization.
+An independent reviewer should receive changed files, exact head, local commands
+and results, unexecuted stages and these blockers. Workflow files alone do not
+make an environment operational. This is partial CI/CD delivery, not a completed
+autonomous production release system.
 
-No environment is operational merely because workflow files exist. Hosting a
-persistent staging URL, adding production dashboards/alerts, and arranging real
-provider acceptance are future activation decisions, not hidden side effects of
-this change. Product bugs and recruiting workflow changes are outside this PR.
+## Legacy and external paths
 
-Only after all activation and per-release prerequisites are independently
-verified, the authorized owner can use GitHub's manual workflow form or:
+Keep legacy SSH/Compose, mobile OTA and server-image publishers disabled during
+review; their opt-ins do not bypass the production drain requirement.
 
-```sh
-gh workflow run promote-production.yml --ref main \
-  -f staging_run_id='<successful staging run ID>' \
-  -f expected_sha='<exact 40-character candidate SHA>'
-```
-
-This command deploys; it is documented for the future owner procedure and was
-not executed during development. Record the dispatch run, artifact identity,
-exact head, checks and readiness result privately. An independent reviewer should
-receive the proposed files, local test commands/results, unexecuted stages and
-remaining setup blockers before activation.
-
-## Legacy and external release boundaries
-
-Legacy SSH/Compose deployment, mobile production OTA and server-image publication
-have separate explicit opt-ins. Keep them disabled while the Modal promotion path
-is being reviewed. Enabling one is a separate release decision; production
-workflow approval does not authorize another publisher.
-
-| Path | Explicit conditions |
+| Path | Existing explicit conditions |
 | --- | --- |
 | SSH/Compose | `LEGACY_COMPOSE_DEPLOY_ENABLED=true`, `PRODUCTION_DEPLOY_ENABLED=true`, `PRODUCTION_DEPLOYMENT_HOLD=clear`, `PRODUCTION_APPROVED_SHA` equal to the tested SHA, and Modal promotion not enabled. |
-| Mobile production OTA | `MOBILE_OTA_PUBLISH_ENABLED=true` and Modal promotion not enabled; existing OTA compatibility checks still apply. |
-| Server images | `SERVER_IMAGE_PUBLISH_ENABLED=true`; independent distribution, separately authorized because a published image can feed an updater. |
+| Mobile OTA | `MOBILE_OTA_PUBLISH_ENABLED=true`, Modal promotion not enabled, and existing OTA compatibility checks. |
+| Server images | `SERVER_IMAGE_PUBLISH_ENABLED=true`; independent distribution that can feed an updater, requiring its own authorization. |
 
 SSH, OTA and Modal promotion share the `production` concurrency group. The legacy
-host script additionally requires `RAKAZO_LEGACY_COMPOSE_APPROVED_SHA` to match the
-full SHA argument and `RAKAZO_DEPLOYMENT_HOLD=clear` in its existing host-owned
-configuration. It refuses a moved `main` instead of fetching and deploying a
-different head. No host configuration is changed by this PR. Image publication
-and mutable tags are not evidence that the Modal artifact passed staging.
+host script also requires `RAKAZO_LEGACY_COMPOSE_APPROVED_SHA` to match the full
+SHA argument and `RAKAZO_DEPLOYMENT_HOLD=clear`; it refuses moved `main`. No host
+configuration is changed. Mutable image tags do not establish Modal staging
+acceptance. Desktop/tag and manual native releases remain separate; do not create
+tags or dispatch them as part of this work.
 
-Desktop/tag and manually dispatched native releases remain separate deliverables
-with their existing release procedures. Do not create tags, dispatch workflows
-or publish OTA updates as part of this server promotion. Before later activation,
-re-audit every enabled publisher and updater that can change a running version.
-
-The headhunter repository's Vercel integration is unchanged. Do not push to that
-repository or rely on `[skip ci]` to suppress Vercel; its earlier PR-specific
-authorization does not carry over. Rakazo's marketing Vercel configuration also
-does not establish whether an external preview integration is enabled. Auditing
-Actions alone is insufficient. The existing Playwright report publication path
-can write a report to external storage after PR CI; it is not a product staging
-deployment and must be included in the publication audit.
+Head-hunter Vercel integration is unchanged. Do not push to that repository or
+assume `[skip ci]` suppresses Vercel; earlier PR-specific authorization does not
+carry over. Rakazo's marketing configuration also does not prove whether previews
+are enabled. Audit apps/webhooks as well as Actions, including the existing
+Playwright report workflow's external-storage writes after PR CI.
 
 ## Failure and rollback
 
-1. Stop further promotions if deployment, readiness, revision verification or a
-   safe smoke fails. Preserve the failure report and exact attempted SHA. Do not
-   claim success because Modal accepted a deployment command or a port opened.
-2. Have the authorized owner inspect migration outcome and active run state.
-   A failed rollout can leave successfully applied migrations behind. Keep
-   Autumn/outreach pauses and the single-writer constraint in place.
-3. Retrieve the exact previously accepted source archive and manifest. Verify its
-   checksum and platform release record. Confirm that its code can run against
-   the current schema and persisted state before considering replacement.
-4. If compatible and separately authorized, recreate the existing app from that
-   exact previous release, retaining the existing Secret and Volume. Run the
-   same revision, readiness and safe smoke checks and record the outcome.
-5. If schema or data compatibility is unknown, stop for the owner's migration
-   recovery plan or a forward fix. There is no automatic down migration, database
-   restore, Volume replacement or blind rollback after migration. Reverting Git
-   does not revert database writes.
+1. Stop on failed eligibility, deployment, readiness, revision or smoke checks.
+   Preserve the attempted SHA and failure evidence; a successful deploy command
+   or open port is not acceptance. Retain the deployment/Autumn holds.
+2. The authorized owner checks migration outcome and active state. A failed
+   rollout may already have applied migrations. Preserve the single writer and
+   do not resume jobs, research or outreach as a diagnostic.
+3. Retrieve the exact previously accepted source archive and manifest; verify
+   checksums and private deployment evidence. Establish compatibility with the
+   current schema and persisted state before any replacement.
+4. Only through a separately authorized owner recovery procedure, and with the
+   required drain maintained, recreate the existing app from compatible previous
+   source, retaining its Secret and Volume. There is no automated production
+   rollback or cutover in this implementation.
+5. If schema/data compatibility is unknown, stop for migration recovery or a
+   forward fix. Do not automatically run down migrations, restore a database,
+   replace a Volume or assume a Git revert reverses data writes.
 
-Do not run CRM sync, resume paused research or send mail as a rollback test.
-Recovery success and permission to resume business operations are separate
-decisions. This procedure does not rely on Modal's platform rollback feature,
-which its [deployment documentation](https://modal.com/docs/guide/managing-deployments)
-limits to Team and Enterprise plans. No plan upgrade or automatic platform
-rollback is part of this release path.
+The bootstrap revision `e740fa441b1db2d1bc64cb546a623f4f99982042` predates the
+`x-rakazo-revision` response header. It cannot satisfy the new automated smoke or
+receipt contract. A first recovery to that version requires owner verification
+of the exact prior SHA/file hashes and independent health/readiness evidence;
+never weaken the normal smoke check or claim a new-style receipt for old code.
+
+Do not invoke CRM sync or send mail to test recovery. Modal's platform rollback
+feature is [plan-limited](https://modal.com/docs/guide/managing-deployments);
+this procedure does not assume it is available or request a plan upgrade.

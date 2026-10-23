@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       staging_run_id:
-        description: Successful main staging run containing the release artifact
+        description: Successful hosted staging run containing its verified staging receipt
         required: true
         type: string
       expected_sha:
@@ -34,10 +34,15 @@ jobs:
       STAGING_RUN_ID: ${{ inputs.staging_run_id }}
       MODAL_PROMOTION_ENABLED: ${{ vars.MODAL_PROMOTION_ENABLED }}
       PRODUCTION_DEPLOYMENT_HOLD: ${{ vars.PRODUCTION_DEPLOYMENT_HOLD }}
-      PRODUCTION_RELEASE_APPROVAL: ${{ vars.PRODUCTION_RELEASE_APPROVAL }}
+      PRODUCTION_RELEASE_APPROVAL: ${{ secrets.PRODUCTION_RELEASE_APPROVAL }}
+      STAGING_MODAL_APP_NAME: ${{ vars.STAGING_MODAL_APP_NAME }}
+      STAGING_MODAL_SECRET_NAME: ${{ vars.STAGING_MODAL_SECRET_NAME }}
+      STAGING_MODAL_VOLUME_NAME: ${{ vars.STAGING_MODAL_VOLUME_NAME }}
+      STAGING_ORIGIN: ${{ vars.STAGING_ORIGIN }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
+          ref: main
           fetch-depth: 0
           persist-credentials: false
       - name: Require activation and preserve the deployment hold
@@ -45,17 +50,14 @@ jobs:
           test "$MODAL_PROMOTION_ENABLED" = true
           test "$PRODUCTION_DEPLOYMENT_HOLD" = clear
           test -n "$PRODUCTION_RELEASE_APPROVAL"
-      - name: Fetch and verify exact staging candidate
+      - name: Fetch and verify actual hosted staging evidence
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 infra/release/release.py fetch --run-id "$STAGING_RUN_ID" --sha "$EXPECTED_SHA" --directory "$RUNNER_TEMP/candidate"
-      - name: Install existing Modal CLI
-        run: python3 -m pip install modal==1.6.2
-      - name: Promote approved candidate and check readiness
+      - name: Verify promotion prerequisites (cutover held)
         env:
           GH_TOKEN: ${{ github.token }}
-          MODAL_TOKEN_ID: ${{ secrets.PRODUCTION_MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.PRODUCTION_MODAL_TOKEN_SECRET }}
+          ENVIRONMENT_AUDIT_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN }}
           MODAL_APP_NAME: ${{ vars.MODAL_APP_NAME }}
           MODAL_SECRET_NAME: ${{ vars.MODAL_SECRET_NAME }}
           MODAL_VOLUME_NAME: ${{ vars.MODAL_VOLUME_NAME }}

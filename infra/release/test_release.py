@@ -63,10 +63,10 @@ def bundle(directory):
     entries["infra/release/headhunter.json"] = json.dumps(DEPENDENCY).encode()
     archive = archive_bytes(entries)
     manifest = {
-        "format": 1, "repository": release.REPO, "sha": SHA,
+        "format": 2, "repository": release.REPO, "sha": SHA,
         "archive_sha256": hashlib.sha256(archive).hexdigest(),
         "ci": {"id": 17, "attempt": 2},
-        "staging": {"id": 41, "attempt": 2, "workflow_sha": SHA},
+        "validation": {"id": 41, "attempt": 2, "workflow_sha": SHA},
         "headhunter": copy.deepcopy(DEPENDENCY),
         "migrations": [{"name": name, "sha256": hashlib.sha256(
             entries[f"packages/db/prisma/migrations/{name}/migration.sql"]).hexdigest()}
@@ -79,18 +79,45 @@ def bundle(directory):
 
 def approval_env(now=NOW):
     value = {
-        "sha": SHA, "staging_run_id": 41, "source_sha": SOURCE_SHA,
+        "sha": SHA, "staging_run_id": 71, "source_sha": SOURCE_SHA,
         "previous_sha": "c" * 40, "active_runs": 0, "autumn_paused": True,
         "source_migrations_verified": True, "product_migrations_approved": True,
         "rollback_compatible": True, "expires_at": (now + dt.timedelta(minutes=10)).isoformat(),
     }
     return {
         "MODAL_PROMOTION_ENABLED": "true", "PRODUCTION_DEPLOYMENT_HOLD": "clear",
-        "PRODUCTION_RELEASE_APPROVAL": json.dumps(value),
+        "PRODUCTION_RELEASE_APPROVAL": json.dumps(value), "STAGING_RUN_ID": "71",
         "MODAL_APP_NAME": "synthetic-app", "MODAL_SECRET_NAME": "synthetic-secret",
         "MODAL_VOLUME_NAME": "synthetic-volume", "MODAL_ENVIRONMENT": "production",
         "MODAL_TOKEN_ID": "synthetic-token", "MODAL_TOKEN_SECRET": "synthetic-secret",
         "PRODUCTION_ORIGIN": "https://example.test",
+    }
+
+
+def stage_env(now=NOW):
+    return {
+        "STAGING_DEPLOY_ENABLED": "true", "STAGING_DEPLOYMENT_HOLD": "clear",
+        "STAGING_RELEASE_APPROVAL": json.dumps({
+            "sha": SHA, "validation_run_id": 41, "isolated_resources_verified": True,
+            "synthetic_data_only": True, "expires_at": (now + dt.timedelta(minutes=10)).isoformat(),
+        }),
+        "STAGING_MODAL_APP_NAME": "rakazo-staging-app",
+        "STAGING_MODAL_SECRET_NAME": "rakazo-staging-config",
+        "STAGING_MODAL_VOLUME_NAME": "rakazo-staging-files",
+        "STAGING_ORIGIN": "https://staging.example.test", "MODAL_ENVIRONMENT": "staging",
+        "RAKAZO_RELEASE_PROFILE": "staging", "MODAL_TOKEN_ID": "synthetic-stage-token",
+        "MODAL_TOKEN_SECRET": "synthetic-stage-secret", "GITHUB_RUN_ID": "71",
+        "GITHUB_RUN_ATTEMPT": "2", "GITHUB_SHA": SHA,
+    }
+
+
+def receipt(manifest):
+    return {
+        "format": 1, "repository": release.REPO, "sha": SHA,
+        "archive_sha256": manifest["archive_sha256"], "validation": manifest["validation"],
+        "run": {"id": 71, "attempt": 2, "workflow_sha": SHA},
+        "target": release.staging_target(stage_env()), "modal_version": 10,
+        "checks": {"readiness": True, "revision": True, "web_shell": True, "mutations_denied": True},
     }
 
 
@@ -159,10 +186,18 @@ class ProvenanceTests(OfflineTest):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 release.sha(value)
 
-    def test_staging_requires_synthetic_validation_not_just_successful_workflow(self):
-        for listing in (jobs(set()), jobs({"Unrelated task"})):
-            with patch.object(release, "api", side_effect=[run_record("staging", "workflow_run"), listing]), self.assertRaises(ValueError):
-                release.checked_run(41, "staging", "workflow_run")
+    def test_validation_and_hosted_staging_require_their_own_job(self):
+        for workflow, event, required in (("release-validation", "workflow_run", "Synthetic validation"),
+                                           ("staging", "workflow_dispatch", "Hosted staging")):
+            for listing in (jobs(set()), jobs({"Unrelated task"}), jobs({required})):
+                with self.subTest(workflow=workflow, listing=listing), patch.object(
+                    release, "api", side_effect=[run_record(workflow, event), listing]
+                ):
+                    if required in {job["name"] for job in listing["jobs"]}:
+                        release.checked_run(41, workflow, event)
+                    else:
+                        with self.assertRaises(ValueError):
+                            release.checked_run(41, workflow, event)
 
     def test_dirty_checkout_cannot_be_packaged(self):
         with tempfile.TemporaryDirectory() as name, patch.object(release, "run", side_effect=[
@@ -193,7 +228,7 @@ class ArchiveTests(OfflineTest):
 
     def test_mismatched_identity_migration_or_source_dependency_is_rejected(self):
         changes = [
-            {"repository": "other/repo"}, {"sha": "d" * 40}, {"format": 2},
+            {"repository": "other/repo"}, {"sha": "d" * 40}, {"format": 1},
             {"migrations": []}, {"migrations": [{"name": MIGRATIONS[0], "sha256": "0" * 64}]},
             {"headhunter": {**DEPENDENCY, "sha": "d" * 40}},
         ]
@@ -251,7 +286,7 @@ class ArchiveTests(OfflineTest):
         return (
             patch.object(release, "run", side_effect=fake_run),
             patch.object(release, "checked_run", side_effect=[
-                run_record("staging", "workflow_run"), {**run_record(), "run_attempt": ci_attempt},
+                run_record("release-validation", "workflow_run"), {**run_record(), "run_attempt": ci_attempt},
             ]),
             patch.object(release, "api", return_value={"total_count": 1, "artifacts": [
                 {"name": "release-41-2", "expired": False},
@@ -261,23 +296,23 @@ class ArchiveTests(OfflineTest):
     def test_fetch_requires_unchanged_ci_attempt_staging_provenance_and_original_git_bytes(self):
         cases = [
             {"ci_attempt": 3}, {"original": b"different original source"},
-            {"manifest_change": lambda manifest: manifest["staging"].update(attempt=1)},
-            {"manifest_change": lambda manifest: manifest["staging"].update(id=42)},
-            {"manifest_change": lambda manifest: manifest["staging"].update(workflow_sha="d" * 40)},
+            {"manifest_change": lambda manifest: manifest["validation"].update(attempt=1)},
+            {"manifest_change": lambda manifest: manifest["validation"].update(id=42)},
+            {"manifest_change": lambda manifest: manifest["validation"].update(workflow_sha="d" * 40)},
         ]
         for options in cases:
             with self.subTest(options=options), tempfile.TemporaryDirectory() as name:
                 directory = Path(name) / "release"
                 command, check, api = self.fetch_fixture(directory, **options)
                 with command, check, api, self.assertRaises(ValueError):
-                    release.fetch(directory, 41, SHA)
+                    release.fetch_validation(directory, 41, SHA)
 
     def test_fetch_accepts_matching_provenance_and_original_git_bytes(self):
         with tempfile.TemporaryDirectory() as name:
             directory = Path(name) / "release"
             command, check, api = self.fetch_fixture(directory)
             with command as run, check, api:
-                manifest = release.fetch(directory, 41, SHA)
+                manifest = release.fetch_validation(directory, 41, SHA)
             self.assertEqual(manifest["sha"], SHA)
             self.assertEqual((directory / "source/.wekruit-source-revision").read_text(), SHA + "\n")
             self.assertEqual(run.call_args.args, ("git", "archive", "--format=tar", SHA))
@@ -286,10 +321,10 @@ class ArchiveTests(OfflineTest):
         for artifacts in ([], [{"name": "release-41-1", "expired": False}],
                           [{"name": "release-41-2", "expired": True}],
                           [{"name": "release-41-2", "expired": False}] * 2):
-            with tempfile.TemporaryDirectory() as name, patch.object(release, "checked_run", return_value=run_record("staging", "workflow_run")), patch.object(release, "api", return_value={
+            with tempfile.TemporaryDirectory() as name, patch.object(release, "checked_run", return_value=run_record("release-validation", "workflow_run")), patch.object(release, "api", return_value={
                 "total_count": len(artifacts), "artifacts": artifacts,
             }), patch.object(release, "run") as run, self.assertRaises(ValueError):
-                release.fetch(Path(name) / "release", 41, SHA)
+                release.fetch_validation(Path(name) / "release", 41, SHA)
             run.assert_not_called()
 
 
@@ -345,9 +380,9 @@ class PromotionSourceTests(OfflineTest):
             directory = Path(name)
             manifest, archive = bundle(directory)
             release.verify_archive(directory, SHA)
-            with patch.object(release, "checked_run", side_effect=[run_record("staging", "workflow_run"), run_record()]) as check, patch.object(release, "run", return_value=archive):
-                release.verify_promotion_source(directory, manifest)
-            self.assertEqual(check.call_args_list[0].args, (41, "staging", "workflow_run", SHA))
+            with patch.object(release, "checked_run", side_effect=[run_record("release-validation", "workflow_run"), run_record()]) as check, patch.object(release, "run", return_value=archive):
+                release.verify_validation_source(directory, manifest)
+            self.assertEqual(check.call_args_list[0].args, (41, "release-validation", "workflow_run", SHA))
             self.assertEqual(check.call_args_list[1].args, (17, "ci", "push", SHA))
 
     def test_changes_after_fetch_cannot_reach_deployment(self):
@@ -385,9 +420,9 @@ class PromotionSourceTests(OfflineTest):
                     raise AssertionError("Invalid source reached an external command")
 
                 with patch.dict(os.environ, approval_env(), clear=True), patch.object(release, "checked_run", side_effect=[
-                    run_record("staging", "workflow_run"), run_record(),
+                    run_record("release-validation", "workflow_run"), run_record(),
                 ]), patch.object(release, "run", side_effect=fake_run), self.assertRaises(ValueError):
-                    release.promote(directory, SHA)
+                    release.verify_validation_source(directory, manifest)
 
     def test_rerunning_either_validation_requires_restage(self):
         for changed in (0, 1):
@@ -395,68 +430,273 @@ class PromotionSourceTests(OfflineTest):
                 directory = Path(name)
                 manifest, _archive = bundle(directory)
                 release.verify_archive(directory, SHA)
-                records = [run_record("staging", "workflow_run"), run_record()]
+                records = [run_record("release-validation", "workflow_run"), run_record()]
                 records[changed]["run_attempt"] += 1
                 with patch.object(release, "checked_run", side_effect=records), patch.object(release, "run") as run, self.assertRaises(ValueError):
-                    release.verify_promotion_source(directory, manifest)
+                    release.verify_validation_source(directory, manifest)
                 run.assert_not_called()
 
 
-class PromotionExecutionTests(OfflineTest):
-    def test_promotes_only_the_verified_source_to_the_existing_app_and_checks_exact_revision(self):
+
+
+class EnvironmentTests(OfflineTest):
+    def policy(self):
+        return [
+            {"deployment_branch_policy": {"protected_branches": False, "custom_branch_policies": True},
+             "protection_rules": [{"type": "required_reviewers",
+                 "prevent_self_review": True, "reviewers": [{"type": "Team", "reviewer": {"id": 1}}]}]},
+            {"total_count": 1, "branch_policies": [{"name": "main", "type": "branch"}]},
+            {"total_count": 4, "secrets": [{"name": name} for name in (
+                "PRODUCTION_MODAL_TOKEN_ID", "PRODUCTION_MODAL_TOKEN_SECRET", "PRODUCTION_RELEASE_APPROVAL", "ENVIRONMENT_AUDIT_TOKEN")]},
+        ]
+
+    def check_policy(self):
+        release.protected_environment("production", {
+            "PRODUCTION_MODAL_TOKEN_ID", "PRODUCTION_MODAL_TOKEN_SECRET", "PRODUCTION_RELEASE_APPROVAL",
+        }, reviewers=True)
+
+    def test_real_main_only_policy_independent_reviewers_and_scoped_secrets_are_required(self):
+        with patch.dict(os.environ, {"ENVIRONMENT_AUDIT_TOKEN": "synthetic-audit-token"}, clear=True), patch.object(release, "api", side_effect=self.policy()) as api:
+            self.check_policy()
+        self.assertEqual([call.args[0] for call in api.call_args_list], [
+            "environments/production", "environments/production/deployment-branch-policies?per_page=100",
+            "environments/production/secrets?per_page=100",
+        ])
+        self.assertEqual(api.call_args.kwargs, {"token": "synthetic-audit-token"})
+        self.assertTrue(all(not call.kwargs for call in api.call_args_list[:2]))
+
+    def test_missing_weaker_or_inaccessible_controls_fail_closed(self):
+        mutations = [
+            lambda values: values[0].pop("deployment_branch_policy"),
+            lambda values: values[0].update(deployment_branch_policy={"protected_branches": True, "custom_branch_policies": False}),
+            lambda values: values[1]["branch_policies"][0].update(name="*"),
+            lambda values: values[1]["branch_policies"][0].update(type="tag"),
+            lambda values: values[1].update(total_count=2),
+            lambda values: values[0].update(protection_rules=[]),
+            lambda values: values[0]["protection_rules"][0].update(prevent_self_review=False),
+            lambda values: values[0]["protection_rules"][0].update(reviewers=[]),
+            lambda values: values[2]["secrets"].pop(),
+            lambda values: values[2].update(total_count=101),
+        ]
+        for mutate in mutations:
+            values = self.policy()
+            mutate(values)
+            with self.subTest(mutation=mutate), patch.dict(os.environ, {"ENVIRONMENT_AUDIT_TOKEN": "synthetic-audit-token"}, clear=True), patch.object(release, "api", side_effect=values), self.assertRaises(ValueError):
+                self.check_policy()
+        with patch.object(release, "api", side_effect=ValueError("read denied")), self.assertRaises(ValueError):
+            self.check_policy()
+        self.process.assert_not_called()
+
+    def test_missing_scoped_metadata_credential_cannot_assume_repository_secrets_are_safe(self):
+        with patch.dict(os.environ, {}, clear=True), patch.object(release, "api", side_effect=self.policy()) as api, self.assertRaisesRegex(
+            ValueError, "metadata read credential"
+        ):
+            self.check_policy()
+        self.assertEqual(api.call_count, 2)
+
+
+class HostedReceiptTests(OfflineTest):
+    def remote_receipt(self, data):
+        def download(directory, run_id, artifact):
+            self.assertEqual((run_id, artifact), (71, "hosted-staging-71-2"))
+            directory.mkdir(parents=True)
+            (directory / "staging.json").write_text(json.dumps(data))
+        return patch.object(release, "download_artifact", side_effect=download)
+
+    def test_receipt_binds_actual_staging_run_exact_target_and_all_smokes(self):
+        with tempfile.TemporaryDirectory() as name:
+            manifest, _ = bundle(Path(name))
+            expected = receipt(manifest)
+            with patch.dict(os.environ, stage_env(), clear=True), patch.object(
+                release, "checked_run", return_value=run_record("staging", "workflow_dispatch")
+            ) as check, self.remote_receipt(expected):
+                self.assertEqual(release.hosted_receipt(71, SHA), expected)
+            check.assert_called_once_with(71, "staging", "workflow_dispatch")
+
+    def test_synthetic_only_stale_wrong_target_or_incomplete_receipt_is_not_hosted_acceptance(self):
+        changes = [
+            {"format": 2}, {"repository": "other/repo"}, {"sha": "d" * 40},
+            {"run": {"id": 71, "attempt": 1, "workflow_sha": SHA}},
+            {"run": {"id": 72, "attempt": 2, "workflow_sha": SHA}},
+            {"run": {"id": 71, "attempt": 2, "workflow_sha": "d" * 40}},
+            {"modal_version": None}, {"modal_version": True}, {"modal_version": 0},
+            {"checks": {"readiness": True, "revision": True, "web_shell": True}},
+            {"checks": {"readiness": 1, "revision": True, "web_shell": True, "mutations_denied": True}},
+            {"target": {**release.staging_target(stage_env()), "origin": "https://other.example.test"}},
+        ]
+        for change in changes:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
+                manifest, _ = bundle(Path(name))
+                with patch.dict(os.environ, stage_env(), clear=True), patch.object(
+                    release, "checked_run", return_value=run_record("staging", "workflow_dispatch")
+                ), self.remote_receipt({**receipt(manifest), **change}), self.assertRaises(ValueError):
+                    release.hosted_receipt(71, SHA)
+
+    def test_fetch_matches_validation_inventory_and_resmokes_before_recording_receipt(self):
+        for mismatch in (None, "archive_sha256", "validation", "smoke"):
+            with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory() as name:
+                root = Path(name)
+                manifest, _ = bundle(root)
+                expected = receipt(manifest)
+                if mismatch == "archive_sha256":
+                    expected["archive_sha256"] = "0" * 64
+                if mismatch == "validation":
+                    expected["validation"] = {**expected["validation"], "attempt": 1}
+                directory = root / "candidate"
+                directory.mkdir()
+                with patch.object(release, "hosted_receipt", return_value=expected), patch.object(
+                    release, "fetch_validation", return_value=manifest
+                ) as fetch, patch.object(release, "smoke", side_effect=ValueError("stale") if mismatch == "smoke" else None) as smoke:
+                    if mismatch:
+                        with self.assertRaises(ValueError):
+                            release.fetch(directory, 71, SHA)
+                        self.assertFalse((directory / "staging.json").exists())
+                    else:
+                        self.assertEqual(release.fetch(directory, 71, SHA), manifest)
+                        self.assertEqual(json.loads((directory / "staging.json").read_text()), expected)
+                    fetch.assert_called_once_with(directory, 41, SHA)
+                    if mismatch in (None, "smoke"):
+                        smoke.assert_called_once_with("https://staging.example.test", SHA, staging=True)
+                    else:
+                        smoke.assert_not_called()
+
+    def test_promotion_reauthenticates_local_evidence_before_source_check(self):
+        for altered in (None, "manifest", "receipt"):
+            with self.subTest(altered=altered), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                manifest, _ = bundle(directory)
+                original = receipt(manifest)
+                (directory / "staging.json").write_text(json.dumps(original))
+                def fetch(fresh, run_id, revision):
+                    self.assertEqual((run_id, revision), (71, SHA))
+                    fresh.mkdir()
+                    data = {**original, "modal_version": 11} if altered == "receipt" else original
+                    (fresh / "staging.json").write_text(json.dumps(data))
+                    return {**manifest, "sha": "d" * 40} if altered == "manifest" else manifest
+                with patch.dict(os.environ, {"STAGING_RUN_ID": "71"}, clear=True), patch.object(
+                    release, "fetch", side_effect=fetch
+                ) as retrieve, patch.object(release, "verify_validation_source") as verify:
+                    if altered:
+                        with self.assertRaises(ValueError):
+                            release.verify_promotion_source(directory, manifest)
+                        verify.assert_not_called()
+                    else:
+                        release.verify_promotion_source(directory, manifest)
+                        verify.assert_called_once_with(directory, manifest)
+                    self.assertEqual(retrieve.call_count, 1)
+
+
+class HostedExecutionTests(OfflineTest):
+    def info(self, version=10):
+        return json.dumps({"description": "rakazo-staging-app",
+                           "lifecycle": {"state": "deployed", "version": version}}).encode()
+
+    def test_deploys_exact_source_with_isolated_env_and_records_actual_post_smoke_receipt(self):
         with tempfile.TemporaryDirectory() as name:
             directory = Path(name)
-            manifest, _archive = bundle(directory)
-            info = {"description": "synthetic-app", "lifecycle": {"state": "deployed"}}
-            with patch.dict(os.environ, approval_env(), clear=True), patch.object(
-                release, "verify_promotion_source"
-            ) as verify, patch.object(release, "run", side_effect=[json.dumps(info).encode(), b""]) as run, patch.object(
-                release, "smoke"
-            ) as smoke, patch("builtins.print"):
-                release.promote(directory, SHA)
+            manifest, _ = bundle(directory)
+            poisoned = {**stage_env(), "DATABASE_URL": "private database", "SMTP_URL": "private mail",
+                        "OPENAI_API_KEY": "private key", "GH_TOKEN": "private github",
+                        "PATH": "/synthetic/bin", "HOME": "/synthetic/home", "LANG": "C.UTF-8"}
+            with patch.dict(os.environ, poisoned, clear=True), patch.object(release, "protected_environment") as policy, patch.object(
+                release, "fetch_validation", return_value=manifest
+            ), patch.object(release, "verify_validation_source") as verify, patch.object(
+                release, "run", side_effect=[self.info(9), b"", self.info(10)]
+            ) as run, patch.object(release, "smoke") as smoke, patch("builtins.print"):
+                release.stage(directory, SHA)
             verify.assert_called_once_with(directory, manifest)
-            self.assertEqual([call.args for call in run.call_args_list], [
-                ("modal", "app", "info", "synthetic-app", "--env", "production", "--json"),
-                ("modal", "deploy", "--env", "production", "--strategy", "recreate", "--tag", SHA, "infra/modal/app.py"),
+            policy.assert_called_once_with("staging", {"STAGING_MODAL_TOKEN_ID", "STAGING_MODAL_TOKEN_SECRET", "STAGING_RELEASE_APPROVAL"})
+            self.assertEqual([call.args[:3] for call in run.call_args_list], [
+                ("modal", "app", "info"), ("modal", "deploy", "--env"), ("modal", "app", "info"),
             ])
-            self.assertEqual(run.call_args_list[1].kwargs, {"cwd": directory / "source", "timeout": 1200})
-            smoke.assert_called_once_with("https://example.test", SHA)
+            deployment = run.call_args_list[1]
+            self.assertEqual(deployment.args, ("modal", "deploy", "--env", "staging", "--strategy", "recreate",
+                                               "--tag", SHA, "infra/modal/app.py"))
+            self.assertEqual(deployment.kwargs["cwd"], directory / "source")
+            self.assertEqual(set(deployment.kwargs["env"]), {"PATH", "HOME", "LANG", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET",
+                "MODAL_ENVIRONMENT", "RAKAZO_RELEASE_PROFILE", "MODAL_APP_NAME", "MODAL_SECRET_NAME", "MODAL_VOLUME_NAME"})
+            smoke.assert_called_once_with("https://staging.example.test", SHA, staging=True)
+            self.assertEqual(json.loads((directory / "staging.json").read_text()), receipt(manifest))
 
-    def test_wrong_or_stopped_app_never_reaches_deploy(self):
-        for info in ({"description": "different-app", "lifecycle": {"state": "deployed"}},
-                     {"description": "synthetic-app", "lifecycle": {"state": "stopped"}}):
-            with self.subTest(info=info), tempfile.TemporaryDirectory() as name:
+    def test_invalid_staging_authority_isolation_or_target_cannot_reach_modal(self):
+        base = stage_env()
+        changes = [
+            {"STAGING_DEPLOY_ENABLED": "false"}, {"STAGING_DEPLOYMENT_HOLD": "held"},
+            {"MODAL_ENVIRONMENT": "production"}, {"RAKAZO_RELEASE_PROFILE": "production"},
+            {"STAGING_MODAL_APP_NAME": "production-app"}, {"STAGING_ORIGIN": "http://staging.example.test"},
+        ]
+        for approval_change in ({"sha": "d" * 40}, {"validation_run_id": 42},
+                                {"isolated_resources_verified": False}, {"synthetic_data_only": False},
+                                {"expires_at": (NOW - dt.timedelta(seconds=1)).isoformat()}):
+            changes.append({"STAGING_RELEASE_APPROVAL": json.dumps({
+                **json.loads(base["STAGING_RELEASE_APPROVAL"]), **approval_change})})
+        for change in changes:
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
                 directory = Path(name)
                 bundle(directory)
-                with patch.dict(os.environ, approval_env(), clear=True), patch.object(
-                    release, "verify_promotion_source"
-                ), patch.object(release, "run", return_value=json.dumps(info).encode()) as run, patch.object(
-                    release, "smoke"
-                ) as smoke, self.assertRaisesRegex(ValueError, "Existing deployed Modal app"):
-                    release.promote(directory, SHA)
-                self.assertEqual(run.call_count, 1)
-                self.assertEqual(run.call_args.args[:3], ("modal", "app", "info"))
-                smoke.assert_not_called()
+                with patch.dict(os.environ, {**base, **change}, clear=True), patch.object(release, "run") as run, self.assertRaises(ValueError):
+                    release.stage(directory, SHA)
+                run.assert_not_called()
 
-    def test_failed_smoke_reports_failure_without_rollback_sync_or_other_commands(self):
+    def test_failed_staging_smoke_records_no_acceptance_and_never_rolls_back_or_syncs(self):
         with tempfile.TemporaryDirectory() as name:
             directory = Path(name)
-            bundle(directory)
-            info = {"description": "synthetic-app", "lifecycle": {"state": "deployed"}}
-            with patch.dict(os.environ, approval_env(), clear=True), patch.object(
+            manifest, _ = bundle(directory)
+            with patch.dict(os.environ, stage_env(), clear=True), patch.object(release, "protected_environment"), patch.object(
+                release, "fetch_validation", return_value=manifest
+            ), patch.object(release, "verify_validation_source"), patch.object(
+                release, "run", side_effect=[self.info(), b""]
+            ) as run, patch.object(release, "smoke", side_effect=ValueError("synthetic smoke failure")) as smoke, patch.object(
+                release.time, "sleep"
+            ) as sleep, self.assertRaisesRegex(ValueError, "Hosted staging smoke failed"):
+                release.stage(directory, SHA)
+            self.assertEqual(run.call_count, 2)
+            self.assertEqual(smoke.call_count, 12)
+            self.assertEqual(sleep.call_count, 11)
+            self.assertFalse((directory / "staging.json").exists())
+
+    def test_invalid_run_provenance_or_existing_receipt_is_rejected_before_modal(self):
+        for change in ({"GITHUB_RUN_ID": "not-a-run"}, {"GITHUB_RUN_ATTEMPT": "0"},
+                       {"GITHUB_SHA": "main"}, {"existing_receipt": True}):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                manifest, _ = bundle(directory)
+                if change.get("existing_receipt"):
+                    (directory / "staging.json").write_text(json.dumps(receipt(manifest)))
+                env = {**stage_env(), **{key: value for key, value in change.items() if key != "existing_receipt"}}
+                with patch.dict(os.environ, env, clear=True), patch.object(release, "protected_environment"), patch.object(
+                    release, "fetch_validation", return_value=manifest
+                ), patch.object(release, "verify_validation_source"), patch.object(release, "run") as run, self.assertRaises((ValueError, KeyError)):
+                    release.stage(directory, SHA)
+                run.assert_not_called()
+
+    def test_wrong_existing_app_or_changed_authenticated_source_never_deploys(self):
+        for failure in ("app", "source"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as name:
+                directory = Path(name)
+                manifest, _ = bundle(directory)
+                trusted = {**manifest, "sha": "d" * 40} if failure == "source" else manifest
+                info = json.dumps({"description": "wrong-app", "lifecycle": {"state": "stopped"}}).encode()
+                with patch.dict(os.environ, stage_env(), clear=True), patch.object(release, "protected_environment"), patch.object(
+                    release, "fetch_validation", return_value=trusted
+                ), patch.object(release, "verify_validation_source"), patch.object(release, "run", return_value=info) as run, self.assertRaises(ValueError):
+                    release.stage(directory, SHA)
+                self.assertTrue(all(call.args[:3] == ("modal", "app", "info") for call in run.call_args_list))
+
+    def test_production_remains_blocked_even_when_every_existing_gate_is_green(self):
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            manifest, _ = bundle(directory)
+            with patch.dict(os.environ, approval_env(), clear=True), patch.object(release, "protected_environment") as policy, patch.object(
                 release, "verify_promotion_source"
-            ), patch.object(release, "run", side_effect=[json.dumps(info).encode(), b""]) as run, patch.object(
-                release, "smoke", side_effect=ValueError("synthetic readiness failure")
-            ) as smoke, patch.object(release.time, "sleep") as sleep, self.assertRaisesRegex(
-                ValueError, "Post-deploy smoke failed; preserve holds"
+            ) as verify, patch.object(release, "run") as run, patch.object(release, "smoke") as smoke, self.assertRaisesRegex(
+                ValueError, "Production cutover blocked: no enforced maintenance/drain"
             ):
                 release.promote(directory, SHA)
-            self.assertEqual([call.args[:3] for call in run.call_args_list], [
-                ("modal", "app", "info"), ("modal", "deploy", "--env"),
-            ])
-            self.assertEqual(smoke.call_count, 12)
-            self.assertTrue(all(call.args == ("https://example.test", SHA) for call in smoke.call_args_list))
-            self.assertEqual([call.args for call in sleep.call_args_list], [(5,)] * 11)
+            policy.assert_called_once_with("production", {"PRODUCTION_MODAL_TOKEN_ID", "PRODUCTION_MODAL_TOKEN_SECRET", "PRODUCTION_RELEASE_APPROVAL"}, reviewers=True)
+            verify.assert_called_once_with(directory, manifest)
+            run.assert_not_called()
+            smoke.assert_not_called()
 
 
 class Response:
@@ -500,6 +740,40 @@ class SmokeTests(OfflineTest):
             with self.subTest(origin=origin), self.assertRaises(ValueError):
                 release.smoke(origin, SHA)
         self.network.assert_not_called()
+
+    def test_hosted_staging_smoke_requires_profile_and_safe_synthetic_post_denial(self):
+        opener = Mock()
+        opener.open.side_effect = [
+            ready_response(headers={"x-rakazo-revision": SHA, "x-rakazo-profile": "staging"}),
+            Response(headers={"content-type": "text/html"}, body=b'<div id="root"></div>'),
+            urllib.error.HTTPError("https://example.test/api/__release_smoke_denied__", 403,
+                                   "Forbidden", {"x-rakazo-profile": "staging"}, io.BytesIO(b"")),
+        ]
+        with patch.object(release.urllib.request, "build_opener", return_value=opener):
+            release.smoke("https://example.test", SHA, staging=True)
+        request = opener.open.call_args_list[2].args[0]
+        self.assertIsInstance(request, urllib.request.Request)
+        self.assertEqual(request.full_url, "https://example.test/api/__release_smoke_denied__")
+        self.assertEqual(request.get_method(), "POST")
+        self.assertEqual(request.data, b"{}")
+        self.assertNotIn("Authorization", request.headers)
+        self.assertNotIn("Cookie", request.headers)
+
+    def test_stage_profile_missing_or_mutation_fence_missing_cannot_pass_smoke(self):
+        for bad in ("profile", "status", "fence-profile"):
+            opener = Mock()
+            headers = {"x-rakazo-revision": SHA, "x-rakazo-profile": "staging"}
+            if bad == "profile":
+                headers.pop("x-rakazo-profile")
+            opener.open.side_effect = [
+                ready_response(headers=headers),
+                Response(headers={"content-type": "text/html"}, body=b'<div id="root"></div>'),
+                Response(status=200 if bad == "status" else 403,
+                         headers={} if bad == "fence-profile" else {"x-rakazo-profile": "staging"}),
+            ]
+            with self.subTest(bad=bad), patch.object(release.urllib.request, "build_opener", return_value=opener), self.assertRaises(ValueError):
+                release.smoke("https://example.test", SHA, staging=True)
+            self.assertEqual(opener.open.call_count, 1 if bad == "profile" else 3)
 
     def test_wrong_readiness_status_body_or_revision_never_accepts_web_only_success(self):
         responses = [ready_response(status=503), ready_response(status=302),

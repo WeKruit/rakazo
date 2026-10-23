@@ -1,9 +1,11 @@
 import type { JobPublisher, JobWorkerHost } from "@rakazo/adapter-kit";
 import { ComposioConnector, IntegrationProviderSettings } from "@rakazo/adapters";
+import { hostedStagingConfig } from "@rakazo/core";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
+import { startStagingWorker } from "./release-staging.js";
 import { createWorkerSecretStore } from "./secret-store.js";
 
-loadRootEnv();
+if (process.env.RAKAZO_RELEASE_PROFILE !== "staging") loadRootEnv();
 
 import {
   AutumnFileConnector,
@@ -65,7 +67,11 @@ import { SERVICE_NAMES } from "@rakazo/logging";
 import { createRootLogger } from "@rakazo/logging/axiom";
 import { MarkdownMemoryStore } from "@rakazo/memory";
 
-const logger = createRootLogger(SERVICE_NAMES.worker);
+const staging = hostedStagingConfig(process.env);
+const logger = createRootLogger(
+  SERVICE_NAMES.worker,
+  staging ? { NODE_ENV: "production" } : process.env,
+);
 // performance.now() is ms since process start, so this includes node + import time.
 logger.info("boot.phase", {
   phase: "imports.done",
@@ -73,6 +79,13 @@ logger.info("boot.phase", {
 });
 
 async function main() {
+  if (staging) {
+    const stop = await startStagingWorker(staging);
+    process.once("SIGTERM", () => void stop());
+    process.once("SIGINT", () => void stop());
+    logger.info("restricted staging worker ready");
+    return;
+  }
   const artifactStorage = artifactStorageOptionsFromEnv(process.env);
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
@@ -357,7 +370,8 @@ async function main() {
 }
 
 main().catch(async (error) => {
-  logger.error("worker startup failed", error);
+  if (staging) logger.error("restricted staging worker startup failed");
+  else logger.error("worker startup failed", error);
   await logger.flush({ timeoutMs: 2_000 });
   // jobHost.start retries 53300 without bound above, so a saturated Postgres at
   // that step does not reach here. Other startup failures still exit.

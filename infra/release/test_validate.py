@@ -6,13 +6,13 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import staging
+import validate
 
 
 SHA = "a" * 40
 
 
-class StagingTests(unittest.TestCase):
+class SyntheticValidationTests(unittest.TestCase):
     def test_credentials_and_configuration_are_not_inherited(self):
         poisoned = {
             "PATH": "/usr/bin", "HOME": "/private/home", "DATABASE_URL": "private",
@@ -22,7 +22,7 @@ class StagingTests(unittest.TestCase):
             "MODAL_TOKEN_SECRET": "private", "NODE_OPTIONS": "private", "VERIFY_PROVIDERS": "1",
             "HTTPS_PROXY": "private", "GH_TOKEN": "private", "AXIOM_TOKEN": "private",
         }
-        env = staging.isolated_env(poisoned, Path("/tmp/synthetic-stage"), SHA)
+        env = validate.isolated_env(poisoned, Path("/tmp/synthetic-stage"), SHA)
         self.assertEqual(env["PATH"], poisoned["PATH"])
         self.assertFalse(any(value == "private" for value in env.values()))
         self.assertNotIn("DATABASE_URL", env)
@@ -35,29 +35,29 @@ class StagingTests(unittest.TestCase):
     def test_source_sha_must_be_full(self):
         for value in ("main", "abc123", SHA + "\n", "$(exit 1)"):
             with self.assertRaises(ValueError):
-                staging.isolated_env({}, Path("/tmp/staging"), value)
+                validate.isolated_env({}, Path("/tmp/staging"), value)
 
     def test_dotenv_blocks_before_startup_but_examples_are_allowed(self):
         with tempfile.TemporaryDirectory() as name:
             root = Path(name)
             (root / ".env.example").write_text("synthetic example")
-            staging.reject_dotenv(root)
+            validate.reject_dotenv(root)
             (root / "packages").mkdir()
             (root / "packages" / ".env.local").write_text("do not read")
             with self.assertRaisesRegex(ValueError, "without dotenv"):
-                staging.reject_dotenv(root)
+                validate.reject_dotenv(root)
 
     def test_mismatched_and_dirty_sources_are_rejected(self):
         for results in (("b" * 40, ""), (SHA, " M source.ts"), (SHA, "?? untracked.ts")):
-            with patch.object(staging, "run", side_effect=[
+            with patch.object(validate, "run", side_effect=[
                 subprocess.CompletedProcess([], 0, stdout=value) for value in results
             ]), self.assertRaises(ValueError):
-                staging.validate_checkout(Path("/tmp/staging"), {}, SHA)
+                validate.validate_checkout(Path("/tmp/staging"), {}, SHA)
 
     def test_missing_native_tools_fail_without_installing_anything(self):
-        with patch.object(staging.shutil, "which", return_value=None), patch.object(staging, "run") as run:
+        with patch.object(validate.shutil, "which", return_value=None), patch.object(validate, "run") as run:
             with self.assertRaisesRegex(ValueError, "Native PostgreSQL"):
-                staging.postgres_bin(None, Path("/tmp/staging"), {"PATH": "/usr/bin"})
+                validate.postgres_bin(None, Path("/tmp/staging"), {"PATH": "/usr/bin"})
             run.assert_not_called()
 
     def run_stage(self, failure=None):
@@ -77,9 +77,9 @@ class StagingTests(unittest.TestCase):
                 raise subprocess.CalledProcessError(1, command)
             return subprocess.CompletedProcess(command, 0)
 
-        with patch.object(staging, "validate_checkout"), patch.object(staging, "postgres_bin", return_value=Path("/fake/pg")), patch.object(staging, "free_port", return_value=43219), patch.object(staging, "run", side_effect=fake_run), patch.dict(os.environ, {"DATABASE_URL": "never-use", "SMTP_URL": "never-use"}):
+        with patch.object(validate, "validate_checkout"), patch.object(validate, "postgres_bin", return_value=Path("/fake/pg")), patch.object(validate, "free_port", return_value=43219), patch.object(validate, "run", side_effect=fake_run), patch.dict(os.environ, {"DATABASE_URL": "never-use", "SMTP_URL": "never-use"}):
             try:
-                staging.stage(Path("/fake/repo"), SHA)
+                validate.stage(Path("/fake/repo"), SHA)
             except subprocess.CalledProcessError:
                 if not failure:
                     raise
@@ -91,13 +91,13 @@ class StagingTests(unittest.TestCase):
     def test_each_suite_gets_a_fresh_local_database_and_no_credentials(self):
         calls = self.run_stage()
         tests = [(command, env) for command, env in calls if "vitest" in command]
-        self.assertEqual([command[-1] for command, _ in tests], list(staging.SUITES))
+        self.assertEqual([command[-1] for command, _ in tests], list(validate.SUITES))
         self.assertEqual(
             [env["DATABASE_URL"] for _, env in tests],
-            [f"postgresql://staging@127.0.0.1:43219/staging_{i}?sslmode=disable" for i in range(2)],
+            [f"postgresql://staging@127.0.0.1:43219/staging_{i}?sslmode=disable" for i in range(len(validate.SUITES))],
         )
         migrations = [(command, env) for command, env in calls if command[-1] == "migrate"]
-        self.assertEqual(len(migrations), 2)
+        self.assertEqual(len(migrations), len(validate.SUITES))
         for command, env in calls:
             self.assertNotIn("never-use", env.values())
             self.assertNotIn("docker", command)
@@ -129,9 +129,9 @@ class StagingTests(unittest.TestCase):
             return subprocess.CompletedProcess(command, 0)
 
         try:
-            with patch.object(staging, "validate_checkout"), patch.object(staging, "postgres_bin", return_value=Path("/fake/pg")), patch.object(staging, "free_port", return_value=43219), patch.object(staging, "run", side_effect=fake_run):
+            with patch.object(validate, "validate_checkout"), patch.object(validate, "postgres_bin", return_value=Path("/fake/pg")), patch.object(validate, "free_port", return_value=43219), patch.object(validate, "run", side_effect=fake_run):
                 with self.assertRaisesRegex(RuntimeError, "temporary directory was retained"):
-                    staging.stage(Path("/fake/repo"), SHA)
+                    validate.stage(Path("/fake/repo"), SHA)
             self.assertTrue(directories)
             self.assertTrue(all(path.exists() for path in directories))
         finally:

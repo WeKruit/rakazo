@@ -2,7 +2,7 @@
 """Run synthetic release checks in an owned, disposable native PostgreSQL cluster.
 
 No deployment credentials, existing database URL, dotenv file or user home are
-accepted. This is ephemeral staging validation, not live product acceptance.
+accepted. This is synthetic CI validation, not a hosted staging deployment or product acceptance.
 """
 
 import argparse
@@ -19,13 +19,14 @@ import tempfile
 SUITES = (
     "apps/api/src/recruiting-crm-sync.postgres.test.ts",
     "packages/testkit/src/pi-offline.postgres.test.ts",
+    "packages/testkit/src/hosted-staging.postgres.test.ts",
 )
 
 
 def isolated_env(parent: dict[str, str], directory: Path, sha: str) -> dict[str, str]:
     """Allow only executable discovery; every other setting is synthetic or local."""
     if not re.fullmatch(r"[0-9a-f]{40}", sha):
-        raise ValueError("Staging requires a full source SHA")
+        raise ValueError("Synthetic validation requires a full source SHA")
     return {
         "PATH": parent.get("PATH", os.defpath),
         "HOME": str(directory / "home"),
@@ -62,9 +63,9 @@ def reject_dotenv(root: Path) -> None:
     for directory, folders, files in os.walk(root):
         folders[:] = [name for name in folders if name not in {".git", "node_modules"}]
         if any(name.startswith(".env") and not name.endswith(".example") for name in files):
-            raise ValueError("Staging requires a checkout without dotenv files")
+            raise ValueError("Synthetic validation requires a checkout without dotenv files")
     if any((ancestor / ".env").exists() for ancestor in root.parents):
-        raise ValueError("Staging requires checkout ancestors without dotenv files")
+        raise ValueError("Synthetic validation requires checkout ancestors without dotenv files")
 
 
 def run(command: list[str], root: Path, env: dict[str, str], **options):
@@ -74,13 +75,13 @@ def run(command: list[str], root: Path, env: dict[str, str], **options):
 def validate_checkout(root: Path, env: dict[str, str], sha: str) -> None:
     head = run(["git", "rev-parse", "HEAD"], root, env, capture_output=True, text=True)
     if head.stdout.strip() != sha:
-        raise ValueError("Staging source SHA does not match the checkout")
+        raise ValueError("Synthetic validation source SHA does not match the checkout")
     status = run(
         ["git", "status", "--porcelain", "--untracked-files=normal"],
         root, env, capture_output=True, text=True,
     )
     if status.stdout.strip():
-        raise ValueError("Staging requires a clean checkout")
+        raise ValueError("Synthetic validation requires a clean checkout")
     reject_dotenv(root)
 
 
@@ -166,7 +167,7 @@ def main() -> None:
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
     stage(root, args.sha, args.pg_bin)
-    print("Synthetic staging passed; no live product acceptance or deployment performed.")
+    print("Synthetic validation passed; no live product acceptance or deployment performed.")
 
 
 if __name__ == "__main__":

@@ -1,15 +1,21 @@
 import type { Socket } from "node:net";
+import { hostedStagingConfig } from "@rakazo/core";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
 
-loadRootEnv();
+if (process.env.RAKAZO_RELEASE_PROFILE !== "staging") loadRootEnv();
 
 import { serve } from "@hono/node-server";
 import { SERVICE_NAMES } from "@rakazo/logging";
 import { createRootLogger } from "@rakazo/logging/axiom";
 import { createApp } from "./app.js";
 import { loadEnv } from "./env.js";
+import { createStagingApp } from "./release-staging.js";
 
-const logger = createRootLogger(SERVICE_NAMES.api);
+const staging = hostedStagingConfig(process.env);
+const logger = createRootLogger(
+  SERVICE_NAMES.api,
+  staging ? { NODE_ENV: "production" } : process.env,
+);
 // performance.now() is ms since process start, so this includes node + import time.
 logger.info("boot.phase", {
   phase: "imports.done",
@@ -17,8 +23,8 @@ logger.info("boot.phase", {
 });
 
 try {
-  const env = loadEnv();
-  const { app, stop } = await createApp({ ...env, logger });
+  const env = staging ? { port: 3100, apiHost: "127.0.0.1" } : loadEnv();
+  const { app, stop } = staging ? createStagingApp(staging) : await createApp({ ...env, logger });
   const server = serve({ fetch: app.fetch, port: env.port, hostname: env.apiHost }, () => {
     logger.info("boot.phase", {
       phase: "listening",
@@ -53,7 +59,8 @@ try {
   process.once("SIGTERM", () => void shutdown());
   process.once("SIGINT", () => void shutdown());
 } catch (error) {
-  logger.error("api startup failed", error);
+  if (staging) logger.error("restricted staging api startup failed");
+  else logger.error("api startup failed", error);
   await logger.flush({ timeoutMs: 2_000 });
   process.exit(1);
 }
