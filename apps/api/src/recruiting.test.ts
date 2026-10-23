@@ -5077,7 +5077,14 @@ describe("role campaign read", () => {
     ]);
     expect(output).toEqual({
       status: "ready",
-      campaign: { name: "Staff [role]", status: 1, stopOnReply: false },
+      serverId: "instantly",
+      campaign: {
+        id: CAMPAIGN,
+        name: "Staff [role]",
+        eaccount: "team@example.test",
+        status: 1,
+        stopOnReply: false,
+      },
       leads: [
         { candidateKey: "ada-key", email: "Ada@Example.test", status: -1, interestStatus: 1 },
         { candidateKey: null, email: "other@example.test", status: 1, interestStatus: null },
@@ -5090,11 +5097,94 @@ describe("role campaign read", () => {
       const f = fixture(effect);
       expect(await api.getRecruitingRoleCampaign(f.deps, actor, target)).toEqual({
         status: "none",
+        serverId: "instantly",
         campaign: null,
         leads: [],
       });
       expect(f.calls).toEqual([]);
     }
+  });
+
+  it("role setup reports a bound campaign, its sender and leads as ready", async () => {
+    const f = fixture({
+      spaceId: actor.spaceId,
+      status: "completed",
+      result: {
+        campaignId: CAMPAIGN,
+        campaignName: "Staff [role]",
+        eaccount: "team@example.test",
+        leads: {},
+      },
+    });
+    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+    expect(setup).toEqual({
+      ready: true,
+      items: [
+        {
+          key: "campaign",
+          state: "ready",
+          label: "Staff [role]",
+          detail: { id: CAMPAIGN, name: "Staff [role]", status: 1, leadCount: 2 },
+        },
+        {
+          key: "sender",
+          state: "ready",
+          label: "team@example.test",
+          detail: { email: "team@example.test" },
+        },
+        {
+          key: "crm",
+          state: "missing",
+          label: "No CRM role linked",
+          action: { kind: "ask_agent", prompt: expect.any(String) },
+        },
+        { key: "leads", state: "ready", label: "2 leads", detail: { count: 2 } },
+      ],
+    });
+  });
+
+  it("role setup without a campaign is not ready and points each gap at the agent", async () => {
+    const f = fixture(null);
+    (
+      f.deps.prisma as unknown as { externalEffect: Record<string, unknown> }
+    ).externalEffect.findFirst = vi.fn(async () => ({ result: { eaccount: "last@example.test" } }));
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValueOnce({
+      role: { id: "role" },
+      crmTarget: {
+        bindingEffectId: "b1",
+        target: { organizationId: "org-1", clientLabel: "Acme", roleLabel: "Staff Engineer" },
+      },
+    } as never);
+    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+    expect(setup.ready).toBe(false);
+    expect(setup.items.map((item) => [item.key, item.state, item.action?.kind])).toEqual([
+      ["campaign", "missing", "ask_agent"],
+      ["sender", "ready", undefined],
+      ["crm", "ready", undefined],
+      ["leads", "missing", "ask_agent"],
+    ]);
+    expect(setup.items[1]).toMatchObject({ detail: { email: "last@example.test" } });
+    expect(setup.items[2]).toMatchObject({
+      detail: { orgId: "org-1", roleLabel: "Staff Engineer" },
+    });
+    expect(f.calls).toEqual([]);
+  });
+
+  it("role setup marks campaign and sender unavailable when Instantly is not assigned", async () => {
+    const f = fixture(null);
+    const prisma = f.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.botMcpServer.findFirst = vi.fn(async () => null);
+    prisma.mcpServer = { findFirst: vi.fn(async () => ({ id: "instantly" })) };
+    const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+    expect(setup.ready).toBe(false);
+    expect(setup.items.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        key: "campaign",
+        state: "unavailable",
+        action: { kind: "connect", serverId: "instantly" },
+      }),
+      expect.objectContaining({ key: "sender", state: "unavailable" }),
+    ]);
   });
 });
 
