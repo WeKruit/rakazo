@@ -257,6 +257,35 @@ describe("native approval answer provenance", () => {
     } else expect(result).toBe(true);
   });
 
+  it.each(["valid", "changed-plan", "changed-request", "missing-hash", "missing-booking"])(
+    "binds specific scheduling evidence: %s",
+    async (mode) => {
+      const f = approvalAnswerFixture();
+      const hash = (value: unknown) =>
+        createHash("sha256").update(stableJsonValue(value)).digest("hex");
+      const evidence = {
+        kind: "recruiting_scheduling",
+        version: 1,
+        planId: "plan-1",
+        operation: "confirm",
+        requestHash: hash(f.effect.request),
+        planHash: "a".repeat(64),
+        bookingEffectId: "booking-1" as string | null,
+      };
+      const ask = f.rows[0]!.blocks[1]!;
+      if (ask.kind !== "ask") throw new Error("missing ask");
+      if (mode !== "missing-hash") ask.approvalEvidenceHash = hash(evidence);
+      if (mode === "changed-plan") evidence.planId = "different";
+      if (mode === "changed-request") evidence.requestHash = "b".repeat(64);
+      if (mode === "missing-booking") evidence.bookingEffectId = null;
+      Object.assign(f.effect, { result: { schedulingApprovalEvidence: evidence } });
+      expect(await answerRunInput(f.prisma, { ...f.input, answer: "allow" })).toBe(
+        mode === "valid",
+      );
+      if (mode !== "valid") expect(f.tx.externalEffect.update).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["valid", "changed", "missing", "wrong-request", "missing-card-hash"])(
     "binds calendar evidence to the original approval card: %s",
     async (mode) => {

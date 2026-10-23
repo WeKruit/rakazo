@@ -13,6 +13,7 @@ import {
   LoginSecretValue,
   MessageBlock as MessageBlockSchema,
   parseAskFormResponse,
+  RecruitingSchedulingApprovalEvidenceSchema,
 } from "@rakazo/contracts";
 import {
   askFormAnswerText,
@@ -947,7 +948,8 @@ async function commitAnswerRunInput(
       approvalEffect.result &&
       typeof approvalEffect.result === "object" &&
       !Array.isArray(approvalEffect.result)
-        ? approvalEffect.result.calendarApprovalEvidence
+        ? (approvalEffect.result.calendarApprovalEvidence ??
+          approvalEffect.result.schedulingApprovalEvidence)
         : undefined;
     if (answerText !== "deny" && (pendingAsk.approvalEvidenceHash || evidence)) {
       if (
@@ -955,7 +957,8 @@ async function commitAnswerRunInput(
         !evidence ||
         typeof evidence !== "object" ||
         Array.isArray(evidence) ||
-        evidence.kind !== "cal_booking_original" ||
+        (evidence.kind !== "cal_booking_original" &&
+          !RecruitingSchedulingApprovalEvidenceSchema.safeParse(evidence).success) ||
         evidence.version !== 1 ||
         evidence.requestHash !==
           createHash("sha256").update(stableJsonValue(approvalEffect.request)).digest("hex") ||

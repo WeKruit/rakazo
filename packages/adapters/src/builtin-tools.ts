@@ -16,6 +16,7 @@ import {
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
+  RecruitingSchedulingToolInputSchema,
   RecruitingShortlistToolInputSchema,
   ScheduleUpdateToolInputSchema,
   SecretAskPurpose,
@@ -595,6 +596,12 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       "Import one exact saved candidate discovery to the role's verified CRM target. Supply roleId, candidateKey, bindingEffectId, sourceEffectId and rowIndex from native candidate/source records. The backend derives professional facts and provenance; never reconstruct names, contact details or source paths. Save directly without requesting human approval by default, then verify the native receipt. Reuse that source reference for inspection/replay, never replace an unknown outcome with a new source or effect. Missing name or LinkedIn remains unresolved. This saves supplied facts and role membership, not qualification, campaign activation or outbound email.",
     inputSchema: z.toJSONSchema(RecruitingCrmImportInputSchema, { io: "input" }),
+  },
+  {
+    name: "recruiting_scheduling",
+    description:
+      "Draft or read an exact scheduling plan from verified saved original email and availability receipts; drafting does not approve or dispatch anything. Use explicit independent candidate/interviewer IANA zones. Read the saved planId from structured chat context. Book with operation book, planId and exact discovered Cal.com arguments; confirm with operation confirm, planId, subject and body only after that plan's successful booking and actual readback. Both actions require their existing native human approval. Never infer a plan from recent messages, resend an uncertain action, add recipients or confirm an unverified host.",
+    inputSchema: z.toJSONSchema(RecruitingSchedulingToolInputSchema, { io: "input" }),
   },
   {
     name: "recruiting_reply",

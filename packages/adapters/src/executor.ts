@@ -63,6 +63,8 @@ import {
   RecruitingRemindersToolInputSchema,
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
+  type RecruitingSchedulingPlan,
+  RecruitingSchedulingToolInputSchema,
   RecruitingShortlistToolInputSchema,
   RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
@@ -141,11 +143,13 @@ import {
   admitRecruitingCrmImport,
   admitRecruitingReply,
   appendEventInTransaction,
+  bindRecruitingSchedulingOperation,
   claimRecruitingCrmImport,
   claimRecruitingReply,
   claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
+  createRecruitingSchedulingPlan,
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
@@ -163,6 +167,7 @@ import {
   isTooManyDatabaseConnections,
   loadRunHistoryMessages,
   loadRunHumanSources,
+  loadVerifiedRecruitingSchedulingPlan,
   Prisma,
   parseComputerMode,
   prepareNativeRecruitingCandidateDecision,
@@ -414,6 +419,12 @@ import {
 } from "./recruiting-feedback.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { mcpObject } from "./recruiting-research.js";
+import {
+  assertSchedulingCall,
+  SchedulingApprovalEvidenceSchema,
+  schedulingPlanHash,
+  schedulingPlanReview,
+} from "./recruiting-scheduling.js";
 import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
   admitRecruitingResearchCall,
@@ -4697,6 +4708,118 @@ export function createRunExecutor(deps: ExecutorDeps) {
             executionId,
             route: connectorTools.get(name)?.route,
           };
+          let schedulingSelection:
+            | { plan: RecruitingSchedulingPlan; operation: "book" | "confirm" }
+            | undefined;
+          if (name === "recruiting_scheduling") {
+            if (disabledBuiltinTools.has("recruiting_scheduling"))
+              return { error: "This tool is disabled for this bot." };
+            try {
+              const input = RecruitingSchedulingToolInputSchema.parse(args);
+              if (input.operation === "draft") {
+                if (input.plan.threadId !== thread.id) throw new IsolationError();
+                return await createRecruitingSchedulingPlan(
+                  deps.prisma,
+                  researchActor.actor,
+                  input.plan,
+                );
+              }
+              const plan = await loadVerifiedRecruitingSchedulingPlan(
+                deps.prisma,
+                researchActor.actor,
+                { threadId: thread.id, planId: input.planId },
+              );
+              if (input.operation === "read") return plan;
+              const linkedId =
+                input.operation === "book" ? plan.bookingEffectId : plan.confirmationEffectId;
+              if (linkedId) {
+                const linked = await deps.prisma.externalEffect.findFirst({
+                  where: {
+                    id: linkedId,
+                    spaceId: run.spaceId,
+                    run: { threadId: thread.id, userId: run.userId },
+                  },
+                });
+                if (!linked) throw new IsolationError();
+                if (
+                  linked.runId !== runId ||
+                  ["completed", "uncertain", "executing", "denied"].includes(linked.status)
+                )
+                  return {
+                    plan,
+                    operation: input.operation,
+                    status: linked.status,
+                    effectId: linked.id,
+                    automaticRetry: false,
+                  };
+              }
+              if (!deps.connector?.resolveCall)
+                throw new Error("Native scheduling tools are unavailable");
+              const route =
+                input.operation === "book"
+                  ? {
+                      connectorId: "mcp",
+                      resourceId: plan.calendar.sourceId,
+                      resourceRevision: plan.calendar.sourceRevision,
+                      toolName: "create_booking",
+                    }
+                  : {
+                      connectorId: "mcp",
+                      resourceId: plan.mailSourceId,
+                      resourceRevision: plan.mailSourceRevision,
+                      toolName: "native_instantly_reply_to_email",
+                    };
+              const providerArgs =
+                input.operation === "book"
+                  ? input.arguments
+                  : {
+                      eaccount: plan.originalEmail.eaccount,
+                      reply_to_uuid: plan.originalEmail.providerMessageId,
+                      subject: input.subject,
+                      body: input.body,
+                    };
+              assertSchedulingCall(plan, input.operation, route, providerArgs);
+              const assigned = await requireMcpToolAssignment(
+                deps.prisma,
+                context,
+                route,
+                route.toolName,
+              );
+              const url = assigned.server.endpoint ? URL.parse(assigned.server.endpoint) : null;
+              const expected =
+                input.operation === "book"
+                  ? "https://mcp.cal.com/mcp"
+                  : "https://mcp.instantly.ai/mcp";
+              if (!url || `${url.origin}${url.pathname.replace(/\/$/, "")}` !== expected)
+                throw new IsolationError();
+              const resolved = await deps.connector.resolveCall(
+                {
+                  tool: catalogExecuteToolName("mcp"),
+                  route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
+                  args: { id: catalogIdForRoute(route), arguments: providerArgs },
+                  executionId,
+                },
+                context,
+              );
+              if (
+                !resolved?.call.route ||
+                !approvalRoutesMatch(route, resolved.call.route as typeof route) ||
+                stableJsonValue(resolved.call.args) !== stableJsonValue(providerArgs)
+              )
+                throw new IsolationError();
+              schedulingSelection = { plan, operation: input.operation };
+              name = resolved.tool.name;
+              args = resolved.call.args;
+              connectorCall = resolved.call;
+              resolvedTool = resolved.tool;
+            } catch (error) {
+              return {
+                error: sanitizeConnectorError(error, runSecrets),
+                code: "SCHEDULING_PLAN_UNAVAILABLE",
+                dispatched: false,
+              };
+            }
+          }
           if (name === "recruiting_reply") {
             const parsed = RecruitingReplyInputSchema.safeParse(args);
             if (!parsed.success) return { error: sanitizeConnectorError(parsed.error, runSecrets) };
@@ -4905,6 +5028,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (
             !researchSelection &&
             !crmImportSelection &&
+            !schedulingSelection &&
             connectorCall.route &&
             deps.connector?.resolveCall
           ) {
@@ -5955,6 +6079,112 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   consumedEffectIds,
                   Boolean(calendarReadEpoch),
                 );
+          let schedulingApprovalHash: string | undefined;
+          if (applied) {
+            try {
+              const stored =
+                applied.effect.result &&
+                typeof applied.effect.result === "object" &&
+                !Array.isArray(applied.effect.result)
+                  ? applied.effect.result.schedulingApprovalEvidence
+                  : undefined;
+              if (stored) {
+                const evidence = SchedulingApprovalEvidenceSchema.parse(stored);
+                const plan = await loadVerifiedRecruitingSchedulingPlan(
+                  deps.prisma,
+                  researchActor.actor,
+                  { threadId: thread.id, planId: evidence.planId },
+                );
+                if (
+                  evidence.requestHash !== calendarEvidenceHash(applied.effect.request) ||
+                  evidence.planHash !== schedulingPlanHash(plan) ||
+                  (evidence.operation === "confirm" &&
+                    evidence.bookingEffectId !== plan.bookingEffectId)
+                )
+                  throw new IsolationError();
+                if (
+                  schedulingSelection &&
+                  (schedulingSelection.plan.id !== plan.id ||
+                    schedulingSelection.operation !== evidence.operation)
+                )
+                  throw new IsolationError();
+                schedulingSelection = { plan, operation: evidence.operation };
+                schedulingApprovalHash = calendarEvidenceHash(evidence);
+              }
+              if (schedulingSelection) {
+                if (!stored && applied.effect.status !== "intended") throw new IsolationError();
+                if (!connectorCall.route) throw new IsolationError();
+                assertSchedulingCall(
+                  schedulingSelection.plan,
+                  schedulingSelection.operation,
+                  connectorCall.route,
+                  args,
+                );
+                await bindRecruitingSchedulingOperation(deps.prisma, researchActor.actor, {
+                  threadId: thread.id,
+                  planId: schedulingSelection.plan.id,
+                  operation: schedulingSelection.operation,
+                  effectId: applied.effect.id,
+                });
+                if (!stored) {
+                  if (applied.effect.status !== "intended") throw new IsolationError();
+                  const evidence = SchedulingApprovalEvidenceSchema.parse({
+                    kind: "recruiting_scheduling",
+                    version: 1,
+                    planId: schedulingSelection.plan.id,
+                    operation: schedulingSelection.operation,
+                    requestHash: calendarEvidenceHash(applied.effect.request),
+                    planHash: schedulingPlanHash(schedulingSelection.plan),
+                    bookingEffectId:
+                      schedulingSelection.operation === "confirm"
+                        ? schedulingSelection.plan.bookingEffectId
+                        : null,
+                  });
+                  const result = { schedulingApprovalEvidence: evidence };
+                  const updated = await deps.prisma.externalEffect.updateMany({
+                    where: {
+                      id: applied.effect.id,
+                      status: "intended",
+                      result: { equals: Prisma.DbNull },
+                    },
+                    data: { result },
+                  });
+                  if (updated.count !== 1) throw new IsolationError();
+                  applied.effect.result = result;
+                  schedulingApprovalHash = calendarEvidenceHash(evidence);
+                }
+                if (applied.effect.status === "approved") {
+                  const answers = await deps.prisma.event.findMany({
+                    where: {
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      runId: run.id,
+                      type: "effect.approval.answered",
+                      payload: { path: ["effectId"], equals: applied.effect.id },
+                    },
+                  });
+                  if (
+                    !answers.some((event) => {
+                      const value = event.payload as Record<string, unknown>;
+                      return (
+                        value.effectId === applied.effect.id &&
+                        value.answer === "allow" &&
+                        value.requestHash === calendarEvidenceHash(applied.effect.request) &&
+                        value.approvalEvidenceHash === schedulingApprovalHash
+                      );
+                    })
+                  )
+                    throw new IsolationError();
+                }
+              }
+            } catch (error) {
+              return {
+                error: sanitizeConnectorError(error, runSecrets),
+                code: "SCHEDULING_PLAN_EVIDENCE_INVALID",
+                dispatched: false,
+              };
+            }
+          }
           if (researchAdmission?.kind === "read") {
             if (!applied) throw new IsolationError();
             researchAdmission = await bindRecruitingResearchReadCall(
@@ -6824,6 +7054,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 instantlyReply,
               },
             );
+            if (schedulingSelection && schedulingApprovalHash) {
+              const review = redactSecrets(
+                schedulingPlanReview(schedulingSelection.plan, schedulingSelection.operation),
+                runSecrets,
+              );
+              approvalBlock.detail = `${review}\n\n${approvalBlock.detail ?? ""}`;
+              approvalBlock.approvalEvidenceHash = schedulingApprovalHash;
+            }
             if (calendarApprovalHash) {
               const visibleSnapshot = redactSecrets(
                 JSON.stringify(approvalArgs.originalBooking, null, 2),
@@ -9135,6 +9373,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (applied && !claimedEffect && (researchAdmission || declaredReadOnly !== true)) {
               const early = await claimOrReturn("intended");
               if (early !== undefined) return early;
+            }
+            if (schedulingSelection && applied) {
+              try {
+                const freshPlan = await loadVerifiedRecruitingSchedulingPlan(
+                  deps.prisma,
+                  researchActor.actor,
+                  { threadId: thread.id, planId: schedulingSelection.plan.id },
+                );
+                if (schedulingPlanHash(freshPlan) !== schedulingPlanHash(schedulingSelection.plan))
+                  throw new IsolationError();
+                await bindRecruitingSchedulingOperation(deps.prisma, researchActor.actor, {
+                  threadId: thread.id,
+                  planId: freshPlan.id,
+                  operation: schedulingSelection.operation,
+                  effectId: applied.effect.id,
+                });
+              } catch (error) {
+                return finish({
+                  error: sanitizeConnectorError(error, runSecrets),
+                  code: "SCHEDULING_PLAN_CHANGED",
+                  dispatched: false,
+                });
+              }
             }
             if (viaConnector) connectorReadOnly.set(executionId, declaredReadOnly === true);
             let result: unknown = { error: `unknown tool ${name}` };
