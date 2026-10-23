@@ -5,7 +5,7 @@ for (const width of [1440, 390]) {
   test(`actual Sequence shows all observed campaign details at ${width}px`, async ({
     page,
   }, info) => {
-    await page.setViewportSize({ width, height: 844 });
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await mockRecruitingApp(page);
     await page.route("**/rpc/recruiting/roleCampaign", (route) =>
       route.fulfill({
@@ -95,6 +95,9 @@ for (const width of [1440, 390]) {
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       ),
     ).toBe(0);
+    await page
+      .getByRole("heading", { name: "Sending schedule", exact: true })
+      .evaluate((element) => element.scrollIntoView({ block: "start" }));
     const path = info.outputPath(`sequence-observed-${width}.png`);
     await page.screenshot({ path, fullPage: true });
     await info.attach(`sequence-observed-${width}`, { path, contentType: "image/png" });
