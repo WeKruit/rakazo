@@ -15,6 +15,7 @@ import {
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
+import { ActivityTab } from "./ActivityTab";
 import { AssessmentCard } from "./AssessmentCard";
 import type { RecruitingDetailController, RecruitingDetailView } from "./detail";
 import type { RecruitingInboxEmail } from "./InboxTab";
@@ -23,6 +24,7 @@ import { InterviewTab } from "./InterviewTab";
 import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import { candidateSections, initials, linkedinHandle, sourceLabel } from "./profile";
 import { statusText } from "./shared";
+import { reminderCandidateKey, TasksTab } from "./TasksTab";
 
 const SKILLS_SHOWN = 12;
 
@@ -102,16 +104,22 @@ export function RecruitingDetailPanel({
 
   if (!current || !person) return null;
   const crm = current.crm !== false;
+  const reminderKey = reminderCandidateKey(
+    current.candidate?.candidateKey,
+    crm && person.candidateId,
+  );
   const views: { view: RecruitingDetailView; label: string }[] = [
     { view: "contact", label: t`Profile` },
+    { view: "activity", label: t`Activity` },
     ...(crm
       ? [
           { view: "thread" as const, label: t`Emails` },
           { view: "interview" as const, label: t`Interview` },
         ]
       : []),
+    ...(reminderKey ? [{ view: "tasks" as const, label: t`Tasks` }] : []),
   ];
-  const view = crm ? current.view : "contact";
+  const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
   const sections = candidateSections(candidate?.latestSource?.report?.fields);
   const email = person.email ?? sections.email;
@@ -346,7 +354,17 @@ export function RecruitingDetailPanel({
           ) : null}
         </nav>
         <div className="px-4 py-3">
-          {view === "thread" ? (
+          {view === "activity" ? (
+            <ActivityTab
+              key={person.candidateId}
+              {...current.role}
+              person={person}
+              crm={crm}
+              candidateKey={current.candidate?.candidateKey}
+            />
+          ) : view === "tasks" && reminderKey ? (
+            <TasksTab key={reminderKey} roleId={current.role.roleId} candidateKey={reminderKey} />
+          ) : view === "thread" ? (
             <InboxWithReply
               key={person.candidateId}
               {...current.role}

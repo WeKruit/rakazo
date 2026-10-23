@@ -26,7 +26,7 @@ export type RecruitingDetailPerson = {
   outreachStatus?: string | null;
 };
 
-export type RecruitingDetailView = "thread" | "contact" | "interview";
+export type RecruitingDetailView = "thread" | "contact" | "interview" | "activity" | "tasks";
 
 export type RecruitingDetailTarget = {
   view: RecruitingDetailView;
