@@ -5706,11 +5706,11 @@ msgstr "正在重置…"
 
 #: src/pages/Shell.tsx
 msgid "Resize chat"
-msgstr ""
+msgstr "调整聊天宽度"
 
 #: src/pages/Shell.tsx
 msgid "Resize navigation"
-msgstr ""
+msgstr "调整导航宽度"
 
 #: src/pages/ResizableSidePanel.tsx
 msgid "Resize panel"

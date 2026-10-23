@@ -136,7 +136,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { ClipboardEvent, DragEvent, MutableRefObject, Ref, RefObject } from "react";
+import type { ClipboardEvent, CSSProperties, DragEvent, MutableRefObject, Ref, RefObject } from "react";
 import {
   createRef,
   Fragment,
@@ -171,6 +171,7 @@ import { VoiceChatCard } from "../components/call/VoiceChatCard";
 import { ComputerWorkspace } from "../components/computer/ComputerWorkspace";
 import { lazyOverlay } from "../components/ErrorBoundary";
 import { LiveWork } from "../components/LiveWork";
+import { PaneResizeHandle } from "../components/PaneResizeHandle";
 import { MessageHoverMetadata } from "../components/MessageHoverMetadata";
 import {
   LIVE_TOOL_STEP_WINDOW,
@@ -227,6 +228,7 @@ import { scheduleFocusPrompt } from "../lib/focus-prompt";
 import { localTimezone } from "../lib/local-timezone";
 import { copyableMessageText } from "../lib/message-text";
 import { messageProviderLabel } from "../lib/messaging";
+import { clampWidth, usePaneWidth, useViewportWidth } from "../lib/pane-width";
 import { parseModelOptionKey } from "../lib/model-catalog";
 import {
   createAttachmentUploads,
@@ -879,6 +881,12 @@ export function ShellPage() {
     () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
     () => false,
   );
+  const viewportWidth = useViewportWidth();
+  const [botsSidebarWidth, setBotsSidebarWidth] = usePaneWidth("rakazo:bots-sidebar-width", showToolActivity ? 316 : 260);
+  const botsSidebarMaxWidth = Math.max(220, Math.min(480, viewportWidth - 640));
+  const visibleSidebarWidth = botsSidebarCollapsed ? 0 : clampWidth(botsSidebarWidth, 220, botsSidebarMaxWidth);
+  const [roleChatWidth, setRoleChatWidth] = usePaneWidth("rakazo:role-chat-width", clampWidth(viewportWidth * 0.34, 320, 420));
+  const roleChatMaxWidth = Math.max(320, Math.min(720, viewportWidth - visibleSidebarWidth - 320));
   const showToolActivityRef = useRef<boolean | null>(null);
   showToolActivityRef.current = bootstrapMe ? showToolActivity : null;
   useEffect(() => {
@@ -4491,14 +4499,13 @@ export function ShellPage() {
         data-bots-sidebar-density={botsSidebarDensity}
         data-collapsed={botsSidebarCollapsed ? "true" : "false"}
         inert={botsSidebarCollapsed && !mobileSidebarOpen ? true : undefined}
-        className={`absolute inset-y-0 start-0 z-40 flex w-[calc(100%-48px)] max-w-[316px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar transition-[transform,width,opacity] md:static md:z-auto md:translate-x-0 ${
+        style={{ "--bots-sidebar-width": `${visibleSidebarWidth}px` } as CSSProperties}
+        className={`absolute inset-y-0 start-0 z-40 flex w-[calc(100%-48px)] max-w-[316px] shrink-0 flex-col border-e border-sidebar-border bg-sidebar transition-[transform,width,opacity] md:relative md:z-auto md:translate-x-0 ${
           mobileSidebarOpen ? "translate-x-0" : "-translate-x-full rtl:translate-x-full"
         } ${
           botsSidebarCollapsed
             ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
-            : showToolActivity
-              ? "md:w-[316px]"
-              : "md:w-[260px]"
+            : "md:w-(--bots-sidebar-width) md:max-w-none"
         }`}
       >
         {!showToolActivity ? (
@@ -5235,10 +5242,11 @@ export function ShellPage() {
             </PopoverContent>
           ) : null}
         </Popover>
+        {!botsSidebarCollapsed ? <PaneResizeHandle label={t`Resize navigation`} edge="end" className="md:block" width={visibleSidebarWidth} min={220} max={botsSidebarMaxWidth} onResize={setBotsSidebarWidth} onReset={() => setBotsSidebarWidth(showToolActivity ? 316 : 260)} /> : null}
       </aside>
 
       {/* The full-screen computer covers the sidebar, so its edge must not catch clicks there. */}
-      {computerOpen || booting ? null : (
+      {computerOpen || booting || !botsSidebarCollapsed ? null : (
         <button
           type="button"
           data-testid="bots-sidebar-edge"
@@ -5252,9 +5260,7 @@ export function ShellPage() {
                 : t`Hide navigation`
           }
           aria-pressed={!botsSidebarCollapsed}
-          className={`absolute inset-y-0 z-50 hidden w-2 cursor-ew-resize touch-none border-0 bg-transparent p-0 md:block ${
-            botsSidebarCollapsed ? "start-0" : showToolActivity ? "start-[308px]" : "start-[252px]"
-          }`}
+          className="absolute inset-y-0 start-0 z-50 hidden w-2 cursor-ew-resize touch-none border-0 bg-transparent p-0 md:block"
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId);
             botsSidebarEdgeDragRef.current = {
@@ -5297,6 +5303,7 @@ export function ShellPage() {
       <main
         aria-hidden={mobileSidebarOpen || undefined}
         inert={mobileSidebarOpen}
+        style={roleChatWorkspace ? { "--hire-role-chat-width": `${clampWidth(roleChatWidth, 320, roleChatMaxWidth)}px` } as CSSProperties : undefined}
         className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", homeView && "hidden", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
       >
         {workspaceFull ? (
@@ -5403,6 +5410,7 @@ export function ShellPage() {
           <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
         <LinkFaviconsContext.Provider value={workspaceFull && !(roleChatWorkspace && roleChatOpen) ? null : linkFavicons}>
         <section ref={roleChatSection} id={roleChatId} hidden={roleChatHidden} inert={roleChatHidden} aria-label={t`Role conversation`} className={roleChatWorkspace ? "hire-role-chat" : workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
+        {roleChatWorkspace && roleChatOpen ? <PaneResizeHandle label={t`Resize chat`} edge="start" className="min-[941px]:block" width={clampWidth(roleChatWidth, 320, roleChatMaxWidth)} min={320} max={roleChatMaxWidth} onResize={setRoleChatWidth} onReset={() => setRoleChatWidth(clampWidth(viewportWidth * 0.34, 320, 420))} /> : null}
         {/* Inside main so the composer and its menus stay above it. */}
         {!mobileSidebarOpen ? (
           <div
@@ -5753,7 +5761,7 @@ export function ShellPage() {
       />
 
       <ResizableSidePanel
-        botsSidebarCollapsed={botsSidebarCollapsed}
+        botsSidebarWidth={visibleSidebarWidth}
         open={Boolean(recruitingDetail.current || (!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create")))}
         panel={recruitingDetail.current ? "recruiting-detail" : (panel ?? "closed")}
       >

@@ -1,5 +1,5 @@
 import type { PointerEvent } from "react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
 import { clampWidth } from "../lib/pane-width";
 
@@ -30,6 +30,13 @@ export function PaneResizeHandle({
   className?: string;
 }) {
   const drag = useRef<{ x: number; width: number; sign: number } | null>(null);
+
+  useEffect(
+    () => () => {
+      if (drag.current) delete document.documentElement.dataset.paneResizing;
+    },
+    [],
+  );
 
   /** Width change per physical pixel moved toward the pane's inside. */
   function growthSign() {
@@ -65,6 +72,8 @@ export function PaneResizeHandle({
         if (start)
           onResize(clampWidth(start.width + (event.clientX - start.x) * start.sign, min, max));
       }}
+      onPointerUp={stopDrag}
+      onPointerCancel={stopDrag}
       onLostPointerCapture={stopDrag}
       onDoubleClick={onReset}
       onKeyDown={(event) => {

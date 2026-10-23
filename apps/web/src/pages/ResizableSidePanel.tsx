@@ -1,49 +1,33 @@
 import { t } from "@lingui/core/macro";
 import type { CSSProperties, ReactNode } from "react";
-import { useEffect, useState } from "react";
 
 import { PaneResizeHandle } from "../components/PaneResizeHandle";
-import { clampWidth, usePaneWidth } from "../lib/pane-width";
+import { clampWidth, usePaneWidth, useViewportWidth } from "../lib/pane-width";
 
 const STORAGE_KEY = "rakazo:right-panel-width";
 const MIN_WIDTH = 320;
 const DEFAULT_WIDTH = 384;
 const ABSOLUTE_MAX = 1000;
-/** Desktop bots sidebar width (`md:w-[316px]` in Shell). */
-const BOTS_SIDEBAR_WIDTH = 316;
 const MIN_CHAT_WIDTH = 320;
-
-function maximumWidth(reservedLeadingPx: number) {
-  return Math.max(
-    MIN_WIDTH,
-    Math.min(ABSOLUTE_MAX, window.innerWidth - reservedLeadingPx - MIN_CHAT_WIDTH),
-  );
-}
 
 export function ResizableSidePanel({
   open,
   panel,
-  botsSidebarCollapsed = false,
+  botsSidebarWidth = 316,
   children,
 }: {
   open: boolean;
   panel: string;
-  botsSidebarCollapsed?: boolean;
+  botsSidebarWidth?: number;
   children: ReactNode;
 }) {
-  const reservedLeadingPx = botsSidebarCollapsed ? 0 : BOTS_SIDEBAR_WIDTH;
+  const viewportWidth = useViewportWidth();
+  const maxWidth = Math.max(
+    MIN_WIDTH,
+    Math.min(ABSOLUTE_MAX, viewportWidth - botsSidebarWidth - MIN_CHAT_WIDTH),
+  );
   const [preferredWidth, setPreferredWidth] = usePaneWidth(STORAGE_KEY, DEFAULT_WIDTH);
-  const [maxWidth, setMaxWidth] = useState(() => maximumWidth(reservedLeadingPx));
   const width = clampWidth(preferredWidth, MIN_WIDTH, maxWidth);
-
-  useEffect(() => {
-    function syncMax() {
-      setMaxWidth(maximumWidth(reservedLeadingPx));
-    }
-    syncMax();
-    window.addEventListener("resize", syncMax);
-    return () => window.removeEventListener("resize", syncMax);
-  }, [reservedLeadingPx]);
 
   return (
     <aside

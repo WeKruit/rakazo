@@ -11,8 +11,8 @@ html[data-pane-resizing] {
   cursor: col-resize;
   user-select: none;
 }
-/* biome-ignore lint/complexity/noImportantStyles: must override the pane's own transition classes */
 html[data-pane-resizing] * {
+  /* biome-ignore lint/complexity/noImportantStyles: must override the pane's own transition classes */
   transition: none !important;
 }
 

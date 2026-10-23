@@ -15,6 +15,13 @@ test("computer rail resizes its preview and remembers width", async ({ page }, t
   const separator = page.getByRole("separator", { name: "Resize panel" });
   await expect(separator).toBeVisible();
   await expect(panel).toHaveCSS("width", "384px");
+  const navigationResize = page.getByRole("separator", { name: "Resize navigation" });
+  await navigationResize.focus();
+  await page.keyboard.press("End");
+  await expect(navigationResize).toHaveAttribute("aria-valuenow", "480");
+  await expect(separator).toHaveAttribute("aria-valuemax", "700");
+  await navigationResize.dblclick();
+  await expect(navigationResize).toHaveAttribute("aria-valuenow", "316");
   const before = (await page.getByTestId("computer-preview").boundingBox())!;
   const handle = (await separator.boundingBox())!;
   await page.mouse.move(handle.x + 3, handle.y + 100);
