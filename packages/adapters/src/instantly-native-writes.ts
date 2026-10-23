@@ -328,6 +328,104 @@ async function defaultMailbox(
 }
 const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
+export const INSTANTLY_CAMPAIGN_STATUS: Record<number, string> = {
+  0: "Draft",
+  1: "Active",
+  2: "Paused",
+  3: "Completed",
+};
+export type InstantlyActivationDisplay = {
+  campaignName: string | null;
+  status: string | null;
+  mailbox: string | null;
+  recipients: { name: string | null; email: string }[];
+  /** null when the leads could not be read; the list itself is capped at 100. */
+  recipientCount: number | null;
+  stopOnReply: boolean | null;
+  schedule: string | null;
+};
+export const EMPTY_ACTIVATION_DISPLAY: InstantlyActivationDisplay = {
+  campaignName: null,
+  status: null,
+  mailbox: null,
+  recipients: [],
+  recipientCount: null,
+  stopOnReply: null,
+  schedule: null,
+};
+/** "Weekdays 09:00-17:00 America/Chicago" from Instantly's campaign_schedule, or null. */
+function describeSchedule(campaign: Record<string, unknown> | undefined) {
+  const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
+  const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
+  if (!first) return null;
+  const timing = first.timing as { from?: unknown; to?: unknown } | undefined;
+  return (
+    [
+      typeof first.name === "string" ? first.name : null,
+      typeof timing?.from === "string" && typeof timing.to === "string"
+        ? `${timing.from}-${timing.to}`
+        : null,
+      typeof first.timezone === "string" ? first.timezone : null,
+    ]
+      .filter(Boolean)
+      .join(" ") || null
+  );
+}
+/** Role-campaign binding for a role, read without a run (approval cards, API). */
+export async function readRoleCampaignBinding(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  serverId: string,
+  roleId: string,
+) {
+  const effect = await prisma.externalEffect.findUnique({
+    where: { idempotencyKey: bindingKey(serverId, roleId) },
+  });
+  if (!effect || effect.spaceId !== spaceId || effect.status !== "completed") return null;
+  const binding = effect.result as Partial<RoleBinding> | null;
+  return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
+}
+/**
+ * What the activate_campaign approval card shows: live name, status, lead count (up to 100) and
+ * sending mailbox, read through the read-only native tools. Reads that fail leave fields null.
+ */
+export async function describeCampaignActivation(
+  read: (
+    tool: "native_instantly_get_campaign" | "native_instantly_list_leads",
+    args: Record<string, unknown>,
+  ) => Promise<Record<string, unknown> | undefined>,
+  campaignId: string,
+  fallbackMailbox: string | null = null,
+): Promise<InstantlyActivationDisplay> {
+  const [campaign, leads] = await Promise.all([
+    read("native_instantly_get_campaign", { campaign_id: campaignId }).catch(() => undefined),
+    read("native_instantly_list_leads", { campaign_id: campaignId, limit: 100 }).catch(
+      () => undefined,
+    ),
+  ]);
+  const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
+  const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
+  const recipients = (items ?? []).flatMap((lead) => {
+    if (typeof lead.email !== "string") return [];
+    const name = [lead.first_name, lead.last_name]
+      .filter((part): part is string => typeof part === "string" && part.trim() !== "")
+      .join(" ");
+    return [{ name: name || null, email: lead.email }];
+  });
+  return {
+    campaignName: typeof campaign?.name === "string" ? campaign.name : null,
+    status:
+      typeof campaign?.status === "number"
+        ? (INSTANTLY_CAMPAIGN_STATUS[campaign.status] ?? String(campaign.status))
+        : null,
+    mailbox: typeof emails[0] === "string" ? emails[0] : fallbackMailbox,
+    recipients,
+    recipientCount: items ? recipients.length : null,
+    stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
+    schedule: describeSchedule(campaign),
+  };
+}
+
 async function readBinding(prisma: PrismaClient, context: AdapterContext, key: string) {
   const effect = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
   if (!effect) return undefined;
@@ -607,6 +705,8 @@ export async function runInstantlyWrite(
         name: campaign.name,
         status: campaign.status,
         stop_on_reply: campaign.stop_on_reply,
+        email_list: campaign.email_list,
+        campaign_schedule: campaign.campaign_schedule,
       };
     }
     case "native_instantly_update_lead_interest":

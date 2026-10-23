@@ -1551,6 +1551,15 @@ export type RecruitingRoleCampaign = z.infer<typeof RecruitingRoleCampaignSchema
 /** Role setup checklist: what a role still needs before its first outreach works out of the box. */
 export const RecruitingRoleSetupSchema = z.strictObject({
   ready: z.boolean(),
+  /** A run in this role's conversation is waiting for the human (e.g. the send confirmation). */
+  attention: z
+    .strictObject({
+      kind: z.literal("approval"),
+      threadId: Id,
+      cardId: Id.nullable(),
+      createdAt: IsoDate,
+    })
+    .nullable(),
   items: z.array(
     z.strictObject({
       key: z.enum(["campaign", "sender", "crm", "leads"]),

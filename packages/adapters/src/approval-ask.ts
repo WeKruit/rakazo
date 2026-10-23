@@ -12,6 +12,7 @@ import {
 import { formatCron, humanizeToolName, redactSecrets } from "@rakazo/core";
 import { redactToolArgsForReview } from "./auto-review.js";
 import { sharedMemorySaveError } from "./builtin-tools.js";
+import type { InstantlyActivationDisplay } from "./instantly-native-writes.js";
 import { nativeMemorySaveError } from "./memory-tools.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
@@ -38,6 +39,7 @@ export function buildApprovalAskBlock(
     crmOperation?: CrmApprovalOperation;
     recruiting?: RecruitingApprovalDisplay;
     crmImportTarget?: RecruitingCrmTarget;
+    instantlyActivation?: InstantlyActivationDisplay;
   },
 ): Extract<MessageBlock, { kind: "ask" }> {
   const scheduleUpdate = toolName === "schedule_update";
@@ -111,17 +113,19 @@ export function buildApprovalAskBlock(
     : nativeMemory
       ? `saving ${toolName === "save_shared_memory" ? "shared" : "private"} memory`
       : describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
-  const detail = formatApprovalDetail(
-    toolName,
-    redactToolArgsForReview(args, secrets),
-    options?.reviewReason,
-    preference,
-    nativeMemory,
-    crmOperation,
-    considerationOperation,
-    options?.recruiting,
-    options?.crmImportTarget,
-  );
+  const detail = options?.instantlyActivation
+    ? formatInstantlyActivation(options.instantlyActivation)
+    : formatApprovalDetail(
+        toolName,
+        redactToolArgsForReview(args, secrets),
+        options?.reviewReason,
+        preference,
+        nativeMemory,
+        crmOperation,
+        considerationOperation,
+        options?.recruiting,
+        options?.crmImportTarget,
+      );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   return {
     kind: "ask",
@@ -130,25 +134,27 @@ export function buildApprovalAskBlock(
       redactSecrets(
         scheduleUpdate
           ? "Review routine change"
-          : crmTarget
-            ? "Review CRM role connection"
-            : crmImport
-              ? "Review CRM import"
-              : shortlist
-                ? "Review shortlist change"
-                : considerationOperation
-                  ? "Review consideration change"
-                  : crmOperation === "crm_bind_candidate_role"
-                    ? "Review CRM role binding"
-                    : crmOperation === "crm_update_candidate_stage"
-                      ? "Review CRM stage change"
-                      : crmOperation === "crm_append_candidate_note"
-                        ? "Review CRM note"
-                        : toolName === "create_space" || recruitingApproval
-                          ? args.stage === "brief" && recruitingApproval
-                            ? summary
-                            : `${summary}?`
-                          : `Review before ${summary}`,
+          : options?.instantlyActivation
+            ? "Review before sending the first campaign email"
+            : crmTarget
+              ? "Review CRM role connection"
+              : crmImport
+                ? "Review CRM import"
+                : shortlist
+                  ? "Review shortlist change"
+                  : considerationOperation
+                    ? "Review consideration change"
+                    : crmOperation === "crm_bind_candidate_role"
+                      ? "Review CRM role binding"
+                      : crmOperation === "crm_update_candidate_stage"
+                        ? "Review CRM stage change"
+                        : crmOperation === "crm_append_candidate_note"
+                          ? "Review CRM note"
+                          : toolName === "create_space" || recruitingApproval
+                            ? args.stage === "brief" && recruitingApproval
+                              ? summary
+                              : `${summary}?`
+                            : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -164,8 +170,13 @@ export function buildApprovalAskBlock(
         ? truncate(safeDetail, MAX_APPROVAL_DETAIL_LENGTH)
         : safeDetail,
     status: "pending",
-    actions:
-      !crmOperation && toolName === "create_space"
+    // A real send is confirmed each time; it is never "always allowed".
+    actions: options?.instantlyActivation
+      ? [
+          { id: "allow", label: "Confirm and send" },
+          { id: "deny", label: "Cancel" },
+        ]
+      : !crmOperation && toolName === "create_space"
         ? [
             { id: "allow", label: "Create space", outcome: "created" },
             { id: "deny", label: "Cancel", outcome: "cancelled" },
@@ -189,6 +200,33 @@ export function buildApprovalAskBlock(
               { id: "deny", label: "Deny" },
             ],
   };
+}
+
+const MAX_RECIPIENT_LINES = 20;
+/** The 「确认发送」 card body: no ids, only what the human is approving. */
+function formatInstantlyActivation(display: InstantlyActivationDisplay) {
+  const unknown = (value: string | number | null) => (value === null ? "unknown" : String(value));
+  const count =
+    display.recipientCount === null
+      ? "unknown"
+      : display.recipientCount >= 100
+        ? "100+"
+        : String(display.recipientCount);
+  const shown = display.recipients.slice(0, MAX_RECIPIENT_LINES);
+  return [
+    `Campaign: ${display.campaignName ?? "created for this role on approval"}`,
+    `Sender: ${unknown(display.mailbox)}`,
+    `Recipients (${count}):`,
+    ...shown.map((r) => `- ${r.name ? `${r.name} <${r.email}>` : r.email}`),
+    ...(display.recipients.length > shown.length
+      ? [`- and ${display.recipients.length - shown.length} more`]
+      : []),
+    `Send window: ${unknown(display.schedule)}`,
+    `Stop on reply: ${display.stopOnReply === null ? "unknown" : display.stopOnReply ? "on" : "off"}`,
+    ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
+    "",
+    "Confirm sending the first email to these recipients",
+  ].join("\n");
 }
 
 function describeApprovalAction(

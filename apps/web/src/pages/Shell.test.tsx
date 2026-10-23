@@ -610,6 +610,19 @@ async function renderFeedbackShell(
     expect(button, name).toBeDefined();
     await act(async () => button.click());
   };
+  // The role chat opens by default; only a collapsed chat needs its trigger.
+  const openRoleChat = async () => {
+    const trigger = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Open role chat"]',
+    );
+    if (trigger) await act(async () => trigger.click());
+  };
+  const collapseRoleChat = async () => {
+    const close = document.body.querySelector<HTMLButtonElement>(
+      'button[aria-label="Collapse role chat"]',
+    );
+    if (close) await act(async () => close.click());
+  };
   if (options.openFeedback !== false) {
     await click("Recruiting");
     await click("Evidence");
@@ -628,6 +641,8 @@ async function renderFeedbackShell(
     type(document.body.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reason"]')!, value);
   return {
     click,
+    openRoleChat,
+    collapseRoleChat,
     choose,
     reason,
     render,
@@ -843,7 +858,7 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
     }),
   );
   expect(view.getPath()).not.toContain("crmServer");
-  await view.click("Chat with WeKruit");
+  await view.openRoleChat();
   expect(document.querySelector('textarea[name="chat-message"]')?.closest("[hidden]")).toBeNull();
   await view.navigate("/app/g/group-1?view=shortlist");
   expect(shellApi.recruiting.listCandidates).toHaveBeenCalledWith(
@@ -1545,7 +1560,7 @@ it.each(["retry", "role-change", "space", "attachment-space"])(
     expect(document.body.textContent).toContain("Stored CRM history");
     expect(shellApi.createGroup).not.toHaveBeenCalled();
     expect(shellApi.followUp).not.toHaveBeenCalled();
-    await view.click("Open role chat");
+    await view.openRoleChat();
     expect(document.body.querySelector('[data-message-id="pending-main"]')).toBeNull();
     const composer = document.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
     expect(composer.closest("[hidden]")).toBeNull();
@@ -2651,11 +2666,13 @@ it("defers hidden conversation icons until revealed without remounting the draft
       },
     ],
   });
+  await view.collapseRoleChat();
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   const card = container!.querySelector('[data-message-id="pending-main"]');
   const conversation = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
   expect(conversation.hidden).toBe(true);
-  expect(load).not.toHaveBeenCalled();
+  // The chat opens by default, so its icon loaded once before the collapse.
+  expect(load).toHaveBeenCalledOnce();
   type(composer, "Keep my unsent recruiting note.");
   await view.navigate("/app/g/group-1?view=conversation");
   expect(load).toHaveBeenCalledExactlyOnceWith("https://hidden-conversation.example.test");
@@ -2729,7 +2746,7 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   const chat = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
   const card = document.body.querySelector('[data-message-id="pending-main"]');
-  await view.click("Open role chat");
+  await view.openRoleChat();
   expect(chat.hidden).toBe(false);
   expect(chat.classList.contains("hire-role-chat")).toBe(true);
   type(composer, "Which saved candidates have robotics experience?");
@@ -2757,7 +2774,7 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   await view.click("Collapse role chat");
   expect(chat.hidden).toBe(true);
-  await view.click("Open role chat");
+  await view.openRoleChat();
   expect(chat.hidden).toBe(false);
   await view.click("New Role");
   expect(chat.hidden).toBe(true);
@@ -2785,6 +2802,7 @@ it("never drops a message typed while the role chat is closed", async () => {
     openFeedback: false,
     initialPath: "/app/g/group-1?view=results",
   });
+  await view.collapseRoleChat();
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   const chat = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
   expect(chat.hidden).toBe(true);
@@ -2829,7 +2847,7 @@ it("sends the currently selected saved email as separate native context and drop
     partial: false,
   });
   await view.navigate("/app/g/group-1?view=inbox");
-  await view.click("Open role chat");
+  await view.openRoleChat();
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   type(composer, "Read this reply; don't send anything.");
   shellApi.send.mockResolvedValue({ runId: "same-role-run" });
@@ -2866,7 +2884,7 @@ it("sends the open role and the person selected in the workbench as bounded chat
     openFeedback: false,
   });
   await view.navigate("/app/g/group-1?view=contacts");
-  await view.click("Open role chat");
+  await view.openRoleChat();
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   await act(async () =>
     chatContext.api!.setSelectedContact({ name: "Avery Example", reference: "candidate-7" }),
@@ -3031,7 +3049,7 @@ it("keeps an uncertain email retry nonce across metadata refresh but renews it f
     snippet: true,
   };
   await act(async () => props.onEmailSelection?.(reference));
-  await view.click("Open role chat");
+  await view.openRoleChat();
   const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   type(composer, "Read this, don't send.");
   shellApi.send.mockRejectedValue(new Error("Unknown acceptance"));
@@ -3093,7 +3111,7 @@ it.each(["view", "thread", "user", "space", "unmount"] as const)(
         snippet: true,
       }),
     );
-    await view.click("Open role chat");
+    await view.openRoleChat();
     pickAttachment();
     type(
       container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!,
@@ -3150,7 +3168,7 @@ it("uses the narrow role column without the desktop metadata gutter and preserve
   const message = container!.querySelector('[data-message-id="saved-role-reply"]')!;
   const frame = message.querySelector('[data-testid="message-bubble-frame"]')!;
   const card = container!.querySelector('[data-message-id="pending-main"]');
-  await view.click("Open role chat");
+  await view.openRoleChat();
   expect(frame.classList.contains("max-w-full")).toBe(true);
   expect(frame.className).not.toContain("8rem");
   expect(
@@ -3179,6 +3197,7 @@ it("follows the latest messages on role chat reveal while preserving a manually 
     openFeedback: false,
     initialPath: "/app/g/group-1?view=results",
   });
+  await view.collapseRoleChat();
   const transcript = container!.querySelector<HTMLDivElement>('[data-testid="transcript"]')!;
   const card = transcript.querySelector('[data-message-id="pending-main"]');
   Object.defineProperties(transcript, {
@@ -3190,7 +3209,7 @@ it("follows the latest messages on role chat reveal while preserving a manually 
     .mockImplementation((options?: ScrollToOptions | number) => {
       if (typeof options === "object") transcript.scrollTop = options.top ?? 0;
     });
-  await view.click("Open role chat");
+  await view.openRoleChat();
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 2_000, behavior: "auto" });
   scroll.mockClear();
   await view.click("Collapse role chat");
@@ -3199,7 +3218,7 @@ it("follows the latest messages on role chat reveal while preserving a manually 
     transcript.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   expect(scroll).not.toHaveBeenCalled();
-  await view.click("Open role chat");
+  await view.openRoleChat();
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 2_000, behavior: "auto" });
   scroll.mockClear();
   await view.click("Contacts");
@@ -3210,7 +3229,7 @@ it("follows the latest messages on role chat reveal while preserving a manually 
     transcript.dispatchEvent(new Event("scroll", { bubbles: true }));
   });
   await view.click("Collapse role chat");
-  await view.click("Open role chat");
+  await view.openRoleChat();
   await view.click("Job Brief");
   await view.click("Client feedback");
   expect(scroll).not.toHaveBeenCalled();
@@ -3219,7 +3238,7 @@ it("follows the latest messages on role chat reveal while preserving a manually 
   expect(transcript.querySelector('[data-message-id="pending-main"]')).toBe(card);
 });
 
-it("waits until role chat is visible before handling an exact native message jump", async () => {
+it("handles an exact native message jump once in the open role chat", async () => {
   Element.prototype.scrollIntoView ??= () => {};
   const jump = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
   const view = await renderFeedbackShell("group", undefined, {
@@ -3231,16 +3250,19 @@ it("waits until role chat is visible before handling an exact native message jum
     groupId: "group-1",
     around: { messageId: "pending-main" },
   });
-  expect(jump).not.toHaveBeenCalled();
+  // The chat opens by default, so the jump runs once the card is on screen.
   const transcript = container!.querySelector<HTMLDivElement>('[data-testid="transcript"]')!;
   const scroll = vi.spyOn(transcript, "scrollTo");
-  await view.click("Open role chat");
-  expect(jump).toHaveBeenCalledExactlyOnceWith({ behavior: "auto", block: "center" });
-  expect(jump.mock.contexts[0]).toBe(transcript.querySelector('[data-message-id="pending-main"]'));
+  expect(jump).toHaveBeenLastCalledWith({ behavior: "auto", block: "center" });
+  expect(jump.mock.contexts.at(-1)).toBe(
+    transcript.querySelector('[data-message-id="pending-main"]'),
+  );
   expect(scroll).not.toHaveBeenCalled();
+  // Reopening the chat does not jump again.
+  const jumps = jump.mock.calls.length;
   await view.click("Collapse role chat");
-  await view.click("Open role chat");
-  expect(jump).toHaveBeenCalledOnce();
+  await view.openRoleChat();
+  expect(jump).toHaveBeenCalledTimes(jumps);
   expect(scroll).not.toHaveBeenCalled();
 });
 
