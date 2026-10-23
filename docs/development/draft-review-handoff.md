@@ -94,3 +94,20 @@ Next Autumn work: verify actual supported serializer/read protocol; agree observ
 Audited repository workflows at current main: production SSH and mobile OTA require main push; server-image publishing is main/tag/manual, with PR jobs build-only; workflow_run publishes test reports. This product branch does not alter workflows. External repository hooks/installed app behavior cannot be excluded: metadata read returned **HTTP 403 Resource not accessible by integration**. No denied read retry, settings change or publication occurred.
 
 Pending action is publishing `codex/unified-workspace-draft-review` and creating a Draft PR. A maintainer must verify that this branch/PR cannot trigger forbidden deployment, or explicitly authorize the applicable automatic side effect with its scope. Draft authorization alone is not deployment authorization. No main push, merge or source push is proposed. Until this gate is resolved, this is a prepared local review branch, not an existing GitHub PR.
+
+## Latest root-cause evidence and mail loop status
+
+A definite product defect is proven independently of the reported person's data: before the structured-profile increment, `projectRecruitingCandidateReport` accepted only scalars/scalar arrays and omitted nested objects/record arrays. The new structured-value contract and direct timeline renderer fix that projection/display loss, with source-shaped fixture → serialized report → UI tests. This establishes a local defect and correction, not that the particular live row contains those fields. Supplied scalar avatar URLs already had a separate path and cannot be assumed to share this cause.
+
+No corresponding real raw artifact was identified in the available repository handoffs or supplied review fixtures. A prior Notes deep-link identifies a candidate for a different refresh issue; it does not establish identity with the later history screenshot. No production artifact was read, no new research was run, and no secrets were requested. The missing evidence is the exact saved row plus its scoped API report and current deployed renderer revision. The existing owner can collect that through the read-only recipe in the profile source review without another search or synchronization.
+
+| Mail / interview link | Latest evidence | Acceptance state |
+| --- | --- | --- |
+| Source contains historical correspondence | Owner reported existing mail across multiple roles, below the former member cap | Historical owner observation, not reverified here |
+| Required caller permission | Owner reported four restricted bot assignments missing role-correspondence read; dry run stopped | No subsequent permission evidence received |
+| Sync mail phase | Old code silently advanced unsupported mail; new code fails and retains progress | Regression passed; new production dryRun completion unverified |
+| Canonical role → existing campaign/mailbox → Inbox | Exact scoped code and synthetic API/browser checks | Actual installed version and positive existing-message readback pending |
+| Reply draft → real human approval → provider send → readback | Native approval/identity/retry fixtures pass; earlier handoff had partial real mail proof on older code | No current full provider-loop evidence; no real send here |
+| Reply intent → available slot/two zones → approved booking → specific confirmation | Linked offline service/approval/receipt tests and mutation freshness fix pass | Autonomous interpretation and actual provider booking/confirmation loop unverified |
+
+Therefore email and interview scheduling must not be reported as live closed-loop complete. The latest owner report remains the stopped dry run, not a successful synchronization. A past connected provider or successful send on another code/role does not establish this current chain.
