@@ -702,6 +702,26 @@ export async function authorizeRecruitingCrmRoleReference(
     throw new IsolationError();
 }
 
+/**
+ * The role snapshot alone, without the CRM binding receipt reads. Run-start context
+ * needs only the role and revision; CRM tools verify their binding at the point of use.
+ */
+export async function getRecruitingRoleSnapshot(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+): Promise<RoleSnapshot | null> {
+  return prisma.$transaction(
+    async (tx) => {
+      const thread = await requireThread(tx, actor, input.threadId);
+      if (!thread.activeRecruitingRoleId) return null;
+      const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+      return roleSnapshot(tx, actor, role, thread);
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
 export async function getRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
