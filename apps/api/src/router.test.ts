@@ -88,6 +88,7 @@ describe("account preferences", () => {
     };
     const target = vi.fn().mockResolvedValue(bot);
     const routines = vi.fn().mockResolvedValue([]);
+    const prewarmLookup = vi.fn().mockResolvedValue(null);
     const snapshot = vi.fn(async (read: (tx: PrismaClient) => Promise<unknown>) =>
       read(f.deps.prisma),
     );
@@ -116,6 +117,7 @@ describe("account preferences", () => {
       message: { findMany: vi.fn().mockResolvedValue([]) },
       event: { findFirst: vi.fn().mockResolvedValue({ seq: 4 }) },
       run: { findFirst: vi.fn().mockResolvedValue(null) },
+      computer: { findFirst: prewarmLookup },
       $queryRaw: vi.fn().mockResolvedValue([]),
       $transaction: snapshot,
     });
@@ -124,6 +126,7 @@ describe("account preferences", () => {
       target,
       routines,
       snapshot,
+      prewarmLookup,
       client: createRouterClient(createRouter(f.deps), { context: { actor: f.actor } }),
     };
   }
@@ -141,6 +144,30 @@ describe("account preferences", () => {
     expect(f.snapshot).not.toHaveBeenCalled();
     expect(f.routines).not.toHaveBeenCalled();
   }, 500);
+
+  it("returns bootstrap without waiting for the computer pre-warm", async () => {
+    const f = bootstrapDeps();
+    f.prewarmLookup.mockImplementation(() => new Promise(() => {}));
+    await expect(f.client.bootstrap({})).resolves.toMatchObject({ bots: [{ id: "bot-1" }] });
+    expect(f.prewarmLookup).toHaveBeenCalledTimes(1);
+  }, 500);
+
+  it("does not fail bootstrap when the computer pre-warm throws", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-api", sinks: [sink] }));
+    try {
+      const f = bootstrapDeps();
+      f.prewarmLookup.mockRejectedValue(new Error("computers table unavailable"));
+      await expect(f.client.bootstrap({})).resolves.toMatchObject({ bots: [{ id: "bot-1" }] });
+      await vi.waitFor(() => {
+        expect(
+          sink.events.some((e) => e.message === "computer.prewarm" && e.level === "warn"),
+        ).toBe(true);
+      });
+    } finally {
+      installLogger(createLogger({ service: "rakazo-api", level: "off", sinks: [] }));
+    }
+  });
 
   it("does not load navigation when the managed recruiting upgrade cannot be read", async () => {
     const f = bootstrapDeps();

@@ -37,6 +37,23 @@ type ComputerUpdateProgress = (
   stage: Exclude<ComputerUpdate["stage"], "preparing">,
 ) => Promise<void>;
 
+/** Optional out-param: wall-clock spent in the provider wake and prepare calls. */
+export type ProvisionTiming = { wakeMs?: number; prepareMs?: number };
+
+async function timed<T>(
+  timing: ProvisionTiming | undefined,
+  key: keyof ProvisionTiming,
+  work: () => Promise<T>,
+): Promise<T> {
+  if (!timing) return work();
+  const startedAt = Date.now();
+  try {
+    return await work();
+  } finally {
+    timing[key] = Date.now() - startedAt;
+  }
+}
+
 const EXECUTION_LEASE_MS = 5 * 60_000;
 const BOOT_WAIT_ATTEMPTS = 40;
 const BOOT_WAIT_MS = 250;
@@ -161,6 +178,7 @@ export async function provisionComputer(
   context: AdapterContext,
   controlHolder: "bot" | "none" = "none",
   onProgress?: ComputerUpdateProgress,
+  timing?: ProvisionTiming,
 ): Promise<ComputerRef> {
   let existing = await deps.prisma.computer.findUniqueOrThrow({ where: { id: computerId } });
   if (existing.maintenanceId && existing.maintenanceId !== context.operationId)
@@ -194,7 +212,7 @@ export async function provisionComputer(
         data: { updatedAt: new Date() },
       });
       if (retained.count !== 1) throw new ComputerBusyError();
-      await deps.sandbox.prepare(ref, context);
+      await timed(timing, "prepareMs", () => deps.sandbox.prepare(ref, context));
       await ensureComputerWorkspaceLayout(
         deps.sandbox,
         ref,
@@ -318,14 +336,16 @@ export async function provisionComputer(
   let replacement = false;
   try {
     await onProgress?.("recreating");
-    const ref = await deps.sandbox.provision(
-      {
-        botId: existing.homeKey,
-        homePath,
-        providerRef: existing.providerRef ?? undefined,
-        providerKind: existing.kind as ComputerRef["kind"],
-      },
-      context,
+    const ref = await timed(timing, "wakeMs", () =>
+      deps.sandbox.provision(
+        {
+          botId: existing.homeKey,
+          homePath,
+          providerRef: existing.providerRef ?? undefined,
+          providerKind: existing.kind as ComputerRef["kind"],
+        },
+        context,
+      ),
     );
     provisioned = ref;
     replacement =
@@ -333,7 +353,7 @@ export async function provisionComputer(
       !existing.providerRef ||
       existing.providerRef !== ref.providerRef ||
       existing.kind !== ref.kind;
-    await deps.sandbox.prepare(ref, context);
+    await timed(timing, "prepareMs", () => deps.sandbox.prepare(ref, context));
     if (replacement) {
       await onProgress?.("restoring");
       await restoreComputerWorkspace(deps.home, deps.sandbox, existing.homeKey, ref, context);
