@@ -213,7 +213,8 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
       .filter(Boolean),
     mcpAllowPrivateEndpoint: source.MCP_ALLOW_PRIVATE_ENDPOINT === "true",
     port: Number(source.API_PORT ?? 3100),
-    gitSha: optional(source.GIT_SHA) ?? optional(source.RAKAZO_GIT_SHA),
+    // The deploy injects RAKAZO_GIT_SHA from the archive; a stale GIT_SHA in the Secret must not win.
+    gitSha: optional(source.RAKAZO_GIT_SHA) ?? optional(source.GIT_SHA),
     updaterUrl,
     updaterToken,
     imageTag: optional(source.RAKAZO_IMAGE_TAG),
