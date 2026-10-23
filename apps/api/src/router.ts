@@ -314,6 +314,7 @@ import {
   setRecruitingCandidateShortlist,
   updateRecruitingReminder,
 } from "./recruiting.js";
+import { syncRecruitingCrm } from "./recruiting-crm-sync.js";
 import { listRoutineRuns } from "./routine-runs.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
@@ -3671,6 +3672,21 @@ export function createRouter(deps: RouterDeps) {
           {
             prisma: deps.prisma,
             artifacts: deps.artifacts,
+            connectors: deps.connectors,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
+          context.actor,
+          await resolveThreadTarget(deps.prisma, context.actor, input),
+          input,
+        ),
+      ),
+      crmSync: authed.recruiting.crmSync.handler(async ({ context, input }) =>
+        syncRecruitingCrm(
+          {
+            prisma: deps.prisma,
             connectors: deps.connectors,
             firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
             signal: context.signal,
