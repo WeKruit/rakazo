@@ -5502,6 +5502,10 @@ msgstr "Saved candidate totals"
 msgid "Saved candidates"
 msgstr "Saved candidates"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved email"
+msgstr "Saved email"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Saved emails"
 msgstr "Saved emails"
@@ -5761,6 +5765,14 @@ msgstr "Send feedback"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Send on day"
 msgstr "Send on day"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send outcome unknown"
+msgstr "Send outcome unknown"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send recorded"
+msgstr "Send recorded"
 
 #: src/pages/Auth.tsx
 msgid "Send reset link"
