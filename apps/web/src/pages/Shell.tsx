@@ -286,6 +286,7 @@ import type {
   CandidateDiscussionContext,
   CandidateFeedback,
   CrmBrowseSelection,
+  CrmReplyDraftContext,
 } from "./RecruitingPanel";
 import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
@@ -2345,6 +2346,7 @@ export function ShellPage() {
       workspaceNewRole,
       boundRoleCrmMode,
       boundCrmTarget?.bindingEffectId,
+      searchParams.get("crmCandidate"),
     ],
   );
   const currentCorrespondenceScope = useRef(correspondenceScope);
@@ -2398,6 +2400,69 @@ export function ShellPage() {
       discussionScope.current.active = false;
     };
   }, []);
+  async function draftCrmReply(draft: CrmReplyDraftContext) {
+    const role = currentBindingRead?.workspace;
+    const bound = boundCrmTarget;
+    const isCurrent = () =>
+      Boolean(
+        userId &&
+          bootstrapMe?.spaceId &&
+          boundRoleCrmMode &&
+          !crmMode &&
+          inGroup &&
+          recruitingWorkspaceView === "inbox" &&
+          role &&
+          bound &&
+          discussionScope.current.active &&
+          discussionScope.current.composerRef === composerRef &&
+          currentCorrespondenceScope.current === correspondenceScope &&
+          botsRefreshUser.current.id === userId &&
+          (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId &&
+          activeGroupId.current === groupId &&
+          snapshotRef.current?.threadId === draft.threadId &&
+          draft.threadId === activeSnapshot?.threadId &&
+          draft.candidateId === searchParams.get("crmCandidate") &&
+          draft.source.serverId === bound.target.mcpServerId &&
+          draft.source.serverRevision === bound.target.serverRevision &&
+          draft.source.organizationId === bound.target.organizationId &&
+          draft.crmRoleId === bound.target.crmRoleId,
+      );
+    if (!isCurrent() || !role || !bound) return;
+    try {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId: draft.threadId });
+      if (!isCurrent()) return;
+      const target = workspace?.crmTarget?.target;
+      if (
+        workspace?.role.id !== role.role.id ||
+        workspace.revision.id !== role.revision.id ||
+        workspace.crmTarget?.bindingEffectId !== bound.bindingEffectId ||
+        target?.mcpServerId !== bound.target.mcpServerId ||
+        target.serverRevision !== bound.target.serverRevision ||
+        target.organizationId !== bound.target.organizationId ||
+        target.crmRoleId !== bound.target.crmRoleId ||
+        target.crmClientId !== bound.target.crmClientId ||
+        target.clientLabel !== bound.target.clientLabel ||
+        target.roleLabel !== bound.target.roleLabel
+      )
+        throw new Error(t`This role changed. Select the candidate again.`);
+      const reference = [
+        t`Role: ${workspace.role.title}`,
+        ...(draft.candidateName ? [t`Name: ${draft.candidateName}`] : []),
+        ...(draft.candidateEmail ? [t`Email: ${draft.candidateEmail}`] : []),
+        ...(draft.email.sender ? [t`Original sender: ${draft.email.sender}`] : []),
+        ...(draft.email.recipients.length
+          ? [t`Original recipients: ${draft.email.recipients.join(", ")}`]
+          : []),
+        ...(draft.email.subject ? [t`Subject: ${draft.email.subject}`] : []),
+        ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
+      ].join("\n");
+      openRoleChat(
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+      );
+    } catch (error) {
+      if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));
+    }
+  }
   function candidateScopeCurrent(candidate: CandidateDiscussionContext) {
     return Boolean(
       userId &&
@@ -4642,6 +4707,7 @@ export function ShellPage() {
           crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
             onStartRecruiting: crmMode && activeGroup && canCreateRoleFrom(activeGroup.id) ? (description) => startNewRole(activeGroup.id, description) : undefined,
+            onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
           }}
         /> : <p role="alert"><Trans>Choose a CRM role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (

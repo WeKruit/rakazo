@@ -1438,6 +1438,18 @@ const CrmBrowseCampaign = z.strictObject({
   clientId: z.uuid().nullable(),
   syncedAt: IsoDate,
 });
+const CrmBrowseOutbox = z.array(
+  z.strictObject({
+    id: z.uuid(),
+    body: z.string(),
+    status: z.enum(["pending", "processing", "sent", "failed"]),
+    polishedBody: z.string().nullable(),
+    providerMessageId: z.string().nullable(),
+    error: z.string().nullable(),
+    createdAt: IsoDate,
+    sentAt: IsoDate.nullable(),
+  }),
+);
 const crmBrowsePinned = { serverId: Id, serverRevision: Revision, organizationId: z.uuid() };
 const crmBrowsePage = { limit: z.number().int().min(1).max(50).optional() };
 /** Live authorized CRM reads; these IDs are never local role, group, run or effect IDs. */
@@ -1540,6 +1552,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
     checkedAt: IsoDate,
     scope: z.literal("stored_candidate_details"),
+    outbox: CrmBrowseOutbox,
     candidateId: z.uuid(),
     review: z
       .strictObject({
@@ -1592,6 +1605,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
     checkedAt: IsoDate,
     scope: z.literal("stored_candidate_correspondence"),
+    outbox: CrmBrowseOutbox,
     candidateId: z.uuid(),
     items: z.array(
       z.strictObject({
@@ -1618,6 +1632,21 @@ export const RecruitingCrmMembershipRowsSchema = z.array(
     organization_id: z.uuid(),
     role: z.string(),
     organizations: z.object({ name: z.string() }).nullable(),
+  }),
+);
+export const RecruitingCrmMessagesReadSchema = z.array(
+  z.object({
+    id: z.uuid(),
+    organization_id: z.uuid(),
+    candidate_id: z.uuid(),
+    author_user_id: z.uuid(),
+    body: z.string(),
+    status: z.enum(["pending", "processing", "sent", "failed"]),
+    polished_body: z.string().nullable(),
+    instantly_email_id: z.string().nullable(),
+    error: z.string().nullable(),
+    created_at: IsoDate,
+    sent_at: IsoDate.nullable(),
   }),
 );
 const CrmNativeRole = z.object({
