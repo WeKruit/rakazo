@@ -69,6 +69,18 @@ adds Modal's published compute multiplier, within the existing usage budget; it
 does not require another plan. Keep the single-writer bounds and use the immediately
 previous frozen product release for rollback, not an older core-package baseline.
 
+## Cold start
+
+A deployment replaces the only container, so the site is unavailable from the old
+container's exit until the new one listens. The image therefore precompiles the API
+and worker entrypoints (`scripts/bundle-server.mjs`): workspace packages are bundled
+into `apps/{api,worker}/dist/index.mjs` and npm dependencies stay external, pinned to
+the files each package resolves in the image. Startup runs migrations with the
+package's Prisma binary and then plain JavaScript, not tsx. The CPU limit lets
+startup burst above the idle request; it does not add containers. A rolling deploy
+still needs the shared-store and writer-lock work below before `max_containers` can
+rise above one.
+
 ## Platform-funded inference
 
 Native onboarding and chat can use a deployment-supplied model without each user
