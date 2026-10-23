@@ -1,3 +1,5 @@
+import type { AgentRunRequest } from "@rakazo/adapter-kit";
+import { serializeModelSecret } from "@rakazo/adapters";
 import { describe, expect, it, vi } from "vitest";
 import {
   ModelTeamChatEngagementJudge,
@@ -41,6 +43,97 @@ describe("team chat engagement judge", () => {
     });
     expect(parseTeamChatEngagementDecision("not json")).toEqual({ act: false });
   });
+
+  it.each(["bot", "judge"])(
+    "uses the connection owning the %s's requested model",
+    async (source) => {
+      const stamp = new Date("2026-10-18T00:00:00.000Z");
+      const preferences = ["default", "requested"].map((name) => ({
+        id: `preference-${name}`,
+        modelId: `${name}-model`,
+        thinkingLevel: null,
+        isDefault: name === "default",
+        updatedAt: stamp,
+        credential: {
+          id: `credential-${name}`,
+          userId: "user-1",
+          provider: "openai-compatible",
+          secretId: `secret-${name}`,
+          label: name,
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+      }));
+      const prisma = {
+        deploymentSettings: { findUnique: vi.fn(async () => null) },
+        spaceModelPreference: {
+          findFirst: vi.fn(async () => preferences[0]),
+          findMany: vi.fn(async () => preferences),
+        },
+        userModelCredential: {
+          findFirst: vi.fn(async ({ where }) =>
+            preferences
+              .map((row) => row.credential)
+              .find(
+                (row) =>
+                  row.id === where.id &&
+                  row.userId === where.userId &&
+                  row.secretId === where.secretId,
+              ),
+          ),
+          findMany: vi.fn(async () => preferences.map((row) => row.credential)),
+        },
+        secret: {
+          findFirst: vi.fn(async ({ where }: { where: { id: string } }) => ({
+            id: where.id,
+            ciphertext: where.id,
+          })),
+        },
+      };
+      const run = vi.fn(async function* (_request: AgentRunRequest) {
+        yield { type: "done", text: '{"act":false}' };
+      });
+      const judge = new ModelTeamChatEngagementJudge({
+        prisma: prisma as never,
+        runtime: { run } as never,
+        secrets: {
+          load: async (ciphertext: string) =>
+            serializeModelSecret({
+              kind: "openai_compatible",
+              baseUrl: `https://${ciphertext}.example/v1`,
+              apiKey: `key-${ciphertext}`,
+            }),
+        } as never,
+        deploymentProvider: "google",
+        deploymentModel: "gemini-3.8-flash",
+        ...(source === "judge"
+          ? { providerOverride: "openai-compatible", modelOverride: "requested-model" }
+          : {}),
+      });
+
+      await judge.decide({
+        bot: {
+          id: "bot-1",
+          spaceId: "space-1",
+          userId: "user-1",
+          name: "Arthur",
+          modelProvider: "openai-compatible",
+          modelId: source === "bot" ? "requested-model" : "default-model",
+        },
+        channelId: "C1",
+        rules: "",
+        messages: [],
+      });
+
+      expect(run).toHaveBeenCalledOnce();
+      expect(run.mock.calls[0]?.[0].model).toMatchObject({
+        provider: "openai-compatible",
+        id: "requested-model",
+        baseUrl: "https://secret-requested.example/v1",
+        apiKey: "key-secret-requested",
+      });
+    },
+  );
 
   it("persists cache-read and cache-write tokens from usage events", async () => {
     const create = vi.fn(async () => ({ id: "usage-1" }));

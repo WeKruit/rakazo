@@ -39,6 +39,7 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
+import { localTimezone } from "../lib/local-timezone";
 import {
   connectedModelOptions,
   modelOptionKey,
@@ -393,7 +394,9 @@ export function RoutineEditor({
       <div className="mt-5 text-sm text-muted-foreground">
         <div className="flex items-baseline gap-2">
           <Trans>When to run</Trans>
-          <span className="text-xs text-muted-foreground/70">{timezone}</span>
+          <span className="text-xs text-muted-foreground/70">
+            {needsOneShotArm ? localTimezone() : timezone}
+          </span>
           <Popover>
             <PopoverTrigger
               render={

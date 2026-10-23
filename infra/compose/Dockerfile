@@ -1,5 +1,6 @@
 FROM node:22-bookworm@sha256:0557ac14e0d45d02ed563067b82856ca5e7aa3437fa28d98d4350ea9c3d9494a
 RUN corepack enable
+RUN apt-get update && apt-get install -y --no-install-recommends poppler-utils && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # Manifests land before the source tree so editing a source file does not re-run the
 # install. pnpm gets a partial workspace: every package listed in pnpm-workspace.yaml

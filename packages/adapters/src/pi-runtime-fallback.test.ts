@@ -1,5 +1,6 @@
 import type * as AgentCore from "@earendil-works/pi-agent-core";
 import type { AgentMessage, AgentOptions } from "@earendil-works/pi-agent-core";
+import { convertToLlm, createCompactionSummaryMessage } from "@earendil-works/pi-agent-core";
 import type {
   AssistantMessage,
   Context,
@@ -58,10 +59,18 @@ vi.mock("./pi-openai-compatible-provider.js", () => ({
   registerOpenAiCompatibleRuntime: (models: unknown) => models,
 }));
 
+import {
+  estimateContextTokens,
+  providerContextPrefix,
+  selectContext,
+} from "./context-selection.js";
+import { toolCompletionAuditPayload } from "./executor.js";
+import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import { isRetryableProviderUnavailable, PiAgentRuntime } from "./pi-runtime.js";
 import { MODEL_STREAM_IDLE_TIMEOUT_MS } from "./pi-runtime-limits.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
+import { createRuntimeContextPolicy } from "./runtime-context.js";
 
 const primary = model("provider-a", "primary", 32_768);
 const backupA = model("provider-b", "backup-a", 8_192);
@@ -214,6 +223,1271 @@ beforeEach(() => {
 });
 
 afterEach(() => vi.useRealTimers());
+
+it.each(["context-abort", "provider-abort", "provider-error-then-shutdown"] as const)(
+  "preserves only the trusted context abort reason for %s",
+  async (failure) => {
+    const controller = new AbortController();
+    const reason = new DOMException("Worker is stopping", "AbortError");
+    const input = request();
+    if (failure === "provider-error-then-shutdown")
+      input.onUsage = async () => controller.abort(reason);
+    providerState.stream.mockImplementation(() => {
+      if (failure === "context-abort") controller.abort(reason);
+      return stream(
+        primary,
+        message(
+          primary,
+          [],
+          failure === "provider-error-then-shutdown" ? "error" : "aborted",
+          failure === "provider-error-then-shutdown" ? "Original provider failure" : "Aborted",
+        ),
+      );
+    });
+    const consume = async () => {
+      for await (const _event of new PiAgentRuntime().run(input, { signal: controller.signal })) {
+      }
+    };
+    const caught = await consume().catch((error: unknown) => error);
+    if (failure === "context-abort") expect(caught).toBe(reason);
+    else {
+      expect(caught).toBeInstanceOf(Error);
+      expect(caught).not.toBe(reason);
+      if (failure === "provider-error-then-shutdown")
+        expect((caught as Error).message).toContain("Original provider failure");
+    }
+    expect(providerState.stream).toHaveBeenCalledOnce();
+  },
+);
+
+function compactionRequest(withHistory = true) {
+  const target = model("provider-a", "large", 128_000);
+  providerState.models.set(
+    `${target.provider}/${target.id}`,
+    target as unknown as Record<string, unknown>,
+  );
+  const input = request();
+  input.model = { provider: target.provider, id: target.id, apiKey: "fake-primary-key" };
+  input.contextStrategy = "current";
+  input.history = withHistory
+    ? Array.from({ length: 18 }, (_, index) => [
+        {
+          id: `old-user-${index}`,
+          role: "user" as const,
+          content: `Earlier request ${index}: ${"u".repeat(1_000)}`,
+        },
+        {
+          id: `old-answer-${index}`,
+          role: "assistant" as const,
+          content: `Earlier result ${index}: ${"a".repeat(26_000)}`,
+        },
+      ]).flat()
+    : [];
+  input.history.push(
+    {
+      id: "canonical-goal",
+      role: "user",
+      content: "Keep the original exact goal.",
+      requiredForRun: true,
+    },
+    {
+      id: "canonical-card",
+      role: "assistant",
+      content: "Choose the exact option.",
+      requiredForRun: true,
+    },
+  );
+  input.prompt = "  Exact answer🙂\r\nContinue my task.  ";
+  input.sourceMessageId = "canonical-answer";
+  input.history.push({
+    id: input.sourceMessageId,
+    role: "user",
+    content: input.prompt,
+    requiredForRun: true,
+  });
+  return { target, input };
+}
+
+it.each(["current", "cache-aware"] as const)(
+  "uses native compaction before the first request and accounts each split summary call with %s",
+  async (strategy) => {
+    const { target, input } = compactionRequest();
+    input.contextStrategy = strategy;
+    const onUsage = vi.fn();
+    input.onUsage = onUsage;
+    const observer: ModelCallObserver = {
+      beforeCall: vi.fn(async () => `reservation-${onUsage.mock.calls.length}`),
+      afterCall: vi.fn(async () => undefined),
+    };
+    providerState.stream.mockImplementation(
+      (_model: Model<"openai-completions">, context: Context) =>
+        stream(
+          target,
+          message(
+            target,
+            [
+              {
+                type: "text",
+                text: context.systemPrompt?.includes("summarization assistant")
+                  ? "Native progress summary."
+                  : "Done.",
+              },
+            ],
+            "stop",
+          ),
+        ),
+    );
+    const events = await run(input, [], new PiAgentRuntime({ modelCallObserver: observer }));
+    const summaries = onUsage.mock.calls.filter(([event]) => event.operationKind === "compaction");
+    expect(summaries).toHaveLength(2);
+    expect(observer.beforeCall).toHaveBeenCalledTimes(3);
+    expect(observer.afterCall).toHaveBeenCalledTimes(3);
+    expect(events.filter((event) => event.type === "usage")).toHaveLength(3);
+    expect(
+      providerState.stream.mock.calls.every((call) => call[2].cacheRetention === "short"),
+    ).toBe(true);
+    const wire = providerState.stream.mock.calls.at(-1)![1] as Context;
+    const serialized = JSON.stringify(wire);
+    expect(serialized).toContain("Native progress summary.");
+    expect(serialized).toContain("untrusted");
+    for (const exact of [
+      "Keep the original exact goal.",
+      "Choose the exact option.",
+      input.prompt,
+    ]) {
+      expect(
+        wire.messages.filter((entry) =>
+          typeof entry.content === "string"
+            ? entry.content === exact
+            : entry.content.some((part) => part.type === "text" && part.text === exact),
+        ),
+      ).toHaveLength(1);
+    }
+    expect(
+      providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+    ).toBe(true);
+    expect(input.history[1]!.content).toHaveLength("Earlier result 0: ".length + 26_000);
+    const convertedState = await providerState.agentOptions!.convertToLlm!(
+      providerState.agent!.state.messages,
+    );
+    const protectedIndexes = createRuntimeContextPolicy(input).protectedIndexes(convertedState);
+    expect(
+      protectedIndexes.some(
+        (index) =>
+          "rakazoMessageId" in convertedState[index]! &&
+          String(convertedState[index]!.rakazoMessageId).startsWith("old-user-"),
+      ),
+    ).toBe(false);
+  },
+);
+
+it.each([true, false])(
+  "preserves an explicit connection cache:none during native compaction when supported=%s",
+  async (supported) => {
+    const { target, input } = compactionRequest();
+    if (supported) target.compat = { cacheControlFormat: "anthropic" };
+    input.model.cacheCapabilities = { scope: "connection", retentionMode: "none" };
+    providerState.stream.mockImplementation(() =>
+      stream(target, message(target, [{ type: "text", text: "Native progress summary." }], "stop")),
+    );
+    if (!supported) {
+      await expect(run(input)).rejects.toThrow("Unsupported prompt-cache retention mode");
+      expect(providerState.stream).not.toHaveBeenCalled();
+      return;
+    }
+    await run(input);
+    const summaries = providerState.stream.mock.calls.filter((call) =>
+      (call[1] as Context).systemPrompt?.includes("summarization assistant"),
+    );
+    expect(summaries).toHaveLength(2);
+    expect(summaries.every((call) => call[2].cacheRetention === "none")).toBe(true);
+  },
+);
+
+it("compacts a running native tool loop while preserving exact role state, sibling results and steering", async () => {
+  const { target, input } = compactionRequest(false);
+  target.contextWindow = 32_768;
+  input.tools = [
+    {
+      name: "recruiting_role",
+      description: "Adopt exact role",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+    {
+      name: "read_file",
+      description: "Read evidence",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+  ];
+  let turn = 0;
+  let projectedPressureCalls = 0;
+  let claimed = false;
+  input.claimSteering = async () => {
+    if (turn < 12 || claimed) return [];
+    claimed = true;
+    return [{ id: "steer", messageId: "steer", text: "Exact human correction: continue B." }];
+  };
+  input.executeTool = vi.fn(async (name, _args, executionId) => ({
+    ...(name === "recruiting_role"
+      ? { roleContext: `EXACT ROLE ${executionId.includes("role-a") ? "A" : "B"}` }
+      : { evidence: "e".repeat(11_500) }),
+  }));
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        const original = convertToLlm(providerState.agent!.state.messages);
+        expect(estimateModelContextTokens({ messages: original })).toBeGreaterThan(
+          target.contextWindow - 16_384,
+        );
+        projectedPressureCalls++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Completed file review; keep working." }], "stop"),
+        );
+      }
+      turn++;
+      const content: AssistantMessage["content"] =
+        turn <= 17
+          ? [
+              { type: "toolCall", id: `file-${turn}`, name: "read_file", arguments: {} },
+              ...(turn === 1 || turn === 8 || turn === 17
+                ? [
+                    {
+                      type: "toolCall" as const,
+                      id: turn === 8 ? "role-b" : `role-a-${turn}`,
+                      name: "recruiting_role",
+                      arguments: {},
+                    },
+                  ]
+                : []),
+            ]
+          : [{ type: "text", text: "Done." }];
+      const next = message(target, content, turn <= 17 ? "toolUse" : "stop");
+      next.usage.totalTokens = estimateContextTokens(
+        providerContextPrefix(context.systemPrompt ?? "", context.tools ?? [], context.messages),
+      );
+      return stream(target, next);
+    },
+  );
+  await run(input);
+  const summaries = providerState.stream.mock.calls.filter((call) =>
+    (call[1] as Context).systemPrompt?.includes("summarization assistant"),
+  );
+  expect(summaries.length).toBeGreaterThanOrEqual(2);
+  expect(projectedPressureCalls).toBe(summaries.length);
+  expect(
+    summaries
+      .slice(1)
+      .some((call) => JSON.stringify(call[1]).includes("Completed file review; keep working.")),
+  ).toBe(true);
+  const wire = providerState.stream.mock.calls.at(-1)![1] as Context;
+  expect(JSON.stringify(wire).includes("Completed file review; keep working.")).toBe(true);
+  expect(JSON.stringify(wire).includes("EXACT ROLE A")).toBe(true);
+  expect(
+    wire.messages.filter(
+      (entry) =>
+        entry.role === "user" &&
+        JSON.stringify(entry.content).includes("Exact human correction: continue B."),
+    ),
+  ).toHaveLength(1);
+  const lastRole = wire.messages.findLast(
+    (entry) => entry.role === "toolResult" && entry.toolName === "recruiting_role",
+  );
+  expect(lastRole?.role === "toolResult" && lastRole.toolCallId).toBe("role-a-17");
+  for (const entry of wire.messages) {
+    if (entry.role !== "assistant") continue;
+    for (const call of entry.content.filter((part) => part.type === "toolCall")) {
+      expect(
+        wire.messages.filter(
+          (result) => result.role === "toolResult" && result.toolCallId === call.id,
+        ),
+      ).toHaveLength(1);
+    }
+  }
+});
+
+it.each(["failure", "empty"])(
+  "preserves original native state when the second split summary has %s",
+  async (failure) => {
+    const { target, input } = compactionRequest();
+    const onUsage = vi.fn();
+    input.onUsage = onUsage;
+    const observer: ModelCallObserver = {
+      beforeCall: vi.fn(async () => "reservation"),
+      afterCall: vi.fn(async () => undefined),
+    };
+    let calls = 0;
+    providerState.stream.mockImplementation(() => {
+      calls++;
+      return stream(
+        target,
+        message(
+          target,
+          [{ type: "text", text: calls === 1 ? "Completed first summary." : "" }],
+          calls === 2 && failure === "failure" ? "error" : "stop",
+          "Invalid summary response",
+        ),
+      );
+    });
+    await expect(
+      run(input, [], new PiAgentRuntime({ modelCallObserver: observer })),
+    ).rejects.toThrow(failure === "failure" ? "Invalid summary response" : "nonempty summary");
+    expect(calls).toBe(2);
+    expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(observer.afterCall).toHaveBeenCalledTimes(2);
+    expect(
+      providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+    ).toBe(false);
+    expect(
+      providerState
+        .agent!.state.messages.filter((entry) => "rakazoMessageId" in entry)
+        .map((entry) => (entry as AgentMessage & { rakazoMessageId: string }).rakazoMessageId),
+    ).toContain("old-answer-0");
+  },
+);
+
+it("accounts each native summary retry before the answer without provider-hidden retries", async () => {
+  const { target, input } = compactionRequest();
+  const onUsage = vi.fn();
+  input.onUsage = onUsage;
+  const observer: ModelCallObserver = {
+    beforeCall: vi.fn(async () => "reservation"),
+    afterCall: vi.fn(async () => undefined),
+  };
+  let calls = 0;
+  providerState.stream.mockImplementation(() => {
+    calls++;
+    return stream(
+      target,
+      message(
+        target,
+        [{ type: "text", text: "Native progress summary." }],
+        calls === 1 ? "error" : "stop",
+        calls === 1 ? "503 Service unavailable" : undefined,
+      ),
+    );
+  });
+  await run(input, [], new PiAgentRuntime({ modelCallObserver: observer }));
+  expect(calls).toBe(4);
+  expect(onUsage.mock.calls.filter(([event]) => event.operationKind === "compaction")).toHaveLength(
+    3,
+  );
+  expect(observer.beforeCall).toHaveBeenCalledTimes(4);
+  expect(observer.afterCall).toHaveBeenCalledTimes(4);
+  expect(providerState.stream.mock.calls.every((call) => call[2].maxRetries === 0)).toBe(true);
+});
+
+it("aborts native compaction before committing state and leaves queued steering unconsumed", async () => {
+  const { target, input } = compactionRequest();
+  const controller = new AbortController();
+  const onUsage = vi.fn();
+  input.onUsage = onUsage;
+  const observer: ModelCallObserver = {
+    beforeCall: vi.fn(async () => "reservation"),
+    afterCall: vi.fn(async () => undefined),
+  };
+  providerState.stream.mockImplementation(() => {
+    providerState.agent!.steer({
+      role: "user",
+      content: "Queued exact human steering.",
+      timestamp: 1,
+    });
+    controller.abort();
+    return stream(
+      target,
+      message(target, [{ type: "text", text: "A summary after cancellation." }], "stop"),
+    );
+  });
+  const events: AgentRuntimeEvent[] = [];
+  const collecting = (async () => {
+    for await (const event of new PiAgentRuntime({ modelCallObserver: observer }).run(input, {
+      signal: controller.signal,
+    }))
+      events.push(event);
+  })();
+  await expect(collecting).rejects.toThrow("aborted");
+  expect(providerState.stream).toHaveBeenCalledTimes(1);
+  expect(onUsage).toHaveBeenCalledTimes(1);
+  expect(observer.afterCall).toHaveBeenCalledTimes(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+  expect(providerState.agent!.peekQueuedMessages()).toEqual([
+    expect.objectContaining({ content: "Queued exact human steering." }),
+  ]);
+  expect(
+    providerState.agent!.state.messages.some(
+      (entry) => "rakazoMessageId" in entry && entry.rakazoMessageId === "old-answer-0",
+    ),
+  ).toBe(true);
+  expect(
+    events.some(
+      (event) => event.type === "text" && event.text.includes("A summary after cancellation."),
+    ),
+  ).toBe(false);
+});
+
+it("uses the same observed native compaction inside a delegated tool loop", async () => {
+  const { target, input } = compactionRequest(false);
+  target.contextWindow = 32_768;
+  input.tools = [
+    {
+      name: "run_subagent",
+      description: "Delegate",
+      inputSchema: { type: "object", properties: { task: { type: "string" } } },
+      readOnly: true,
+    },
+    {
+      name: "read_file",
+      description: "Read evidence",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+  ];
+  input.executeTool = vi.fn(async () => ({ evidence: "e".repeat(11_500) }));
+  let parentTurns = 0;
+  let childTurns = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant"))
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Native delegated progress summary." }], "stop"),
+        );
+      if (JSON.stringify(context.messages[0]?.content).includes("Rakazo subagent")) {
+        childTurns++;
+        const next = message(
+          target,
+          childTurns <= 15
+            ? [{ type: "toolCall", id: `child-${childTurns}`, name: "read_file", arguments: {} }]
+            : [{ type: "text", text: "Child finished." }],
+          childTurns <= 15 ? "toolUse" : "stop",
+        );
+        next.usage.totalTokens = estimateContextTokens(
+          providerContextPrefix(context.systemPrompt ?? "", context.tools ?? [], context.messages),
+        );
+        return stream(target, next);
+      }
+      parentTurns++;
+      return stream(
+        target,
+        message(
+          target,
+          parentTurns === 1
+            ? [
+                {
+                  type: "toolCall",
+                  id: "delegate",
+                  name: "run_subagent",
+                  arguments: { name: "reviewer", task: "Review every file" },
+                },
+              ]
+            : [{ type: "text", text: "Done." }],
+          parentTurns === 1 ? "toolUse" : "stop",
+        ),
+      );
+    },
+  );
+  const observer: ModelCallObserver = {
+    beforeCall: vi.fn(async () => "reservation"),
+    afterCall: vi.fn(async () => undefined),
+  };
+  const events = await run(input, [], new PiAgentRuntime({ modelCallObserver: observer }));
+  expect(events.filter((event) => event.type === "subagent" && event.status === "failed")).toEqual(
+    [],
+  );
+  expect(childTurns).toBe(16);
+  const summaries = events.filter(
+    (event) => event.type === "usage" && event.operationKind === "compaction",
+  );
+  expect(summaries.length).toBeGreaterThan(0);
+  expect(summaries.every((event) => "agentId" in event && typeof event.agentId === "string")).toBe(
+    true,
+  );
+  expect(observer.afterCall).toHaveBeenCalledTimes(providerState.stream.mock.calls.length);
+  expect(
+    providerState.stream.mock.calls.some((call) =>
+      JSON.stringify(call[1]).includes("Native delegated progress summary."),
+    ),
+  ).toBe(true);
+});
+
+it("does not spend a summary call when exact protected controls already exceed the budget", async () => {
+  const { target, input } = compactionRequest();
+  input.prompt = `Current exact human instructions: ${"x".repeat(520_000)}`;
+  providerState.stream.mockImplementation(() =>
+    stream(
+      target,
+      message(target, [{ type: "text", text: "Summary cannot solve oversized controls." }], "stop"),
+    ),
+  );
+  await expect(run(input)).rejects.toThrow("context");
+  expect(providerState.stream).not.toHaveBeenCalled();
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+});
+
+it("leaves the original state when the native summary cannot reduce context enough", async () => {
+  const { target, input } = compactionRequest();
+  input.history.unshift({ id: "earlier-context", role: "user", content: "x".repeat(40_000) });
+  providerState.stream.mockImplementation(() =>
+    stream(target, message(target, [{ type: "text", text: "s".repeat(480_000) }], "stop")),
+  );
+  await expect(run(input)).rejects.toThrow("preserving required messages");
+  expect(providerState.stream).toHaveBeenCalledTimes(2);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+  expect(
+    providerState.agent!.state.messages.some(
+      (entry) => "rakazoMessageId" in entry && entry.rakazoMessageId === "old-answer-0",
+    ),
+  ).toBe(true);
+});
+
+it("keeps fitting native receipts without compaction when serialized bytes exceed the token window", async () => {
+  const { target, input } = compactionRequest(false);
+  target.contextWindow = 272_000;
+  target.maxTokens = 32_768;
+  input.instructions = `Exact instructions: ${"i".repeat(140_000)}`;
+  input.history.unshift(
+    ...Array.from({ length: 10 }, (_, index) => [
+      { id: `old-request-${index}`, role: "user" as const, content: "Earlier completed work." },
+      { id: `old-result-${index}`, role: "assistant" as const, content: "e".repeat(12_000) },
+    ]).flat(),
+  );
+  const receipt = {
+    rows: Array.from({ length: 5 }, (_, rowIndex) => ({
+      rowIndex,
+      evidence: "evidence🙂\r\n".repeat(100),
+    })),
+  };
+  input.tools = [
+    { name: "get_rows", description: "Read saved rows", inputSchema: { type: "object" } },
+  ];
+  input.executeTool = vi.fn(async () => receipt);
+  let answers = 0;
+  let summaries = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        summaries++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Earlier completed work." }], "stop"),
+        );
+      }
+      const next = message(
+        target,
+        ++answers === 1
+          ? [{ type: "toolCall", id: "rows", name: "get_rows", arguments: {} }]
+          : [{ type: "text", text: "Done." }],
+        answers === 1 ? "toolUse" : "stop",
+      );
+      next.usage = {
+        ...next.usage,
+        input: 28_000,
+        output: 400,
+        cacheRead: 16_000,
+        totalTokens: 44_400,
+      };
+      return stream(target, next);
+    },
+  );
+  expect((await run(input)).at(-1)).toEqual({ type: "done", text: "Done." });
+  expect(summaries).toBe(0);
+  expect(input.executeTool).toHaveBeenCalledOnce();
+  const wire = providerState.stream.mock.calls.at(-1)![1] as Context;
+  expect(
+    wire.messages.find((entry) => entry.role === "toolResult" && entry.toolCallId === "rows"),
+  ).toMatchObject({ content: [{ type: "text", text: JSON.stringify(receipt) }] });
+  expect(
+    wire.messages.filter(
+      (entry) => entry.role === "user" && JSON.stringify(entry.content).includes("Exact answer🙂"),
+    ),
+  ).toHaveLength(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+});
+
+it("counts initial system/tools and invalidates measured usage after a newer native summary", () => {
+  const context: Context = {
+    systemPrompt: "i".repeat(8_000),
+    tools: [{ name: "read", description: "d".repeat(8_000), parameters: { type: "object" } }],
+    messages: [{ role: "user", content: "Exact request🙂\r\n", timestamp: 1 }],
+  };
+  const first = estimateModelContextTokens(context);
+  expect(first).toBeGreaterThan(4_000);
+  expect(first).toBeLessThan(5_000);
+  const used = message(
+    primary,
+    [{ type: "toolCall", id: "read", name: "read", arguments: {} }],
+    "toolUse",
+  );
+  used.timestamp = 2;
+  used.usage = {
+    ...used.usage,
+    input: 28_000,
+    output: 400,
+    cacheRead: 16_000,
+    totalTokens: 44_400,
+  };
+  context.messages.push(used, {
+    role: "toolResult",
+    toolCallId: "read",
+    toolName: "read",
+    content: [{ type: "text", text: "Exact evidence🙂\r\n" }],
+    isError: false,
+    timestamp: 3,
+  });
+  expect(estimateModelContextTokens(context)).toBeGreaterThan(44_400);
+  context.messages.splice(
+    1,
+    0,
+    ...convertToLlm([createCompactionSummaryMessage("Earlier progress only.", 44_400, 4)]),
+  );
+  expect(estimateModelContextTokens(context)).toBeGreaterThan(first);
+  expect(estimateModelContextTokens(context)).toBeLessThan(5_000);
+  const fresh = message(primary, [{ type: "text", text: "New answer." }], "stop");
+  fresh.timestamp = 5;
+  fresh.usage.totalTokens = 2_000;
+  context.messages.push(fresh);
+  expect(estimateModelContextTokens(context)).toBeGreaterThan(2_000);
+  expect(estimateModelContextTokens(context)).toBeLessThan(3_000);
+});
+
+it("keeps fitting exact context when a native progress summary would exceed its remaining budget", async () => {
+  const { target, input } = compactionRequest(false);
+  input.instructions = `Exact run instructions: ${"i".repeat(90_000)}`;
+  input.history.unshift(
+    ...Array.from({ length: 10 }, (_, index) => [
+      { id: `old-request-${index}`, role: "user" as const, content: "Earlier status request." },
+      {
+        id: `old-progress-${index}`,
+        role: "assistant" as const,
+        content: "Earlier status. ".repeat(500),
+      },
+    ]).flat(),
+  );
+  input.tools = [
+    { name: "recruiting_role", inputSchema: { type: "object" }, description: "Read role" },
+  ];
+  const role = {
+    roleContext: "Exact current role and memory.",
+    workspace: { source: "r".repeat(25_433) },
+  };
+  input.executeTool = vi.fn(async () => role);
+  let turns = 0;
+  let summaries = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        summaries++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "s".repeat(500_000) }], "stop"),
+        );
+      }
+      turns++;
+      if (turns > 1)
+        return stream(target, message(target, [{ type: "text", text: "Done." }], "stop"));
+      const next = message(
+        target,
+        [{ type: "toolCall", id: "role", name: "recruiting_role", arguments: {} }],
+        "toolUse",
+      );
+      next.usage.totalTokens = 113_000;
+      return stream(target, next);
+    },
+  );
+  expect((await run(input)).at(-1)).toEqual({ type: "done", text: "Done." });
+  expect(summaries).toBe(2);
+  const original = convertToLlm(providerState.agent!.state.messages);
+  expect(estimateContextTokens(providerContextPrefix("", [], original)) + 240).toBeLessThan(
+    target.contextWindow - target.maxTokens,
+  );
+  expect(
+    original.find((entry) => entry.role === "toolResult" && entry.toolCallId === "role"),
+  ).toMatchObject({
+    content: [{ type: "text", text: JSON.stringify(role) }],
+  });
+  expect(
+    original.filter(
+      (entry) =>
+        entry.role === "user" &&
+        (typeof entry.content === "string"
+          ? entry.content === input.prompt
+          : entry.content.some((part) => part.type === "text" && part.text === input.prompt)),
+    ),
+  ).toHaveLength(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+});
+
+it("does not compact an unfinished native tool batch", async () => {
+  const { target, input } = compactionRequest(false);
+  const pending = message(
+    target,
+    [
+      { type: "text", text: "p".repeat(130_000) },
+      { type: "toolCall", id: "unfinished", name: "read_file", arguments: {} },
+    ],
+    "toolUse",
+  );
+  let checking: unknown;
+  providerState.stream.mockImplementation(() => {
+    const context = {
+      messages: [...providerState.agent!.state.messages, pending],
+      tools: providerState.agent!.state.tools,
+    };
+    checking = providerState.agentOptions!.prepareRequest!(
+      { context, model: target, thinkingLevel: "off" },
+      new AbortController().signal,
+    );
+    return stream(target, message(target, [{ type: "text", text: "Done." }], "stop"));
+  });
+  await run(input);
+  expect(await checking).toBeUndefined();
+  expect(providerState.stream).toHaveBeenCalledTimes(1);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(false);
+});
+
+it("uses native compaction for initial history in a small context window", async () => {
+  const { target, input } = compactionRequest();
+  target.contextWindow = 32_768;
+  input.history = [...input.history.slice(0, 8), ...input.history.slice(-3)];
+  providerState.stream.mockImplementation((_model: Model<"openai-completions">, context: Context) =>
+    stream(
+      target,
+      message(
+        target,
+        [
+          {
+            type: "text",
+            text: context.systemPrompt?.includes("summarization assistant")
+              ? "Native earlier progress."
+              : "Done.",
+          },
+        ],
+        "stop",
+      ),
+    ),
+  );
+  const events = await run(input);
+  expect(events.at(-1)).toEqual({ type: "done", text: "Done." });
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(true);
+});
+
+it("excludes duplicate tool bookkeeping from the native prompt budget for a saved read", async () => {
+  const { target, input } = compactionRequest(false);
+  input.instructions = `Existing exact instructions: ${"s".repeat(55_000)}`;
+  input.history.unshift(
+    { id: "earlier-user", role: "user", content: `Earlier request: ${"u".repeat(1_000)}` },
+    { id: "earlier-answer", role: "assistant", content: `Earlier answer: ${"a".repeat(1_000)}` },
+  );
+  input.tools = [
+    {
+      name: "recruiting_candidates",
+      description: "Read saved assessment",
+      inputSchema: { type: "object", properties: {} },
+      readOnly: true,
+    },
+  ];
+  const assessment = {
+    candidateKey: "saved-candidate",
+    assessment: "e".repeat(40_000),
+    sourceArtifactId: "saved-source",
+  };
+  input.executeTool = vi.fn(async () => assessment);
+  let turns = 0;
+  let summaries = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        summaries++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Earlier progress." }], "stop"),
+        );
+      }
+      turns++;
+      return stream(
+        target,
+        message(
+          target,
+          turns === 1
+            ? [{ type: "toolCall", id: "read-saved", name: "recruiting_candidates", arguments: {} }]
+            : [{ type: "text", text: "Saved assessment summarized." }],
+          turns === 1 ? "toolUse" : "stop",
+        ),
+      );
+    },
+  );
+  const events = await run(input);
+  expect(events.at(-1)).toEqual({ type: "done", text: "Saved assessment summarized." });
+  expect(input.executeTool).toHaveBeenCalledTimes(1);
+  expect(summaries).toBe(0);
+  const final = providerState.stream.mock.calls.at(-1)![1] as Context;
+  const available = target.contextWindow - target.maxTokens;
+  expect(estimateModelContextTokens(final)).toBeLessThan(available);
+  expect(
+    selectContext(final.messages, {
+      strategy: "current",
+      protectedIndexes: final.messages.map((_, index) => index),
+      truncateToolResults: false,
+      budget: {
+        contextWindow: target.contextWindow,
+        outputReserve: target.maxTokens,
+        systemPrompt: "",
+        tools: [],
+      },
+    }).estimatedInputTokens,
+  ).toBeLessThan(available);
+  expect(
+    final.messages.find(
+      (entry) => entry.role === "toolResult" && entry.toolCallId === "read-saved",
+    ),
+  ).toMatchObject({ content: [{ type: "text", text: JSON.stringify(assessment) }] });
+});
+
+it("updates the previous native summary when protected history leaves only a split turn prefix", async () => {
+  const { target, input } = compactionRequest(false);
+  target.contextWindow = 8_192;
+  const previous = "PRIOR_COMPLETED_PROGRESS_SENTINEL";
+  const exactRole = JSON.stringify({ roleContext: "Exact current role." });
+  const steering = "Exact current human steering.";
+  const summaryPrompts: string[] = [];
+  let replacement: Awaited<ReturnType<NonNullable<AgentOptions["prepareRequest"]>>>;
+  function batch(
+    id: string,
+    name = "read_file",
+    text = "Earlier completed file review.",
+  ): AgentMessage[] {
+    return [
+      message(target, [{ type: "toolCall", id, name, arguments: {} }], "toolUse"),
+      {
+        role: "toolResult",
+        toolCallId: id,
+        toolName: name,
+        content: [{ type: "text", text }],
+        isError: false,
+        timestamp: 1,
+      },
+    ];
+  }
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        const prompt = JSON.stringify(context);
+        summaryPrompts.push(prompt);
+        return stream(
+          target,
+          message(
+            target,
+            [
+              {
+                type: "text",
+                text: prompt.includes(previous)
+                  ? `${previous}: updated progress.`
+                  : "New progress only.",
+              },
+            ],
+            "stop",
+          ),
+        );
+      }
+      const role = batch("role", "recruiting_role", exactRole);
+      if (role[0]?.role === "assistant") role[0].usage.totalTokens = 30_000;
+      const messages = [
+        ...providerState.agent!.state.messages,
+        ...role,
+        createCompactionSummaryMessage(previous, 30_000, 1),
+        { role: "user" as const, content: steering, timestamp: 1 },
+        ...Array.from({ length: 4 }, (_, index) => batch(`old-${index}`)).flat(),
+        ...batch("latest"),
+      ];
+      const latestAssistant = messages.at(-2)!;
+      if (latestAssistant.role === "assistant") latestAssistant.usage.totalTokens = 30_000;
+      const waiting = new AssistantMessageEventStream();
+      void Promise.resolve(
+        providerState.agentOptions!.prepareRequest!(
+          {
+            context: { messages, tools: providerState.agent!.state.tools },
+            model: target,
+            thinkingLevel: "off",
+          },
+          new AbortController().signal,
+        ),
+      )
+        .then(async (update) => {
+          replacement = update;
+          expect(
+            estimateModelContextTokens({ messages: convertToLlm(update?.context?.messages ?? []) }),
+          ).toBeLessThan(target.contextWindow - target.maxTokens);
+          const retry = await providerState.agentOptions!.prepareRequest!(
+            { context: update!.context!, model: target, thinkingLevel: "off" },
+            new AbortController().signal,
+          );
+          expect(retry).toBeUndefined();
+          expect(summaryPrompts).toHaveLength(1);
+          const done = message(target, [{ type: "text", text: "Done." }], "stop");
+          waiting.push({ type: "done", reason: "stop", message: done });
+          waiting.end(done);
+        })
+        .catch((error) => {
+          const failed = message(target, [], "error", String(error));
+          waiting.push({ type: "error", reason: "error", error: failed });
+          waiting.end(failed);
+        });
+      return waiting;
+    },
+  );
+  const events = await run(input);
+  expect(events.at(-1)).toEqual({ type: "done", text: "Done." });
+  expect(summaryPrompts).toHaveLength(1);
+  expect(summaryPrompts[0]!.includes(previous)).toBe(true);
+  expect(summaryPrompts[0]!.includes("Exact current role.")).toBe(false);
+  expect(summaryPrompts[0]!.includes(steering)).toBe(false);
+  const messages = replacement?.context?.messages ?? [];
+  expect(messages.filter((entry) => entry.role === "compactionSummary")).toHaveLength(1);
+  expect(messages.find((entry) => entry.role === "compactionSummary")?.summary).toContain(previous);
+  expect(
+    messages.find((entry) => entry.role === "toolResult" && entry.toolCallId === "role"),
+  ).toMatchObject({
+    content: [{ type: "text", text: exactRole }],
+  });
+  expect(
+    messages.filter((entry) => entry.role === "user" && entry.content === steering),
+  ).toHaveLength(1);
+});
+
+it("replays native questions as assistant turns with the latest exact human answer current", async () => {
+  const goal = "Ask my language, echo the complete answer in a code block, then stop. Chat only.";
+  const answer = "  中文🙂\r\nEnglish details  ";
+  const input = request();
+  input.sourceMessageId = "answer-2";
+  input.prompt = answer;
+  input.history = [
+    {
+      role: "user",
+      content:
+        "Platform task state (data):\n" +
+        goal +
+        "\nSaved skill: quote raw input. Resolved selected value: private-choice",
+      requiredForRun: true,
+    },
+    {
+      id: "old-jd",
+      role: "user",
+      content: "[bot peer-sourcer] Earlier unrelated task: create a role from a JD.",
+    },
+    { id: "original-goal", role: "user", content: goal, requiredForRun: true },
+    { id: "card-1", role: "assistant", content: "Which language?", requiredForRun: true },
+    { id: "answer-1", role: "user", content: answer, requiredForRun: true },
+    {
+      id: "card-2",
+      role: "assistant",
+      content: "Which language is preferred?",
+      requiredForRun: true,
+    },
+    { id: "answer-2", role: "user", content: answer, requiredForRun: true },
+  ];
+  providerState.stream.mockImplementation(() =>
+    stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+  );
+  await run(input);
+  const wireContext = providerState.stream.mock.calls[0]![1] as Context;
+  const context = {
+    ...wireContext,
+    messages: wireContext.messages.filter((m) => m.role !== "system"),
+  };
+  const texts = context.messages.map((m) =>
+    typeof m.content === "string"
+      ? m.content
+      : m.content
+          .filter((p) => p.type === "text")
+          .map((p) => p.text)
+          .join(""),
+  );
+  expect(context.messages.map((m) => m.role)).toEqual([
+    "user",
+    "user",
+    "user",
+    "assistant",
+    "user",
+    "assistant",
+    "user",
+  ]);
+  expect(texts).toEqual([
+    input.history[0]!.content,
+    input.history[1]!.content,
+    goal,
+    "Which language?",
+    answer,
+    "Which language is preferred?",
+    answer,
+  ]);
+  expect(
+    context.messages.filter(
+      (m) => (m as { rakazoMessageId?: string }).rakazoMessageId === "original-goal",
+    ),
+  ).toHaveLength(1);
+  expect(JSON.stringify(context.messages)).toContain("private-choice");
+  expect(context.messages).not.toContainEqual(
+    expect.objectContaining({ rakazoMessageId: "answer-2" }),
+  );
+  expect(input.executeTool).not.toHaveBeenCalled();
+});
+
+describe("Pi pre-dispatch tool audit", () => {
+  it("does not persist an undeclared tool name or its error text", async () => {
+    const input = request();
+    const audits: Record<string, unknown>[] = [];
+    input.onToolCompleted = (completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    };
+    const unknownName = "private-unknown-name-canary";
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [{ type: "toolCall", id: "unknown", name: unknownName, arguments: {} }],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    await run(input);
+
+    expect(input.executeTool).not.toHaveBeenCalled();
+    expect(audits).toEqual([
+      expect.objectContaining({
+        name: "unknown-tool",
+        outcome: "error",
+        error: "Tool not found before execution.",
+      }),
+    ]);
+    expect(JSON.stringify(audits)).not.toContain(unknownName);
+    const nextContext = providerState.stream.mock.calls[1]?.[1] as Context;
+    expect(JSON.stringify(nextContext.messages)).toContain(`Tool ${unknownName} not found`);
+  });
+
+  it("audits rejected fields without argument values and leaves the model error intact", async () => {
+    const input = request();
+    input.tools = [
+      {
+        name: "source.lookup",
+        description: "Read a source.",
+        readOnly: true,
+        inputSchema: {
+          type: "object",
+          properties: {
+            operation: { const: "read" },
+            sourceRefs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: { artifactId: { type: "string" } },
+                required: ["artifactId"],
+              },
+            },
+          },
+          required: ["operation", "sourceRefs"],
+        },
+      },
+    ];
+    const args = {
+      operation: "private-invalid-enum-value",
+      sourceRefs: [{ artifact_id: "fake-artifact", quote: "private quote ".repeat(300) }],
+    };
+    const audits: Record<string, unknown>[] = [];
+    const onToolCompleted = vi.fn((completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    });
+    input.onToolCompleted = onToolCompleted;
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "rejected",
+                name: "source_lookup",
+                arguments: args,
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    const events = await run(input);
+
+    expect(input.executeTool).not.toHaveBeenCalled();
+    expect(events.filter((event) => event.type === "tool")).toEqual([]);
+    expect(onToolCompleted).toHaveBeenCalledOnce();
+    expect(audits[0]).toMatchObject({
+      name: "source.lookup",
+      executionId: JSON.stringify(["pi-tool", "main", "rejected"]),
+      outcome: "error",
+    });
+    const error = String(audits[0]?.error);
+    expect(error).toContain("sourceRefs.0.artifactId");
+    expect(error).toContain("operation: must be equal to constant");
+    expect(error).not.toContain("Received arguments");
+    expect(error).not.toContain(args.operation);
+    expect(error).not.toContain("private quote");
+    expect(error.length).toBeLessThanOrEqual(2_000);
+    const nextContext = providerState.stream.mock.calls[1]?.[1] as Context;
+    const rejection = nextContext.messages.find((entry) => entry.role === "toolResult");
+    expect(JSON.stringify(rejection)).toContain(args.operation);
+    expect(JSON.stringify(rejection)).toContain("private quote");
+    expect(events.at(-1)).toEqual({ type: "done", text: "Done." });
+  });
+
+  it.each([false, true])("keeps one existing host audit with host failure=%s", async (failed) => {
+    const input = request();
+    const audits: Record<string, unknown>[] = [];
+    input.onToolCompleted = (completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    };
+    if (failed)
+      input.executeTool = vi.fn(async () => {
+        throw new Error("host rejected the write");
+      });
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "valid",
+                name: "write_effect",
+                arguments: { value: "ready" },
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    await run(input);
+
+    expect(input.executeTool).toHaveBeenCalledOnce();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      name: "write_effect",
+      outcome: failed ? "error" : "succeeded",
+    });
+    if (failed) expect(audits[0]?.error).toBe("host rejected the write");
+  });
+
+  it("audits a helper rejection separately when parent and helper reuse a call ID", async () => {
+    const input = request();
+    input.tools = [
+      ...input.tools,
+      {
+        name: "run_subagent",
+        description: "Run a helper.",
+        readOnly: true,
+        inputSchema: {
+          type: "object",
+          properties: { name: { type: "string" }, task: { type: "string" } },
+          required: ["name", "task"],
+        },
+      },
+    ];
+    const audits: Record<string, unknown>[] = [];
+    input.onToolCompleted = (completion) => {
+      audits.push(toolCompletionAuditPayload(completion));
+    };
+    providerState.stream
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "same-call",
+                name: "run_subagent",
+                arguments: { name: "helper", task: "Check the source." },
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementationOnce(() =>
+        stream(
+          primary,
+          message(
+            primary,
+            [
+              {
+                type: "toolCall",
+                id: "same-call",
+                name: "write_effect",
+                arguments: {},
+              },
+            ],
+            "toolUse",
+          ),
+        ),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Done." }], "stop")),
+      );
+
+    await run(input);
+
+    expect(input.executeTool).not.toHaveBeenCalled();
+    expect(audits).toHaveLength(2);
+    const parentId = JSON.stringify(["pi-tool", "main", "same-call"]);
+    expect(audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: "run_subagent",
+          executionId: parentId,
+          outcome: "succeeded",
+        }),
+        expect.objectContaining({
+          name: "write_effect",
+          executionId: JSON.stringify(["pi-tool", parentId, "same-call"]),
+          outcome: "error",
+          error: expect.stringContaining("value"),
+        }),
+      ]),
+    );
+  });
+});
 
 describe("Pi runtime transient model retries", () => {
   it.each([
@@ -1344,7 +2618,7 @@ describe("Pi runtime ordered model fallback", () => {
       { provider: backupA.provider, id: backupA.id, apiKey: "small...key" },
       { provider: backupB.provider, id: backupB.id, apiKey: "fitti...key" },
     ]);
-    input.prompt = "x".repeat(8_000);
+    input.prompt = "x".repeat(20_000);
     providerState.stream.mockImplementation((target: Model<"openai-completions">) =>
       target.provider === primary.provider
         ? stream(target, message(target, [], "error", "429 rate_limit_error"))

@@ -1,3 +1,4 @@
+import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hostCredentialSource, resolveDeploymentModel } from "./deployment-model.js";
 
@@ -48,6 +49,41 @@ describe("resolveDeploymentModel", () => {
       configured: false,
       hostCredentials: false,
     });
+  });
+
+  it("runs OpenAI on the deployment key without a personal credential and keeps vendor keys separate", () => {
+    const keys = {
+      OPENAI_API_KEY: "openai-key",
+      OPENROUTER_API_KEY: "or-key",
+      ANTHROPIC_API_KEY: "sk-ant-key",
+    };
+    const direct = resolveDeploymentModel({ ...keys, PI_DEFAULT_PROVIDER: "openai" });
+    expect(direct).toEqual({
+      provider: "openai",
+      model: "gpt-6-luna",
+      key: "openai-key",
+      configured: true,
+      hostCredentials: false,
+    });
+    expect(builtinModels().getModel(direct.provider, direct.model)?.api).toBe("openai-responses");
+    expect(
+      resolveDeploymentModel({
+        ...keys,
+        PI_DEFAULT_PROVIDER: "openai",
+        PI_DEFAULT_MODEL: "gpt-6-sol",
+      }).model,
+    ).toBe("gpt-6-sol");
+    expect(resolveDeploymentModel(keys).key).toBe("or-key");
+    expect(resolveDeploymentModel({ ...keys, PI_DEFAULT_PROVIDER: "anthropic" }).key).toBe(
+      "sk-ant-key",
+    );
+    expect(
+      resolveDeploymentModel({
+        OPENROUTER_API_KEY: keys.OPENROUTER_API_KEY,
+        ANTHROPIC_API_KEY: keys.ANTHROPIC_API_KEY,
+        PI_DEFAULT_PROVIDER: "openai",
+      }),
+    ).toMatchObject({ key: undefined, configured: false, hostCredentials: false });
   });
 
   it("runs a provider that authenticates from the host without a key", () => {

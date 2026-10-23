@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import type { JobPublisher, SecretStore } from "@rakazo/adapter-kit";
 import { runContinueJob, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { inboundRoutineModelPin } from "@rakazo/adapters";
-import type { PrismaClient } from "@rakazo/db";
+import type { PrismaClient, SendUserMessageInput } from "@rakazo/db";
+import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 export const WEBHOOK_MAX_BODY_BYTES = 64 * 1024;
@@ -19,12 +20,13 @@ export type WebhookEvents = {
     trigger: "webhook";
     clientNonce?: string;
     allowParallelRun?: boolean;
+    routineEvent?: SendUserMessageInput["routineEvent"];
     modelPin?: {
       modelProvider: string;
       modelId: string;
       thinkingLevel: string | null;
     };
-  }): Promise<{ messageId: string; runId: string | null; seq: number }>;
+  }): Promise<{ messageId: string; runId: string | null; seq: number; replayed?: true }>;
 };
 
 export type WebhookDeps = {
@@ -46,7 +48,7 @@ export type WebhookTarget = {
 };
 
 export type InboundTarget = {
-  bot: Pick<WebhookTarget["bot"], "id" | "spaceId" | "userId">;
+  bot: Pick<WebhookTarget["bot"], "id" | "spaceId" | "userId"> & { webhookSecretId?: string };
   threadId: string;
 };
 
@@ -262,12 +264,62 @@ export function inboundDeliveryClientNonce(
   return `${source}:${botId}:${createHash("sha256").update(idempotencyKey).digest("base64url")}`;
 }
 
+/** Read the native source receipt; it fixes the original routing scope across recovery. */
+export async function loadMessageRoutineDelivery(
+  prisma: Pick<PrismaClient, "event">,
+  target: InboundTarget,
+  key: string,
+) {
+  const source = await prisma.event.findFirst({
+    where: {
+      threadId: target.threadId,
+      spaceId: target.bot.spaceId,
+      botId: target.bot.id,
+      thread: { userId: target.bot.userId },
+      type: "thread.meta",
+      payload: { path: ["routineDelivery", "key"], equals: key },
+    },
+    select: { payload: true },
+    orderBy: { seq: "asc" },
+  });
+  if (!source) return null;
+  const payload = source.payload;
+  const delivery =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload.routineDelivery
+      : null;
+  if (
+    !delivery ||
+    typeof delivery !== "object" ||
+    Array.isArray(delivery) ||
+    delivery.key !== key ||
+    typeof delivery.provider !== "string" ||
+    !delivery.provider ||
+    typeof delivery.prompt !== "string" ||
+    !delivery.prompt ||
+    !Array.isArray(delivery.routineIds) ||
+    !delivery.routineIds.length ||
+    !delivery.routineIds.every((id) => typeof id === "string" && id)
+  ) {
+    throw new Error("Invalid native message routine delivery receipt");
+  }
+  return {
+    key,
+    provider: delivery.provider,
+    prompt: delivery.prompt,
+    routineIds: delivery.routineIds as string[],
+  };
+}
+
 export async function deliverWebhookEvent(
   deps: Pick<WebhookDeps, "events" | "jobs">,
   target: InboundTarget,
   input: {
     prompt: string;
     routines: Array<{
+      id: string;
+      userId: string;
+      threadId: string | null;
       name: string;
       prompt: string;
       modelProvider: string | null;
@@ -276,57 +328,70 @@ export async function deliverWebhookEvent(
     }>;
     source: "webhook" | "github" | "messaging";
     idempotencyKey?: string;
-    /** Messaging wakes share the live chat thread; keep a separate webhook run. */
-    allowParallelRun?: boolean;
+    provider?: string;
   },
 ) {
-  const promptText =
-    input.routines.length > 0
-      ? [
-          ...input.routines.map(
-            (routine) => `Run routine "${routine.name}":\n${routine.prompt.trim()}`,
-          ),
-          "",
-          input.source === "github"
-            ? "Inbound GitHub event metadata:"
-            : input.source === "messaging"
-              ? "Inbound messaging event:"
-              : "Inbound webhook payload:",
-          input.prompt,
-        ].join("\n")
-      : input.prompt;
-
-  const clientNonce = input.idempotencyKey
-    ? inboundDeliveryClientNonce(input.source, target.bot.id, input.idempotencyKey)
-    : undefined;
-  const pin = inboundRoutineModelPin(input.routines);
-
-  const sent = await deps.events.sendUserMessage({
-    spaceId: target.bot.spaceId,
-    threadId: target.threadId,
-    botId: target.bot.id,
-    userId: target.bot.userId,
-    blocks: [{ kind: "text", text: promptText }],
-    prompt: promptText,
-    trigger: "webhook",
-    clientNonce,
-    ...(input.allowParallelRun ? { allowParallelRun: true } : {}),
-    ...(pin.modelProvider && pin.modelId
-      ? {
-          modelPin: {
-            modelProvider: pin.modelProvider,
-            modelId: pin.modelId,
-            thinkingLevel: pin.thinkingLevel ?? null,
-          },
-        }
-      : {}),
-  });
-
-  if (sent.runId) {
-    await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
-      getLogger().error(`${input.source} run enqueue error`, error);
+  const deliveries = [];
+  for (const routine of input.routines) {
+    const promptText = [
+      `Run routine "${routine.name}":\n${routine.prompt.trim()}`,
+      "",
+      input.source === "github"
+        ? "Inbound GitHub event metadata:"
+        : input.source === "messaging"
+          ? "Inbound messaging event:"
+          : "Inbound webhook payload:",
+      input.prompt,
+    ].join("\n");
+    const clientNonce = input.idempotencyKey
+      ? `${inboundDeliveryClientNonce(input.source, target.bot.id, input.idempotencyKey)}:routine:${routine.id}`
+      : undefined;
+    const pin = inboundRoutineModelPin([routine]);
+    let sent: Awaited<ReturnType<WebhookEvents["sendUserMessage"]>>;
+    try {
+      sent = await deps.events.sendUserMessage({
+        spaceId: target.bot.spaceId,
+        threadId: routine.threadId ?? target.threadId,
+        botId: target.bot.id,
+        userId: routine.userId,
+        blocks: [{ kind: "text", text: promptText }],
+        prompt: promptText,
+        trigger: "webhook",
+        clientNonce,
+        routineEvent: {
+          routineId: routine.id,
+          source: input.source,
+          ...(input.source === "messaging"
+            ? { provider: input.provider }
+            : { webhookSecretId: target.bot.webhookSecretId }),
+        },
+        ...(pin.modelProvider && pin.modelId
+          ? {
+              modelPin: {
+                modelProvider: pin.modelProvider,
+                modelId: pin.modelId,
+                thinkingLevel: pin.thinkingLevel ?? null,
+              },
+            }
+          : {}),
+      });
+    } catch (error) {
+      if (error instanceof IsolationError) continue;
+      throw error;
+    }
+    if (sent.runId && !sent.replayed) {
+      await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
+        getLogger().error(`${input.source} run enqueue error`, error);
+      });
+    }
+    deliveries.push({
+      routineId: routine.id,
+      messageId: sent.messageId,
+      runId: sent.runId,
+      seq: sent.seq,
     });
   }
-
-  return { ok: true as const, messageId: sent.messageId, runId: sent.runId, seq: sent.seq };
+  return deliveries.length
+    ? { ok: true as const, deliveries }
+    : { ok: true as const, ignored: true as const };
 }

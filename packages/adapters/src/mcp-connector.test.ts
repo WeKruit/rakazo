@@ -1,7 +1,16 @@
+import { toolRequiresApproval } from "@rakazo/core";
+import { IsolationError } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
-import { allowlistDrift, McpConnector } from "./mcp-connector.js";
+import {
+  allowlistDrift,
+  firstPartyMcpUrl,
+  loadMcpCredentialRecord,
+  McpConnector,
+  requireMcpToolAssignment,
+} from "./mcp-connector.js";
+import type { OAuthMaterial } from "./mcp-oauth.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
 import { migrateSecrets } from "./secret-migration.js";
@@ -31,11 +40,671 @@ const ASSIGNMENT = {
   server: SERVER,
 };
 
+describe("MCP assignment denial identity", () => {
+  it.each(["context", "assignment", "revision"])(
+    "classifies %s denial without changing its message",
+    async (failure) => {
+      const findFirst = vi.fn(async () => (failure === "assignment" ? null : ASSIGNMENT));
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        ...(failure === "context" ? {} : { botId: "bot-1" }),
+      };
+      await expect(
+        requireMcpToolAssignment(
+          { botMcpServer: { findFirst } } as never,
+          context as never,
+          { resourceId: SERVER.id, resourceRevision: failure === "revision" ? 2 : 1 },
+          "tool",
+        ),
+      ).rejects.toMatchObject({
+        name: "IsolationError",
+        message:
+          failure === "context"
+            ? "MCP tools require a bot context"
+            : failure === "assignment"
+              ? "MCP tool is not assigned to this bot"
+              : "MCP server changed; rediscover the tool before trying again",
+      });
+    },
+  );
+  it("preserves an unexpected lookup failure by identity", async () => {
+    const error = new Error("Database unavailable");
+    const failure = requireMcpToolAssignment(
+      { botMcpServer: { findFirst: vi.fn().mockRejectedValue(error) } } as never,
+      { botId: "bot-1" } as never,
+      { resourceId: SERVER.id, resourceRevision: 1 },
+      "tool",
+    );
+    await expect(failure).rejects.toBe(error);
+    expect(error).not.toBeInstanceOf(IsolationError);
+  });
+});
+
 const TEST_NETWORK = {
   // Read the global per call so a fetch stubbed after construction still wins.
   fetch: (input: string | URL | Request, init?: RequestInit) => globalThis.fetch(input, init),
   resolveHostname: async () => [{ address: "203.0.113.10", family: 4 }],
 };
+
+describe("local native Instantly thread history", () => {
+  const route = {
+    connectorId: "mcp",
+    resourceId: SERVER.id,
+    resourceRevision: 1,
+    toolName: "native_instantly_get_thread_history",
+  };
+  const anchor = {
+    id: "123e4567-e89b-42d3-a456-426614174000",
+    organization_id: "123e4567-e89b-42d3-a456-426614174001",
+    campaign_id: "123e4567-e89b-42d3-a456-426614174002",
+    timestamp_created: "2026-10-22T10:00:00Z",
+    timestamp_email: "2026-10-22T10:00:00Z",
+    message_id: "<original@example.test>",
+    thread_id: "opaque:thread + original",
+    eaccount: "team@example.test",
+    from_address_email: "person@example.test",
+    to_address_email_list: "team@example.test",
+    subject: "Original reply",
+    body: { text: "Full original reply" },
+    ue_type: 2,
+  };
+  function fixture(endpoint = "https://mcp.instantly.ai/mcp") {
+    const context = {
+      userId: "u1",
+      spaceId: "w1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    };
+    const server = {
+      ...SERVER,
+      userId: context.userId,
+      spaceId: context.spaceId,
+      enabled: true,
+      endpoint,
+      secretId: "key-1",
+    };
+    const assignment = {
+      ...ASSIGNMENT,
+      server,
+      allowAllTools: false,
+      allowedTools: ["get_email", "list_emails"],
+    };
+    const state = {
+      key: "fixture-private-api-key",
+      material: undefined as Record<string, unknown> | undefined,
+      available: true,
+      failNext: false,
+      initializations: 0,
+      calls: [] as string[],
+      tools: ["get_email", "list_emails"].map((name) => ({
+        name,
+        inputSchema: { type: "object" },
+      })),
+      callResult: { content: [], structuredContent: structuredClone(anchor) },
+      page: { items: [structuredClone(anchor)] } as Record<string, unknown>,
+      status: 200,
+      afterAnchor: () => {},
+      afterRest: () => {},
+    };
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn(async () => (state.available ? [assignment] : [])),
+        findFirst: vi.fn(async ({ where }) =>
+          state.available &&
+          where.userId === context.userId &&
+          where.spaceId === context.spaceId &&
+          where.botId === context.botId &&
+          where.serverId === server.id &&
+          server.enabled !== false
+            ? assignment
+            : null,
+        ),
+      },
+      secret: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.id === server.secretId &&
+          where.userId === context.userId &&
+          where.spaceId === context.spaceId
+            ? { id: server.secretId, ciphertext: "encrypted-record" }
+            : null,
+        ),
+      },
+      mcpServer: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.id === server.id &&
+          where.userId === context.userId &&
+          where.spaceId === context.spaceId &&
+          where.endpoint === server.endpoint &&
+          where.transport === server.transport
+            ? server
+            : null,
+        ),
+      },
+    };
+    const secrets = {
+      load: vi.fn(async () => JSON.stringify(state.material ?? { secret: state.key })),
+    };
+    const native = mcpFetch(state, server.endpoint);
+    const rest = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init);
+      expect(request.method).toBe("GET");
+      expect(new URL(request.url).origin).toBe("https://api.instantly.ai");
+      expect(new URL(request.url).pathname).toBe("/api/v2/emails");
+      expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
+      state.afterRest();
+      return new Response(JSON.stringify(state.page), { status: state.status });
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        if (new URL(logicalHref(input, init)).origin === "https://api.instantly.ai")
+          return rest(input, init);
+        const response = await native(input, init);
+        const request = new Request(input, init);
+        if (request.method === "POST") {
+          const rpc = await request.json();
+          if (rpc.method === "tools/call") state.afterAnchor();
+        }
+        return response;
+      }),
+    );
+    const connector = new McpConnector(prisma as never, secrets as never, {
+      network: TEST_NETWORK,
+    });
+    const collect = async (
+      args: Record<string, unknown> = { anchor_id: anchor.id },
+      callRoute = route,
+      actor = context,
+    ) => {
+      const events = [];
+      for await (const event of connector.execute(
+        {
+          tool: "instantly__demo__get_thread_history",
+          route: callRoute,
+          args,
+          executionId: "thread-read",
+        },
+        actor as never,
+      ))
+        events.push(event);
+      return events;
+    };
+    return { connector, context, state, server, assignment, prisma, secrets, rest, collect };
+  }
+  it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {
+    const f = fixture();
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const tool = tools.find((tool) => tool.route?.toolName === route.toolName);
+      expect(tool).toMatchObject({
+        name: "instantly__demo__get_thread_history",
+        readOnly: true,
+        route,
+      });
+      expect(tool?.description).toMatch(/local native REST integration/i);
+      expect(tool!.inputSchema.required).toEqual(["anchor_id"]);
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
+      const events = await f.collect({ anchor_id: anchor.id, limit: 5 });
+      expect(events).toEqual([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              anchor: f.state.callResult,
+              page: f.state.page,
+              query: {
+                search: `thread:${anchor.thread_id}`,
+                eaccount: anchor.eaccount,
+                mode: "emode_all",
+                latest_of_thread: "false",
+                preview_only: "false",
+                limit: "5",
+              },
+              coverage: {
+                scope: "exact_thread",
+                anchorId: anchor.id,
+                organizationId: anchor.organization_id,
+                account: anchor.eaccount,
+                threadId: anchor.thread_id,
+                startingAfter: null,
+                nextStartingAfter: null,
+                anchorPresent: true,
+                pageExhausted: true,
+                bodiesComplete: true,
+                returnedCount: 1,
+                checkedAt: expect.any(String),
+              },
+            },
+          },
+        },
+      ]);
+      expect(f.rest).toHaveBeenCalledOnce();
+      expect(new URL(logicalHref(...f.rest.mock.calls[0]!)).searchParams.get("search")).toBe(
+        `thread:${anchor.thread_id}`,
+      );
+      expect(f.state.calls).toEqual(["get_email"]);
+      expect(JSON.stringify(events)).not.toContain(f.state.key);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("looks up an exact contact through a separate read-only local tool with truthful page coverage", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    const outbound = {
+      ...anchor,
+      id: anchor.campaign_id,
+      lead: anchor.from_address_email,
+      from_address_email: anchor.eaccount,
+      to_address_email_list: `Other <other@example.test>, Person <${anchor.from_address_email}>`,
+      body_fallback_reason: "too_large",
+      ue_type: 3,
+    };
+    f.state.page = { items: [anchor, outbound], next_starting_after: "provider-next" };
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const tool = tools.find((tool) => tool.route?.toolName === contactRoute.toolName);
+      expect(tool).toMatchObject({
+        name: "instantly__demo__search_contact_emails",
+        readOnly: true,
+        route: contactRoute,
+      });
+      expect(tool?.description).toMatch(/local native REST integration/i);
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
+      const args = {
+        email: anchor.from_address_email,
+        eaccount: anchor.eaccount,
+        limit: 5,
+        starting_after: "provider-prior",
+      };
+      const events = await f.collect(args, contactRoute);
+      expect(events).toEqual([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              page: f.state.page,
+              query: {
+                lead: args.email,
+                eaccount: args.eaccount,
+                mode: "emode_all",
+                latest_of_thread: "false",
+                preview_only: "false",
+                sort_order: "desc",
+                limit: "5",
+                starting_after: args.starting_after,
+              },
+              coverage: {
+                scope: "exact_contact",
+                contactEmail: args.email,
+                account: args.eaccount,
+                organizationIds: [anchor.organization_id],
+                accounts: [anchor.eaccount],
+                startingAfter: args.starting_after,
+                nextStartingAfter: "provider-next",
+                pageExhausted: false,
+                bodiesComplete: false,
+                returnedCount: 2,
+                checkedAt: expect.any(String),
+              },
+            },
+          },
+        },
+      ]);
+      expect(f.rest).toHaveBeenCalledOnce();
+      expect(f.state.calls).toEqual([]);
+      expect(JSON.stringify(events)).not.toContain(f.state.key);
+      f.state.page = { items: [] };
+      expect(await f.collect({ email: args.email }, contactRoute)).toMatchObject([
+        {
+          type: "result",
+          data: {
+            structuredContent: {
+              page: { items: [] },
+              coverage: {
+                account: null,
+                organizationIds: [],
+                accounts: [],
+                returnedCount: 0,
+                pageExhausted: true,
+              },
+            },
+          },
+        },
+      ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each(["lead", "participant", "account", "missing-body", "shape", "http", "count"])(
+    "checks exact contact %s without silently widening the search or claiming full bodies",
+    async (kind) => {
+      const f = fixture();
+      const row = { ...anchor, lead: anchor.from_address_email };
+      if (kind === "lead") row.lead = "different@example.test";
+      if (kind === "participant") row.from_address_email = "different@example.test";
+      if (kind === "account") row.eaccount = "different@example.test";
+      if (kind === "missing-body") row.body = {} as typeof row.body;
+      f.state.page = { items: [row] };
+      if (kind === "shape") f.state.page = { items: "invalid" };
+      if (kind === "http") f.state.status = 401;
+      if (kind === "count") f.state.page = { items: [row, row] };
+      try {
+        expect(
+          await f.collect(
+            { email: anchor.from_address_email, eaccount: anchor.eaccount, limit: 1 },
+            { ...route, toolName: "native_instantly_search_contact_emails" },
+          ),
+        ).toMatchObject(
+          kind === "missing-body"
+            ? [
+                {
+                  type: "result",
+                  data: { structuredContent: { coverage: { bodiesComplete: false } } },
+                },
+              ]
+            : [{ type: "error" }],
+        );
+        expect(f.rest).toHaveBeenCalledOnce();
+        expect(f.state.calls).toEqual([]);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each(["get_email", "list_emails", "actor", "revision", "credential", "pointer"])(
+    "fences contact lookup against changed %s",
+    async (kind) => {
+      const f = fixture();
+      const before = kind === "get_email" || kind === "list_emails" || kind === "actor";
+      if (kind === "get_email" || kind === "list_emails")
+        f.assignment.allowedTools = f.assignment.allowedTools.filter((name) => name !== kind);
+      f.state.afterRest = () => {
+        if (kind === "revision") f.server.revision++;
+        if (kind === "credential") f.state.key = "rotated-private-key";
+        if (kind === "pointer") f.server.secretId = "rotated-secret";
+      };
+      try {
+        const events = await f.collect(
+          { email: anchor.from_address_email },
+          { ...route, toolName: "native_instantly_search_contact_emails" },
+          kind === "actor" ? { ...f.context, spaceId: "foreign" } : f.context,
+        );
+        expect(events).toMatchObject([{ type: "error" }]);
+        expect(f.rest).toHaveBeenCalledTimes(before ? 0 : 1);
+        expect(JSON.stringify(events)).not.toMatch(/private-key|fixture-private-api-key/);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each([
+    {},
+    { email: "not-an-address" },
+    { email: anchor.from_address_email, limit: 101 },
+    { email: anchor.from_address_email, eaccount: "team@example.test,other@example.test" },
+    { email: anchor.from_address_email, starting_after: " " },
+    { email: anchor.from_address_email, search: "broad query" },
+  ])("rejects malformed contact search before provider reads: %j", async (args) => {
+    const f = fixture();
+    try {
+      expect(
+        await f.collect(args, { ...route, toolName: "native_instantly_search_contact_emails" }),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      expect(f.state.calls).toEqual([]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each(["too_large", "unavailable", "missing-body", "cursor", "empty"])(
+    "retains honest %s page coverage without claiming an entire thread",
+    async (kind) => {
+      const f = fixture();
+      if (kind === "too_large" || kind === "unavailable")
+        f.state.page = { items: [{ ...anchor, body_fallback_reason: kind }] };
+      if (kind === "missing-body") f.state.page = { items: [{ ...anchor, body: {} }] };
+      if (kind === "cursor") f.state.page = { items: [anchor], next_starting_after: "opaque-next" };
+      if (kind === "empty") f.state.page = { items: [] };
+      try {
+        const events = await f.collect({
+          anchor_id: anchor.id,
+          starting_after: "opaque-prior",
+          limit: 100,
+        });
+        expect(events[0]).toMatchObject({
+          type: "result",
+          data: {
+            structuredContent: {
+              page: f.state.page,
+              coverage: {
+                startingAfter: "opaque-prior",
+                nextStartingAfter: kind === "cursor" ? "opaque-next" : null,
+                anchorPresent: kind !== "empty",
+                pageExhausted: kind !== "cursor",
+                bodiesComplete: !["too_large", "unavailable", "missing-body"].includes(kind),
+              },
+            },
+          },
+        });
+        expect(JSON.stringify(events)).not.toContain('"complete":true');
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each([
+    "get_email",
+    "list_emails",
+    "actor",
+    "revision",
+    "endpoint",
+    "disabled",
+    "oauth",
+    "ambiguous-key",
+  ])("denies invalid %s before the REST read", async (kind) => {
+    const f = fixture();
+    if (kind === "get_email" || kind === "list_emails")
+      f.assignment.allowedTools = f.assignment.allowedTools.filter((name) => name !== kind);
+    if (kind === "revision") f.server.revision++;
+    if (kind === "endpoint") f.server.endpoint = "https://other.example.test/mcp";
+    if (kind === "disabled") Object.assign(f.server, { enabled: false });
+    if (kind === "oauth")
+      f.state.material = { oauth: { tokens: { access_token: "unrelated-audience" } } };
+    if (kind === "ambiguous-key")
+      f.state.material = {
+        secret: f.state.key,
+        headers: { Authorization: "Bearer conflicting-private-key" },
+      };
+    try {
+      const events = await f.collect(
+        undefined,
+        route,
+        kind === "actor" ? { ...f.context, userId: "foreign" } : f.context,
+      );
+      expect(events).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      expect(JSON.stringify(events)).not.toMatch(
+        /fixture-private-api-key|conflicting-private-key|unrelated-audience/,
+      );
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each(["after-anchor", "after-rest"])(
+    "fences changed grants, revision and credentials %s",
+    async (phase) => {
+      for (const kind of ["grant", "revision", "credential", "pointer"]) {
+        const f = fixture();
+        const change = () => {
+          if (kind === "grant") f.assignment.allowedTools = [];
+          if (kind === "revision") f.server.revision++;
+          if (kind === "credential") f.state.key = "changed-private-key";
+          if (kind === "pointer") f.server.secretId = "changed-secret";
+        };
+        if (phase === "after-anchor") f.state.afterAnchor = change;
+        else f.state.afterRest = change;
+        try {
+          expect(await f.collect()).toMatchObject([{ type: "error" }]);
+          expect(f.rest).toHaveBeenCalledTimes(phase === "after-rest" ? 1 : 0);
+        } finally {
+          await f.connector.close();
+        }
+      }
+    },
+  );
+  it.each(["thread_id", "organization_id", "eaccount", "id", "shape", "http", "oversize"])(
+    "rejects %s response without inventing an empty successful page",
+    async (kind) => {
+      const f = fixture();
+      if (["thread_id", "organization_id", "eaccount"].includes(kind))
+        f.state.page = {
+          items: [
+            { ...anchor, [kind]: kind === "organization_id" ? anchor.campaign_id : "foreign" },
+          ],
+        };
+      if (kind === "id") f.state.callResult.structuredContent.id = anchor.campaign_id;
+      if (kind === "shape") f.state.page = { items: "invalid" };
+      if (kind === "http") f.state.status = 401;
+      if (kind === "oversize") f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
+      try {
+        expect(await f.collect()).toMatchObject([{ type: "error" }]);
+        expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
+      } finally {
+        await f.connector.close();
+      }
+    },
+  );
+  it.each([
+    "get_thread_history",
+    route.toolName,
+    "search_contact_emails",
+    "native_instantly_search_contact_emails",
+  ])("handles offered remote %s explicitly without routing it to REST", async (toolName) => {
+    const f = fixture();
+    f.state.tools.push({ name: toolName, inputSchema: { type: "object" } });
+    f.assignment.allowedTools.push(toolName);
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const isContact = toolName.includes("contact");
+      const localName = isContact ? "search_contact_emails" : "get_thread_history";
+      expect(tools.some((tool) => tool.name === `instantly__demo__${localName}`)).toBe(false);
+      expect(
+        await f.collect(
+          isContact ? { email: anchor.from_address_email } : undefined,
+          isContact ? { ...route, toolName: "native_instantly_search_contact_emails" } : route,
+        ),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      const remote = tools.find((tool) => tool.name === `mcp__demo__${toolName}`)!;
+      expect(remote.readOnly).not.toBe(true);
+      if (toolName === localName) {
+        expect(await f.collect({}, remote.route as typeof route)).toMatchObject([
+          { type: "result" },
+        ]);
+        expect(f.state.calls).toEqual([toolName]);
+      }
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each([
+    "get_thread_history",
+    route.toolName,
+    "search_contact_emails",
+    "native_instantly_search_contact_emails",
+  ])("does not intercept a third-party remote %s", async (toolName) => {
+    const f = fixture("https://unrelated.example.test/mcp");
+    f.assignment.allowedTools = [toolName];
+    f.state.tools = [{ name: toolName, inputSchema: { type: "object" } }];
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      expect(tools).toHaveLength(1);
+      expect(tools[0]!.readOnly).not.toBe(true);
+      expect(await f.collect({}, tools[0]!.route as typeof route)).toMatchObject([
+        { type: "result" },
+      ]);
+      expect(f.state.calls).toEqual([toolName]);
+      expect(f.rest).not.toHaveBeenCalled();
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("preserves local read-only classification through the native lazy catalog without trusting remote hints", async () => {
+    const f = fixture();
+    const write = {
+      name: "send_email",
+      inputSchema: { type: "object" },
+      annotations: { readOnlyHint: true },
+    };
+    f.state.tools.push(
+      write,
+      ...Array.from({ length: 20 }, (_, index) => ({
+        name: `extra_${index}`,
+        inputSchema: { type: "object" },
+      })),
+    );
+    f.assignment.allowAllTools = true;
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const execute = tools.find((tool) => tool.route?.toolName === "__catalog_execute")!;
+      expect(execute).toBeDefined();
+      const resolve = async (toolName: string, args: Record<string, unknown>) =>
+        f.connector.resolveCall(
+          {
+            tool: execute.name,
+            route: execute.route,
+            executionId: "lazy-history",
+            args: { id: `${SERVER.id}:${toolName}`, arguments: args },
+          },
+          f.context as never,
+        );
+      const local = await resolve(route.toolName, { anchor_id: anchor.id });
+      expect(local!.tool.readOnly).toBe(true);
+      expect(toolRequiresApproval(local!.tool.name, true, local!.tool.readOnly)).toBe(false);
+      const contact = await resolve("native_instantly_search_contact_emails", {
+        email: anchor.from_address_email,
+      });
+      expect(contact!.tool.readOnly).toBe(true);
+      expect(toolRequiresApproval(contact!.tool.name, true, contact!.tool.readOnly)).toBe(false);
+      const remote = await resolve("send_email", {});
+      expect(remote!.tool.readOnly).not.toBe(true);
+      expect(toolRequiresApproval(remote!.tool.name, true, remote!.tool.readOnly)).toBe(true);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each([
+    {},
+    { anchor_id: "not-a-uuid" },
+    { anchor_id: anchor.id, limit: 0 },
+    { anchor_id: anchor.id, limit: 101 },
+    { anchor_id: anchor.id, starting_after: " " },
+    { anchor_id: anchor.id, search: "anything" },
+  ])("rejects malformed input before reading provider data: %j", async (args) => {
+    const f = fixture();
+    try {
+      expect(await f.collect(args)).toMatchObject([{ type: "error" }]);
+      expect(f.state.calls).toEqual([]);
+      expect(f.rest).not.toHaveBeenCalled();
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("reuses a raw Authorization API key only in the official REST bearer header", async () => {
+    const f = fixture();
+    f.state.material = { headers: { Authorization: f.state.key } };
+    try {
+      expect(await f.collect()).toMatchObject([{ type: "result" }]);
+      expect(f.rest).toHaveBeenCalledOnce();
+    } finally {
+      await f.connector.close();
+    }
+  });
+});
 
 function logicalHref(input: string | URL | Request, init?: RequestInit): string {
   const url = new URL(
@@ -53,6 +722,8 @@ function mcpFetch(
     headers?: Record<string, string>[];
     tools?: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>;
     calls?: string[];
+    callError?: Error;
+    callResult?: Record<string, unknown>;
   },
   expectedUrl = "https://mcp.example.test/mcp",
 ) {
@@ -91,17 +762,449 @@ function mcpFetch(
     }
     if (message.method === "tools/call") {
       if (message.params?.name) state.calls?.push(message.params.name);
+      if (state.callError) throw state.callError;
       return Response.json({
         jsonrpc: "2.0",
         id: message.id,
-        result: { content: [{ type: "text", text: "ok" }] },
+        result: state.callResult ?? { content: [{ type: "text", text: "ok" }] },
       });
     }
     return new Response(null, { status: 202 });
   });
 }
 
+describe("official Autumn task dispatch", () => {
+  it.each(["get_task", "get_rows", "reply", "stop_task", "list_tasks"])(
+    "denies an unowned %s call before connecting to the provider",
+    async (toolName) => {
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      const load = vi.fn();
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findFirst: vi.fn().mockResolvedValue({
+              ...ASSIGNMENT,
+              server: { ...SERVER, endpoint: "https://api.autumn.ai/mcp" },
+            }),
+          },
+          recruitingResearchTask: { findFirst: vi.fn().mockResolvedValue(null) },
+          externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+        } as never,
+        { load } as never,
+        { network: TEST_NETWORK },
+      );
+      const events = [];
+      try {
+        for await (const event of connector.execute(
+          {
+            tool: `mcp__autumn__${toolName}`,
+            executionId: "isolated-call",
+            route: { connectorId: "mcp", resourceId: SERVER.id, resourceRevision: 1, toolName },
+            args: { task_id: "foreign-task" },
+          },
+          {
+            spaceId: "w1",
+            userId: "u1",
+            botId: "bot-1",
+            signal: new AbortController().signal,
+          } as never,
+        ))
+          events.push(event);
+        expect(events).toEqual([
+          expect.objectContaining({
+            type: "error",
+            message: expect.stringMatching(/scoped research history/i),
+          }),
+        ]);
+        expect(fetch).not.toHaveBeenCalled();
+        expect(load).not.toHaveBeenCalled();
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+});
+
+it("denies an unowned FullEnrich job before connecting or loading credentials", async () => {
+  const fetch = vi.fn();
+  vi.stubGlobal("fetch", fetch);
+  const load = vi.fn();
+  const connector = new McpConnector(
+    {
+      botMcpServer: {
+        findFirst: vi.fn().mockResolvedValue({
+          ...ASSIGNMENT,
+          server: { ...SERVER, endpoint: "https://mcp.fullenrich.com/mcp" },
+        }),
+      },
+      externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
+    } as never,
+    { load } as never,
+    { network: TEST_NETWORK },
+  );
+  try {
+    const events = [];
+    for await (const event of connector.execute(
+      {
+        tool: "mcp__fullenrich__get_enrichment_results",
+        executionId: "unowned-job",
+        route: {
+          connectorId: "mcp",
+          resourceId: SERVER.id,
+          resourceRevision: 1,
+          toolName: "get_enrichment_results",
+        },
+        args: { enrichment_id: "foreign-job" },
+      },
+      {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never,
+    ))
+      events.push(event);
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "error",
+        message: expect.stringMatching(/not available in your workspace/i),
+      }),
+    ]);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+  } finally {
+    await connector.close();
+  }
+});
+
 describe("MCP connector session cache", () => {
+  it.each(["direct", "catalog"])(
+    "marks a thrown %s tool call uncertain and preserves returned provider errors",
+    async (path) => {
+      const state = {
+        failNext: false,
+        initializations: 0,
+        calls: [] as string[],
+        callError: new Error("response timed out: fixture-token") as Error | undefined,
+        callResult: {
+          isError: true,
+          content: [{ type: "text", text: "provider rejected fixture-token" }],
+        },
+        tools: [{ name: "echo", inputSchema: { type: "object" } }],
+      };
+      vi.stubGlobal("fetch", mcpFetch(state));
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([{ ...ASSIGNMENT, server: { ...SERVER, secretId: "secret-1" } }]),
+            findFirst: vi.fn().mockResolvedValue({
+              ...ASSIGNMENT,
+              server: { ...SERVER, secretId: "secret-1" },
+            }),
+          },
+          secret: {
+            findFirst: vi.fn().mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }),
+          },
+        } as never,
+        { load: async () => JSON.stringify({ secret: "fixture-token" }) } as never,
+        { network: TEST_NETWORK },
+      );
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never;
+      const tool = (await connector.discoverTools(context))[0]!;
+      const call = {
+        tool: path === "direct" ? tool.name : "connectors_execute_tool",
+        args: path === "direct" ? {} : { id: "server-1:echo", arguments: {} },
+        route:
+          path === "direct" ? tool.route : { connectorId: "mcp", toolName: "__catalog_execute" },
+        executionId: "transport-test",
+      };
+      try {
+        const failed = [];
+        for await (const event of connector.execute(call, context)) failed.push(event);
+        expect(failed).toEqual([
+          { type: "error", message: expect.any(String), outcome: "uncertain" },
+        ]);
+        expect(JSON.stringify(failed)).not.toContain("fixture-token");
+        expect(state.calls).toEqual(["echo"]);
+
+        state.callError = undefined;
+        const returned = [];
+        for await (const event of connector.execute(call, context)) returned.push(event);
+        expect(returned).toMatchObject([{ type: "result", data: { isError: true } }]);
+        expect(JSON.stringify(returned)).not.toContain("fixture-token");
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+
+  it.each(["assignment", "authorization", "session", "cancellation"])(
+    "keeps a pre-dispatch %s failure an ordinary error",
+    async (failure) => {
+      const state = { failNext: failure === "session", initializations: 0, calls: [] as string[] };
+      vi.stubGlobal("fetch", mcpFetch(state));
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi.fn().mockResolvedValue([ASSIGNMENT]),
+            findFirst:
+              failure === "authorization"
+                ? vi.fn().mockRejectedValue(new Error("lookup failed: Bearer fixture-token"))
+                : vi.fn().mockResolvedValue(failure === "assignment" ? null : ASSIGNMENT),
+          },
+        } as never,
+        {} as never,
+        { network: TEST_NETWORK },
+      );
+      const controller = new AbortController();
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: controller.signal,
+      } as never;
+      try {
+        if (failure === "cancellation") {
+          await connector.discoverTools(context);
+          controller.abort();
+        }
+        const events = [];
+        for await (const event of connector.execute(
+          {
+            tool: "mcp__demo__echo",
+            args: {},
+            route: {
+              connectorId: "mcp",
+              resourceId: SERVER.id,
+              resourceRevision: SERVER.revision,
+              toolName: "echo",
+            },
+            executionId: "before-dispatch",
+          },
+          context,
+        ))
+          events.push(event);
+        expect(events).toEqual([{ type: "error", message: expect.any(String) }]);
+        expect(JSON.stringify(events)).not.toContain("fixture-token");
+        expect(state.calls).toEqual([]);
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+
+  it.each([
+    "accepted",
+    "live-refresh",
+    "live-revoked",
+    "live-endpoint",
+    "live-later-notification",
+    "revoked",
+    "disabled",
+    "endpoint",
+    "transport",
+    "revision",
+    "foreign-owner",
+    "pointer",
+    "missing-secret",
+    "ref",
+    "digest",
+    "later-notification",
+    "cancelled",
+  ])("publishes only the authoritative refreshed MCP connection: %s", async (change) => {
+    const controller = new AbortController();
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: controller.signal,
+    };
+    const initial = {
+      oauth: {
+        obtainedAt: 1,
+        tokens: {
+          access_token: "expired-access",
+          refresh_token: "initial-refresh",
+          token_type: "bearer",
+          expires_in: 1,
+        },
+      },
+    };
+    const accepted = {
+      oauth: {
+        obtainedAt: Date.now(),
+        tokens: {
+          access_token: "accepted-access",
+          refresh_token: "accepted-refresh",
+          token_type: "bearer",
+          expires_in: 3600,
+        },
+      },
+    };
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: "initial-secret" } };
+    const current: Omit<typeof assignment.server, "secretId"> & {
+      secretId: string | null;
+      userId: string;
+      spaceId: string;
+      enabled: boolean;
+    } = { ...assignment.server, userId: "u1", spaceId: "w1", enabled: true };
+    let row: { id: string; ciphertext: string } | null = {
+      id: "initial-secret",
+      ciphertext: "initial-ref",
+    };
+    let notify = (_ref: string) => {};
+    let afterLiveRefresh = false;
+    const load = vi.fn(async (ref: string) => {
+      if (ref === "initial-ref") return JSON.stringify(initial);
+      if (
+        change === "later-notification" ||
+        (afterLiveRefresh && change === "live-later-notification")
+      )
+        notify(ref);
+      if (change === "cancelled") controller.abort();
+      return JSON.stringify(change === "digest" ? initial : accepted);
+    });
+    const findServer = vi.fn(
+      async ({
+        where,
+      }: {
+        where: { id: string; spaceId: string; userId: string; enabled: boolean };
+      }) =>
+        current.id === where.id &&
+        current.spaceId === where.spaceId &&
+        current.userId === where.userId &&
+        current.enabled === where.enabled
+          ? current
+          : null,
+    );
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn(async () => [assignment]),
+        findFirst: vi.fn(async () => assignment),
+      },
+      mcpServer: { findFirst: findServer },
+      secret: { findFirst: vi.fn(async () => row) },
+    };
+    const refresh = vi.fn();
+    let activeMaterial: OAuthMaterial | undefined;
+    const providerFor: McpOAuthBroker["providerFor"] = async (
+      _server,
+      _context,
+      loaded,
+      persisted,
+    ) => {
+      activeMaterial = loaded.material;
+      return new StoredMcpOAuthProvider(SERVER.id, loaded.material, async () => undefined, {
+        refreshNetwork: async () => ({ fetch: globalThis.fetch, close: async () => undefined }),
+        refresh: async () => {
+          refresh();
+          Object.assign(loaded.material, structuredClone(accepted));
+          row = { id: "accepted-secret", ciphertext: "accepted-ref" };
+          current.secretId = row.id;
+          persisted?.({ id: row.id, ref: row.ciphertext, material: accepted });
+          // The broker adopts its committed grant before flushing the native store notification.
+          notify(row.ciphertext);
+          if (change === "revoked") current.secretId = null;
+          if (change === "disabled") current.enabled = false;
+          if (change === "endpoint") current.endpoint = "https://other.example.test/mcp";
+          if (change === "transport") current.transport = "sse";
+          if (change === "revision") current.revision += 1;
+          if (change === "foreign-owner") current.userId = "u2";
+          if (change === "pointer") current.secretId = "other-secret";
+          if (change === "missing-secret") row = null;
+          if (change === "ref") row!.ciphertext = "other-ref";
+        },
+      });
+    };
+    const state = { failNext: false, initializations: 0, calls: [] as string[] };
+    vi.stubGlobal("fetch", mcpFetch(state));
+    const connector = new McpConnector(
+      prisma as never,
+      {
+        load,
+        onChange(listener: (ref: string) => void) {
+          notify = listener;
+          return () => {};
+        },
+      } as never,
+      { network: TEST_NETWORK },
+      { providerFor } as McpOAuthBroker,
+    );
+    try {
+      const tools = await connector.discoverTools(context as never);
+      expect(refresh).toHaveBeenCalledOnce();
+      const succeeds = change === "accepted" || change.startsWith("live-");
+      expect(tools).toHaveLength(succeeds ? 1 : 0);
+      expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(
+        succeeds ? 1 : 0,
+      );
+      expect(prisma.secret.findFirst).toHaveBeenLastCalledWith({
+        where: { id: "accepted-secret", userId: "u1", spaceId: "w1" },
+      });
+      if (["missing-secret", "ref"].includes(change)) expect(findServer).not.toHaveBeenCalled();
+      else
+        expect(findServer).toHaveBeenCalledWith({
+          where: { id: SERVER.id, userId: "u1", spaceId: "w1", enabled: true },
+        });
+      if (change.startsWith("live-")) {
+        activeMaterial!.oauth!.obtainedAt = 1;
+        const events = [];
+        for await (const event of connector.execute(
+          {
+            tool: tools[0]!.name,
+            args: {},
+            executionId: "live-refresh",
+            route: tools[0]!.route,
+          },
+          context as never,
+        ))
+          events.push(event);
+        expect(events).toMatchObject([{ type: "result" }]);
+        expect(refresh).toHaveBeenCalledTimes(2);
+        expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(1);
+        afterLiveRefresh = true;
+        if (change === "live-refresh") {
+          await connector.discoverTools(context as never);
+          expect(state.initializations).toBe(1);
+        } else {
+          if (change === "live-revoked") current.secretId = null;
+          if (change === "live-endpoint") current.endpoint = "https://other.example.test/mcp";
+          notify("accepted-ref");
+          const denied = [];
+          for await (const event of connector.execute(
+            {
+              tool: tools[0]!.name,
+              args: {},
+              executionId: "after-live-change",
+              route: tools[0]!.route,
+            },
+            context as never,
+          ))
+            denied.push(event);
+          expect(denied).toMatchObject([{ type: "error" }]);
+          expect(state.calls).toEqual(["echo"]);
+          expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(
+            0,
+          );
+        }
+      } else if (change === "accepted") {
+        await connector.discoverTools(context as never);
+        expect(refresh).toHaveBeenCalledOnce();
+        expect(state.initializations).toBe(1);
+      }
+    } finally {
+      await connector.close();
+    }
+  });
+
   it("keeps sessions across unchanged TTL reads and reconnects on observed rotation", async () => {
     vi.useFakeTimers();
     const fake = infisicalFake();
@@ -789,7 +1892,9 @@ describe("MCP connector session cache", () => {
         },
         context,
       ),
-    ).rejects.toThrow("unknown or not authorized");
+    ).rejects.toThrow(
+      /Unknown tool ID or name in this bot's current catalog\..*Search again with group and query/,
+    );
     await expect(
       connector.resolveCall(
         {
@@ -823,6 +1928,88 @@ describe("MCP connector session cache", () => {
     expect(state.calls).toEqual(["tool_29"]);
     await connector.close();
   });
+
+  it.each([
+    ["direct", "stale"],
+    ["direct", "missing"],
+    ["catalog", "stale"],
+    ["catalog", "missing"],
+  ] as const)(
+    "rejects a %s call with a %s server revision before connecting",
+    async (path, revision) => {
+      let assignment = ASSIGNMENT;
+      const state = {
+        failNext: false,
+        initializations: 0,
+        calls: [] as string[],
+        tools: Array.from({ length: path === "direct" ? 1 : 21 }, (_, index) => ({
+          name: `tool_${index}`,
+          inputSchema: { type: "object", properties: { value: { type: "string" } } },
+        })),
+      };
+      vi.stubGlobal("fetch", mcpFetch(state));
+      const prisma = {
+        botMcpServer: {
+          findMany: vi.fn(async () => [assignment]),
+          findFirst: vi.fn(async () => assignment),
+        },
+      };
+      const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never;
+      const resolve = async () => {
+        const exposed = await connector.discoverTools(context);
+        const call = {
+          tool: exposed[0]!.name,
+          args: { value: "approved fixture" },
+          executionId: "fixture",
+          route: exposed[0]!.route,
+        };
+        if (path === "direct") return call;
+        const execute = exposed.find((tool) => tool.name === "connectors_execute_tool")!;
+        return (await connector.resolveCall(
+          {
+            ...call,
+            tool: execute.name,
+            route: execute.route,
+            args: { id: "server-1:tool_0", arguments: call.args },
+          },
+          context,
+        ))!.call;
+      };
+      const collect = async (call: Parameters<McpConnector["execute"]>[0]) => {
+        const events = [];
+        for await (const event of connector.execute(call, context)) events.push(event);
+        return events;
+      };
+      try {
+        const old = await resolve();
+        assignment = { ...ASSIGNMENT, server: { ...SERVER, revision: 2 } };
+        const route = { ...old.route! };
+        if (revision === "missing") delete route.resourceRevision;
+        const initializations = state.initializations;
+        expect(await collect({ ...old, route })).toEqual([
+          { type: "error", message: "MCP server changed; rediscover the tool before trying again" },
+        ]);
+        expect(state.initializations).toBe(initializations);
+        expect(state.calls).toEqual([]);
+        expect(prisma.botMcpServer.findFirst).toHaveBeenCalledOnce();
+
+        const fresh = await resolve();
+        expect(fresh.route?.resourceRevision).toBe(2);
+        expect(await collect(fresh)).toMatchObject([{ type: "result" }]);
+        expect(state.initializations).toBe(initializations + 1);
+        expect(state.calls).toEqual(["tool_0"]);
+        expect(prisma.botMcpServer.findFirst).toHaveBeenCalledTimes(2);
+      } finally {
+        await connector.close();
+      }
+    },
+  );
 
   it("executes authoritative MCP tools whose names match catalog controls", async () => {
     const state = {
@@ -936,12 +2123,12 @@ describe("MCP connector session cache", () => {
           `POST ${SERVER.endpoint}`,
           "POST https://auth.example.test/token",
         ]);
-        expect(invalidate).toHaveBeenCalledWith("all");
+        expect(invalidate.mock.calls).toEqual([["client"], ["tokens"]]);
+        expect(provider.clientInformation()).toBeUndefined();
+        await expect(provider.tokens()).resolves.toBeUndefined();
         expect(requests.some((request) => request.url === metadataUrl)).toBe(false);
-        // The endpoint-origin compatibility retry remains allowed, through remote policy.
-        expect(
-          requests.some((request) => request.url === "https://mcp.example.test/private-probe"),
-        ).toBe(true);
+        // Native invalid_client recovery retains validated discovery instead of following a new challenge.
+        expect(provider.discoveryState()?.authorizationServerUrl).toBe("https://auth.example.test");
         expect(requests.every((request) => new URL(request.url).protocol === "https:")).toBe(true);
       } finally {
         await connector.close();
@@ -1029,7 +2216,12 @@ describe("MCP connector session cache", () => {
     const call = {
       tool: "mcp__demo__echo",
       args: {},
-      route: { connectorId: "mcp", resourceId: "server-1", toolName: "echo" },
+      route: {
+        connectorId: "mcp",
+        resourceId: "server-1",
+        resourceRevision: SERVER.revision,
+        toolName: "echo",
+      },
     } as never;
 
     const tools = await connector.discoverTools(context);
@@ -1216,5 +2408,316 @@ describe("allowlistDrift", () => {
       offered: 2,
       stringAllowedCount: 1,
     });
+  });
+});
+
+describe.each([
+  ["Autumn", "https://api.autumn.ai/mcp", "AUTUMN_API_KEY", "Recruiting research"],
+  ["FullEnrich", "https://mcp.fullenrich.com/mcp", "FULLENRICH_API_KEY", "Contact enrichment"],
+])("deployment %s credentials", (name, endpoint, env, label) => {
+  afterEach(() => vi.unstubAllEnvs());
+  const context = {
+    userId: "new-user",
+    spaceId: "private-space",
+    signal: new AbortController().signal,
+  };
+  const official = {
+    secretId: null,
+    transport: "streamable_http",
+    endpoint,
+  };
+
+  it("supplies the platform key in memory without loading or copying another account's secret", async () => {
+    vi.stubEnv(env, "platform-service-key");
+    const findFirst = vi.fn();
+    const load = vi.fn();
+    const result = await loadMcpCredentialRecord(
+      { secret: { findFirst } } as never,
+      { load } as never,
+      official,
+      context as never,
+    );
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "platform-service-key" });
+    expect(result.secret).toBeNull();
+    expect(findFirst).not.toHaveBeenCalled();
+    expect(load).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://api.autumn.ai/mcp?redirect=other",
+    "https://api.autumn.ai.example.test/mcp",
+    "https://other.example.test/mcp",
+    "http://api.autumn.ai/mcp",
+    "https://mcp.fullenrich.com/mcp?redirect=other",
+    "https://mcp.fullenrich.com.example.test/mcp",
+    "http://mcp.fullenrich.com/mcp",
+  ])("never supplies a platform key to a different endpoint: %s", async (endpoint) => {
+    vi.stubEnv(env, "platform-service-key");
+    const result = await loadMcpCredentialRecord(
+      {} as never,
+      {} as never,
+      { ...official, endpoint },
+      context as never,
+    );
+    expect(result.plaintext).toBeUndefined();
+  });
+
+  it("preserves actor-scoped personal credentials and refuses a missing owned secret", async () => {
+    vi.stubEnv(env, "platform-service-key");
+    const row = { id: "personal-secret", ciphertext: "encrypted-reference" };
+    const findFirst = vi.fn().mockResolvedValueOnce(row).mockResolvedValueOnce(null);
+    const load = vi.fn().mockResolvedValue('{"secret":"personal-service-key"}');
+    const server = { ...official, secretId: row.id };
+    const prisma = { secret: { findFirst } } as never;
+    const secrets = { load } as never;
+    const personal = await loadMcpCredentialRecord(prisma, secrets, server, context as never);
+    expect(JSON.parse(personal.plaintext!)).toEqual({ secret: "personal-service-key" });
+    expect(findFirst).toHaveBeenCalledWith({
+      where: { id: row.id, userId: context.userId, spaceId: context.spaceId },
+    });
+    const missing = await loadMcpCredentialRecord(prisma, secrets, server, context as never);
+    expect(missing.plaintext).toBeUndefined();
+    expect(load).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports an unconfigured platform service before authentication when its key is absent", async () => {
+    vi.stubEnv(env, " ");
+    await expect(
+      loadMcpCredentialRecord({} as never, {} as never, official, context as never),
+    ).rejects.toThrow(`${label} is not configured on this server`);
+  });
+
+  it("activates the existing service assignment after platform configuration without network or OAuth while unavailable", async () => {
+    vi.stubEnv(env, " ");
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
+    const fetch = mcpFetch(state, official.endpoint);
+    vi.stubGlobal("fetch", fetch);
+    const providerFor = vi.fn().mockResolvedValue(undefined);
+    const findMany = vi
+      .fn()
+      .mockResolvedValue([
+        { ...ASSIGNMENT, server: { ...SERVER, ...official, slug: name.toLowerCase() } },
+      ]);
+    const load = vi.fn();
+    const connector = new McpConnector(
+      { botMcpServer: { findMany } } as never,
+      { load } as never,
+      { network: TEST_NETWORK },
+      { providerFor } as never,
+    );
+    const scoped = { ...context, botId: ASSIGNMENT.botId };
+    try {
+      await expect(connector.discoverTools(scoped as never)).resolves.toEqual([]);
+      expect(fetch).not.toHaveBeenCalled();
+      expect(providerFor).not.toHaveBeenCalled();
+      vi.stubEnv(env, "platform-service-key");
+      await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
+        expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
+      ]);
+      expect(
+        state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),
+      ).toBe(true);
+      expect(load).not.toHaveBeenCalled();
+      expect(findMany).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: {
+            botId: scoped.botId,
+            spaceId: scoped.spaceId,
+            userId: scoped.userId,
+            server: { enabled: true },
+          },
+        }),
+      );
+    } finally {
+      await connector.close();
+    }
+  });
+});
+
+describe("first-party product OIDC MCP connection", () => {
+  const endpoint = "https://crm.example.test/mcp";
+  const context = {
+    spaceId: "w1",
+    userId: "u1",
+    botId: "bot-1",
+    signal: new AbortController().signal,
+  };
+  it("limits the existing endpoint configuration to a credential-free HTTPS resource", () => {
+    expect(firstPartyMcpUrl(undefined)).toBeUndefined();
+    expect(firstPartyMcpUrl(` ${endpoint} `)).toBe(endpoint);
+    for (const url of [
+      "http://crm.example.test/mcp",
+      `${endpoint}?x=1`,
+      `${endpoint}#x`,
+      `${endpoint}?`,
+      `${endpoint}#`,
+      "https://user:secret@crm.example.test/mcp",
+    ])
+      expect(() => firstPartyMcpUrl(url)).toThrow();
+  });
+  it.each(["other endpoint", "personal secret", "no assignment"])(
+    "does not bridge %s or grant access",
+    async (kind) => {
+      const state = { failNext: false, initializations: 0 };
+      const server = {
+        ...SERVER,
+        endpoint: kind === "other endpoint" ? `${endpoint}/other` : endpoint,
+        secretId: kind === "personal secret" ? "personal-secret" : null,
+      };
+      vi.stubGlobal("fetch", mcpFetch(state, server.endpoint));
+      const accessToken = vi.fn().mockRejectedValue(new Error("Must not access product token"));
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue(kind === "no assignment" ? [] : [{ ...ASSIGNMENT, server }]),
+          },
+          secret: { findFirst: vi.fn().mockResolvedValue(null) },
+        } as never,
+        {} as never,
+        { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+      );
+      try {
+        await connector.discoverTools(context as never);
+        expect(accessToken).not.toHaveBeenCalled();
+      } finally {
+        await connector.close();
+      }
+    },
+  );
+  it("does not retain a completed run's cancellation signal and denies revoked identity before another dispatch", async () => {
+    const state = { failNext: false, initializations: 0, calls: [] as string[] };
+    vi.stubGlobal("fetch", mcpFetch(state, endpoint));
+    let revoked = false;
+    const accessToken = vi.fn(async (actor: typeof context) => {
+      expect(actor.signal.aborted).toBe(false);
+      if (revoked) throw new IsolationError("CRM identity disconnected");
+      return "current-access";
+    });
+    const server = { ...SERVER, endpoint };
+    const row = { ...ASSIGNMENT, server };
+    const connector = new McpConnector(
+      {
+        botMcpServer: {
+          findMany: vi.fn().mockResolvedValue([row]),
+          findFirst: vi.fn().mockResolvedValue(row),
+        },
+      } as never,
+      {} as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+    );
+    const firstRun = new AbortController();
+    const call = {
+      tool: "mcp__demo__echo",
+      executionId: "first-party",
+      args: {},
+      route: {
+        connectorId: "mcp",
+        resourceId: server.id,
+        resourceRevision: server.revision,
+        toolName: "echo",
+      },
+    };
+    try {
+      expect(
+        await connector.discoverTools({ ...context, signal: firstRun.signal } as never),
+      ).toHaveLength(1);
+      firstRun.abort();
+      const before = [];
+      for await (const event of connector.execute(call, context as never)) before.push(event);
+      expect(before.at(-1)).toMatchObject({ type: "result" });
+      expect(state.initializations).toBe(1);
+      revoked = true;
+      const after = [];
+      for await (const event of connector.execute(call, context as never)) after.push(event);
+      expect(after.at(-1)).toMatchObject({ type: "error" });
+      expect(state.calls).toEqual(["echo"]);
+    } finally {
+      await connector.close();
+    }
+  });
+  it("uses the current caller token on every native request and refreshes the precise rejected bearer once", async () => {
+    const state = {
+      failNext: false,
+      initializations: 0,
+      headers: [] as Record<string, string>[],
+      calls: [] as string[],
+      callResult: { content: [{ type: "text", text: "first-access rotated-access" }] },
+    };
+    const native = mcpFetch(state, endpoint);
+    let reject = false;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (reject && request.headers.get("authorization") === "Bearer first-access") {
+          reject = false;
+          return new Response(null, { status: 401 });
+        }
+        return native(input, init);
+      }),
+    );
+    let token = "first-access";
+    const accessToken = vi.fn(async (actor: typeof context, rejected?: string) => {
+      expect(actor.userId).toBe(context.userId);
+      expect(actor.spaceId).toBe(context.spaceId);
+      if (rejected) {
+        expect(rejected).toBe("first-access");
+        token = "rotated-access";
+      }
+      return token;
+    });
+    const server = { ...SERVER, endpoint };
+    const row = { ...ASSIGNMENT, server };
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn().mockResolvedValue([row]),
+        findFirst: vi.fn().mockResolvedValue(row),
+      },
+    };
+    const put = vi.fn();
+    const providerFor = vi.fn();
+    const connector = new McpConnector(
+      prisma as never,
+      { put } as never,
+      { network: TEST_NETWORK, firstParty: { endpoint, accessToken } },
+      { providerFor } as never,
+    );
+    try {
+      expect(await connector.discoverTools(context as never)).toHaveLength(1);
+      const before = accessToken.mock.calls.length;
+      reject = true;
+      const events = [];
+      for await (const event of connector.execute(
+        {
+          tool: "mcp__demo__echo",
+          executionId: "first-party",
+          args: {},
+          route: {
+            connectorId: "mcp",
+            resourceId: server.id,
+            resourceRevision: server.revision,
+            toolName: "echo",
+          },
+        },
+        context as never,
+      ))
+        events.push(event);
+      expect(events.at(-1)).toMatchObject({ type: "result" });
+      expect(JSON.stringify(events)).not.toContain("first-access");
+      expect(JSON.stringify(events)).not.toContain("rotated-access");
+      expect(accessToken.mock.calls.length).toBeGreaterThan(before);
+      expect(accessToken.mock.calls.filter(([, rejected]) => rejected !== undefined)).toHaveLength(
+        1,
+      );
+      expect(
+        state.headers.some((headers) => headers.authorization === "Bearer rotated-access"),
+      ).toBe(true);
+      expect(providerFor).not.toHaveBeenCalled();
+      expect(put).not.toHaveBeenCalled();
+    } finally {
+      await connector.close();
+    }
   });
 });

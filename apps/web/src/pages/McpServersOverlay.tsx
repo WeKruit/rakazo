@@ -1,6 +1,7 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Bot, BotMcpServer, McpServer, McpTransport } from "@rakazo/contracts";
+import { McpOAuthConfigInput } from "@rakazo/contracts";
 import { deriveMcpSlug } from "@rakazo/core";
 import {
   Badge,
@@ -9,6 +10,7 @@ import {
   CardContent,
   CardHeader,
   CardTitle,
+  Checkbox,
   Dialog,
   DialogClose,
   DialogContent,
@@ -22,6 +24,7 @@ import {
   Tabs,
   TabsList,
   TabsTrigger,
+  Textarea,
 } from "@rakazo/ui-web";
 import { Check, X } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -43,6 +46,8 @@ function oauthActionLabel(server: McpServer, pending: boolean): string {
 export function McpServersOverlay({ onClose }: { onClose: () => void }) {
   const { t } = useLingui();
   const [servers, setServers] = useState<McpServer[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [bots, setBots] = useState<Bot[]>([]);
   const [botAssignments, setBotAssignments] = useState<Record<string, BotMcpServer[]>>({});
   const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
@@ -57,29 +62,39 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
   const [args, setArgs] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingAccess, setSavingAccess] = useState(false);
   const [oauthPending, setOauthPending] = useState<string | null>(null);
 
   async function refresh() {
-    const [nextServers, nextBots, assignments] = await Promise.all([
-      rpc.mcp.servers.list(),
-      rpc.bots.list(),
-      rpc.mcp.assignments.all(),
-    ]);
-    const activeBots = nextBots.filter((bot) => !bot.archivedAt);
-    setServers(nextServers);
-    setBots(activeBots);
-    setBotAssignments(
-      Object.fromEntries(
-        activeBots.map((bot) => [
-          bot.id,
-          assignments.filter((assignment) => assignment.botId === bot.id),
-        ]),
-      ),
-    );
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const [nextServers, nextBots, assignments] = await Promise.all([
+        rpc.mcp.servers.list(),
+        rpc.bots.list(),
+        rpc.mcp.assignments.all(),
+      ]);
+      const activeBots = nextBots.filter((bot) => !bot.archivedAt);
+      setServers(nextServers);
+      setBots(activeBots);
+      setBotAssignments(
+        Object.fromEntries(
+          activeBots.map((bot) => [
+            bot.id,
+            assignments.filter((assignment) => assignment.botId === bot.id),
+          ]),
+        ),
+      );
+    } catch (err) {
+      setLoadError(errorText(err, t`Could not load MCP servers`));
+      throw err;
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
-    void refresh().catch((err: unknown) => setError(errorText(err, t`Could not load MCP servers`)));
+    void refresh().catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -172,11 +187,33 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
     }
   }
 
-  async function connectOAuth(server: McpServer) {
+  async function connectOAuth(server: McpServer, form: HTMLFormElement) {
     setError(null);
+    const fields = new FormData(form);
+    const clientId = String(fields.get("clientId") ?? "").trim();
+    const clientSecret = String(fields.get("clientSecret") ?? "");
+    const scopes = String(fields.get("scopes") ?? "").trim();
+    const params = String(fields.get("authorizationParams") ?? "").trim();
+    const secretInput = form.elements.namedItem("clientSecret");
+    if (secretInput instanceof HTMLInputElement) secretInput.value = "";
+    const configured = clientId || clientSecret || scopes || params;
+    const parsed = configured
+      ? McpOAuthConfigInput.safeParse({
+          clientId,
+          ...(clientSecret ? { clientSecret } : {}),
+          ...(scopes ? { scopes: scopes.split(/\s+/) } : {}),
+          ...(params
+            ? { authorizationParams: Object.fromEntries(new URLSearchParams(params)) }
+            : {}),
+        })
+      : undefined;
+    if (parsed && !parsed.success) {
+      setError(t`Check the OAuth client settings.`);
+      return;
+    }
     setOauthPending(server.id);
     try {
-      const result = await connectMcpOauth(server.id);
+      const result = await connectMcpOauth(server.id, parsed?.data);
       if (result !== "cancelled") setOauthPending(null);
       await refresh();
       if (result === "connected") return;
@@ -190,12 +227,15 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
       }
       setOauthPending((current) => (current === server.id ? null : current));
     } catch (err) {
-      setError(errorText(err, t`Could not start OAuth`));
+      const message = errorText(err, t`Could not start OAuth`);
+      setError(clientSecret ? message.split(clientSecret).join("[redacted]") : message);
       setOauthPending(null);
     }
   }
 
   async function toggleAssignment(server: McpServer, botId: string) {
+    if (saving || savingAccess) return;
+    setSavingAccess(true);
     setError(null);
     const current = botAssignments[botId] ?? [];
     const assigned = current.some((entry) => entry.serverId === server.id);
@@ -207,6 +247,36 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
       setBotAssignments((map) => ({ ...map, [botId]: updated }));
     } catch (err) {
       setError(errorText(err, t`Could not update agent access`));
+    } finally {
+      setSavingAccess(false);
+    }
+  }
+
+  async function saveToolAccess(serverId: string, botId: string, form: HTMLFormElement) {
+    if (saving || savingAccess) return;
+    const values = new FormData(form);
+    const current = botAssignments[botId] ?? [];
+    const allowedTools = [
+      ...new Set(
+        String(values.get("allowedTools") ?? "")
+          .split(/\r?\n/)
+          .map((tool) => tool.trim())
+          .filter(Boolean),
+      ),
+    ];
+    const access = { serverId, allowAllTools: values.has("allowAllTools"), allowedTools };
+    const assignments = current.some((entry) => entry.serverId === serverId)
+      ? current.map((entry) => (entry.serverId === serverId ? { ...entry, ...access } : entry))
+      : [...current, access];
+    setSavingAccess(true);
+    setError(null);
+    try {
+      const updated = await rpc.mcp.assignments.replace({ botId, assignments });
+      setBotAssignments((map) => ({ ...map, [botId]: updated }));
+    } catch (err) {
+      setError(errorText(err, t`Could not update agent access`));
+    } finally {
+      setSavingAccess(false);
     }
   }
 
@@ -259,12 +329,12 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
             <X />
           </DialogClose>
         </DialogHeader>
-        {error ? (
+        {error || loadError ? (
           <p
             role="alert"
             className="mx-6 mt-5 rounded-xl border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive"
           >
-            {error}
+            {error ?? loadError}
           </p>
         ) : null}
         <div className="rk-scroll grid min-h-0 grid-cols-1 gap-5 overflow-y-auto p-6 lg:grid-cols-2">
@@ -408,7 +478,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
               <Button
                 type="button"
                 className="mt-5 w-full"
-                disabled={saving}
+                disabled={saving || savingAccess}
                 onClick={() => void addServer()}
               >
                 {saving ? <Trans>Adding…</Trans> : <Trans>Add server</Trans>}
@@ -420,7 +490,11 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
               <Trans>Configured servers</Trans>
             </h2>
             <div className="mt-3 space-y-2">
-              {servers.length === 0 ? (
+              {loading && servers.length === 0 ? (
+                <p role="status" className="p-5 text-sm text-muted-foreground">
+                  <Trans>Loading…</Trans>
+                </p>
+              ) : servers.length === 0 && !loadError ? (
                 <p className="rounded-xl border border-dashed border-border p-5 text-sm text-muted-foreground">
                   <Trans>No MCP servers yet.</Trans>
                 </p>
@@ -462,6 +536,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                                 size="xs"
                                 className="rounded-full"
                                 aria-pressed={assigned}
+                                disabled={saving || savingAccess}
                                 onClick={() => void toggleAssignment(server, bot.id)}
                               >
                                 {assigned ? <Check aria-hidden="true" /> : null}
@@ -470,15 +545,113 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                             );
                           })}
                         </div>
+                        {bots.length > 0 ? (
+                          <details className="mt-3 text-sm">
+                            <summary className="cursor-pointer text-muted-foreground">
+                              <Trans>Tool access</Trans>
+                            </summary>
+                            {bots.map((bot) => {
+                              const assignment = (botAssignments[bot.id] ?? []).find(
+                                (entry) => entry.serverId === server.id,
+                              );
+                              return (
+                                <form
+                                  key={`${bot.id}-${assignment?.allowAllTools}-${JSON.stringify(assignment?.allowedTools)}`}
+                                  aria-label={`${server.name} · ${bot.name}`}
+                                  className="mt-3 space-y-2"
+                                  onSubmit={(event) => {
+                                    event.preventDefault();
+                                    void saveToolAccess(server.id, bot.id, event.currentTarget);
+                                  }}
+                                >
+                                  <div className="font-medium">{bot.name}</div>
+                                  <div className="flex items-center gap-2">
+                                    <Checkbox
+                                      id={`mcp-all-${server.id}-${bot.id}`}
+                                      name="allowAllTools"
+                                      defaultChecked={assignment?.allowAllTools ?? false}
+                                      disabled={saving || savingAccess}
+                                    />
+                                    <FieldLabel htmlFor={`mcp-all-${server.id}-${bot.id}`}>
+                                      <Trans>All tools</Trans>
+                                    </FieldLabel>
+                                  </div>
+                                  <FieldLabel htmlFor={`mcp-tools-${server.id}-${bot.id}`}>
+                                    <Trans>Allowed tools</Trans>
+                                  </FieldLabel>
+                                  <Textarea
+                                    id={`mcp-tools-${server.id}-${bot.id}`}
+                                    name="allowedTools"
+                                    defaultValue={(assignment?.allowedTools ?? []).join("\n")}
+                                    placeholder={t`One tool per line. Empty means no tools.`}
+                                    disabled={saving || savingAccess}
+                                  />
+                                  <Button
+                                    type="submit"
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={saving || savingAccess}
+                                  >
+                                    <Trans>Save</Trans>
+                                  </Button>
+                                </form>
+                              );
+                            })}
+                          </details>
+                        ) : null}
                         <div className="mt-3 flex flex-wrap gap-2">
                           {server.transport !== "stdio" ? (
-                            <>
-                              <Button
-                                type="button"
-                                size="sm"
-                                disabled={oauthPending === server.id}
-                                onClick={() => void connectOAuth(server)}
-                              >
+                            <form
+                              aria-label={`${server.name} OAuth`}
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                void connectOAuth(server, event.currentTarget);
+                              }}
+                              className="space-y-3"
+                            >
+                              <details className="text-sm">
+                                <summary className="cursor-pointer">
+                                  <Trans>Advanced OAuth</Trans>
+                                </summary>
+                                <div className="mt-3 space-y-3">
+                                  <label className="block" htmlFor={`oauth-client-${server.id}`}>
+                                    <Trans>Client ID</Trans>
+                                    <Input
+                                      id={`oauth-client-${server.id}`}
+                                      name="clientId"
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                  <label className="block" htmlFor={`oauth-secret-${server.id}`}>
+                                    <Trans>Client secret</Trans>
+                                    <Input
+                                      name="clientSecret"
+                                      id={`oauth-secret-${server.id}`}
+                                      type="password"
+                                      autoComplete="new-password"
+                                    />
+                                  </label>
+                                  <label className="block" htmlFor={`oauth-scopes-${server.id}`}>
+                                    <Trans>Scopes</Trans>
+                                    <Input
+                                      name="scopes"
+                                      id={`oauth-scopes-${server.id}`}
+                                      placeholder={t`Space-separated scopes`}
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                  <label className="block" htmlFor={`oauth-params-${server.id}`}>
+                                    <Trans>Authorization parameters</Trans>
+                                    <Input
+                                      name="authorizationParams"
+                                      id={`oauth-params-${server.id}`}
+                                      placeholder="access_type=offline&prompt=consent"
+                                      autoComplete="off"
+                                    />
+                                  </label>
+                                </div>
+                              </details>
+                              <Button type="submit" size="sm" disabled={oauthPending === server.id}>
                                 {oauthActionLabel(server, oauthPending === server.id)}
                               </Button>
                               {server.oauthStatus !== "none" ? (
@@ -492,7 +665,7 @@ export function McpServersOverlay({ onClose }: { onClose: () => void }) {
                                   <Trans>Disconnect</Trans>
                                 </Button>
                               ) : null}
-                            </>
+                            </form>
                           ) : null}
                           <Button
                             type="button"

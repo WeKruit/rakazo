@@ -1,8 +1,11 @@
+import { EventEmitter } from "node:events";
+import type { PoolClient } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDb,
   createPool,
   isTooManyDatabaseConnections,
+  Prisma,
   parsePositiveInteger,
   retryOnTooManyConnections,
 } from "./client.js";
@@ -14,6 +17,37 @@ afterEach(async () => {
 });
 
 describe("createDb", () => {
+  it("admits a bounded remote checkout once while preserving the snapshot transaction", async () => {
+    const { prisma, pool } = createDb("postgres://rakazo:rakazo@127.0.0.1:9/rakazo");
+    pools.push(pool);
+    const client = Object.assign(new EventEmitter(), {
+      query: vi.fn(async (_query: { text: string }) => ({ rows: [], fields: [], rowCount: 0 })),
+      release: vi.fn(),
+    });
+    const ready = new Promise<PoolClient>((resolve) =>
+      setTimeout(() => resolve(client as unknown as PoolClient), 2_500),
+    );
+    const checkout = vi.spyOn(pool, "connect").mockImplementation(() => ready);
+    const read = vi.fn(async () => "snapshot");
+    try {
+      await expect(
+        prisma.$transaction(read, {
+          isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
+        }),
+      ).resolves.toBe("snapshot");
+      expect(checkout).toHaveBeenCalledOnce();
+      expect(read).toHaveBeenCalledOnce();
+      expect(client.query.mock.calls.map(([query]) => query.text)).toEqual([
+        "BEGIN",
+        "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ",
+        "COMMIT",
+      ]);
+      expect(client.release).toHaveBeenCalledOnce();
+    } finally {
+      await ready;
+      await prisma.$disconnect();
+    }
+  });
   it("caps the pg pool and swallows idle-client errors so they cannot crash the process", () => {
     const { pool } = createDb("postgres://rakazo:rakazo@127.0.0.1:9/rakazo", {
       poolMax: 3,

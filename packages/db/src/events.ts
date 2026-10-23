@@ -1,11 +1,20 @@
+import { createHash } from "node:crypto";
 import type { RealtimeFanout } from "@rakazo/adapter-kit";
-import type { BotSecretDestination, MessageBlock, ProductEvent } from "@rakazo/contracts";
+import type {
+  AskAnswer,
+  AskFormResponse,
+  BotSecretDestination,
+  MessageBlock,
+  ProductEvent,
+} from "@rakazo/contracts";
 import {
   encodeLoginSecret,
   LoginSecretValue,
   MessageBlock as MessageBlockSchema,
+  parseAskFormResponse,
 } from "@rakazo/contracts";
 import {
+  askFormAnswerText,
   blocksToAgentHistoryText,
   callIdFromClientNonce,
   isApprovalAskBlock,
@@ -15,6 +24,7 @@ import {
   resolveAskChoice,
   sanitizeJsonValue,
 } from "@rakazo/core";
+import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { getLogger } from "@rakazo/logging";
 import { cancelRunsInTransaction } from "./cancel-runs.js";
 import type { Prisma, PrismaClient } from "./client.js";
@@ -25,11 +35,22 @@ import {
   createThreadMessageInTransaction,
   RunHistoryWriteError,
 } from "./messages.js";
+import type { RecruitingQuestionPauseContext } from "./recruiting.js";
+import {
+  authorizeRecruitingApprovalAnswerInTransaction,
+  authorizeRecruitingFeedbackMessage,
+  authorizeRecruitingQuestionAnswerInTransaction,
+  commitRecruitingQuestionInTransaction,
+  prepareRecruitingQuestionInTransaction,
+} from "./recruiting.js";
+import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 const EVENT_BATCH_SIZE = 200;
 const PUSH_CATCH_UP_MS = 30_000;
 const POLL_ONLY_CATCH_UP_MS = 400;
+// ponytail: process-local per-client/thread backpressure; DB row locks remain the cross-process authority.
+const appendTails = new WeakMap<PrismaClient, Map<string, Promise<void>>>();
 
 export interface AppendEventInput {
   spaceId: string;
@@ -136,11 +157,15 @@ export interface PauseRunForInput {
   leaseOwner: string;
   leaseFence: number;
   blocks: MessageBlock[];
+  /** Server-owned replay binding; reuse its pending native card without rewriting it. */
+  existingApprovalEffectId?: string;
   /**
    * Unredacted choice actions for resume. Persisted only on the run checkpoint
    * (not in message blocks) so clients still see redacted labels.
    */
   offeredActions?: Array<{ id: string; label: string }>;
+  /** Server-owned native question binding; model tool arguments never supply this context. */
+  recruitingQuestion?: RecruitingQuestionPauseContext;
 }
 
 const CHOICE_ASK_CHECKPOINT_KIND = "choice_ask_v1";
@@ -172,18 +197,16 @@ function resumeChoiceLabel(
 }
 
 /**
- * A conversational run's request and earlier answers stay in thread history, so its resumed
- * attempt gets just the answer. A background run's prompt never reaches the thread, so it keeps
- * its instructions and every earlier answer; otherwise the resumed attempt forgets them.
+ * Keep authoritative task state, including resolved private choice labels. The
+ * executor separately projects native goals/questions/answers into conversation turns.
  */
 function resumePrompt(
   run: { trigger: string; task?: { prompt: string } | null },
   question: string,
   answer: string,
 ): string {
-  if (isConversationalRun(run.trigger)) return answer;
-  return [run.task?.prompt.trim(), `${question.trim()}\nAnswer: ${answer}`]
-    .filter(Boolean)
+  return [run.task?.prompt, `${question}\nAnswer: ${answer}`]
+    .filter((part) => part?.trim())
     .join("\n\n");
 }
 
@@ -206,7 +229,9 @@ export interface AnswerRunInput {
   runId: string;
   messageId: string;
   answeredByUserId: string;
-  answer: string;
+  answer: AskAnswer;
+  /** Server-only: an authenticated composer message already created in this transaction. */
+  answerMessageId?: string;
   /** Identifies a spoken answer as part of a live voice call. */
   clientNonce?: string;
   /** Only for a login card; `answer` carries its password. */
@@ -227,7 +252,14 @@ export interface SendUserMessageInput {
   createRun?: boolean;
   /** When true, start a new run even if the bot is already busy (team-chat delivery). */
   allowParallelRun?: boolean;
-  /** Model every routine in an inbound delivery agreed on. */
+  /** Server-only: recheck and claim this saved event routine in the message transaction. */
+  routineEvent?: {
+    routineId: string;
+    source: "webhook" | "github" | "messaging";
+    provider?: string;
+    webhookSecretId?: string;
+  };
+  /** Model pinned by a native inbound sender. */
   modelPin?: {
     modelProvider: string;
     modelId: string;
@@ -240,6 +272,8 @@ export interface SendUserMessageResult {
   seq: number;
   taskId: string | null;
   runId: string | null;
+  /** An event routine's durable receipt already existed; do not enqueue it again. */
+  replayed?: true;
 }
 
 export interface RunSecretWriter {
@@ -373,27 +407,42 @@ export async function sendUserMessage(
   input: SendUserMessageInput,
   realtime?: RealtimeFanout,
 ): Promise<SendUserMessageResult> {
-  const replay = async (): Promise<SendUserMessageResult | null> => {
+  const replay = async (
+    db: Pick<PrismaClient, "message" | "run"> = prisma,
+  ): Promise<SendUserMessageResult | null> => {
     if (!input.clientNonce) return null;
-    const message = await prisma.message.findUnique({
-      where: {
-        threadId_clientNonce: {
-          threadId: input.threadId,
-          clientNonce: input.clientNonce,
-        },
-      },
-      include: { sourceRuns: { orderBy: { createdAt: "asc" }, take: 1 } },
-    });
+    const include = { sourceRuns: { orderBy: { createdAt: "asc" as const }, take: 1 } };
+    const message = input.routineEvent
+      ? await db.message.findFirst({
+          where: {
+            clientNonce: input.clientNonce,
+            sourceRuns: {
+              some: {
+                routineId: input.routineEvent.routineId,
+                spaceId: input.spaceId,
+                botId: input.botId,
+                userId: input.userId,
+              },
+            },
+          },
+          include,
+        })
+      : await db.message.findUnique({
+          where: {
+            threadId_clientNonce: { threadId: input.threadId, clientNonce: input.clientNonce },
+          },
+          include,
+        });
     if (!message) return null;
     const created = message.sourceRuns[0];
     const run =
-      created ??
-      (message.runId ? await prisma.run.findUnique({ where: { id: message.runId } }) : null);
+      created ?? (message.runId ? await db.run.findUnique({ where: { id: message.runId } }) : null);
     return {
       messageId: message.id,
       seq: message.seq,
       taskId: created?.taskId ?? null,
       runId: run?.id ?? null,
+      ...(input.routineEvent ? { replayed: true as const } : {}),
     };
   };
   const existing = await replay();
@@ -401,6 +450,90 @@ export async function sendUserMessage(
 
   const commit = () =>
     prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      let modelPin = input.modelPin;
+      if (input.routineEvent) {
+        const routineEvent = input.routineEvent;
+        if (
+          input.trigger !== "webhook" ||
+          input.createRun === false ||
+          (routineEvent.source === "messaging"
+            ? !routineEvent.provider
+            : !routineEvent.webhookSecretId)
+        )
+          throw new IsolationError();
+        // Group edits lock the group before its thread; keep membership valid through admission.
+        await tx.$queryRaw`SELECT id FROM chat_groups WHERE id = (SELECT "groupId" FROM threads WHERE id = ${input.threadId}) FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+        const thread = await tx.thread.findFirst({
+          where: {
+            id: input.threadId,
+            spaceId: input.spaceId,
+            userId: input.userId,
+            OR: [
+              { botId: input.botId },
+              { group: { archivedAt: null, members: { some: { botId: input.botId } } } },
+              {
+                externalConversation: {
+                  botId: input.botId,
+                  spaceId: input.spaceId,
+                  userId: input.userId,
+                },
+              },
+            ],
+          },
+          select: { id: true },
+        });
+        if (!thread) throw new IsolationError();
+        // Serialize nonce admission across saved-room changes as well as same-thread retries.
+        await tx.$queryRaw`SELECT id FROM routines WHERE id = ${routineEvent.routineId} FOR UPDATE`;
+        const winner = await replay(tx);
+        if (winner) return { replay: winner } as const;
+        const admitted = await tx.routine.updateMany({
+          where: {
+            id: routineEvent.routineId,
+            spaceId: input.spaceId,
+            botId: input.botId,
+            userId: input.userId,
+            active: true,
+            bot: {
+              archivedAt: null,
+              spaceId: input.spaceId,
+              userId: input.userId,
+              ...(routineEvent.source === "messaging"
+                ? {}
+                : { webhookSecretId: routineEvent.webhookSecretId }),
+            },
+            OR: [
+              { threadId: input.threadId },
+              {
+                threadId: null,
+                ...(routineEvent.source === "messaging"
+                  ? {}
+                  : { bot: { thread: { id: input.threadId } } }),
+              },
+            ],
+            ...(routineEvent.source === "messaging"
+              ? { messageProvider: routineEvent.provider }
+              : routineEvent.source === "github"
+                ? { githubEnabled: true }
+                : { webhookEnabled: true }),
+          },
+          data: { lastRunAt: new Date() },
+        });
+        if (admitted.count !== 1) throw new IsolationError();
+        const routine = await tx.routine.findUniqueOrThrow({
+          where: { id: routineEvent.routineId },
+          select: { modelProvider: true, modelId: true, thinkingLevel: true },
+        });
+        modelPin =
+          routine.modelProvider && routine.modelId
+            ? {
+                modelProvider: routine.modelProvider,
+                modelId: routine.modelId,
+                thinkingLevel: routine.thinkingLevel,
+              }
+            : undefined;
+      }
       // Message first: its thread-row lock serializes the whole send against clearThread, so a
       // concurrent clear either sees the committed run and cancels it, or strictly precedes this
       // transaction. Created in separate transactions, the run could land inside the clear's
@@ -412,12 +545,23 @@ export async function sendUserMessage(
         blocks: input.blocks,
         clientNonce: input.clientNonce,
       });
+      for (const block of input.blocks) {
+        if (block.kind !== "text" || !block.recruitingFeedback) continue;
+        if (input.trigger !== "follow_up") throw new IsolationError();
+        await authorizeRecruitingFeedbackMessage(
+          tx,
+          { spaceId: input.spaceId, userId: input.userId, email: "", isDeploymentOwner: false },
+          input.threadId,
+          block.recruitingFeedback,
+          message.id,
+        );
+      }
       const createRun = input.createRun !== false;
       // Include the creation intro. It has no tools, so it must not absorb the message, and a
       // second run would overlap it on a dedicated computer. Pending steering waits for the
       // continuation that starts when the intro finishes.
       const activeRuns =
-        createRun && !input.allowParallelRun
+        createRun && !input.allowParallelRun && !input.routineEvent
           ? await tx.run.findMany({
               where: {
                 threadId: input.threadId,
@@ -456,11 +600,12 @@ export async function sendUserMessage(
             trigger: input.trigger,
             clientNonce: input.clientNonce ? `send:${message.id}` : undefined,
             sourceMessageId: message.id,
-            ...(input.modelPin
+            routineId: input.routineEvent?.routineId,
+            ...(modelPin
               ? {
-                  modelProvider: input.modelPin.modelProvider,
-                  modelId: input.modelPin.modelId,
-                  thinkingLevel: input.modelPin.thinkingLevel,
+                  modelProvider: modelPin.modelProvider,
+                  modelId: modelPin.modelId,
+                  thinkingLevel: modelPin.thinkingLevel,
                   modelPinned: true,
                 }
               : {}),
@@ -512,7 +657,7 @@ export async function sendUserMessage(
     if (winner) return { replay: winner } as const;
     throw error;
   });
-  if ("replay" in committed) return committed.replay;
+  if (committed.replay) return committed.replay;
   await notifyRealtime(realtime, input.threadId, committed.event.seq).catch((error) => {
     // The event is durable; subscribers recover it from their persisted cursor.
     getLogger().error("user message realtime notification", error);
@@ -672,24 +817,37 @@ async function commitAnswerRunInput(
     (block) => block.kind === "ask" && block.status !== "answered",
   );
   if (pendingAsk?.kind !== "ask") return null;
+  let formResponse: AskFormResponse | undefined;
+  try {
+    if (pendingAsk.requestedSchema)
+      formResponse = parseAskFormResponse(pendingAsk.requestedSchema, input.answer);
+    else if (typeof input.answer !== "string") return null;
+  } catch {
+    return null;
+  }
+  const answerText = formResponse
+    ? askFormAnswerText(pendingAsk.requestedSchema!, formResponse)
+    : (input.answer as string);
+  // Composer/voice messages cannot stand in for a structured card submission.
+  if (formResponse && (input.answerMessageId || input.username || input.clientNonce)) return null;
   const approvalAsk = isApprovalAskBlock(pendingAsk);
   const secretAsk = isSecretAskBlock(pendingAsk);
   const choiceAsk = !approvalAsk && !secretAsk && Boolean(pendingAsk.actions?.length);
-  const selectedChoice = choiceAsk ? resolveAskChoice(input.answer, pendingAsk.actions) : undefined;
+  const selectedChoice = choiceAsk ? resolveAskChoice(answerText, pendingAsk.actions) : undefined;
   if (secretAsk && !runSecretWriter) return null;
   if (secretAsk && pendingAsk.credential && run.userId !== input.answeredByUserId) return null;
   const loginAsk = secretAsk && pendingAsk.credential?.auth.type === "login";
   // A username belongs only to a login card, which cannot be saved without one.
   if (loginAsk !== Boolean(input.username?.trim())) return null;
   const login = loginAsk
-    ? LoginSecretValue.safeParse({ username: input.username!.trim(), password: input.answer })
+    ? LoginSecretValue.safeParse({ username: input.username!.trim(), password: answerText })
     : undefined;
   if (login && !login.success) return null;
-  let approvalEffect: { id: string; kind: string } | null = null;
+  let approvalEffect: { id: string; kind: string; request: Prisma.JsonValue } | null = null;
   let approvalUserId: string | null = null;
 
   if (approvalAsk) {
-    if (!pendingAsk.actions?.some((action) => action.id === input.answer)) return null;
+    if (!pendingAsk.actions?.some((action) => action.id === answerText)) return null;
     approvalEffect = await tx.externalEffect.findFirst({
       where: {
         id: pendingAsk.approvalEffectId,
@@ -699,11 +857,58 @@ async function commitAnswerRunInput(
       },
     });
     if (!approvalEffect) return null;
-    if (input.answer === "always") {
+    if (
+      approvalEffect.kind === "recruiting_request_approval" &&
+      (answerText === "always" ||
+        (answerText === "allow" &&
+          !(await authorizeRecruitingApprovalAnswerInTransaction(
+            tx,
+            input,
+            approvalEffect.request,
+          ))))
+    )
+      return null;
+    if (answerText === "always") {
       if (run.userId !== input.answeredByUserId) return null;
       approvalUserId = input.answeredByUserId;
     }
   }
+
+  const ordinaryAsk = !approvalAsk && !secretAsk;
+  if (ordinaryAsk && !answerText.trim()) return null;
+  let answerMessageId = input.answerMessageId;
+  if (answerMessageId !== undefined) {
+    if (!ordinaryAsk) return null;
+    const answerMessage = await tx.message.findFirst({
+      where: { id: answerMessageId, threadId: input.threadId, role: "user", botId: null },
+      include: { externalTranscriptFor: { select: { id: true } } },
+    });
+    const answerBlocks = MessageBlockSchema.array().safeParse(answerMessage?.blocks);
+    if (
+      !answerMessage ||
+      answerMessage.threadId !== input.threadId ||
+      answerMessage.role !== "user" ||
+      answerMessage.botId !== null ||
+      answerMessage.externalTranscriptFor ||
+      !answerBlocks.success ||
+      answerBlocks.data.some((block) => !["text", "file", "image"].includes(block.kind)) ||
+      answerBlocks.data
+        .filter((block) => block.kind === "text")
+        .map((block) => block.text)
+        .join("\n") !== answerText
+    )
+      return null;
+  }
+
+  if (
+    !(await authorizeRecruitingQuestionAnswerInTransaction(
+      tx,
+      input,
+      message,
+      parsed.data.indexOf(pendingAsk),
+    ))
+  )
+    return null;
 
   const queued = await tx.run.updateMany({
     where: {
@@ -719,19 +924,24 @@ async function commitAnswerRunInput(
   });
   if (queued.count !== 1) return null;
 
-  const recordedAnswer = secretAsk ? "" : (selectedChoice?.id ?? input.answer);
+  const recordedAnswer = secretAsk ? "" : (selectedChoice?.id ?? answerText);
   const callId = callIdFromClientNonce(input.clientNonce);
   const recordsCallUtterance = Boolean(callId && !secretAsk);
 
-  // Give spoken answers the same durable, call-scoped user utterance as other voice turns.
-  // Secret asks stay out of message history; the call UI requires those answers on screen.
-  if (recordsCallUtterance) {
-    const blocks = [{ kind: "text" as const, text: input.answer }];
+  // Ordinary answers are native human messages; spoken approvals keep their existing call transcript.
+  // Secret asks stay out of message history.
+  if (!answerMessageId && (ordinaryAsk || recordsCallUtterance)) {
+    const blocks = [
+      {
+        kind: "text" as const,
+        text: ordinaryAsk ? (selectedChoice?.label ?? answerText) : answerText,
+      },
+    ];
     const utterance = await createThreadMessageInTransaction(tx, {
       threadId: input.threadId,
       role: "user",
       blocks,
-      botId: run.botId,
+      botId: ordinaryAsk ? undefined : run.botId,
       runId: input.runId,
       clientNonce: input.clientNonce,
     });
@@ -741,17 +951,18 @@ async function commitAnswerRunInput(
       botId: run.botId,
       type: "thread.message.created",
       runId: input.runId,
-      payload: { messageId: utterance.id, role: "user", blocks, callId },
+      payload: { messageId: utterance.id, role: "user", blocks, ...(callId ? { callId } : {}) },
     });
+    answerMessageId = utterance.id;
   }
 
   if (approvalAsk) {
-    const allowed = input.answer === "allow" || input.answer === "always";
+    const allowed = answerText === "allow" || answerText === "always";
     await tx.externalEffect.update({
       where: { id: approvalEffect!.id },
       data: { status: allowed ? "approved" : "denied" },
     });
-    if (input.answer === "always") {
+    if (answerText === "always") {
       await tx.actionApprovalRule.upsert({
         where: {
           spaceId_createdByUserId_effect_matchKind_matchValue: {
@@ -779,7 +990,7 @@ async function commitAnswerRunInput(
       runId: input.runId,
       userId: run.userId,
       spaceId: input.spaceId,
-      plaintext: login?.success ? encodeLoginSecret(login.data) : input.answer,
+      plaintext: login?.success ? encodeLoginSecret(login.data) : answerText,
       tx,
     });
     await tx.externalEffect.updateMany({
@@ -804,7 +1015,11 @@ async function commitAnswerRunInput(
         prompt: resumePrompt(
           run,
           pendingAsk.text,
-          selectedChoice ? `Selected choice ${selectedChoice.id}: ${resumeLabel}` : input.answer,
+          formResponse
+            ? JSON.stringify(formResponse)
+            : selectedChoice
+              ? `Selected choice ${selectedChoice.id}: ${resumeLabel}`
+              : answerText,
         ),
       },
     });
@@ -817,6 +1032,7 @@ async function commitAnswerRunInput(
           ...block,
           status: "answered" as const,
           answer: recordedAnswer,
+          ...(formResponse ? { formResponse } : {}),
         }
       : block,
   );
@@ -829,6 +1045,42 @@ async function commitAnswerRunInput(
     runId: input.runId,
     payload: { messageId: message.id, role: "bot", blocks },
   });
+  if (ordinaryAsk) {
+    const proof = await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: run.botId,
+      runId: input.runId,
+      type: "thread.choice",
+      payload: {
+        messageId: message.id,
+        askIndex: parsed.data.indexOf(pendingAsk),
+        answerMessageId: answerMessageId!,
+        answeredByUserId: input.answeredByUserId,
+      },
+    });
+    return { threadId: proof.threadId, seq: proof.seq };
+  }
+  if (approvalAsk) {
+    const proof = await appendEventInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      botId: run.botId,
+      runId: input.runId,
+      type: "effect.approval.answered",
+      payload: {
+        effectId: approvalEffect!.id,
+        messageId: message.id,
+        askIndex: parsed.data.indexOf(pendingAsk),
+        answeredByUserId: input.answeredByUserId,
+        answer: answerText,
+        requestHash: createHash("sha256")
+          .update(stableJsonValue(approvalEffect!.request))
+          .digest("hex"),
+      },
+    });
+    return { threadId: proof.threadId, seq: proof.seq };
+  }
   return { threadId: updated.threadId, seq: updated.seq };
 }
 
@@ -860,14 +1112,20 @@ export async function answerWaitingRunWithTextInTransaction(
     runId: string;
     answeredByUserId: string;
     answer: string;
+    /** Server-only native composer message, reused across the waiting runs it answers. */
+    answerMessageId?: string;
   },
 ): Promise<{ threadId: string; seq: number } | null> {
-  const answer = input.answer.trim();
-  if (!answer) return null;
+  if (!input.answer.trim()) return null;
   const found = await findPendingAsk(tx, input);
   if (!found) return null;
-  if (isApprovalAskBlock(found.pendingAsk) || isSecretAskBlock(found.pendingAsk)) return null;
-  return commitAnswerRunInput(tx, { ...input, messageId: found.messageId, answer });
+  if (
+    isApprovalAskBlock(found.pendingAsk) ||
+    isSecretAskBlock(found.pendingAsk) ||
+    found.pendingAsk.requestedSchema
+  )
+    return null;
+  return commitAnswerRunInput(tx, { ...input, messageId: found.messageId });
 }
 
 export async function pauseRunForInput(
@@ -875,10 +1133,88 @@ export async function pauseRunForInput(
   input: PauseRunForInput,
   realtime?: RealtimeFanout,
 ): Promise<boolean> {
+  // Validate the exact durable card before changing run/attempt state.
+  MessageBlockSchema.array().parse(input.blocks);
+  if (
+    input.existingApprovalEffectId !== undefined &&
+    (!input.existingApprovalEffectId.trim() ||
+      input.blocks.length ||
+      input.offeredActions?.length ||
+      input.recruitingQuestion)
+  )
+    return false;
   const committed = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     // Thread row first, then run rows — the same order as clearThread and finalizeRun, so a
     // concurrent clear cannot deadlock against this transaction.
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+    if (input.existingApprovalEffectId) {
+      await tx.$queryRaw`SELECT id FROM external_effects WHERE id = ${input.existingApprovalEffectId} FOR UPDATE`;
+      const effect = await tx.externalEffect.findFirst({
+        where: {
+          id: input.existingApprovalEffectId,
+          spaceId: input.spaceId,
+          runId: input.runId,
+          status: "intended",
+        },
+        select: { id: true, spaceId: true, runId: true, status: true },
+      });
+      if (
+        !effect ||
+        effect.id !== input.existingApprovalEffectId ||
+        effect.spaceId !== input.spaceId ||
+        effect.runId !== input.runId ||
+        effect.status !== "intended"
+      )
+        return null;
+      const cards = await tx.message.findMany({
+        where: {
+          threadId: input.threadId,
+          runId: input.runId,
+          botId: input.botId,
+          role: "bot",
+          blocks: { array_contains: [{ approvalEffectId: effect.id }] },
+        },
+        select: { id: true, threadId: true, runId: true, botId: true, role: true, blocks: true },
+        take: 2,
+      });
+      const message = cards.length === 1 ? cards[0] : undefined;
+      const parsed = MessageBlockSchema.array().safeParse(message?.blocks);
+      const asks = parsed.success
+        ? parsed.data.filter(
+            (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+          )
+        : [];
+      const ask = asks.length === 1 ? asks[0] : undefined;
+      if (
+        !message ||
+        message.threadId !== input.threadId ||
+        message.runId !== input.runId ||
+        message.botId !== input.botId ||
+        message.role !== "bot" ||
+        ask?.kind !== "ask" ||
+        ask.status !== "pending" ||
+        !isApprovalAskBlock(ask) ||
+        ask.input === "secret" ||
+        ask.credential
+      )
+        return null;
+      const answered = await tx.event.findFirst({
+        where: {
+          spaceId: input.spaceId,
+          threadId: input.threadId,
+          botId: input.botId,
+          runId: input.runId,
+          type: "effect.approval.answered",
+          payload: { path: ["effectId"], equals: effect.id },
+        },
+        select: { id: true },
+      });
+      if (answered) return null;
+    }
+    const question = input.recruitingQuestion
+      ? await prepareRecruitingQuestionInTransaction(tx, input)
+      : undefined;
+    if (question?.kind === "completed") return { threadId: input.threadId, seq: question.eventSeq };
     const paused = await tx.run.updateMany({
       where: {
         id: input.runId,
@@ -888,6 +1224,9 @@ export async function pauseRunForInput(
         status: "running",
         leaseOwner: input.leaseOwner,
         leaseFence: input.leaseFence,
+        ...(input.recruitingQuestion || input.existingApprovalEffectId
+          ? { leaseExpiresAt: { gt: new Date() } }
+          : {}),
       },
       data: {
         status: "waiting_input",
@@ -911,22 +1250,28 @@ export async function pauseRunForInput(
     });
     if (attempt.count !== 1) throw new Error("Active run attempt was not available to pause");
 
-    const message = await createThreadMessageInTransaction(tx, {
-      threadId: input.threadId,
-      role: "bot",
-      blocks: input.blocks,
-      botId: input.botId,
-      runId: input.runId,
-    });
-    await appendEventInTransaction(tx, {
-      spaceId: input.spaceId,
-      threadId: input.threadId,
-      botId: input.botId,
-      type: "thread.message.created",
-      runId: input.runId,
-      payload: { messageId: message.id, role: "bot", blocks: input.blocks },
-    });
-    const waitingEvent = await appendEventInTransaction(tx, {
+    const message = input.existingApprovalEffectId
+      ? null
+      : await createThreadMessageInTransaction(tx, {
+          threadId: input.threadId,
+          role: "bot",
+          blocks: input.blocks,
+          botId: input.botId,
+          runId: input.runId,
+          ...(question?.kind === "new"
+            ? { clientNonce: `recruiting-question:${question.effectId}` }
+            : {}),
+        });
+    if (message)
+      await appendEventInTransaction(tx, {
+        spaceId: input.spaceId,
+        threadId: input.threadId,
+        botId: input.botId,
+        type: "thread.message.created",
+        runId: input.runId,
+        payload: { messageId: message.id, role: "bot", blocks: input.blocks },
+      });
+    let waitingEvent = await appendEventInTransaction(tx, {
       spaceId: input.spaceId,
       threadId: input.threadId,
       botId: input.botId,
@@ -934,6 +1279,8 @@ export async function pauseRunForInput(
       runId: input.runId,
       payload: {},
     });
+    if (question?.kind === "new" && message)
+      waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
     await tx.event.deleteMany({ where: { runId: input.runId, type: "thread.progress" } });
     return { threadId: waitingEvent.threadId, seq: waitingEvent.seq };
   });
@@ -1144,13 +1491,31 @@ export async function appendEvent(
   input: AppendEventInput,
   realtime?: RealtimeFanout,
 ): Promise<ProductEvent> {
-  // Concurrent writers in one thread (group members, bot messages) can deadlock on the thread row.
-  const event = await withTransactionRetry(() =>
-    prisma.$transaction((tx: Prisma.TransactionClient) => appendEventInTransaction(tx, input)),
+  let tails = appendTails.get(prisma);
+  if (!tails) {
+    tails = new Map();
+    appendTails.set(prisma, tails);
+  }
+  const pending = (tails.get(input.threadId) ?? Promise.resolve()).then(async () => {
+    // Cross-process writers can still deadlock on the thread row.
+    const event = await withTransactionRetry(() =>
+      prisma.$transaction((tx: Prisma.TransactionClient) => appendEventInTransaction(tx, input)),
+    );
+    const productEvent = mapProductEvent(event);
+    await notifyRealtime(realtime, event.threadId, event.seq);
+    return productEvent;
+  });
+  const tail = pending.then(
+    () => undefined,
+    () => undefined,
   );
-  const productEvent = mapProductEvent(event);
-  await notifyRealtime(realtime, event.threadId, event.seq);
-  return productEvent;
+  tails.set(input.threadId, tail);
+  try {
+    return await pending;
+  } finally {
+    if (tails.get(input.threadId) === tail) tails.delete(input.threadId);
+    if (tails.size === 0) appendTails.delete(prisma);
+  }
 }
 
 export async function finalizeRun(
@@ -1471,7 +1836,9 @@ async function notifyRealtime(
   threadId: string,
   cursor: number,
 ): Promise<void> {
-  await realtime?.publish(threadTopic(threadId), JSON.stringify({ cursor })).catch(() => undefined);
+  await realtime?.publish(threadTopic(threadId), JSON.stringify({ cursor })).catch((error) => {
+    getLogger().error("thread.realtime.publish.failed", error, { threadId, cursor });
+  });
 }
 
 export async function eventsAfter(

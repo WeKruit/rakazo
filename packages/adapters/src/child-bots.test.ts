@@ -1651,6 +1651,11 @@ describe("archiveBot", () => {
   it("surfaces computer stop failures and leaves the provider state retryable", async () => {
     const archivedAt = new Date("2026-08-16T12:00:00.000Z");
     const updateComputer = vi.fn().mockResolvedValue({});
+    const updateBot = vi.fn().mockResolvedValue({});
+    const computerUpdate = {
+      create: vi.fn().mockResolvedValue({ id: "checkpoint-archive" }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
     const transaction = vi.fn(async (callback: (tx: unknown) => Promise<void>) =>
       callback({
         ...noGroupMemberships(),
@@ -1658,8 +1663,12 @@ describe("archiveBot", () => {
         task: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
         routine: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
         computerExecutionLease: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        computer: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
-        bot: { update: vi.fn().mockResolvedValue({}) },
+        computer: {
+          findUnique: vi.fn(async () => dedicated),
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        },
+        computerUpdate,
+        bot: { update: updateBot },
       }),
     );
     const dedicated = {
@@ -1678,6 +1687,7 @@ describe("archiveBot", () => {
       },
       run: { findMany: vi.fn().mockResolvedValue([]) },
       routine: { findMany: vi.fn().mockResolvedValue([]) },
+      computerUpdate,
       $transaction: transaction,
     } as unknown as PrismaClient;
     const sandbox = {
@@ -1703,6 +1713,15 @@ describe("archiveBot", () => {
 
     expect(stop).toHaveBeenCalledOnce();
     expect(updateComputer).not.toHaveBeenCalled();
+    expect(updateBot).toHaveBeenCalledWith({
+      where: { id: "bot-1" },
+      data: { archivedAt: expect.any(Date), pinned: false },
+    });
+    expect(computerUpdate.updateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: { status: "interrupted" },
+      }),
+    );
   });
 
   it("stops a provider that finishes booting while the bot is archived", async () => {
@@ -1716,6 +1735,10 @@ describe("archiveBot", () => {
       state: "booting",
     };
     const running = { ...booting, providerRef: "provider-1", state: "running" };
+    const computerUpdate = {
+      create: vi.fn().mockResolvedValue({ id: "checkpoint-archive" }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    };
     const transaction = vi.fn(async (callback: (tx: unknown) => Promise<void>) =>
       callback({
         ...noGroupMemberships(),
@@ -1723,7 +1746,8 @@ describe("archiveBot", () => {
         task: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
         routine: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
         computerExecutionLease: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
-        computer: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        computer: { findUnique: vi.fn(async () => booting), updateMany },
+        computerUpdate,
         bot: { update: vi.fn().mockResolvedValue({}) },
       }),
     );
@@ -1734,6 +1758,7 @@ describe("archiveBot", () => {
       },
       run: { findMany: vi.fn().mockResolvedValue([]) },
       routine: { findMany: vi.fn().mockResolvedValue([]) },
+      computerUpdate,
       $transaction: transaction,
     } as unknown as PrismaClient;
     const sandbox = {
@@ -1757,8 +1782,21 @@ describe("archiveBot", () => {
 
     expect(stop).toHaveBeenCalledOnce();
     expect(updateMany).toHaveBeenLastCalledWith({
-      where: { id: "computer-1", state: "running", providerRef: "provider-1" },
-      data: { state: "stopped" },
+      where: {
+        id: "computer-1",
+        state: "suspending",
+        providerRef: "provider-1",
+        maintenanceId: "checkpoint-archive",
+      },
+      data: {
+        state: "stopped",
+        maintenanceId: null,
+        controlHolder: "none",
+        controlLeaseId: null,
+        controlLeaseExpiresAt: null,
+        controlBotId: null,
+        controlRunId: null,
+      },
     });
   });
 

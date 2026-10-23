@@ -135,6 +135,7 @@ type CatalogModelRef = {
   label: string;
   providerName?: string;
   placeholder?: boolean;
+  deployment?: boolean;
 };
 
 type CredentialModelRef = {
@@ -238,6 +239,19 @@ export function connectedModelChoices(
       seen.add(choice.key);
       choices.push(choice);
     }
+  }
+  for (const entry of catalog) {
+    if (!entry.deployment || entry.placeholder) continue;
+    const modelId = resolveSelectableModelId(catalog, entry.provider, entry.id);
+    const key = modelOptionKey(entry.provider, modelId);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    choices.push({
+      key,
+      provider: entry.provider,
+      modelId,
+      label: `${entry.providerName ?? entry.provider} · ${entry.label}`,
+    });
   }
   return choices;
 }

@@ -1,33 +1,19 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
-import type {
-  AdapterContext,
-  ArtifactStore,
-  ComputerRef,
-  SandboxProvider,
-} from "@rakazo/adapter-kit";
-import type { ComputerMode, MessageBlock } from "@rakazo/contracts";
+import type { ArtifactStore } from "@rakazo/adapter-kit";
+import type { MessageBlock } from "@rakazo/contracts";
 import {
   ARTIFACT_DESCRIPTION_MAX_LENGTH,
   ARTIFACT_NAME_MAX_LENGTH,
   ATTACHMENT_MAX_BYTES,
 } from "@rakazo/contracts";
 import {
-  attachmentExtensionForMimeType,
   inferAttachmentMimeType,
   messageBlockForArtifact,
   validateAttachmentMimeType,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { withResolvedArtifactVersion } from "@rakazo/db";
-import { resolveBotWorkspacePath } from "./computer-support.js";
-
-export type MaterializedThreadFile = {
-  name: string;
-  mimeType: string;
-  size: number;
-  path: string;
-};
 
 export async function attachWorkspaceFileToThread(
   deps: {
@@ -108,78 +94,4 @@ export async function attachWorkspaceFileToThread(
       size: row.size,
     }),
   };
-}
-
-export async function materializeCurrentTurnFiles(
-  deps: {
-    prisma: PrismaClient;
-    artifacts: ArtifactStore;
-    sandbox: SandboxProvider;
-  },
-  blocks: MessageBlock[] | undefined,
-  input: {
-    context: AdapterContext & { botId: string };
-    computer: ComputerRef;
-    computerMode: ComputerMode;
-    markWorkspaceDirty?: () => void;
-  },
-): Promise<MaterializedThreadFile[]> {
-  // "image" attachments (e.g. a photo pasted or uploaded in chat) are backed
-  // by a real artifact exactly like "file" ones — the model seeing them
-  // inline for vision (loadCurrentTurnImages) doesn't put them on disk, so
-  // they must be included here too or a bot can describe a photo it can't
-  // actually attach, forward, or hand to a tool that needs the file.
-  const fileBlocks = blocks?.filter(
-    (block): block is Extract<MessageBlock, { kind: "file" | "image" }> =>
-      block.kind === "file" || block.kind === "image",
-  );
-  if (!fileBlocks?.length) return [];
-
-  const rows = await deps.prisma.artifact.findMany({
-    where: {
-      id: { in: fileBlocks.map((block) => block.artifactId) },
-      spaceId: input.context.spaceId,
-      userId: input.context.userId,
-    },
-  });
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  const materialized: MaterializedThreadFile[] = [];
-
-  for (const block of fileBlocks) {
-    const row = byId.get(block.artifactId);
-    if (!row) throw new Error(`Attached file is unavailable: ${block.name}`);
-    const bytes = await deps.artifacts.get(row.storageKey, input.context);
-    if (bytes.byteLength > ATTACHMENT_MAX_BYTES) {
-      throw new Error(`Attached file exceeds the 10 MiB limit: ${row.name}`);
-    }
-    const relativePath = `attachments/${row.id}${attachmentExtensionForMimeType(row.mimeType)}`;
-    input.markWorkspaceDirty?.();
-    await deps.sandbox.writeFile(
-      input.computer,
-      {
-        path: resolveBotWorkspacePath(input.computerMode, input.context.botId, relativePath),
-        content: bytes,
-      },
-      input.context,
-    );
-    materialized.push({
-      name: row.name,
-      mimeType: row.mimeType,
-      size: row.size,
-      path: relativePath,
-    });
-  }
-
-  return materialized;
-}
-
-export function currentTurnFilesInstruction(files: readonly MaterializedThreadFile[]): string {
-  if (!files.length) return "";
-  return [
-    "Current-turn attached files are available on your computer. Inspect them before answering:",
-    ...files.map(
-      (file) =>
-        `- ${JSON.stringify(file.name)} (${file.mimeType}, ${file.size} bytes): ${JSON.stringify(file.path)}`,
-    ),
-  ].join("\n");
 }

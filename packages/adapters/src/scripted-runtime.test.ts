@@ -214,6 +214,27 @@ describe("ScriptedAgentRuntime executionIds", () => {
 });
 
 describe("inferScript save_shared_memory", () => {
+  it("keeps both facts when remembering a second fact from the loaded document", () => {
+    const first = inferScript("remember fact A")[0]!.memory![0]!;
+    const second = inferScript("remember fact B", undefined, [{ ...first, revision: 1 }])[0]!
+      .memory![0]!;
+    expect(second.content).toContain("remember fact A");
+    expect(second.content).toContain("remember fact B");
+    expect(second.expectedRevision).toBe(1);
+  });
+  it("uses the target revision loaded before preparing the scripted replacement", () => {
+    const script = inferScript("save shared memory MEMORY.md with: Prepared text", undefined, [
+      { scope: "user", path: "MEMORY.md", revision: 4, content: "Prior text" },
+    ]);
+    expect(script[0]?.toolCalls?.[0]?.args.expectedRevision).toBe(4);
+  });
+
+  it("carries the loaded bot revision into scripted memory writes", () => {
+    const script = inferScript("remember this preference", undefined, [
+      { scope: "bot", path: "MEMORY.md", revision: 2, content: "Prior fact" },
+    ]);
+    expect(script[0]?.memory?.[0]?.expectedRevision).toBe(2);
+  });
   it("saves shared memory from the prompt", () => {
     expect(inferScript("save shared memory MEMORY.md with: Printing jobs go to Clyde.")).toEqual([
       {
@@ -221,7 +242,7 @@ describe("inferScript save_shared_memory", () => {
         toolCalls: [
           {
             name: "save_shared_memory",
-            args: { path: "MEMORY.md", content: "Printing jobs go to Clyde." },
+            args: { path: "MEMORY.md", content: "Printing jobs go to Clyde.", expectedRevision: 0 },
           },
         ],
         complete: true,
@@ -236,7 +257,7 @@ describe("inferScript save_shared_memory", () => {
         toolCalls: [
           {
             name: "save_shared_memory",
-            args: { path: "ROUTING.md", content: "Route print jobs." },
+            args: { path: "ROUTING.md", content: "Route print jobs.", expectedRevision: 0 },
           },
         ],
         complete: true,
@@ -251,7 +272,7 @@ describe("inferScript save_shared_memory", () => {
         toolCalls: [
           {
             name: "save_shared_memory",
-            args: { path: "MEMORY.md", content: "Team facts" },
+            args: { path: "MEMORY.md", content: "Team facts", expectedRevision: 0 },
           },
         ],
         complete: true,
@@ -265,6 +286,7 @@ describe("inferScript save_shared_memory", () => {
     expect(script?.[0]?.toolCalls?.[0]?.args).toEqual({
       path: "MEMORY.md",
       content: "Keep notes concise.",
+      expectedRevision: 0,
     });
   });
 
@@ -275,7 +297,7 @@ describe("inferScript save_shared_memory", () => {
         toolCalls: [
           {
             name: "save_shared_memory",
-            args: { path: "ROUTING.md", content: "Keep notes concise." },
+            args: { path: "ROUTING.md", content: "Keep notes concise.", expectedRevision: 0 },
           },
         ],
         complete: true,
@@ -290,7 +312,7 @@ describe("inferScript save_shared_memory", () => {
         toolCalls: [
           {
             name: "save_shared_memory",
-            args: { path: "MEMORY.md", content: "Team facts" },
+            args: { path: "MEMORY.md", content: "Team facts", expectedRevision: 0 },
           },
         ],
         complete: true,
@@ -305,7 +327,7 @@ describe("inferScript save_shared_memory", () => {
         toolCalls: [
           {
             name: "save_shared_memory",
-            args: { path: "ROUTING.md", content: "Team named Alice." },
+            args: { path: "ROUTING.md", content: "Team named Alice.", expectedRevision: 0 },
           },
         ],
         complete: true,

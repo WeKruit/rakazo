@@ -206,6 +206,18 @@ const visibleBlocks: Array<[MessageBlock, string]> = [
     { kind: "subagent", agentId: "agent", name: "Research", task: "Search", status: "running" },
     "Research",
   ],
+  [
+    {
+      kind: "subagent",
+      agentId: "agent",
+      name: "",
+      task: "Read internal role/source records",
+      progress: "using mcp__crm__list_candidates",
+      result: "Internal receipt artifact-123",
+      status: "running",
+    },
+    "Subagent",
+  ],
   [{ kind: "child_bot", botId: "child", name: "Helper", status: "created" }, "Helper"],
   [
     {

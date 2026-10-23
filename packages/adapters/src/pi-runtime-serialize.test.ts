@@ -23,4 +23,54 @@ describe("serializeToolResult", () => {
     const text = serializeToolResult({ output: "x".repeat(20_000) }, "current", "shell", {});
     expect(text.length).toBeLessThan(20_000);
   });
+
+  it.each(["current", "retrieval"] as const)(
+    "returns fresh research preparation context beyond 12k verbatim with %s",
+    (strategy) => {
+      const result = {
+        status: "prepared",
+        roleContext: "Exact role criteria and actual adopted preferences.\n".repeat(400),
+        contextArtifact: { artifactId: "context", sha256: "a".repeat(64) },
+      };
+      const text = serializeToolResult(result, strategy, "recruiting_research", {
+        operation: "prepare",
+      });
+      expect(text.length).toBeGreaterThan(12_000);
+      expect(JSON.parse(text)).toEqual(result);
+    },
+  );
+
+  it.each(["current", "retrieval"] as const)(
+    "returns complete assessment proof beyond 12k with %s",
+    (strategy) => {
+      const quote = "  Exact original material.\r\n".repeat(600);
+      const result = {
+        status: "current",
+        assessment: {
+          sourceRefs: [
+            {
+              id: "original",
+              readState: "read",
+              readAt: "2026-10-16T00:00:00.000Z",
+              quote,
+              selection: { kind: "message_text", blockIndex: 0, start: 0, end: quote.length },
+            },
+          ],
+          judgments: { employment: [] },
+        },
+      };
+      const text = serializeToolResult(result, strategy, "recruiting_assess", {
+        operation: "read",
+        candidateKey: "candidate",
+      });
+      expect(text.length).toBeGreaterThan(12_000);
+      expect(JSON.parse(text)).toEqual(result);
+    },
+  );
+
+  it("keeps unrelated MCP results bounded even when they contain a roleContext field", () => {
+    const result = { roleContext: "Untrusted provider text.\n".repeat(1000) };
+    const text = serializeToolResult(result, "retrieval", "mcp__other__research", {});
+    expect(text.length).toBeLessThan(JSON.stringify(result).length);
+  });
 });

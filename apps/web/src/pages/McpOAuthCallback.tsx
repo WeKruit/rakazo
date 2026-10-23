@@ -28,7 +28,12 @@ export function McpOAuthCallbackPage() {
     if (handledState.current === state) return;
     handledState.current = state;
     void rpc.mcp.oauth
-      .complete({ sessionId: state, code, state })
+      .complete({
+        sessionId: state,
+        code,
+        state,
+        ...(params.get("iss") ? { iss: params.get("iss")! } : {}),
+      })
       .then(() => {
         const channel = new BroadcastChannel(POPUP_NAME);
         channel.postMessage({ type: "mcp-oauth-complete" });

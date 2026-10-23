@@ -6,8 +6,11 @@ import { createWorkerSecretStore } from "./secret-store.js";
 loadRootEnv();
 
 import {
+  AutumnFileConnector,
+  artifactStorageOptionsFromEnv,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
+  createArtifactStore,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
   createConnectorStack,
@@ -21,6 +24,7 @@ import {
   createWebProvider,
   databaseCapacityBackoffMs,
   ExpoPushProvider,
+  firstPartyMcpUrl,
   GraphileJobPublisher,
   GraphileJobWorkerHost,
   InMemoryJobQueue,
@@ -29,7 +33,6 @@ import {
   isMessagingSurfaceEnabled,
   isPipedreamEnabled,
   LocalAgentHomeStore,
-  LocalArtifactStore,
   McpConnector,
   McpOAuthBroker,
   messagingEnvFromProcess,
@@ -48,7 +51,8 @@ import {
   sandboxProviderOptionsFromEnv,
   withSecretPersistence,
 } from "@rakazo/adapters";
-import { resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
+import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
+import { resolveAuthSecret, resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
   createBoardEvents,
   createDb,
@@ -64,8 +68,10 @@ import { MarkdownMemoryStore } from "@rakazo/memory";
 const logger = createRootLogger(SERVICE_NAMES.worker);
 
 async function main() {
+  const artifactStorage = artifactStorageOptionsFromEnv(process.env);
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
+  const shutdown = new AbortController();
   // Shared by Prisma, the reconciliation leadership lock, and both graphile-worker
   // components (see GraphileJobPublisher/GraphileJobWorkerHost) — one pool instead
   // of four separate ones. Keep this modest: graphile holds a LISTEN client and
@@ -107,6 +113,22 @@ async function main() {
     prisma,
   });
   const allowPrivateEndpoint = process.env.MCP_ALLOW_PRIVATE_ENDPOINT === "true";
+  const trustedMcpEndpoint = firstPartyMcpUrl(process.env.FIRST_PARTY_MCP_URL);
+  const firstPartyOidc = trustedMcpEndpoint ? oidcConfigFromEnv(process.env) : undefined;
+  if (trustedMcpEndpoint && !firstPartyOidc)
+    throw new Error("FIRST_PARTY_MCP_URL requires OIDC configuration");
+  const firstPartyAuth =
+    trustedMcpEndpoint && firstPartyOidc
+      ? createAuth(prisma, {
+          oidc: firstPartyOidc,
+          passwordAuth: process.env.AUTH_PASSWORD_ENABLED !== "false",
+          secret: resolveAuthSecret(process.env),
+          baseURL: process.env.BETTER_AUTH_URL ?? process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173",
+          webOrigin: process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173",
+          signupsEnabled: process.env.SIGNUPS_ENABLED,
+          signupAllowlist: process.env.SIGNUP_ALLOWLIST,
+        })
+      : undefined;
   const mcpOAuth = new McpOAuthBroker(prisma, secrets, {}, allowPrivateEndpoint);
   const mcp = new McpConnector(
     prisma,
@@ -119,6 +141,14 @@ async function main() {
         .filter(Boolean),
       events,
       allowPrivateEndpoint,
+      firstParty:
+        trustedMcpEndpoint && firstPartyOidc && firstPartyAuth
+          ? {
+              endpoint: trustedMcpEndpoint,
+              accessToken: (context, rejectedToken) =>
+                getOidcAccessToken(prisma, firstPartyAuth, firstPartyOidc, context, rejectedToken),
+            }
+          : undefined,
     },
     mcpOAuth,
   );
@@ -154,17 +184,18 @@ async function main() {
       pipedream,
     },
   );
+  const artifacts = createArtifactStore(dataDir, artifactStorage);
   const stack = createConnectorStack(false, undefined, [
     new InstalledConnectorProvider(prisma, secrets, {}, allowPrivateEndpoint),
     ...integrationSettings.providers(),
     mcp,
+    new AutumnFileConnector(prisma, secrets, artifacts),
   ]);
   const connector = stack.destination;
   await connector.start();
   integrationSettings.warmDirectories();
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
   const home = new LocalAgentHomeStore(dataDir);
-  const artifacts = new LocalArtifactStore(dataDir);
   const inMemoryJobs = process.env.WAKEUP_DRIVER === "memory" ? new InMemoryJobQueue() : undefined;
   const jobs: JobPublisher = inMemoryJobs ?? new GraphileJobPublisher(pool);
   const ticketChanges = createTicketChangeNotifier({
@@ -177,6 +208,7 @@ async function main() {
     inMemoryJobs ??
     new GraphileJobWorkerHost(pool, {
       concurrency: parsePositiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 4),
+      noHandleSignals: true,
     });
   // One provider instance so emulator launches and polls share the same Map.
   const cloudAgent = createCloudAgentConnection();
@@ -226,6 +258,7 @@ async function main() {
     messaging: messaging ? createMessagingContextLoader(prisma) : undefined,
     web: createWebProvider(),
     cloudAgent,
+    shutdownSignal: shutdown.signal,
   });
 
   const jobHandlers = createBackgroundJobHandlers({
@@ -243,6 +276,7 @@ async function main() {
     deploymentModelConfigured,
     messaging,
     cloudAgent,
+    shutdownSignal: shutdown.signal,
   });
   // graphile-worker run() connects through the shared pool. createPool already
   // retries connect() on 53300 a finite number of times. Keep retrying start
@@ -278,6 +312,7 @@ async function main() {
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    shutdown.abort();
     try {
       await reconciler.stop();
       await jobHost.stop();
@@ -286,6 +321,7 @@ async function main() {
       await realtime.close();
       await connector.stop();
       await mcp.close();
+      firstPartyAuth?.disposeOidcDiscovery();
       await prisma.$disconnect().catch(() => undefined);
       await pool.end().catch(() => undefined);
     } finally {

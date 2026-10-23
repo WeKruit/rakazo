@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  readRecruitingPanelState,
   readRightPanelState,
   rightPanelStorageKey,
+  writeRecruitingPanelState,
   writeRightPanelState,
 } from "./right-panel-state";
 
@@ -55,4 +57,91 @@ describe("right panel preferences", () => {
     writeRightPanelState(key, "create-group");
     expect(readRightPanelState(key)).toEqual({ panel: "computer" });
   });
+  it("restores recruiting only for its target and discards unrelated stored data", () => {
+    const entries = new Map<string, string>();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => entries.get(key) ?? null,
+      setItem: (key: string, value: string) => entries.set(key, value),
+    });
+    const botKey = rightPanelStorageKey("user", "space", "bot", "bot");
+    const groupKey = rightPanelStorageKey("user", "space", "group", "group");
+    writeRightPanelState(botKey, "recruiting", "unrelated-routine");
+    expect(readRightPanelState(botKey)).toEqual({ panel: "recruiting" });
+    expect(readRightPanelState(groupKey)).toEqual({ panel: null });
+    expect(entries.get(botKey)).toBe('{"panel":"recruiting"}');
+    entries.set(
+      botKey,
+      JSON.stringify({ panel: "recruiting", candidate: "private", authorized: true }),
+    );
+    expect(readRightPanelState(botKey)).toEqual({ panel: "recruiting" });
+  });
 });
+
+it("round trips only recruiting list settings and ignores malformed browser state", () => {
+  const entries = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => entries.get(key) ?? null,
+    setItem: (key: string, value: string) => entries.set(key, value),
+  });
+  const state = {
+    ...readRecruitingPanelState(null),
+    tab: "evidence" as const,
+    candidateView: "table" as const,
+    filters: { sort: "recent" as const, sourceEffectId: "source-a", query: "Search" },
+    pageCount: 2,
+    selectedCandidateKey: "candidate-a",
+    detailOpen: true,
+  };
+  writeRecruitingPanelState("list", state);
+  expect(readRecruitingPanelState("list")).toEqual(state);
+  entries.set("list", JSON.stringify({ ...state, candidate: { name: "private" } }));
+  expect(readRecruitingPanelState("list")).toEqual(state);
+  expect(readRecruitingPanelState("other")).toEqual(readRecruitingPanelState(null));
+  for (const value of [
+    "not json",
+    "null",
+    JSON.stringify({ ...state, filters: { roleId: "untrusted-role" } }),
+    JSON.stringify({ ...state, filters: { sort: "unknown" } }),
+    JSON.stringify({ ...state, pageCount: 0 }),
+    JSON.stringify({ ...state, pageCount: 1.5 }),
+    JSON.stringify({ ...state, candidateView: "unknown" }),
+    JSON.stringify({ ...state, selectedCandidateKey: {} }),
+  ]) {
+    entries.set("list", value);
+    expect(readRecruitingPanelState("list")).toEqual(readRecruitingPanelState(null));
+  }
+  vi.stubGlobal("localStorage", {
+    getItem: () => {
+      throw new Error("denied");
+    },
+    setItem: () => {
+      throw new Error("denied");
+    },
+  });
+  expect(readRecruitingPanelState("list")).toEqual(readRecruitingPanelState(null));
+  expect(() => writeRecruitingPanelState("list", state)).not.toThrow();
+});
+
+it("starts candidate lists as a table ordered by the provider's original score", () => {
+  vi.stubGlobal("localStorage", { getItem: () => null });
+  const state = readRecruitingPanelState("new-role");
+  expect(state.candidateView).toBe("table");
+  expect(state.filters.sort).toBe("score");
+  vi.stubGlobal("localStorage", {
+    getItem: () =>
+      JSON.stringify({ ...state, candidateView: "cards", filters: { sort: "recent" } }),
+  });
+  expect(readRecruitingPanelState("new-role")).toMatchObject({
+    candidateView: "cards",
+    filters: { sort: "recent" },
+  });
+});
+
+it.each(["rank", "tier", "score"] as const)(
+  "restores the explicit provider %s ordering",
+  (sort) => {
+    const state = { ...readRecruitingPanelState(null), filters: { sort } };
+    vi.stubGlobal("localStorage", { getItem: () => JSON.stringify(state) });
+    expect(readRecruitingPanelState("list")).toEqual(state);
+  },
+);

@@ -18,6 +18,14 @@ export function selectedSpaceId(): string | null {
   }
 }
 
+export function subscribeSpaceSelection(listener: () => void) {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === null || event.key === SPACE_STORAGE_KEY) listener();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => window.removeEventListener("storage", onStorage);
+}
+
 export function selectSpace(id: string): boolean {
   try {
     window.localStorage.setItem(SPACE_STORAGE_KEY, id);
@@ -69,10 +77,32 @@ const link = new RPCLink<RpcClientContext>({
     }
     const spaceId =
       options.context.spaceId === undefined ? selectedSpaceId() : options.context.spaceId;
-    return fetch(request, {
-      headers: withSpaceHeaders(request.headers, spaceId),
+    const headers = withSpaceHeaders(request.headers, spaceId);
+    if (!headers.has("x-request-id")) headers.set("x-request-id", crypto.randomUUID());
+    const started = performance.now();
+    const response = await fetch(request, {
+      headers,
       credentials: "include",
     });
+    if (!response.ok) {
+      const requestId = response.headers.get("x-request-id");
+      const traceparent = response.headers.get("traceparent");
+      console.error(
+        "RPC request failed",
+        JSON.stringify({
+          method: request.method,
+          pathname: new URL(request.url).pathname,
+          status: response.status,
+          contentType: response.headers.get("content-type"),
+          timestamp: new Date().toISOString(),
+          durationMs: Math.round(performance.now() - started),
+          "sent-x-request-id": headers.get("x-request-id"),
+          ...(requestId ? { "x-request-id": requestId } : {}),
+          ...(traceparent ? { traceparent } : {}),
+        }),
+      );
+    }
+    return response;
   },
 });
 

@@ -1,0 +1,2283 @@
+import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
+import { ORPCError } from "@orpc/server";
+import type { AdapterContext, ArtifactStore, ConnectorProvider } from "@rakazo/adapter-kit";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
+import type { McpOAuthBroker } from "@rakazo/adapters";
+import {
+  classifyInstantlyReplyReceipt,
+  createRecruitingCandidateReportReader,
+  hasPlatformMcpCredential,
+  htmlToPlainText,
+  isRecruitingCandidateReportField,
+  readActorArtifact,
+  readInstantlyEmail,
+} from "@rakazo/adapters";
+import type {
+  Actor,
+  ReadRecruitingSourceInput,
+  RecruitingAssessmentSourceRef,
+  RecruitingCandidateSource,
+  RecruitingCorrespondence,
+  RecruitingCrmDataInput,
+  RecruitingCrmDataOutput,
+  RecruitingCrmTarget,
+  RecruitingSourceRef,
+  RecruitingSourceSelection,
+} from "@rakazo/contracts";
+import {
+  RecruitingCorrespondenceSchema,
+  RecruitingCrmCandidatesReadSchema,
+  RecruitingCrmClientsReadSchema,
+  RecruitingCrmDataInputSchema,
+  RecruitingCrmDataOutputSchema,
+  RecruitingCrmDetailsReadSchema,
+  RecruitingCrmImportantReadSchema,
+  RecruitingCrmImportReceiptSchema,
+  RecruitingCrmMailReadSchema,
+  RecruitingCrmMembershipRowsSchema,
+  RecruitingCrmMessagesReadSchema,
+  RecruitingCrmRoleCampaignsReadSchema,
+  RecruitingCrmRoleReadSchema,
+  RecruitingNativeCorrespondenceSchema,
+} from "@rakazo/contracts";
+import {
+  boundDirectApprovalDetails,
+  catalogApprovalDetails,
+  RecruitingPlaybookValidationError,
+  readRecruitingJsonString,
+  recruitingCalibrationIdentity,
+  validateRecruitingTextSelection,
+} from "@rakazo/core";
+import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
+import { extractPdfText } from "@rakazo/core/node/pdf-text";
+import type { PrismaClient, RecruitingRoleMaterialContext, ThreadEvents } from "@rakazo/db";
+import * as recruiting from "@rakazo/db";
+import {
+  IsolationError,
+  RecruitingConflictError,
+  RecruitingSourceValidationError,
+} from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
+import type { ParseError } from "jsonc-parser";
+import { findNodeAtLocation, parseTree } from "jsonc-parser";
+import type { ThreadTarget } from "./thread-target.js";
+
+async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch (error) {
+    if (error instanceof IsolationError)
+      throw new ORPCError("NOT_FOUND", { message: "Resource not found" });
+    if (error instanceof RecruitingConflictError)
+      throw new ORPCError("CONFLICT", { message: error.message });
+    if (error instanceof RecruitingPlaybookValidationError)
+      throw new ORPCError("BAD_REQUEST", { message: error.message });
+    if (error instanceof RecruitingSourceValidationError)
+      throw new ORPCError("BAD_REQUEST", { message: error.message });
+    if (error instanceof Error && error.name === "ZodError")
+      throw new ORPCError("BAD_REQUEST", { message: "Invalid recruiting input" });
+    throw error;
+  }
+}
+
+type RecruitingReadDeps = { prisma: PrismaClient; artifacts: ArtifactStore };
+
+/** Wake the native durable stream only after the mutation has committed. */
+export async function notifyRecruitingChange(
+  deps: { prisma: PrismaClient; events: Pick<ThreadEvents, "notify"> },
+  actor: Actor,
+  threadId: string,
+) {
+  try {
+    const event = await deps.prisma.event.findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        threadId,
+        type: "recruiting.changed",
+        thread: { userId: actor.userId, spaceId: actor.spaceId },
+      },
+      select: { seq: true },
+      orderBy: { seq: "desc" },
+    });
+    if (event) await deps.events.notify(threadId, event.seq);
+  } catch (error) {
+    // The save committed; native stream catch-up still replays a missed wake-up.
+    getLogger().error("recruiting.change.notification.failed", error);
+  }
+}
+
+function correspondenceProvider(
+  endpoint: string | null,
+  view: "inbox" | "interview" | "contacts",
+  firstPartyEndpoint?: string,
+) {
+  if (!endpoint) return null;
+  let address: string;
+  try {
+    const url = new URL(endpoint);
+    address = `${url.origin}${url.pathname.replace(/\/$/, "")}`;
+  } catch {
+    return null;
+  }
+  if (view === "inbox") {
+    if (endpoint === firstPartyEndpoint)
+      return {
+        kind: "crm",
+        tools: ["list_crm_candidate_correspondence", "list_crm_candidate_roles"],
+      };
+    if (address === "https://mcp.instantly.ai/mcp")
+      return { kind: "instantly", tools: ["list_emails", "get_email"] };
+    if (address === "https://gmailmcp.googleapis.com/mcp/v1")
+      return { kind: "gmail", tools: ["get_message", "get_thread", "search_threads"] };
+  } else if (view === "interview") {
+    if (address === "https://calendarmcp.googleapis.com/mcp/v1")
+      return {
+        kind: "calendar",
+        tools: ["list_events", "get_event", "search_events", "suggest_time"],
+      };
+    if (address === "https://mcp.cal.com/mcp")
+      return { kind: "cal", tools: ["get_bookings", "get_booking", "get_availability"] };
+  } else if (address === "https://mcp.fullenrich.com/mcp") {
+    return { kind: "fullenrich", tools: ["get_enrichment_results"] };
+  }
+  return null;
+}
+
+function correspondenceCall(request: unknown) {
+  const direct = boundDirectApprovalDetails(request, "__rakazoCatalogTool");
+  if (direct) return direct;
+  const catalog = catalogApprovalDetails(request, "__rakazoCatalogTool");
+  if (
+    !catalog?.route ||
+    catalog.args.id !== `${catalog.route.resourceId}:${encodeURIComponent(catalog.route.toolName)}`
+  )
+    return null;
+  const args = catalog.args.arguments;
+  return args && typeof args === "object" && !Array.isArray(args)
+    ? { route: catalog.route, args: args as Record<string, unknown> }
+    : null;
+}
+
+function correspondenceAllows(
+  assignment: { allowAllTools: boolean; allowedTools: unknown },
+  tool: string,
+) {
+  return (
+    assignment.allowAllTools ||
+    (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(tool))
+  );
+}
+
+function correspondenceRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function calAvailabilitySubject(args: Record<string, unknown>) {
+  return [
+    "eventTypeId",
+    "eventTypeSlug",
+    "username",
+    "teamSlug",
+    "organizationSlug",
+    "usernames",
+    "bookingUidToReschedule",
+  ].map((key) => args[key] ?? null);
+}
+
+async function nativeRecruitingCorrespondence(
+  prisma: PrismaClient,
+  actor: Actor,
+  threadId: string,
+  selection: {
+    roleId?: string;
+    target?: Pick<
+      RecruitingCrmTarget,
+      "mcpServerId" | "serverRevision" | "organizationId" | "crmRoleId"
+    >;
+    candidateId?: string;
+    crmEndpoint?: string;
+  } = {},
+) {
+  const items: Array<ReturnType<typeof RecruitingNativeCorrespondenceSchema.parse>> = [];
+  if (!selection.crmEndpoint) return { items, partial: false, assertCurrent: null };
+  const captured = await recruiting.readRecruitingNativeCorrespondence(prisma, actor, {
+    threadId,
+    roleId: selection.roleId,
+    target: selection.target,
+  });
+  if (!captured) return { items, partial: false, assertCurrent: null };
+  if (
+    captured.crmSource?.endpoint !== selection.crmEndpoint ||
+    captured.crmSource.transport !== "streamable_http"
+  )
+    return { items, partial: true, assertCurrent: null };
+  const seen = new Set<string>();
+  let partial = captured.partial;
+  const readEmails = new Map(
+    [
+      ...new Map(
+        captured.records
+          .flatMap((record) => [record.emailRead, ...record.reads])
+          .map((read) => [read.id, read]),
+      ).values(),
+    ].map((read) => {
+      const result = correspondenceRecord(read.result);
+      return [
+        read.id,
+        read.status === "completed" &&
+        result &&
+        !("error" in result) &&
+        (result.isError === undefined || result.isError === false)
+          ? readInstantlyEmail(mcpObject(result))
+          : null,
+      ] as const;
+    }),
+  );
+  for (const record of captured.records) {
+    if (selection.candidateId && record.scope.candidateId !== selection.candidateId) continue;
+    if (
+      record.source.transport !== "streamable_http" ||
+      correspondenceProvider(record.source.endpoint, "inbox")?.kind !== "instantly"
+    )
+      continue;
+    const anchor = readEmails.get(record.emailRead.id);
+    if (!anchor?.thread_id || anchor.id !== record.args.reply_to_uuid) {
+      partial = true;
+      continue;
+    }
+    const base = {
+      roleId: captured.roleId,
+      bindingEffectId: captured.bindingEffectId,
+      crmRoleId: captured.target.crmRoleId,
+      candidateId: record.scope.candidateId,
+    };
+    const append = (
+      effect: typeof record.effect | typeof record.emailRead,
+      status: "read" | "sent_recorded" | "scheduled" | "unknown",
+      value: unknown,
+    ) => {
+      const key = `${effect.id}:${status}`;
+      if (seen.has(key)) return;
+      const email = value ? readInstantlyEmail(value) : null;
+      const text =
+        email &&
+        (email.body.text ||
+          (email.body.html ? htmlToPlainText(email.body.html) : "") ||
+          email.content_preview ||
+          "");
+      const item = RecruitingNativeCorrespondenceSchema.safeParse({
+        ...base,
+        id: effect.id,
+        status,
+        checkedAt: effect.updatedAt.toISOString(),
+        email: email && {
+          id: `${record.source.id}:${email.id}`,
+          sourceName: record.source.name,
+          sourceId: record.source.id,
+          providerMessageId: email.id,
+          savedRead: effect.run.sourceMessageId
+            ? {
+                messageId: effect.run.sourceMessageId,
+                linkedRunId: effect.run.id,
+                effectId: effect.id,
+              }
+            : null,
+          sender: email.from_address_email ?? null,
+          recipients: [email.to_address_email_list],
+          subject: email.subject,
+          body: text!.slice(0, 50_000),
+          snippet:
+            email.body_fallback_reason != null ||
+            !(email.body.text || email.body.html) ||
+            text!.length > 50_000,
+          date: email.timestamp_email,
+          url: null,
+        },
+      });
+      if (!item.success || (status !== "unknown" && !item.data.email)) {
+        partial = true;
+        return;
+      }
+      seen.add(key);
+      items.push(item.data);
+    };
+    for (const read of record.reads) {
+      const call = correspondenceCall(read.request);
+      const email = readEmails.get(read.id);
+      if (
+        !email ||
+        email.id !== call?.args.id ||
+        email.organization_id !== anchor.organization_id ||
+        email.eaccount !== anchor.eaccount ||
+        email.thread_id !== anchor.thread_id
+      )
+        continue;
+      append(read, "read", email);
+    }
+    const result = correspondenceRecord(record.effect.result);
+    if (record.effect.status === "uncertain") {
+      append(record.effect, "unknown", null);
+      continue;
+    }
+    if (record.effect.status !== "completed") continue;
+    const provider = correspondenceRecord(result?.providerResult);
+    const sourceRead = [record.emailRead, ...record.reads].find(
+      (read) => read.id === result?.sourceReadEffectId,
+    );
+    const outcome = classifyInstantlyReplyReceipt(
+      record.args,
+      anchor,
+      sourceRead &&
+        result &&
+        !("error" in result) &&
+        provider &&
+        !("error" in provider) &&
+        (provider.isError === undefined || provider.isError === false)
+        ? mcpObject(provider)
+        : undefined,
+    );
+    if (
+      outcome.status === "unknown" ||
+      outcome.status !== result?.status ||
+      stableJsonValue(outcome.receipt) !== stableJsonValue(result.receipt)
+    ) {
+      append(record.effect, "unknown", null);
+      partial = true;
+      continue;
+    }
+    append(record.effect, outcome.status, mcpObject(provider));
+  }
+  const assertCurrent = async () => {
+    if (!items.length) return;
+    await prisma.$transaction(
+      async (tx) => {
+        const member = await recruiting.requireMembership(tx, actor.userId, actor.spaceId);
+        if (member.userId !== actor.userId || member.spaceId !== actor.spaceId)
+          throw new IsolationError();
+        // Only current thread/role/binding can publish the captured evidence after pure parsing.
+        const current = await tx.thread.findFirst({
+          where: {
+            id: threadId,
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+            activeRecruitingRoleId: captured.roleId,
+            activeRecruitingRole: { crmBindingEffectId: captured.bindingEffectId },
+          },
+          select: { id: true },
+        });
+        if (!current) throw new IsolationError();
+        const serverIds = [...new Set(captured.authorizations.map((item) => item.server.id))];
+        const servers = await tx.mcpServer.findMany({
+          where: { id: { in: serverIds }, userId: actor.userId, spaceId: actor.spaceId },
+          select: {
+            id: true,
+            userId: true,
+            spaceId: true,
+            enabled: true,
+            revision: true,
+            endpoint: true,
+            transport: true,
+            secretId: true,
+          },
+        });
+        const assignments = await tx.botMcpServer.findMany({
+          where: {
+            serverId: { in: serverIds },
+            botId: { in: [...new Set(captured.authorizations.map((item) => item.botId))] },
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+          },
+        });
+        for (const item of captured.authorizations) {
+          const server = servers.find((value) => value.id === item.server.id);
+          const assignment = assignments.find(
+            (value) => value.serverId === item.server.id && value.botId === item.botId,
+          );
+          if (
+            !server?.enabled ||
+            server.userId !== actor.userId ||
+            server.spaceId !== actor.spaceId ||
+            server.revision !== item.server.revision ||
+            server.endpoint !== item.server.endpoint ||
+            server.transport !== item.server.transport ||
+            Boolean(server.secretId) !== Boolean(item.server.secretId) ||
+            !assignment ||
+            assignment.userId !== actor.userId ||
+            assignment.spaceId !== actor.spaceId ||
+            !correspondenceAllows(assignment, item.tool)
+          )
+            throw new IsolationError();
+        }
+      },
+      { isolationLevel: "RepeatableRead" },
+    );
+  };
+  return { items, partial, assertCurrent };
+}
+
+/** Project saved native reads only. Opening a dashboard never invokes a provider. */
+export async function getRecruitingCorrespondence(
+  prisma: PrismaClient,
+  actor: Actor,
+  target: ThreadTarget,
+  view: "inbox" | "interview" | "contacts",
+  productIdentity?: { endpoint: string; connected: boolean },
+  oauth?: Pick<McpOAuthBroker, "statusFor">,
+): Promise<RecruitingCorrespondence> {
+  return authenticated(async () => {
+    const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
+      threadId: target.threadId,
+    });
+    const botIds = target.kind === "group" ? target.memberBotIds : [target.botId];
+    const servers = await prisma.mcpServer.findMany({
+      where: { userId: actor.userId, spaceId: actor.spaceId },
+      select: {
+        id: true,
+        name: true,
+        endpoint: true,
+        transport: true,
+        secretId: true,
+        enabled: true,
+        revision: true,
+        assignments: {
+          where: { userId: actor.userId, spaceId: actor.spaceId, botId: { in: botIds } },
+          select: { botId: true, allowAllTools: true, allowedTools: true },
+        },
+      },
+    });
+    const sourceRows = servers.map((server) => ({
+      ...server,
+      provider: correspondenceProvider(
+        server.endpoint,
+        view,
+        server.transport === "streamable_http" ? productIdentity?.endpoint : undefined,
+      ),
+    }));
+    const sources = sourceRows.filter((source) => source.provider !== null);
+    const output: RecruitingCorrespondence = {
+      roleId: workspace?.role.id ?? null,
+      status: "not_checked",
+      checkedAt: null,
+      connectionChanged: false,
+      emails: [],
+      events: [],
+      contacts: [],
+      partial: false,
+      connections: await Promise.all(
+        sources.map(async (source): Promise<RecruitingCorrespondence["connections"][number]> => {
+          let identityConnected = productIdentity?.connected;
+          if (source.enabled && source.provider?.kind === "crm" && source.secretId) {
+            try {
+              identityConnected = (await oauth?.statusFor(source, actor)) === "connected";
+            } catch (error) {
+              if (!(error instanceof SecretStoreUnavailableError)) throw error;
+              return { name: source.name, status: "unavailable", checkIssue: null };
+            }
+          }
+          return {
+            name: source.name,
+            checkIssue: null,
+            status: !source.enabled
+              ? "disabled"
+              : (
+                    source.provider?.kind === "crm"
+                      ? !identityConnected
+                      : !source.secretId && !hasPlatformMcpCredential(source)
+                  )
+                ? "needs_connection"
+                : !source.assignments.some((assignment) =>
+                      source.provider?.tools.some(
+                        (tool) =>
+                          tool !== "list_crm_candidate_roles" &&
+                          correspondenceAllows(assignment, tool),
+                      ),
+                    )
+                  ? "needs_access"
+                  : "configured",
+          };
+        }),
+      ),
+    };
+    const finish = async () => {
+      if (workspace && view === "inbox") {
+        const native = await nativeRecruitingCorrespondence(prisma, actor, target.threadId, {
+          roleId: workspace.role.id,
+          crmEndpoint: productIdentity?.endpoint,
+        });
+        const emails = new Map(output.emails.map((email) => [email.id, email]));
+        const latest = new Map<string, (typeof native.items)[number]>();
+        for (const item of native.items) {
+          if (
+            item.email &&
+            (!latest.has(item.email.id) || item.checkedAt > latest.get(item.email.id)!.checkedAt)
+          )
+            latest.set(item.email.id, item);
+          if (!output.checkedAt || item.checkedAt > output.checkedAt)
+            output.checkedAt = item.checkedAt;
+        }
+        for (const item of latest.values()) if (item.email) emails.set(item.email.id, item.email);
+        output.partial ||=
+          native.partial ||
+          emails.size > 50 ||
+          native.items.some((item) => item.status === "unknown");
+        output.emails = [...emails.values()].slice(0, 50);
+        if (output.emails.length) output.status = "ready";
+        await native.assertCurrent?.();
+      }
+      return output;
+    };
+    if (!workspace) return finish();
+    const readTools =
+      view === "inbox"
+        ? [
+            "list_emails",
+            "get_email",
+            "get_message",
+            "get_thread",
+            "search_threads",
+            "list_crm_candidate_correspondence",
+            "list_crm_candidate_roles",
+          ]
+        : view === "interview"
+          ? [
+              "get_bookings",
+              "get_booking",
+              "get_availability",
+              "list_events",
+              "get_event",
+              "search_events",
+              "suggest_time",
+            ]
+          : ["get_enrichment_results"];
+    const querySources = sourceRows.filter(
+      (source) =>
+        source.enabled &&
+        source.assignments.some((assignment) =>
+          readTools.some((tool) => correspondenceAllows(assignment, tool)),
+        ),
+    );
+    if (!querySources.length) return finish();
+    // Keep historical reads of the same role, including native legacy runs without an initial revision.
+    const scope = {
+      spaceId: actor.spaceId,
+      run: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        threadId: target.threadId,
+        botId: { in: botIds },
+        OR: [
+          { initialRecruitingRoleRevisionId: null },
+          { initialRecruitingRoleRevision: { roleId: workspace.role.id } },
+        ],
+      },
+      status: { in: ["completed", "failed"] },
+    };
+    const retained = await prisma.externalEffect.findMany({
+      where: {
+        ...scope,
+        OR: querySources.flatMap((source) =>
+          (source.provider?.tools ?? readTools).flatMap((tool) => [
+            {
+              AND: [
+                { request: { path: ["2", "route", "resourceId"], equals: source.id } },
+                { request: { path: ["2", "route", "toolName"], equals: tool } },
+              ],
+            },
+            {
+              AND: [
+                { request: { path: ["3", "resourceId"], equals: source.id } },
+                { request: { path: ["3", "toolName"], equals: tool } },
+              ],
+            },
+          ]),
+        ),
+      },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      take: 201,
+      select: {
+        id: true,
+        request: true,
+        status: true,
+        updatedAt: true,
+        run: { select: { id: true, botId: true, sourceMessageId: true } },
+      },
+    });
+    // ponytail: bound saved display history to 200 matching reads; a native fresh check refreshes older coverage.
+    output.partial = retained.length > 200;
+    const seen = new Set<string>();
+    const crmMemberships = new Map<
+      string,
+      { effectId: string; status: string; updatedAt: Date; readable: boolean }
+    >();
+    let unsupported = false;
+    let failed = false;
+    const connections = new Map(
+      sources.map((source, index) => [source.id, output.connections[index]!]),
+    );
+    const checkIssue = (
+      sourceId: string,
+      updatedAt: Date,
+      status: "failed" | "unsupported" = "unsupported",
+    ) => {
+      if (status === "failed") failed = true;
+      else unsupported = true;
+      const connection = connections.get(sourceId);
+      const checkedAt = updatedAt.toISOString();
+      if (connection && (!connection.checkIssue || checkedAt > connection.checkIssue.checkedAt))
+        connection.checkIssue = { status, checkedAt };
+    };
+    const reads = retained.slice(0, 200).flatMap((effect) => {
+      const call = correspondenceCall(effect.request);
+      const source = sourceRows.find(
+        (source) => source.id === call?.route.resourceId && source.enabled,
+      );
+      if (
+        call?.route.connectorId !== "mcp" ||
+        !source ||
+        !(source.provider?.tools ?? readTools).includes(call.route.toolName)
+      )
+        return [];
+      const permission = source.assignments.find(
+        (assignment) => assignment.botId === effect.run.botId,
+      );
+      if (
+        source.provider?.kind === "crm" &&
+        call.route.toolName === "list_crm_candidate_roles" &&
+        [call.args.p_org, call.args.p_candidate].every(
+          (value) => typeof value === "string" && value.trim(),
+        )
+      ) {
+        const key = stableJsonValue([source.id, call.args.p_org, call.args.p_candidate]);
+        if (!crmMemberships.has(key))
+          crmMemberships.set(key, {
+            effectId: effect.id,
+            status: effect.status,
+            updatedAt: effect.updatedAt,
+            readable: Boolean(
+              permission &&
+                correspondenceAllows(permission, call.route.toolName) &&
+                call.route.resourceRevision === source.revision,
+            ),
+          });
+      }
+      if (!permission || !correspondenceAllows(permission, call.route.toolName)) return [];
+      const query = Object.fromEntries(
+        Object.entries(call.args).filter(([key]) => key !== "limit"),
+      );
+      const campaignId = call.args.campaign_id;
+      if (
+        view === "inbox" &&
+        call.route.toolName === "list_emails" &&
+        (typeof campaignId !== "string" || !campaignId.trim())
+      )
+        return []; // Account-wide exploration is not evidence of this role's correspondence.
+      if (
+        source.provider?.kind === "crm" &&
+        [call.args.p_org, call.args.p_candidate].some(
+          (value) => typeof value !== "string" || !value.trim(),
+        )
+      ) {
+        if (call.route.toolName === "list_crm_candidate_roles") return [];
+        checkIssue(source.id, effect.updatedAt);
+        output.checkedAt ??= effect.updatedAt.toISOString();
+        return [];
+      }
+      const key = stableJsonValue([
+        source.id,
+        call.route.toolName,
+        call.route.toolName === "list_emails"
+          ? { campaign_id: campaignId }
+          : source.provider?.kind === "crm"
+            ? { p_org: call.args.p_org, p_candidate: call.args.p_candidate }
+            : source.provider?.kind === "cal" && call.route.toolName === "get_availability"
+              ? calAvailabilitySubject(call.args)
+              : source.provider?.kind === "gmail" && call.route.toolName !== "search_threads"
+                ? call.route.toolName === "get_message"
+                  ? { messageId: call.args.messageId }
+                  : { threadId: call.args.threadId }
+                : query,
+      ]);
+      // ponytail: Inbox shows the latest campaign check, not accumulated mailbox history; native cursor coverage stays explicit.
+      // A new check replaces the prior observation, including empty/error.
+      if (seen.has(key)) return [];
+      seen.add(key);
+      if (call.route.resourceRevision !== source.revision || !source.provider) {
+        if (call.route.toolName === "list_crm_candidate_roles") return [];
+        checkIssue(source.id, effect.updatedAt);
+        output.checkedAt ??= effect.updatedAt.toISOString();
+        output.connectionChanged ||= call.route.resourceRevision !== source.revision;
+        return [];
+      }
+      return [{ effect, call, source, provider: source.provider }];
+    });
+    if (!reads.length) {
+      if (unsupported) output.status = "unsupported";
+      return finish();
+    }
+    const mailCampaigns = new Set(
+      reads
+        .filter(
+          (read) =>
+            read.provider.kind === "instantly" && read.call.route.toolName === "list_emails",
+        )
+        .map((read) => stableJsonValue([read.source.id, read.call.args.campaign_id])),
+    );
+    const results = await prisma.externalEffect.findMany({
+      where: { ...scope, id: { in: reads.map((read) => read.effect.id) } },
+      select: { id: true, result: true },
+    });
+    const byId = new Map(results.map((result) => [result.id, result.result]));
+    const candidateKeys = new Set(
+      view === "contacts"
+        ? (
+            await prisma.recruitingCandidate.findMany({
+              where: {
+                roleId: workspace.role.id,
+                role: { spaceId: actor.spaceId, userId: actor.userId },
+              },
+              select: { candidateKey: true },
+            })
+          ).map((candidate) => candidate.candidateKey)
+        : [],
+    );
+    const contactKeys = new Set<string>();
+    let parsed = false;
+    const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
+    const gmailMessages = new Map<string, string>();
+    const gmailThreads = new Map<string, string>();
+    const mailMembership = new Set<string>();
+    const events = new Map<string, RecruitingCorrespondence["events"][number]>();
+    let crmBinding: Awaited<ReturnType<typeof recruiting.getRecruitingCrmTarget>> | undefined;
+    const crmPages: Array<{
+      sourceId: string;
+      updatedAt: Date;
+      candidateId: string;
+      importEffectId: string;
+      messages: RecruitingCorrespondence["emails"];
+    }> = [];
+    // Details may supplement only messages present in the latest selected campaign snapshot.
+    const projections = [
+      ...reads.filter(
+        (read) => !["get_email", "list_crm_candidate_roles"].includes(read.call.route.toolName),
+      ),
+      ...reads.filter((read) => read.call.route.toolName === "get_email"),
+    ];
+    for (const { effect, call, source, provider } of projections) {
+      const savedRead = effect.run.sourceMessageId
+        ? { messageId: effect.run.sourceMessageId, linkedRunId: effect.run.id, effectId: effect.id }
+        : null;
+      if (
+        provider.kind === "instantly" &&
+        call.route.toolName === "get_email" &&
+        (typeof call.args.id !== "string" || !emails.has(`${source.id}:${call.args.id}`))
+      )
+        continue;
+      if (provider.kind === "gmail" && call.route.toolName !== "search_threads") {
+        const thread = call.route.toolName === "get_thread";
+        const selectedId = thread ? call.args.threadId : call.args.messageId;
+        if (typeof selectedId === "string" && selectedId.trim()) {
+          const claims = thread ? gmailThreads : gmailMessages;
+          const key = `${source.id}:${selectedId}`;
+          if (claims.has(key)) continue;
+          // The latest authorized identity observation replaces older bodies even on failure.
+          claims.set(key, effect.id);
+        }
+      }
+      const result = byId.get(effect.id);
+      if (result === undefined) continue;
+      output.checkedAt ??= effect.updatedAt.toISOString();
+      if (
+        effect.status === "failed" ||
+        (result &&
+          typeof result === "object" &&
+          !Array.isArray(result) &&
+          ("error" in result ||
+            ("isError" in result && result.isError !== false && result.isError !== undefined)))
+      ) {
+        checkIssue(source.id, effect.updatedAt, "failed");
+        continue;
+      }
+      const body = mcpObject(result);
+      if (provider.kind === "crm") {
+        const data = correspondenceRecord(body?.data);
+        const cursorMatches = (value: unknown) => {
+          const cursor = correspondenceRecord(value);
+          return (
+            cursor !== undefined &&
+            cursor.p_org === call.args.p_org &&
+            cursor.p_candidate === call.args.p_candidate &&
+            [cursor.linked_offset, cursor.unlinked_offset].every(
+              (offset) =>
+                typeof offset === "number" &&
+                Number.isSafeInteger(offset) &&
+                offset >= 0 &&
+                offset <= Number.MAX_SAFE_INTEGER - 51,
+            )
+          );
+        };
+        const limit = call.args.p_limit === undefined ? 10 : call.args.p_limit;
+        if (
+          !data ||
+          data.organization_id !== call.args.p_org ||
+          data.candidate_id !== call.args.p_candidate ||
+          data.pagination !== "offset" ||
+          !Array.isArray(data.messages) ||
+          typeof limit !== "number" ||
+          !Number.isInteger(limit) ||
+          limit < 1 ||
+          limit > 50 ||
+          data.messages.length > limit ||
+          (call.args.p_cursor !== undefined && !cursorMatches(call.args.p_cursor)) ||
+          (data.next_cursor !== null && !cursorMatches(data.next_cursor))
+        ) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        const messages = data.messages.map((value) => {
+          const row = correspondenceRecord(value);
+          if (
+            typeof row?.id !== "string" ||
+            !row.id.trim() ||
+            row.organization_id !== call.args.p_org ||
+            (row.candidate_id !== null && row.candidate_id !== call.args.p_candidate) ||
+            (row.body_text !== null && typeof row.body_text !== "string")
+          )
+            return null;
+          const message = RecruitingCorrespondenceSchema.shape.emails.element.safeParse({
+            id: stableJsonValue([source.id, call.args.p_org, call.args.p_candidate, row.id]),
+            sourceName: source.name,
+            sourceId: source.id,
+            providerMessageId: row.id,
+            savedRead,
+            sender: row.from_address,
+            recipients: row.to_address === null ? [] : [row.to_address],
+            subject: row.subject ?? "",
+            body: row.body_text ?? "",
+            snippet: row.body_text === null,
+            date: row.timestamp_email,
+            url: null,
+          });
+          return message.success ? message.data : null;
+        });
+        if (messages.some((message) => message === null)) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        crmBinding ??= await recruiting.getRecruitingCrmTarget(prisma, actor, {
+          runId: effect.run.id,
+          roleId: workspace.role.id,
+        });
+        const bound = crmBinding.target;
+        if (
+          !bound ||
+          !crmBinding.bindingEffectId ||
+          bound.mcpServerId !== source.id ||
+          bound.serverRevision !== source.revision ||
+          call.args.p_org !== bound.organizationId ||
+          typeof call.args.p_candidate !== "string"
+        ) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        output.partial ||= call.args.p_cursor !== undefined || data.next_cursor !== null;
+        if (!messages.length) {
+          parsed = true;
+          continue;
+        }
+        const membership = crmMemberships.get(
+          stableJsonValue([source.id, call.args.p_org, call.args.p_candidate]),
+        );
+        if (membership) {
+          // A newer explicit membership observation supersedes past imports, including empty/error.
+          const result = byId.get(membership.effectId);
+          const envelope = correspondenceRecord(result);
+          const failed =
+            membership.status === "failed" ||
+            Boolean(
+              envelope &&
+                ("error" in envelope ||
+                  ("isError" in envelope &&
+                    envelope.isError !== false &&
+                    envelope.isError !== undefined)),
+            );
+          const rows = mcpObject(result)?.data;
+          if (
+            !membership.readable ||
+            failed ||
+            !Array.isArray(rows) ||
+            !rows.every((value) => {
+              const row = correspondenceRecord(value);
+              return (
+                row?.organization_id === bound.organizationId &&
+                row.candidate_id === call.args.p_candidate &&
+                RecruitingCrmImportReceiptSchema.shape.membership_id.safeParse(row.membership_id)
+                  .success &&
+                typeof row.role_spec_id === "string" &&
+                typeof row.client_id === "string"
+              );
+            }) ||
+            !rows.some(
+              (row) => row.role_spec_id === bound.crmRoleId && row.client_id === bound.crmClientId,
+            )
+          ) {
+            checkIssue(source.id, membership.updatedAt, failed ? "failed" : "unsupported");
+            continue;
+          }
+          parsed = true;
+          for (const message of messages)
+            if (message && !emails.has(message.id)) emails.set(message.id, message);
+          continue;
+        }
+        if (retained.length > 200) {
+          checkIssue(source.id, effect.updatedAt);
+          continue; // Truncated history cannot establish absence of a membership observation.
+        }
+        // Only locate an exact import here; the single native batch below owns source verification.
+        const link = await prisma.recruitingCrmImport.findFirst({
+          where: {
+            bindingEffectId: crmBinding.bindingEffectId,
+            occurrence: { roleId: workspace.role.id },
+            effect: {
+              spaceId: actor.spaceId,
+              status: "completed",
+              run: { userId: actor.userId, spaceId: actor.spaceId },
+              AND: [
+                {
+                  result: {
+                    path: ["structuredContent", "data", "organization_id"],
+                    equals: bound.organizationId,
+                  },
+                },
+                {
+                  result: {
+                    path: ["structuredContent", "data", "candidate_id"],
+                    equals: call.args.p_candidate,
+                  },
+                },
+              ],
+            },
+          },
+          orderBy: [{ effect: { createdAt: "desc" } }, { effectId: "desc" }],
+          select: { effectId: true },
+        });
+        if (!link) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        crmPages.push({
+          sourceId: source.id,
+          updatedAt: effect.updatedAt,
+          candidateId: call.args.p_candidate,
+          importEffectId: link.effectId,
+          messages: messages.filter((message) => message !== null),
+        });
+        continue;
+      }
+      if (provider.kind === "fullenrich" && body) {
+        if (typeof call.args.enrichment_id !== "string" || !call.args.enrichment_id.trim()) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        if (body.status === "in_progress") {
+          output.partial = true;
+          continue;
+        }
+        if (body.status !== "FINISHED" || !Array.isArray(body.results)) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        parsed = true;
+        for (const row of body.results) {
+          const entry = correspondenceRecord(row);
+          const input = correspondenceRecord(entry?.input);
+          const profile = correspondenceRecord(entry?.profile);
+          const network = correspondenceRecord(
+            correspondenceRecord(profile?.social_profiles)?.professional_network,
+          );
+          const linkedinUrl = input?.professional_network_url;
+          const identity =
+            typeof linkedinUrl === "string" ? recruitingCalibrationIdentity(linkedinUrl) : null;
+          const profileIdentity =
+            typeof network?.url === "string" ? recruitingCalibrationIdentity(network.url) : null;
+          if (!identity || identity !== profileIdentity) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          const candidateKey = `linkedin:${identity}`;
+          if (!candidateKeys.has(candidateKey) || contactKeys.has(candidateKey)) continue;
+          contactKeys.add(candidateKey);
+          const info = correspondenceRecord(entry?.contact_info);
+          if (!info || !Array.isArray(info.work_emails)) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          const addresses = [info.most_probable_work_email, ...info.work_emails]
+            .filter((email) => email !== null && email !== undefined)
+            .map((email) => {
+              const value = correspondenceRecord(email);
+              return { address: value?.email, status: value?.status };
+            });
+          const contact = RecruitingCorrespondenceSchema.shape.contacts.element.safeParse({
+            candidateKey,
+            linkedinUrl,
+            emails: addresses,
+            // ponytail: the observed provider phone is null; do not infer an unverified phone schema.
+            phones: [],
+            source: source.name,
+            checkedAt: effect.updatedAt.toISOString(),
+          });
+          if (!contact.success) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          contact.data.emails = [
+            ...new Map(contact.data.emails.map((email) => [email.address, email])).values(),
+          ];
+          output.contacts.push(contact.data);
+        }
+        continue;
+      }
+      if (provider.kind === "cal" && body) {
+        if (body.status !== "success") {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        const availability = call.route.toolName === "get_availability";
+        let rows: unknown[];
+        if (availability) {
+          const days = correspondenceRecord(body.data);
+          if (!days) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          rows = Object.values(days).flatMap((slots) => {
+            if (Array.isArray(slots)) return slots;
+            checkIssue(source.id, effect.updatedAt);
+            return [];
+          });
+        } else {
+          rows = call.route.toolName === "get_booking" ? [body.data] : (body.data as unknown[]);
+          if (!Array.isArray(rows)) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          if (call.route.toolName === "get_bookings") {
+            const pagination = correspondenceRecord(body.pagination);
+            output.partial ||=
+              pagination?.hasNextPage !== false ||
+              pagination.hasPreviousPage === true ||
+              (typeof call.args.skip === "number" && call.args.skip > 0);
+          }
+        }
+        parsed = true;
+        for (const value of rows) {
+          const row = correspondenceRecord(value);
+          const start = availability && typeof value === "string" ? value : row?.start;
+          const end = row?.end ?? null;
+          if (
+            !availability &&
+            (typeof row?.uid !== "string" ||
+              !row.uid.trim() ||
+              (call.route.toolName === "get_booking" && row.uid !== call.args.bookingUid))
+          ) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          const id = availability
+            ? stableJsonValue([
+                source.id,
+                "slot",
+                ...calAvailabilitySubject(call.args),
+                start ?? null,
+                end,
+              ])
+            : `${source.id}:booking:${row!.uid}`;
+          const location = availability ? null : (row?.location ?? null);
+          const event = RecruitingCorrespondenceSchema.shape.events.element.safeParse({
+            id,
+            kind: availability ? "availability" : "event",
+            title: availability ? null : (row?.title ?? null),
+            start,
+            end,
+            timeZone: availability ? (call.args.timeZone ?? "UTC") : null,
+            attendees: availability
+              ? []
+              : Array.isArray(row?.attendees)
+                ? row.attendees.map(
+                    (attendee) =>
+                      correspondenceRecord(attendee)?.email ?? correspondenceRecord(attendee)?.name,
+                  )
+                : [],
+            status: availability ? null : (row?.status ?? null),
+            location,
+            url: typeof location === "string" && /^https?:\/\//u.test(location) ? location : null,
+          });
+          if (
+            !event.success ||
+            (!availability && !event.data.end) ||
+            (event.data.end && Date.parse(event.data.end) <= Date.parse(event.data.start))
+          ) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          if (!events.has(id)) events.set(id, event.data);
+        }
+        continue;
+      }
+      if (provider.kind === "gmail" && body) {
+        // ponytail: selected native reads leave mailbox coverage and canonical role association unknown.
+        output.partial = true;
+        if (call.route.toolName === "search_threads") continue;
+        const thread = call.route.toolName === "get_thread";
+        const selectedId = thread ? call.args.threadId : call.args.messageId;
+        if (typeof selectedId !== "string" || !selectedId.trim() || body.id !== selectedId) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        const rows = thread ? (body.messages === undefined ? [] : body.messages) : [body];
+        if (!Array.isArray(rows)) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        const format = call.args.messageFormat;
+        const full =
+          format === undefined ||
+          format === "MESSAGE_FORMAT_UNSPECIFIED" ||
+          format === "FULL_CONTENT" ||
+          format === "PLAIN_TEXT";
+        parsed = true;
+        for (const value of rows.toReversed()) {
+          const row = correspondenceRecord(value);
+          if (
+            typeof row?.id !== "string" ||
+            !row.id.trim() ||
+            (thread && row.threadId !== undefined && row.threadId !== selectedId)
+          ) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          const threadId = thread ? selectedId : row.threadId;
+          const threadOwner =
+            typeof threadId === "string" ? gmailThreads.get(`${source.id}:${threadId}`) : undefined;
+          const id = `${source.id}:${row.id}`;
+          const messageOwner = gmailMessages.get(id);
+          if (
+            (threadOwner && threadOwner !== effect.id) ||
+            (messageOwner && messageOwner !== effect.id)
+          )
+            continue;
+          gmailMessages.set(id, effect.id);
+          const plain = full ? row.plaintextBody : undefined;
+          const text =
+            typeof plain === "string" ? plain : typeof row.snippet === "string" ? row.snippet : "";
+          const message = RecruitingCorrespondenceSchema.shape.emails.element.safeParse({
+            id,
+            sourceName: source.name,
+            sourceId: source.id,
+            providerMessageId: row.id,
+            savedRead,
+            sender: row.sender ?? null,
+            recipients: row.toRecipients ?? [],
+            subject: row.subject ?? "",
+            body: text.slice(0, 50_000),
+            snippet: typeof plain !== "string" || text.length > 50_000,
+            date: row.date ?? null,
+            url: row.viewUrl ?? null,
+          });
+          if (!message.success) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          if (!emails.has(message.data.id)) emails.set(message.data.id, message.data);
+        }
+        continue;
+      }
+      if (provider.kind !== "instantly" || !body) {
+        checkIssue(source.id, effect.updatedAt);
+        continue;
+      }
+      const rows = call.route.toolName === "list_emails" ? body.items : [body];
+      if (!Array.isArray(rows)) {
+        checkIssue(source.id, effect.updatedAt);
+        continue;
+      }
+      if (call.route.toolName === "list_emails") {
+        parsed = true;
+        output.partial ||=
+          call.args.starting_after !== undefined &&
+          call.args.starting_after !== null &&
+          call.args.starting_after !== "";
+      }
+      output.partial ||=
+        body.next_starting_after !== undefined &&
+        body.next_starting_after !== null &&
+        body.next_starting_after !== "";
+      for (const row of rows) {
+        const email = readInstantlyEmail(row);
+        if (!email) {
+          checkIssue(source.id, effect.updatedAt);
+          output.partial = true;
+          continue;
+        }
+        const id = `${source.id}:${email.id}`;
+        const membership = stableJsonValue([source.id, email.campaign_id, email.id]);
+        if (
+          call.route.toolName === "get_email" &&
+          (email.id !== call.args.id || !mailMembership.has(membership))
+        ) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        if (
+          !email.campaign_id ||
+          !mailCampaigns.has(stableJsonValue([source.id, email.campaign_id])) ||
+          (call.route.toolName === "list_emails" && email.campaign_id !== call.args.campaign_id)
+        ) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        parsed = true;
+        if (emails.has(id) && call.route.toolName !== "get_email") continue;
+        if (call.route.toolName === "list_emails") mailMembership.add(membership);
+        const fullText =
+          email.body.text || (email.body.html ? htmlToPlainText(email.body.html) : "");
+        const text = fullText || email.content_preview || "";
+        const displayText =
+          call.route.toolName === "list_emails"
+            ? text.replace(/\[truncated — use get_email for full content\](\s*)$/u, "$1")
+            : text;
+        output.partial ||= email.body_fallback_reason != null;
+        emails.set(id, {
+          id,
+          sourceName: source.name,
+          sourceId: source.id,
+          providerMessageId: email.id,
+          savedRead,
+          sender: email.from_address_email ?? null,
+          recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
+          subject: email.subject,
+          body: displayText.slice(0, 50_000),
+          snippet:
+            call.route.toolName === "list_emails" ||
+            email.body_fallback_reason != null ||
+            !fullText ||
+            text.length > 50_000,
+          date: email.timestamp_email,
+          url: null,
+        });
+      }
+    }
+    if (crmPages.length) {
+      const bound = crmBinding?.target;
+      if (!bound) throw new IsolationError();
+      const imports = new Map(
+        (
+          await recruiting.getRecruitingCrmCandidateSyncs(prisma, actor, {
+            roleId: workspace.role.id,
+            effectIds: [...new Set(crmPages.map((page) => page.importEffectId))],
+          })
+        ).map((sync) => [sync.effectId, sync]),
+      );
+      for (const page of crmPages) {
+        const imported = imports.get(page.importEffectId);
+        if (
+          imported?.status !== "synced" ||
+          imported.bindingEffectId !== crmBinding?.bindingEffectId ||
+          stableJsonValue(imported.target) !== stableJsonValue(bound) ||
+          imported.receipt?.organization_id !== bound.organizationId ||
+          imported.receipt.candidate_id !== page.candidateId
+        ) {
+          checkIssue(page.sourceId, page.updatedAt);
+          continue;
+        }
+        parsed = true;
+        for (const message of page.messages)
+          if (!emails.has(message.id)) emails.set(message.id, message);
+      }
+    }
+    output.emails = [...emails.values()].slice(0, 50);
+    // ponytail: bound retained calendar display to 200 entries; full receipts remain in native history.
+    output.events = [...events.values()].slice(0, 200);
+    output.partial ||= emails.size > 50 || events.size > 200 || unsupported || failed;
+    output.status =
+      output.emails.length || output.events.length || output.contacts.length
+        ? "ready"
+        : failed
+          ? "failed"
+          : unsupported
+            ? "unsupported"
+            : parsed
+              ? "empty"
+              : "not_checked";
+    // A late role switch cannot carry a previous role's saved mail into the new workspace.
+    const current = await prisma.thread.findFirst({
+      where: {
+        id: target.threadId,
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        activeRecruitingRoleId: workspace.role.id,
+        ...(crmBinding
+          ? { activeRecruitingRole: { crmBindingEffectId: crmBinding.bindingEffectId } }
+          : {}),
+      },
+      select: { id: true },
+    });
+    if (!current) throw new IsolationError();
+    return finish();
+  });
+}
+
+/** Bind exact UTF-16 quotes in MCP array text to one canonical saved person. */
+function selectedProviderRow(
+  bytes: Uint8Array,
+  text: string,
+  selection: RecruitingSourceSelection | undefined,
+) {
+  if (selection?.kind !== "artifact_json_string") throw new IsolationError();
+  const { path, start, end } = selection;
+  const rowPaths = [
+    ["providerResult", "structuredContent", "rows"],
+    ["observation", "rows"],
+  ];
+  const rowPath = rowPaths.find((prefix) => prefix.every((key, index) => path[index] === key));
+  if (rowPath) {
+    const rowIndex = path[rowPath.length];
+    if (typeof rowIndex !== "number" || !Number.isSafeInteger(rowIndex) || rowIndex < 0)
+      throw new IsolationError();
+    const original = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    JSON.parse(original);
+    const node = findNodeAtLocation(parseTree(original)!, [...rowPath, rowIndex]);
+    if (node?.type !== "object") throw new IsolationError();
+    return {
+      rowIndex,
+      row: JSON.parse(original.slice(node.offset, node.offset + node.length)) as Record<
+        string,
+        unknown
+      >,
+    };
+  }
+  if (
+    path.length !== 4 ||
+    path[0] !== "providerResult" ||
+    path[1] !== "content" ||
+    typeof path[2] !== "number" ||
+    path[3] !== "text"
+  )
+    throw new IsolationError();
+  JSON.parse(text);
+  const errors: ParseError[] = [];
+  const root = parseTree(text, errors, { disallowComments: true, allowTrailingComma: false });
+  const rows = root?.type === "array" ? root : root && findNodeAtLocation(root, ["rows"]);
+  if (errors.length || rows?.type !== "array" || !rows.children) throw new IsolationError();
+  const overlapping = rows.children.filter(
+    (node) => start < node.offset + node.length && end > node.offset,
+  );
+  const node = overlapping[0];
+  if (overlapping.length !== 1 || !node || node.type !== "object") throw new IsolationError();
+  const surrounding =
+    text.slice(start, Math.min(end, node.offset)) +
+    text.slice(Math.max(start, node.offset + node.length), end);
+  if (!/^[\s[\],]*$/.test(surrounding)) throw new IsolationError();
+  return {
+    rowIndex: rows.children.indexOf(node),
+    row: JSON.parse(text.slice(node.offset, node.offset + node.length)) as Record<string, unknown>,
+  };
+}
+
+function sameReportedRow(selected: Record<string, unknown>, canonical: unknown) {
+  if (!canonical || typeof canonical !== "object" || Array.isArray(canonical)) return false;
+  const value = (cell: unknown) =>
+    cell && typeof cell === "object" && !Array.isArray(cell) && Object.hasOwn(cell, "value")
+      ? (cell as { value: unknown }).value
+      : cell;
+  const keys = Object.keys(selected).filter(isRecruitingCandidateReportField);
+  return (
+    keys.length > 0 &&
+    keys.length === Object.keys(canonical).filter(isRecruitingCandidateReportField).length &&
+    keys.every(
+      (key) =>
+        Object.hasOwn(canonical, key) &&
+        isDeepStrictEqual(value(selected[key]), value((canonical as Record<string, unknown>)[key])),
+    )
+  );
+}
+
+export const readRecruitingSource = (
+  deps: { prisma: PrismaClient; artifacts: ArtifactStore },
+  actor: Actor,
+  input: ReadRecruitingSourceInput,
+) =>
+  authenticated(async () => {
+    let sources: readonly (RecruitingSourceRef | RecruitingAssessmentSourceRef)[];
+    if (input.kind === "role") {
+      const workspace = await recruiting.getRecruitingWorkspace(deps.prisma, actor, {
+        threadId: input.threadId,
+      });
+      if (!workspace || workspace.revision.id !== input.roleRevisionId) throw new IsolationError();
+      sources = [
+        ...workspace.revision.sourceRefs,
+        ...workspace.revision.criteria.flatMap((criterion) => criterion.sourceRefs),
+      ];
+    } else {
+      const snapshot = await recruiting.getRecruitingAssessment(deps.prisma, actor, {
+        roleId: input.roleId,
+        candidateKey: input.candidateKey,
+        version: input.version,
+      });
+      if (!snapshot || snapshot.assessment.version !== input.version) throw new IsolationError();
+      sources = snapshot.assessment.sourceRefs;
+    }
+    const matches = sources.filter((source) => source.id === input.sourceRefId);
+    const source = matches[0];
+    if (
+      !source ||
+      matches.some((value) => !isDeepStrictEqual(value, source)) ||
+      source.readState !== "read" ||
+      !source.quote ||
+      source.anchor.kind !== "artifact"
+    )
+      throw new IsolationError();
+    try {
+      const { row, bytes } = await readActorArtifact(deps, actor, {
+        artifactId: source.anchor.artifact.artifactId,
+      });
+      if (row.hash !== source.anchor.artifact.sha256) throw new IsolationError();
+      const selection = "selection" in source ? source.selection : undefined;
+      // ponytail: role sources attest only extracted text; other strings require the stored typed path.
+      if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
+        throw new IsolationError();
+      const json = row.mimeType === "application/json" || row.mimeType.endsWith("+json");
+      const pdf = row.mimeType === "application/pdf";
+      const path =
+        selection?.kind === "artifact_json_string"
+          ? selection.path
+          : !selection && json
+            ? ["text"]
+            : undefined;
+      if (path ? !json : (!row.mimeType.startsWith("text/") && !pdf) || json)
+        throw new IsolationError();
+      const text = path
+        ? readRecruitingJsonString(bytes, path)
+        : pdf
+          ? await extractPdfText(bytes)
+          : new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      const start = selection?.start ?? text.indexOf(source.quote);
+      const end = selection?.end ?? start + source.quote.length;
+      validateRecruitingTextSelection(text, start, end, source.quote);
+      if (input.kind === "assessment" && source.kind === "provider_report" && json) {
+        const selected = selectedProviderRow(bytes, text, selection);
+        const readReport = createRecruitingCandidateReportReader(deps, actor, input.roleId, {
+          artifacts: new Map([[row.id, { row, bytes }]]),
+        });
+        // ponytail: use existing occurrence pagination; add an artifact selector only if histories grow large.
+        const matches: RecruitingCandidateSource[] = [];
+        let cursor: string | undefined;
+        do {
+          const page = await recruiting.listRecruitingCandidateSources(deps.prisma, actor, {
+            roleId: input.roleId,
+            candidateKey: input.candidateKey,
+            ...(cursor ? { cursor } : {}),
+          });
+          matches.push(
+            ...page.items.filter(
+              (item) =>
+                item.artifactRef.artifactId === row.id &&
+                item.artifactRef.sha256 === row.hash &&
+                item.rowIndex === selected.rowIndex,
+            ),
+          );
+          cursor = page.nextCursor ?? undefined;
+        } while (cursor);
+        if (matches.length !== 1) throw new IsolationError();
+        const retained = await readReport(matches[0]!);
+        if (!sameReportedRow(selected.row, retained.row)) throw new IsolationError();
+        return { kind: "report" as const, report: retained.report };
+      }
+      return { kind: "text" as const, text, start, end };
+    } catch {
+      throw new IsolationError();
+    }
+  });
+
+export const createRecruitingRole = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.createRecruitingRole>[2],
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.createRecruitingRole(prisma, actor, input, material));
+export const bindRecruitingRole = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.bindRecruitingRole>[2],
+) => authenticated(() => recruiting.bindRecruitingRole(prisma, actor, input));
+export const getRecruitingWorkspace = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.getRecruitingWorkspace>[2],
+) => authenticated(() => recruiting.getRecruitingWorkspace(prisma, actor, input));
+export const reviseRecruitingRole = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.reviseRecruitingRole>[2],
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.reviseRecruitingRole(prisma, actor, input, material));
+export const listRecruitingAssessments = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingAssessments>[2],
+) => authenticated(() => recruiting.listRecruitingAssessments(prisma, actor, input));
+export const listRecruitingFeedback = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingFeedback>[2],
+) => authenticated(() => recruiting.listRecruitingFeedback(prisma, actor, input));
+export const getRecruitingAssessment = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.getRecruitingAssessment>[2],
+) => authenticated(() => recruiting.getRecruitingAssessment(prisma, actor, input));
+export const listRecruitingResearch = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingResearch>[2],
+) => authenticated(() => recruiting.listRecruitingResearch(prisma, actor, input));
+
+export const listRecruitingQuestions = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingQuestions>[2],
+) =>
+  authenticated(async () => ({
+    questions: await recruiting.listRecruitingQuestions(prisma, actor, input),
+  }));
+
+export const confirmRecruitingBrief = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.confirmRecruitingBrief>[2],
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.confirmRecruitingBrief(prisma, actor, input, material));
+
+export const editRecruitingCriteria = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.editRecruitingCriteria>[2],
+  material?: RecruitingRoleMaterialContext,
+) => authenticated(() => recruiting.editRecruitingCriteria(prisma, actor, input, material));
+
+async function hydrateRecruitingCandidateReports(
+  deps: RecruitingReadDeps,
+  actor: Actor,
+  roleId: string,
+  sources: Omit<RecruitingCandidateSource, "crmImports">[],
+) {
+  const artifacts = new Map<string, Awaited<ReturnType<typeof readActorArtifact>>>();
+  const readReport = createRecruitingCandidateReportReader(deps, actor, roleId, { artifacts });
+  const byArtifact = new Map<string, typeof sources>();
+  for (const source of sources) {
+    const group = byArtifact.get(source.artifactRef.artifactId) ?? [];
+    group.push(source);
+    byArtifact.set(source.artifactRef.artifactId, group);
+  }
+  const groups = [...byArtifact.values()];
+  // ponytail: bound parallel multi-MB reads to four pages; tune only after measured storage capacity.
+  for (let start = 0; start < groups.length; start += 4) {
+    await Promise.all(
+      groups.slice(start, start + 4).map(async (group) => {
+        for (const source of group) delete source.report;
+        const artifactId = group[0]!.artifactRef.artifactId;
+        try {
+          artifacts.set(artifactId, await readActorArtifact(deps, actor, { artifactId }));
+        } catch {
+          return;
+        }
+        for (const source of group) {
+          try {
+            source.report = (await readReport(source)).report;
+          } catch {
+            // Authorized provenance remains readable when its report bytes are unavailable.
+          }
+        }
+      }),
+    );
+  }
+}
+
+export const listRecruitingCandidates = (
+  deps: RecruitingReadDeps,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingCandidates>[2],
+) =>
+  authenticated(async () => {
+    const page = await recruiting.listRecruitingCandidates(deps.prisma, actor, input);
+    await hydrateRecruitingCandidateReports(
+      deps,
+      actor,
+      input.roleId,
+      page.items.flatMap((candidate) => (candidate.latestSource ? [candidate.latestSource] : [])),
+    );
+    return page;
+  });
+export const listRecruitingCandidateSources = (
+  deps: RecruitingReadDeps,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingCandidateSources>[2],
+) =>
+  authenticated(async () => {
+    const page = await recruiting.listRecruitingCandidateSources(deps.prisma, actor, input);
+    await hydrateRecruitingCandidateReports(deps, actor, input.roleId, page.items);
+    return page;
+  });
+export const setRecruitingCandidateShortlist = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.setRecruitingCandidateShortlist>[2],
+) => authenticated(() => recruiting.setRecruitingCandidateShortlist(prisma, actor, input));
+
+/** Live read-only CRM view. The CRM remains the store; browsing creates no agent work. */
+export async function getRecruitingCrmData(
+  deps: {
+    prisma: PrismaClient;
+    connectors: Pick<ConnectorProvider, "execute">;
+    firstPartyMcpUrl?: string;
+    signal?: AbortSignal;
+    stillAuthorized?: () => Promise<boolean>;
+    reauthorize: () => Promise<ThreadTarget>;
+  },
+  actor: Actor,
+  target: ThreadTarget,
+  raw: RecruitingCrmDataInput,
+): Promise<RecruitingCrmDataOutput> {
+  return authenticated(async () => {
+    const input = RecruitingCrmDataInputSchema.parse(raw);
+    const signal = deps.signal ?? AbortSignal.timeout(30_000);
+    const coordinator = (value: ThreadTarget) =>
+      value.kind === "bot" ? value.botId : value.memberBotIds[0];
+    const targetKey = (value: ThreadTarget) =>
+      stableJsonValue(
+        value.kind === "bot"
+          ? [value.kind, value.threadId, value.botId]
+          : [value.kind, value.threadId, value.groupId, value.memberBotIds],
+      );
+    const botId = coordinator(target);
+    const targetScope = targetKey(target);
+    if (!botId || !deps.firstPartyMcpUrl) throw new IsolationError();
+    const context: AdapterContext = {
+      operationId: randomUUID(),
+      traceId: randomUUID(),
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      botId,
+      signal,
+    };
+    const serverSelect = {
+      id: true,
+      name: true,
+      revision: true,
+      endpoint: true,
+      transport: true,
+      enabled: true,
+      secretId: true,
+      userId: true,
+      spaceId: true,
+    } as const;
+    type Server = {
+      id: string;
+      name: string;
+      revision: number;
+      endpoint: string | null;
+      transport: string;
+      enabled: boolean;
+      secretId: string | null;
+      userId: string;
+      spaceId: string;
+    };
+    const allowed = (
+      assignment: { allowAllTools: boolean; allowedTools: unknown } | null,
+      tool: string,
+    ) =>
+      assignment &&
+      (assignment.allowAllTools ||
+        (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(tool)));
+    const actorFence = async () => {
+      signal.throwIfAborted();
+      if (deps.stillAuthorized && !(await deps.stillAuthorized())) throw new IsolationError();
+      const freshActor = await recruiting.requireMembership(
+        deps.prisma,
+        actor.userId,
+        actor.spaceId,
+      );
+      if (
+        freshActor.userId !== actor.userId ||
+        freshActor.spaceId !== actor.spaceId ||
+        targetKey(await deps.reauthorize()) !== targetScope
+      )
+        throw new IsolationError();
+    };
+    const sourceFence = async (server: Server, tool: string) => {
+      await actorFence();
+      const current = await deps.prisma.mcpServer.findFirst({
+        where: { id: server.id, userId: actor.userId, spaceId: actor.spaceId },
+        select: serverSelect,
+      });
+      const assignment = await deps.prisma.botMcpServer.findFirst({
+        where: { serverId: server.id, botId, userId: actor.userId, spaceId: actor.spaceId },
+      });
+      if (
+        !current?.enabled ||
+        current.userId !== actor.userId ||
+        current.spaceId !== actor.spaceId ||
+        current.id !== server.id ||
+        // Native account changes advance revision; quiet refresh only rotates secret records.
+        current.revision !== server.revision ||
+        (current.secretId === null) !== (server.secretId === null) ||
+        current.endpoint !== deps.firstPartyMcpUrl ||
+        current.endpoint !== server.endpoint ||
+        current.transport !== "streamable_http" ||
+        !allowed(assignment, tool)
+      )
+        throw new IsolationError();
+      signal.throwIfAborted();
+    };
+    const unavailable = () =>
+      new ORPCError("SERVICE_UNAVAILABLE", {
+        message: "CRM records could not be loaded. Try again.",
+      });
+    const parse = <T>(
+      schema: { safeParse(value: unknown): { success: true; data: T } | { success: false } },
+      value: unknown,
+    ): T => {
+      const result = schema.safeParse(value);
+      if (!result.success) throw unavailable();
+      return result.data;
+    };
+    const read = async (server: Server, tool: string, args: Record<string, unknown>) => {
+      await sourceFence(server, tool);
+      const results: unknown[] = [];
+      let failed = false;
+      try {
+        for await (const event of deps.connectors.execute(
+          {
+            tool,
+            route: {
+              connectorId: "mcp",
+              resourceId: server.id,
+              resourceRevision: server.revision,
+              toolName: tool,
+            },
+            args,
+            executionId: randomUUID(),
+          },
+          context,
+        )) {
+          if (event.type === "result") results.push(event.data);
+          if (event.type === "error") failed = true;
+        }
+      } catch {
+        failed = true;
+      }
+      await sourceFence(server, tool);
+      const result = correspondenceRecord(results[0]);
+      const payload = mcpObject(result);
+      if (
+        failed ||
+        results.length !== 1 ||
+        !result ||
+        "error" in result ||
+        (result.isError !== undefined && result.isError !== false) ||
+        !payload ||
+        !("data" in payload)
+      )
+        throw unavailable();
+      return payload.data;
+    };
+    const membershipRows = async (server: Server) =>
+      parse(RecruitingCrmMembershipRowsSchema, await read(server, "list_crm_memberships", {}));
+    const where = {
+      userId: actor.userId,
+      spaceId: actor.spaceId,
+      endpoint: deps.firstPartyMcpUrl,
+      transport: "streamable_http",
+      enabled: true,
+    };
+    await actorFence();
+    if (input.operation === "memberships") {
+      const servers = await deps.prisma.mcpServer.findMany({
+        where: { ...where, ...(input.serverId ? { id: input.serverId } : {}) },
+        select: {
+          ...serverSelect,
+          assignments: {
+            where: { botId, userId: actor.userId, spaceId: actor.spaceId },
+            select: { allowAllTools: true, allowedTools: true },
+          },
+        },
+        orderBy: { id: "asc" },
+      });
+      const sources = [];
+      const pinnedSources = [];
+      for (const row of servers) {
+        const server = { ...row };
+        if (
+          server.userId !== actor.userId ||
+          server.spaceId !== actor.spaceId ||
+          server.endpoint !== deps.firstPartyMcpUrl ||
+          !server.enabled ||
+          server.transport !== "streamable_http"
+        )
+          throw new IsolationError();
+        if (
+          input.serverId &&
+          (server.id !== input.serverId || server.revision !== input.serverRevision)
+        )
+          throw new IsolationError();
+        if (!server.assignments.some((assignment) => allowed(assignment, "list_crm_memberships")))
+          continue;
+        pinnedSources.push(server);
+        try {
+          const rows = await membershipRows(server);
+          sources.push({
+            serverId: server.id,
+            serverRevision: server.revision,
+            name: server.name,
+            status: "ready" as const,
+            memberships: rows.map((row) => ({
+              organizationId: row.organization_id,
+              name: row.organizations?.name ?? null,
+              role: row.role,
+            })),
+          });
+        } catch (error) {
+          if (!(error instanceof ORPCError) || error.code !== "SERVICE_UNAVAILABLE") throw error;
+          sources.push({
+            serverId: server.id,
+            serverRevision: server.revision,
+            name: server.name,
+            status: "unavailable" as const,
+            memberships: [],
+          });
+        }
+      }
+      if (input.serverId && !sources.length) throw new IsolationError();
+      for (const source of pinnedSources) await sourceFence(source, "list_crm_memberships");
+      return RecruitingCrmDataOutputSchema.parse({
+        operation: input.operation,
+        checkedAt: new Date().toISOString(),
+        sources,
+      });
+    }
+    const selectedServer = await deps.prisma.mcpServer.findFirst({
+      where: { ...where, id: input.serverId },
+      select: serverSelect,
+    });
+    if (
+      !selectedServer ||
+      selectedServer.id !== input.serverId ||
+      selectedServer.revision !== input.serverRevision
+    )
+      throw new IsolationError();
+    const server = { ...selectedServer };
+    if (!(await membershipRows(server)).some((row) => row.organization_id === input.organizationId))
+      throw new IsolationError();
+    const source = {
+      serverId: server.id,
+      serverRevision: server.revision,
+      name: server.name,
+      organizationId: input.organizationId,
+    };
+    const roles = async () =>
+      parse(
+        RecruitingCrmClientsReadSchema,
+        await read(server, "list_crm_roles", { p_org: input.organizationId }),
+      ).flatMap((client) =>
+        client.roles.map((role) => ({
+          crmRoleId: role.role_spec_id,
+          clientId: client.client_id,
+          clientLabel: client.client_label,
+          roleLabel: role.role_label,
+          summary: role.summary,
+        })),
+      );
+    const finish = (value: Record<string, unknown>) =>
+      RecruitingCrmDataOutputSchema.parse({
+        ...value,
+        source,
+        checkedAt: new Date().toISOString(),
+      });
+    const candidate = (
+      row: ReturnType<typeof RecruitingCrmCandidatesReadSchema.parse>["rows"][number],
+    ) => ({
+      candidateId: row.candidate_id,
+      name: row.full_name,
+      email: row.email,
+      phone: row.phone,
+      linkedinUrl: row.linkedin_url,
+      location: row.location ?? null,
+      title: row.headline ?? null,
+      stage: row.stage,
+      contactStatus: row.contact_status,
+      outreachStatus: row.outreach_status,
+      roleSpecId: row.role_spec_id,
+      legacyClientLabel: row.client_label,
+      legacyRoleLabel: row.role_label,
+    });
+    const tracking = (
+      row: Omit<
+        ReturnType<typeof RecruitingCrmDetailsReadSchema.parse>["role_tracking"][number],
+        "candidate_id"
+      >,
+    ) => ({
+      roleKey: row.role_key,
+      clientLabel: row.client_label,
+      roleLabel: row.role_label,
+      highSignal: row.high_signal,
+      workflowStatus: row.workflow_status,
+      highSignalAt: row.high_signal_at,
+      statusChangedAt: row.status_changed_at,
+      updatedAt: row.updated_at,
+    });
+    const outbox = async (candidateId: string) => {
+      const rows = parse(
+        RecruitingCrmMessagesReadSchema,
+        await read(server, "list_crm_candidate_messages", {
+          p_org: input.organizationId,
+          p_candidate: candidateId,
+        }),
+      );
+      if (
+        rows.some(
+          (row) => row.organization_id !== input.organizationId || row.candidate_id !== candidateId,
+        ) ||
+        new Set(rows.map((row) => row.id)).size !== rows.length
+      )
+        throw unavailable();
+      return rows.map((row) => ({
+        id: row.id,
+        body: row.body,
+        status: row.status,
+        polishedBody: row.polished_body,
+        providerMessageId: row.instantly_email_id,
+        error: row.error,
+        createdAt: row.created_at,
+        sentAt: row.sent_at,
+      }));
+    };
+    if (input.operation === "important") {
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmImportantReadSchema,
+        await read(server, "list_crm_candidates", {
+          p_view: "important",
+          p_org: input.organizationId,
+          p_limit: limit,
+          p_offset: offset,
+          ...(input.status ? { p_status: input.status } : {}),
+        }),
+      );
+      const keys = page.rows.map((row) =>
+        JSON.stringify([row.candidate_id, row.role_tracking[0].role_key]),
+      );
+      if (
+        page.rows.length > limit ||
+        (page.rows.length && offset + page.rows.length > page.total) ||
+        new Set(keys).size !== keys.length ||
+        page.rows.some(
+          (row) =>
+            !row.role_tracking[0].high_signal && row.role_tracking[0].workflow_status === null,
+        )
+      )
+        throw unavailable();
+      return finish({
+        operation: input.operation,
+        scope: "organization_candidate_roles",
+        items: page.rows.map((row) => ({
+          ...candidate(row),
+          ...tracking({
+            ...row.role_tracking[0],
+            client_label: row.client_label,
+            role_label: row.role_label,
+          }),
+        })),
+        total: page.total,
+        offset,
+        nextOffset:
+          page.rows.length && offset + page.rows.length < page.total
+            ? offset + page.rows.length
+            : null,
+      });
+    }
+    if (input.operation === "candidateDetails") {
+      const messages = await outbox(input.candidateId);
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmDetailsReadSchema,
+        await read(server, "get_crm_candidate_review", {
+          p_view: "details",
+          p_org: input.organizationId,
+          p_candidate: input.candidateId,
+          p_campaign_limit: limit,
+          p_campaign_offset: offset,
+        }),
+      );
+      const associations = page.campaign_associations;
+      if (
+        page.organization_id !== input.organizationId ||
+        page.candidate_id !== input.candidateId ||
+        (page.review &&
+          (page.review.organization_id !== input.organizationId ||
+            page.review.candidate_id !== input.candidateId)) ||
+        page.role_tracking.some((row) => row.candidate_id !== input.candidateId) ||
+        new Set(page.role_tracking.map((row) => row.role_key)).size !== page.role_tracking.length ||
+        new Set(page.role_interests.map((row) => row.role_key)).size !==
+          page.role_interests.length ||
+        associations.lead_campaigns.length > limit ||
+        associations.offset !== offset ||
+        new Set(associations.lead_campaigns.map((row) => row.lead_id)).size !==
+          associations.lead_campaigns.length ||
+        associations.lead_campaigns.some(
+          (row) => row.campaign && row.campaign.id !== row.campaign_id,
+        ) ||
+        (associations.next_offset !== null &&
+          (!associations.lead_campaigns.length ||
+            associations.next_offset !== offset + associations.lead_campaigns.length))
+      )
+        throw unavailable();
+      const campaign = (row: typeof associations.pipeline_campaign) =>
+        row && {
+          id: row.id,
+          name: row.name,
+          status: row.status,
+          crmRoleId: row.role_spec_id,
+          clientId: row.client_id,
+          syncedAt: row.synced_at,
+        };
+      await sourceFence(server, "list_crm_candidate_messages");
+      return finish({
+        operation: input.operation,
+        scope: "stored_candidate_details",
+        outbox: messages,
+        candidateId: input.candidateId,
+        review: page.review && {
+          id: page.review.id,
+          crmRoleId: page.review.role_spec_id,
+          stage: page.review.stage,
+          reviewed: page.review.reviewed,
+          result: page.review.review_result,
+          notes: page.review.notes,
+          updatedAt: page.review.updated_at,
+          candidateName: page.review.candidate_full_name,
+          roleTitle: page.review.canonical_role_title,
+        },
+        roleTracking: page.role_tracking.map(tracking),
+        roleInterests: page.role_interests.map((row) => ({
+          roleKey: row.role_key,
+          clientLabel: row.client_label,
+          roleLabel: row.role_label,
+          interest: row.interest,
+          source: row.source,
+        })),
+        campaignAssociations: {
+          leadCampaigns: associations.lead_campaigns.map((row) => ({
+            leadId: row.lead_id,
+            campaignId: row.campaign_id,
+            campaign: campaign(row.campaign),
+          })),
+          pipelineCampaign: campaign(associations.pipeline_campaign),
+          offset,
+          nextOffset: associations.next_offset,
+        },
+      });
+    }
+    if (input.operation === "roleCampaigns") {
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmRoleCampaignsReadSchema,
+        await read(server, "get_crm_role", {
+          p_view: "campaigns",
+          p_org: input.organizationId,
+          p_role: input.crmRoleId,
+          p_limit: limit,
+          p_offset: offset,
+        }),
+      );
+      if (
+        page.organization_id !== input.organizationId ||
+        page.role_spec_id !== input.crmRoleId ||
+        page.campaigns.length > limit ||
+        page.offset !== offset ||
+        new Set(page.campaigns.map((row) => row.id)).size !== page.campaigns.length ||
+        (page.next_offset !== null &&
+          (!page.campaigns.length || page.next_offset !== offset + page.campaigns.length))
+      )
+        throw unavailable();
+      return finish({
+        operation: input.operation,
+        scope: "stored_role_campaigns",
+        crmRoleId: input.crmRoleId,
+        items: page.campaigns.map((row) => ({
+          id: row.id,
+          name: row.name,
+          status: row.status,
+          syncedAt: row.synced_at,
+        })),
+        offset,
+        nextOffset: page.next_offset,
+      });
+    }
+    if (input.operation === "roles")
+      return finish({ operation: input.operation, items: await roles() });
+    if (input.operation === "candidates") {
+      const trim = (text: string) => text.replace(/^ +| +$/g, "");
+      let selectedRole = null;
+      if (input.crmRoleId) {
+        const choices = await roles();
+        const row = parse(
+          RecruitingCrmRoleReadSchema,
+          await read(server, "get_crm_role", {
+            p_org: input.organizationId,
+            p_role: input.crmRoleId,
+          }),
+        );
+        const sameLabels = choices.filter(
+          (role) =>
+            trim(role.clientLabel) === trim(row.client_label) &&
+            trim(role.roleLabel) === trim(row.role_label),
+        );
+        if (
+          !trim(row.client_label) ||
+          !trim(row.role_label) ||
+          row.role_spec_id !== input.crmRoleId ||
+          sameLabels.length !== 1 ||
+          sameLabels[0]!.crmRoleId !== input.crmRoleId ||
+          sameLabels[0]!.clientId !== row.client_id
+        )
+          throw new ORPCError("CONFLICT", {
+            message: "This CRM role could not be matched unambiguously. Refresh the roles.",
+          });
+        selectedRole = {
+          crmRoleId: row.role_spec_id,
+          clientId: row.client_id,
+          clientLabel: row.client_label,
+          roleLabel: row.role_label,
+          summary: row.summary,
+          description: row.description,
+          jdText: row.jd_text,
+          jdUrl: row.jd_url,
+        };
+      }
+      const offset = input.offset ?? 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmCandidatesReadSchema,
+        await read(server, "list_crm_candidates", {
+          p_org: input.organizationId,
+          p_not_reviewed: false,
+          p_limit: limit,
+          p_offset: offset,
+          ...(input.query ? { p_q: input.query } : {}),
+          ...(selectedRole
+            ? { p_client: selectedRole.clientLabel, p_role: selectedRole.roleLabel }
+            : {}),
+        }),
+      );
+      if (
+        page.rows.length > limit ||
+        (selectedRole &&
+          page.rows.some(
+            (row) =>
+              trim(row.client_label) !== trim(selectedRole.clientLabel) ||
+              trim(row.role_label) !== trim(selectedRole.roleLabel),
+          )) ||
+        new Set(page.rows.map((row) => row.candidate_id)).size !== page.rows.length
+      )
+        throw unavailable();
+      return finish({
+        operation: input.operation,
+        scope: selectedRole ? "legacy_role_labels" : "organization",
+        selectedRole,
+        items: page.rows.map(candidate),
+        total: page.total,
+        offset,
+        nextOffset:
+          page.rows.length && offset + page.rows.length < page.total
+            ? offset + page.rows.length
+            : null,
+      });
+    }
+    if (
+      input.cursor &&
+      (input.cursor.p_org !== input.organizationId ||
+        input.cursor.p_candidate !== input.candidateId)
+    )
+      throw new IsolationError();
+    const messages = await outbox(input.candidateId);
+    const page = parse(
+      RecruitingCrmMailReadSchema,
+      await read(server, "list_crm_candidate_correspondence", {
+        p_org: input.organizationId,
+        p_candidate: input.candidateId,
+        p_limit: input.limit ?? 25,
+        ...(input.cursor ? { p_cursor: input.cursor } : {}),
+      }),
+    );
+    if (
+      page.messages.length > (input.limit ?? 25) ||
+      page.organization_id !== input.organizationId ||
+      page.candidate_id !== input.candidateId ||
+      page.messages.some(
+        (row) =>
+          row.organization_id !== input.organizationId ||
+          (row.candidate_id !== null && row.candidate_id !== input.candidateId) ||
+          (row.candidate_id === null && !row.lead_email),
+      ) ||
+      new Set(page.messages.map((row) => row.id)).size !== page.messages.length ||
+      (page.next_cursor &&
+        (page.next_cursor.p_org !== input.organizationId ||
+          page.next_cursor.p_candidate !== input.candidateId ||
+          page.next_cursor.linked_offset < (input.cursor?.linked_offset ?? 0) ||
+          page.next_cursor.unlinked_offset < (input.cursor?.unlinked_offset ?? 0) ||
+          page.next_cursor.linked_offset + page.next_cursor.unlinked_offset <=
+            (input.cursor?.linked_offset ?? 0) + (input.cursor?.unlinked_offset ?? 0)))
+    )
+      throw unavailable();
+    const native = input.crmRoleId
+      ? await nativeRecruitingCorrespondence(deps.prisma, actor, target.threadId, {
+          target: {
+            mcpServerId: server.id,
+            serverRevision: server.revision,
+            organizationId: input.organizationId,
+            crmRoleId: input.crmRoleId,
+          },
+          candidateId: input.candidateId,
+          crmEndpoint: deps.firstPartyMcpUrl,
+        })
+      : { items: [], partial: false, assertCurrent: null };
+    await sourceFence(server, "list_crm_candidate_messages");
+    await native.assertCurrent?.();
+    return finish({
+      operation: input.operation,
+      scope: "stored_candidate_correspondence",
+      outbox: messages,
+      candidateId: input.candidateId,
+      nativeCorrespondence: native.items,
+      items: page.messages.map((row) => ({
+        id: row.id,
+        providerMessageId: row.id,
+        threadId: row.thread_id,
+        direction: row.direction,
+        sender: row.from_address,
+        recipients: row.to_address === null ? [] : [row.to_address],
+        subject: row.subject,
+        body: row.body_text,
+        date: row.timestamp_email,
+        partial: row.body_text === null,
+      })),
+      nextCursor: page.next_cursor,
+    });
+  });
+}

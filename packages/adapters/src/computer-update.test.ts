@@ -50,6 +50,7 @@ function fixture(status = "queued") {
           : !where.status.in.includes(row.status))
       )
         return { count: 0 };
+      if (where.action && !where.action.in.includes(row.action)) return { count: 0 };
       Object.assign(row, data);
       return { count: 1 };
     }),
@@ -66,6 +67,15 @@ function fixture(status = "queued") {
   return { row, computer, computerUpdate, deps, jobs };
 }
 describe("background computer maintenance", () => {
+  it("never replays a checkpoint reservation as update or recovery", async () => {
+    const { row, deps, jobs } = fixture();
+    row.action = "checkpoint";
+    await performComputerUpdate(deps, row.id);
+    await reconcileComputerUpdates(deps);
+    expect(replacement).not.toHaveBeenCalled();
+    expect(jobs.enqueue).not.toHaveBeenCalled();
+    expect(row.status).toBe("queued");
+  });
   it("persists stages and releases its reservation only after completion; redelivery is harmless", async () => {
     const { row, computer, deps } = fixture();
     replacement.mockImplementationOnce(async (_deps, _id, _mode, _ctx, _holder, progress) => {

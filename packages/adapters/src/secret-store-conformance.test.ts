@@ -3,6 +3,7 @@ import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/
 import { describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore, SecretStoreUnavailableError } from "./infisical-secret-store.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
+import { deferSecretChanges } from "./secret-changes.js";
 import {
   ComposedSecretStore,
   createSecretStore,
@@ -66,6 +67,38 @@ function conformance(name: string, create: () => SecretStore) {
 }
 conformance("encrypted", () => new EncryptedSecretStore("test-key"));
 conformance("Infisical", () => new InfisicalSecretStore(infisicalFake().options));
+
+describe("transaction-owned secret changes", () => {
+  it("never checks out the notification pool while its single transaction connection is held", async () => {
+    let transactionOpen = false;
+    const fanout = new InMemoryRealtimeFanout();
+    const publish = vi.spyOn(fanout, "publish").mockImplementation(async () => {
+      if (transactionOpen) throw new Error("notification attempted a nested pool checkout");
+    });
+    const store = new ComposedSecretStore(new EncryptedSecretStore("test-key"), undefined, fanout);
+    await store.start();
+    const changed = vi.fn();
+    store.onChange(changed);
+    await deferSecretChanges(async () => {
+      transactionOpen = true;
+      await store.put("test-rotated-credential", secretTestContext, { recordId: "row" });
+      expect(publish).not.toHaveBeenCalled();
+      expect(changed).not.toHaveBeenCalled();
+      transactionOpen = false;
+    });
+    expect(publish).toHaveBeenCalledOnce();
+    expect(changed).toHaveBeenCalledOnce();
+    await expect(
+      deferSecretChanges(async () => {
+        await store.put("test-rolled-back", secretTestContext, { recordId: "row" });
+        throw new Error("rollback");
+      }),
+    ).rejects.toThrow("rollback");
+    expect(publish).toHaveBeenCalledOnce();
+    expect(changed).toHaveBeenCalledOnce();
+    await store.close();
+  });
+});
 
 describe("Infisical lifecycle and REST", () => {
   it("reads a just-written ref from another process and reads legacy/ephemeral refs locally", async () => {

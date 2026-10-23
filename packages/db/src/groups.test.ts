@@ -416,6 +416,69 @@ describe("archiveGroup", () => {
   });
 });
 
+describe("removeGroup", () => {
+  it("removes only the owned Crew's routines before its thread can be detached", async () => {
+    const actor = {
+      spaceId: "space-1",
+      userId: "user-1",
+      email: "user@example.test",
+      isDeploymentOwner: false,
+    };
+    const routines = [
+      { id: "crew-routine", spaceId: actor.spaceId, userId: actor.userId, groupId: "group-1" },
+      { id: "dm-routine", spaceId: actor.spaceId, userId: actor.userId, groupId: null },
+      { id: "other-crew", spaceId: actor.spaceId, userId: actor.userId, groupId: "group-2" },
+      { id: "other-user", spaceId: actor.spaceId, userId: "user-2", groupId: "group-1" },
+    ];
+    const tx = {
+      $queryRaw: vi.fn(async () => [{ id: "group-1" }]),
+      chatGroup: {
+        findUnique: vi.fn(async () => ({ members: [{ botId: "bot-1" }], artifacts: [] })),
+        delete: vi.fn(async () => {
+          expect(routines.some((routine) => routine.id === "crew-routine")).toBe(false);
+        }),
+      },
+      routine: {
+        deleteMany: vi.fn(
+          async ({
+            where,
+          }: {
+            where: { spaceId: string; userId: string; thread: { groupId: string } };
+          }) => {
+            for (let i = routines.length - 1; i >= 0; i--) {
+              const routine = routines[i]!;
+              if (
+                routine.spaceId === where.spaceId &&
+                routine.userId === where.userId &&
+                routine.groupId === where.thread.groupId
+              )
+                routines.splice(i, 1);
+            }
+          },
+        ),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    await expect(createGroupRepos(prisma).removeGroup(actor, "group-1")).resolves.toEqual({
+      contextBotId: "bot-1",
+      artifactStorageKeys: [],
+    });
+    expect(tx.routine.deleteMany).toHaveBeenCalledWith({
+      where: { spaceId: actor.spaceId, userId: actor.userId, thread: { groupId: "group-1" } },
+    });
+    expect(routines.map((routine) => routine.id)).toEqual([
+      "dm-routine",
+      "other-crew",
+      "other-user",
+    ]);
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      tx.routine.deleteMany.mock.invocationCallOrder[0]!,
+    );
+  });
+});
+
 describe("createGroup", () => {
   it("keeps the caller's member order instead of the insert order", async () => {
     const createMany = vi.fn();
@@ -468,6 +531,7 @@ describe("createGroup", () => {
       isDeploymentOwner: false,
     };
 
+    Object.assign(tx, { bot: prisma.bot });
     const group = await createGroupRepos(prisma).createGroup(actor, {
       name: "Support crew",
       botIds: ["lead", "build"],

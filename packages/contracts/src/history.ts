@@ -15,15 +15,24 @@ export const HistorySearchInputSchema = z.object({
   beforeSeq: z.number().int().nonnegative().optional(),
   limit: z.number().int().min(1).max(20).optional(),
 });
-export const HistoryReadInputSchema = z.object({
-  messageId: Id,
-  linkedRunId: Id.optional(),
-  runAfterId: Id.optional(),
-  artifactAfterId: Id.optional(),
-  outcomeAfterSeq: z.number().int().nonnegative().optional(),
-  textOffset: z.number().int().nonnegative().optional(),
-  direction: z.enum(["around", "older", "newer"]).optional(),
-  limit: z.number().int().min(1).max(20).optional(),
-});
+export const HistoryReadInputSchema = z
+  .object({
+    messageId: Id,
+    linkedRunId: Id.optional(),
+    effectId: Id.optional(),
+    effectAfterId: Id.optional(),
+    runAfterId: Id.optional(),
+    artifactAfterId: Id.optional(),
+    outcomeAfterSeq: z.number().int().nonnegative().optional(),
+    textOffset: z.number().int().nonnegative().optional(),
+    direction: z.enum(["around", "older", "newer"]).optional(),
+    limit: z.number().int().min(1).max(20).optional(),
+  })
+  .refine(
+    (input) =>
+      (!(input.effectId || input.effectAfterId) || Boolean(input.linkedRunId)) &&
+      !(input.effectId && input.effectAfterId),
+    "Receipt selection requires linkedRunId and one receipt mode",
+  );
 export type HistorySearchInput = z.infer<typeof HistorySearchInputSchema>;
 export type HistoryReadInput = z.infer<typeof HistoryReadInputSchema>;

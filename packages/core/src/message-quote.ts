@@ -164,7 +164,7 @@ function replyBlockText(block: MessageBlock): string {
     case "cloud_agent":
       return block.title;
     case "subagent":
-      return block.name || block.task;
+      return block.name || "Subagent";
     case "child_bot":
     case "skill_draft":
     case "connect":

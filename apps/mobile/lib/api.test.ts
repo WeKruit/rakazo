@@ -2790,6 +2790,27 @@ describe("mobile thread event reduction", () => {
     ).toBe("Slack · Alex: Hello from the group");
   });
 
+  it.each(["running", "completed", "failed"] as const)(
+    "keeps internal subagent details out of mobile previews when %s",
+    (status) => {
+      expect(
+        blockText(
+          mobileMessage("subagent-1", [
+            {
+              kind: "subagent",
+              agentId: "temporary-agent",
+              name: "Saved CRM records",
+              status,
+              task: "Internal role/source records",
+              progress: "using mcp__crm__list_candidates",
+              result: "Internal receipt artifact-123",
+            },
+          ]),
+        ),
+      ).toBe(`Saved CRM records: ${status}`);
+    },
+  );
+
   it("deduplicates durable messages and replaces matching transient subagent state", () => {
     const initial = snapshot([
       mobileMessage("message-1", [{ kind: "text", text: "old" }]),
@@ -2859,6 +2880,86 @@ describe("mobile thread event reduction", () => {
     const next = applyMobileThreadEvent(initial, { type: "thread.cleared", seq: 12 });
 
     expect(next).toMatchObject({ cursor: 12, messages: [], olderCursor: null, run: null });
+  });
+
+  it.each(["queued", "waiting_takeover"])(
+    "projects native requeue %s without losing a pending card",
+    (status) => {
+      const run = { id: "run-1", botId: "bot-1", status: "leased" };
+      const sibling = { id: "run-2", botId: "bot-2", status: "waiting_input" };
+      const card = mobileMessage("ask-1", [
+        { kind: "ask", text: "Allow?", approvalEffectId: "effect-1", status: "pending" },
+      ]);
+      const initial = { ...snapshot([card]), groupId: "group-1", run, activeRuns: [run, sibling] };
+      const next = applyMobileThreadEvent(initial, {
+        type: "run.requeued",
+        threadId: "thread-1",
+        botId: "bot-1",
+        runId: "run-1",
+        seq: 4,
+        payload: { status },
+      });
+      expect(next?.run?.status).toBe(status);
+      expect(next?.activeRuns?.[0]?.status).toBe(status);
+      expect(next?.activeRuns?.[1]).toBe(sibling);
+      expect(next?.messages).toEqual([card]);
+      expect(next?.cursor).toBe(4);
+    },
+  );
+
+  it("does not replay requeues over newer attempts, terminals or waiting input", () => {
+    const event = {
+      type: "run.requeued",
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: "run-1",
+      seq: 9,
+      payload: { status: "queued" },
+    };
+    for (const status of [
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "waiting_input",
+      "waiting_takeover",
+    ]) {
+      const run = { id: "run-1", botId: "bot-1", status };
+      const initial = { ...snapshot(), cursor: 10, run, activeRuns: [run] };
+      expect(applyMobileThreadEvent(initial, event)).toBe(initial);
+      if (status !== "running")
+        expect(applyMobileThreadEvent(initial, { ...event, seq: 11 })).toBe(initial);
+    }
+    const run = { id: "run-1", botId: "bot-1", status: "running" };
+    const initial = { ...snapshot(), run, activeRuns: [run] };
+    for (const patch of [
+      { runId: "future-run" },
+      { botId: "other-bot" },
+      { threadId: "other-thread" },
+    ]) {
+      expect(applyMobileThreadEvent(initial, { ...event, ...patch })).toBe(initial);
+    }
+  });
+
+  it("projects an admitted queued run from its native start without replaying over a later wait", () => {
+    const run = { id: "run-1", botId: "bot-1", status: "queued" };
+    const initial = { ...snapshot(), run, activeRuns: [run] };
+    const start = {
+      type: "run.started",
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: run.id,
+      seq: 4,
+    };
+    const started = applyMobileThreadEvent(initial, start);
+    expect(started?.run?.status).toBe("running");
+    expect(started?.activeRuns?.[0]?.status).toBe("running");
+    const waiting = applyMobileThreadEvent(started, {
+      type: "run.waiting_input",
+      runId: run.id,
+      seq: 5,
+    });
+    expect(applyMobileThreadEvent(waiting, start)).toBe(waiting);
   });
 
   it("applies the durable waiting-input run transition", () => {

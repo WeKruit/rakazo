@@ -1,4 +1,4 @@
-import { buildSkillMd } from "@rakazo/core";
+import { buildSkillMd, RECRUITING_DEFAULT_SKILLS } from "@rakazo/core";
 
 /**
  * Built-in Agent Skills (SKILL.md recipes) available to every user.
@@ -6,6 +6,7 @@ import { buildSkillMd } from "@rakazo/core";
  * Descriptions show in the / picker (truncated at 72) and inject every turn in the skills catalog.
  */
 const SKILLS: Array<{ name: string; description: string; body: string }> = [
+  ...RECRUITING_DEFAULT_SKILLS,
   {
     name: "Interrogate",
     description: "Adversarial review of a diff/PR/plan. Review only; never applies fixes.",

@@ -4,7 +4,7 @@ import type {
   ThreadMessage,
   ThreadSnapshot,
 } from "@rakazo/contracts";
-import { withLiveStreamingProgress } from "@rakazo/core";
+import { answerableAskMessageIds, withLiveStreamingProgress } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import {
   activeThreadRuns,
@@ -467,6 +467,70 @@ describe("thread event reduction", () => {
     expect(isThreadSnapshotEvent(event({ type: "agent.tool.completed" }))).toBe(true);
   });
 
+  it.each(["queued", "waiting_takeover"] as const)(
+    "projects a fenced requeue to %s without changing another run or its approval card",
+    (status) => {
+      const run = { ...threadRun("run-1"), status: "leased" as const };
+      const sibling = { ...threadRun("run-2", "bot-2"), status: "waiting_input" as const };
+      const card = message("ask-1", [
+        { kind: "ask", text: "Allow?", approvalEffectId: "effect-1", status: "pending" },
+      ]);
+      const initial = { ...snapshot([card]), groupId: "group-1", run, activeRuns: [run, sibling] };
+      const next = reduceThreadSnapshot(
+        initial,
+        event({ type: "run.requeued", payload: { status } }),
+      );
+      expect(isThreadSnapshotEvent(event({ type: "run.requeued" }))).toBe(true);
+      expect(next?.run?.status).toBe(status);
+      expect(next?.activeRuns?.[0]?.status).toBe(status);
+      expect(next?.activeRuns?.[1]).toBe(sibling);
+      expect(next?.messages).toEqual([card]);
+      expect(next?.cursor).toBe(4);
+    },
+  );
+
+  it("does not let a requeue replay regress newer attempts, terminals or pending input", () => {
+    for (const status of [
+      "running",
+      "completed",
+      "failed",
+      "cancelled",
+      "waiting_input",
+      "waiting_takeover",
+    ] as const) {
+      const run = { ...threadRun("run-1"), status };
+      const initial = { ...snapshot([]), cursor: 10, run, activeRuns: [run] };
+      expect(
+        reduceThreadSnapshot(
+          initial,
+          event({ type: "run.requeued", seq: 9, payload: { status: "queued" } }),
+        ),
+      ).toBe(initial);
+      if (status !== "running") {
+        expect(
+          reduceThreadSnapshot(
+            initial,
+            event({ type: "run.requeued", seq: 11, payload: { status: "queued" } }),
+          ),
+        ).toBe(initial);
+      }
+    }
+    const run = threadRun("run-1");
+    const initial = { ...snapshot([]), run, activeRuns: [run] };
+    for (const patch of [
+      { runId: "future-run" },
+      { botId: "other-bot" },
+      { threadId: "other-thread" },
+    ]) {
+      expect(
+        reduceThreadSnapshot(
+          initial,
+          event({ type: "run.requeued", seq: 11, payload: { status: "queued" }, ...patch }),
+        ),
+      ).toBe(initial);
+    }
+  });
+
   it("event-sources the active run on run.started so Stop does not wait on threads.get", () => {
     const initial = snapshot([]);
     const started = reduceThreadSnapshot(
@@ -712,6 +776,42 @@ describe("thread event reduction", () => {
     expect(stopped.activeRuns).toEqual([]);
     expect(stopped.messages).toEqual([durable]);
     expect(stopped.computer?.busyBotName).toBeNull();
+  });
+
+  it("clears only the selected member run and keeps the other waiting card answerable", () => {
+    const first = { ...threadRun("run-a"), botId: "bot-a", status: "waiting_input" as const };
+    const second = { ...threadRun("run-b"), botId: "bot-b", status: "waiting_input" as const };
+    const cards = [first, second].map((run) => ({
+      ...message(`ask:${run.id}`, [
+        { kind: "ask" as const, text: "Choose", status: "pending" as const },
+      ]),
+      runId: run.id,
+      botId: run.botId,
+    }));
+    const progress = [first, second].map((run) => ({
+      ...message(`progress:${run.id}`, [{ kind: "progress" as const, text: "Working" }]),
+      runId: run.id,
+    }));
+    const initial = {
+      ...snapshot([...cards, ...progress]),
+      run: first,
+      activeRuns: [first, second],
+      members: [first, second].map((run) => ({
+        botId: run.botId,
+        name: run.botId,
+        color: "ink",
+        status: run.status,
+      })),
+      computer: computer({ state: "running", busyBotName: "Crew" }),
+    };
+    const stopped = clearActiveThreadRuns(initial, "run-a");
+    expect(stopped.run).toBe(second);
+    expect(stopped.activeRuns).toEqual([second]);
+    expect(stopped.messages).toEqual([...cards, progress[1]]);
+    expect(answerableAskMessageIds(stopped)).toEqual(["ask:run-b"]);
+    expect(stopped.members?.map((member) => member.status)).toEqual(["idle", "waiting_input"]);
+    expect(stopped.computer).toBe(initial.computer);
+    expect(clearActiveThreadRuns(initial, "run-unknown")).toBe(initial);
   });
 
   it("keeps an optimistic stop clear when an older cursor refresh still looks busy", () => {
@@ -1032,6 +1132,7 @@ describe("thread event reduction", () => {
               { label: "Slack fetch conversation history", count: 2 },
             ],
           },
+          { kind: "progress", activity: true, text: "" },
         ],
       }),
     ]);
@@ -1061,6 +1162,47 @@ describe("thread event reduction", () => {
     expect(next?.cursor).toBe(5);
     expect(next?.messages).toEqual(initial.messages);
   });
+
+  it.each(["succeeded", "error", "paused"])(
+    "clears native activity on an actual %s tool completion without claiming business success",
+    (outcome) => {
+      const initial = snapshot([
+        message(
+          "progress:run-1",
+          [
+            {
+              kind: "progress",
+              activity: true,
+              text: "Reading private/path",
+              pendingToolNames: ["read_file"],
+            },
+          ],
+          4,
+        ),
+        message(
+          "progress:other-run",
+          [{ kind: "progress", activity: true, text: "Other work" }],
+          3,
+        ),
+      ]);
+      const next = reduceThreadSnapshot(
+        initial,
+        event({
+          type: "agent.tool.completed",
+          seq: 5,
+          runId: "run-1",
+          payload: { name: "read_file", outcome },
+        }),
+      );
+      expect(next?.messages.find((item) => item.id === "progress:run-1")?.blocks).toEqual([
+        { kind: "steps", steps: [{ label: "Read file", count: 1 }] },
+      ]);
+      expect(next?.messages.find((item) => item.id === "progress:other-run")).toEqual(
+        initial.messages[1],
+      );
+      expect(JSON.stringify(next?.messages)).not.toContain("private/path");
+    },
+  );
 
   it("holds a tool call that lands mid-sentence until the sentence completes", () => {
     const initial = snapshot([]);

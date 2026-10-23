@@ -1,9 +1,11 @@
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
-import { ChatMarkdown, LinkifiedText } from "@rakazo/chat-ui/web";
+import { ORPCError } from "@orpc/client";
+import { ChatMarkdown, LinkFaviconsContext, LinkifiedText } from "@rakazo/chat-ui/web";
 import type {
   AgentSkillCatalogEntry,
+  AskAnswer,
   Bot,
   BotSection,
   ComputerMode,
@@ -15,6 +17,7 @@ import type {
   Me,
   MessageReaction,
   ProductEvent,
+  RecruitingCorrespondenceReference,
   Routine,
   SearchHit,
   Space,
@@ -30,11 +33,15 @@ import {
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_COUNT,
   canReactToThreadMessage,
+  GROUP_MEMBER_MAX,
+  GROUP_MEMBER_MIN,
   MESSAGE_REACTIONS,
   normalizeCreateBotProfile,
+  RecruitingOutreachSequenceSchema,
 } from "@rakazo/contracts";
 import type { ComposerMention, SlashActionId } from "@rakazo/core";
 import {
+  answerableAskMessageIds,
   attachmentsForThread,
   buildComposerMentionOptions,
   clampMentionHighlightIndex,
@@ -46,7 +53,6 @@ import {
   isPeerReceiptBlocks,
   isRunTerminalEvent,
   isToolActivityBlock,
-  latestAnswerableAskMessageId,
   mentionChipKey,
   nestRosterByParent,
   plainTextFromMarkdown,
@@ -89,10 +95,12 @@ import {
   ArrowUp,
   Bell,
   Box,
+  BriefcaseBusiness,
   ChevronDown,
   CircleAlert,
   Clock,
   Copy,
+  Download,
   FolderOpen,
   Gauge,
   LayoutGrid,
@@ -113,20 +121,24 @@ import {
   Search,
   Settings,
   Smile,
+  Sparkles,
   Square,
   SquareKanban,
   TextQuote,
   Trash2,
   X,
 } from "lucide-react";
-import type { ClipboardEvent, DragEvent, MutableRefObject, RefObject } from "react";
+import type { ClipboardEvent, DragEvent, MutableRefObject, Ref, RefObject } from "react";
 import {
+  createRef,
   Fragment,
   memo,
   Suspense,
   useCallback,
+  useContext,
   useEffect,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -138,6 +150,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { ActiveBotGlyph, CollaborationMarker } from "../components/ai/CollaborationMarker";
+import { LoadingState, Shimmer } from "../components/ai/primitives";
 import { CloudAgentCard } from "../components/CloudAgentCard";
 import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
 import {
@@ -212,8 +225,10 @@ import {
 } from "../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { quoteDraftForSelection } from "../lib/quote-selection";
+import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
+import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { getResponseStreamingEnabled, subscribeResponseStreaming } from "../lib/response-streaming";
-import type { Panel, RightPanelState } from "../lib/right-panel-state";
+import type { Panel, RecruitingPanelState, RightPanelState } from "../lib/right-panel-state";
 import {
   readRightPanelState,
   rightPanelStorageKey,
@@ -247,6 +262,7 @@ import {
 import { getToolActivityEnabled, subscribeToolActivity } from "../lib/tool-activity-preference";
 import {
   isToolOnlyNarration,
+  latestNativeToolActivity,
   messageHasVisibleBlocks,
   renderableMessageBlocks,
   shouldRenderToolCard,
@@ -263,6 +279,17 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
+import {
+  RecruitingCorrespondence,
+  type RecruitingSequenceSaveInput,
+} from "./RecruitingCorrespondence";
+import type {
+  CandidateDiscussionContext,
+  CandidateFeedback,
+  CrmBrowseSelection,
+  CrmReplyDraftContext,
+} from "./RecruitingPanel";
+import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
 import {
@@ -296,6 +323,8 @@ import {
   ChoiceCard,
   McpApprovalCard,
 } from "./shell/message-cards";
+import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
+import { RecruitingNavigation } from "./shell/RecruitingNavigation";
 import { commitSpaceRename, sidebarGroupsForSpaces } from "./shell/space-sidebar";
 import { WindowChrome } from "./WindowChrome";
 
@@ -335,7 +364,8 @@ type PendingBrowserNotification = {
 const ATTACHMENT_ACCEPT = [...ATTACHMENT_ALLOWED_MIME_TYPES, ".zip"].join(",");
 /** Identity colour for bots the roster no longer knows about. */
 const FALLBACK_BOT_COLOR = "#85858A";
-const THREAD_SNAPSHOT_TIMEOUT_MS = 2_000;
+// Allow the API's 15s transaction and 5s pool wait when Postgres is remote.
+const THREAD_SNAPSHOT_TIMEOUT_MS = 30_000;
 /** Bound Settings leave so a hung voice status refresh cannot block dismissal. */
 const VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
@@ -408,8 +438,69 @@ function readCollapsedRosterParents(userId: string | null | undefined): Set<stri
   return readCollapsedIdSet(collapsedRosterParentsStorageKey(userId));
 }
 
+export function eventChangesRecruitingPanel(
+  event: Pick<ProductEvent, "type" | "payload">,
+): boolean {
+  if (event.type === "thread.message.created" && event.payload.role === "user")
+    return (
+      Array.isArray(event.payload.blocks) &&
+      event.payload.blocks.some(
+        (block) =>
+          block && typeof block === "object" && block.kind === "text" && block.recruitingFeedback,
+      )
+    );
+  if (event.type === "effect.recorded") {
+    const result = event.payload.result;
+    if (
+      event.payload.tool === "recruiting_feedback" &&
+      result &&
+      typeof result === "object" &&
+      "status" in result &&
+      result.status === "recorded" &&
+      "feedback" in result
+    ) {
+      const feedback = result.feedback;
+      return (
+        feedback !== null &&
+        typeof feedback === "object" &&
+        "target" in feedback &&
+        feedback.target === "candidate" &&
+        "operation" in feedback &&
+        ["hold", "pass", "resume"].includes(String(feedback.operation))
+      );
+    }
+    return (
+      (event.payload.tool === "recruiting_role" &&
+        event.payload.status === "saved" &&
+        event.payload.changed === true) ||
+      (event.payload.tool === "recruiting_crm_target" && event.payload.status === "connected") ||
+      (event.payload.tool === "recruiting_shortlist" &&
+        result !== null &&
+        typeof result === "object" &&
+        "kind" in result &&
+        result.kind === "saved")
+    );
+  }
+  // ponytail: arbitrary MCP aliases refresh at run termination;
+  // immediate updates need a persisted native recruiting receipt.
+  if (event.type === "agent.tool.completed")
+    return (
+      event.payload.name === "recruiting_crm_import" || event.payload.name === "recruiting_reply"
+    );
+  return (
+    (event.type.startsWith("recruiting.") &&
+      event.type !== "recruiting.context.adopted" &&
+      event.type !== "recruiting.material.read" &&
+      !(event.type === "recruiting.read" && event.payload.phase === "bound")) ||
+    event.type === "memory.revised" ||
+    event.type === "thread.cleared" ||
+    isRunTerminalEvent(event)
+  );
+}
+
 export function ShellPage() {
   const { t } = useLingui();
+  const linkFavicons = useContext(LinkFaviconsContext);
   const { botId, groupId } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -421,6 +512,10 @@ export function ShellPage() {
   const session = authClient.useSession();
   const userId = session.data?.user.id;
   const [groups, setGroups] = useState<Group[]>([]);
+  const [recruitingTab, setRecruitingTab] = useState<{
+    threadId: string;
+    tab: RecruitingPanelState["tab"];
+  } | null>(null);
   const [bots, setBots] = useState<Bot[]>([]);
   const botsRef = useRef(bots);
   botsRef.current = bots;
@@ -432,6 +527,9 @@ export function ShellPage() {
   const [archivedBots, setArchivedBots] = useState<Bot[]>([]);
   const [archivedGroups, setArchivedGroups] = useState<Group[]>([]);
   const [archivedOpen, setArchivedOpen] = useState(false);
+  const [newRoleSourceId, setNewRoleSourceId] = useState<string | null>(null);
+  const [newRoleDescription, setNewRoleDescription] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
   const [collapsedSidebarSections, setCollapsedSidebarSections] = useState(() => new Set<string>());
   const [collapsedRosterParents, setCollapsedRosterParents] = useState(() => new Set<string>());
 
@@ -454,11 +552,6 @@ export function ShellPage() {
   );
   const streamResponsesRef = useRef(streamResponses);
   streamResponsesRef.current = streamResponses;
-  const showToolActivity = useSyncExternalStore(
-    subscribeToolActivity,
-    getToolActivityEnabled,
-    () => true,
-  );
   const botsSidebarDensity = useSyncExternalStore(
     subscribeBotsSidebarDensity,
     getBotsSidebarDensity,
@@ -475,9 +568,20 @@ export function ShellPage() {
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [exportingConversation, setExportingConversation] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [panel, setPanelState] = useState<Panel>(null);
+  const [recruitingRefresh, setRecruitingRefresh] = useState(0);
+  const [roleChatOpen, setRoleChatOpen] = useState(false);
+  const roleChatId = useId();
+  const roleChatTrigger = useRef<HTMLButtonElement>(null);
+  const roleChatSection = useRef<HTMLElement>(null);
+  const recruitingReadCache = useRef<RecruitingReadCache>({ entries: new Map(), epoch: 0 });
+  useEffect(() => {
+    const cache = recruitingReadCache.current;
+    return () => clearRecruitingReads(cache);
+  }, []);
   const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
   const panelStorageKeyRef = useRef<string | null>(null);
   const observedPanelKey = useRef<string | null>(null);
@@ -522,10 +626,28 @@ export function ShellPage() {
   const computerRef = useRef<ComputerStatus | null>(null);
   const threadRefreshEpoch = useRef(0);
   const groupRefreshEpoch = useRef(0);
+  // ponytail: keep at most 20 threads in this authenticated shell; switching
+  // account/space reloads it. Native refresh/SSE remains authoritative.
+  const threadSnapshotCache = useRef(new Map<string, ThreadSnapshot>());
+  const validatedThreadEpoch = useRef<number | null>(null);
   const botsRefreshEpoch = useRef(0);
   const botsRefreshApplied = useRef(0);
   const archivedBotsRefreshEpoch = useRef(0);
-  const botsRefreshInFlight = useRef(0);
+  const botsRefreshInFlight = useRef<Promise<void> | null>(null);
+  const pendingBotsRefresh = useRef<{
+    user: { id: string | undefined };
+    request: number;
+    archivedRequest: number | null;
+    includeArchived: boolean;
+    replaceBotOrder: boolean;
+  } | null>(null);
+  const botsRefreshUser = useRef({ id: userId });
+  if (botsRefreshUser.current.id !== userId) {
+    botsRefreshUser.current = { id: userId };
+    pendingBotsRefresh.current = null;
+    botsRefreshEpoch.current++;
+    archivedBotsRefreshEpoch.current++;
+  }
   // A very fast run can finish over SSE while its threads.send response is still
   // returning. Do not let that late receipt resurrect terminal work as queued.
   const terminalRunReceipts = useRef(new Set<string>());
@@ -556,6 +678,13 @@ export function ShellPage() {
   }
 
   function commitSnapshot(next: ThreadSnapshot | null) {
+    if (next) {
+      const key = next.groupId ? `group:${next.groupId}` : `bot:${next.botId}`;
+      const cache = threadSnapshotCache.current;
+      cache.delete(key);
+      cache.set(key, next);
+      if (cache.size > 20) cache.delete(cache.keys().next().value!);
+    }
     snapshotRef.current = next;
     setSnapshot(withLiveStreamingProgress(next, streamResponsesRef.current));
   }
@@ -583,7 +712,6 @@ export function ShellPage() {
     SpaceMemoryConfig | null | undefined
   >(undefined);
   const memoryProviderConfigRevision = useRef(0);
-  const call = useCallSession();
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus | null>(null);
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [dismissedRunErrorIds, setDismissedRunErrorIds] =
@@ -676,6 +804,19 @@ export function ShellPage() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
   const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
+  const call = useCallSession(userId, bootstrapMe?.spaceId);
+  const showToolActivity = useSyncExternalStore(
+    subscribeToolActivity,
+    () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
+    () => false,
+  );
+  const showToolActivityRef = useRef<boolean | null>(null);
+  showToolActivityRef.current = bootstrapMe ? showToolActivity : null;
+  useEffect(() => {
+    if (!showToolActivity && panel && panel !== "recruiting" && panel !== "create-group") {
+      setPanel(null);
+    }
+  }, [showToolActivity, panel]);
   const [keepComputerRecovery, setKeepComputerRecovery] = useState(false);
   const recoveryHoldTimer = useRef<number | undefined>(undefined);
   const showComputerRecoveryHint =
@@ -814,6 +955,27 @@ export function ShellPage() {
   computerOpenRef.current = computerOpen;
   computerBotIdRef.current = computerBotId ?? active?.id;
   const activeGroup = groups.find((group) => group.id === groupId);
+  const roleSourceGroup =
+    panel === "create-group" && newRoleSourceId
+      ? [...groups, ...archivedGroups].find((group) => group.id === newRoleSourceId)
+      : activeGroup;
+  function canCreateRoleFrom(id: string) {
+    const group = [...groups, ...archivedGroups].find((group) => group.id === id);
+    return Boolean(
+      !creatingGroup &&
+        group &&
+        group.members.length >= GROUP_MEMBER_MIN &&
+        group.members.length <= GROUP_MEMBER_MAX &&
+        group.members.every((member) =>
+          bots.some((bot) => bot.id === member.botId && !bot.archivedAt),
+        ),
+    );
+  }
+  // Reuse this role's ordered native crew; its first member already owns default sends.
+  const roleCrewBots = (roleSourceGroup?.members ?? []).flatMap((member) => {
+    const bot = bots.find((bot) => bot.id === member.botId && !bot.archivedAt);
+    return bot ? [bot] : [];
+  });
   const activePendingAttachments = useMemo(
     () => attachmentsForThread(pendingAttachments, inGroup ? groupId : active?.id),
     [active?.id, groupId, inGroup, pendingAttachments],
@@ -835,6 +997,35 @@ export function ShellPage() {
   activeBotId.current = inGroup ? undefined : active?.id;
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
+  const refreshRecruitingReads = useCallback(
+    (threadId: string, spaceId: string | undefined) => {
+      const current = snapshotRef.current;
+      if (
+        !userId ||
+        !bootstrapMe?.spaceId ||
+        botsRefreshUser.current.id !== userId ||
+        (selectedSpaceId() ?? bootstrapMe.spaceId) !== bootstrapMe.spaceId ||
+        spaceId !== bootstrapMe.spaceId ||
+        threadId !== current?.threadId ||
+        (activeGroupId.current
+          ? current?.groupId !== activeGroupId.current
+          : current?.botId !== activeBotId.current)
+      )
+        return;
+      clearRecruitingReads(
+        recruitingReadCache.current,
+        JSON.stringify([userId, spaceId, current.threadId]),
+      );
+      setRecruitingRefresh((value) => value + 1);
+    },
+    [bootstrapMe?.spaceId, userId],
+  );
+  const invalidateRecruiting = useCallback(
+    (event: ProductEvent) => {
+      if (eventChangesRecruitingPanel(event)) refreshRecruitingReads(event.threadId, event.spaceId);
+    },
+    [refreshRecruitingReads],
+  );
   const screenRequest = useRef(0);
   const contextBot =
     botMenu?.kind === "bot" ? bots.find((bot) => bot.id === botMenu.id) : undefined;
@@ -950,70 +1141,112 @@ export function ShellPage() {
   );
 
   const refreshBots = useCallback(
-    async (includeArchived = false, replaceBotOrder = false) => {
-      markOnce("rk:renderer:bots-request-start");
+    (includeArchived = false, replaceBotOrder = false) => {
+      const user = botsRefreshUser.current;
+      if (!user.id) return Promise.resolve();
+      const pending = pendingBotsRefresh.current;
       const request = ++botsRefreshEpoch.current;
-      const botOrderEpoch = botOrderEpochRef.current;
-      const preserveBotOrder = savingBotOrderRef.current || pendingBotOrderRef.current !== null;
       const archivedRequest = includeArchived ? ++archivedBotsRefreshEpoch.current : null;
-      botsRefreshInFlight.current += 1;
-      try {
-        const [navigation, archived, archivedGroupList] = await Promise.all([
-          rpc.spaces.list(),
-          includeArchived ? rpc.bots.listArchived() : Promise.resolve(null),
-          includeArchived ? rpc.groups.listArchived() : Promise.resolve(null),
-        ]);
-        const { bots: list, botSections: sections, groups: groupList } = navigation.current;
-        markOnce("rk:renderer:bots-response");
-        const botsFresh = request === botsRefreshEpoch.current;
-        const archivedFresh =
-          archivedRequest != null && archivedRequest === archivedBotsRefreshEpoch.current;
-        // A newer non-archived refresh can win the bots epoch while an older
-        // includeArchived request still owns archivedBotsRefreshEpoch — apply
-        // whichever slices are still current.
-        if (!botsFresh && !archivedFresh) return;
-        if (archivedFresh && archived) setArchivedBots(archived);
-        if (archivedFresh && archivedGroupList) setArchivedGroups(archivedGroupList);
-        if (!botsFresh) return;
-        if (
-          botOrderEpoch === botOrderEpochRef.current &&
-          (replaceBotOrder || (!preserveBotOrder && !savingBotOrderRef.current))
-        ) {
-          setBots(list);
-        }
-        setBotSections(sections);
-        setGroups(groupList);
-        setSpaces(navigation.spaces);
-        setInitialBotsLoaded(true);
-        botsRefreshApplied.current = request;
-        if (
-          includeArchived &&
-          list.length === 0 &&
-          archived?.length === 0 &&
-          groupList.length === 0 &&
-          archivedGroupList?.length === 0 &&
-          !navigation.spaces.some((space) => space.hasContent)
-        ) {
-          // Only the very first bot everywhere needs onboarding. An empty
-          // current space with content elsewhere stays in the app so the
-          // space can be switched to or deleted instead of trapping the user.
-          navigate("/onboarding", { replace: true });
-          return;
-        }
-        const currentGroupId = routeGroupId.current;
-        if (currentGroupId) {
-          if (!groupList.some((group) => group.id === currentGroupId)) {
-            navigate(firstThreadRoute(list, groupList), { replace: true });
+      // ponytail: retain one pending refresh in this shell; merge triggers, never candidate data.
+      pendingBotsRefresh.current = {
+        user,
+        request,
+        archivedRequest:
+          archivedRequest ?? (pending?.user === user ? pending.archivedRequest : null),
+        includeArchived: includeArchived || (pending?.user === user && pending.includeArchived),
+        replaceBotOrder: replaceBotOrder || (pending?.user === user && pending.replaceBotOrder),
+      };
+      if (botsRefreshInFlight.current) return botsRefreshInFlight.current;
+      const refreshing = Promise.resolve().then(async () => {
+        try {
+          while (pendingBotsRefresh.current) {
+            const { user, request, archivedRequest, includeArchived, replaceBotOrder } =
+              pendingBotsRefresh.current;
+            pendingBotsRefresh.current = null;
+            if (user !== botsRefreshUser.current) continue;
+            markOnce("rk:renderer:bots-request-start");
+            const botOrderEpoch = botOrderEpochRef.current;
+            const preserveBotOrder =
+              savingBotOrderRef.current || pendingBotOrderRef.current !== null;
+            const requests = [
+              rpc.spaces.list(),
+              includeArchived ? rpc.bots.listArchived() : Promise.resolve(null),
+              includeArchived ? rpc.groups.listArchived() : Promise.resolve(null),
+            ] as const;
+            try {
+              const [navigation, archived, archivedGroupList] = await Promise.all(requests);
+              if (user !== botsRefreshUser.current) continue;
+              const { bots: list, botSections: sections, groups: groupList } = navigation.current;
+              markOnce("rk:renderer:bots-response");
+              const botsFresh = request === botsRefreshEpoch.current;
+              const archivedFresh =
+                archivedRequest != null && archivedRequest === archivedBotsRefreshEpoch.current;
+              if (!botsFresh && replaceBotOrder && botOrderEpoch === botOrderEpochRef.current) {
+                const pending =
+                  pendingBotsRefresh.current as (typeof pendingBotsRefresh)["current"];
+                if (pending?.user === user) pending.replaceBotOrder = true;
+              }
+              if (!botsFresh && !archivedFresh) continue;
+              if (archivedFresh && archived) setArchivedBots(archived);
+              if (archivedFresh && archivedGroupList) setArchivedGroups(archivedGroupList);
+              if (!botsFresh) continue;
+              if (
+                botOrderEpoch === botOrderEpochRef.current &&
+                (replaceBotOrder || (!preserveBotOrder && !savingBotOrderRef.current))
+              ) {
+                setBots(list);
+              }
+              setBotSections(sections);
+              setGroups(groupList);
+              setSpaces(navigation.spaces);
+              setInitialBotsLoaded(true);
+              botsRefreshApplied.current = request;
+              if (
+                includeArchived &&
+                list.length === 0 &&
+                archived?.length === 0 &&
+                groupList.length === 0 &&
+                archivedGroupList?.length === 0 &&
+                !navigation.spaces.some((space) => space.hasContent)
+              ) {
+                navigate("/onboarding", { replace: true });
+                continue;
+              }
+              const developerView = showToolActivityRef.current;
+              if (developerView === null) continue;
+              const currentGroupId = routeGroupId.current;
+              if (currentGroupId) {
+                if (!groupList.some((group) => group.id === currentGroupId)) {
+                  navigate(firstThreadRoute(list, groupList, !developerView), {
+                    replace: true,
+                  });
+                }
+                continue;
+              }
+              const currentBotId = routeBotId.current;
+              if (!currentBotId || !list.some((bot) => bot.id === currentBotId)) {
+                navigate(firstThreadRoute(list, groupList, !developerView), {
+                  replace: true,
+                });
+              }
+            } catch (error) {
+              await Promise.allSettled(requests);
+              // Other callers can enqueue while this failed batch settles.
+              const pending = pendingBotsRefresh.current as (typeof pendingBotsRefresh)["current"];
+              if (!pending) throw error;
+              if (pending.user === user) {
+                pending.includeArchived ||= includeArchived;
+                pending.replaceBotOrder ||= replaceBotOrder;
+                pending.archivedRequest ??= archivedRequest;
+              }
+            }
           }
-          return;
+        } finally {
+          botsRefreshInFlight.current = null;
         }
-        const currentBotId = routeBotId.current;
-        if (!currentBotId || !list.some((bot) => bot.id === currentBotId)) {
-          navigate(firstThreadRoute(list, groupList), { replace: true });
-        }
-      } finally {
-        botsRefreshInFlight.current -= 1;
-      }
+      });
+      botsRefreshInFlight.current = refreshing;
+      return refreshing;
     },
     [navigate],
   );
@@ -1030,20 +1263,50 @@ export function ShellPage() {
     });
   }
 
+  async function readThreadSnapshot(
+    target: { botId?: string; groupId?: string },
+    signal: AbortSignal | undefined,
+    isCurrent: () => boolean,
+  ) {
+    try {
+      return await rpc.threads.get(target, signal ? { signal } : undefined);
+    } catch (error) {
+      if (
+        isCurrent() &&
+        !signal?.aborted &&
+        error instanceof ORPCError &&
+        ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+      ) {
+        threadSnapshotCache.current.delete(
+          target.groupId ? `group:${target.groupId}` : `bot:${target.botId}`,
+        );
+        validatedThreadEpoch.current = null;
+        commitSnapshot(null);
+      }
+      throw error;
+    }
+  }
+
   async function refreshGroupThread(id: string, signal?: AbortSignal) {
     const scrollElement = messageScroll.current;
     const stickToEnd = !scrollElement || transcriptIsNearEnd(scrollElement);
     markOnce("rk:renderer:thread-request-start");
+    const epoch = historyEpoch.current;
     const request = ++groupRefreshEpoch.current;
-    const snap = await rpc.threads.get({ groupId: id }, signal ? { signal } : undefined);
+    const isCurrent = () =>
+      activeGroupId.current === id &&
+      epoch === historyEpoch.current &&
+      request === groupRefreshEpoch.current;
+    const snap = await readThreadSnapshot({ groupId: id }, signal, isCurrent);
     markOnce("rk:renderer:thread-response");
-    if (activeGroupId.current !== id || request !== groupRefreshEpoch.current) return snap;
+    if (!isCurrent()) return snap;
     const reconciled = reconcileRefreshedThread(
       snapshotRef.current,
       snap,
       computerRef.current,
       expandedHistoryThread.current === snap.threadId,
     );
+    validatedThreadEpoch.current = epoch;
     commitSnapshot(reconciled.snapshot);
     if (!computerOpenRef.current) commitComputer(null);
     setRoutines([]);
@@ -1067,7 +1330,11 @@ export function ShellPage() {
     const request = ++threadRefreshEpoch.current;
     // Apply threads.get as soon as it returns so stop/takeover status is not held behind
     // routines/skills/screen fetches (progress can advance the cursor meanwhile).
-    const snap = await rpc.threads.get({ botId: id }, signal ? { signal } : undefined);
+    const isCurrent = () =>
+      activeBotId.current === id &&
+      epoch === historyEpoch.current &&
+      request === threadRefreshEpoch.current;
+    const snap = await readThreadSnapshot({ botId: id }, signal, isCurrent);
     markOnce("rk:renderer:thread-response");
     if (
       activeBotId.current !== id ||
@@ -1082,6 +1349,7 @@ export function ShellPage() {
       computerRef.current,
       expandedHistoryThread.current === snap.threadId,
     );
+    validatedThreadEpoch.current = epoch;
     commitSnapshot(reconciled.snapshot);
     commitComputer(reconciled.computer);
     cacheComputerFor(id, { computer: reconciled.computer });
@@ -1178,6 +1446,29 @@ export function ShellPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const user = { id: userId };
+    botsRefreshUser.current = user;
+    let bootstrapReady = false;
+    let refreshTimer: number | undefined;
+    const canRefresh = () =>
+      !cancelled &&
+      bootstrapReady &&
+      botsRefreshUser.current === user &&
+      document.visibilityState === "visible" &&
+      document.hasFocus();
+    const scheduleRefresh = (delay = 15_000) => {
+      window.clearTimeout(refreshTimer);
+      if (!canRefresh()) return;
+      // ponytail: active-thread events miss other clients' roles; reconcile only while focused.
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined;
+        if (!canRefresh()) return;
+        void (botsRefreshInFlight.current ?? refreshBots())
+          .catch(() => undefined)
+          .finally(() => scheduleRefresh());
+      }, delay);
+    };
+    const refreshVisibleBots = () => scheduleRefresh(50);
     const providerConfigRevision = memoryProviderConfigRevision.current;
     void rpc.memory
       .providerConfig()
@@ -1192,10 +1483,12 @@ export function ShellPage() {
         }
       });
     const appliedAtStart = botsRefreshApplied.current;
-    void takeInitialBootstrap(botId)
+    void takeInitialBootstrap(botId, groupId)
       .then((bootstrap) => {
-        if (cancelled) return;
+        if (cancelled || botsRefreshUser.current !== user) return;
         const groupList = bootstrap.groups;
+        const recruiting = !getToolActivityEnabled(bootstrap.me.isDeploymentOwner === true);
+        showToolActivityRef.current = !recruiting;
         setBootstrapMe(bootstrap.me);
         // Skip list/route writes only if a later refreshBots() successfully
         // committed (failed refreshes bump epoch but not botsRefreshApplied).
@@ -1209,7 +1502,19 @@ export function ShellPage() {
           setSpaces(bootstrap.spaces);
           setInitialBotsLoaded(true);
         }
-        if (!groupId && bootstrap.thread) {
+        const selectedThread =
+          bootstrap.thread &&
+          (groupId
+            ? routeGroupId.current === groupId && bootstrap.thread.groupId === groupId
+            : !routeGroupId.current &&
+              routeBotId.current === botId &&
+              bootstrap.thread.botId === botId);
+        if (
+          applyBotLists &&
+          selectedThread &&
+          bootstrap.thread &&
+          !(groupId && searchParamsRef.current.get("m"))
+        ) {
           bootstrappedThread.current = bootstrap.thread;
           commitSnapshot(bootstrap.thread);
           commitComputer(bootstrap.thread.computer ?? null);
@@ -1229,46 +1534,60 @@ export function ShellPage() {
           navigate("/onboarding", { replace: true });
           return;
         }
-        if (groupId) {
-          if (!groupList.some((group) => group.id === groupId)) {
-            navigate(firstThreadRoute(bootstrap.bots, groupList), { replace: true });
+        if (routeGroupId.current) {
+          if (!groupList.some((group) => group.id === routeGroupId.current)) {
+            navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
           }
           return;
         }
-        const selectedBotId = bootstrap.thread?.botId ?? bootstrap.bots[0]?.id;
-        if (selectedBotId && selectedBotId !== botId) {
-          navigate(`/app/${selectedBotId}`, { replace: true });
+        if (!bootstrap.bots.some((bot) => bot.id === routeBotId.current)) {
+          navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
         }
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || botsRefreshUser.current !== user) return;
         setBootstrapMe(null);
-        void refreshBots(true);
+        showToolActivityRef.current = null;
+        const spaceId = selectedSpaceId();
+        return rpc
+          .me()
+          .then((me) => {
+            if (
+              cancelled ||
+              botsRefreshUser.current !== user ||
+              me.userId !== user.id ||
+              spaceId !== selectedSpaceId() ||
+              (spaceId !== null && me.spaceId !== spaceId)
+            )
+              return;
+            setBootstrapMe(me);
+            showToolActivityRef.current = getToolActivityEnabled(me.isDeploymentOwner === true);
+            return refreshBots(true);
+          })
+          .catch(() => undefined);
+      })
+      .finally(() => {
+        bootstrapReady = true;
+        scheduleRefresh();
       });
-    let refreshTimer: number | undefined;
-    const refreshVisibleBots = () => {
-      if (document.visibilityState !== "visible") return;
-      window.clearTimeout(refreshTimer);
-      refreshTimer = window.setTimeout(() => void refreshBots().catch(() => undefined), 50);
-    };
     window.addEventListener("focus", refreshVisibleBots);
+    window.addEventListener("blur", refreshVisibleBots);
     document.addEventListener("visibilitychange", refreshVisibleBots);
-    // Poll skips while a refresh is in flight; focus/visibility and event-driven
-    // callers still bump botsRefreshEpoch so only the latest response applies.
-    const poll = window.setInterval(() => {
-      if (botsRefreshInFlight.current > 0) return;
-      refreshVisibleBots();
-    }, 3_000);
     return () => {
       cancelled = true;
+      botsRefreshUser.current = { id: undefined };
+      pendingBotsRefresh.current = null;
+      botsRefreshEpoch.current++;
+      archivedBotsRefreshEpoch.current++;
       window.clearTimeout(refreshTimer);
-      window.clearInterval(poll);
       window.removeEventListener("focus", refreshVisibleBots);
+      window.removeEventListener("blur", refreshVisibleBots);
       document.removeEventListener("visibilitychange", refreshVisibleBots);
     };
   }, []);
 
   useEffect(() => {
+    if (!showToolActivity) return;
     let cancelled = false;
     void rpc.agentSkills
       .list()
@@ -1281,7 +1600,7 @@ export function ShellPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [showToolActivity]);
 
   const refreshAgentSkills = useCallback(() => {
     void rpc.agentSkills
@@ -1365,7 +1684,7 @@ export function ShellPage() {
       setScreenUrl(null);
     }
     expandedHistoryThread.current = null;
-    historyEpoch.current += 1;
+    const epoch = ++historyEpoch.current;
     const abort = new AbortController();
     void runThreadSubscription({
       signal: abort.signal,
@@ -1373,16 +1692,33 @@ export function ShellPage() {
         const primed = bootstrappedThread.current;
         bootstrappedThread.current = null;
         // Pending search jumps load the around-page separately; avoid replacing it with latest.
-        return primed?.botId === active.id
-          ? primed
-          : pendingJump
-            ? rpc.threads.get({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) })
-            : refreshThread(active.id, threadSnapshotSignal(abort.signal));
+        if (primed?.botId === active.id) {
+          validatedThreadEpoch.current = epoch;
+          commitSnapshot({ ...primed });
+          return primed;
+        }
+        return pendingJump
+          ? readThreadSnapshot(
+              { botId: active.id },
+              threadSnapshotSignal(abort.signal),
+              () => epoch === historyEpoch.current && activeBotId.current === active.id,
+            )
+          : refreshThread(active.id, threadSnapshotSignal(abort.signal));
       },
       loadHead: () =>
         rpc.threads.head({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) }),
-      refresh: () => refreshThread(active.id, threadSnapshotSignal(abort.signal)),
-      currentSnapshot: () => snapshotRef.current,
+      refresh: async () => {
+        const fresh = await refreshThread(active.id, threadSnapshotSignal(abort.signal));
+        if (
+          !abort.signal.aborted &&
+          epoch === historyEpoch.current &&
+          activeBotId.current === active.id
+        )
+          refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+        return fresh;
+      },
+      currentSnapshot: () =>
+        validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
       subscribe: (cursor) =>
         rpc.threads.subscribe({ botId: active.id, cursor }, { signal: abort.signal }),
       beforeEvent: (event) => {
@@ -1397,6 +1733,7 @@ export function ShellPage() {
       applyEvent: (event) =>
         applyThreadEvent(event, commitSnapshot, commitComputer, snapshotRef, computerRef),
       onEvent: (event, initial) => {
+        invalidateRecruiting(event);
         const currentBot = botsRef.current.find((bot) => bot.id === active.id);
         notifyBrowserForEvent(
           event,
@@ -1446,7 +1783,13 @@ export function ShellPage() {
     return () => {
       abort.abort();
     };
-  }, [active?.id, markBotReadIfVisible, notifyBrowserForEvent]);
+  }, [
+    active?.id,
+    markBotReadIfVisible,
+    notifyBrowserForEvent,
+    invalidateRecruiting,
+    refreshRecruitingReads,
+  ]);
 
   useEffect(() => {
     if (!groupId || !activeGroup) return;
@@ -1483,17 +1826,39 @@ export function ShellPage() {
       pinnedAroundRef.current = null;
       expandedHistoryThread.current = null;
     }
-    historyEpoch.current += 1;
+    const epoch = ++historyEpoch.current;
     const abort = new AbortController();
     void runThreadSubscription({
       signal: abort.signal,
-      loadInitial: () =>
-        pendingJump
-          ? rpc.threads.get({ groupId }, { signal: threadSnapshotSignal(abort.signal) })
-          : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal)),
+      loadInitial: async () => {
+        const primed = bootstrappedThread.current;
+        bootstrappedThread.current = null;
+        if (!pendingJump && primed?.groupId === groupId) {
+          validatedThreadEpoch.current = epoch;
+          commitSnapshot({ ...primed });
+          return primed;
+        }
+        return pendingJump
+          ? readThreadSnapshot(
+              { groupId },
+              threadSnapshotSignal(abort.signal),
+              () => epoch === historyEpoch.current && activeGroupId.current === groupId,
+            )
+          : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
+      },
       loadHead: () => rpc.threads.head({ groupId }, { signal: threadSnapshotSignal(abort.signal) }),
-      refresh: () => refreshGroupThread(groupId, threadSnapshotSignal(abort.signal)),
-      currentSnapshot: () => snapshotRef.current,
+      refresh: async () => {
+        const fresh = await refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
+        if (
+          !abort.signal.aborted &&
+          epoch === historyEpoch.current &&
+          activeGroupId.current === groupId
+        )
+          refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+        return fresh;
+      },
+      currentSnapshot: () =>
+        validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
       subscribe: (cursor) => rpc.threads.subscribe({ groupId, cursor }, { signal: abort.signal }),
       applyEvent: (event) =>
         applyThreadEvent(
@@ -1507,6 +1872,7 @@ export function ShellPage() {
           computerRef,
         ),
       onEvent: (event, initial) => {
+        invalidateRecruiting(event);
         const eventBot = botsRef.current.find((bot) => bot.id === event.botId);
         notifyBrowserForEvent(
           event,
@@ -1539,7 +1905,13 @@ export function ShellPage() {
       document.removeEventListener("visibilitychange", markVisibleGroupRead);
       abort.abort();
     };
-  }, [activeGroup?.id, groupId, notifyBrowserForEvent]);
+  }, [
+    activeGroup?.id,
+    groupId,
+    notifyBrowserForEvent,
+    invalidateRecruiting,
+    refreshRecruitingReads,
+  ]);
 
   const sidebarGroups = useMemo(() => {
     const sidebarSpaces =
@@ -1688,7 +2060,16 @@ export function ShellPage() {
     jumpGeneration.current += 1;
     const jumpId = jumpGeneration.current;
     const [snap, page] = await Promise.all([
-      rpc.threads.get(threadTarget),
+      readThreadSnapshot(
+        threadTarget,
+        undefined,
+        () =>
+          epoch === historyEpoch.current &&
+          jumpId === jumpGeneration.current &&
+          (target.groupId
+            ? activeGroupId.current === target.groupId
+            : activeBotId.current === target.botId),
+      ),
       rpc.threads.messages({ ...threadTarget, around: { messageId: target.messageId } }),
     ]);
     // The epoch check drops a jump that raced a conversation clear (or a bot switch): applying
@@ -1711,6 +2092,7 @@ export function ShellPage() {
         }
       : null;
     if (targetInPage) initiallyScrolledThread.current = page.threadId;
+    validatedThreadEpoch.current = epoch;
     commitSnapshot({
       ...snap,
       messages: targetInPage ? page.messages : snap.messages,
@@ -1793,13 +2175,460 @@ export function ShellPage() {
       });
     }
   }, [active?.id, groupId, inGroup, routines, routinesBotId, searchParams, setSearchParams]);
-  const activeSnapshot = inGroup
-    ? snapshot?.groupId === groupId
-      ? snapshot
-      : null
-    : snapshot?.botId === active?.id
-      ? snapshot
-      : null;
+  const activeSnapshot =
+    (inGroup
+      ? snapshot?.groupId === groupId
+        ? snapshot
+        : null
+      : snapshot?.botId === active?.id
+        ? snapshot
+        : null) ??
+    threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
+    null;
+  const composerDraftKey = inGroup ? `group:${groupId}` : `bot:${active?.id}`;
+  const workspaceViews: readonly RecruitingWorkspaceView[] = [
+    "conversation",
+    "results",
+    "brief",
+    "feedback",
+    "shortlist",
+    "contacts",
+    "sequence",
+    "inbox",
+    "interview",
+    "workflow",
+  ];
+  const requestedWorkspaceView = searchParams.get("view") as RecruitingWorkspaceView | null;
+  const recruitingWorkspaceView: RecruitingWorkspaceView =
+    requestedWorkspaceView && workspaceViews.includes(requestedWorkspaceView)
+      ? requestedWorkspaceView
+      : inGroup
+        ? "results"
+        : "conversation";
+  const workspaceNewRole = !showToolActivity && panel === "create-group";
+  const crmMode = !showToolActivity && !workspaceNewRole && searchParams.has("crmServer");
+  const crmRevision = Number(searchParams.get("crmRevision"));
+  const crmSelection: CrmBrowseSelection | undefined =
+    crmMode &&
+    searchParams.get("crmServer") &&
+    searchParams.get("crmOrganization") &&
+    Number.isSafeInteger(crmRevision) &&
+    crmRevision > 0
+      ? {
+          serverId: searchParams.get("crmServer")!,
+          serverRevision: crmRevision,
+          organizationId: searchParams.get("crmOrganization")!,
+          ...(searchParams.get("crmRole") ? { crmRoleId: searchParams.get("crmRole")! } : {}),
+        }
+      : undefined;
+  const recruitingCacheScope =
+    userId && bootstrapMe?.spaceId && activeSnapshot?.threadId
+      ? JSON.stringify([userId, bootstrapMe.spaceId, activeSnapshot.threadId])
+      : undefined;
+  const boundRoleView =
+    !showToolActivity &&
+    !crmMode &&
+    !workspaceNewRole &&
+    inGroup &&
+    ["contacts", "inbox", "feedback", "sequence"].includes(recruitingWorkspaceView);
+  const bindingReadKey = JSON.stringify([recruitingCacheScope, recruitingRefresh]);
+  const [bindingRead, setBindingRead] = useState<{
+    key: string;
+    workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
+    failed?: boolean;
+  }>();
+  useEffect(() => {
+    if (!boundRoleView || !recruitingCacheScope || !activeSnapshot?.threadId) {
+      setBindingRead(undefined);
+      return;
+    }
+    let cancelled = false;
+    const cache = recruitingReadCache.current;
+    const epoch = cache.epoch;
+    const threadId = activeSnapshot.threadId;
+    const isCurrent = () =>
+      !cancelled &&
+      epoch === cache.epoch &&
+      botsRefreshUser.current.id === userId &&
+      (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
+      snapshotRef.current?.threadId === threadId &&
+      activeGroupId.current === groupId;
+    setBindingRead({ key: bindingReadKey });
+    void rpc.recruiting
+      .getWorkspace({ threadId })
+      .then((workspace) => {
+        if (!isCurrent()) return;
+        rememberRecruitingRead(cache, `${recruitingCacheScope}:workspace`, { workspace }, epoch);
+        setBindingRead({ key: bindingReadKey, workspace });
+      })
+      .catch(() => {
+        if (!isCurrent()) return;
+        clearRecruitingReads(cache, recruitingCacheScope);
+        setBindingRead({ key: bindingReadKey, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    boundRoleView,
+    recruitingCacheScope,
+    bindingReadKey,
+    activeSnapshot?.threadId,
+    userId,
+    bootstrapMe?.spaceId,
+    groupId,
+  ]);
+  const currentBindingRead = bindingRead?.key === bindingReadKey ? bindingRead : undefined;
+  const boundCrmTarget = currentBindingRead?.workspace?.crmTarget;
+  const boundCrmSelection: CrmBrowseSelection | undefined = boundCrmTarget
+    ? {
+        serverId: boundCrmTarget.target.mcpServerId,
+        serverRevision: boundCrmTarget.target.serverRevision,
+        organizationId: boundCrmTarget.target.organizationId,
+        crmRoleId: boundCrmTarget.target.crmRoleId,
+      }
+    : undefined;
+  const boundRoleCrmMode =
+    boundRoleView &&
+    searchParams.get("roleSource") !== "search" &&
+    (!currentBindingRead ||
+      currentBindingRead.failed ||
+      currentBindingRead.workspace === undefined ||
+      Boolean(boundCrmSelection));
+  const effectiveCrmSelection = crmMode ? crmSelection : boundCrmSelection;
+  const workspaceCandidates =
+    !showToolActivity &&
+    !crmMode &&
+    !boundRoleCrmMode &&
+    !workspaceNewRole &&
+    ["results", "shortlist", "contacts", "workflow"].includes(recruitingWorkspaceView);
+  const workspaceCorrespondence =
+    !showToolActivity &&
+    !crmMode &&
+    !boundRoleCrmMode &&
+    !workspaceNewRole &&
+    ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
+  const workspaceFull =
+    crmMode ||
+    boundRoleCrmMode ||
+    workspaceNewRole ||
+    workspaceCandidates ||
+    workspaceCorrespondence;
+  const roleChatWorkspace =
+    workspaceFull && !crmMode && !workspaceNewRole && Boolean(activeSnapshot?.threadId);
+  useEffect(() => {
+    if (roleChatWorkspace && roleChatOpen)
+      roleChatSection.current
+        ?.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')
+        ?.focus();
+  }, [roleChatWorkspace, roleChatOpen, activeSnapshot?.threadId]);
+  const workspaceBrief =
+    !showToolActivity &&
+    !crmMode &&
+    !boundRoleCrmMode &&
+    !workspaceNewRole &&
+    ["brief", "feedback"].includes(recruitingWorkspaceView);
+  function openRecruitingView(view: RecruitingWorkspaceView) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("view", view);
+        return next;
+      },
+      { replace: true },
+    );
+    setMobileSidebarOpen(false);
+    setPanel(null);
+  }
+  const activeRecruitingTab =
+    recruitingTab?.threadId === activeSnapshot?.threadId ? recruitingTab?.tab : undefined;
+  const changeRecruitingTab = useCallback(
+    (tab: RecruitingPanelState["tab"]) => {
+      const threadId = activeSnapshot?.threadId;
+      if (!threadId) return;
+      setRecruitingTab((current) =>
+        current?.threadId === threadId && current.tab === tab ? current : { threadId, tab },
+      );
+    },
+    [activeSnapshot?.threadId],
+  );
+  const composerRef = useMemo(
+    () => createRef<ComposerHandle>(),
+    [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
+  );
+  const correspondenceScope = useMemo(
+    () => ({}),
+    [
+      composerRef,
+      recruitingWorkspaceView,
+      recruitingRefresh,
+      workspaceNewRole,
+      boundRoleCrmMode,
+      boundCrmTarget?.bindingEffectId,
+      searchParams.get("crmCandidate"),
+    ],
+  );
+  const currentCorrespondenceScope = useRef(correspondenceScope);
+  currentCorrespondenceScope.current = correspondenceScope;
+  const [selectedCorrespondence, setSelectedCorrespondence] = useState<{
+    scope: typeof correspondenceScope;
+    reference: RecruitingCorrespondenceReference;
+  } | null>(null);
+  const selectCorrespondence = useCallback(
+    (reference: RecruitingCorrespondenceReference | undefined) => {
+      if (
+        currentCorrespondenceScope.current !== correspondenceScope ||
+        !discussionScope.current.active
+      )
+        return;
+      setSelectedCorrespondence(
+        reference && recruitingWorkspaceView === "inbox" && !workspaceNewRole
+          ? { scope: correspondenceScope, reference }
+          : null,
+      );
+    },
+    [correspondenceScope, recruitingWorkspaceView, workspaceNewRole],
+  );
+  function openRoleChat(text?: string) {
+    if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
+    if (roleChatWorkspace) setRoleChatOpen(true);
+    else openRecruitingView("conversation");
+  }
+  const candidateFeedbackRecipients = inGroup
+    ? (activeSnapshot?.members ?? activeGroup?.members ?? [])
+        .filter((_member, index) => showToolActivity || index === 0)
+        .map((member) => ({
+          id: member.botId,
+          name: member.name,
+        }))
+    : undefined;
+  const discussionScope = useRef({
+    composerRef,
+    panel,
+    workspaceCandidates,
+    active: true,
+    candidateFeedbackRecipients,
+  });
+  discussionScope.current.composerRef = composerRef;
+  discussionScope.current.panel = panel;
+  discussionScope.current.workspaceCandidates = workspaceCandidates;
+  discussionScope.current.candidateFeedbackRecipients = candidateFeedbackRecipients;
+  useLayoutEffect(() => {
+    discussionScope.current.active = true;
+    return () => {
+      discussionScope.current.active = false;
+    };
+  }, []);
+  async function draftCrmReply(draft: CrmReplyDraftContext) {
+    const role = currentBindingRead?.workspace;
+    const bound = boundCrmTarget;
+    const isCurrent = () =>
+      Boolean(
+        userId &&
+          bootstrapMe?.spaceId &&
+          boundRoleCrmMode &&
+          !crmMode &&
+          inGroup &&
+          recruitingWorkspaceView === "inbox" &&
+          role &&
+          bound &&
+          discussionScope.current.active &&
+          discussionScope.current.composerRef === composerRef &&
+          currentCorrespondenceScope.current === correspondenceScope &&
+          botsRefreshUser.current.id === userId &&
+          (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId &&
+          activeGroupId.current === groupId &&
+          snapshotRef.current?.threadId === draft.threadId &&
+          draft.threadId === activeSnapshot?.threadId &&
+          draft.candidateId === searchParams.get("crmCandidate") &&
+          draft.source.serverId === bound.target.mcpServerId &&
+          draft.source.serverRevision === bound.target.serverRevision &&
+          draft.source.organizationId === bound.target.organizationId &&
+          draft.crmRoleId === bound.target.crmRoleId,
+      );
+    if (!isCurrent() || !role || !bound) return;
+    try {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId: draft.threadId });
+      if (!isCurrent()) return;
+      const target = workspace?.crmTarget?.target;
+      if (
+        workspace?.role.id !== role.role.id ||
+        workspace.revision.id !== role.revision.id ||
+        workspace.crmTarget?.bindingEffectId !== bound.bindingEffectId ||
+        target?.mcpServerId !== bound.target.mcpServerId ||
+        target.serverRevision !== bound.target.serverRevision ||
+        target.organizationId !== bound.target.organizationId ||
+        target.crmRoleId !== bound.target.crmRoleId ||
+        target.crmClientId !== bound.target.crmClientId ||
+        target.clientLabel !== bound.target.clientLabel ||
+        target.roleLabel !== bound.target.roleLabel
+      )
+        throw new Error(t`This role changed. Select the candidate again.`);
+      const reference = [
+        t`Role: ${workspace.role.title}`,
+        ...(draft.candidateName ? [t`Name: ${draft.candidateName}`] : []),
+        ...(draft.candidateEmail ? [t`Email: ${draft.candidateEmail}`] : []),
+        ...(draft.email.sender ? [t`Original sender: ${draft.email.sender}`] : []),
+        ...(draft.email.recipients.length
+          ? [t`Original recipients: ${draft.email.recipients.join(", ")}`]
+          : []),
+        ...(draft.email.subject ? [t`Subject: ${draft.email.subject}`] : []),
+        ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
+      ].join("\n");
+      openRoleChat(
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+      );
+    } catch (error) {
+      if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));
+    }
+  }
+  function candidateScopeCurrent(candidate: CandidateDiscussionContext) {
+    return Boolean(
+      userId &&
+        bootstrapMe?.spaceId &&
+        discussionScope.current.active &&
+        discussionScope.current.composerRef === composerRef &&
+        (discussionScope.current.panel === "recruiting" ||
+          discussionScope.current.workspaceCandidates) &&
+        (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId &&
+        candidate.threadId === activeSnapshot?.threadId &&
+        (inGroup ? activeGroupId.current === groupId : activeBotId.current === active?.id),
+    );
+  }
+  const candidateRequests = useRef(new Map<string, string>());
+  async function discussCandidate(candidate: CandidateDiscussionContext) {
+    if (!candidateScopeCurrent(candidate)) return;
+    const text =
+      candidate.intent === "email_draft"
+        ? `${candidateReferenceText(candidate)}${t`Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending.`}`
+        : candidate.intent === "contact_lookup"
+          ? `${candidateReferenceText(candidate)}${t`Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message.`}`
+          : candidateReferenceText(candidate);
+    if (!candidate.intent) {
+      composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
+      if (!showToolActivity) openRoleChat();
+      return;
+    }
+    if (
+      sendingRef.current ||
+      !candidate.roleId ||
+      !candidate.roleRevisionId ||
+      !candidate.candidateKey ||
+      validatedThreadEpoch.current !== historyEpoch.current
+    )
+      return;
+    const key = JSON.stringify([
+      userId,
+      bootstrapMe?.spaceId,
+      composerDraftKey,
+      candidate.threadId,
+      candidate.roleId,
+      candidate.roleRevisionId,
+      candidate.candidateKey,
+      candidate.intent,
+      text,
+    ]);
+    sendingRef.current = true;
+    setSending(true);
+    setSendError(null);
+    if (!showToolActivity) openRoleChat();
+    try {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId: candidate.threadId });
+      if (!candidateScopeCurrent(candidate)) return;
+      if (
+        workspace?.role.id !== candidate.roleId ||
+        workspace?.revision.id !== candidate.roleRevisionId
+      )
+        throw new Error(t`This role changed. Select the candidate again.`);
+      const clientNonce = candidateRequests.current.get(key) ?? newClientNonce();
+      candidateRequests.current.set(key, clientNonce);
+      await rpc.threads.followUp({
+        ...(inGroup ? { groupId: groupId! } : { botId: active!.id }),
+        text,
+        clientNonce,
+      });
+      if (candidateRequests.current.get(key) === clientNonce) candidateRequests.current.delete(key);
+      if (candidateScopeCurrent(candidate)) {
+        if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+        else void refreshThreadRef.current(active!.id).catch(() => undefined);
+      }
+    } catch (error) {
+      if (candidateScopeCurrent(candidate))
+        setSendError(errorText(error, t`Failed to send message`));
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }
+  async function feedbackCandidate(
+    candidate: CandidateDiscussionContext,
+    feedback: CandidateFeedback,
+    clientNonce: string,
+  ): Promise<boolean> {
+    if (!candidateScopeCurrent(candidate)) return false;
+    if (
+      !candidate.roleId ||
+      !candidate.roleRevisionId ||
+      !candidate.roleVersion ||
+      !candidate.candidateKey
+    )
+      return false;
+    const decision =
+      feedback.choice === "hold" || feedback.choice === "pass" || feedback.choice === "resume";
+    if (
+      decision &&
+      (candidate.candidateRevision === undefined ||
+        !Number.isSafeInteger(candidate.candidateRevision) ||
+        candidate.candidateRevision < 0)
+    )
+      return false;
+    if (feedback.recipientBotId && !inGroup) return false;
+    if (
+      inGroup &&
+      !discussionScope.current.candidateFeedbackRecipients?.some(
+        (member) => member.id === feedback.recipientBotId,
+      )
+    )
+      return false;
+    const choice = {
+      good_example: t`Good example`,
+      not_fit: t`Not a fit`,
+      skip: t`Skip for now`,
+      hold: t`Pause consideration`,
+      pass: t`Stop considering`,
+      resume: t`Resume consideration`,
+    }[feedback.choice];
+    const text = `${candidateReferenceText(candidate)}${t`Candidate feedback`}: ${choice}\n\n${feedback.reason}`;
+    const receipt = await rpc.threads.followUp({
+      ...(inGroup
+        ? { groupId: groupId!, mentions: [feedback.recipientBotId!] }
+        : { botId: active!.id }),
+      text,
+      recruitingFeedback: {
+        roleId: candidate.roleId,
+        roleRevisionId: candidate.roleRevisionId,
+        expectedRoleRevision: candidate.roleVersion,
+        candidateKeys: [candidate.candidateKey],
+        ...(decision
+          ? {
+              candidateRevisions: [
+                {
+                  candidateKey: candidate.candidateKey,
+                  expectedRevision: candidate.candidateRevision!,
+                },
+              ],
+            }
+          : {}),
+        choice: feedback.choice,
+      },
+      clientNonce,
+    });
+    if (candidateScopeCurrent(candidate)) {
+      if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+      else void refreshThreadRef.current(active!.id).catch(() => undefined);
+    }
+    return receipt.ok;
+  }
   // Keep the armed reply even when its parent leaves the loaded page: the
   // server resolves a paged-out target and degrades a deleted one to a plain
   // reply instead of failing the send.
@@ -1809,27 +2638,130 @@ export function ShellPage() {
     setReplyTarget(null);
     setReplyQuote(null);
   }, []);
+  const managedConnectionBots =
+    !booting &&
+    bootstrapMe?.userId === userId &&
+    (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId
+      ? bots.filter((bot) => !bot.archivedAt && bot.spaceId === bootstrapMe?.spaceId)
+      : [];
+  const managedConnectionMain = managedConnectionBots.find(
+    (bot) => bot.spawnKey === `recruiting:${userId}:main`,
+  );
+  const connectionMemberIds = workspaceNewRole
+    ? managedConnectionMain
+      ? ["main", "outreach", "scheduling"].flatMap((key) => {
+          const bot = managedConnectionBots.find(
+            (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
+          );
+          return bot ? [bot.id] : [];
+        })
+      : []
+    : validatedThreadEpoch.current === historyEpoch.current &&
+        (inGroup
+          ? snapshotRef.current?.groupId === groupId
+          : snapshotRef.current?.botId === active?.id)
+      ? inGroup
+        ? (snapshotRef.current?.members ?? []).map((member) => member.botId)
+        : active
+          ? [active.id]
+          : []
+      : [];
+  const recruitingConnectionBot = (key: "outreach" | "scheduling") =>
+    managedConnectionBots.find(
+      (bot) =>
+        connectionMemberIds.includes(bot.id) && bot.spawnKey === `recruiting:${userId}:${key}`,
+    )?.id;
   const currentRuns = activeThreadRuns(activeSnapshot);
-  const answerableAskMessageId = latestAnswerableAskMessageId(activeSnapshot);
+  const answerableAskIds = answerableAskMessageIds(
+    validatedThreadEpoch.current === historyEpoch.current &&
+      (inGroup
+        ? snapshotRef.current?.groupId === groupId
+        : snapshotRef.current?.botId === active?.id)
+      ? snapshotRef.current
+      : null,
+  );
   const workingRuns = currentRuns.filter((run) =>
     ["running", "queued", "leased"].includes(run.status),
   );
   const transcriptRunning = workingRuns.length > 0;
   const composerRunning = currentRuns.some((run) => isActive(run.status));
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
-  const displayedRunError = !sendError ? runError : null;
+  const displayedRunError =
+    !sendError && runError
+      ? showToolActivity
+        ? runError
+        : t`Something went wrong. Try again.`
+      : null;
   const displayedRunErrorId = displayedRunError ? (activeSnapshot?.run?.id ?? null) : null;
   const handleRunErrorPresented = useCallback((runId: string) => {
     rememberSeenRunErrorId(runId);
   }, []);
   const transcriptMessages = useMemo(
-    () => userVisibleMessages(activeSnapshot?.messages ?? [], { includePeerReceipts: true }),
-    [activeSnapshot?.messages],
+    () =>
+      userVisibleMessages(activeSnapshot?.messages ?? [], {
+        includePeerReceipts: showToolActivity,
+      }),
+    [activeSnapshot?.messages, showToolActivity],
   );
   const transcriptArtifactTarget = useMemo<ArtifactTarget>(
     () => (inGroup ? { groupId: groupId ?? "" } : { botId: active?.id ?? "" }),
     [active?.id, groupId, inGroup],
   );
+  const sequenceScopeKey = JSON.stringify([
+    userId,
+    bootstrapMe?.spaceId,
+    activeSnapshot?.threadId,
+    transcriptArtifactTarget,
+    workspaceCorrespondence,
+  ]);
+  const sequenceScope = useRef(sequenceScopeKey);
+  sequenceScope.current = sequenceScopeKey;
+  async function saveSequenceDraft(input: RecruitingSequenceSaveInput) {
+    const scopeCurrent = () =>
+      discussionScope.current.active &&
+      sequenceScope.current === sequenceScopeKey &&
+      (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId;
+    if (!userId || !bootstrapMe?.spaceId || !activeSnapshot?.threadId || !scopeCurrent())
+      throw new Error(t`Return to the original role before saving this draft.`);
+    const recipient = activeSnapshot.members?.[0] ?? activeGroup?.members?.[0];
+    if (inGroup && !recipient)
+      throw new Error(t`Wait for this role to finish loading before saving.`);
+    const source = transcriptMessages
+      .flatMap((message) => message.blocks)
+      .find((block) => block.kind === "file" && block.artifactId === input.sourceArtifactId);
+    if (source?.kind !== "file" || source.mimeType !== "application/json")
+      throw new Error(t`Open the saved sequence before editing it.`);
+    const sequence = RecruitingOutreachSequenceSchema.parse({
+      ...input.sequence,
+      revisesArtifactId: input.sourceArtifactId,
+    });
+    const contentBase64 = await readFileAsBase64(
+      new File([JSON.stringify(sequence, null, 2)], source.name, { type: "application/json" }),
+    );
+    if (!scopeCurrent()) throw new Error(t`Return to the original role before saving this draft.`);
+    const artifact = await rpc.artifacts.create({
+      ...transcriptArtifactTarget,
+      name: source.name,
+      mimeType: "application/json",
+      contentBase64,
+      clientNonce: input.clientNonce,
+    });
+    if (!scopeCurrent())
+      throw new Error(
+        t`The file was saved. Return to the original role and retry to share it there.`,
+      );
+    await rpc.threads.followUp({
+      ...transcriptArtifactTarget,
+      ...(inGroup ? { mentions: [recipient!.botId] } : {}),
+      artifactIds: [artifact.id],
+      clientNonce: input.clientNonce,
+      text: t`I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone.`,
+    });
+    if (scopeCurrent()) {
+      if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+      else void refreshThreadRef.current(active!.id).catch(() => undefined);
+    }
+  }
   const transcriptMembers = activeSnapshot?.members ?? activeGroup?.members;
   const resolveTranscriptBot = useCallback(
     (botId: string) => {
@@ -1855,7 +2787,9 @@ export function ShellPage() {
   const replyTargetName = activeReplyTarget
     ? activeReplyTarget.role === "user"
       ? t`You`
-      : (resolveTranscriptMemberName(activeReplyTarget.botId) ?? active?.name ?? t`Bot`)
+      : showToolActivity
+        ? (resolveTranscriptMemberName(activeReplyTarget.botId) ?? active?.name ?? t`Bot`)
+        : "WeKruit"
     : undefined;
   const composerMentionTargets = useMemo(
     () =>
@@ -1980,21 +2914,28 @@ export function ShellPage() {
   useLayoutEffect(() => {
     const pin = pinnedAroundRef.current;
     if (inGroup) {
-      if (!groupId || !snapshot || snapshot.groupId !== groupId) return;
-      if (initiallyScrolledThread.current === snapshot.threadId) return;
-      if (expandedHistoryThread.current === snapshot.threadId) return;
+      if (!groupId || !activeSnapshot || activeSnapshot.groupId !== groupId) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
       if (pin?.groupId === groupId) return;
     } else {
-      if (!active || !snapshot || snapshot.botId !== active.id) return;
-      if (initiallyScrolledThread.current === snapshot.threadId) return;
-      if (expandedHistoryThread.current === snapshot.threadId) return;
+      if (!active || !activeSnapshot || activeSnapshot.botId !== active.id) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
       if (pin?.botId === active.id) return;
     }
     const element = messageScroll.current;
     if (!element) return;
     element.scrollTop = element.scrollHeight;
-    initiallyScrolledThread.current = snapshot.threadId;
-  }, [active, groupId, inGroup, snapshot?.botId, snapshot?.groupId, snapshot?.threadId]);
+    initiallyScrolledThread.current = activeSnapshot.threadId;
+  }, [
+    active,
+    groupId,
+    inGroup,
+    activeSnapshot?.botId,
+    activeSnapshot?.groupId,
+    activeSnapshot?.threadId,
+  ]);
 
   const openBot = useCallback((id: string) => navigate(`/app/${id}`), [navigate]);
   const loadOlder = useCallback(() => loadOlderMessagesRef.current(), []);
@@ -2015,10 +2956,20 @@ export function ShellPage() {
     if (botId) void jumpToMessageRef.current({ botId, messageId }).catch(() => undefined);
   }, []);
   const answerMessage = useCallback(
-    async (message: ThreadMessage, text: string, username?: string) => {
+    async (message: ThreadMessage, text: AskAnswer, username?: string) => {
       const botId = activeBotId.current;
       const groupId = activeGroupId.current;
       if (!botId && !groupId) return;
+      const current = snapshotRef.current;
+      if (
+        validatedThreadEpoch.current !== historyEpoch.current ||
+        !current ||
+        current.threadId !== message.threadId ||
+        (groupId ? current.groupId !== groupId : current.botId !== botId) ||
+        !answerableAskMessageIds(current).includes(message.id) ||
+        !current.messages.some((item) => item.id === message.id && item.runId === message.runId)
+      )
+        return;
       await rpc.threads.answer({
         ...(groupId ? { groupId } : { botId: botId! }),
         runId: message.runId ?? "",
@@ -2057,8 +3008,7 @@ export function ShellPage() {
     [t],
   );
   const onAttachmentPick = useCallback(
-    (files: FileList | null) => {
-      const threadKey = activeGroupId.current ?? activeBotId.current;
+    (files: FileList | null, threadKey = activeGroupId.current ?? activeBotId.current) => {
       if (!threadKey || !files?.length) return false;
       const existing = attachmentsForThread(pendingAttachments, threadKey);
       const next: PendingAttachment[] = [];
@@ -2093,7 +3043,11 @@ export function ShellPage() {
   );
   const removeAttachment = useCallback((attachment: PendingAttachment) => {
     revokePendingAttachmentPreviews([attachment]);
-    setPendingAttachments((current) => current.filter((item) => item.id !== attachment.id));
+    setPendingAttachments((current) =>
+      current.filter(
+        (item) => item.id !== attachment.id || item.threadKey !== attachment.threadKey,
+      ),
+    );
   }, []);
   const sendMessage = useCallback(
     async (text: string, mentions: ComposerMention[], clientNonce: string) => {
@@ -2113,6 +3067,15 @@ export function ShellPage() {
       );
       const groupTarget = plan.rerouteGroupId ?? initialGroupTarget;
       const botTarget = reroutedToGroup ? undefined : initialBotTarget;
+      const submittedComposer = composerRef;
+      const submittedUser = botsRefreshUser.current;
+      const selectedEmail = selectedCorrespondence;
+      const correspondenceReference =
+        !reroutedToGroup &&
+        selectedEmail?.scope === currentCorrespondenceScope.current &&
+        discussionScope.current.active
+          ? selectedEmail.reference
+          : undefined;
       if (
         plan.shouldSend &&
         (groupTarget || botsRef.current.find((bot) => bot.id === botTarget)?.notifyOnFinish)
@@ -2179,11 +3142,21 @@ export function ShellPage() {
           );
           artifactIds.push(artifact.id);
         }
+        if (
+          !discussionScope.current.active ||
+          (selectedSpaceId() ?? bootstrapMe?.spaceId) !== bootstrapMe?.spaceId ||
+          botsRefreshUser.current !== submittedUser ||
+          discussionScope.current.composerRef !== submittedComposer ||
+          (correspondenceReference && currentCorrespondenceScope.current !== selectedEmail?.scope)
+        )
+          return false;
         if (groupTarget) {
           await rpc.threads.send({
             groupId: groupTarget,
+            addressing: showToolActivity ? undefined : "coordinator",
             clientNonce,
             text: trimmed || undefined,
+            ...(correspondenceReference ? { correspondenceReference } : {}),
             mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
@@ -2195,6 +3168,7 @@ export function ShellPage() {
             botId: botTarget,
             clientNonce,
             text: trimmed || undefined,
+            ...(correspondenceReference ? { correspondenceReference } : {}),
             mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: activeReplyTarget?.id,
@@ -2250,67 +3224,79 @@ export function ShellPage() {
       activeReplyTarget?.id,
       activeReplyQuote,
       clearReply,
+      composerRef,
+      bootstrapMe?.spaceId,
       flushPendingBrowserNotifications,
       navigate,
       pendingAttachments,
       sending,
+      selectedCorrespondence,
+      showToolActivity,
       t,
     ],
   );
-  const stopRun = useCallback(async () => {
-    if (sending) return;
-    sendingRef.current = true;
-    setSending(true);
-    try {
-      const botTarget = activeBotId.current;
-      const groupTarget = activeGroupId.current;
-      if (groupTarget) {
+  const stopRun = useCallback(
+    async (runId?: string) => {
+      if (sending) return;
+      sendingRef.current = true;
+      setSending(true);
+      try {
+        const botTarget = activeBotId.current;
+        const groupTarget = activeGroupId.current;
+        if (groupTarget) {
+          setSendError(null);
+          try {
+            await rpc.threads.stop({
+              groupId: groupTarget,
+              ...(runId !== undefined ? { runId } : {}),
+            });
+          } catch (error) {
+            if (activeGroupId.current === groupTarget) {
+              setSendError(errorText(error, t`Failed to stop`));
+            }
+            return;
+          }
+          // Clear run UI ahead of the run.cancelled event so refresh races with in-flight gets.
+          if (activeGroupId.current === groupTarget) {
+            updateSnapshot((prev) =>
+              prev && prev.groupId === groupTarget ? clearActiveThreadRuns(prev, runId) : prev,
+            );
+          }
+          await refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
+          return;
+        }
+        if (!botTarget) return;
         setSendError(null);
         try {
-          await rpc.threads.stop({ groupId: groupTarget });
+          await rpc.threads.stop({ botId: botTarget, ...(runId !== undefined ? { runId } : {}) });
         } catch (error) {
-          if (activeGroupId.current === groupTarget) {
+          if (activeBotId.current === botTarget) {
             setSendError(errorText(error, t`Failed to stop`));
           }
           return;
         }
-        // Clear run UI ahead of the run.cancelled event so refresh races with in-flight gets.
-        if (activeGroupId.current === groupTarget) {
-          updateSnapshot((prev) =>
-            prev && prev.groupId === groupTarget ? clearActiveThreadRuns(prev) : prev,
-          );
-        }
-        await refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
-        return;
-      }
-      if (!botTarget) return;
-      setSendError(null);
-      try {
-        await rpc.threads.stop({ botId: botTarget });
-      } catch (error) {
+        // Clear local run/busy immediately rather than waiting for run.cancelled so a
+        // superseded in-flight refresh (older cursor) cannot leave Stop enabled / Take control
+        // blocked while the API is already idle.
         if (activeBotId.current === botTarget) {
-          setSendError(errorText(error, t`Failed to stop`));
+          updateSnapshot((prev) =>
+            !prev || (prev.botId !== botTarget && prev.botId)
+              ? prev
+              : clearActiveThreadRuns(prev, runId),
+          );
+          const currentComputer = computerRef.current;
+          if (runId === undefined && currentComputer?.busyBotName) {
+            commitComputer({ ...currentComputer, busyBotName: null });
+          }
         }
-        return;
+        await refreshThreadRef.current(botTarget).catch(() => undefined);
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
       }
-      // Clear local run/busy immediately rather than waiting for run.cancelled so a
-      // superseded in-flight refresh (older cursor) cannot leave Stop enabled / Take control
-      // blocked while the API is already idle.
-      if (activeBotId.current === botTarget) {
-        updateSnapshot((prev) =>
-          !prev || (prev.botId !== botTarget && prev.botId) ? prev : clearActiveThreadRuns(prev),
-        );
-        const currentComputer = computerRef.current;
-        if (currentComputer?.busyBotName) {
-          commitComputer({ ...currentComputer, busyBotName: null });
-        }
-      }
-      await refreshThreadRef.current(botTarget).catch(() => undefined);
-    } finally {
-      sendingRef.current = false;
-      setSending(false);
-    }
-  }, [sending, t]);
+    },
+    [sending, t],
+  );
   const stopTeaching = useCallback(async () => {
     const id = activeBotId.current;
     if (!id || teachBusy) return;
@@ -2369,14 +3355,102 @@ export function ShellPage() {
     if (text && id) void speaker.speak(text, { botId: id, messageId: message.id });
   }, []);
 
-  async function createGroup(input: { name: string; botIds: string[] }) {
-    const group = await rpc.groups.create(input);
-    setGroups((current) =>
-      current.some((item) => item.id === group.id) ? current : [group, ...current],
-    );
-    navigate(`/app/g/${group.id}`);
-    setPanel(null);
-    await refreshBots().catch(() => undefined);
+  const pendingRoleCreation = useRef<{
+    key: string;
+    group: Group;
+    clientNonce: string;
+    artifactIds: string[];
+  } | null>(null);
+  async function createGroup(input: { name: string; botIds: string[]; description?: string }) {
+    const attachments = showToolActivity
+      ? []
+      : attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
+    if (attachments.length && !input.description)
+      input = {
+        ...input,
+        description: t`Use the attached files to define this role and start the search.`,
+      };
+    const submittedUser = botsRefreshUser.current;
+    const submittedSpace = bootstrapMe?.spaceId;
+    const submittedTarget = activeGroupId.current ?? activeBotId.current;
+    const stillCurrent = () =>
+      discussionScope.current.active &&
+      discussionScope.current.panel === "create-group" &&
+      submittedUser.id === userId &&
+      botsRefreshUser.current === submittedUser &&
+      (activeGroupId.current ?? activeBotId.current) === submittedTarget &&
+      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
+
+    setCreatingGroup(true);
+    try {
+      const key = JSON.stringify([
+        userId,
+        bootstrapMe?.spaceId,
+        input,
+        attachments.map((item) => item.id),
+      ]);
+      let attempt =
+        input.description && pendingRoleCreation.current?.key === key
+          ? pendingRoleCreation.current
+          : null;
+      const group =
+        attempt?.group ?? (await rpc.groups.create({ name: input.name, botIds: input.botIds }));
+      if (input.description && !attempt) {
+        attempt = { key, group, clientNonce: crypto.randomUUID(), artifactIds: [] };
+        pendingRoleCreation.current = attempt;
+      }
+      if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
+      setGroups((current) =>
+        current.some((item) => item.id === group.id) ? current : [group, ...current],
+      );
+      if (input.description && attempt) {
+        for (const pending of attachments.slice(attempt.artifactIds.length)) {
+          const mimeType = inferAttachmentMimeType(pending.file.name, pending.file.type);
+          if (!mimeType) throw new Error(t`Unsupported file type: ${pending.file.name}`);
+          const contentBase64 = await readFileAsBase64(pending.file);
+          if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
+          const artifact = await rpc.artifacts.create({
+            groupId: group.id,
+            name: pending.file.name,
+            mimeType,
+            contentBase64,
+          });
+          attempt.artifactIds.push(artifact.id);
+        }
+        if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
+        await rpc.threads.followUp({
+          groupId: group.id,
+          text: input.description,
+          ...(attempt.artifactIds.length ? { artifactIds: attempt.artifactIds } : {}),
+          mentions: [input.botIds[0]!],
+          clientNonce: attempt.clientNonce,
+        });
+        pendingRoleCreation.current = null;
+      }
+      if (!stillCurrent()) return;
+      navigate(`/app/g/${group.id}${input.description ? "?view=brief" : ""}`);
+      setPanel(null);
+      setNewRoleSourceId(null);
+      setNewRoleDescription("");
+      await refreshBots().catch(() => undefined);
+    } finally {
+      setCreatingGroup(false);
+    }
+  }
+
+  function startNewRole(sourceId: string, description = "") {
+    if (!canCreateRoleFrom(sourceId)) return;
+    setNewRoleSourceId(sourceId);
+    setNewRoleDescription(description);
+    setPanel("create-group");
+    setMobileSidebarOpen(false);
+  }
+
+  function restoreGroup(groupId: string) {
+    return rpc.groups
+      .restore({ groupId })
+      .then(() => refreshBots(true))
+      .catch((error) => setSendError(errorText(error, t`Could not continue`)));
   }
 
   function cancelFocusPrompt() {
@@ -2647,6 +3721,10 @@ export function ShellPage() {
   }, [computerOpen]);
 
   useEffect(() => {
+    if (!showToolActivity) {
+      setCommandPaletteOpen(false);
+      return;
+    }
     function onKey(event: KeyboardEvent) {
       if (!isCommandPaletteHotkey(event)) return;
       event.preventDefault();
@@ -2654,7 +3732,7 @@ export function ShellPage() {
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [showToolActivity]);
 
   useEffect(() => {
     const heartbeatBotId = computerBot?.id ?? active?.id;
@@ -2770,11 +3848,59 @@ export function ShellPage() {
     .slice(0, 2)
     .toUpperCase();
 
+  const newRoleAttachmentKey = JSON.stringify([
+    "new-role",
+    userId,
+    bootstrapMe?.spaceId,
+    roleSourceGroup?.id,
+  ]);
+  const newRoleAttachments = attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
+  const roleCreationForm = (
+    <CreateGroupForm
+      key={showToolActivity ? "group" : JSON.stringify([roleSourceGroup?.id, newRoleDescription])}
+      bots={showToolActivity ? bots : roleCrewBots}
+      recruiting={!showToolActivity}
+      initialDescription={newRoleDescription}
+      attachments={showToolActivity ? undefined : newRoleAttachments}
+      attachmentNotice={attachmentNotice}
+      attachmentAccept={ATTACHMENT_ACCEPT}
+      onAttachmentPick={
+        showToolActivity ? undefined : (files) => onAttachmentPick(files, newRoleAttachmentKey)
+      }
+      onRemoveAttachment={(id) => {
+        const attachment = newRoleAttachments.find((item) => item.id === id);
+        if (attachment) removeAttachment(attachment);
+      }}
+      onCancel={() => {
+        for (const attachment of newRoleAttachments) removeAttachment(attachment);
+        setAttachmentNotice(null);
+        setPanel(null);
+        setNewRoleSourceId(null);
+        setNewRoleDescription("");
+      }}
+      onCreate={(input) => {
+        if (
+          !showToolActivity &&
+          (!roleSourceGroup ||
+            !canCreateRoleFrom(roleSourceGroup.id) ||
+            roleCrewBots.length !== roleSourceGroup.members.length ||
+            input.botIds.length !== roleSourceGroup.members.length ||
+            !input.botIds.every((id, index) => id === roleSourceGroup.members[index]?.botId))
+        ) {
+          throw new Error(t`The recruiting team changed. Open the role again.`);
+        }
+        return createGroup(input);
+      }}
+    />
+  );
+
+  // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
   const shell = (
     <div
       data-testid="shell-root"
       data-ready={shellReady}
-      className="relative flex h-full min-w-0 overflow-hidden bg-background text-foreground/90"
+      data-product-view={showToolActivity ? "developer" : "recruiting"}
+      className="relative flex h-full min-w-0 overflow-clip bg-background text-foreground/90"
       onTouchStartCapture={(event) => {
         if (
           mobileSidebarOpen ||
@@ -2817,12 +3943,14 @@ export function ShellPage() {
         mobileSidebarSwipeRef.current = null;
       }}
     >
-      <ComputerUpdateProgress
-        onCompleted={() => {
-          if (active) void refreshThread(active.id);
-        }}
-      />
-      {bootstrapMe !== undefined ? (
+      {showToolActivity ? (
+        <ComputerUpdateProgress
+          onCompleted={() => {
+            if (active) void refreshThread(active.id);
+          }}
+        />
+      ) : null}
+      {showToolActivity && bootstrapMe !== undefined ? (
         <HostComputerPrompt initialMe={bootstrapMe ?? undefined} onMeUpdated={setBootstrapMe} />
       ) : null}
       {mobileSidebarOpen ? (
@@ -2843,9 +3971,57 @@ export function ShellPage() {
         } ${
           botsSidebarCollapsed
             ? "md:w-0 md:max-w-0 md:overflow-hidden md:border-e-0 md:opacity-0 md:pointer-events-none"
-            : "md:w-[316px]"
+            : showToolActivity
+              ? "md:w-[316px]"
+              : "md:w-[260px]"
         }`}
       >
+        {!showToolActivity ? (
+          <>
+            {desktopBridge() ? <div className="app-drag px-5 pt-4"><WindowChrome /></div> : null}
+            <RecruitingNavigation
+              crmContext={recruitingCacheScope && activeSnapshot?.threadId ? { target: transcriptArtifactTarget, scope: recruitingCacheScope, cache: recruitingReadCache.current, refreshSignal: recruitingRefresh } : undefined}
+              crmSelection={crmSelection}
+              onOpenCrmRole={(selection) => {
+                setPanel(null); setMobileSidebarOpen(false); setRoleChatOpen(false);
+                setSearchParams(new URLSearchParams({ view: "contacts", crmServer: selection.serverId, crmRevision: String(selection.serverRevision), crmOrganization: selection.organizationId, ...(selection.crmRoleId ? { crmRole: selection.crmRoleId } : {}) }));
+              }}
+              groups={groups}
+              archivedGroups={archivedGroups}
+              archivedOpen={archivedOpen}
+              groupId={groupId}
+              query={query}
+              view={recruitingWorkspaceView}
+              onView={openRecruitingView}
+              onCollapse={() => setBotsSidebarCollapsedPref(true)}
+              canOpenDashboard={Boolean(activeSnapshot?.threadId)}
+              canCreateRole={
+                Boolean(activeGroup && canCreateRoleFrom(activeGroup.id)) || archivedGroups.some((group) => canCreateRoleFrom(group.id))
+              }
+              canCreateRoleFrom={canCreateRoleFrom}
+              onQueryChange={setQuery}
+              onOpenRole={(id) => {
+                setPanel(null);
+                setMobileSidebarOpen(false);
+                navigate(`/app/g/${id}?view=results`);
+              }}
+              onNewRole={() => {
+                if (activeGroup && canCreateRoleFrom(activeGroup.id)) startNewRole(activeGroup.id);
+                else setArchivedOpen(true);
+              }}
+              onNewRoleFrom={startNewRole}
+              onToggleArchived={() => setArchivedOpen((open) => !open)}
+              onRestoreRole={(id) => void restoreGroup(id)}
+              onRoleMenu={(id, anchor, position) => {
+                if (groups.find((group) => group.id === id)?.spaceId !== bootstrapMe?.spaceId) return;
+                botMenuAnchor.current = anchor;
+                setBotMenu({ kind: "group", id, position });
+              }}
+            />
+          </>
+        ) : null}
+        {showToolActivity && (
+          <>
         <div className="app-drag flex items-center justify-between px-[18px] pb-3 pt-4">
           <WindowChrome />
           <div className="relative flex items-center gap-2.5">
@@ -3411,9 +4587,7 @@ export function ShellPage() {
                         variant="ghost"
                         size="xs"
                         onClick={() =>
-                          void rpc.groups
-                            .restore({ groupId: group.id })
-                            .then(() => refreshBots(true))
+                          void restoreGroup(group.id)
                         }
                       >
                         <Trans>Restore</Trans>
@@ -3434,6 +4608,8 @@ export function ShellPage() {
             </div>
           ) : null}
         </div>
+          </>
+        )}
         <button
           type="button"
           onClick={() => setPluginsOpen(true)}
@@ -3462,7 +4638,7 @@ export function ShellPage() {
               align="start"
               className="w-[calc(316px-1.5rem)] max-w-[calc(100vw-3rem)] gap-0 p-1 data-closed:animate-none"
             >
-              {bootstrapMe?.ticketBoardEnabled ? (
+              {showToolActivity && bootstrapMe?.ticketBoardEnabled ? (
                 <Button
                   variant="ghost"
                   className="w-full justify-start font-normal"
@@ -3486,7 +4662,7 @@ export function ShellPage() {
                 }}
               >
                 <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
-                <Trans>Artifacts</Trans>
+                {showToolActivity ? <Trans>Artifacts</Trans> : <Trans>Files</Trans>}
               </Button>
               <Button
                 variant="ghost"
@@ -3535,10 +4711,18 @@ export function ShellPage() {
         <button
           type="button"
           data-testid="bots-sidebar-edge"
-          aria-label={botsSidebarCollapsed ? t`Show bots` : t`Hide bots`}
+          aria-label={
+            showToolActivity
+              ? botsSidebarCollapsed
+                ? t`Show bots`
+                : t`Hide bots`
+              : botsSidebarCollapsed
+                ? t`Show navigation`
+                : t`Hide navigation`
+          }
           aria-pressed={!botsSidebarCollapsed}
           className={`absolute inset-y-0 z-50 hidden w-2 cursor-ew-resize touch-none border-0 bg-transparent p-0 md:block ${
-            botsSidebarCollapsed ? "start-0" : "start-[308px]"
+            botsSidebarCollapsed ? "start-0" : showToolActivity ? "start-[308px]" : "start-[252px]"
           }`}
           onPointerDown={(event) => {
             event.currentTarget.setPointerCapture(event.pointerId);
@@ -3580,8 +4764,125 @@ export function ShellPage() {
       <main
         aria-hidden={mobileSidebarOpen || undefined}
         inert={mobileSidebarOpen}
-        className="isolate flex min-w-0 flex-1 flex-col bg-background"
+        className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
       >
+        {workspaceFull ? (
+          <div className={botsSidebarCollapsed ? "flex items-center px-4 pt-3" : "flex items-center px-4 pt-3 md:hidden"}>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label={botsSidebarCollapsed ? t`Show navigation` : t`Open navigation`}
+              onClick={() => {
+                setBotsSidebarCollapsedPref(false);
+                setMobileSidebarOpen(true);
+              }}
+            >
+              <PanelLeftOpen size={19} aria-hidden="true" />
+            </Button>
+          </div>
+        ) : null}
+        {workspaceFull && !workspaceNewRole && !activeSnapshot ? (
+          <div role="status" className="grid min-h-0 flex-1 place-items-center text-muted-foreground">
+            <Shimmer><Trans>Loading…</Trans></Shimmer>
+          </div>
+        ) : null}
+        {workspaceNewRole ? (
+          <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+            {roleCreationForm}
+          </div>
+        ) : null}
+        {boundRoleView && (boundCrmSelection || currentBindingRead?.failed) ? (
+          <fieldset className="flex flex-wrap gap-2 px-6 py-3" aria-label={t`Contact source`}>
+            <Button aria-pressed={searchParams.get("roleSource") !== "search"} variant={searchParams.get("roleSource") === "search" ? "outline" : "secondary"} onClick={() => setSearchParams(current => { const next = new URLSearchParams(current); next.delete("roleSource"); next.delete("crmCandidate"); return next; })}>
+              {recruitingWorkspaceView === "contacts" ? <Trans>CRM contacts</Trans> : <Trans>CRM history</Trans>}
+            </Button>
+            <Button aria-pressed={searchParams.get("roleSource") === "search"} variant={searchParams.get("roleSource") === "search" ? "secondary" : "outline"} onClick={() => setSearchParams(current => { const next = new URLSearchParams(current); next.set("roleSource", "search"); next.delete("crmCandidate"); return next; })}>
+              {recruitingWorkspaceView === "contacts" ? <Trans>Search results</Trans> : <Trans>Current search</Trans>}
+            </Button>
+          </fieldset>
+        ) : null}
+        {boundRoleCrmMode && !effectiveCrmSelection ? <div role={currentBindingRead?.failed ? "alert" : "status"} className="p-6">
+          {currentBindingRead?.failed ? <>
+            <p><Trans>Could not load this role’s CRM connection.</Trans></p>
+            <Button variant="outline" onClick={() => setRecruitingRefresh(value => value + 1)}><Trans>Refresh</Trans></Button>
+          </> : <Trans>Loading…</Trans>}
+        </div> : null}
+        {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
+          threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
+          readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
+          crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
+            onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
+            onStartRecruiting: crmMode && activeGroup && canCreateRoleFrom(activeGroup.id) ? (description) => startNewRole(activeGroup.id, description) : undefined,
+            onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
+          }}
+        /> : <p role="alert"><Trans>Choose a CRM role again.</Trans></p>}</div> : null}
+        {workspaceCorrespondence && activeSnapshot?.threadId ? (
+          <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+            <RecruitingCorrespondence
+              view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
+              messages={transcriptMessages}
+              artifactTarget={transcriptArtifactTarget}
+              threadId={activeSnapshot.threadId}
+              onEmailSelection={selectCorrespondence}
+              outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
+              onConversation={(text) => {
+                openRoleChat(text);
+              }}
+              onOpenConnections={() => setPluginsOpen(true)}
+              onSaveDraft={saveSequenceDraft}
+              refreshSignal={recruitingRefresh}
+              readCache={recruitingReadCache.current}
+              readCacheScope={recruitingCacheScope}
+            />
+          </div>
+        ) : null}
+        {workspaceCandidates && activeSnapshot?.threadId ? (
+          <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+            <div className="recruiting-workspace-content">
+              <RecruitingPanel
+                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:workspace`}
+                presentation="workspace"
+                view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "contacts" ? "contacts" : "results"}
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                groupId={inGroup ? groupId : undefined}
+                readCache={recruitingReadCache.current}
+                readCacheScope={recruitingCacheScope}
+                refreshSignal={recruitingRefresh}
+                tab={recruitingWorkspaceView === "workflow" ? "dashboard" : "evidence"}
+                showDiagnostics={false}
+                onClose={() => openRecruitingView("conversation")}
+                onBrowseCandidates={() => openRecruitingView("results")}
+                onDiscussCandidate={discussCandidate}
+                onCandidateFeedback={feedbackCandidate}
+                candidateFeedbackRecipients={candidateFeedbackRecipients}
+                onRevealMessage={(target) => navigate({
+                  pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
+                  search: `?${new URLSearchParams({ view: "conversation", m: target.messageId })}`,
+                })}
+              />
+              <div className="flex justify-end py-4">
+                <Button variant="outline" onClick={() => openRoleChat()}><Trans>Refine in chat</Trans></Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
+        {roleChatWorkspace && !roleChatOpen ? <Button ref={roleChatTrigger} className="absolute bottom-4 end-4 z-20" aria-label={t`Open role chat`} aria-controls={roleChatId} aria-expanded={false} onClick={() => openRoleChat()}><Sparkles size={17} aria-hidden /><Trans>Chat with WeKruit</Trans></Button> : null}
+        <div className={workspaceBrief ? "hire-brief-view rk-scroll" : "contents"}>
+          {workspaceBrief ? (
+            <div className="hire-brief-top">
+              <div>
+                <span className="hire-eyebrow">{recruitingWorkspaceView === "brief" ? <Trans>Job Brief</Trans> : <Trans>Client feedback</Trans>}</span>
+                <h1>{recruitingWorkspaceView === "brief" ? <Trans>Let’s define the search.</Trans> : <Trans>Let’s sharpen the search.</Trans>}</h1>
+                <p className="hire-brief-role" dir="auto">{inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</p>
+                <p>{recruitingWorkspaceView === "brief" ? <Trans>Describe the role and clarify what matters in the conversation.</Trans> : <Trans>Tell WeKruit what to change for a person, a few candidates, or the whole search.</Trans>}</p>
+              </div>
+              <Button variant="outline" className="hire-outline-button" onClick={() => openRecruitingView("results")}><Trans>Back to results</Trans></Button>
+            </div>
+          ) : null}
+          <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
+        <LinkFaviconsContext.Provider value={workspaceFull && !(roleChatWorkspace && roleChatOpen) ? null : linkFavicons}>
+        <section ref={roleChatSection} id={roleChatId} hidden={workspaceFull && !(roleChatWorkspace && roleChatOpen)} aria-label={t`Role conversation`} className={roleChatWorkspace ? "hire-role-chat" : workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
         {/* Inside main so the composer and its menus stay above it. */}
         {!mobileSidebarOpen ? (
           <div
@@ -3590,7 +4891,7 @@ export function ShellPage() {
             className="absolute bottom-20 start-0 top-16 z-20 w-8 touch-none md:hidden"
           />
         ) : null}
-        <div className="app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]">
+        <div className={workspaceBrief ? "app-drag hire-panel-heading justify-between" : "app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]"}>
           <div className="flex min-w-0 items-center gap-2">
             {/* Collapsed bots sidebar: this header is the leading edge for window chrome. */}
             {botsSidebarCollapsed && desktopBridge() ? <WindowChrome /> : null}
@@ -3606,44 +4907,116 @@ export function ShellPage() {
               <button
                 type="button"
                 data-testid="restore-bots-sidebar"
-                aria-label={t`Show bots`}
-                title={t`Show bots`}
+                aria-label={showToolActivity ? t`Show bots` : t`Show navigation`}
+                title={showToolActivity ? t`Show bots` : t`Show navigation`}
                 onClick={() => setBotsSidebarCollapsedPref(false)}
                 className="app-no-drag hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-foreground/75 hover:bg-accent md:grid"
               >
                 <PanelLeftOpen size={19} strokeWidth={1.7} aria-hidden="true" />
               </button>
             ) : null}
-            <button
-              type="button"
-              data-testid="bot-settings-trigger"
-              onClick={() => setPanel(inGroup ? "group-settings" : "settings")}
-              className="app-no-drag flex min-w-0 items-center gap-3"
-            >
-              {inGroup ? (
-                <GroupAvatar
-                  members={activeSnapshot?.members ?? activeGroup?.members ?? []}
-                  size={26}
-                />
-              ) : active ? (
-                <BotAvatar
-                  color={active.color}
-                  identity={active.id}
-                  size={26}
-                  status={active.status}
-                />
-              ) : null}
-              <span className="min-w-0">
-                <span className="block truncate text-[16px] font-medium text-foreground" dir="auto">
-                  {inGroup
-                    ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Group`)
-                    : (active?.name ?? t`Select a bot`)}
+            {showToolActivity ? (
+              <button
+                type="button"
+                data-testid="bot-settings-trigger"
+                onClick={() => setPanel(inGroup ? "group-settings" : "settings")}
+                className="app-no-drag flex min-w-0 items-center gap-3"
+              >
+                {inGroup ? (
+                  <GroupAvatar
+                    members={activeSnapshot?.members ?? activeGroup?.members ?? []}
+                    size={26}
+                  />
+                ) : active ? (
+                  <BotAvatar
+                    color={active.color}
+                    identity={active.id}
+                    size={26}
+                    status={active.status}
+                  />
+                ) : null}
+                <span className="min-w-0">
+                  <span className="block truncate text-[16px] font-medium text-foreground" dir="auto">
+                    {inGroup
+                      ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Group`)
+                      : (active?.name ?? t`Select a bot`)}
+                  </span>
                 </span>
-              </span>
-            </button>
+              </button>
+            ) : roleChatWorkspace ? (
+              <div className="hire-assistant-identity"><Sparkles size={18} aria-hidden /><div><strong>WeKruit</strong><span>{inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</span></div></div>
+            ) : workspaceBrief ? (
+              <div className="hire-assistant-identity"><Sparkles size={18} aria-hidden /><div><strong>WeKruit</strong><span>{recruitingWorkspaceView === "brief" ? <Trans>Recruiting assistant</Trans> : <Trans>Search refinement</Trans>}</span></div></div>
+            ) : (
+              <h1 className="recruiting-heading min-w-0 truncate text-[27px] leading-none text-foreground" dir="auto">
+                {inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Role conversation`) : t`Conversation`}
+              </h1>
+            )}
           </div>
           <div className="flex items-center gap-1">
-            {!inGroup && active ? (
+            {roleChatWorkspace ? <Button variant="ghost" size="icon-sm" aria-label={t`Collapse role chat`} onClick={() => { setRoleChatOpen(false); requestAnimationFrame(() => roleChatTrigger.current?.focus()); }}><X size={18} aria-hidden /></Button> : null}
+            {activeSnapshot?.threadId ? (
+              <button
+                type="button"
+                aria-label={t`Export conversation`}
+                title={t`Export conversation`}
+                disabled={exportingConversation}
+                aria-busy={exportingConversation}
+                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent disabled:opacity-50"
+                onClick={async () => {
+                  const target = inGroup ? { groupId: groupId! } : { botId: active!.id };
+                  const title = inGroup
+                    ? (activeGroup?.name ?? activeSnapshot.groupName ?? t`Group`)
+                    : active!.name;
+                  setExportingConversation(true);
+                  try {
+                    const { downloadConversation } = await import("../lib/conversation-export");
+                    await downloadConversation({
+                      target,
+                      isCurrent: () =>
+                        Boolean(
+                          userId &&
+                            bootstrapMe?.spaceId &&
+                            discussionScope.current.active &&
+                            userId === botsRefreshUser.current.id &&
+                            (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId,
+                        ),
+                      title,
+                      userName,
+                      locale: i18n.locale,
+                      agentName: (botId) => showToolActivity
+                        ? (resolveTranscriptBot(botId ?? "")?.name ?? t`Agent`)
+                        : "WeKruit",
+                    });
+                  } catch (error) {
+                    setSendError(errorText(error, t`Could not export conversation`));
+                  } finally {
+                    setExportingConversation(false);
+                  }
+                }}
+              >
+                <Download size={18} strokeWidth={1.6} className="text-foreground/75" aria-hidden />
+              </button>
+            ) : null}
+            {activeSnapshot?.threadId && !workspaceBrief && !roleChatWorkspace ? (
+              <button
+                type="button"
+                aria-label={t`Recruiting`}
+                title={t`Recruiting`}
+                onClick={() => setPanel(panel === "recruiting" ? null : "recruiting")}
+                aria-pressed={panel === "recruiting"}
+                data-active={panel === "recruiting" ? "" : undefined}
+                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent data-active:bg-accent"
+              >
+                <BriefcaseBusiness
+                  size={18}
+                  strokeWidth={1.6}
+                  className="text-foreground/75"
+                  aria-hidden
+                />
+              </button>
+            ) : null}
+            {showToolActivity && !inGroup && active ? (
               <button
                 type="button"
                 title={t`Agent computer`}
@@ -3665,14 +5038,24 @@ export function ShellPage() {
         </div>
         {!active && !activeGroup && initialBotsLoaded ? (
           <div className="grid flex-1 place-items-center">
-            <Button onClick={() => setPanel("create")}>
+            <Button
+              onClick={() => (showToolActivity ? setPanel("create") : navigate("/onboarding"))}
+            >
               <Plus size={16} aria-hidden="true" />
-              <Trans>Create new Bot</Trans>
+              {showToolActivity ? <Trans>Create new Bot</Trans> : <Trans>Start recruiting</Trans>}
             </Button>
+          </div>
+        ) : !activeSnapshot ? (
+          <div role="status" className="grid flex-1 place-items-center text-muted-foreground">
+            <Shimmer>
+              <Trans>Loading…</Trans>
+            </Shimmer>
           </div>
         ) : (
           <Transcript
             key={activeSnapshot?.threadId}
+            narrow={roleChatWorkspace}
+            visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
             scrollRef={messageScroll}
             scrollRequest={scrollRequest}
             onScrollRequestHandled={clearScrollRequest}
@@ -3681,9 +5064,10 @@ export function ShellPage() {
             showToolActivity={showToolActivity}
             olderCursor={activeSnapshot?.olderCursor ?? null}
             loadingOlder={loadingOlder}
-            answerableAskMessageId={answerableAskMessageId}
+            answerableAskMessageIds={answerableAskIds}
             running={transcriptRunning}
             workingBots={workingBots}
+            runningRunIds={workingRuns.filter((run) => run.status === "running").map((run) => run.id)}
             onLoadOlder={loadOlder}
             onOpenBot={openBot}
             onAnswer={answerMessage}
@@ -3711,6 +5095,28 @@ export function ShellPage() {
             onOpenComputer={onOpenComputer}
           />
         )}
+        {showToolActivity && inGroup && composerRunning ? (
+          <div className="flex flex-wrap gap-1 px-6 pb-2">
+            {currentRuns
+              .filter((run) => isActive(run.status))
+              .map((run) => {
+                const name = resolveTranscriptBot(run.botId)?.name ?? t`Agent`;
+                return (
+                  <Button
+                    key={run.id}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-label={t`Stop ${name}`}
+                    disabled={sending}
+                    onClick={() => void stopRun(run.id)}
+                  >
+                    <Trans>Stop {name}</Trans>
+                  </Button>
+                );
+              })}
+          </div>
+        ) : null}
         {recordingSkill ? (
           <div className="px-6 pb-2 text-center text-[13px] text-destructive">
             <Trans>Teaching in progress. Stop teaching before sending a new message.</Trans>
@@ -3718,8 +5124,10 @@ export function ShellPage() {
         ) : null}
         {active || activeGroup ? (
           <Composer
-            key={inGroup ? `group:${groupId}` : `bot:${active?.id}`}
-            draftKey={inGroup ? `group:${groupId}` : `bot:${active?.id}`}
+            key={`${userId}:${bootstrapMe?.spaceId}:${composerDraftKey}:${showToolActivity ? "developer" : "recruiting"}`}
+            ref={composerRef}
+            draftKey={composerDraftKey}
+            contextKey={selectedCorrespondence?.scope === correspondenceScope ? JSON.stringify([userId, bootstrapMe?.spaceId, selectedCorrespondence.reference.threadId, selectedCorrespondence.reference.roleId, selectedCorrespondence.reference.sourceId, selectedCorrespondence.reference.providerMessageId, selectedCorrespondence.reference.emailId]) : undefined}
             enterToSend={enterToSend}
             activeName={inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
             running={composerRunning}
@@ -3740,11 +5148,14 @@ export function ShellPage() {
             onVoice={
               !inGroup && active
                 ? () => {
+                    if (!userId || !bootstrapMe?.spaceId) return;
                     if (!voiceStatus?.ready) {
                       openSettings("voice");
                       return;
                     }
                     startCall({
+                      userId,
+                      spaceId: bootstrapMe.spaceId,
                       botId: active.id,
                       botName: active.name,
                       botColor: active.color,
@@ -3758,39 +5169,68 @@ export function ShellPage() {
             replyQuote={activeReplyQuote}
             replyTargetName={replyTargetName}
             onClearReply={clearReply}
-            mentionTargets={composerMentionTargets}
-            agentSkills={agentSkills}
-            onSlashOpen={refreshAgentSkills}
-            onSlashAction={(action) => {
-              if (action === "chat-settings") {
-                setPanel(inGroup ? "group-settings" : "settings");
-                return;
-              }
-              if (action === "settings-general") {
-                openSettings("general");
-                return;
-              }
-              if (action === "settings-usage") {
-                openSettings("usage");
-              }
-            }}
+            mentionTargets={showToolActivity ? composerMentionTargets : []}
+            agentSkills={showToolActivity ? agentSkills : []}
+            onSlashOpen={showToolActivity ? refreshAgentSkills : undefined}
+            onSlashAction={
+              showToolActivity
+                ? (action) => {
+                    if (action === "chat-settings") {
+                      setPanel(inGroup ? "group-settings" : "settings");
+                      return;
+                    }
+                    if (action === "settings-general") {
+                      openSettings("general");
+                      return;
+                    }
+                    if (action === "settings-usage") {
+                      openSettings("usage");
+                    }
+                  }
+                : undefined
+            }
           />
         ) : null}
+        </section>
+        </LinkFaviconsContext.Provider>
+          {workspaceBrief && activeSnapshot?.threadId ? (
+            <aside aria-label={t`Saved role summary`}>
+              <RecruitingPanel
+                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
+                presentation="workspace"
+                summary={recruitingWorkspaceView === "brief" ? "brief" : "feedback"}
+                readCache={recruitingReadCache.current}
+                readCacheScope={recruitingCacheScope}
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                refreshSignal={recruitingRefresh}
+                showDiagnostics={false}
+                onClose={() => openRecruitingView("conversation")}
+              />
+            </aside>
+          ) : null}
+          </div>
+        </div>
       </main>
 
-      <CallCard onSettings={() => openSettings("voice")} />
+      <CallCard
+        userId={userId}
+        spaceId={bootstrapMe?.spaceId}
+        onSettings={() => openSettings("voice")}
+      />
 
       <ResizableSidePanel
         botsSidebarCollapsed={botsSidebarCollapsed}
-        open={Boolean(panel && (active || activeGroup || panel === "create"))}
+        open={Boolean(!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create"))}
         panel={panel ?? "closed"}
       >
-        {panel && (active || activeGroup || panel === "create") ? (
+        {!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create") ? (
           <div className="rk-scroll h-full w-full overflow-y-auto px-5 py-[17px]">
             {panel !== "routine" &&
             panel !== "create" &&
             panel !== "create-group" &&
-            panel !== "group-settings" ? (
+            panel !== "group-settings" &&
+            panel !== "recruiting" ? (
               <div className="mb-4 flex items-center justify-between">
                 <span className="text-[13.5px] text-muted-foreground">
                   {panel === "settings" ? (
@@ -3935,13 +5375,28 @@ export function ShellPage() {
                 })}
               </div>
             ) : null}
-            {panel === "create-group" ? (
-              <CreateGroupForm
-                bots={bots}
-                onCancel={() => setPanel(null)}
-                onCreate={(input) => createGroup(input)}
+            {panel === "recruiting" && activeSnapshot?.threadId ? (
+              <RecruitingPanel
+                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                refreshSignal={recruitingRefresh}
+                tab={activeRecruitingTab}
+                onTabChange={changeRecruitingTab}
+                showDiagnostics={showToolActivity}
+                onClose={() => setPanel(null)}
+                onDiscussCandidate={discussCandidate}
+                onCandidateFeedback={feedbackCandidate}
+                candidateFeedbackRecipients={candidateFeedbackRecipients}
+                onRevealMessage={(target) => {
+                  navigate({
+                    pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
+                    search: `?${new URLSearchParams({ m: target.messageId })}`,
+                  });
+                }}
               />
             ) : null}
+            {panel === "create-group" ? roleCreationForm : null}
             {panel === "group-settings" && activeGroup ? (
               <GroupSettings
                 key={activeGroup.id}
@@ -4076,7 +5531,8 @@ export function ShellPage() {
                     };
                     let saved: Routine;
                     if (targetRoutine) {
-                      const armOneShot = routineNeedsOneShotArm(targetRoutine, crons);
+                      const armOneShot =
+                        routineDraft.active && routineNeedsOneShotArm(targetRoutine, crons);
                       let runAt: string | undefined;
                       if (armOneShot) {
                         if (!routineDraft.runAtLocal) {
@@ -4094,8 +5550,12 @@ export function ShellPage() {
                         routineId: targetRoutine.id,
                         name: routineDraft.name || t`Routine`,
                         prompt: routineDraft.prompt || t`Check in.`,
-                        crons,
-                        active: armOneShot ? true : routineDraft.active,
+                        ...(JSON.stringify(crons) !== JSON.stringify(targetRoutine.crons)
+                          ? { crons }
+                          : {}),
+                        ...(armOneShot || routineDraft.active !== targetRoutine.active
+                          ? { active: armOneShot ? true : routineDraft.active }
+                          : {}),
                         webhookEnabled: routineDraft.webhookEnabled,
                         githubEnabled: routineDraft.githubEnabled,
                         messageProvider: routineDraft.messageProvider,
@@ -4186,6 +5646,7 @@ export function ShellPage() {
         {contextChat && botMenu ? (
           <BotContextMenu
             bot={contextChat}
+            showDeveloperActions={showToolActivity}
             position={botMenu.position}
             onClose={closeBotMenu}
             sections={botSections}
@@ -4283,7 +5744,7 @@ export function ShellPage() {
               const request = contextBot
                 ? rpc.bots.archive({ botId: contextBot.id })
                 : rpc.groups.archive({ groupId: contextGroup!.id });
-              void request.then(() => refreshBots(true));
+              void request.then(() => refreshBots(true)).catch((error) => setSendError(errorText(error, t`Could not continue`)));
             }}
             onDelete={() => {
               if (contextBot) setDeleteTarget(contextBot);
@@ -4494,15 +5955,17 @@ export function ShellPage() {
           </DropdownMenu>
         ) : null}
 
-        <CommandPalette
-          open={commandPaletteOpen}
-          onOpenChange={setCommandPaletteOpen}
-          bots={bots}
-          onSelectBot={(id) => {
-            setMobileSidebarOpen(false);
-            navigate(`/app/${id}`);
-          }}
-        />
+        {showToolActivity && (
+          <CommandPalette
+            open={commandPaletteOpen}
+            onOpenChange={setCommandPaletteOpen}
+            bots={bots}
+            onSelectBot={(id) => {
+              setMobileSidebarOpen(false);
+              navigate(`/app/${id}`);
+            }}
+          />
+        )}
 
         {newSpaceOpen ? (
           <NewSpaceDialog
@@ -4569,7 +6032,12 @@ export function ShellPage() {
 
         {pluginsOpen ? (
           <PluginsOverlay
-            activeBotId={activeBotId.current}
+            key={JSON.stringify([userId, bootstrapMe?.spaceId, panelTarget, activeSnapshot?.threadId, connectionMemberIds])}
+            activeBotId={workspaceNewRole ? undefined : activeBotId.current}
+            coordinatorBotId={connectionMemberIds[0]}
+            recruitingBotIds={{outreach: recruitingConnectionBot("outreach"), scheduling: recruitingConnectionBot("scheduling")}}
+            memberBotIds={inGroup || workspaceNewRole ? connectionMemberIds : undefined}
+            developerView={showToolActivity}
             onClose={() => setPluginsOpen(false)}
             onOpenMcp={() => {
               setPluginsOpen(false);
@@ -4828,6 +6296,8 @@ export function ShellPage() {
 }
 
 const Transcript = memo(function Transcript({
+  narrow,
+  visible,
   scrollRef,
   scrollRequest,
   onScrollRequestHandled,
@@ -4836,9 +6306,10 @@ const Transcript = memo(function Transcript({
   showToolActivity,
   olderCursor,
   loadingOlder,
-  answerableAskMessageId,
+  answerableAskMessageIds,
   running,
   workingBots,
+  runningRunIds,
   onLoadOlder,
   onOpenBot,
   onAnswer,
@@ -4857,6 +6328,8 @@ const Transcript = memo(function Transcript({
   onSpeak,
   onOpenComputer,
 }: {
+  narrow: boolean;
+  visible: boolean;
   scrollRef: RefObject<HTMLDivElement | null>;
   scrollRequest: { messageId: string; nonce: number } | null;
   onScrollRequestHandled: () => void;
@@ -4865,12 +6338,13 @@ const Transcript = memo(function Transcript({
   showToolActivity: boolean;
   olderCursor: number | null;
   loadingOlder: boolean;
-  answerableAskMessageId: string | null;
+  answerableAskMessageIds: string[];
   running: boolean;
   workingBots: GroupAvatarMember[];
+  runningRunIds: string[];
   onLoadOlder: () => void | Promise<void>;
   onOpenBot: (botId: string) => void;
-  onAnswer: (message: ThreadMessage, text: string, username?: string) => Promise<void>;
+  onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
   onReply: (message: ThreadMessage) => void;
   onQuote: (message: ThreadMessage, quote: string) => void;
   onReact: (message: ThreadMessage, reaction: MessageReaction) => Promise<void>;
@@ -4897,17 +6371,45 @@ const Transcript = memo(function Transcript({
     () => new Map(messages.map((message) => [message.id, message])),
     [messages],
   );
-  const reactionView = useMemo(() => projectMessageReactions(messages), [messages]);
+  // Keep the original waiting cards at hand after later group replies; render each card once.
+  const reactionView = useMemo(
+    () =>
+      projectMessageReactions([
+        ...messages.filter((message) => !answerableAskMessageIds.includes(message.id)),
+        ...messages.filter((message) => answerableAskMessageIds.includes(message.id)),
+      ]),
+    [messages, answerableAskMessageIds],
+  );
   const separatorIds = timeSeparatorIds(
     reactionView.visibleMessages.filter((message) =>
       messageHasVisibleBlocks(message.blocks, showToolActivity),
     ),
   );
-  const workingBotName = workingBots.length === 1 ? workingBots[0]?.name : undefined;
-  const workingLabel =
-    workingBotName != null && workingBotName !== ""
-      ? t`${workingBotName} is working`
-      : t`Bots are working`;
+  const nativeActivity = latestNativeToolActivity(messages, runningRunIds);
+  const activityLabels = {
+    files: t`Preparing to read files…`,
+    search: t`Preparing a search…`,
+    page: t`Preparing to read a page…`,
+    context: t`Preparing to read saved context…`,
+    connections: t`Checking available connections…`,
+    connected_action: t`Preparing connected work…`,
+    emails: t`Preparing to read emails…`,
+    availability: t`Preparing to check availability…`,
+    working: t`Working…`,
+  };
+  const workingLabel = showToolActivity
+    ? workingBots
+        .map(({ name, status }) =>
+          [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
+        )
+        .join("; ")
+    : workingBots.some((bot) => bot.status === "running")
+      ? nativeActivity
+        ? activityLabels[nativeActivity]
+        : t`Working…`
+      : workingBots.some((bot) => bot.status === "leased")
+        ? t`Starting…`
+        : t`Waiting in line…`;
   const [quoteDraft, setQuoteDraft] = useState<{
     message: ThreadMessage;
     text: string;
@@ -5039,7 +6541,7 @@ const Transcript = memo(function Transcript({
   // (or user input interrupting it, which also fires scrollend) ends the
   // suppression, with the timeout as fallback when no scroll happens.
   useLayoutEffect(() => {
-    if (!scrollRequest || scrolledJump.current === scrollRequest.nonce) return;
+    if (!visible || !scrollRequest || scrolledJump.current === scrollRequest.nonce) return;
     const element = scrollRef.current;
     const row = element?.querySelector(
       `[data-message-id="${CSS.escape(scrollRequest.messageId)}"]`,
@@ -5065,11 +6567,11 @@ const Transcript = memo(function Transcript({
       { duration: 1200 },
     );
     onScrollRequestHandled();
-  }, [messages, scrollRequest, scrollRef, endJumpScroll, onScrollRequestHandled]);
+  }, [visible, messages, scrollRequest, scrollRef, endJumpScroll, onScrollRequestHandled]);
 
   useLayoutEffect(() => {
-    if (following.current) snapToEnd();
-  }, [messages, running, snapToEnd]);
+    if (visible && following.current) snapToEnd();
+  }, [visible, messages, running, snapToEnd]);
 
   useLayoutEffect(() => {
     const button = jumpButtonRef.current;
@@ -5126,6 +6628,7 @@ const Transcript = memo(function Transcript({
           }
         }}
         onScroll={(event) => {
+          if (!visible) return;
           const scrolledDown = transcriptMovedDown(
             lastScrollTop.current,
             event.currentTarget.scrollTop,
@@ -5198,16 +6701,20 @@ const Transcript = memo(function Transcript({
                       peerReceipt
                         ? undefined
                         : `relative w-fit min-w-0 ${
-                            message.role === "user"
-                              ? "max-w-[min(84%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[84%]"
-                              : "max-w-[min(88%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[88%]"
+                            narrow
+                              ? message.role === "user"
+                                ? "max-w-[88%]"
+                                : "max-w-full"
+                              : message.role === "user"
+                                ? "max-w-[min(84%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[84%]"
+                                : "max-w-[min(88%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[88%]"
                           }`
                     }
                   >
                     <MessageView
                       artifactTarget={artifactTarget}
                       message={message}
-                      canAnswer={message.id === answerableAskMessageId}
+                      canAnswer={answerableAskMessageIds.includes(message.id)}
                       onOpenBot={onOpenBot}
                       onOpenPeerMessages={onOpenPeerMessages}
                       onAnswer={onAnswer}
@@ -5215,7 +6722,9 @@ const Transcript = memo(function Transcript({
                         peerReceipt
                           ? undefined
                           : message.role === "bot"
-                            ? memberName?.(message.botId)
+                            ? showToolActivity
+                              ? memberName?.(message.botId)
+                              : undefined
                             : undefined
                       }
                       memberName={memberName}
@@ -5238,6 +6747,7 @@ const Transcript = memo(function Transcript({
                     {peerReceipt ? null : (
                       <MessageHoverActions
                         message={message}
+                        below={narrow}
                         side={message.role === "user" ? "start" : "end"}
                         onReply={onReply}
                         onReact={onReact}
@@ -5250,19 +6760,27 @@ const Transcript = memo(function Transcript({
                     dateTime={message.createdAt}
                     data-testid="message-hover-time"
                     className={cn(
-                      "pointer-events-none absolute top-1 z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 group-has-[[aria-expanded=true]]/message:opacity-100 [@media(hover:none)]:transition-none",
-                      // Hover keeps the date in the side margin. Touch leaves that margin for the bubble and drops the revealed time under it.
-                      message.role === "user"
-                        ? "start-0 max-w-[max(8rem,16%)] text-start"
-                        : "end-0 max-w-[max(8rem,12%)] text-end",
-                      "[@media(hover:none)]:group-hover/message:static [@media(hover:none)]:group-focus-within/message:static [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:static",
-                      "[@media(hover:none)]:group-hover/message:block [@media(hover:none)]:group-focus-within/message:block [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:block",
-                      "[@media(hover:none)]:group-hover/message:mt-1 [@media(hover:none)]:group-focus-within/message:mt-1 [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:mt-1",
-                      "[@media(hover:none)]:group-hover/message:w-full [@media(hover:none)]:group-focus-within/message:w-full [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:w-full",
-                      "[@media(hover:none)]:group-hover/message:max-w-none [@media(hover:none)]:group-focus-within/message:max-w-none [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:max-w-none",
-                      message.role === "user"
-                        ? "[@media(hover:none)]:group-hover/message:text-end [@media(hover:none)]:group-focus-within/message:text-end [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-end"
-                        : "[@media(hover:none)]:group-hover/message:text-start [@media(hover:none)]:group-focus-within/message:text-start [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-start",
+                      "pointer-events-none absolute z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 group-has-[[aria-expanded=true]]/message:opacity-100 [@media(hover:none)]:transition-none",
+                      narrow
+                        ? [
+                            "bottom-1 max-w-[50%]",
+                            message.role === "user" ? "start-0 text-start" : "end-0 text-end",
+                          ]
+                        : [
+                            "top-1",
+                            // Hover keeps the date in the side margin. Touch leaves that margin for the bubble and drops the revealed time under it.
+                            message.role === "user"
+                              ? "start-0 max-w-[max(8rem,16%)] text-start"
+                              : "end-0 max-w-[max(8rem,12%)] text-end",
+                            "[@media(hover:none)]:group-hover/message:static [@media(hover:none)]:group-focus-within/message:static [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:static",
+                            "[@media(hover:none)]:group-hover/message:block [@media(hover:none)]:group-focus-within/message:block [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:block",
+                            "[@media(hover:none)]:group-hover/message:mt-1 [@media(hover:none)]:group-focus-within/message:mt-1 [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:mt-1",
+                            "[@media(hover:none)]:group-hover/message:w-full [@media(hover:none)]:group-focus-within/message:w-full [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:w-full",
+                            "[@media(hover:none)]:group-hover/message:max-w-none [@media(hover:none)]:group-focus-within/message:max-w-none [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:max-w-none",
+                            message.role === "user"
+                              ? "[@media(hover:none)]:group-hover/message:text-end [@media(hover:none)]:group-focus-within/message:text-end [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-end"
+                              : "[@media(hover:none)]:group-hover/message:text-start [@media(hover:none)]:group-focus-within/message:text-start [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-start",
+                          ],
                     )}
                   >
                     {formatMessageTime(message.createdAt, i18n.locale || "en")}
@@ -5300,7 +6818,18 @@ const Transcript = memo(function Transcript({
                 block.kind === "progress" && !isToolActivityBlock(block) && Boolean(block.text),
             ),
         ) ? (
-          <ActiveBotGlyph bots={workingBots} label={workingLabel} />
+          showToolActivity ? (
+            <ActiveBotGlyph bots={workingBots} label={workingLabel} />
+          ) : (
+            <LoadingState
+              label={workingLabel}
+              indicator={
+                <span aria-hidden>
+                  <Shimmer>{workingLabel}</Shimmer>
+                </span>
+              }
+            />
+          )
         ) : null}
       </div>
       {quoteDraft ? (
@@ -5404,7 +6933,25 @@ const QuoteSelectionButton = memo(function QuoteSelectionButton({
   );
 });
 
+export function candidateReferenceText(candidate: CandidateDiscussionContext): string {
+  const reference = [
+    t`Name: ${candidate.name ?? t`Name missing`}`,
+    t`Role: ${candidate.roleTitle}`,
+    ...(candidate.roleVersion === undefined ? [] : [t`Role version: ${candidate.roleVersion}`]),
+    ...(candidate.title ? [t`Title: ${candidate.title}`] : []),
+    ...(candidate.company ? [t`Company: ${candidate.company}`] : []),
+    t`LinkedIn: ${candidate.linkedinUrl ?? t`LinkedIn missing`}`,
+    t`Resume: ${candidate.resumeUrl ?? t`Resume missing`}`,
+  ].join("\n");
+  return `${t`Candidate reference`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n`;
+}
+
+export type ComposerHandle = {
+  insertContext: (context: { draftKey: string; text: string }) => void;
+};
+
 export const Composer = memo(function Composer({
+  ref,
   artifactTarget,
   activeName,
   running,
@@ -5432,8 +6979,10 @@ export const Composer = memo(function Composer({
   onSlashOpen,
   onSlashAction,
   draftKey,
+  contextKey,
   enterToSend,
 }: {
+  ref?: Ref<ComposerHandle>;
   activeName?: string;
   running: boolean;
   disabled?: boolean;
@@ -5461,6 +7010,7 @@ export const Composer = memo(function Composer({
   onSlashOpen?: () => void;
   onSlashAction?: (action: SlashActionId) => void;
   draftKey: string;
+  contextKey?: string;
   enterToSend: boolean;
 }) {
   const { t } = useLingui();
@@ -5486,7 +7036,7 @@ export const Composer = memo(function Composer({
       }),
     [draftKey],
   );
-  const retryNonce = useRef<string | null>(null);
+  const retryNonce = useRef<{ nonce: string; contextKey?: string } | null>(null);
   const replyId = replyTarget?.id ?? null;
   const quote = replyTarget ? (replyQuote ?? null) : null;
   const previousReply = useRef({ id: replyId, quote });
@@ -5635,6 +7185,43 @@ export const Composer = memo(function Composer({
     textareaRef.current?.focus();
   }
 
+  const contextHandle = useRef<ComposerHandle | null>(null);
+  useImperativeHandle(ref, () => {
+    const handle: ComposerHandle = {
+      insertContext: ({ draftKey: target, text }) => {
+        const textarea = textareaRef.current;
+        if (contextHandle.current !== handle || target !== draftKey || !textarea || !text.trim())
+          return;
+        const next = `${draft}${draft ? "\n\n" : ""}${text}`;
+        updateDraft(next);
+        const revision = editRevision.current;
+        focusComposer();
+        let interrupted = false;
+        const interrupt = () => {
+          interrupted = true;
+        };
+        const interactions = ["blur", "pointerdown", "keydown"] as const;
+        for (const event of interactions)
+          textarea.addEventListener(event, interrupt, { once: true });
+        window.requestAnimationFrame(() => {
+          for (const event of interactions) textarea.removeEventListener(event, interrupt);
+          if (
+            interrupted ||
+            textareaRef.current !== textarea ||
+            textarea.value !== next ||
+            document.activeElement !== textarea ||
+            editRevision.current !== revision
+          )
+            return;
+          textarea.setSelectionRange(next.length, next.length);
+          textarea.scrollTop = textarea.scrollHeight;
+        });
+      },
+    };
+    contextHandle.current = handle;
+    return handle;
+  });
+
   function insertMention(mention: ComposerMention) {
     markEdited();
     const next = draft.replace(/@([\w-]*)$/, "");
@@ -5712,10 +7299,11 @@ export const Composer = memo(function Composer({
   }, [agentSkills, slashQuery]);
 
   const slashActionOptions = useMemo(() => {
+    if (!onSlashAction) return [];
     if (slashQuery === null) return [];
     const query = slashQuery.trim().toLowerCase();
     return SLASH_ACTIONS.filter((action) => !query || action.label.toLowerCase().includes(query));
-  }, [slashQuery]);
+  }, [slashQuery, onSlashAction]);
 
   const showSlashPicker =
     slashQuery !== null &&
@@ -5725,7 +7313,10 @@ export const Composer = memo(function Composer({
   async function send() {
     if (!canSend || sending || disabled) return;
     const revision = editRevision.current;
-    const clientNonce = retryNonce.current ?? newClientNonce();
+    const clientNonce =
+      retryNonce.current?.contextKey === contextKey
+        ? (retryNonce.current?.nonce ?? newClientNonce())
+        : newClientNonce();
     retryNonce.current = null;
     const text = serializeComposerPrompt(draft, selectedSkill, selectedMentions);
     const submission = beginComposerDraftSubmission(draftKey, draft);
@@ -5747,7 +7338,7 @@ export const Composer = memo(function Composer({
     }
     // Restore only an untouched draft, retaining its nonce for an unchanged retry.
     if (editRevision.current !== revision) return;
-    retryNonce.current = clientNonce;
+    retryNonce.current = { nonce: clientNonce, contextKey };
     setDraft(draft);
     setSelectedSkill(selectedSkill);
     setSelectedMentions(mentions);
@@ -6241,7 +7832,7 @@ export const Composer = memo(function Composer({
             autoComplete="off"
             dir="auto"
             rows={1}
-            className="rk-scroll max-h-25 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-[15.5px] leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
+            className="rk-scroll max-h-25 min-h-[24px] min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
           />
         </div>
         <div
@@ -6439,11 +8030,13 @@ function formatRosterTime(isoDate?: string | null): string {
 function MessageHoverActions({
   message,
   side,
+  below = false,
   onReply,
   onReact,
 }: {
   message: ThreadMessage;
   side: "start" | "end";
+  below?: boolean;
   onReply: (message: ThreadMessage) => void;
   onReact: (message: ThreadMessage, reaction: MessageReaction) => Promise<void>;
 }) {
@@ -6464,7 +8057,7 @@ function MessageHoverActions({
     "grid h-7 w-7 place-items-center text-muted-foreground transition-colors hover:text-foreground";
 
   return (
-    <MessageHoverMetadata pinned={moreOpen || reactionsOpen} side={side}>
+    <MessageHoverMetadata pinned={moreOpen || reactionsOpen} side={side} below={below}>
       <div data-testid="message-hover-actions" className="flex items-center gap-0.5">
         {canReactToThreadMessage(message) ? (
           <Popover open={reactionsOpen} onOpenChange={setReactionsOpen}>
@@ -6544,7 +8137,9 @@ function MessageHoverActions({
 function firstThreadRoute(
   bots: readonly Pick<Bot, "id">[],
   groups: readonly Pick<Group, "id">[],
+  recruiting = false,
 ): string {
+  if (recruiting && groups[0]) return `/app/g/${groups[0].id}`;
   if (bots[0]) return `/app/${bots[0].id}`;
   if (groups[0]) return `/app/g/${groups[0].id}`;
   return "/app";
@@ -6618,7 +8213,7 @@ const MessageView = memo(function MessageView({
   artifactTarget: ArtifactTarget;
   canAnswer: boolean;
   message: ThreadMessage;
-  onAnswer: (message: ThreadMessage, text: string, username?: string) => Promise<void>;
+  onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
   onOpenBot: (botId: string) => void;
   onOpenPeerMessages: (peer: { peerBotId: string; peerBotName: string }) => void;
   speakerName?: string;
@@ -6675,9 +8270,11 @@ const MessageView = memo(function MessageView({
         author={
           (message.replyPreview?.role ?? replyParent?.role) === "user"
             ? t`You`
-            : ((replyBotId ? peerBot(replyBotId)?.name : undefined) ??
-              memberName?.(replyBotId) ??
-              t`Bot`)
+            : showToolActivity
+              ? ((replyBotId ? peerBot(replyBotId)?.name : undefined) ??
+                memberName?.(replyBotId) ??
+                t`Bot`)
+              : "WeKruit"
         }
         onJump={onJumpToMessage}
       />
@@ -6699,7 +8296,7 @@ const MessageView = memo(function MessageView({
         <div className="flex w-fit max-w-full justify-start [@media(hover:none)]:w-full">
           <div
             data-testid="message-bot-bubble"
-            className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+            className="max-w-full space-y-2.5 rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
             dir="auto"
           >
             {visibleNarrationBlocks.map((block, i) => {
@@ -6749,7 +8346,7 @@ const MessageView = memo(function MessageView({
   return (
     <>
       {messageContext}
-      {message.blocks.map((block, i) => {
+      {visibleNarrationBlocks.map((block, i) => {
         if (block.kind === "steps" && shouldRenderToolCard(block, showToolActivity)) {
           return (
             <StandaloneToolActivity
@@ -6773,7 +8370,7 @@ const MessageView = memo(function MessageView({
               <span>
                 ↪ {to} ← {from}
               </span>
-              <span>{block.text}</span>
+              {showToolActivity ? <span>{block.text}</span> : null}
             </div>
           );
         }
@@ -6825,7 +8422,7 @@ const MessageView = memo(function MessageView({
             >
               <div
                 data-testid="message-bot-bubble"
-                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
                 dir="auto"
               >
                 <ChatMarkdown streaming>{block.text}</ChatMarkdown>
@@ -6857,11 +8454,13 @@ const MessageView = memo(function MessageView({
                     animation: running ? "rkPulse 1.2s ease-in-out infinite" : undefined,
                   }}
                 >
-                  {running ? <Trans>subagent</Trans> : block.status}
+                  {running ? <Trans>Working…</Trans> : block.status}
                 </span>
               </div>
-              <div className="mt-2 text-[13.5px] text-muted-foreground">{block.task}</div>
-              {block.progress || block.result ? (
+              {showToolActivity ? (
+                <div className="mt-2 text-[13.5px] text-muted-foreground">{block.task}</div>
+              ) : null}
+              {showToolActivity && (block.progress || block.result) ? (
                 <div className="mt-2.5 text-[14.5px] leading-[1.5] text-foreground/75">
                   <ChatMarkdown streaming={running}>
                     {block.result || block.progress || ""}
@@ -6965,6 +8564,7 @@ const MessageView = memo(function MessageView({
                 name={block.name}
                 mimeType={block.mimeType}
                 size={block.size}
+                preview={block.preview}
               />
             </div>
           );
@@ -6977,11 +8577,32 @@ const MessageView = memo(function MessageView({
             <div key={i} className="flex w-fit max-w-full justify-end [@media(hover:none)]:w-full">
               <div
                 data-testid="message-user-bubble"
-                data-quote-message-id={quoteMessageId}
-                className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-[15.5px] leading-[1.45] text-chat-user-foreground"
+                className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-base leading-relaxed text-chat-user-foreground"
                 dir="auto"
               >
-                <LinkifiedText>{block.text}</LinkifiedText>
+                <div data-quote-message-id={quoteMessageId}>
+                  <LinkifiedText>{block.text}</LinkifiedText>
+                </div>
+                {block.correspondenceReference ? (
+                  <div
+                    className="mt-2 border-t border-border pt-2 text-sm text-muted-foreground"
+                    data-testid="message-email-reference"
+                  >
+                    <span>{block.correspondenceReference.sourceName}</span>
+                    {block.correspondenceReference.sender ? (
+                      <span> · {block.correspondenceReference.sender}</span>
+                    ) : null}
+                    <div>{block.correspondenceReference.subject || <Trans>No subject</Trans>}</div>
+                    {block.correspondenceReference.date ? (
+                      <div>{new Date(block.correspondenceReference.date).toLocaleString()}</div>
+                    ) : null}
+                    {block.correspondenceReference.snippet ? (
+                      <div>
+                        <Trans>Preview only</Trans>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           );
@@ -6994,7 +8615,7 @@ const MessageView = memo(function MessageView({
             >
               <div
                 data-testid="message-bot-bubble"
-                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-[15.5px] leading-[1.5] text-foreground/90"
+                className="max-w-full rounded-[20px] bg-muted px-[18px] py-3 text-base leading-relaxed text-foreground"
                 dir="auto"
               >
                 <div data-quote-message-id={quoteMessageId}>
@@ -7021,7 +8642,7 @@ const MessageView = memo(function MessageView({
                 {block.lines.map((line) => (
                   <div key={line.k} className="flex items-baseline gap-2.5 text-[15px]">
                     <span className="text-success">✓</span>
-                    <span className="font-semibold text-white">{line.k}</span>
+                    <span className="font-semibold text-foreground">{line.k}</span>
                     <span className="text-muted-foreground">→</span>
                     <span>{line.v}</span>
                   </div>

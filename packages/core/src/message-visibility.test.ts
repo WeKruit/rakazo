@@ -114,4 +114,72 @@ describe("user-visible messages", () => {
       userVisibleMessages(background, { backgroundRunIds: ["run-ticket"] }).map((m) => m.id),
     ).toEqual(["ask", "computer", "approval", "user"]);
   });
+
+  it("preserves the original specialist input and approval records without peer receipts", () => {
+    const cards = [
+      message("specialist-choice", "run-peer", [
+        {
+          kind: "ask",
+          text: "Choose a time",
+          input: "text",
+          status: "pending",
+          actions: [{ id: "morning", label: "Morning" }],
+        },
+      ]),
+      message("specialist-consent", "run-peer", [
+        {
+          kind: "ask",
+          text: "Send this exact draft?",
+          approvalEffectId: "effect-original",
+          detail: "To: person@example.test\nBody: Original draft",
+          status: "pending",
+          actions: [{ id: "allow", label: "Allow once" }],
+        },
+      ]),
+      message("specialist-access", "run-peer", [
+        {
+          kind: "mcp_approval",
+          serverId: "server-original",
+          name: "Calendar",
+          transport: "streamable_http",
+          endpoint: "https://example.test/mcp",
+          needsOAuth: true,
+          status: "pending",
+        },
+      ]),
+      message("specialist-computer", "run-peer", [
+        { kind: "computer", state: "Needs you", text: "Sign in" },
+      ]),
+    ];
+    const visible = userVisibleMessages([...peerExchange, ...cards], {
+      includeDelegatedReplyText: false,
+    });
+    expect(visible.slice(-cards.length)).toEqual(cards);
+    cards.forEach((card, index) => {
+      expect(visible.at(index - cards.length)).toBe(card);
+    });
+    expect(visible.some((row) => row.id === "received")).toBe(false);
+  });
+
+  it("keeps a mixed peer receipt and input record when receipt chrome is hidden", () => {
+    const receipt = peerExchange[2]!.blocks[0]!;
+    const cards = [
+      { kind: "ask" as const, text: "Choose", status: "pending" as const },
+      { kind: "computer" as const, state: "Needs you", text: "Sign in" },
+      {
+        kind: "mcp_approval" as const,
+        serverId: "original-server",
+        name: "Calendar",
+        transport: "streamable_http" as const,
+        endpoint: "https://example.test/mcp",
+        needsOAuth: true,
+        status: "pending" as const,
+      },
+    ];
+    for (const card of cards) {
+      const original = message("mixed-original", "run-peer", [receipt, card]);
+      expect(userVisibleMessages([original], { includePeerReceipts: false })).toEqual([original]);
+      expect(userVisibleMessages([original], { includePeerReceipts: false })[0]).toBe(original);
+    }
+  });
 });

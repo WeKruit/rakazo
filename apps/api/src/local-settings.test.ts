@@ -1,4 +1,5 @@
 import { LOCAL_SETTINGS_RPC, LOCAL_SETTINGS_TOKEN_HEADER } from "@rakazo/contracts";
+import type { Prisma } from "@rakazo/db";
 import { Hono } from "hono";
 import { describe, expect, it, vi } from "vitest";
 import { mountLocalSettings, validLocalSettingsToken } from "./local-settings.js";
@@ -9,11 +10,14 @@ function fixture(
   ownerUserId: string | null = "owner",
 ) {
   const findUnique = vi.fn(async () => ({ ownerUserId }));
-  const findFirst = vi.fn(async () => ({
-    userId: "owner",
-    spaceId: "owner-default",
-    member: { user: { email: "owner@example.test" } },
-  }));
+  const queryRaw = vi.fn(async (_query: Prisma.Sql) => [
+    {
+      userId: "owner",
+      spaceId: "owner-default",
+      email: "owner@example.test",
+      isDeploymentOwner: true,
+    },
+  ]);
   const handle = vi.fn(async () => ({
     matched: true,
     response: new Response('{"json":{"ok":true}}'),
@@ -21,7 +25,7 @@ function fixture(
   const app = new Hono();
   mountLocalSettings(app, {
     token: configuredToken,
-    prisma: { deploymentSettings: { findUnique }, spaceMember: { findFirst } } as never,
+    prisma: { deploymentSettings: { findUnique }, $queryRaw: queryRaw } as never,
     rpc: { handle } as never,
   });
   function request(procedure: string, supplied: string | null = token, method = "POST") {
@@ -34,7 +38,7 @@ function fixture(
       },
     });
   }
-  return { request, findUnique, findFirst, handle };
+  return { request, findUnique, queryRaw, handle };
 }
 
 describe("local settings authority", () => {
@@ -77,9 +81,11 @@ describe("local settings authority", () => {
     ]) {
       expect((await f.request(procedure)).status).toBe(200);
     }
-    expect(f.findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: "owner" } }),
-    );
+    expect(f.queryRaw).toHaveBeenCalledTimes(6);
+    for (const [query] of f.queryRaw.mock.calls) {
+      expect(query.values).toEqual(["default", "owner"]);
+      expect(query.sql).not.toContain('AND sm."spaceId" = ?');
+    }
     expect(f.handle).toHaveBeenCalledWith(
       expect.any(Request),
       expect.objectContaining({

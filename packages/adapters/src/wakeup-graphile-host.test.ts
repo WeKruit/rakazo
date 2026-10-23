@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import type { BackgroundJobHandlers } from "@rakazo/adapter-kit";
 import {
   HISTORY_COMPACT_MAX_ATTEMPTS,
@@ -219,6 +220,43 @@ describe("GraphileJobPublisher.enqueue", () => {
 describe("GraphileJobWorkerHost runner lifecycle", () => {
   afterEach(() => {
     run.mockReset();
+  });
+
+  it("keeps the native worker as sole signal owner while awaiting runner drain", async () => {
+    // ponytail: inspect the literal configuration; importing this entrypoint starts real services.
+    const source = await readFile(
+      new URL("../../../apps/worker/src/index.ts", import.meta.url),
+      "utf8",
+    );
+    const options = source.match(/new GraphileJobWorkerHost\(pool,\s*\{([^}]*)\}\)/)?.[1] ?? "";
+    const noHandleSignals = /\bnoHandleSignals:\s*true\b/.test(options);
+    expect(noHandleSignals).toBe(true);
+    expect(source).toContain('process.once("SIGTERM", () => void stop())');
+    expect(source).toContain('process.once("SIGINT", () => void stop())');
+
+    const first = mockRunner();
+    const drain = deferred();
+    const stop = vi.mocked(first.runner.stop);
+    const finish = stop.getMockImplementation()!;
+    stop.mockImplementation(async () => {
+      await drain.promise;
+      await finish();
+    });
+    run.mockResolvedValueOnce(first.runner);
+    const host = new GraphileJobWorkerHost({} as Pool, { noHandleSignals });
+    await host.start(handlers());
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ noHandleSignals: true }));
+
+    let stopped = false;
+    const stopping = host.stop().then(() => {
+      stopped = true;
+    });
+    await Promise.resolve();
+    expect(stopped).toBe(false);
+    drain.resolve();
+    await stopping;
+    expect(stop).toHaveBeenCalledOnce();
+    expect(first.runner.kill).not.toHaveBeenCalled();
   });
 
   it("backs off then restarts when runner.promise rejects with 53300", async () => {

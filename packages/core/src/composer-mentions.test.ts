@@ -112,6 +112,22 @@ describe("buildComposerMentionOptions", () => {
 });
 
 describe("resolveComposerSendPlan", () => {
+  it("preserves nonblank source text and rejects whitespace-only sends", () => {
+    const raw = " \n  Candidate evidence 😀\n  ";
+    expect(
+      resolveComposerSendPlan({ text: raw, mentions: [], hasAttachments: false }),
+    ).toMatchObject({ trimmed: raw, shouldSend: true });
+    expect(
+      resolveComposerSendPlan({ text: " \n\t ", mentions: [], hasAttachments: false }).isNoOp,
+    ).toBe(true);
+    expect(
+      resolveComposerSendPlan({
+        text: `@Planning ${raw}`,
+        mentions: [{ kind: "group", id: "g1", name: "Planning" }],
+        hasAttachments: false,
+      }),
+    ).toMatchObject({ trimmed: raw, rerouteGroupId: "g1" });
+  });
   it("opens a chip-only @Group from a 1:1 without sending", () => {
     const plan = resolveComposerSendPlan({
       text: "@Planning",
@@ -224,8 +240,19 @@ describe("strip and connector intent", () => {
     expect(stripMentionToken("Ask @Draft team please", "Draft team")).toBe("Ask please");
   });
 
+  it("strips adjacent repeated controls without changing the remaining draft", () => {
+    expect(stripMentionToken("@Planning @Planning hello", "Planning")).toBe("hello");
+    expect(
+      resolveComposerSendPlan({
+        text: "@Planning @Planning",
+        mentions: [{ kind: "group", id: "g1", name: "Planning" }],
+        hasAttachments: false,
+      }),
+    ).toMatchObject({ trimmed: "", shouldSend: false, rerouteGroupId: "g1" });
+  });
+
   it("preserves newlines when stripping mention tokens", () => {
-    expect(stripMentionToken("@Planning\n\nline two", "Planning")).toBe("line two");
+    expect(stripMentionToken("@Planning\n\nline two", "Planning")).toBe("\n\nline two");
     expect(stripMentionToken("one\n@Planning\ntwo", "Planning")).toBe("one\n\ntwo");
   });
 
@@ -237,6 +264,13 @@ describe("strip and connector intent", () => {
       "check inbox\n\nUse these connectors if relevant: Gmail.",
     );
     expect(appendConnectorIntent("", ["Gmail"])).toBe("Use these connectors if relevant: Gmail.");
+    const raw = " \n  keep indentation\n  ";
+    expect(stripMentionToken(raw, "Not present")).toBe(raw);
+    expect(stripMentionKinds(raw, [], ["group"])).toBe(raw);
+    expect(appendConnectorIntent(raw, [])).toBe(raw);
+    expect(appendConnectorIntent(raw, ["Gmail"])).toBe(
+      `${raw}\n\nUse these connectors if relevant: Gmail.`,
+    );
   });
 
   it("formats routine subtitles", () => {

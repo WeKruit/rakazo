@@ -3,7 +3,7 @@ import sharp from "sharp";
 import { expect, it, vi } from "vitest";
 import { builtinAgentTools } from "./builtin-tools.js";
 
-const captured = vi.hoisted(() => ({ policies: [] as unknown[] }));
+const captured = vi.hoisted(() => ({ policies: [] as unknown[], prompts: [] as string[] }));
 
 vi.mock("./runtime-context.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("./runtime-context.js")>();
@@ -17,7 +17,8 @@ vi.mock("./runtime-context.js", async (importOriginal) => {
   };
 });
 
-vi.mock("@earendil-works/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
     state = { errorMessage: undefined, messages: [] };
     private readonly tools: Array<{
@@ -26,12 +27,14 @@ vi.mock("@earendil-works/pi-agent-core", () => ({
     }>;
     constructor(options: {
       initialState: {
+        systemPrompt: string;
         tools: Array<{
           name: string;
           execute: (id: string, args: Record<string, unknown>) => Promise<unknown>;
         }>;
       };
     }) {
+      captured.prompts.push(options.initialState.systemPrompt);
       this.tools = options.initialState.tools;
     }
     subscribe() {}
@@ -80,6 +83,7 @@ import type { createRuntimeContextPolicy } from "./runtime-context.js";
 
 it("uses the image planner in a nested subagent's screenshot context", async () => {
   captured.policies = [];
+  captured.prompts = [];
   for await (const _event of new PiAgentRuntime().run(
     {
       botId: "bot",
@@ -101,6 +105,10 @@ it("uses the image planner in a nested subagent's screenshot context", async () 
   )) {
   }
   expect(captured.policies).toHaveLength(2);
+  expect(captured.prompts[1]).toContain(
+    "Internal routing identifiers belong only in tool arguments",
+  );
+  expect(captured.prompts[1]).not.toContain("Keep the answer brief.");
   const policy = captured.policies[1] as ReturnType<typeof createRuntimeContextPolicy>;
   const pixels = Buffer.alloc(1024 * 1024);
   let seed = 1;

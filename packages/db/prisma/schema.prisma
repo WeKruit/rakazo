@@ -23,6 +23,7 @@ model AiDataConsent {
 
 model User {
   aiDataConsents AiDataConsent[]
+  recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
   email                       String
@@ -196,6 +197,7 @@ model Member {
 
 model Space {
   aiDataConsents AiDataConsent[]
+  recruitingRoles RecruitingRole[]
   id                          String                       @id
   organizationId              String
   organization                Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
@@ -519,6 +521,9 @@ model ChatGroupMember {
 }
 
 model Thread {
+  activeRecruitingRoleId String?
+  activeRecruitingRole RecruitingRole? @relation("ActiveRecruitingRole", fields: [activeRecruitingRoleId], references: [id], onDelete: SetNull)
+  sourcedRecruitingRoles RecruitingRole[] @relation("RecruitingSourceThread")
   id                          String     @id @default(cuid())
   spaceId                     String
   space                       Space      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -547,6 +552,8 @@ model Thread {
 }
 
 model Message {
+  recruitingShortlists RecruitingCandidate[] @relation("RecruitingCandidateShortlist")
+  recruitingActions RecruitingResearchAction[]
   id               String    @id @default(cuid())
   threadId         String
   thread           Thread    @relation(fields: [threadId], references: [id], onDelete: Cascade)
@@ -612,6 +619,11 @@ model Task {
 }
 
 model Run {
+  initialRecruitingRoleRevisionId String?
+  initialRecruitingRoleRevision RecruitingRoleRevision? @relation(fields: [initialRecruitingRoleRevisionId], references: [id], onDelete: SetNull)
+  recruitingTasks RecruitingResearchTask[]
+  recruitingActions RecruitingResearchAction[]
+  recruitingAssessments RecruitingAssessment[]
   id                   String           @id @default(cuid())
   spaceId              String
   space                Space            @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -742,6 +754,14 @@ model CloudAgent {
 }
 
 model ExternalEffect {
+  recruitingReply RecruitingReply? @relation("RecruitingReplyEffect")
+  recruitingReplyEmailProofs RecruitingReply[] @relation("RecruitingReplyEmailProof")
+  recruitingReplyCrmProofs RecruitingReply[] @relation("RecruitingReplyCrmProof")
+  recruitingCrmRole RecruitingRole? @relation("RecruitingCrmBinding")
+  recruitingCrmImport RecruitingCrmImport? @relation("RecruitingCrmImportEffect")
+  recruitingCrmBoundImports RecruitingCrmImport[] @relation("RecruitingCrmImportBinding")
+  recruitingCandidatePage RecruitingCandidatePage?
+  recruitingActions RecruitingResearchAction[]
   id             String   @id @default(cuid())
   spaceId        String
   space          Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -1027,6 +1047,10 @@ model ComputerExecutionLease {
 }
 
 model Artifact {
+  recruitingCandidatePages RecruitingCandidatePage[]
+  recruitingRequests RecruitingResearchAction[] @relation("RecruitingRequest")
+  recruitingContexts RecruitingResearchAction[] @relation("RecruitingContext")
+  recruitingReceipts RecruitingResearchAction[] @relation("RecruitingReceipt")
   id         String     @id @default(cuid())
   spaceId    String
   space      Space      @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -1149,6 +1173,7 @@ model Secret {
 }
 
 model McpServer {
+  recruitingTasks RecruitingResearchTask[]
   id            String            @id @default(cuid())
   spaceId       String
   space         Space             @relation(fields: [spaceId], references: [id], onDelete: Cascade)
@@ -1475,4 +1500,231 @@ model TicketComment {
 
   @@index([ticketId, createdAt])
   @@map("ticket_comments")
+}
+
+
+model RecruitingRole {
+  crmBindingEffectId String? @unique
+  crmBindingEffect ExternalEffect? @relation("RecruitingCrmBinding", fields: [crmBindingEffectId], references: [id], onDelete: NoAction)
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sourceThreadId String
+  sourceThread Thread @relation("RecruitingSourceThread", fields: [sourceThreadId], references: [id], onDelete: Cascade)
+  title String
+  revision Int
+  currentRevisionId String @unique
+  currentRevision RecruitingRoleRevision @relation("CurrentRecruitingRevision", fields: [currentRevisionId], references: [id], onDelete: NoAction)
+  revisions RecruitingRoleRevision[] @relation("RecruitingRoleRevisions")
+  activeThreads Thread[] @relation("ActiveRecruitingRole")
+  candidates RecruitingCandidate[]
+  sourcePages RecruitingCandidatePage[]
+  researchTasks RecruitingResearchTask[]
+  assessments RecruitingAssessment[]
+
+  @@index([spaceId, userId])
+  @@map("recruiting_roles")
+}
+
+model RecruitingRoleRevision {
+  replies RecruitingReply[]
+  brief Json?
+  id String @id @default(cuid())
+  roleId String
+  role RecruitingRole @relation("RecruitingRoleRevisions", fields: [roleId], references: [id], onDelete: Cascade)
+  revision Int
+  sourceRefs Json
+  criteria Json
+  preferences Json
+  definitionQuestions Json
+  createdAt DateTime @default(now())
+  currentFor RecruitingRole? @relation("CurrentRecruitingRevision")
+  initialRuns Run[]
+  actions RecruitingResearchAction[]
+  candidatePages RecruitingCandidatePage[]
+  assessments RecruitingAssessment[]
+
+  @@unique([roleId, revision])
+  @@map("recruiting_role_revisions")
+}
+
+model RecruitingResearchTask {
+  id String @id @default(cuid())
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: NoAction)
+  serverRevision Int
+  providerTaskId String?
+  pendingActionId String? @unique
+  pendingAction RecruitingResearchAction? @relation("RecruitingPendingAction", fields: [pendingActionId], references: [id], onDelete: SetNull)
+  state String @default("active")
+  createdByRunId String
+  createdByRun Run @relation(fields: [createdByRunId], references: [id], onDelete: Cascade)
+  actions RecruitingResearchAction[] @relation("RecruitingTaskActions")
+  candidatePages RecruitingCandidatePage[]
+
+  @@unique([mcpServerId, serverRevision, providerTaskId])
+  @@index([roleId])
+  @@map("recruiting_research_tasks")
+}
+
+model RecruitingResearchAction {
+  id String @id @default(cuid())
+  taskId String
+  task RecruitingResearchTask @relation("RecruitingTaskActions", fields: [taskId], references: [id], onDelete: Cascade)
+  pendingFor RecruitingResearchTask? @relation("RecruitingPendingAction")
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  runId String
+  run Run @relation(fields: [runId], references: [id], onDelete: Cascade)
+  sourceMessageId String
+  sourceMessage Message @relation(fields: [sourceMessageId], references: [id], onDelete: NoAction)
+  clientNonce String @unique
+  kind String
+  purpose String?
+  candidateOutputSchema String?
+  candidatePages RecruitingCandidatePage[]
+  approvalEffectId String?
+  deliveryState String @default("prepared")
+  observedProviderState String?
+  requestArtifactId String
+  requestArtifact Artifact @relation("RecruitingRequest", fields: [requestArtifactId], references: [id], onDelete: NoAction)
+  requestArtifactHash String
+  contextArtifactId String
+  contextArtifact Artifact @relation("RecruitingContext", fields: [contextArtifactId], references: [id], onDelete: NoAction)
+  contextArtifactHash String
+  recallScope String?
+  receiptArtifactId String?
+  receiptArtifact Artifact? @relation("RecruitingReceipt", fields: [receiptArtifactId], references: [id], onDelete: NoAction)
+  receiptArtifactHash String?
+  outputArtifacts Json @default("[]")
+  cursor String?
+  effectId String?
+  effect ExternalEffect? @relation(fields: [effectId], references: [id], onDelete: NoAction)
+  usage Json?
+
+  @@index([taskId])
+  @@map("recruiting_research_actions")
+}
+
+model RecruitingAssessment {
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  candidateKey String
+  version Int
+  basedOnVersion Int?
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  facts Json
+  judgments Json
+  questions Json
+  sourceRefs Json
+  createdByRunId String
+  createdByRun Run @relation(fields: [createdByRunId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([roleId, candidateKey, version])
+  @@map("recruiting_assessments")
+}
+
+
+/// A role-local identity and independent human selection. Profiles live on immutable source rows.
+model RecruitingCandidate {
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  candidateKey String
+  shortlisted Boolean @default(false)
+  consideration Json?
+  revision Int @default(0)
+  shortlistMessageId String?
+  shortlistMessage Message? @relation("RecruitingCandidateShortlist", fields: [shortlistMessageId], references: [id], onDelete: NoAction)
+  occurrences RecruitingCandidateOccurrence[]
+
+  @@id([roleId, candidateKey])
+  @@map("recruiting_candidates")
+}
+
+/// One native get_rows effect, including genuine zero-row pages; never a synthetic sentinel row.
+model RecruitingCandidatePage {
+  effectId String @id
+  effect ExternalEffect @relation(fields: [effectId], references: [id], onDelete: Cascade)
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  taskId String?
+  task RecruitingResearchTask? @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actionId String?
+  action RecruitingResearchAction? @relation(fields: [actionId], references: [id], onDelete: Cascade)
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  artifactId String
+  artifact Artifact @relation(fields: [artifactId], references: [id], onDelete: NoAction)
+  artifactHash String
+  requestCursor String?
+  outputId String?
+  observedAt DateTime
+  /// Null means the native receipt did not establish an accepted row array.
+  rowCount Int?
+  occurrences RecruitingCandidateOccurrence[]
+
+  @@index([roleId, observedAt, effectId])
+  @@index([actionId])
+  @@map("recruiting_candidate_pages")
+}
+
+/// Projection only. Exact provider row bytes remain in the referenced native ArtifactStore receipt.
+model RecruitingCandidateOccurrence {
+  crmImports RecruitingCrmImport[]
+  pageId String
+  page RecruitingCandidatePage @relation(fields: [pageId], references: [effectId], onDelete: Cascade)
+  rowIndex Int
+  roleId String
+  candidateKey String
+  candidate RecruitingCandidate @relation(fields: [roleId, candidateKey], references: [roleId, candidateKey], onDelete: Cascade)
+  name String?
+  title String?
+  company String?
+  location String?
+  linkedinUrl String?
+  resumeUrl String?
+  evidenceUrls Json?
+  issues Json
+
+  @@id([pageId, rowIndex])
+  @@index([roleId, candidateKey])
+  @@map("recruiting_candidate_occurrences")
+}
+
+model RecruitingCrmImport {
+  replies RecruitingReply[]
+  effectId String @id
+  effect ExternalEffect @relation("RecruitingCrmImportEffect", fields: [effectId], references: [id], onDelete: Cascade)
+  bindingEffectId String
+  bindingEffect ExternalEffect @relation("RecruitingCrmImportBinding", fields: [bindingEffectId], references: [id], onDelete: NoAction)
+  pageId String
+  rowIndex Int
+  occurrence RecruitingCandidateOccurrence @relation(fields: [pageId, rowIndex], references: [pageId, rowIndex], onDelete: Cascade)
+
+  @@unique([bindingEffectId, pageId, rowIndex])
+  @@map("recruiting_crm_imports")
+}
+
+/// Recruiting scope only; approval, execution state and provider result remain on ExternalEffect.
+model RecruitingReply {
+  effectId String @id
+  effect ExternalEffect @relation("RecruitingReplyEffect", fields: [effectId], references: [id], onDelete: Cascade)
+  roleRevisionId String
+  roleRevision RecruitingRoleRevision @relation(fields: [roleRevisionId], references: [id], onDelete: NoAction)
+  crmImportEffectId String
+  crmImport RecruitingCrmImport @relation(fields: [crmImportEffectId], references: [effectId], onDelete: NoAction)
+  emailReadEffectId String
+  emailReadEffect ExternalEffect @relation("RecruitingReplyEmailProof", fields: [emailReadEffectId], references: [id], onDelete: NoAction)
+  crmContextReadEffectId String
+  crmContextReadEffect ExternalEffect @relation("RecruitingReplyCrmProof", fields: [crmContextReadEffectId], references: [id], onDelete: NoAction)
+
+  @@index([crmImportEffectId])
+  @@index([roleRevisionId])
+  @@map("recruiting_replies")
 }

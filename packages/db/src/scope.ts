@@ -1,5 +1,7 @@
 import type { Actor } from "@rakazo/contracts";
+import { getLogger } from "@rakazo/logging";
 import type { PrismaClient } from "./client.js";
+import { Prisma } from "./client.js";
 
 export class IsolationError extends Error {
   constructor(message = "Resource not found") {
@@ -17,30 +19,44 @@ export class BotSectionNameConflictError extends Error {
 }
 
 export async function requireMembership(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, "$queryRaw">,
   userId: string,
   requestedSpaceId?: string | null,
 ): Promise<Actor> {
-  const membership = await prisma.spaceMember.findFirst({
-    where: {
-      userId,
-      ...(requestedSpaceId ? { spaceId: requestedSpaceId } : {}),
-    },
-    orderBy: [{ space: { isDefault: "desc" } }, { createdAt: "asc" }, { id: "asc" }],
-    include: { member: { include: { user: true } } },
-  });
-  if (!membership) {
-    throw new IsolationError("No personal space");
+  const started = performance.now();
+  let queryMs: number | undefined;
+  let outcome = "error";
+  try {
+    const [actor] = await prisma
+      .$queryRaw<Actor[]>(Prisma.sql`
+        SELECT sm."userId", sm."spaceId", u.email,
+          COALESCE(settings."ownerUserId" = sm."userId", false) AS "isDeploymentOwner"
+        FROM space_members sm
+        JOIN spaces s ON s.id = sm."spaceId" AND s."organizationId" = sm."organizationId"
+        JOIN member m ON m."organizationId" = sm."organizationId" AND m."userId" = sm."userId"
+        JOIN "user" u ON u.id = m."userId"
+        LEFT JOIN deployment_settings settings ON settings.id = ${"default"}
+        WHERE sm."userId" = ${userId}
+          ${requestedSpaceId ? Prisma.sql`AND sm."spaceId" = ${requestedSpaceId}` : Prisma.empty}
+        ORDER BY s."isDefault" DESC, sm."createdAt" ASC, sm.id ASC
+        LIMIT 1
+      `)
+      .finally(() => {
+        queryMs = Math.round(performance.now() - started);
+      });
+    if (!actor) {
+      outcome = "missing";
+      throw new IsolationError("No personal space");
+    }
+    outcome = "ok";
+    return actor;
+  } finally {
+    getLogger().info("membership.lookup.timing", {
+      queryMs,
+      totalMs: Math.round(performance.now() - started),
+      outcome,
+    });
   }
-  const settings = await prisma.deploymentSettings.findUnique({
-    where: { id: "default" },
-  });
-  return {
-    userId: membership.userId,
-    spaceId: membership.spaceId,
-    email: membership.member.user.email,
-    isDeploymentOwner: settings?.ownerUserId === membership.userId,
-  };
 }
 
 export function scoped<T extends { spaceId: string; userId?: string }>(

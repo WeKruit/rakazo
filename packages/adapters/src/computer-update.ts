@@ -27,6 +27,22 @@ const STALE_MS = 10 * 60_000;
 const UNCONFIRMED_HANDBACK_STATUSES = ["reserving", "revoking"] as const;
 const PENDING_HANDBACK_STATUSES = ["reserving", "revoking", "revoked"] as const;
 
+/** The related updates are completed checkpoints on this same computer. */
+export function computerUpdateIsCurrent(row: {
+  id: string;
+  action: string;
+  status: string;
+  updatedAt: Date;
+  computer: { maintenanceId: string | null; updates: { createdAt: Date }[] };
+}): boolean {
+  return (
+    row.action !== "checkpoint" ||
+    row.status !== "failed" ||
+    row.computer.maintenanceId === row.id ||
+    !row.computer.updates.some((checkpoint) => checkpoint.createdAt > row.updatedAt)
+  );
+}
+
 export function computerUpdateView(
   row: {
     action: string;
@@ -520,7 +536,7 @@ async function recordTakeoverHandback(
 
 export async function performComputerUpdate(deps: Deps, updateId: string) {
   const claimed = await deps.prisma.computerUpdate.updateMany({
-    where: { id: updateId, status: "queued" },
+    where: { id: updateId, status: "queued", action: { in: ["update", "recover"] } },
     data: { status: "running" },
   });
   if (claimed.count !== 1) return; // Never replay a destructive operation on job redelivery.
@@ -528,6 +544,7 @@ export async function performComputerUpdate(deps: Deps, updateId: string) {
     where: { id: updateId },
     include: { computer: true },
   });
+  if (update.action !== "update" && update.action !== "recover") return;
   const controller = new AbortController();
   const heartbeat = setInterval(() => {
     void deps.prisma.computerUpdate
@@ -610,7 +627,7 @@ export async function reconcileComputerUpdates(deps: Pick<Deps, "prisma" | "jobs
     orderBy: { updatedAt: "asc" },
   });
   for (const update of updates) {
-    if (update.status === "queued") {
+    if (update.status === "queued" && (update.action === "update" || update.action === "recover")) {
       await deps.jobs.enqueue({
         name: "computer.update",
         payload: { updateId: update.id },

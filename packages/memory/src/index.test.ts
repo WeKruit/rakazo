@@ -1,4 +1,5 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
+import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { MarkdownMemoryStore } from "./index.js";
 
@@ -45,5 +46,33 @@ describe("memory store contract shape", () => {
       },
       orderBy: [{ updatedAt: "desc" }, { path: "asc" }],
     });
+  });
+});
+
+describe("memory import CAS", () => {
+  it("carries the prepared target revision into the native commit", async () => {
+    const store = new MarkdownMemoryStore({} as PrismaClient);
+    const commit = vi
+      .spyOn(store, "commit")
+      .mockResolvedValue({ id: "doc", path: "MEMORY.md", content: "Prepared text", revision: 3 });
+    async function* files() {
+      yield {
+        path: "MEMORY.md",
+        content: new TextEncoder().encode("Prepared text"),
+        expectedRevision: 2,
+      };
+    }
+    await store.importMarkdown(files(), context);
+    expect(commit).toHaveBeenCalledWith(
+      { scope: "user", path: "MEMORY.md", content: "Prepared text", expectedRevision: 2 },
+      context,
+    );
+  });
+
+  it("rejects a native commit without its prepared revision before accessing storage", async () => {
+    const store = new MarkdownMemoryStore({} as PrismaClient);
+    await expect(
+      store.commit({ scope: "user", path: "MEMORY.md", content: "Unsafe" } as never, context),
+    ).rejects.toThrow("expectedRevision must be a nonnegative integer");
   });
 });

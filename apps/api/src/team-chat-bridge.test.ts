@@ -10,6 +10,19 @@ import {
 } from "./team-chat-bridge.js";
 import { inboundDeliveryClientNonce, messagingWakeIdempotencyKey } from "./webhook-inbound.js";
 
+function routineReceipt(key: string, provider = "slack") {
+  return {
+    payload: {
+      routineDelivery: {
+        key,
+        provider,
+        prompt: "<untrusted_delivery_payload>event</untrusted_delivery_payload>",
+        routineIds: ["routine-1"],
+      },
+    },
+  };
+}
+
 describe("team chat bridge", () => {
   it("attributes an external speaker without changing their message", () => {
     expect(teamChatPrompt("slack", "Ada Lovelace", "Review the launch plan")).toBe(
@@ -148,7 +161,8 @@ describe("team chat bridge", () => {
           updateMany,
           findMany,
         },
-        message: { findUnique },
+        event: { findFirst: findUnique },
+        routine: { findMany: vi.fn(async () => []) },
         run: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage: vi.fn() },
@@ -211,14 +225,17 @@ describe("team chat bridge", () => {
           ]
         : [],
     );
-    const findUnique = vi.fn(async () => ({ id: "msg-routine-wake" }));
+    const findUnique = vi.fn(async ({ where }: { where: { payload: { equals: string } } }) =>
+      routineReceipt(where.payload.equals),
+    );
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: {
           updateMany,
           findMany,
         },
-        message: { findUnique },
+        event: { findFirst: findUnique },
+        routine: { findMany: vi.fn(async () => []) },
         run: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage: vi.fn() },
@@ -237,16 +254,22 @@ describe("team chat bridge", () => {
 
     expect(findUnique).toHaveBeenCalledWith({
       where: {
-        threadId_clientNonce: {
-          threadId: "thread-1",
-          clientNonce: inboundDeliveryClientNonce(
+        threadId: "thread-1",
+        spaceId: "space-1",
+        botId: "bot-1",
+        thread: { userId: "owner-1" },
+        type: "thread.meta",
+        payload: {
+          path: ["routineDelivery", "key"],
+          equals: inboundDeliveryClientNonce(
             "messaging",
             "bot-1",
             messagingWakeIdempotencyKey("slack", "Ev-woken"),
           ),
         },
       },
-      select: { id: true },
+      select: { payload: true },
+      orderBy: { seq: "asc" },
     });
     expect(updateMany).toHaveBeenCalledWith({
       where: {
@@ -299,14 +322,14 @@ describe("team chat bridge", () => {
           ]
         : [],
     );
-    const findUnique = vi.fn(
-      async ({ where }: { where: { threadId_clientNonce: { clientNonce: string } } }) =>
-        where.threadId_clientNonce.clientNonce === aligned ? { id: "msg-emulator-wake" } : null,
+    const findUnique = vi.fn(async ({ where }: { where: { payload: { equals: string } } }) =>
+      where.payload.equals === aligned ? routineReceipt(aligned, "teamchat-emulator") : null,
     );
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: { updateMany, findMany },
-        message: { findUnique },
+        event: { findFirst: findUnique },
+        routine: { findMany: vi.fn(async () => []) },
         run: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage: vi.fn() },
@@ -326,12 +349,15 @@ describe("team chat bridge", () => {
 
     expect(findUnique).toHaveBeenCalledWith({
       where: {
-        threadId_clientNonce: {
-          threadId: "thread-1",
-          clientNonce: aligned,
-        },
+        threadId: "thread-1",
+        spaceId: "space-1",
+        botId: "bot-1",
+        thread: { userId: "owner-1" },
+        type: "thread.meta",
+        payload: { path: ["routineDelivery", "key"], equals: aligned },
       },
-      select: { id: true },
+      select: { payload: true },
+      orderBy: { seq: "asc" },
     });
     expect(updateMany).toHaveBeenCalledWith({
       where: {
@@ -442,7 +468,7 @@ describe("team chat bridge", () => {
       const bridge = new TeamChatBridge({
         prisma: {
           externalMessage: { updateMany, findMany },
-          message: { findUnique: vi.fn(async () => null) },
+          event: { findFirst: vi.fn(async () => null) },
           run: { findMany: vi.fn(async () => []) },
         } as unknown as PrismaClient,
         events: { sendUserMessage: vi.fn() },
@@ -587,7 +613,7 @@ describe("team chat bridge", () => {
       const bridge = new TeamChatBridge({
         prisma: {
           externalMessage: { updateMany, findMany },
-          message: { findUnique: vi.fn(async () => null) },
+          event: { findFirst: vi.fn(async () => null) },
           run: { findMany: vi.fn(async () => []) },
         } as unknown as PrismaClient,
         events: { sendUserMessage },
@@ -741,7 +767,7 @@ describe("team chat bridge", () => {
               engagementReason,
             })),
           },
-          message: { findUnique: vi.fn(async () => null) },
+          event: { findFirst: vi.fn(async () => null) },
           run: { findMany: vi.fn(async () => []) },
         } as unknown as PrismaClient,
         events: { sendUserMessage },
@@ -805,7 +831,7 @@ describe("team chat bridge", () => {
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: { updateMany, findMany },
-        message: { findUnique: vi.fn(async () => null) },
+        event: { findFirst: vi.fn(async () => null) },
         run: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage: vi.fn() },
@@ -866,7 +892,7 @@ describe("team chat bridge", () => {
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: { updateMany, findMany },
-        message: { findUnique: vi.fn(async () => null) },
+        event: { findFirst: vi.fn(async () => null) },
         run: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage: vi.fn() },
@@ -921,7 +947,7 @@ describe("team chat bridge", () => {
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: { updateMany, findMany },
-        message: { findUnique: vi.fn(async () => null) },
+        event: { findFirst: vi.fn(async () => null) },
         run: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage: vi.fn() },
@@ -1041,12 +1067,15 @@ describe("team chat bridge", () => {
 
   it("does not queue a received message that already woke a message routine", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
-    const findUnique = vi.fn(async () => ({ id: "msg-routine-wake" }));
+    const findUnique = vi.fn(async ({ where }: { where: { payload: { equals: string } } }) =>
+      routineReceipt(where.payload.equals),
+    );
     const sendUserMessage = vi.fn();
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: { updateMany },
-        message: { findUnique },
+        event: { findFirst: findUnique },
+        routine: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage },
       jobs: { enqueue: vi.fn() },
@@ -1099,17 +1128,185 @@ describe("team chat bridge", () => {
     expect(sendUserMessage).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { status: "received", initial: ["A"], failure: "B" },
+    { status: "deferred", initial: ["A"], failure: "B" },
+    { status: "deferred", initial: [], failure: "A" },
+    { status: "observed", initial: ["A"], failure: "B" },
+  ])(
+    "resumes a partial routine delivery after an error or crash from $status at $failure",
+    async ({ status, initial, failure }) => {
+      const sourceProvider = "teamchat-emulator";
+      const sharedPrompt =
+        "[Messaging Event: teamchat-emulator]\n\n<untrusted_delivery_payload>original event</untrusted_delivery_payload>";
+      const row = {
+        id: "external-partial",
+        providerEventId: "Ev-partial",
+        kind: status === "observed" ? "ambient" : "mention",
+        status,
+        senderId: "U-1",
+        senderName: "Ada",
+        content: "original event",
+        batchContext: null,
+        engagementReason: null,
+        attempts: 0,
+        nextAttemptAt: new Date(0),
+        providerReplyHandle: null,
+        externalConversation: {
+          spaceId: "space-1",
+          botId: "bot-1",
+          userId: "owner-1",
+          thread: { id: "thread-1" },
+        },
+      };
+      const deliveryKey = inboundDeliveryClientNonce(
+        "messaging",
+        "bot-1",
+        messagingWakeIdempotencyKey("slack", row.providerEventId),
+      );
+      const source = {
+        payload: {
+          routineDelivery: {
+            key: deliveryKey,
+            provider: sourceProvider,
+            prompt: sharedPrompt,
+            routineIds: ["A", "B", "C"],
+          },
+        },
+      };
+      const receipts = new Set(initial);
+      let failOnce = true;
+      const sendUserMessage = vi.fn(
+        async (input: { routineEvent?: { routineId: string }; prompt: string }) => {
+          const id = input.routineEvent?.routineId;
+          if (!id) throw new Error("ordinary fallback must not run");
+          if (id === failure && failOnce) {
+            failOnce = false;
+            throw new Error("transient native admission failure");
+          }
+          const replayed = receipts.has(id);
+          receipts.add(id);
+          return {
+            messageId: `msg-${id}`,
+            runId: `run-${id}`,
+            taskId: `task-${id}`,
+            seq: 1,
+            ...(replayed ? { replayed: true as const } : {}),
+          };
+        },
+      );
+      const enqueue = vi.fn(async () => undefined);
+      const updateMany = vi.fn(
+        async ({
+          where,
+          data,
+        }: {
+          where: { id?: string; status?: unknown };
+          data: Record<string, unknown>;
+        }) => {
+          if (
+            (where.id && where.id !== row.id) ||
+            (typeof where.status === "string" && where.status !== row.status)
+          )
+            return { count: 0 };
+          Object.assign(row, data);
+          return { count: 1 };
+        },
+      );
+      const routineFindMany = vi.fn(
+        async ({ where }: { where: { id?: { in: string[] }; messageProvider?: string } }) =>
+          ["A", "B", "C", "new-routine"]
+            .filter(
+              (id) =>
+                (!where.id || where.id.in.includes(id)) && where.messageProvider === sourceProvider,
+            )
+            .map((id) => ({
+              id,
+              userId: "owner-1",
+              threadId: "thread-1",
+              name: id,
+              prompt: `Routine ${id}`,
+              modelProvider: null,
+              modelId: null,
+              thinkingLevel: null,
+            })),
+      );
+      const prisma = {
+        bot: { findFirst: vi.fn(async () => ({ teamChatAmbientEnabled: false })) },
+        event: { findFirst: vi.fn(async () => source) },
+        message: { findFirst: vi.fn(async () => ({ id: "msg-A" })) },
+        routine: { findMany: routineFindMany },
+        externalMessage: {
+          updateMany,
+          findUnique: vi.fn(async () => row),
+          findMany: vi.fn(async ({ where }: { where: { status?: unknown } }) =>
+            where.status === row.status &&
+            (!row.nextAttemptAt || row.nextAttemptAt.getTime() <= Date.now())
+              ? [row]
+              : [],
+          ),
+        },
+        run: { findMany: vi.fn(async () => []) },
+      } as unknown as PrismaClient;
+      const freshBridge = () => {
+        const bridge = new TeamChatBridge({
+          prisma,
+          events: { sendUserMessage },
+          jobs: { enqueue },
+          send: vi.fn(),
+          providerId: "slack",
+          botId: "bot-1",
+        });
+        (bridge as unknown as { target: object }).target = {
+          id: "bot-1",
+          spaceId: "space-1",
+          userId: "owner-1",
+          name: "Chief",
+        };
+        return bridge;
+      };
+      await freshBridge().reconcileOnce();
+      expect(row.status).toBe(status);
+      expect(row.attempts).toBe(1);
+      expect(receipts).toEqual(new Set(initial));
+      expect(enqueue).not.toHaveBeenCalled();
+      row.nextAttemptAt = new Date(0);
+      await freshBridge().reconcileOnce();
+      expect(row.status).toBe("ignored");
+      expect(receipts).toEqual(new Set(["A", "B", "C"]));
+      expect(enqueue.mock.calls.map(([job]) => job)).toEqual(
+        ["A", "B", "C"]
+          .filter((id) => !initial.includes(id))
+          .map((id) => expect.objectContaining({ payload: { runId: `run-${id}` } })),
+      );
+      expect(routineFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            active: true,
+            messageProvider: sourceProvider,
+            id: { in: ["A", "B", "C"] },
+          }),
+        }),
+      );
+      for (const [input] of sendUserMessage.mock.calls)
+        expect(input.prompt).toContain(sharedPrompt);
+    },
+  );
+
   it("abandons a queueing reservation when the wake nonce appears after claim", async () => {
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const findUnique = vi
       .fn()
       .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: "msg-routine-wake" });
+      .mockImplementationOnce(({ where }: { where: { payload: { equals: string } } }) =>
+        routineReceipt(where.payload.equals),
+      );
     const sendUserMessage = vi.fn();
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: { updateMany },
-        message: { findUnique },
+        event: { findFirst: findUnique },
+        routine: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage },
       jobs: { enqueue: vi.fn() },
@@ -1196,7 +1393,9 @@ describe("team chat bridge", () => {
       .fn()
       .mockResolvedValueOnce(null) // pre-claim
       .mockResolvedValueOnce(null) // post-claim
-      .mockResolvedValueOnce({ id: "msg-routine-wake" }); // final barrier
+      .mockImplementationOnce(({ where }: { where: { payload: { equals: string } } }) =>
+        routineReceipt(where.payload.equals),
+      ); // final barrier
     const sendUserMessage = vi.fn();
     const bridge = new TeamChatBridge({
       prisma: {
@@ -1207,7 +1406,8 @@ describe("team chat bridge", () => {
             engagementReason: "message_teamchat_agent",
           })),
         },
-        message: { findUnique: messageFindUnique },
+        event: { findFirst: messageFindUnique },
+        routine: { findMany: vi.fn(async () => []) },
       } as unknown as PrismaClient,
       events: { sendUserMessage },
       jobs: { enqueue: vi.fn() },
@@ -1270,7 +1470,10 @@ describe("team chat bridge", () => {
       releaseSend = resolve;
     });
     let woken = false;
-    const messageFindUnique = vi.fn(async () => (woken ? { id: "msg-routine-wake" } : null));
+    const messageFindUnique = vi.fn(
+      async ({ where }: { where: { payload: { equals: string } } }) =>
+        woken ? routineReceipt(where.payload.equals) : null,
+    );
     const enqueue = vi.fn();
     const updateMany = vi.fn(async () => ({ count: 1 }));
     const runUpdateMany = vi.fn(async () => ({ count: 1 }));
@@ -1288,7 +1491,8 @@ describe("team chat bridge", () => {
             engagementReason: "message_teamchat_agent",
           })),
         },
-        message: { findUnique: messageFindUnique },
+        event: { findFirst: messageFindUnique },
+        routine: { findMany: vi.fn(async () => []) },
         run: { updateMany: runUpdateMany },
         task: { updateMany: taskUpdateMany },
       } as unknown as PrismaClient,
@@ -1400,7 +1604,7 @@ describe("team chat bridge", () => {
             engagementReason: "message_routine_routing",
           })),
         },
-        message: { findUnique: vi.fn(async () => null) },
+        event: { findFirst: vi.fn(async () => null) },
       } as unknown as PrismaClient,
       events: { sendUserMessage },
       jobs: { enqueue: vi.fn() },
@@ -1461,7 +1665,7 @@ describe("team chat bridge", () => {
     const bridge = new TeamChatBridge({
       prisma: {
         externalMessage: { updateMany },
-        message: { findUnique: vi.fn(async () => null) },
+        event: { findFirst: vi.fn(async () => null) },
       } as unknown as PrismaClient,
       events: { sendUserMessage },
       jobs: { enqueue: vi.fn() },
@@ -1671,11 +1875,15 @@ describe("team chat bridge", () => {
         }),
       },
       run: { findMany: vi.fn(async () => []) },
+      event: { findFirst: vi.fn(async () => null) },
       message: {
-        findUnique: vi.fn(async () => null),
-        findFirst: vi.fn(async () => ({
-          blocks: [{ kind: "text", text: "The launch plan is ready." }],
-        })),
+        findFirst: vi.fn(async ({ where }: { where: { runId?: string } }) =>
+          where.runId
+            ? {
+                blocks: [{ kind: "text", text: "The launch plan is ready." }],
+              }
+            : null,
+        ),
       },
     } as unknown as PrismaClient;
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AskRequestedSchema,
   appContract,
   BOT_DESCRIPTION_MAX_LENGTH,
   BOT_INSTRUCTIONS_MAX_LENGTH,
@@ -15,7 +16,9 @@ import {
   ModelConnectInputSchema,
   ModelOAuthBeginSchema,
   normalizeCreateBotProfile,
+  ProductEventSchema,
   ProductEventType,
+  parseAskFormResponse,
   parseModelContextWindow,
   parseModelMaxImagesPerPrompt,
   parseModelMaxTokens,
@@ -28,6 +31,151 @@ import {
 } from "./index.js";
 
 describe("contracts", () => {
+  it("accepts an explicit group addressing mode without changing direct bot sends", () => {
+    const schema = appContract.threads.send["~orpc"].inputSchema!;
+    for (const addressing of ["coordinator", "mentions"] as const) {
+      const input = { groupId: "group-1", text: "@Sourcer ask @everyone", addressing };
+      expect(schema.parse(input)).toEqual(input);
+      expect(schema.safeParse({ botId: "bot-1", text: "Hello", addressing }).success).toBe(false);
+    }
+    expect(schema.parse({ botId: "bot-1", text: "Hello" })).toEqual({
+      botId: "bot-1",
+      text: "Hello",
+    });
+    expect(schema.parse({ groupId: "group-1", text: "Hello" })).toEqual({
+      groupId: "group-1",
+      text: "Hello",
+    });
+    expect(schema.safeParse({ groupId: "group-1", text: "Hello", addressing: "all" }).success).toBe(
+      false,
+    );
+  });
+
+  it("accepts one optional bootstrap target without dropping group identity", () => {
+    const schema = appContract.bootstrap["~orpc"].inputSchema!;
+    expect(schema.parse({})).toEqual({});
+    expect(schema.parse({ botId: "bot-1" })).toEqual({ botId: "bot-1" });
+    expect(schema.parse({ groupId: "group-1" })).toEqual({ groupId: "group-1" });
+    expect(schema.safeParse({ botId: "bot-1", groupId: "group-1" }).success).toBe(false);
+  });
+  it("accepts pre-registered MCP OAuth clients without allowing protocol or secret URL parameters", () => {
+    const schema = appContract.mcp.oauth.begin["~orpc"].inputSchema!;
+    const input = {
+      serverId: "server-1",
+      redirectUri: "https://app.example.test/mcp/oauth/callback",
+      oauth: {
+        clientId: "registered-client",
+        clientSecret: "private-client-secret",
+        scopes: ["mail.readonly"],
+        authorizationParams: { access_type: "offline", prompt: "consent" },
+      },
+    };
+    expect(schema.parse(input)).toEqual(input);
+    for (const key of [
+      "state",
+      "client_id",
+      "client_secret",
+      "redirect_uri",
+      "response_type",
+      "response_mode",
+      "request",
+      "request_uri",
+      "code_challenge",
+      "code_challenge_method",
+      "resource",
+      "scope",
+      "access_token",
+    ]) {
+      expect(
+        schema.safeParse({
+          ...input,
+          oauth: { ...input.oauth, authorizationParams: { [key]: "override" } },
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      schema.safeParse({
+        ...input,
+        oauth: { ...input.oauth, authorizationParams: { prompt: input.oauth.clientSecret } },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("keeps an exact run selector on the existing authorized thread stop target", () => {
+    const schema = appContract.threads.stop["~orpc"].inputSchema!;
+    expect(schema.parse({ groupId: "group-1", runId: "run-1" })).toEqual({
+      groupId: "group-1",
+      runId: "run-1",
+    });
+    expect(schema.parse({ botId: "bot-1" })).toEqual({ botId: "bot-1" });
+    expect(schema.safeParse({ runId: "run-1" }).success).toBe(false);
+    expect(schema.safeParse({ groupId: "group-1", runId: "" }).success).toBe(false);
+  });
+
+  it("validates standard elicitation form fields and structured decisions", () => {
+    const schema = AskRequestedSchema.parse({
+      type: "object",
+      properties: {
+        website: { type: "string", format: "uri" },
+        regions: {
+          type: "array",
+          minItems: 1,
+          items: {
+            anyOf: [
+              { const: "north", title: "North" },
+              { const: "south", title: "South" },
+            ],
+          },
+        },
+        count: { type: "integer", minimum: 1, maximum: 3 },
+      },
+      required: ["website", "regions", "count"],
+    });
+    const content = { website: "https://example.com", regions: ["north", "south"], count: 2 };
+    expect(parseAskFormResponse(schema, { action: "accept", content })).toEqual({
+      action: "accept",
+      content,
+    });
+    for (const invalid of [
+      { ...content, website: "invalid" },
+      { ...content, regions: ["unknown"] },
+      { ...content, count: 1.5 },
+      { ...content, extra: true },
+      { website: content.website },
+    ])
+      expect(() => parseAskFormResponse(schema, { action: "accept", content: invalid })).toThrow();
+    expect(parseAskFormResponse(schema, { action: "cancel" })).toEqual({ action: "cancel" });
+    expect(parseAskFormResponse(schema, { action: "decline" })).toEqual({ action: "decline" });
+    expect(() => parseAskFormResponse(schema, { action: "cancel", content })).toThrow();
+    const defaults = AskRequestedSchema.parse({
+      type: "object",
+      properties: {
+        label: { type: "string", default: "Suggested" },
+        optional: { type: "boolean", default: true },
+      },
+      required: ["label"],
+    });
+    expect(() => parseAskFormResponse(defaults, { action: "accept", content: {} })).toThrow();
+    expect(
+      parseAskFormResponse(defaults, { action: "accept", content: { label: "Chosen" } }),
+    ).toEqual({ action: "accept", content: { label: "Chosen" } });
+    expect(
+      MessageBlock.safeParse({
+        kind: "ask",
+        text: "Form",
+        requestedSchema: schema,
+        input: "secret",
+      }).success,
+    ).toBe(false);
+    expect(
+      MessageBlock.safeParse({
+        kind: "ask",
+        text: "Form",
+        requestedSchema: schema,
+        approvalEffectId: "effect-1",
+      }).success,
+    ).toBe(false);
+  });
   it("accepts structured live activity progress", () => {
     expect(MessageBlock.parse({ kind: "progress", text: "Using browser", activity: true })).toEqual(
       { kind: "progress", text: "Using browser", activity: true },
@@ -334,6 +482,29 @@ describe("contracts", () => {
     expect(ProductEventType.options).toContain("thread.cleared");
     expect(ProductEventType.options).toContain("thread.subagent");
     expect(ProductEventType.options).toContain("bot.spawned");
+  });
+
+  it("limits native requeue events to their actual queued or held state", () => {
+    const event = {
+      id: "event-1",
+      spaceId: "space-1",
+      threadId: "thread-1",
+      botId: "bot-1",
+      runId: "run-1",
+      type: "run.requeued",
+      seq: 1,
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+    for (const status of ["queued", "waiting_takeover"]) {
+      expect(ProductEventSchema.safeParse({ ...event, payload: { status } }).success).toBe(true);
+    }
+    for (const payload of [{}, { status: "running" }, { status: "queued", prompt: "internal" }]) {
+      expect(ProductEventSchema.safeParse({ ...event, payload }).success).toBe(false);
+    }
+    expect(
+      ProductEventSchema.safeParse({ ...event, runId: undefined, payload: { status: "queued" } })
+        .success,
+    ).toBe(false);
   });
 
   it("requires a distinct, non-empty bot order", () => {

@@ -12,7 +12,8 @@ const fakeAgentState = vi.hoisted(() => ({
   lastToolResult: null as unknown,
 }));
 
-vi.mock("@earendil-works/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
     state = { errorMessage: undefined, messages: [] };
     private readonly tools: typeof fakeAgentState.tools;

@@ -57,63 +57,6 @@ import { errorText } from "../lib/user-error";
 
 const CUSTOM_MODEL_OPTION = "__rakazo_custom_model__";
 const DEFAULT_THINKING_LEVEL_OPTION = "__rakazo_default_thinking__";
-const FIRST_BOT_NAME = "Chief";
-const FIRST_BOT_SPAWN_KEY = "onboarding:first";
-const FIRST_BOT_LOCK = "rakazo:onboarding-first-bot";
-
-/** Survives StrictMode remounts; concurrent first-bot creates share one in-flight attempt. */
-let firstBotEnsure: Promise<{ id: string }> | null = null;
-
-function findFirstBot(
-  bots: Array<{ id: string; name: string; spawnKey: string | null }>,
-): { id: string } | undefined {
-  const bySpawnKey = bots.find((bot) => bot.spawnKey === FIRST_BOT_SPAWN_KEY);
-  if (bySpawnKey) return { id: bySpawnKey.id };
-  // Legacy first-run Chief created before spawnKey was set.
-  const byName = bots.find((bot) => bot.name === FIRST_BOT_NAME);
-  return byName ? { id: byName.id } : undefined;
-}
-
-async function createOrReuseFirstBot(): Promise<{ id: string }> {
-  const existing = await rpc.bots.list();
-  const reuse = findFirstBot(existing);
-  if (reuse) return reuse;
-  try {
-    const created = await rpc.bots.create({
-      name: FIRST_BOT_NAME,
-      title: "",
-      description: "",
-      instructions: "",
-      notifyOnFinish: true,
-      spawnKey: FIRST_BOT_SPAWN_KEY,
-    });
-    return { id: created.id };
-  } catch (error) {
-    // Another tab won the unique (spaceId, spawnKey) race; reuse that bot only.
-    const afterConflict = await rpc.bots.list();
-    const winner = afterConflict.find((bot) => bot.spawnKey === FIRST_BOT_SPAWN_KEY);
-    if (winner) return { id: winner.id };
-    throw error;
-  }
-}
-
-async function withFirstBotLock<T>(run: () => Promise<T>): Promise<T> {
-  const locks = globalThis.navigator?.locks;
-  if (!locks?.request) return run();
-  return locks.request(FIRST_BOT_LOCK, run);
-}
-
-async function ensureFirstBot(): Promise<{ id: string }> {
-  if (firstBotEnsure) return firstBotEnsure;
-  // Web Lock serializes cross-tab creates; module promise covers same-tab StrictMode.
-  // spawnKey makes create idempotent when locks are unavailable.
-  // Clear after settle so a later empty-space visit re-lists instead of reusing a deleted id.
-  firstBotEnsure = withFirstBotLock(createOrReuseFirstBot).finally(() => {
-    firstBotEnsure = null;
-  });
-  return firstBotEnsure;
-}
-
 function providerLabel(entry: ModelCatalogEntry): string {
   return entry.provider === "openai-codex" ? "ChatGPT" : (entry.providerName ?? entry.provider);
 }
@@ -127,6 +70,8 @@ export function OnboardingPage() {
   const navigate = useNavigate();
   const fieldId = useId();
   const [step, setStep] = useState<"loading" | "model" | "integrations" | "bot">("loading");
+  const [initializationAttempt, setInitializationAttempt] = useState(0);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
   const [integrationSetup, setIntegrationSetup] = useState<IntegrationSetupState | null>(null);
   const needsIntegrationSetup = integrationSetup?.needsSetup ?? false;
   const [integrationServers, setIntegrationServers] = useState<string[]>([]);
@@ -150,6 +95,7 @@ export function OnboardingPage() {
   const [modelProbe] = useState(() => createModelProbe(setProbe));
   const resetOpenAiCompatibleProbe = modelProbe.reset;
   const createStartedRef = useRef(false);
+  const mountedRef = useRef(false);
   const deploymentDefaultModelRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -193,12 +139,12 @@ export function OnboardingPage() {
   });
 
   useEffect(() => {
-    void Promise.all([
-      rpc.me(),
-      rpc.models.list().catch(() => []),
-      rpc.integrationSetup.get().catch(() => null),
-    ])
+    let active = true;
+    mountedRef.current = true;
+    setInitializationError(null);
+    void Promise.all([rpc.me(), rpc.models.list(), rpc.integrationSetup.get()])
       .then(([me, models, integrations]) => {
+        if (!active || !mountedRef.current) return;
         setIntegrationSetup(integrations);
         setCatalog(models);
         deploymentDefaultModelRef.current = me.defaultModel;
@@ -214,11 +160,16 @@ export function OnboardingPage() {
         }
         setStep(me.needsModel ? "model" : integrations?.needsSetup ? "integrations" : "bot");
       })
-      .catch(() => setStep("bot"));
+      .catch((error) => {
+        if (active && mountedRef.current)
+          setInitializationError(errorText(error, t`Could not load your setup`));
+      });
     return () => {
+      active = false;
+      mountedRef.current = false;
       modelProbe.invalidate();
     };
-  }, []);
+  }, [initializationAttempt]);
 
   const providers = useMemo(() => {
     const seen = new Map<string, ModelCatalogEntry>();
@@ -527,23 +478,16 @@ export function OnboardingPage() {
     createStartedRef.current = true;
     setError(null);
     try {
-      const bot = await ensureFirstBot();
+      const workspace = await rpc.onboarding.ensureRecruiting({});
+      if (!mountedRef.current) return;
       for (const serverId of integrationServers) {
-        await rpc.mcp.assignments.approve({ botId: bot.id, serverId });
+        if (!mountedRef.current) return;
+        await rpc.mcp.assignments.approve({ botId: workspace.botId, serverId });
       }
-      // Onboarding continues conversationally in the thread: greeting first,
-      // then the focus choice (immediate for the first bot).
-      const started = await rpc.onboarding
-        .start({ botId: bot.id })
-        .then(() => true)
-        .catch(() => false);
-      if (started) {
-        await rpc.onboarding.promptFocus({ botId: bot.id }).catch(() => undefined);
-      }
-      navigate(`/app/${bot.id}`);
+      if (mountedRef.current) navigate(`/app/g/${workspace.groupId}`, { replace: true });
     } catch (err) {
       createStartedRef.current = false;
-      setError(errorText(err, t`Could not create your bot`));
+      if (mountedRef.current) setError(errorText(err, t`Could not prepare your workspace`));
     }
   }
 
@@ -556,9 +500,23 @@ export function OnboardingPage() {
     <div className="min-h-full bg-background px-6 py-12">
       <div className="mx-auto w-full max-w-[560px]">
         {step === "loading" ? (
-          <p className="text-muted-foreground">
-            <Trans>Loading…</Trans>
-          </p>
+          initializationError ? (
+            <div>
+              <p role="alert" className="text-sm text-destructive">
+                {initializationError}
+              </p>
+              <Button
+                className="mt-4"
+                onClick={() => setInitializationAttempt((attempt) => attempt + 1)}
+              >
+                <Trans>Try again</Trans>
+              </Button>
+            </div>
+          ) : (
+            <p className="text-muted-foreground">
+              <Trans>Loading…</Trans>
+            </p>
+          )
         ) : null}
         {step === "model" ? (
           <div>

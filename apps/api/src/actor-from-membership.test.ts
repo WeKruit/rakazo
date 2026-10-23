@@ -10,25 +10,9 @@ const actor = {
   isDeploymentOwner: false,
 };
 
-function prisma(options: {
-  membership: boolean;
-  settings?: () => Promise<{ ownerUserId: string } | null>;
-}) {
+function prisma(options: { membership: boolean; lookup?: () => Promise<Array<typeof actor>> }) {
   return {
-    spaceMember: {
-      findFirst: vi.fn(async () =>
-        options.membership
-          ? {
-              userId: actor.userId,
-              spaceId: actor.spaceId,
-              member: { user: { email: actor.email } },
-            }
-          : null,
-      ),
-    },
-    deploymentSettings: {
-      findUnique: vi.fn(options.settings ?? (async () => ({ ownerUserId: "someone-else" }))),
-    },
+    $queryRaw: vi.fn(options.lookup ?? (async () => (options.membership ? [actor] : []))),
   } as unknown as PrismaClient;
 }
 
@@ -49,14 +33,14 @@ describe("actorFromMembership", () => {
     ).resolves.toEqual(actor);
   });
 
-  it("lets a deployment-settings failure surface instead of looking signed out", async () => {
+  it("lets a joined-lookup failure surface instead of looking signed out", async () => {
     const failure = new Error("database unavailable");
     await expect(
       actorFromMembership(
         requireMembership(
           prisma({
             membership: true,
-            settings: async () => {
+            lookup: async () => {
               throw failure;
             },
           }),

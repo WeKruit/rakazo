@@ -96,7 +96,7 @@ function hasMinimumActiveMembers(members: readonly unknown[]) {
 }
 
 async function assertOwnedBots(
-  prisma: PrismaClient,
+  prisma: Pick<PrismaClient, "bot">,
   actor: Actor,
   botIds: string[],
 ): Promise<GroupMember[]> {
@@ -259,6 +259,38 @@ async function resumeArchivedGroupTeardown(tx: Prisma.TransactionClient, threadI
   return { cancelledRunIds: leasedRunIds, computers: targets };
 }
 
+export async function createGroupInTransaction(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  input: { id?: string; name: string; botIds: string[] },
+) {
+  await lockSpaceForContentCreation(tx, actor);
+  if (input.id) {
+    const existing = await tx.chatGroup.findFirst({
+      where: { id: input.id, spaceId: actor.spaceId, userId: actor.userId },
+      include: groupInclude,
+    });
+    if (existing) {
+      if (existing.archivedAt || !existing.thread) throw new IsolationError();
+      return existing;
+    }
+  }
+  const members = await assertOwnedBots(tx, actor, input.botIds);
+  const group = await tx.chatGroup.create({
+    data: { id: input.id, spaceId: actor.spaceId, userId: actor.userId, name: input.name.trim() },
+  });
+  await tx.chatGroupMember.createMany({
+    data: memberRowsInOrder(
+      group.id,
+      members.map((member) => member.botId),
+    ),
+  });
+  await tx.thread.create({
+    data: { spaceId: actor.spaceId, groupId: group.id, userId: actor.userId },
+  });
+  return tx.chatGroup.findFirstOrThrow({ where: { id: group.id }, include: groupInclude });
+}
+
 export function createGroupRepos(prisma: PrismaClient) {
   async function listSpaceGroupsForSpaces(actor: Actor, spaceIds: string[]): Promise<SpaceGroup[]> {
     if (spaceIds.length === 0) return [];
@@ -341,37 +373,7 @@ export function createGroupRepos(prisma: PrismaClient) {
     },
 
     async createGroup(actor: Actor, input: { name: string; botIds: string[] }): Promise<Group> {
-      const members = await assertOwnedBots(prisma, actor, input.botIds);
-      const created = await prisma.$transaction(async (tx) => {
-        await lockSpaceForContentCreation(tx, {
-          spaceId: actor.spaceId,
-          userId: actor.userId,
-        });
-        const group = await tx.chatGroup.create({
-          data: {
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-            name: input.name.trim(),
-          },
-        });
-        await tx.chatGroupMember.createMany({
-          data: memberRowsInOrder(
-            group.id,
-            members.map((member) => member.botId),
-          ),
-        });
-        await tx.thread.create({
-          data: {
-            spaceId: actor.spaceId,
-            groupId: group.id,
-            userId: actor.userId,
-          },
-        });
-        return tx.chatGroup.findFirstOrThrow({
-          where: { id: group.id },
-          include: groupInclude,
-        });
-      });
+      const created = await prisma.$transaction((tx) => createGroupInTransaction(tx, actor, input));
       return mapGroup(created as GroupRecord);
     },
 
@@ -545,6 +547,9 @@ export function createGroupRepos(prisma: PrismaClient) {
         });
         const contextBotId = group?.members[0]?.botId;
         if (!contextBotId) throw new IsolationError();
+        await tx.routine.deleteMany({
+          where: { spaceId: actor.spaceId, userId: actor.userId, thread: { groupId } },
+        });
         await tx.chatGroup.delete({ where: { id: groupId } });
         return {
           contextBotId,

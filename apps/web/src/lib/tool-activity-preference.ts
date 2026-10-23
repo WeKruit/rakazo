@@ -38,8 +38,11 @@ export function normalizeToolActivityPreference(
   return raw?.trim().toLowerCase() === "on" ? "on" : "off";
 }
 
-export function toolActivityEnabled(preference: ToolActivityPreference = "off"): boolean {
-  return preference === "on";
+export function toolActivityEnabled(
+  preference: ToolActivityPreference = "off",
+  isDeploymentOwner = false,
+): boolean {
+  return isDeploymentOwner && preference === "on";
 }
 
 export function resolveToolActivityPreference(
@@ -68,8 +71,8 @@ export function getToolActivityPreference(): ToolActivityPreference {
   return memoryPreference ?? resolveToolActivityPreference();
 }
 
-export function getToolActivityEnabled(): boolean {
-  return toolActivityEnabled(getToolActivityPreference());
+export function getToolActivityEnabled(isDeploymentOwner = false): boolean {
+  return toolActivityEnabled(getToolActivityPreference(), isDeploymentOwner);
 }
 
 export function setToolActivityPreference(

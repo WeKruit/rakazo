@@ -20,7 +20,7 @@ export const RUN_TRIGGERS = [
 export const RunTriggerSchema = z.enum(RUN_TRIGGERS);
 export type RunTrigger = z.infer<typeof RunTriggerSchema>;
 
-export const RoutineRunSchema = z.object({
+const RoutineRunFields = {
   id: Id,
   botId: Id,
   groupId: Id.nullable(),
@@ -29,6 +29,16 @@ export const RoutineRunSchema = z.object({
   startedAt: IsoDate.nullable(),
   completedAt: IsoDate.nullable(),
   messageId: Id.nullable(),
+};
+export const RoutineDelegationSchema = z.object({
+  ...RoutineRunFields,
+  parentRunId: Id,
+  botName: z.string().min(1),
+});
+export type RoutineDelegation = z.infer<typeof RoutineDelegationSchema>;
+export const RoutineRunSchema = z.object({
+  ...RoutineRunFields,
+  delegations: z.array(RoutineDelegationSchema),
 });
 export type RoutineRun = z.infer<typeof RoutineRunSchema>;
 

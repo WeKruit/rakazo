@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { CommandRequest, ComputerRef, SandboxProvider } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   checkpointComputerWorkspace,
@@ -24,8 +25,11 @@ const context = {
   signal: new AbortController().signal,
 };
 const roots: string[] = [];
+const previousLogger = getLogger();
 
 afterEach(async () => {
+  installLogger(previousLogger);
+  vi.restoreAllMocks();
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
@@ -48,9 +52,20 @@ describe("provider-neutral computer workspace", () => {
   });
 
   it("restores a checkpoint into a replacement provider machine", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => clock);
     const root = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-store-"));
     roots.push(root);
     const home = new LocalAgentHomeStore(root);
+    const originalCommit = home.commit.bind(home);
+    const commit = vi.spyOn(home, "commit").mockImplementation(async (...args) => {
+      expect(sink.events.at(-1)?.message).toBe("computer.workspace.commit.begin");
+      const revision = await originalCommit(...args);
+      clock += 17;
+      return revision;
+    });
     const firstProvider = new FakeSandboxProvider();
     const first = await firstProvider.provision({ botId: "bot-1", homePath: "/ignored" }, context);
 
@@ -65,7 +80,24 @@ describe("provider-neutral computer workspace", () => {
       "bot-1",
       first,
       context,
+      async () => {
+        clock += 13;
+      },
     );
+    expect(commit).toHaveBeenCalledOnce();
+    expect(sink.events).toEqual([
+      expect.objectContaining({ message: "computer.workspace.export.begin" }),
+      expect.objectContaining({
+        message: "computer.workspace.export.complete",
+        stagedFileCount: 1,
+        stagedBytes: 8,
+        stagingWriteMs: expect.any(Number),
+      }),
+      expect.objectContaining({ message: "computer.workspace.commit.begin", commitGuardMs: 13 }),
+      expect.objectContaining({ message: "computer.workspace.commit.complete", commitMs: 17 }),
+    ]);
+    expect(JSON.stringify(sink.events)).not.toContain("notes/result.txt");
+    expect(JSON.stringify(sink.events)).not.toContain("portable");
 
     const replacementProvider = new FakeSandboxProvider();
     const replacement = await replacementProvider.provision(
@@ -88,7 +120,7 @@ describe("Team run checkpoints", () => {
     const { checkpointRunComputerWorkspace } = await import("./computer-workspace.js");
     const exportWorkspace = vi.fn();
     const updateMany = vi.fn().mockResolvedValue({ count: 0 });
-    const deps = { sandbox: { exportWorkspace }, home: {}, prisma: { computer: { updateMany } } };
+    const deps = checkpointDeps(exportWorkspace, updateMany);
     const result = await checkpointRunComputerWorkspace(
       deps as never,
       { id: "team", homeKey: "team", scope: "team" },
@@ -100,10 +132,14 @@ describe("Team run checkpoints", () => {
     expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          state: "running",
-          executionLeases: {
-            none: { expiresAt: { gt: expect.any(Date) }, NOT: { runId: "run-a", fence: 2 } },
-          },
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              state: "running",
+              executionLeases: {
+                none: { expiresAt: { gt: expect.any(Date) }, NOT: { runId: "run-a", fence: 2 } },
+              },
+            }),
+          ]),
         }),
         data: expect.objectContaining({ state: "suspending" }),
       }),
@@ -117,7 +153,7 @@ describe("Team run checkpoints", () => {
       await Promise.reject(new Error("export failed"));
       yield { path: "unreachable", content: new Uint8Array() };
     });
-    const deps = { sandbox: { exportWorkspace }, home: {}, prisma: { computer: { updateMany } } };
+    const deps = checkpointDeps(exportWorkspace, updateMany);
     await expect(
       checkpointRunComputerWorkspace(
         deps as never,
@@ -130,11 +166,33 @@ describe("Team run checkpoints", () => {
       exportWorkspace.mock.invocationCallOrder[0]!,
     );
     expect(updateMany).toHaveBeenLastCalledWith({
-      where: { id: "team", providerRef: "remote", state: "suspending" },
-      data: { state: "running" },
+      where: {
+        id: "team",
+        providerRef: "remote",
+        state: "suspending",
+        maintenanceId: "checkpoint-1",
+      },
+      data: { state: "running", maintenanceId: null },
     });
   });
 });
+
+function checkpointDeps(
+  exportWorkspace: ReturnType<typeof vi.fn>,
+  updateMany: ReturnType<typeof vi.fn>,
+) {
+  const prisma = {
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    computer: { updateMany },
+    computerUpdate: {
+      create: vi.fn().mockResolvedValue({ id: "checkpoint-1" }),
+      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+    },
+    $transaction: vi.fn(),
+  };
+  prisma.$transaction.mockImplementation(async (fn) => fn(prisma));
+  return { sandbox: { exportWorkspace }, home: {}, prisma };
+}
 
 describe("Team bot folder cleanup", () => {
   const computer: ComputerRef = {

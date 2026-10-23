@@ -223,6 +223,17 @@ describe("nextCronDate", () => {
     );
   });
 
+  it.each([
+    ["2026-03-07T17:00:00.000Z", "2026-03-08T16:00:00.000Z"],
+    ["2026-03-08T15:59:00.000Z", "2026-03-08T16:00:00.000Z"],
+    ["2026-10-31T16:00:00.000Z", "2026-11-01T17:00:00.000Z"],
+    ["2026-11-01T16:59:00.000Z", "2026-11-01T17:00:00.000Z"],
+  ])("keeps a Pacific morning routine at 9 AM from %s", (from, next) => {
+    expect(nextCronDate("0 9 * * *", new Date(from), "America/Los_Angeles")).toEqual(
+      new Date(next),
+    );
+  });
+
   it("rejects malformed expressions instead of scheduling one minute later", () => {
     const from = new Date("2026-08-24T10:00:00.000Z");
     expect(() => nextCronDate("61 25 * * *", from)).toThrow();

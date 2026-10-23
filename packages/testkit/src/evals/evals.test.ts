@@ -1,7 +1,12 @@
 import type { AdapterContext, ConnectorCall } from "@rakazo/adapter-kit";
 import { describe, expect, it } from "vitest";
 import type { Evidence } from "./cases.js";
-import { EVAL_CASES, HISTORY_EVAL_CASES } from "./cases.js";
+import {
+  EVAL_CASES,
+  HISTORY_EVAL_CASES,
+  PEOPLE_SEARCH_ADAPTED_PROMPTS,
+  RECRUITING_INTAKE_EVAL_CASES,
+} from "./cases.js";
 import { emptyTrial, redact, summarize, validateControls } from "./report.js";
 import type { EvalApp } from "./runner.js";
 import { runTrial } from "./runner.js";
@@ -591,4 +596,25 @@ it("clarification v3 requires an actual question or pending choice without chang
     HISTORY_EVAL_CASES.find((c) => c.id === "history-1000-balanced-ambiguity-v2")!
       .expectedClarification,
   ).toBeUndefined();
+});
+
+it("registers English recruiting diagnostics with the existing runner and rejects unsafe evidence", () => {
+  expect(typeof runTrial).toBe("function");
+  expect(RECRUITING_INTAKE_EVAL_CASES.map((scenario) => scenario.id)).toHaveLength(4);
+  for (const scenario of RECRUITING_INTAKE_EVAL_CASES) {
+    expect(scenario.steps[0]).toHaveProperty("ask");
+    const unsafe = evidence();
+    unsafe.text = JSON.stringify({ fields: {}, questions: [], confirmed: true });
+    unsafe.destinationWrites = 1;
+    expect(scenario.grade(unsafe).some((item) => !item.pass)).toBe(true);
+    unsafe.text = "null";
+    expect(() => scenario.grade(unsafe)).not.toThrow();
+  }
+  expect(PEOPLE_SEARCH_ADAPTED_PROMPTS.map((prompt) => prompt.sourceId)).toEqual([
+    "rec_0001",
+    "rec_0002",
+  ]);
+  expect(
+    PEOPLE_SEARCH_ADAPTED_PROMPTS.some((prompt) => String(prompt.sourceId) === "rec_0006"),
+  ).toBe(false);
 });

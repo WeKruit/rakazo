@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-vi.mock("@earendil-works/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
     state = { errorMessage: "WebSocket closed 1006", messages: [] };
 

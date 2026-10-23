@@ -1,4 +1,4 @@
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
+import type { OAuthClientProvider } from "@modelcontextprotocol/client";
 import type { AdapterContext } from "@rakazo/adapter-kit";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 import { withTransactionRetry } from "@rakazo/db";
@@ -28,6 +28,7 @@ type Row = {
   botId?: string;
   endpoint?: string;
   secretId?: string | null;
+  revision?: number;
   organizationId?: string;
 };
 type Args = { where?: Record<string, unknown>; data?: Row; create?: Row; update?: Row };
@@ -350,6 +351,7 @@ describe("MCP OAuth prepared persistence", () => {
         id: "server",
         endpoint: "https://mcp.example.test/mcp",
         secretId: initial.id,
+        revision: 1,
         spaceId: "space",
         userId: "user",
       });
@@ -471,6 +473,7 @@ describe("MCP OAuth prepared persistence", () => {
       id: "server",
       endpoint: "https://mcp.example.test/mcp",
       secretId: null,
+      revision: 1,
       spaceId: "space",
       userId: "user",
     });
@@ -501,7 +504,7 @@ describe("MCP OAuth prepared persistence", () => {
     });
     const broker = new McpOAuthBroker(prisma, store);
     const oauth = await broker.providerFor(
-      { id: "server", endpoint: "https://mcp.example.test/mcp", secretId: null },
+      { id: "server", endpoint: "https://mcp.example.test/mcp", secretId: null, revision: 1 },
       context,
       { material: { oauth: {} } },
     );

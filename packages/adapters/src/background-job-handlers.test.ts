@@ -43,6 +43,7 @@ describe("createBackgroundJobHandlers", () => {
       runtime: {} as unknown as AgentRuntime,
       secretStore: {} as unknown as EncryptedSecretStore,
       memoryProviders: { resolve: vi.fn(async () => null) },
+      shutdownSignal: new AbortController().signal,
       messaging: {} as unknown as MessagingSurface,
     });
 
@@ -83,6 +84,7 @@ describe("createBackgroundJobHandlers", () => {
       runtime,
       secretStore,
       memoryProviders,
+      shutdownSignal: new AbortController().signal,
       deploymentModelKey: "openrouter-key",
       deploymentModelConfigured: true,
     });
@@ -100,11 +102,12 @@ describe("createBackgroundJobHandlers", () => {
         resolveModel,
       },
       "thread-1",
+      undefined,
     );
   });
 
   it.each([undefined, "retrieval", "snapshots", "cache-aware"] as const)(
-    "does not spend on a queued legacy compaction after switching to %s",
+    "dispatches automatic summary work without changing the %s context strategy",
     async (contextStrategy) => {
       vi.mocked(compactHistory).mockClear();
       const runtime = { run: vi.fn() } as unknown as AgentRuntime;
@@ -124,10 +127,19 @@ describe("createBackgroundJobHandlers", () => {
         runtime,
         secretStore: {} as unknown as EncryptedSecretStore,
         memoryProviders: { resolve: vi.fn(async () => null) },
+        shutdownSignal: new AbortController().signal,
       });
 
-      await handlers["history.compact"]({ threadId: "thread-fixture" });
+      await handlers["history.compact"]({ threadId: "thread-fixture", sourceRunId: "origin-run" });
 
+      expect(compactHistory).toHaveBeenCalledWith(
+        expect.any(Object),
+        "thread-fixture",
+        "origin-run",
+      );
+      expect(runtime.run).not.toHaveBeenCalled();
+      vi.mocked(compactHistory).mockClear();
+      await handlers["history.compact"]({ threadId: "legacy-thread-without-origin" });
       expect(compactHistory).not.toHaveBeenCalled();
       expect(runtime.run).not.toHaveBeenCalled();
     },

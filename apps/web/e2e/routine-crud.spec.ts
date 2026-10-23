@@ -186,7 +186,7 @@ test("a routine runs on the bot's model until another is picked", async ({ page 
   await page.getByRole("button", { name: /Model check/ }).click();
   await page.locator("label:has-text('Name') input").fill("Renamed model check");
   const patch = await saveAndReturn(page, "routines/update");
-  for (const column of ["modelProvider", "modelId", "thinkingLevel"])
+  for (const column of ["modelProvider", "modelId", "thinkingLevel", "active", "crons"])
     expect(patch).not.toHaveProperty(column);
 });
 

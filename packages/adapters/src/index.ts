@@ -1,9 +1,12 @@
 export * from "./agent-connections.js";
 export * from "./agent-environment.js";
 export * from "./ai-consent.js";
+export { buildApprovalAskBlock } from "./approval-ask.js";
+export * from "./artifact-read.js";
 export * from "./artifacts.js";
 export * from "./auto-review.js";
 export * from "./auto-review-factory.js";
+export * from "./autumn-files.js";
 export * from "./background-job-handlers.js";
 export * from "./billing-emulator.js";
 export * from "./bot-avatar.js";
@@ -71,6 +74,7 @@ export * from "./home.js";
 export * from "./host-aware-sandbox.js";
 export * from "./infisical-secret-store.js";
 export * from "./installed-connectors.js";
+export { classifyInstantlyReplyReceipt, readInstantlyEmail } from "./instantly-reply.js";
 export * from "./integration-provider-settings.js";
 export * from "./jev-auto-review.js";
 export * from "./job-reconciler.js";
@@ -104,6 +108,12 @@ export * from "./pipedream-connector.js";
 export * from "./private-endpoint.js";
 export * from "./railway-sandbox.js";
 export * from "./realtime.js";
+export {
+  classifyRecruitingResearchResult,
+  createRecruitingCandidateReportReader,
+  isRecruitingCandidateReportField,
+  projectRecruitingCandidateReport,
+} from "./recruiting-research.js";
 export * from "./release-watch.js";
 export * from "./remote-mcp.js";
 export * from "./run-secret.js";

@@ -1,6 +1,6 @@
 import type * as db from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { chooseFocus, markAppConnected } from "./onboarding.js";
+import { chooseFocus, markAppConnected, promptFocus } from "./onboarding.js";
 
 const posted = vi.hoisted(() => [] as Array<{ blocks: unknown[] }>);
 vi.mock("@rakazo/db", async (original) => ({
@@ -11,7 +11,7 @@ vi.mock("@rakazo/db", async (original) => ({
   }),
   appendEventInTransaction: vi.fn(async () => ({ seq: 1 })),
 }));
-function fixture(catalog: unknown[]) {
+function fixture(catalog: unknown[], profile = { title: "", description: "", instructions: "" }) {
   posted.length = 0;
   const tx = {
     $executeRaw: vi.fn(),
@@ -22,7 +22,14 @@ function fixture(catalog: unknown[]) {
   };
   const deps = {
     prisma: {
-      bot: { findFirst: vi.fn(async () => ({ id: "bot", thread: { id: "thread" } })) },
+      bot: {
+        findFirst: vi.fn(async () => ({
+          id: "bot",
+          name: "Named bot",
+          ...profile,
+          thread: { id: "thread" },
+        })),
+      },
       $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn(tx)),
     },
     events: { notify: vi.fn() },
@@ -76,3 +83,32 @@ it("marks only the authorized connector when provider slugs collide", async () =
     data: { blocks: [blocks[0], { ...blocks[1], status: "connected" }] },
   });
 });
+
+it.each([
+  { profile: { title: "  Coordinator  ", description: "", instructions: "" }, postedCount: 0 },
+  {
+    profile: { title: "", description: "  Coordinate interviews  ", instructions: "" },
+    postedCount: 0,
+  },
+  {
+    profile: { title: "", description: "", instructions: "  Use the assigned role  " },
+    postedCount: 0,
+  },
+  { profile: { title: "", description: "", instructions: "" }, postedCount: 1 },
+  { profile: { title: " ", description: "\n", instructions: "\t" }, postedCount: 1 },
+])(
+  "posts a generic focus only without an explicit profile: $profile",
+  async ({ profile, postedCount }) => {
+    const { deps, actor, tx } = fixture([], profile);
+    tx.message.findMany.mockResolvedValue([]);
+    await promptFocus(deps, actor, "bot");
+    expect(posted).toHaveLength(postedCount);
+    expect(deps.events.notify).toHaveBeenCalledTimes(postedCount);
+    if (postedCount) {
+      expect(posted[0]!.blocks).toEqual([
+        expect.objectContaining({ kind: "choice", question: "What do you want me on first?" }),
+      ]);
+      expect(tx.$executeRaw).toHaveBeenCalledTimes(1);
+    }
+  },
+);

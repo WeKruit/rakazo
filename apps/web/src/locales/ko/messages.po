@@ -17,6 +17,26 @@ msgstr ""
 msgid " (unread)"
 msgstr " (읽지 않음)"
 
+#. placeholder {0}: candidatePage.counts.candidates
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
+msgstr ""
+
+#. placeholder {0}: important.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# candidate-role record} other {# candidate-role records}}"
+msgstr ""
+
+#. placeholder {0}: candidatePage.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# candidate} other {# candidates}}"
+msgstr ""
+
+#. placeholder {0}: page.total
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# contact} other {# contacts}}"
+msgstr ""
+
 #. placeholder {0}: group.entries.length
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "{0, plural, one {# model} other {# models}}"
@@ -85,6 +105,16 @@ msgstr ""
 msgid "{0} runs · {1} tokens"
 msgstr "{0}회 실행 · 토큰 {1}개"
 
+#. placeholder {0}: candidate.discoveryCount
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} saved discoveries"
+msgstr ""
+
+#. placeholder {0}: observation.rowCount
+#: src/pages/RecruitingPanel.tsx
+msgid "{0} saved source rows"
+msgstr ""
+
 #. placeholder {0}: bot.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} will still respond to direct mentions."
@@ -112,6 +142,7 @@ msgid "{count} days"
 msgstr ""
 
 #: src/lib/billing.ts
+#: src/pages/RecruitingPanel.tsx
 msgid "{count} months"
 msgstr ""
 
@@ -185,10 +216,6 @@ msgstr "{title}, {label}"
 msgid "{toolCount, plural, one {# tool} other {# tools}}"
 msgstr ""
 
-#: src/pages/Shell.tsx
-msgid "{workingBotName} is working"
-msgstr "{workingBotName} 작업 중"
-
 #. placeholder {0}: mention.name
 #: src/pages/Shell.tsx
 msgid "@{0}"
@@ -196,6 +223,14 @@ msgstr "@{0}"
 
 #: src/pages/shell/message-cards.tsx
 msgid "A bit of everything"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "A saved check failed."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "A saved result cannot be displayed."
 msgstr ""
 
 #. placeholder {0}: oauth.verificationUri.replace(/^https:\/\//, "")
@@ -250,11 +285,16 @@ msgstr ""
 msgid "Action confirmations"
 msgstr "작업 실행 전 확인"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Actions"
+msgstr ""
+
 #. placeholder {0}: bot.name
+#. placeholder {0}: group.name
 #. placeholder {0}: group.spaceName
-#. placeholder {0}: sectionMenu.section.name
 #: src/pages/BotContextMenu.tsx
 #: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Actions for {0}"
 msgstr "{0} 작업 메뉴"
 
@@ -272,6 +312,7 @@ msgid "Active model"
 msgstr "현재 모델"
 
 #: src/components/computer/TerminalApp.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Activity"
 msgstr "활동"
@@ -281,6 +322,10 @@ msgstr "활동"
 #: src/pages/ScratchpadSection.tsx
 msgid "Add"
 msgstr "추가"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Add {name} to shortlist"
+msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Add a model in Settings to use this."
@@ -330,6 +375,10 @@ msgstr ""
 msgid "Add Executor"
 msgstr "Executor 추가"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Add filter"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Add GraphQL"
 msgstr "GraphQL 추가"
@@ -375,6 +424,7 @@ msgstr "Treg 추가"
 msgid "Add trigger"
 msgstr "트리거 추가"
 
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Added"
 msgstr ""
@@ -395,9 +445,17 @@ msgstr "추가 중…"
 msgid "Advanced"
 msgstr "고급 설정"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "Advanced OAuth"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Advanced..."
 msgstr "고급..."
+
+#: src/pages/Shell.tsx
+msgid "Agent"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Agent computer"
@@ -411,12 +469,40 @@ msgstr "Agent 연결"
 msgid "Agents:"
 msgstr "사용 Bot:"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AI interpretation"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "All Important records"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All internal assessments"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All internal verdicts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All of"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "All roles"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "All rounds"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
@@ -425,6 +511,10 @@ msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "All time"
+msgstr ""
+
+#: src/pages/McpServersOverlay.tsx
+msgid "All tools"
 msgstr ""
 
 #. placeholder {0}: rule.matchValue
@@ -462,6 +552,10 @@ msgstr ""
 msgid "Allowed once"
 msgstr "한 번 허용됨"
 
+#: src/pages/McpServersOverlay.tsx
+msgid "Allowed tools"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Already have an account?"
 msgstr "이미 계정이 있나요?"
@@ -482,6 +576,10 @@ msgstr "항상 허용됨"
 msgid "An API key is stored for this provider, not a subscription sign-in."
 msgstr "이 서비스에는 구독 로그인이 아니라 API 키가 저장되어 있습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "AND"
+msgstr ""
+
 #: src/components/AskCard.tsx
 msgid "Answer"
 msgstr "답변"
@@ -495,12 +593,12 @@ msgstr "응답함"
 msgid "Answered: {0}"
 msgstr "응답: {0}"
 
-#: src/components/AskCard.tsx
-msgid "Answered: {answer}"
-msgstr "응답: {answer}"
-
 #: src/pages/Paywall.tsx
 msgid "Any model, with your own key"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Any of"
 msgstr ""
 
 #: src/components/SoftwareUpdateSection.tsx
@@ -537,6 +635,14 @@ msgstr "승인"
 msgid "Approve this server to let your agent use its tools."
 msgstr "이 서버를 승인하면 Bot이 제공되는 도구를 사용할 수 있습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Approved in internal review"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Archive"
 msgstr "보관"
@@ -546,6 +652,7 @@ msgid "archived"
 msgstr "보관됨"
 
 #: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Archived"
 msgstr "보관됨"
 
@@ -560,6 +667,10 @@ msgstr "인자"
 #: src/pages/Artifacts.tsx
 #: src/pages/Shell.tsx
 msgid "Artifacts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Ask an agent to clarify in chat."
 msgstr ""
 
 #. placeholder {0}: rule.matchValue
@@ -578,6 +689,10 @@ msgid "Ask before {0} connector"
 msgstr "{0} 커넥터 전에 확인"
 
 #: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
 msgstr "이메일 동작 전에 확인"
 
@@ -593,8 +708,24 @@ msgstr "결제하기 전에 확인"
 msgid "Ask before sending external email"
 msgstr "외부 이메일을 보내기 전에 확인"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment date"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assessment unavailable"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Assumption"
 msgstr ""
 
 #. placeholder {0}: preset.time
@@ -606,9 +737,21 @@ msgstr "{0}에"
 msgid "at {timeSelect}"
 msgstr "{timeSelect}에"
 
+#: src/pages/GroupPanel.tsx
+msgid "Attach"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Attach file"
 msgstr "파일 첨부"
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach file or screenshot"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Attach role files"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Attached {path}"
@@ -627,6 +770,10 @@ msgstr "인증에 실패했습니다."
 #: src/pages/Onboarding.tsx
 msgid "Authorization code or callback URL"
 msgstr "인증 코드 또는 돌아온 페이지 주소"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Authorization parameters"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "Authorization timed out. Please try again."
@@ -648,9 +795,21 @@ msgstr ""
 msgid "Automated senders will appear after they post here."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Autumn rank"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Available"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Available after the routine is saved"
 msgstr "루틴을 저장한 후 사용할 수 있습니다"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Available time"
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Available to this bot's shell commands as {commandVariable}"
@@ -664,12 +823,20 @@ msgstr "아바타 스튜디오"
 msgid "Avatars"
 msgstr "아바타"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Awaiting feedback"
+msgstr ""
+
 #: src/components/computer/FilesApp.tsx
 #: src/pages/Board.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Back"
 msgstr "뒤로"
+
+#: src/pages/Shell.tsx
+msgid "Back to results"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Back to sign in"
@@ -762,16 +929,24 @@ msgstr "봇의 모델"
 msgid "Bots"
 msgstr ""
 
-#: src/pages/Shell.tsx
-msgid "Bots are working"
-msgstr "봇 작업 중"
-
 #: src/pages/Paywall.tsx
 msgid "Bots with their own computer and browser"
 msgstr ""
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Brain label"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief changed or could not be confirmed. Refresh and review it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Brief confirmed"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Browse all candidates"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -785,6 +960,22 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 msgid "Built-in"
 msgstr "기본 제공"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Calendar booking details are not included in these manual CRM workflow records."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Calendar event"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Campaign"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Campaign details unavailable"
+msgstr ""
 
 #: src/App.tsx
 msgid "Can't reach the server."
@@ -800,6 +991,7 @@ msgstr "서버에 연결할 수 없습니다."
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Cancel"
@@ -812,6 +1004,10 @@ msgstr "새 Bot 만들기 취소"
 #: src/pages/GroupPanel.tsx
 msgid "Cancel new group"
 msgstr "새 그룹 만들기 취소"
+
+#: src/pages/GroupPanel.tsx
+msgid "Cancel new role"
+msgstr ""
 
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
@@ -830,13 +1026,69 @@ msgstr "취소됨"
 msgid "Cancelled"
 msgstr "취소됨"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate"
+msgstr "후보자"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate assessment"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate details"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate facts"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Candidate feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate messages"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate question"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Candidate reference"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate sort"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidate statement"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Candidates"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "Card view"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Cards"
+msgstr "카드"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Change password"
 msgstr "비밀번호 변경"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Changes could not be saved."
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Changing…"
@@ -862,9 +1114,17 @@ msgstr "채팅 앱, 그룹 채널 및 Agent 연결을 관리합니다."
 msgid "Chat Settings"
 msgstr "채팅 설정"
 
+#: src/pages/Shell.tsx
+msgid "Chat with WeKruit"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/HostComputerPrompt.tsx
 msgid "Check again"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Check availability"
 msgstr ""
 
 #: src/components/SoftwareUpdateSection.tsx
@@ -880,9 +1140,21 @@ msgstr "업데이트 확인"
 msgid "Check in."
 msgstr "확인해 주세요."
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Check inbox"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Check the API key or sign-in, then test again."
 msgstr "API 키 또는 로그인을 확인한 뒤 다시 테스트하세요."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Check the connected calendar for interview availability for this role. Show the actual available times, time zone and any missing scheduling details. Don't send invitations, create events or contact candidates."
+msgstr ""
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Check the OAuth client settings."
+msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Check the server URL and network, then test again."
@@ -891,6 +1163,10 @@ msgstr "서버 URL과 네트워크를 확인한 뒤 다시 테스트하세요."
 #: src/pages/Auth.tsx
 msgid "Check your email"
 msgstr "이메일을 확인하세요"
+
+#: src/pages/Shell.tsx
+msgid "Checking available connections…"
+msgstr ""
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
@@ -915,9 +1191,17 @@ msgstr "봇 모양과 색을 고르거나 이미지를 업로드하세요"
 msgid "Choose a bot…"
 msgstr "Bot 선택…"
 
+#: src/pages/Shell.tsx
+msgid "Choose a CRM role again."
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Choose a new password"
 msgstr "새 비밀번호 선택"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Choose feedback"
+msgstr ""
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Choose file"
@@ -949,11 +1233,23 @@ msgstr ""
 msgid "Clearing…"
 msgstr "비우는 중…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Client"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Client feedback"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/McpServersOverlay.tsx
 msgid "Client ID"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/McpServersOverlay.tsx
 msgid "Client secret"
 msgstr ""
 
@@ -961,6 +1257,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
@@ -1010,6 +1307,7 @@ msgid "Close navigation"
 msgstr "메뉴 닫기"
 
 #: src/pages/GroupPanel.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Close panel"
 msgstr "패널 닫기"
@@ -1040,6 +1338,14 @@ msgstr "코드"
 #: src/pages/Shell.tsx
 msgid "Collapse {0}"
 msgstr "{0} 접기"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Collapse navigation"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Collapse role chat"
+msgstr ""
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Color"
@@ -1072,6 +1378,19 @@ msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Compact"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Company"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Company deck"
+msgstr ""
+
+#. placeholder {0}: candidate.company
+#: src/pages/Shell.tsx
+msgid "Company: {0}"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -1116,6 +1435,11 @@ msgstr "컴퓨터가 꺼져 있습니다. SANDBOX_PROVIDER=docker와 SANDBOX_SUP
 msgid "Configure a plugin catalog on the server to connect apps."
 msgstr ""
 
+#: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Configured"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Configured by deployment"
 msgstr "서버에서 설정됨"
@@ -1123,6 +1447,10 @@ msgstr "서버에서 설정됨"
 #: src/pages/McpServersOverlay.tsx
 msgid "Configured servers"
 msgstr "연결된 서버"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Confirm brief"
+msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
@@ -1138,9 +1466,14 @@ msgstr "비밀번호 확인"
 msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "이 브라우저 세션에서 URL에 연결할 수 있는지 확인한 뒤 다시 테스트하세요."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Conflicting information"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "연결"
@@ -1152,6 +1485,15 @@ msgstr "AI 모델 연결"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Connect a provider to add backups."
 msgstr "백업을 추가하려면 제공업체를 연결하세요."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Connect account"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Connect an app"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Connect API key"
@@ -1210,6 +1552,7 @@ msgstr "연결되었습니다. 다음 메시지부터 이 도구를 사용할 �
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/PluginsOverlay.tsx
 #: src/pages/shell/message-cards.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connecting…"
@@ -1224,12 +1567,46 @@ msgstr "연결 테스트에 실패했습니다."
 msgid "Connection to {0} is still pending. You can close this and check again."
 msgstr "{0} 연결이 아직 진행 중입니다. 이 창을 닫고 나중에 다시 확인할 수 있습니다."
 
+#: src/pages/PluginsOverlay.tsx
+msgid "Connection was not confirmed. Try again or check your account settings."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Consideration resumed"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Contact campaign associations"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Contact details have not been checked yet."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Contact source"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Contact status"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Contacts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Context"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Context limit"
 msgstr "컨텍스트 한도"
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/GroupPanel.tsx
 #: src/pages/Onboarding.tsx
 msgid "Continue"
 msgstr "계속"
@@ -1247,6 +1624,14 @@ msgstr "{0}(으)로 계속"
 msgid "Continue with email"
 msgstr "이메일로 계속하기"
 
+#: src/pages/Shell.tsx
+msgid "Conversation"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Conversations"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -1261,6 +1646,10 @@ msgstr "복사"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not access"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -1311,6 +1700,10 @@ msgstr "OAuth 인증을 완료하지 못했습니다."
 msgid "Could not complete the update. Try again."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not confirm feedback. Try again."
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not connect"
@@ -1320,6 +1713,11 @@ msgstr "연결하지 못했습니다."
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Could not connect {0}"
 msgstr "{0}에 연결하지 못했습니다."
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/PluginsOverlay.tsx
+msgid "Could not connect this app. Check your account settings and try again."
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not connect this provider"
@@ -1335,6 +1733,7 @@ msgstr ""
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
+#: src/lib/mcp-connect.ts
 #: src/lib/sso-flow.ts
 #: src/lib/user-error.ts
 #: src/pages/Auth.tsx
@@ -1350,6 +1749,10 @@ msgstr "Bot을 만들지 못했습니다."
 msgid "Could not create group"
 msgstr "그룹을 만들지 못했습니다."
 
+#: src/pages/GroupPanel.tsx
+msgid "Could not create role"
+msgstr ""
+
 #: src/pages/shell/dialogs.tsx
 msgid "Could not create section"
 msgstr "섹션을 만들지 못했습니다."
@@ -1357,10 +1760,6 @@ msgstr "섹션을 만들지 못했습니다."
 #: src/pages/shell/dialogs.tsx
 msgid "Could not create space"
 msgstr "스페이스를 만들 수 없습니다"
-
-#: src/pages/Onboarding.tsx
-msgid "Could not create your bot"
-msgstr "Bot을 만들지 못했습니다."
 
 #: src/pages/shell/dialogs.tsx
 msgid "Could not delete bot"
@@ -1427,6 +1826,10 @@ msgstr "{name}을 다운로드하지 못했습니다. 다시 시도해 주세요
 msgid "Could not download file"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Could not export conversation"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not install connector"
 msgstr "도구 연결을 추가하지 못했습니다."
@@ -1452,6 +1855,10 @@ msgstr "확인 규칙을 불러오지 못했습니다."
 msgid "Could not load artifacts."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load assessment"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not load backup models"
 msgstr "백업 모델을 불러오지 못했습니다."
@@ -1464,12 +1871,36 @@ msgstr ""
 msgid "Could not load bots. Reload to try again."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidate sources"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load candidates"
+msgstr ""
+
 #: src/components/computer/TerminalApp.tsx
 msgid "Could not load commands"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load contact details. Refresh to try again."
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not load credentials."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load CRM records. Try refreshing."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load history"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -1485,9 +1916,25 @@ msgstr "MCP 서버 목록을 불러오지 못했습니다."
 msgid "Could not load model settings"
 msgstr "AI 모델 설정을 불러오지 못했습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load recruiting"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load recruiting. Refresh to try again."
+msgstr ""
+
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
 msgstr "실행 기록을 불러오지 못했습니다"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Could not load saved results. Try refreshing."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load search results"
+msgstr "검색 결과를 불러올 수 없습니다"
 
 #: src/lib/account-security.ts
 #: src/pages/Auth.tsx
@@ -1497,6 +1944,10 @@ msgstr "로그인 옵션을 불러올 수 없습니다"
 #: src/pages/KnowledgeSection.tsx
 msgid "Could not load skill"
 msgstr "스킬을 불러오지 못했습니다"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load stored messages. Try refreshing."
+msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "Could not load this artifact."
@@ -1510,6 +1961,10 @@ msgstr "이 채팅을 불러오지 못했습니다."
 msgid "Could not load this file."
 msgstr "파일을 불러오지 못했습니다."
 
+#: src/pages/Shell.tsx
+msgid "Could not load this role’s CRM connection."
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr "업데이트 상태를 불러올 수 없습니다"
@@ -1517,6 +1972,10 @@ msgstr "업데이트 상태를 불러올 수 없습니다"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Could not load voice settings"
 msgstr "음성 설정을 불러오지 못했습니다."
+
+#: src/pages/Onboarding.tsx
+msgid "Could not load your setup"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 #: src/pages/Paywall.tsx
@@ -1539,6 +1998,10 @@ msgstr "터미널을 열 수 없습니다"
 msgid "Could not play a test clip"
 msgstr "샘플 음성을 재생하지 못했습니다."
 
+#: src/pages/Onboarding.tsx
+msgid "Could not prepare your workspace"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Could not reach the model server."
 msgstr "모델 서버에 연결하지 못했습니다."
@@ -1549,6 +2012,14 @@ msgstr "모델 서버에 연결하지 못했습니다."
 #: src/pages/Auth.tsx
 msgid "Could not reach the server"
 msgstr "서버에 연결할 수 없습니다"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Could not read a CRM connection."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Could not read this sequence."
+msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
@@ -1624,6 +2095,10 @@ msgstr "자동 실행을 저장하지 못했습니다."
 msgid "Could not save rule"
 msgstr "확인 규칙을 저장하지 못했습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not save shortlist"
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Could not save skill"
 msgstr "스킬을 저장하지 못했습니다"
@@ -1647,6 +2122,10 @@ msgstr ""
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
 msgstr "선택 내용을 저장하지 못했습니다."
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Could not save this draft. Try again."
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not search catalog"
@@ -1716,6 +2195,10 @@ msgstr "아바타를 업데이트할 수 없습니다"
 msgid "Couldn't update messaging settings"
 msgstr "메시징 설정을 업데이트할 수 없습니다"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Count through"
+msgstr ""
+
 #: src/pages/Board.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-panel.tsx
@@ -1759,8 +2242,8 @@ msgid "Create space"
 msgstr "스페이스 만들기"
 
 #: src/pages/Auth.tsx
-msgid "Create your Rakazo"
-msgstr "Rakazo 계정 만들기"
+msgid "Create your WeKruit Headhunter account"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Created"
@@ -1789,6 +2272,36 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "인증 정보는 암호화되며 모델에 전송되지 않습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Criterion {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "CRM contacts"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "CRM history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "CRM receipt"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "CRM roles"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Cron"
 msgstr "Cron"
@@ -1797,10 +2310,26 @@ msgstr "Cron"
 msgid "Cron expression"
 msgstr "Cron 표현식"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Current"
+msgstr ""
+
 #: src/components/AccountAccess.tsx
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Current password"
 msgstr "현재 비밀번호"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Current role"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Current role not returned"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Current search"
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Custom header"
@@ -1814,14 +2343,32 @@ msgstr "고객 지원"
 msgid "Customize bot avatar"
 msgstr "봇 아바타 맞춤설정"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Cutoff date"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
 msgstr "다크"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Dashboard"
+msgstr ""
+
+#. placeholder {0}: draft.email.date
+#: src/pages/Shell.tsx
+msgid "Date: {0}"
+msgstr ""
 
 #: src/lib/billing.ts
 #: src/pages/RoutineSchedule.tsx
 msgid "day"
 msgstr "일"
+
+#. placeholder {0}: item.dayOffset
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Day {0}"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "Day-to-day work"
@@ -1831,9 +2378,14 @@ msgstr ""
 msgid "days"
 msgstr "일"
 
+#: src/components/AskCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Decline"
 msgstr "거절"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Declined"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -1918,6 +2470,7 @@ msgid "Deletion code"
 msgstr "삭제 코드"
 
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Denied"
 msgstr "거부됨"
 
@@ -1928,6 +2481,10 @@ msgstr "거부"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Deployment default"
 msgstr "서버 기본값"
+
+#: src/pages/Shell.tsx
+msgid "Describe the role and clarify what matters in the conversation."
+msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Describe what this bot does"
@@ -1946,8 +2503,20 @@ msgstr ""
 msgid "Desktop update"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Details"
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Developer diagnostics"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Direct MCP"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Disabled"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -1975,6 +2544,18 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Disconnecting…"
 msgstr "연결 해제 중…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Discoveries"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Discovery details"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Discuss candidate"
+msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
@@ -2005,6 +2586,10 @@ msgstr ""
 #: src/pages/HostComputerPrompt.tsx
 msgid "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 msgstr "Docker는 보안을 위해 컴퓨터 접근을 제한합니다. {hostLabel}에서는 Bot이 로컬 파일과 도구로 작업할 수 있습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Does not match"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Don’t have an account?"
@@ -2044,6 +2629,18 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Draft"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Draft reply"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Draft saved"
+msgstr ""
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Draft skill"
 msgstr "작업 기술 초안"
@@ -2060,25 +2657,63 @@ msgstr "복제"
 msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
 msgstr "예: Hivenet Agent, Presales, 근무표 봇"
 
-#: src/components/AskCard.tsx
-msgid "Edit first"
-msgstr "수정 후 보내기"
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit criteria"
+msgstr ""
 
 #: src/pages/BotContextMenu.tsx
 msgid "Edit Profile"
 msgstr "Bot 정보 수정"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Edit search filters"
+msgstr ""
+
 #: src/pages/Auth.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Email"
 msgstr "이메일"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Email content"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Email draft"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Email draft editor"
+msgstr ""
 
 #: src/lib/user-error.ts
 msgid "Email is not allowed to register"
 msgstr "이 이메일은 가입이 허용되지 않습니다"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Email missing"
+msgstr ""
+
 #: src/lib/user-error.ts
 msgid "Email verification required"
 msgstr "이메일 인증이 필요합니다"
+
+#. placeholder {0}: draft.candidateEmail
+#: src/pages/Shell.tsx
+msgid "Email: {0}"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Emails"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Employment rule"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Enable for this role"
+msgstr ""
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Ends {day}"
@@ -2124,6 +2759,10 @@ msgstr "테스트하기 전에 API 키를 입력하세요."
 msgid "Error"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Error details"
+msgstr ""
+
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Every"
@@ -2157,6 +2796,14 @@ msgstr "매월"
 msgid "Every week"
 msgstr "매주"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Evidence"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Exclude"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Executor token"
 msgstr "Executor 토큰"
@@ -2174,6 +2821,10 @@ msgstr "{0} 펼치기"
 #: src/pages/shell/bot-panel.tsx
 msgid "Export"
 msgstr "내보내기"
+
+#: src/pages/Shell.tsx
+msgid "Export conversation"
+msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Export this week's list from the CRM and drop it in the shared folder"
@@ -2203,6 +2854,10 @@ msgid "Failed"
 msgstr "실패"
 
 #: src/pages/Shell.tsx
+msgid "Failed to load recruiting data"
+msgstr ""
+
+#: src/pages/Shell.tsx
 msgid "Failed to send message"
 msgstr "메시지를 보내지 못했습니다."
 
@@ -2219,11 +2874,28 @@ msgstr "실패했습니다."
 msgid "Failure handling"
 msgstr "실패했을 때 처리"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Feedback sent"
+msgstr ""
+
 #: src/components/computer/FilesApp.tsx
 msgid "File is too large to upload."
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "File preview"
+msgstr ""
+
 #: src/components/computer/ComputerWorkspace.tsx
+#: src/pages/Shell.tsx
 msgid "Files"
 msgstr ""
 
@@ -2235,10 +2907,18 @@ msgstr ""
 msgid "Filters"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Find email"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Find models"
 msgstr "모델 찾기"
+
+#: src/pages/Shell.tsx
+msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -2268,9 +2948,17 @@ msgstr "완료되었습니다."
 msgid "Finishing MCP connection…"
 msgstr "MCP 연결을 마무리하는 중…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Fixed date"
+msgstr ""
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Flag unexpected actions"
 msgstr "예상하지 못한 작업 표시"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Follow-up email"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Forgot password?"
@@ -2287,6 +2975,10 @@ msgstr ""
 #. placeholder {0}: filters.dateRange.from
 #: src/pages/ActivityList.tsx
 msgid "From {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "From this role’s saved requirements"
 msgstr ""
 
 #: src/pages/WindowChrome.tsx
@@ -2318,10 +3010,23 @@ msgstr ""
 msgid "Git event"
 msgstr "Git 이벤트"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Give feedback"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Good example"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
 msgid "Group"
 msgstr "그룹"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Group bot memory is not included"
+msgstr ""
 
 #: src/pages/GroupPanel.tsx
 msgid "Group settings"
@@ -2335,17 +3040,29 @@ msgstr ""
 msgid "Groups"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Guide retrieval; qualification criteria stay unchanged."
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Hang up"
 msgstr "통화 종료"
 
 #: src/lib/call-session.ts
-msgid "Hang up first, then enter the code on screen."
-msgstr "먼저 전화를 끊은 다음 화면에 표시된 코드를 입력하세요."
+msgid "Hang up first, then answer on screen."
+msgstr ""
 
 #: src/lib/call-session.ts
-msgid "Hang up, then enter the code on screen."
-msgstr "전화를 끊은 다음 화면에 표시된 코드를 입력하세요."
+msgid "Hang up, then answer on screen."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hard criteria"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "header"
@@ -2369,12 +3086,20 @@ msgstr "헤더 값"
 msgid "Hear a sample"
 msgstr "샘플 듣기"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Help me revise the saved outreach drafts for this role. Keep the changes unsent."
+msgstr ""
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Hi, this is how I'll sound when I read replies out loud."
 msgstr "안녕하세요. 답변을 소리 내어 읽을 때 이런 목소리로 들립니다."
 
 #: src/pages/Shell.tsx
 msgid "Hide bots"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
 msgstr ""
 
 #: src/pages/Auth.tsx
@@ -2396,6 +3121,26 @@ msgstr "높음"
 msgid "High"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "High probability"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "High signal"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Hiring manager"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "History"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "hour"
 msgstr "시간"
@@ -2413,9 +3158,21 @@ msgstr "실행 주기"
 msgid "How to check"
 msgstr "완료 확인 방법"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Human-entered"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "I’m done"
 msgstr "조작 끝내기"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Identified profiles"
+msgstr ""
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "If you heard that, voice is ready."
@@ -2433,6 +3190,10 @@ msgstr "이미지 업로드 영역"
 msgid "Import OpenAPI JSON"
 msgstr "OpenAPI JSON 가져오기"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Important"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 msgid "In progress"
 msgstr ""
@@ -2445,13 +3206,26 @@ msgstr ""
 msgid "Inactive"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Inbox"
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Inbox & email"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Include"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Inherit default"
 msgstr "기본 설정 사용"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Initial email"
+msgstr ""
 
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Inputs"
@@ -2464,6 +3238,10 @@ msgstr "인스턴스 API 키"
 #: src/pages/RoutineEditor.tsx
 msgid "Instruction"
 msgstr "실행할 내용"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Integration domain"
@@ -2478,6 +3256,46 @@ msgstr ""
 msgid "Integrations"
 msgstr "앱·도구 연동"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Interest"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Interested"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal assessment"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal assessment: current"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal assessment: outdated"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal review"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict: met"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict: unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Internal verdict: unmet"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
 msgid "Interval"
@@ -2491,6 +3309,23 @@ msgstr "간격 숫자"
 msgid "Interval unit"
 msgstr "간격 단위"
 
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Interview"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Interview workflow"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Introduced"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Is a company deck available?"
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Isolated"
@@ -2503,6 +3338,23 @@ msgstr ""
 #: src/pages/shell/dialogs.tsx
 msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
 msgstr "대화, 파일, 자동 실행이 영구 삭제됩니다. 이 Bot이 만든 다른 Bot은 목록에 남습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "JD"
+msgstr ""
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Job Brief"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Job description"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Job description and files"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Jump to latest"
@@ -2533,8 +3385,20 @@ msgstr "지식"
 msgid "Language"
 msgstr "언어"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Last checked"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Last synced"
+msgstr ""
+
 #: src/components/DesktopUpdates.tsx
 msgid "Later"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Latest messages"
 msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
@@ -2544,6 +3408,14 @@ msgstr ""
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "나가기"
+
+#: src/pages/Shell.tsx
+msgid "Let’s define the search."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Let’s sharpen the search."
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Light"
@@ -2560,6 +3432,22 @@ msgstr "채팅 앱 연결"
 #: src/components/AccountAccess.tsx
 msgid "Link SSO"
 msgstr "SSO 연결"
+
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "LinkedIn"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "LinkedIn missing"
+msgstr ""
+
+#. placeholder {0}: candidate.linkedinUrl ?? t`LinkedIn missing`
+#: src/pages/Shell.tsx
+msgid "LinkedIn: {0}"
+msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "List view"
@@ -2578,6 +3466,7 @@ msgid "Load earlier messages"
 msgstr "이전 메시지 불러오기"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Load more"
 msgstr ""
 
@@ -2589,9 +3478,25 @@ msgstr "이전 실행 불러오기"
 msgid "Load web images automatically"
 msgstr "웹 이미지 자동으로 불러오기"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Loaded files"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Loading activity…"
 msgstr "활동을 불러오는 중…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading contact details…"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading CRM records…"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading CRM roles…"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading integrations…"
@@ -2613,6 +3518,18 @@ msgstr "미리보기를 불러오는 중…"
 msgid "Loading rules…"
 msgstr "확인 규칙을 불러오는 중…"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Loading saved results…"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Loading sequence…"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Loading stored messages…"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Loading tools…"
 msgstr ""
@@ -2625,9 +3542,11 @@ msgstr "음성 서비스를 불러오는 중…"
 #: src/pages/Artifacts.tsx
 #: src/pages/Auth.tsx
 #: src/pages/IntegrationSetup.tsx
+#: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/PeerMessagesOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
 #: src/pages/Shell.tsx
 msgid "Loading…"
@@ -2643,6 +3562,14 @@ msgstr "로컬 접근을 허용하면 Bot이 묻지 않고 명령을 실행할 �
 
 #: src/pages/LocalSettings.tsx
 msgid "Local Server Settings"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Location"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Location not returned"
 msgstr ""
 
 #: src/pages/Paywall.tsx
@@ -2677,6 +3604,10 @@ msgstr ""
 msgid "Manage billing"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Manage connections"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Manage MCP servers"
 msgstr "MCP 서버 관리"
@@ -2704,6 +3635,22 @@ msgstr "읽음으로 표시"
 #: src/pages/BotContextMenu.tsx
 msgid "Mark as Unread"
 msgstr "읽지 않음으로 표시"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Match"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Match score"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Match tier"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -2761,9 +3708,14 @@ msgstr "참여 Bot ({GROUP_MEMBER_MIN}~{GROUP_MEMBER_MAX}개 선택)"
 
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/SettingsOverlay.tsx
 msgid "Memory"
 msgstr "기억"
+
+#: src/pages/KnowledgeSection.tsx
+msgid "Memory changed. Close and reopen it before saving again."
+msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Memory scope"
@@ -2777,6 +3729,8 @@ msgstr "멘션"
 msgid "Mentions only"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Message"
 msgstr "메시지"
@@ -2789,6 +3743,10 @@ msgstr "메시지"
 #: src/pages/Shell.tsx
 msgid "Message {activeName}"
 msgstr "{activeName}에게 메시지 보내기"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Message body unavailable"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Message composer"
@@ -2810,10 +3768,18 @@ msgstr "메시지를 입력하세요"
 msgid "Messaged {peer}"
 msgstr "{peer}에게 메시지 보냄"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Messages"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Messaging"
 msgstr "메시징"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Met"
+msgstr ""
 
 #: src/lib/call-session.ts
 msgid "Microphone failed"
@@ -2837,6 +3803,15 @@ msgstr "최소화"
 msgid "Minimize bots"
 msgstr ""
 
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "minute"
 msgstr "분"
@@ -2844,6 +3819,14 @@ msgstr "분"
 #: src/pages/RoutineSchedule.tsx
 msgid "minutes"
 msgstr "분"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Missing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Missing info"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -2900,6 +3883,7 @@ msgstr ""
 msgid "Monthly"
 msgstr "매월"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "More"
 msgstr ""
@@ -2907,6 +3891,14 @@ msgstr ""
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "More computer actions"
 msgstr "컴퓨터 작업 더보기"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "More results may be available. This is not the complete mailbox or calendar."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "More sources"
+msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Move {full} down"
@@ -2924,6 +3916,10 @@ msgstr "공용 기억으로 옮깁니다."
 msgid "Move to"
 msgstr "섹션으로 이동"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Must not"
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Mute"
 msgstr "음소거"
@@ -2931,12 +3927,18 @@ msgstr "음소거"
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Auth.tsx
 #: src/pages/GroupPanel.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Name"
 msgstr "이름"
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Name missing"
+msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Name this bot"
@@ -2950,13 +3952,27 @@ msgstr "그룹 이름"
 msgid "Name this routine"
 msgstr "이 루틴의 이름을 정하세요"
 
+#. placeholder {0}: candidate.name ?? t`Name missing`
+#. placeholder {0}: draft.candidateName
+#: src/pages/Shell.tsx
+msgid "Name: {0}"
+msgstr ""
+
 #: src/lib/roster-status.ts
 msgid "Needs an answer"
+msgstr ""
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Needs connection"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Needs input"
 msgstr "입력 필요"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Needs scheduling"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Needs takeover"
@@ -2984,6 +4000,19 @@ msgstr "새 진행 작업"
 msgid "New password"
 msgstr "새 비밀번호"
 
+#: src/pages/GroupPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New role"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New Role"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "New search"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "New section"
@@ -3001,9 +4030,29 @@ msgstr "새 스페이스"
 msgid "New ticket"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Next"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Next campaigns"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Next contact campaigns"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No additional search filters"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No agent connections yet."
 msgstr "아직 Agent 연결이 없습니다."
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No apps found"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "No apps match your search."
@@ -3037,13 +4086,45 @@ msgstr ""
 msgid "No chat apps linked yet."
 msgstr "아직 연결된 채팅 앱이 없습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No contact campaign associations were returned."
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No CRM records matched this search."
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "No CRM roles were returned."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
 msgstr "아직 그룹 채팅이 없습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No Important records matched this filter."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No internal assessment"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No internal review was returned."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "No longer active"
@@ -3081,18 +4162,38 @@ msgstr "사용 가능한 모델 목록이 없습니다."
 msgid "No models listed."
 msgstr "나열된 모델이 없습니다."
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No outreach files loaded"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "검색된 AI 서비스가 없습니다."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No recruiter messages were found."
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No research activity"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
 msgid "No results"
 msgstr "검색 결과가 없습니다"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No role linked"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No role linked yet. Describe the role in this conversation."
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "No runs match these filters."
@@ -3102,9 +4203,78 @@ msgstr ""
 msgid "No runs yet"
 msgstr "아직 실행 기록이 없습니다"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved assessments"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved candidates"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved discovery sources"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved feedback yet."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved memory in these scopes"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved questions"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved research"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No saved result rows"
+msgstr "저장된 결과 행 없음"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No saved results"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No service configured for this role."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No shortlisted candidates match these filters."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No shortlisted candidates yet."
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "아직 스킬이 없습니다"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No stored campaign associations were returned for this role."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No stored messages were returned for this contact."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No stored role-interest records were returned."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/Shell.tsx
+msgid "No subject"
+msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No team conversations yet."
@@ -3130,6 +4300,31 @@ msgstr "아직 없음"
 msgid "Normal"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "NOT"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Not a fit"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not accepted"
+msgstr ""
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Not available to this assistant"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not checked"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Not checked yet"
+msgstr ""
+
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Not connected"
 msgstr "연결되지 않음"
@@ -3141,6 +4336,18 @@ msgstr "플러그인 카탈로그에 없음"
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "나중에"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not pursuing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not returned"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Not reviewed"
+msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Nothing is still running"
@@ -3179,6 +4386,10 @@ msgstr "OAuth 연결 실패"
 msgid "OAuth expired"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Older messages"
+msgstr ""
+
 #. placeholder {0}: call.botName
 #: src/components/call/CallCard.tsx
 msgid "On a call with {0}"
@@ -3188,10 +4399,18 @@ msgstr "{0}님과 통화 중"
 msgid "On a schedule"
 msgstr "일정에 따라"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "On hold"
+msgstr ""
+
 #. placeholder {0}: preset.time
 #: src/pages/RoutineSchedule.tsx
 msgid "on the 1st at {0}"
 msgstr "매월 1일 {0}에"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "One tool per line. Empty means no tools."
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Only empty spaces can be deleted. Delete its bots and groups first."
@@ -3220,6 +4439,10 @@ msgstr ""
 msgid "Open <0>{0}</0> to finish signing in."
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Open calendar event"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Open computer settings"
 msgstr ""
@@ -3236,9 +4459,29 @@ msgstr "전체 창으로 열기"
 msgid "Open navigation"
 msgstr "메뉴 열기"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Open original email"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Open original question"
+msgstr "원래 질문 열기"
+
+#: src/pages/Shell.tsx
+msgid "Open role chat"
+msgstr ""
+
 #: src/components/computer/TerminalApp.tsx
 msgid "Open shell"
 msgstr "셸 열기"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Open the conversation to review its history, or ask WeKruit to prepare drafts from saved candidate evidence."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Open the saved sequence before editing it."
+msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Open work"
@@ -3275,6 +4518,10 @@ msgstr "선택 사항"
 msgid "Optional header value"
 msgstr "선택 사항인 헤더 값"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "OR"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Or connect an API key"
 msgstr "또는 API 키 연결"
@@ -3291,14 +4538,68 @@ msgstr "자연스럽게"
 msgid "Organization API key"
 msgstr "조직 API 키"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Organization-wide candidate-role records."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Original email results saved in this role conversation."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Original job description"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Original message"
+msgstr ""
+
 #: src/pages/shell/chat-context.tsx
 msgid "Original message unavailable"
 msgstr "원본 메시지를 사용할 수 없습니다"
+
+#. placeholder {0}: draft.email.recipients.join(", ")
+#: src/pages/Shell.tsx
+msgid "Original recipients: {0}"
+msgstr ""
+
+#. placeholder {0}: draft.email.sender
+#: src/pages/Shell.tsx
+msgid "Original sender: {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Original source"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Other model…"
 msgstr "다른 모델 직접 입력…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Outdated"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Output"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Outreach"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Outreach file review"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Outreach status"
+msgstr ""
 
 #: src/pages/Board.tsx
 msgid "Owner"
@@ -3354,9 +4655,22 @@ msgstr "API 키를 붙여넣으세요"
 msgid "Paste your API key, then test again."
 msgstr "API 키를 붙여넣은 뒤 다시 테스트하세요."
 
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Pause consideration"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
 msgstr "일시 중지됨"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Pending approval"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Phone"
+msgstr ""
 
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx
@@ -3383,11 +4697,79 @@ msgstr "재생 중…"
 msgid "Plugin"
 msgstr "플러그인"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Polished message"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Pooled in internal review"
+msgstr ""
+
 #: src/pages/RoutineEditor.tsx
 msgid "POST to"
 msgstr "POST 대상"
 
-#. placeholder {0}: props.name
+#: src/pages/RecruitingPanel.tsx
+msgid "Prefer"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferences"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Preferred criteria"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Prepare drafts"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Prepare personalized first email drafts and follow-up sequences for the selected candidates in this role, using their saved evidence. Keep missing contact details unknown. Save the drafts here. Don't send anything or enroll anyone in a campaign."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Prepared"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing a search…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing connected work…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to check availability…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read a page…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read emails…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read files…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read saved context…"
+msgstr ""
+
+#. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
 msgid "Preview {0}"
 msgstr "{0} 미리보기"
@@ -3396,7 +4778,36 @@ msgstr "{0} 미리보기"
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Preview only"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Preview only. Ask for the complete message to read the full body."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previous"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previous campaigns"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previous contact campaigns"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previously processing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Primary pipeline campaign"
+msgstr ""
+
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Priority"
 msgstr ""
 
@@ -3406,6 +4817,14 @@ msgstr "Bot 전용"
 
 #: src/pages/shell/dialogs.tsx
 msgid "Private workspace with its own bots and groups."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Profile"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Profile details"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
@@ -3421,6 +4840,18 @@ msgstr ""
 msgid "Provider"
 msgstr "서비스"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Provider status"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Provider status code"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Provider task"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Providers"
@@ -3430,12 +4861,28 @@ msgstr "서비스"
 msgid "Pull request"
 msgstr "풀 리퀘스트"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Qualifying work"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Queued"
 msgstr "대기 중"
 
 #: src/pages/Shell.tsx
 msgid "Quote"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Rank"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw search results"
+msgstr "원본 검색 결과"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Raw value"
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -3450,6 +4897,18 @@ msgstr "반응"
 msgid "Read replies aloud"
 msgstr "답변을 자동으로 읽기"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Reason"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Reasoning effort"
@@ -3463,9 +4922,25 @@ msgstr ""
 msgid "Recall only"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Receipt"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Recent"
 msgstr "최근"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recently discovered"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Recipients"
+msgstr ""
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Reconnect OAuth"
@@ -3532,11 +5007,54 @@ msgstr "작동하지 않는 컴퓨터를 다시 만듭니다."
 msgid "Recreating the computer"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter messages"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter verified"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Recruiting"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Recruiting assistant"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiting views"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workflow"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Refine in chat"
+msgstr ""
+
 #: src/App.tsx
 #: src/components/ErrorBoundary.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineRunHistory.tsx
+#: src/pages/Shell.tsx
 msgid "Refresh"
 msgstr "새로고침"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Refresh criteria"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Refresh saved results"
+msgstr ""
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Refresh view"
@@ -3549,6 +5067,10 @@ msgstr "새로고침 중…"
 #: src/lib/user-error.ts
 msgid "Registration is closed"
 msgstr "가입이 마감되었습니다"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Rejected in internal review"
+msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Release computer"
@@ -3571,6 +5093,7 @@ msgid "Remove"
 msgstr "삭제"
 
 #. placeholder {0}: attachment.file.name
+#: src/pages/GroupPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Remove {0}"
 msgstr "{0} 삭제"
@@ -3579,8 +5102,16 @@ msgstr "{0} 삭제"
 msgid "Remove {full}"
 msgstr "{full} 삭제"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Remove {name} from shortlist"
+msgstr ""
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Remove {secretName}? This bot will no longer be able to use it."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Remove filter"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -3652,6 +5183,10 @@ msgstr "키 교체"
 msgid "Replace value"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Replaced"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Reply"
 msgstr "답장"
@@ -3660,13 +5195,45 @@ msgstr "답장"
 msgid "Reply cancelled"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Reply to the selected email"
+msgstr ""
+
 #. placeholder {0}: replyNameRef.current
 #: src/pages/Shell.tsx
 msgid "Replying to {0}"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Request"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Required"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Requirements and feedback stay with this role."
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "Research & writing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research findings"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research history"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research match"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Research round"
 msgstr ""
 
 #: src/components/ComputerMaintenanceActions.tsx
@@ -3707,6 +5274,7 @@ msgid "Restart to update"
 msgstr ""
 
 #: src/pages/Shell.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Restore"
 msgstr "복원"
 
@@ -3722,9 +5290,38 @@ msgstr "마지막으로 저장된 작업 공간을 복원합니다. 컴퓨터에
 msgid "Restoring your workspace"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Results saved"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Resume"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Resume consideration"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Resume missing"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Resume ready"
+msgstr ""
+
+#. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
+#: src/pages/Shell.tsx
+msgid "Resume: {0}"
+msgstr ""
+
 #: src/components/AccountAccess.tsx
 #: src/pages/Auth.tsx
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Retry"
 msgstr "다시 시도"
 
@@ -3741,14 +5338,44 @@ msgstr ""
 msgid "Return to Rakazo"
 msgstr "Rakazo로 돌아가기"
 
+#: src/pages/Shell.tsx
+msgid "Return to the original role before saving this draft."
+msgstr ""
+
 #. placeholder {0}: doc.revision
 #: src/pages/KnowledgeSection.tsx
 msgid "rev {0}"
 msgstr "리비전 {0}"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Review in conversation"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Review provider settings and test again."
 msgstr "서비스 설정을 확인한 뒤 다시 테스트하세요."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Review status unknown"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Review the outreach files saved in this conversation."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Reviewed"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Revise in chat"
+msgstr ""
+
+#. placeholder {0}: document.revision
+#. placeholder {0}: entry.revision
+#: src/pages/RecruitingPanel.tsx
+msgid "Revision {0}"
+msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Revoke"
@@ -3757,6 +5384,59 @@ msgstr "연결 해제"
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Robot"
 msgstr "로봇"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role campaigns"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Role conversation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role definition"
+msgstr ""
+
+#. placeholder {0}: unphrasedBriefFields.length
+#: src/pages/RecruitingPanel.tsx
+msgid "Role details needing clarification: {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role interest"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role revision"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role sources"
+msgstr ""
+
+#. placeholder {0}: record.feedback.expectedRoleRevision
+#: src/pages/RecruitingPanel.tsx
+msgid "Role version {0}"
+msgstr ""
+
+#. placeholder {0}: candidate.roleVersion
+#: src/pages/Shell.tsx
+msgid "Role version: {0}"
+msgstr ""
+
+#. placeholder {0}: candidate.roleTitle
+#. placeholder {0}: workspace.role.title
+#: src/pages/Shell.tsx
+msgid "Role: {0}"
+msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Room guidance"
@@ -3777,6 +5457,10 @@ msgstr "자동 실행"
 
 #: src/pages/Paywall.tsx
 msgid "Routines that run while you're away"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Run"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -3811,13 +5495,19 @@ msgstr "실행 중…"
 msgid "Runs when this bot receives a verified message from this provider."
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Salary range"
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/Board.tsx
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/McpServersOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/dialogs.tsx
@@ -3830,6 +5520,10 @@ msgstr "백업 모델 저장"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Save credential"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Save draft"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -3850,9 +5544,77 @@ msgstr "작업 공간을 저장하고 최신 소프트웨어를 설치합니다.
 msgid "Saved"
 msgstr "저장됨"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved before latest role update"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved calendar checks in this conversation."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidate sources"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidate totals"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved candidates"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved email"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved emails"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved facts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved feedback for this role"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved files"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved outreach files"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved research results"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved results"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Saved role summary"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Saved sequence file"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved source rows"
+msgstr ""
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Saved, but list refresh failed"
 msgstr "저장했지만 목록을 새로고침하지 못했습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved, not sent"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Saved."
@@ -3875,6 +5637,7 @@ msgstr ""
 #: src/pages/GroupPanel.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/shell/bot-credentials.tsx
 #: src/pages/shell/dialogs.tsx
@@ -3885,13 +5648,36 @@ msgstr "저장 중…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "예 또는 아니요로 답하거나 문장으로 답해 주세요."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Scheduled"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Scheduling"
+msgstr ""
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Scopes"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Score / tier not returned"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 #: src/pages/shell/bot-picker.tsx
 #: src/pages/shell/command-palette.tsx
 msgid "Search"
 msgstr "검색"
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search {0}"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Search activity"
@@ -3914,6 +5700,39 @@ msgstr ""
 msgid "Search by domain"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Search candidates"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search Criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search CRM contacts"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filter mode"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search filters"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Search follow-up"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search integrations.sh"
 msgstr ""
@@ -3926,8 +5745,25 @@ msgstr "모델 검색"
 msgid "Search providers"
 msgstr "AI 서비스 검색"
 
+#: src/pages/Shell.tsx
+msgid "Search refinement"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Search results"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Search runs"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingPanel.tsx
+msgid "Search update {0}"
 msgstr ""
 
 #. placeholder {0}: filters.query.trim()
@@ -3948,6 +5784,22 @@ msgstr "대화할 Bot을 선택하세요"
 msgid "Select a connected model"
 msgstr "연결된 모델 선택"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Select a contact to read their stored details."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Select a contact to read their stored messages."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Select a CRM role to read its campaign associations."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Selected recipient unavailable"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Send"
 msgstr "보내기"
@@ -3964,25 +5816,67 @@ msgstr "답변 보내기"
 msgid "Send deletion code"
 msgstr "삭제 코드 보내기"
 
-#: src/components/AskCard.tsx
-msgid "Send it"
-msgstr "보내기"
+#: src/pages/RecruitingPanel.tsx
+msgid "Send failed"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send feedback"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Send on day"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send outcome unknown"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Send recorded"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Send reset link"
 msgstr "재설정 링크 보내기"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Send to"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "Enter 키로 전송"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Sender unavailable"
+msgstr ""
+
 #: src/components/AskCard.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "보내는 중…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sent at"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Sentry alert"
 msgstr "Sentry 알림"
+
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequence"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Sequence steps"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sequence steps and delivery status are not included in these stored campaign associations."
+msgstr ""
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Serenity endpoint is required."
@@ -4004,6 +5898,10 @@ msgstr "서버 이름"
 #: src/pages/Onboarding.tsx
 msgid "Server URL"
 msgstr "서버 URL"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Service connections"
+msgstr ""
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4029,6 +5927,10 @@ msgstr "설정 도움말"
 msgid "Shape"
 msgstr "모양"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Share the role requirements in the conversation to build this brief."
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Shared"
@@ -4050,6 +5952,32 @@ msgstr "공유 스킬"
 msgid "Shell"
 msgstr "셸"
 
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Shortlist"
+msgstr ""
+
+#. placeholder {0}: candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist {name}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlist people from search results to keep them here."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlisted"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Shortlisted only"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Show bots"
 msgstr ""
@@ -4066,6 +5994,10 @@ msgstr ""
 msgid "Show more"
 msgstr "더 보기"
 
+#: src/pages/Shell.tsx
+msgid "Show navigation"
+msgstr ""
+
 #: src/pages/Auth.tsx
 msgid "Show password"
 msgstr "비밀번호 표시"
@@ -4073,10 +6005,6 @@ msgstr "비밀번호 표시"
 #: src/pages/Shell.tsx
 msgid "Show settings"
 msgstr "설정 보기"
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Show tool activity"
-msgstr ""
 
 #: src/components/call/VoiceChatCard.tsx
 msgid "Show transcript"
@@ -4101,8 +6029,8 @@ msgid "Sign in again"
 msgstr ""
 
 #: src/pages/Auth.tsx
-msgid "Sign in to Rakazo"
-msgstr "Rakazo 로그인"
+msgid "Sign in to WeKruit Headhunter"
+msgstr ""
 
 #: src/lib/user-error.ts
 msgid "Sign in to your existing account to link SSO"
@@ -4131,6 +6059,11 @@ msgstr "작업 기술 {0}"
 msgid "Skip"
 msgstr "건너뛰기"
 
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Skip for now"
+msgstr ""
+
 #: src/lib/localized-provider-hint.ts
 msgid "Skip or deploy key"
 msgstr "건너뛰거나 배포 키"
@@ -4152,10 +6085,40 @@ msgstr ""
 msgid "Software update"
 msgstr "소프트웨어 업데이트"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Some saved contact details could not be displayed."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
+msgstr ""
+
 #: src/App.tsx
 #: src/lib/user-error.ts
+#: src/pages/Shell.tsx
 msgid "Something went wrong. Try again."
 msgstr "문제가 발생했습니다. 다시 시도하세요."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Source"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Source Artifact"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Source text"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Source unavailable"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sources"
+msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Space changed. Reopen Models to load its backup list."
@@ -4168,6 +6131,10 @@ msgstr "공간이 변경되었습니다. 백업 목록을 저장하려면 모델
 #: src/pages/shell/bot-panel.tsx
 msgid "Space default"
 msgstr "스페이스 기본값"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Space-separated scopes"
+msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Spaces"
@@ -4197,6 +6164,10 @@ msgstr "음성 모델"
 msgid "SSO is temporarily unavailable. Try again."
 msgstr "SSO를 일시적으로 사용할 수 없습니다. 다시 시도하세요."
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stage"
+msgstr ""
+
 #: src/pages/Paywall.tsx
 msgid "Start {trialDays}-day free trial"
 msgstr ""
@@ -4204,6 +6175,15 @@ msgstr ""
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Start recording"
 msgstr "작업 녹화 시작"
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Start recruiting"
+msgstr ""
+
+#: src/pages/GroupPanel.tsx
+msgid "Start with a role title or paste a job description…"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "Starting"
@@ -4213,21 +6193,46 @@ msgstr "시작 중"
 #: src/lib/roster-status.ts
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
+#: src/pages/Shell.tsx
 msgid "Starting…"
 msgstr "시작하는 중…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Statement"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Board.tsx
 msgid "Status"
 msgstr ""
 
+#. placeholder {0}: index + 1
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Step {0}"
+msgstr ""
+
+#. placeholder {0}: stepIndex + 1
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Step {0} · Email draft"
+msgstr ""
+
 #: src/components/teach/SkillDraftCard.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "Steps"
 msgstr "실행 단계"
 
 #: src/pages/Shell.tsx
 msgid "Stop"
 msgstr "중지"
+
+#: src/pages/Shell.tsx
+msgid "Stop {name}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/Shell.tsx
+msgid "Stop considering"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Stop speaking"
@@ -4237,10 +6242,18 @@ msgstr "읽기 중지"
 msgid "Stop teaching"
 msgstr "가르치기 종료"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Stopped"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Stopped."
 msgstr "중지되었습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Stored CRM history"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Stored encrypted"
@@ -4254,14 +6267,31 @@ msgstr "안전하게 저장됩니다. 이 화면에 표시되지 않습니다."
 msgid "Stream replies"
 msgstr "답변 스트리밍"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Subject"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Subject not set"
+msgstr ""
+
+#. placeholder {0}: draft.email.subject
 #: src/pages/Shell.tsx
-msgid "subagent"
-msgstr "보조 에이전트"
+msgid "Subject: {0}"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Submit"
 msgstr "확인"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Submitted"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Submitting"
+msgstr ""
 
 #: src/pages/Paywall.tsx
 msgid "Subscribe"
@@ -4289,9 +6319,25 @@ msgstr ""
 msgid "Switching…"
 msgstr "전환 중…"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Sync not confirmed"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Synced"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Syncing"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "System"
 msgstr "시스템"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Table"
+msgstr "표"
 
 #: src/pages/Shell.tsx
 msgid "Take control"
@@ -4323,6 +6369,14 @@ msgstr "Teams 메시지"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Teams not enabled"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Tell WeKruit what to change for a person, a few candidates, or the whole search."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Temporarily unavailable"
 msgstr ""
 
 #: src/components/computer/ComputerWorkspace.tsx
@@ -4357,13 +6411,37 @@ msgstr "API가 다시 작동하지 않습니다. 이 페이지를 새로 고침�
 msgid "The connection timed out."
 msgstr "연결 시간이 초과되었습니다."
 
+#: src/pages/Shell.tsx
+msgid "The file was saved. Return to the original role and retry to share it there."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "The last check failed"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "The provider is rate-limiting requests."
 msgstr "서비스가 요청 속도를 제한하고 있습니다."
 
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "The saved check returned no matching records. It does not confirm the entire account is empty."
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
 msgstr "선택한 기억 서비스는 현재 빌드에서 사용할 수 없습니다."
+
+#: src/pages/Shell.tsx
+msgid "The workspace changed. Open the role again."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "There was a problem sending this message."
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "These saved settings can't be read. Remove it and add it again."
@@ -4441,6 +6519,14 @@ msgstr ""
 msgid "This reset link is invalid or expired"
 msgstr "이 재설정 링크는 유효하지 않거나 만료되었습니다"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "This result cannot be displayed yet"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "This role changed. Select the candidate again."
+msgstr ""
+
 #: src/pages/shell/message-cards.tsx
 msgid "This server cannot be assigned without a bot."
 msgstr "연결할 Bot이 없어 이 서버를 배정할 수 없습니다."
@@ -4461,14 +6547,28 @@ msgstr "이 구독 로그인 방식은 아직 Rakazo에서 지원되지 않습�
 msgid "This week"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Thread"
+msgstr ""
+
 #: src/pages/RoutineSchedule.tsx
 msgid "Time of day"
 msgstr "실행 시각"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Timing not set"
+msgstr ""
+
 #: src/pages/Board.tsx
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Title"
 msgstr "역할"
+
+#. placeholder {0}: candidate.title
+#: src/pages/Shell.tsx
+msgid "Title: {0}"
+msgstr ""
 
 #: src/pages/ActivityList.tsx
 msgid "To"
@@ -4491,6 +6591,14 @@ msgstr "받는 사람:"
 #: src/pages/shell/chat-context.tsx
 msgid "Today"
 msgstr "오늘"
+
+#: src/pages/McpServersOverlay.tsx
+msgid "Tool access"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Tool sources"
@@ -4522,6 +6630,8 @@ msgstr ""
 
 #: src/pages/ActivityList.tsx
 #: src/pages/Onboarding.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "다시 시도"
 
@@ -4546,11 +6656,20 @@ msgid "Unassigned"
 msgstr "섹션 없음"
 
 #: src/components/SoftwareUpdateSection.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Unavailable"
 msgstr "사용할 수 없음"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unclear"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Uninstall"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Unknown"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -4561,13 +6680,25 @@ msgstr ""
 msgid "Unlink"
 msgstr "연결 해제"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unmet"
+msgstr ""
+
 #: src/components/call/CallCard.tsx
 msgid "Unmute"
 msgstr "음소거 해제"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unnamed candidate"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Unpin"
 msgstr "고정 해제"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr ""
 
 #. placeholder {0}: pending.file.name
 #: src/pages/Shell.tsx
@@ -4605,6 +6736,7 @@ msgid "Update progress"
 msgstr ""
 
 #: src/components/SoftwareUpdateSection.tsx
+#: src/pages/RecruitingPanel.tsx
 msgid "Updated"
 msgstr "업데이트됨"
 
@@ -4666,6 +6798,14 @@ msgstr ""
 msgid "Use Protected input for passwords."
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Use the attached files to define this role and start the search."
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Use the connected service to check this role. Saved results will appear here when the agent finishes."
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Use this model"
 msgstr "이 모델 사용"
@@ -4673,6 +6813,18 @@ msgstr "이 모델 사용"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Use your own key"
 msgstr "내 키 사용"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User and bot memory"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User instruction"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "User memory"
+msgstr ""
 
 #: src/components/AskCard.tsx
 #: src/pages/shell/bot-credentials.tsx
@@ -4703,9 +6855,28 @@ msgstr "확인 중…"
 msgid "Version"
 msgstr ""
 
+#. placeholder {0}: assessment.version
+#. placeholder {0}: selected.roleRevision.revision
+#. placeholder {0}: workspace.revision.revision
+#: src/pages/RecruitingPanel.tsx
+msgid "Version {0}"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "View {name}"
+msgstr ""
+
 #: src/pages/RoutineRunHistory.tsx
 msgid "View chat"
 msgstr "채팅 보기"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "View details"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "View messages"
+msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
 #: src/pages/Shell.tsx
@@ -4722,11 +6893,20 @@ msgstr "음성 대화"
 msgid "Wait a moment and test again."
 msgstr "잠시 기다린 뒤 다시 테스트하세요."
 
+#: src/pages/Shell.tsx
+msgid "Wait for this role to finish loading before saving."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Waiting for resume"
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Waiting for the API to come back…"
 msgstr "API가 다시 작동하기를 기다리는 중…"
 
 #: src/lib/roster-status.ts
+#: src/pages/Shell.tsx
 msgid "Waiting in line…"
 msgstr "줄에서 기다리는 중…"
 
@@ -4755,6 +6935,10 @@ msgstr ""
 msgid "Weekdays"
 msgstr "주중"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "WeKruit home"
+msgstr ""
+
 #: src/pages/shell/dialogs.tsx
 msgid "What about its memories?"
 msgstr "이 Bot의 기억은 어떻게 할까요?"
@@ -4763,9 +6947,17 @@ msgstr "이 Bot의 기억은 어떻게 할까요?"
 msgid "What do you want me on first?"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "What location or remote work scope applies?"
+msgstr ""
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "What result will you demonstrate?"
 msgstr "어떤 작업을 직접 보여줄까요?"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "What salary range may be stated in outreach?"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "What should this routine do each time it runs?"
@@ -4795,12 +6987,25 @@ msgstr "언제 사용할지"
 msgid "Where should bots run?"
 msgstr "Bot을 어디에서 실행할까요?"
 
+#: src/pages/GroupPanel.tsx
+msgid "Who are you looking for?"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 msgid "Won't do"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Workflow filter"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Workflow status"
+msgstr ""
+
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx
+#: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "처리 중…"
 
@@ -4842,5 +7047,5 @@ msgid "Your name"
 msgstr "이름"
 
 #: src/pages/Welcome.tsx
-msgid "Your team of always-on agents<0/>that you can give real work to."
-msgstr "언제든 실제 작업을 맡길 수 있는<0/>나만의 Agent 팀"
+msgid "Your recruiting workspace."
+msgstr ""

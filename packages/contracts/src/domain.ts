@@ -8,7 +8,7 @@ import {
   isCloudflareAiGatewayProvider,
 } from "./cloudflare-ai-gateway.js";
 import { ThreadMessageSchema } from "./events.js";
-import { Id, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
+import { Id, IsoDate, MemoryScope, RunStatus, SandboxKind } from "./ids.js";
 import { McpHeadersSchema, McpRemoteEndpointSchema, McpTransportSchema } from "./mcp.js";
 import { RunTriggerSchema } from "./runs.js";
 
@@ -468,6 +468,57 @@ export const CreateRoutineInput = z
     }
   });
 
+const RoutineUpdateFields = z.object({
+  routineId: Id,
+  name: z.string().optional(),
+  prompt: z.string().optional(),
+  crons: z.array(z.string().min(1)).optional(),
+  timezone: z.string().optional(),
+  active: z.boolean().optional(),
+  notify: z.boolean().optional(),
+  webhookEnabled: z.boolean().optional(),
+  githubEnabled: z.boolean().optional(),
+  messageProvider: z
+    .string()
+    .min(1)
+    .max(50)
+    .regex(/^[a-z0-9._-]+$/i)
+    .nullable()
+    .optional(),
+  /** Null clears the routine's own model and runs it on the bot's. */
+  modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
+  modelId: z.string().trim().min(1).max(200).nullable().optional(),
+  thinkingLevel: ThinkingLevelSchema.nullable().optional(),
+  /** ISO datetime to arm a never-run one-shot. */
+  runAt: IsoDate.optional(),
+});
+export const UpdateRoutineInput = RoutineUpdateFields.superRefine((value, ctx) => {
+  if (
+    value.crons &&
+    value.crons.length === 0 &&
+    value.webhookEnabled === false &&
+    value.githubEnabled === false &&
+    value.messageProvider === null
+  ) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Add a schedule, webhook, GitHub, or message trigger",
+      path: ["crons"],
+    });
+  }
+});
+export type UpdateRoutineInput = z.infer<typeof UpdateRoutineInput>;
+export const ScheduleUpdateToolInputSchema = RoutineUpdateFields.pick({
+  routineId: true,
+  name: true,
+  prompt: true,
+  crons: true,
+  timezone: true,
+  active: true,
+  notify: true,
+  runAt: true,
+}).strict();
+
 export const ScratchpadItemStatusSchema = z.enum(["open", "parked", "done"]);
 export type ScratchpadItemStatus = z.infer<typeof ScratchpadItemStatusSchema>;
 
@@ -623,6 +674,17 @@ export const MemoryDocumentSchema = z.object({
 });
 export type MemoryDocument = z.infer<typeof MemoryDocumentSchema>;
 
+export const MemoryRevisionSchema = z.object({
+  id: Id,
+  documentId: Id,
+  revision: z.number().int().positive(),
+  content: z.string(),
+  sourceRunId: Id.nullable(),
+  sourceThreadId: Id.nullable(),
+  createdAt: IsoDate,
+});
+export type MemoryRevision = z.infer<typeof MemoryRevisionSchema>;
+
 export const ConnectionSchema = z.object({
   id: Id,
   connectorId: z.string(),
@@ -749,6 +811,7 @@ export const McpServerSchema = z.object({
   envKeys: z.array(z.string()),
   headerKeys: z.array(z.string()),
   hasSecret: z.boolean(),
+  platformCredentialConfigured: z.boolean(),
   oauthStatus: z.enum(["none", "connected", "reconnect"]),
   enabled: z.boolean(),
   revision: z.number().int().positive(),
@@ -831,7 +894,7 @@ export const COMPUTER_UPDATE_STAGES = [
 ] as const;
 export const ComputerUpdateSchema = z.object({
   canReleaseReservation: z.boolean().optional(),
-  action: z.enum(["update", "recover"]),
+  action: z.enum(["update", "recover", "checkpoint"]),
   id: Id,
   botId: Id,
   name: z.string(),
@@ -1179,6 +1242,8 @@ export const ModelCatalogEntrySchema = z.object({
   id: z.string(),
   label: z.string(),
   billing: z.string(),
+  /** Available through deployment credentials, without a personal provider connection. */
+  deployment: z.boolean().optional(),
   auth: z.enum(["api-key", "oauth", "both"]).optional(),
   oauthLabel: z.string().optional(),
   authHint: z.string().optional(),

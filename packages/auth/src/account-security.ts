@@ -18,6 +18,7 @@ export function accountSecurity(
   email: TransactionalEmailProvider | undefined,
   ssoName?: string,
   ssoIssuer?: string,
+  ssoClientId?: string,
   passwordChangeEnabled = true,
 ): BetterAuthPlugin {
   return {
@@ -42,7 +43,9 @@ export function accountSecurity(
                 proof.value === ctx.context.session.user.id &&
                 proof.expiresAt.getTime() > Date.now(),
             ),
-            ssoLinked: accounts.some((account) => isCurrentOidcAccount(account, ssoIssuer)),
+            ssoLinked: accounts.some((account) =>
+              isCurrentOidcAccount(account, ssoIssuer, ssoClientId),
+            ),
             hasPassword: Boolean(credential?.password),
             passwordChangeEnabled,
             emailDeletion: Boolean(email),

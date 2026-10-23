@@ -99,6 +99,7 @@ export class ScriptedAgentRuntime implements AgentRuntime {
             text: turn.ask.text,
             detail: turn.ask.detail,
             actions: turn.ask.actions,
+            requestedSchema: turn.ask.requestedSchema,
           };
           return;
         }
@@ -132,6 +133,12 @@ export class ScriptedAgentRuntime implements AgentRuntime {
 export function inferScript(
   prompt: string,
   resumeFromCheckpoint?: string,
+  loadedMemory: Array<{
+    scope: "bot" | "user";
+    path: string;
+    revision: number;
+    content: string;
+  }> = [],
 ): NonNullable<AgentRunRequest["script"]> {
   const lower = prompt.toLowerCase();
   if (resumeFromCheckpoint === "takeover-skipped") {
@@ -532,7 +539,18 @@ code-b
     return [
       {
         assistant: "saving that to shared memory.",
-        toolCalls: [{ name: "save_shared_memory", args: { path, content } }],
+        toolCalls: [
+          {
+            name: "save_shared_memory",
+            args: {
+              path,
+              content,
+              expectedRevision:
+                loadedMemory.find((doc) => doc.scope === "user" && doc.path === path)?.revision ??
+                0,
+            },
+          },
+        ],
         complete: true,
       },
     ];
@@ -551,10 +569,18 @@ code-b
     ];
   }
   if (lower.includes("remember")) {
+    const current = loadedMemory.find((doc) => doc.scope === "bot" && doc.path === "MEMORY.md");
     return [
       {
         assistant: "noted — i will keep that in memory.",
-        memory: [{ scope: "bot", path: "MEMORY.md", content: `# Memory\n\n- ${prompt}\n` }],
+        memory: [
+          {
+            scope: "bot",
+            path: "MEMORY.md",
+            content: `${current?.content ?? "# Memory\n"}\n- ${prompt}\n`,
+            expectedRevision: current?.revision ?? 0,
+          },
+        ],
         complete: true,
       },
     ];

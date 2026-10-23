@@ -43,7 +43,11 @@ export function createDb(
 ): { prisma: PrismaClient; pool: Pool } {
   const pool = createPool(connectionString, options);
   const adapter = new PrismaPg(pool);
-  const prisma = new PrismaClient({ adapter });
+  // Native source/ACL validation needs a shared bounded budget for remote database round trips.
+  const prisma = new PrismaClient({
+    adapter,
+    transactionOptions: { timeout: 15_000, maxWait: 5_000 },
+  });
   return { prisma, pool };
 }
 

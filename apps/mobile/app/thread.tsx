@@ -2,17 +2,28 @@ import type { MenuAction } from "@expo/ui/community/menu";
 import { ChatMarkdown } from "@rakazo/chat-ui/native";
 import type {
   AgentSkillCatalogEntry,
+  AskAnswer,
+  AskFormContent,
+  AskFormResponse,
   Connection,
   ConnectionCatalogItem,
   MessageBlock,
   MessageReaction,
   Routine,
 } from "@rakazo/contracts";
-import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
+import {
+  canReactToThreadMessage,
+  MESSAGE_REACTIONS,
+  parseAskFormResponse,
+} from "@rakazo/contracts";
 import type { SlashActionId, ThreadItem } from "@rakazo/core";
 import {
   abortableDelay,
+  answerableAskMessageIds,
   appendNewerThreadPage,
+  askFormContent,
+  askFormDefaults,
+  askFormOptions,
   attachmentsForThread,
   buildComposerMentionOptions,
   cloudAgentHttpsUrl,
@@ -24,7 +35,6 @@ import {
   isPeerReceiptBlocks,
   isRunTerminalEvent,
   isSecretAskBlock,
-  latestAnswerableAskMessageId,
   leaveThreadWindow,
   openThreadWindow,
   plainTextFromMarkdown,
@@ -99,9 +109,11 @@ import { InlineImageAttachment } from "../components/inline-image-attachment";
 import { McpApprovalCard } from "../components/McpApprovalCard";
 import type { MarkdownArtifactPreviewTarget } from "../components/markdown-artifact-preview";
 import { MarkdownArtifactPreview } from "../components/markdown-artifact-preview";
+import { MenuPicker } from "../components/menu-picker";
 import { MessageCaption } from "../components/message-caption";
 import { MessageContextMenu } from "../components/message-context-menu";
 import { NativeActionButton } from "../components/native-action-button";
+import { NativeSwitch } from "../components/native-switch";
 import { NativeSymbol } from "../components/native-symbol";
 import { ReplyDismissButton } from "../components/reply-dismiss-button";
 import { ReplyLine } from "../components/reply-line";
@@ -235,9 +247,17 @@ function formatApprovalAnswer(
   const outcome = selectedAction?.outcome;
   if (approval && outcome === "created") return t("Created");
   if (approval && outcome === "cancelled") return t("Cancelled");
-  if (approval && answer === "allow") return t("Allowed once");
-  if (approval && answer === "always") return t("Always allowed");
-  if (approval && answer === "deny") return t("Denied");
+  const label = selectedAction?.label;
+  if (approval && answer === "allow" && (label === undefined || label === "Allow once"))
+    return t("Allowed once");
+  if (
+    approval &&
+    answer === "always" &&
+    (label === undefined || label === "Always allow this tool" || label === "Always allow")
+  )
+    return t("Always allowed");
+  if (approval && answer === "deny" && (label === undefined || label === "Deny"))
+    return t("Denied");
   return t("Answered: {answer}", { answer: selectedAskActionLabel(answer, actions) });
 }
 
@@ -590,9 +610,10 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const newerLoadFailed = useRef(false);
   const pinnedScrollMetrics = useRef({ offset: 0, viewport: 0, content: 0 });
   const joinPinnedAfterLayout = useRef<number | null>(null);
-  const [markdownPreview, setMarkdownPreview] = useState<MarkdownArtifactPreviewTarget | null>(
-    null,
-  );
+  const [markdownPreview, setMarkdownPreview] = useState<{
+    threadKey: string;
+    target: MarkdownArtifactPreviewTarget;
+  } | null>(null);
   const [dismissedChoiceQuestions, setDismissedChoiceQuestions] = useState<
     ReadonlyMap<string, ReadonlySet<string>>
   >(() => new Map());
@@ -1407,6 +1428,8 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
                 event.type === "thread.cloud_agent" ||
                 event.type === "thread.cleared" ||
                 event.type === "run.waiting_input" ||
+                event.type === "run.requeued" ||
+                event.type === "run.started" ||
                 event.type === "computer.takeover.requested" ||
                 isRunTerminalEvent(event)
               ) {
@@ -1534,6 +1557,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     setReplyTarget(null);
     setReplyQuote(null);
     setQuoteTarget(null);
+    setMarkdownPreview(null);
     setAttachmentNotice(null);
     setError(null);
   }, [threadKey]);
@@ -1710,7 +1734,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   }
 
   const answerMessage = useCallback(
-    async (message: MobileMessage, answer: string, username?: string) => {
+    async (message: MobileMessage, answer: AskAnswer, username?: string) => {
       const targetBotId = botId;
       const targetGroupId = groupId;
       if (readOnly || (!targetBotId && !targetGroupId) || !message.runId) return;
@@ -1896,8 +1920,9 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     );
   }
 
-  const answerableAskMessageId = latestAnswerableAskMessageId(snap);
-  const runError = snap?.run?.status === "failed" ? (snap.run.error ?? null) : null;
+  const answerableAskIds = answerableAskMessageIds(snap);
+  const runError =
+    snap?.run?.status === "failed" && snap.run.error ? t("Something went wrong. Try again.") : null;
   const separatorIds = useMemo(() => timeSeparatorIds(visibleMessages), [visibleMessages]);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2017,7 +2042,9 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     answer: answerMessage,
     openBot,
     openComputer,
-    previewMarkdown: setMarkdownPreview,
+    previewMarkdown: (target) => {
+      if (threadKey !== undefined) setMarkdownPreview({ threadKey, target });
+    },
     previewImage: (target) =>
       router.push({
         pathname: "/image",
@@ -2113,7 +2140,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           members={snap?.members}
           readOnly={readOnly}
           onCall={onCall}
-          canAnswer={!readOnly && message.id === answerableAskMessageId}
+          canAnswer={!readOnly && answerableAskIds.includes(message.id)}
           highlighted={highlightedMessageId === message.id}
           separator={separatorIds.has(message.id)}
           replyAuthor={replyAuthor}
@@ -2145,7 +2172,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       rowActions,
       readOnly,
       onCall,
-      answerableAskMessageId,
+      answerableAskIds,
       highlightedMessageId,
       separatorIds,
       windowWidth,
@@ -2627,10 +2654,10 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         </View>
       </Modal>
       <SelectTextSheet text={selectableText} onClose={() => setSelectableText(null)} />
-      {markdownPreview && artifactTarget ? (
+      {threadKey !== undefined && markdownPreview?.threadKey === threadKey && artifactTarget ? (
         <MarkdownArtifactPreview
           threadTarget={artifactTarget}
-          target={markdownPreview}
+          target={markdownPreview.target}
           onClose={() => setMarkdownPreview(null)}
         />
       ) : null}
@@ -2802,7 +2829,7 @@ type MessageRowActions = {
   select: (text: string) => void;
   speak: (message: MobileMessage) => void;
   react: (message: MobileMessage, reaction: MessageReaction) => void;
-  answer: (message: MobileMessage, answer: string, username?: string) => Promise<void>;
+  answer: (message: MobileMessage, answer: AskAnswer, username?: string) => Promise<void>;
   openBot: (id: string, name: string) => void;
   openComputer: (id: string, name: string) => void;
   previewMarkdown: (target: MarkdownArtifactPreviewTarget) => void;
@@ -3131,7 +3158,7 @@ const MessageBubble = memo(function MessageBubble({
   message: MobileMessage;
   members?: MobileSnapshot["members"];
   canAnswer: boolean;
-  onAnswer: (message: MobileMessage, answer: string, username?: string) => Promise<void>;
+  onAnswer: (message: MobileMessage, answer: AskAnswer, username?: string) => Promise<void>;
   onOpenBot: (botId: string, name: string) => void;
   onOpenComputer: (botId: string, name: string) => void;
   onChoiceDismissed?: (question: string) => void;
@@ -3154,6 +3181,116 @@ const MessageBubble = memo(function MessageBubble({
     (block): block is Extract<MessageBlock, { kind: "mcp_approval" }> =>
       block.kind === "mcp_approval",
   );
+  const attachments = message.blocks.filter(
+    (block) => block.kind === "image" || block.kind === "file",
+  );
+  function renderAttachment(
+    attachment: Extract<MessageBlock, { kind: "image" | "file" }>,
+    index: number,
+  ) {
+    return attachment.kind === "image" ? (
+      attachment.artifactId && isInlineImageMimeType(attachment.mimeType) ? (
+        <InlineImageAttachment
+          key={`${attachment.artifactId}-${index}`}
+          threadTarget={artifactTarget}
+          artifactId={attachment.artifactId}
+          name={attachment.name ?? t("Image")}
+          mimeType={attachment.mimeType ?? "image/png"}
+          labelColor={message.role === "user" ? tokens.secondaryForeground : tokens.foreground}
+          pressableProps={actionProps}
+          onOpen={() =>
+            onPreviewImage({
+              artifactId: attachment.artifactId!,
+              name: attachment.name ?? t("Image"),
+              mimeType: attachment.mimeType ?? "image/png",
+            })
+          }
+        />
+      ) : (
+        <Pressable
+          {...actionProps}
+          key={`${attachment.artifactId ?? attachment.name ?? "image"}-${index}`}
+          onPress={() =>
+            attachment.artifactId
+              ? void openMobileArtifact(
+                  artifactTarget,
+                  attachment.artifactId,
+                  attachment.name ?? t("Image"),
+                  attachment.mimeType ?? "image/png",
+                ).catch((err) =>
+                  Alert.alert(t("Could not open image"), errorText(err, t("Try again."))),
+                )
+              : undefined
+          }
+        >
+          <Text
+            style={{
+              color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
+              fontSize: 15,
+            }}
+          >
+            🖼 {attachment.name ?? t("Image")}
+          </Text>
+        </Pressable>
+      )
+    ) : (
+      <Pressable
+        {...actionProps}
+        key={`${attachment.artifactId ?? attachment.name ?? "file"}-${index}`}
+        onPress={() =>
+          attachment.preview
+            ? onPreviewMarkdown({
+                artifactId: attachment.artifactId,
+                name: attachment.name,
+                mimeType: attachment.mimeType,
+                preview: attachment.preview,
+                messageId: message.id,
+              })
+            : attachment.artifactId
+              ? attachment.mimeType === "text/markdown"
+                ? onPreviewMarkdown({
+                    artifactId: attachment.artifactId,
+                    name: attachment.name ?? t("Markdown file"),
+                    mimeType: attachment.mimeType,
+                  })
+                : void openMobileArtifact(
+                    artifactTarget,
+                    attachment.artifactId,
+                    attachment.name ?? t("File"),
+                    attachment.mimeType ?? "text/plain",
+                  ).catch((err) =>
+                    Alert.alert(t("Could not open file"), errorText(err, t("Try again."))),
+                  )
+              : undefined
+        }
+      >
+        <Text
+          style={{
+            color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
+            fontSize: 15,
+          }}
+        >
+          📎 {attachment.preview?.label ?? attachment.name ?? t("File")}
+        </Text>
+        {attachment.preview?.source === null ? (
+          <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+            {t("Source unavailable")}
+          </Text>
+        ) : null}
+        {formatFileSize(attachment.size) ? (
+          <Text
+            style={{
+              color: tokens.mutedForeground,
+              marginTop: 4,
+              fontSize: 13,
+            }}
+          >
+            {formatFileSize(attachment.size)}
+          </Text>
+        ) : null}
+      </Pressable>
+    );
+  }
   const ask = message.blocks.find(
     (block): block is Extract<MessageBlock, { kind: "ask" }> =>
       block.kind === "ask" && !isApprovalAskBlock(block) && !block.actions?.length,
@@ -3186,6 +3323,7 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
+        {attachments.map(renderAttachment)}
       </View>
     );
   }
@@ -3308,18 +3446,6 @@ const MessageBubble = memo(function MessageBubble({
                   : special.status}
           </Text>
         </View>
-        {special.task ? (
-          <Text style={{ color: tokens.mutedForeground, marginTop: 8, fontSize: 13.5 }}>
-            {special.task}
-          </Text>
-        ) : null}
-        {special.result || special.progress ? (
-          <View style={{ marginTop: 8 }}>
-            <ChatMarkdown palette={tokens} colorScheme={colorScheme} streaming={running}>
-              {special.result || special.progress || ""}
-            </ChatMarkdown>
-          </View>
-        ) : null}
       </Pressable>
     );
   }
@@ -3513,12 +3639,13 @@ const MessageBubble = memo(function MessageBubble({
               {formatApprovalAnswer(
                 askBlock.answer,
                 askBlock.actions,
-                isApprovalAskBlock(askBlock),
+                Boolean(askBlock.approvalEffectId),
               )}
             </Text>
           ) : canAnswer && onAnswer ? (
             <AskActions
               actions={askBlock.actions}
+              allowCustomAnswer={!isApprovalAskBlock(askBlock) && !isSecretAskBlock(askBlock)}
               accessibilityActions={actionProps.accessibilityActions}
               onAccessibilityAction={actionProps.onAccessibilityAction}
               onAnswer={(answer) => onAnswer(message, answer)}
@@ -3551,12 +3678,10 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
+        {attachments.map(renderAttachment)}
       </View>
     );
   }
-  const attachments = message.blocks.filter(
-    (block) => block.kind === "image" || block.kind === "file",
-  );
   const caption = message.blocks
     .flatMap((block) => {
       if (block.kind === "channel_message" && block.text) {
@@ -3605,99 +3730,7 @@ const MessageBubble = memo(function MessageBubble({
             streaming={message.id.startsWith("progress:")}
           />
         ) : null}
-        {attachments.map((attachment, index) =>
-          attachment.kind === "image" ? (
-            attachment.artifactId && isInlineImageMimeType(attachment.mimeType) ? (
-              <InlineImageAttachment
-                key={`${attachment.artifactId}-${index}`}
-                threadTarget={artifactTarget}
-                artifactId={attachment.artifactId}
-                name={attachment.name ?? t("Image")}
-                mimeType={attachment.mimeType ?? "image/png"}
-                labelColor={
-                  message.role === "user" ? tokens.secondaryForeground : tokens.foreground
-                }
-                pressableProps={actionProps}
-                onOpen={() =>
-                  onPreviewImage({
-                    artifactId: attachment.artifactId!,
-                    name: attachment.name ?? t("Image"),
-                    mimeType: attachment.mimeType ?? "image/png",
-                  })
-                }
-              />
-            ) : (
-              <Pressable
-                {...actionProps}
-                key={`${attachment.artifactId ?? attachment.name ?? "image"}-${index}`}
-                onPress={() =>
-                  attachment.artifactId
-                    ? void openMobileArtifact(
-                        artifactTarget,
-                        attachment.artifactId,
-                        attachment.name ?? t("Image"),
-                        attachment.mimeType ?? "image/png",
-                      ).catch((err) =>
-                        Alert.alert(t("Could not open image"), errorText(err, t("Try again."))),
-                      )
-                    : undefined
-                }
-              >
-                <Text
-                  style={{
-                    color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
-                    fontSize: 15,
-                  }}
-                >
-                  🖼 {attachment.name ?? t("Image")}
-                </Text>
-              </Pressable>
-            )
-          ) : (
-            <Pressable
-              {...actionProps}
-              key={`${attachment.artifactId ?? attachment.name ?? "file"}-${index}`}
-              onPress={() =>
-                attachment.artifactId
-                  ? attachment.mimeType === "text/markdown"
-                    ? onPreviewMarkdown({
-                        artifactId: attachment.artifactId,
-                        name: attachment.name ?? t("Markdown file"),
-                        mimeType: attachment.mimeType,
-                      })
-                    : void openMobileArtifact(
-                        artifactTarget,
-                        attachment.artifactId,
-                        attachment.name ?? t("File"),
-                        attachment.mimeType ?? "text/plain",
-                      ).catch((err) =>
-                        Alert.alert(t("Could not open file"), errorText(err, t("Try again."))),
-                      )
-                  : undefined
-              }
-            >
-              <Text
-                style={{
-                  color: message.role === "user" ? tokens.secondaryForeground : tokens.foreground,
-                  fontSize: 15,
-                }}
-              >
-                📎 {attachment.name ?? t("File")}
-              </Text>
-              {formatFileSize(attachment.size) ? (
-                <Text
-                  style={{
-                    color: tokens.mutedForeground,
-                    marginTop: 4,
-                    fontSize: 13,
-                  }}
-                >
-                  {formatFileSize(attachment.size)}
-                </Text>
-              ) : null}
-            </Pressable>
-          ),
-        )}
+        {attachments.map(renderAttachment)}
         {appConnectBlocks.map((block, index) => (
           <AppConnectCard
             key={`${block.provider}-${index}`}
@@ -3892,7 +3925,7 @@ function AskBlock({
 }: {
   ask: Extract<MobileMessage["blocks"][number], { kind: "ask" }>;
   canAnswer: boolean;
-  onAnswer: (answer: string, username?: string) => Promise<void>;
+  onAnswer: (answer: AskAnswer, username?: string) => Promise<void>;
   actionProps: MessageActionProps;
 }) {
   const tokens = useMobileTokens();
@@ -3901,6 +3934,9 @@ function AskBlock({
   const [username, setUsername] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [formValues, setFormValues] = useState<AskFormContent>(() =>
+    ask.requestedSchema ? askFormDefaults(ask.requestedSchema) : {},
+  );
   const answered = ask.status === "answered";
   const secretInput = isSecretAskBlock(ask);
   const loginInput = secretInput && ask.credential?.auth.type === "login";
@@ -3917,7 +3953,7 @@ function AskBlock({
   async function submit() {
     if (submitting) return;
     if (incomplete) return;
-    const submitValue = secretInput ? answer : answer.trim();
+    const submitValue = answer;
     const submitUsername = loginInput ? username.trim() : undefined;
     setSubmitting(true);
     setError(null);
@@ -3928,6 +3964,25 @@ function AskBlock({
       setError(
         secretInput ? t("Could not send answer") : errorText(cause, t("Could not send answer")),
       );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitForm(action: AskFormResponse["action"]) {
+    if (submitting || !ask.requestedSchema) return;
+    setError(null);
+    try {
+      const response = parseAskFormResponse(
+        ask.requestedSchema,
+        action === "accept"
+          ? { action, content: askFormContent(ask.requestedSchema, formValues) }
+          : { action },
+      );
+      setSubmitting(true);
+      await onAnswer(response);
+    } catch (cause) {
+      setError(errorText(cause, t("Could not send answer")));
     } finally {
       setSubmitting(false);
     }
@@ -3962,8 +4017,146 @@ function AskBlock({
       ) : null}
       {answered ? (
         <Text style={{ color: tokens.success, fontSize: 14 }}>
-          {secretInput ? t("Saved") : t("Answered: {answer}", { answer: ask.answer ?? t("Done") })}
+          {secretInput
+            ? t("Saved")
+            : ask.approvalEffectId
+              ? formatApprovalAnswer(ask.answer, ask.actions, true)
+              : t("Answered: {answer}", { answer: ask.answer ?? t("Done") })}
         </Text>
+      ) : canAnswer && ask.requestedSchema ? (
+        <>
+          {Object.entries(ask.requestedSchema.properties).map(([name, field]) => {
+            const label = field.title ?? name;
+            const options = askFormOptions(field);
+            const value = formValues[name];
+            const setValue = (next: AskFormContent[string] | undefined) =>
+              setFormValues((current: AskFormContent) => {
+                const values = { ...current };
+                if (next === undefined) delete values[name];
+                else values[name] = next;
+                return values;
+              });
+            return (
+              <View key={name} style={{ gap: 6 }}>
+                <Text style={{ color: tokens.foreground, fontWeight: "600" }}>
+                  {label}
+                  {ask.requestedSchema!.required?.includes(name) ? " *" : ""}
+                </Text>
+                {field.description ? (
+                  <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+                    {field.description}
+                  </Text>
+                ) : null}
+                {field.type === "array" ? (
+                  options?.map((option) => (
+                    <View
+                      key={option.value}
+                      style={{
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 8,
+                      }}
+                    >
+                      <Text style={{ color: tokens.foreground, flex: 1 }}>{option.label}</Text>
+                      <NativeSwitch
+                        accessibilityLabel={`${label}: ${option.label}`}
+                        disabled={submitting}
+                        value={Array.isArray(value) && value.includes(option.value)}
+                        onValueChange={(checked) =>
+                          setValue(
+                            checked
+                              ? [...(Array.isArray(value) ? value : []), option.value]
+                              : (Array.isArray(value) ? value : []).filter(
+                                  (item) => item !== option.value,
+                                ),
+                          )
+                        }
+                      />
+                    </View>
+                  ))
+                ) : field.type === "boolean" ? (
+                  <NativeSwitch
+                    accessibilityLabel={label}
+                    disabled={submitting}
+                    value={value === true}
+                    onValueChange={setValue}
+                  />
+                ) : options ? (
+                  <View
+                    pointerEvents={submitting ? "none" : "auto"}
+                    accessibilityElementsHidden={submitting}
+                    importantForAccessibility={submitting ? "no-hide-descendants" : "auto"}
+                  >
+                    <MenuPicker
+                      label={label}
+                      choices={[
+                        { key: "", label: t("Select") },
+                        ...options.map((option, index) => ({
+                          key: String(index),
+                          label: option.label,
+                        })),
+                      ]}
+                      value={
+                        value === undefined
+                          ? ""
+                          : String(options.findIndex((option) => option.value === value))
+                      }
+                      onChange={(key) => {
+                        if (!submitting)
+                          setValue(key === "" ? undefined : options[Number(key)]?.value);
+                      }}
+                    />
+                  </View>
+                ) : (
+                  <TextInput
+                    accessibilityLabel={label}
+                    accessibilityHint={field.description}
+                    multiline={field.type === "string" && !("format" in field && field.format)}
+                    value={
+                      typeof value === "string" || typeof value === "number" ? String(value) : ""
+                    }
+                    onChangeText={setValue}
+                    keyboardType={
+                      field.type === "number" || field.type === "integer"
+                        ? "numbers-and-punctuation"
+                        : "format" in field && field.format === "uri"
+                          ? "url"
+                          : "format" in field && field.format === "email"
+                            ? "email-address"
+                            : "default"
+                    }
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    editable={!submitting}
+                    style={[
+                      askInputStyles.field,
+                      { borderColor: tokens.border, color: tokens.foreground },
+                    ]}
+                  />
+                )}
+              </View>
+            );
+          })}
+          <NativeActionButton
+            label={t("Send answer")}
+            disabled={submitting}
+            busy={submitting}
+            onPress={() => void submitForm("accept")}
+          />
+          <NativeActionButton
+            label={t("Decline")}
+            disabled={submitting}
+            prominence="secondary"
+            onPress={() => void submitForm("decline")}
+          />
+          <NativeActionButton
+            label={t("Cancel")}
+            disabled={submitting}
+            prominence="plain"
+            onPress={() => void submitForm("cancel")}
+          />
+        </>
       ) : canAnswer ? (
         <>
           {loginInput ? (
@@ -3990,11 +4183,12 @@ function AskBlock({
             placeholder={secretInput ? secretLabel : t("Type your answer")}
             placeholderTextColor={tokens.mutedForeground}
             secureTextEntry={secretInput}
+            multiline={!secretInput}
             autoComplete="off"
             autoCorrect={secretInput ? false : undefined}
             autoCapitalize={secretInput ? "none" : "sentences"}
             editable={!submitting}
-            onSubmitEditing={() => void submit()}
+            onSubmitEditing={secretInput ? () => void submit() : undefined}
             style={[askInputStyles.field, { borderColor: tokens.border, color: tokens.foreground }]}
           />
           <NativeActionButton

@@ -56,7 +56,7 @@ test("restricted signup waits for mailbox verification", async ({ page }, testIn
   await expect(page.getByRole("heading", { name: "Check your email" })).toBeVisible();
   await captureScreenshot(page, testInfo, "signup-verification-required");
   await page.getByRole("link", { name: "Back to sign in" }).click();
-  await expect(page.getByRole("heading", { name: "Sign in to Rakazo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to WeKruit Headhunter" })).toBeVisible();
 });
 
 test("signed-out welcome fits a narrow phone and offers sign in", async ({ page }, testInfo) => {
@@ -75,7 +75,7 @@ test("signed-out welcome fits a narrow phone and offers sign in", async ({ page 
   await captureScreenshot(page, testInfo, "logged-out-welcome-phone");
   await main.getByRole("link", { name: "Sign in", exact: true }).click();
   await expect(page).toHaveURL(/\/sign-in$/);
-  await expect(page.getByRole("heading", { name: "Sign in to Rakazo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to WeKruit Headhunter" })).toBeVisible();
 });
 
 test("logout protects bot deep links and sign-in restores the session", async ({
@@ -123,19 +123,21 @@ test("logout protects bot deep links and sign-in restores the session", async ({
   await captureScreenshot(page, testInfo, "36-account-menu");
 
   await page.getByRole("button", { name: "Log out" }).click();
-  await expect(page.getByRole("heading", { name: "Sign in to Rakazo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to WeKruit Headhunter" })).toBeVisible();
   await page.goto("/");
   await expect(page.locator('[data-rakazo-surface="welcome"]')).toBeVisible();
-  await expect(page.getByText(/Your team of always-on agents/)).toBeVisible();
+  await expect(page.getByText("Your recruiting workspace.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: /Sign up/ }).click();
   await expect(page).toHaveURL(/\/sign-up$/);
-  await expect(page.getByRole("heading", { name: "Create your Rakazo" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Create your WeKruit Headhunter account" }),
+  ).toBeVisible();
   await page.goto("/");
   await captureScreenshot(page, testInfo, "37-logged-out-welcome");
 
   await page.goto(protectedBotPath);
   await page.waitForURL((url) => url.pathname === "/sign-in");
-  await expect(page.getByRole("heading", { name: "Sign in to Rakazo" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to WeKruit Headhunter" })).toBeVisible();
   await expect(page.getByText("Chief", { exact: true })).toHaveCount(0);
   await expect(page.getByText(userName, { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Email")).toHaveAttribute("autocomplete", "username");

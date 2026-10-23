@@ -1,7 +1,17 @@
 import * as z from "zod";
 import { botSecretDestinationSchema } from "./bot-secrets.js";
-import { Id } from "./ids.js";
+import { Id, IsoDate } from "./ids.js";
 import { McpTransportSchema } from "./mcp.js";
+import {
+  RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
+  ReadRecruitingSourceInput,
+  RecruitingActionDeliveryStateSchema,
+  RecruitingArtifactRefSchema,
+  RecruitingAssessmentAskTargetSchema,
+  RecruitingCandidateFeedbackSelectionSchema,
+  RecruitingCorrespondenceReferenceSchema,
+  RecruitingId,
+} from "./recruiting.js";
 
 export const ProductEventType = z.enum([
   "thread.message.created",
@@ -18,6 +28,7 @@ export const ProductEventType = z.enum([
   "thread.cloud_agent",
   "thread.call.ended",
   "run.started",
+  "run.requeued",
   "run.steering.claimed",
   "run.checkpointed",
   "run.waiting_input",
@@ -38,6 +49,7 @@ export const ProductEventType = z.enum([
   "skill.draft.created",
   "skill.saved",
   "effect.recorded",
+  "effect.approval.answered",
   "agent.tool.called",
   "agent.tool.completed",
   "effect.reconciled",
@@ -49,6 +61,14 @@ export const ProductEventType = z.enum([
   "group.created",
   "group.updated",
   "group.handoff",
+  "recruiting.changed",
+  "recruiting.context.adopted",
+  "recruiting.action.transitioned",
+  "recruiting.read",
+  "recruiting.candidates.saved",
+  "recruiting.material.read",
+  "recruiting.assessment.saved",
+  "recruiting.question.asked",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
 ]);
@@ -93,13 +113,119 @@ const ChartBlock = z
 export const SecretAskPurpose = z.enum(["otp", "password", "api_key"]);
 export type SecretAskPurpose = z.infer<typeof SecretAskPurpose>;
 
-export const MessageBlock = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("text"), text: z.string() }),
-  z.object({
-    kind: z.literal("card"),
-    lines: z.array(z.object({ k: z.string(), v: z.string() })),
+// ponytail: MCP form-mode's flat vocabulary; expand with upstream fields rather
+// than a separate schema engine. Zod's native importer validates formats/bounds.
+const formTitle = { title: z.string().optional(), description: z.string().optional() };
+const formOption = z.strictObject({ const: z.string(), title: z.string() });
+const formString = z.strictObject({
+  ...formTitle,
+  type: z.literal("string"),
+  minLength: z.number().int().nonnegative().optional(),
+  maxLength: z.number().int().nonnegative().optional(),
+  format: z.enum(["date", "uri", "email", "date-time"]).optional(),
+  default: z.string().optional(),
+});
+export const AskFormFieldSchema = z.union([
+  formString,
+  z.strictObject({
+    ...formTitle,
+    type: z.literal("string"),
+    enum: z.array(z.string()).min(1),
+    enumNames: z.array(z.string()).optional(),
+    default: z.string().optional(),
   }),
-  z.object({
+  z.strictObject({
+    ...formTitle,
+    type: z.literal("string"),
+    oneOf: z.array(formOption).min(1),
+    default: z.string().optional(),
+  }),
+  z.strictObject({
+    ...formTitle,
+    type: z.enum(["number", "integer"]),
+    minimum: z.number().optional(),
+    maximum: z.number().optional(),
+    default: z.number().optional(),
+  }),
+  z.strictObject({ ...formTitle, type: z.literal("boolean"), default: z.boolean().optional() }),
+  z.strictObject({
+    ...formTitle,
+    type: z.literal("array"),
+    minItems: z.number().int().nonnegative().optional(),
+    maxItems: z.number().int().nonnegative().optional(),
+    items: z.union([
+      z.strictObject({ type: z.literal("string"), enum: z.array(z.string()).min(1) }),
+      z.strictObject({ anyOf: z.array(formOption).min(1) }),
+    ]),
+    default: z.array(z.string()).optional(),
+  }),
+]);
+export type AskFormField = z.infer<typeof AskFormFieldSchema>;
+export const AskRequestedSchema = z
+  .strictObject({
+    type: z.literal("object"),
+    properties: z.record(z.string(), AskFormFieldSchema),
+    required: z.array(z.string()).optional(),
+  })
+  .refine(
+    (schema) => schema.required?.every((name) => Object.hasOwn(schema.properties, name)) ?? true,
+    "Required fields must exist",
+  );
+export type AskRequestedSchema = z.infer<typeof AskRequestedSchema>;
+const AskFormContent = z.record(
+  z.string(),
+  z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]),
+);
+export type AskFormContent = z.infer<typeof AskFormContent>;
+export const AskFormResponseSchema = z.discriminatedUnion("action", [
+  z.strictObject({ action: z.literal("accept"), content: AskFormContent }),
+  z.strictObject({ action: z.literal("cancel") }),
+  z.strictObject({ action: z.literal("decline") }),
+]);
+export type AskFormResponse = z.infer<typeof AskFormResponseSchema>;
+export const AskAnswerSchema = z.union([z.string().min(1), AskFormResponseSchema]);
+export type AskAnswer = z.infer<typeof AskAnswerSchema>;
+
+export function parseAskFormResponse(
+  schema: AskRequestedSchema,
+  response: unknown,
+): AskFormResponse {
+  const parsed = AskFormResponseSchema.parse(response);
+  if (parsed.action !== "accept") return parsed;
+  // JSON Schema defaults are UI suggestions, not implicit user answers.
+  const properties = Object.fromEntries(
+    Object.entries(schema.properties).map(([name, { default: _default, ...field }]) => [
+      name,
+      field,
+    ]),
+  );
+  const result = z
+    .fromJSONSchema({ ...schema, properties, additionalProperties: false })
+    .safeParse(parsed.content);
+  if (!result.success)
+    throw new Error(
+      result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("\n"),
+    );
+  const content = result.data;
+  return { action: "accept", content: AskFormContent.parse(content) };
+}
+
+const askQuestion = { question: z.string().min(1).max(240) };
+export const AskUserInputSchema = z.union([
+  z.strictObject({
+    ...askQuestion,
+    options: z
+      .array(z.string().trim().min(1).max(80))
+      .min(2)
+      .max(4)
+      .refine((values) => new Set(values).size === values.length),
+  }),
+  z.strictObject({ ...askQuestion, requestedSchema: AskRequestedSchema }),
+]);
+export const AskUserInputJsonSchema = z.toJSONSchema(AskUserInputSchema);
+
+export const AskBlockSchema = z
+  .object({
     kind: z.literal("ask"),
     text: z.string(),
     approvalEffectId: Id.optional(),
@@ -113,6 +239,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
     status: z.enum(["pending", "answered"]).optional(),
     answer: z.string().optional(),
+    requestedSchema: AskRequestedSchema.optional(),
+    formResponse: AskFormResponseSchema.optional(),
     actions: z
       .array(
         z.object({
@@ -122,7 +250,34 @@ export const MessageBlock = z.discriminatedUnion("kind", [
         }),
       )
       .optional(),
+  })
+  .refine(
+    (block) =>
+      !block.requestedSchema ||
+      (!block.approvalEffectId &&
+        block.input !== "secret" &&
+        !block.purpose &&
+        !block.credential &&
+        !block.actions?.length),
+    "A form cannot be an approval, secret or choice card",
+  )
+  .refine(
+    (block) => !block.formResponse || Boolean(block.requestedSchema && block.status === "answered"),
+    "A form response belongs to an answered form",
+  );
+
+export const MessageBlock = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("text"),
+    text: z.string(),
+    recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
+    correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
   }),
+  z.object({
+    kind: z.literal("card"),
+    lines: z.array(z.object({ k: z.string(), v: z.string() })),
+  }),
+  AskBlockSchema,
   z.object({
     kind: z.literal("choice"),
     question: z.string(),
@@ -243,6 +398,9 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     mimeType: z.string(),
     name: z.string(),
     size: z.number().int().nonnegative(),
+    preview: z
+      .object({ label: z.string(), source: ReadRecruitingSourceInput.nullable() })
+      .optional(),
   }),
   z.object({
     kind: z.literal("handoff"),
@@ -327,17 +485,160 @@ export function foldComputerCommands<T extends ComputerCommand>(events: T[]): T[
   return [...byId.values()];
 }
 
-export const ProductEventSchema = z.object({
-  id: Id,
-  spaceId: Id,
-  threadId: Id,
-  botId: Id,
-  seq: z.number().int().nonnegative(),
-  type: ProductEventType,
-  runId: Id.optional(),
-  createdAt: z.string(),
-  payload: z.record(z.string(), z.unknown()),
+export const RecruitingChangedPayloadSchema = z.strictObject({
+  roleId: RecruitingId.nullable(),
 });
+export type RecruitingChangedPayload = z.infer<typeof RecruitingChangedPayloadSchema>;
+
+export const RecruitingContextAdoptedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  contextArtifact: RecruitingArtifactRefSchema,
+});
+export type RecruitingContextAdoptedPayload = z.infer<typeof RecruitingContextAdoptedPayloadSchema>;
+
+export const RecruitingActionTransitionedPayloadSchema = z.strictObject({
+  taskId: RecruitingId,
+  actionId: RecruitingId,
+  from: RecruitingActionDeliveryStateSchema.nullable(),
+  to: RecruitingActionDeliveryStateSchema,
+});
+export type RecruitingActionTransitionedPayload = z.infer<
+  typeof RecruitingActionTransitionedPayloadSchema
+>;
+
+export const RecruitingReadPayloadSchema = z.discriminatedUnion("phase", [
+  z.strictObject({
+    phase: z.literal("bound"),
+    taskId: RecruitingId,
+    actionId: RecruitingId,
+    effectId: RecruitingId,
+    toolName: z.enum(["get_task", "get_rows"]),
+  }),
+  z.strictObject({
+    phase: z.literal("recorded"),
+    taskId: RecruitingId,
+    actionId: RecruitingId,
+    effectId: RecruitingId,
+    outputArtifact: RecruitingArtifactRefSchema,
+  }),
+]);
+export type RecruitingReadPayload = z.infer<typeof RecruitingReadPayloadSchema>;
+
+export const RecruitingCandidatesSavedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  effectId: RecruitingId,
+  mcpServerId: RecruitingId,
+  serverRevision: z.number().int().positive(),
+  providerTaskId: RecruitingId,
+  requestCursor: z.string().nullable(),
+  outputArtifact: RecruitingArtifactRefSchema,
+  candidateOutputSchema: z.literal(RECRUITING_CANDIDATE_OUTPUT_SCHEMA),
+});
+export type RecruitingCandidatesSavedPayload = z.infer<
+  typeof RecruitingCandidatesSavedPayloadSchema
+>;
+
+export const RecruitingMaterialReadPayloadSchema = z.strictObject({
+  reader: z.literal("web_fetch"),
+  artifact: RecruitingArtifactRefSchema,
+  url: z.httpUrl(),
+  readAt: IsoDate,
+});
+export type RecruitingMaterialReadPayload = z.infer<typeof RecruitingMaterialReadPayloadSchema>;
+
+export const RecruitingAssessmentSavedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  candidateKey: RecruitingId,
+  version: z.number().int().positive(),
+  effectId: RecruitingId,
+});
+export type RecruitingAssessmentSavedPayload = z.infer<
+  typeof RecruitingAssessmentSavedPayloadSchema
+>;
+
+export const RecruitingQuestionAskedPayloadSchema = z.strictObject({
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  target: RecruitingAssessmentAskTargetSchema,
+  effectId: RecruitingId,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+});
+export type RecruitingQuestionAskedPayload = z.infer<typeof RecruitingQuestionAskedPayloadSchema>;
+
+export const NativeAskAnswerPayloadSchema = z.strictObject({
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  answerMessageId: Id,
+  answeredByUserId: Id,
+});
+export type NativeAskAnswerPayload = z.infer<typeof NativeAskAnswerPayloadSchema>;
+
+export const EffectApprovalAnsweredPayloadSchema = z.strictObject({
+  effectId: Id,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  answeredByUserId: Id,
+  answer: z.enum(["allow", "always", "deny"]),
+  requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+});
+export type EffectApprovalAnsweredPayload = z.infer<typeof EffectApprovalAnsweredPayloadSchema>;
+
+const RunRequeuedPayloadSchema = z.strictObject({
+  status: z.enum(["queued", "waiting_takeover"]),
+});
+
+export const ProductEventSchema = z
+  .object({
+    id: Id,
+    spaceId: Id,
+    threadId: Id,
+    botId: Id,
+    seq: z.number().int().nonnegative(),
+    type: ProductEventType,
+    runId: Id.optional(),
+    createdAt: z.string(),
+    payload: z.record(z.string(), z.unknown()),
+  })
+  .superRefine((event, ctx) => {
+    if (event.type === "run.requeued" && !event.runId) {
+      ctx.addIssue({ code: "custom", path: ["runId"], message: "Requeue requires its run" });
+    }
+    const schema =
+      event.type === "recruiting.changed"
+        ? RecruitingChangedPayloadSchema
+        : event.type === "recruiting.context.adopted"
+          ? RecruitingContextAdoptedPayloadSchema
+          : event.type === "recruiting.action.transitioned"
+            ? RecruitingActionTransitionedPayloadSchema
+            : event.type === "recruiting.read"
+              ? RecruitingReadPayloadSchema
+              : event.type === "recruiting.candidates.saved"
+                ? RecruitingCandidatesSavedPayloadSchema
+                : event.type === "recruiting.material.read"
+                  ? RecruitingMaterialReadPayloadSchema
+                  : event.type === "recruiting.assessment.saved"
+                    ? RecruitingAssessmentSavedPayloadSchema
+                    : event.type === "recruiting.question.asked"
+                      ? RecruitingQuestionAskedPayloadSchema
+                      : event.type === "thread.choice"
+                        ? NativeAskAnswerPayloadSchema
+                        : event.type === "effect.approval.answered"
+                          ? EffectApprovalAnsweredPayloadSchema
+                          : event.type === "run.requeued"
+                            ? RunRequeuedPayloadSchema
+                            : null;
+    if (!schema) return;
+    const parsed = schema.safeParse(event.payload);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        ctx.addIssue({ ...issue, path: ["payload", ...issue.path] });
+      }
+    }
+  });
 export type ProductEvent = z.infer<typeof ProductEventSchema>;
 
 export const ReplyPreviewSchema = z.object({

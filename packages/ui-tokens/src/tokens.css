@@ -78,3 +78,42 @@
   --scrollbar-hover: #a8a8a4;
   --radius: 0.75rem;
 }
+
+[data-product-view="recruiting"] {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #17191d;
+  --card: #ffffff;
+  --card-foreground: #17191d;
+  --popover: #ffffff;
+  --popover-foreground: #17191d;
+  --primary: #141519;
+  --primary-foreground: #ffffff;
+  --secondary: #f3effb;
+  --secondary-foreground: #7243c9;
+  --chat-user: #6e45c5;
+  --chat-user-foreground: #ffffff;
+  --muted: #f4f4f5;
+  --muted-foreground: #7c818b;
+  --accent: #ececed;
+  --accent-foreground: #17191d;
+  --destructive: #dc2626;
+  --destructive-foreground: #ffffff;
+  --border: #e7e8ea;
+  --input: #e1e2e5;
+  --ring: #8565d8;
+  --sidebar: #f7f7f8;
+  --sidebar-foreground: #17191d;
+  --sidebar-border: #e5e5e7;
+  --sidebar-accent: #e9e9eb;
+  --sidebar-accent-foreground: #17191d;
+  --link: #6f43c7;
+  --favicon-plate: #ffffff;
+  --success: #228b3b;
+  --warning: #b7791f;
+  --status-working: #6f43c7;
+  --overlay: rgba(20, 20, 22, 0.45);
+  --scrollbar: #d9dbe0;
+  --scrollbar-hover: #b3b6bc;
+  --radius: 0.75rem;
+}

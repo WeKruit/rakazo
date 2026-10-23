@@ -1,4 +1,5 @@
-import { type CommandResult, Sandbox, TimeoutError } from "@e2b/desktop";
+import type { CommandResult } from "@e2b/desktop";
+import { CommandExitError, Sandbox, TimeoutError } from "@e2b/desktop";
 import type {
   AdapterContext,
   CommandRequest,
@@ -16,6 +17,7 @@ import type {
   TerminalRequest,
 } from "@rakazo/adapter-kit";
 import { boundedSandboxCommandTimeoutMs } from "@rakazo/core";
+import { getLogger } from "@rakazo/logging";
 import { sandboxIdleMs } from "./computer-idle.js";
 import { normalizeWorkspacePath, shellQuote, workspacePath } from "./computer-support.js";
 import {
@@ -27,6 +29,9 @@ import { sandboxCommandArgv } from "./sandbox-command-environment.js";
 
 const E2B_WORKSPACE = "/home/user/rakazo-home";
 const E2B_BROWSER_PROFILES = `${E2B_WORKSPACE}/.browser-profiles`;
+// Export latency is per-request round trips, not bytes; bytes stay bounded per batch.
+const EXPORT_CONCURRENCY = 32;
+const EXPORT_BATCH_BYTES = 32 * 1024 * 1024;
 
 export interface E2BSandboxSdk {
   create(options: ReturnType<typeof e2bCreateOptions>): Promise<Sandbox>;
@@ -188,9 +193,19 @@ export class E2BSandboxProvider implements SandboxProvider {
   }
 
   async prepare(computer: ComputerRef, _context: AdapterContext): Promise<void> {
+    const startedAt = performance.now();
     const desktop = await this.box(computer);
+    const connectedAt = performance.now();
     if (computer.fresh) await desktop.files.makeDir(E2B_WORKSPACE);
     const result = await this.runSetupCommand(desktop, PREPARE_LINUX_DESKTOP, _context.signal);
+    getLogger().info("computer.prepare.timing", {
+      operationId: _context.operationId,
+      runId: _context.runId,
+      fresh: computer.fresh === true,
+      connectMs: Math.round(connectedAt - startedAt),
+      prepareMs: Math.round(performance.now() - connectedAt),
+      exitCode: result.exitCode,
+    });
     if (result.exitCode !== 0)
       throw new Error(result.stderr || "could not prepare computer desktop tools");
   }
@@ -203,16 +218,14 @@ export class E2BSandboxProvider implements SandboxProvider {
     const desktop = await this.box(computer);
     const cmd = sandboxCommandArgv(request).map(shellQuote).join(" ");
     const timeoutMs = boundedSandboxCommandTimeoutMs(request.timeoutMs);
+    let result: CommandResult;
     try {
-      const result = await desktop.commands.run(cmd, {
+      result = await desktop.commands.run(cmd, {
         cwd: e2bCwd(request.cwd),
         envs: request.env,
         signal: context.signal,
         timeoutMs,
       });
-      if (result.stdout) yield { type: "stdout", data: result.stdout };
-      if (result.stderr) yield { type: "stderr", data: result.stderr };
-      yield { type: "exit", code: result.exitCode ?? 0 };
     } catch (error) {
       if (error instanceof TimeoutError) {
         yield {
@@ -222,8 +235,12 @@ export class E2BSandboxProvider implements SandboxProvider {
         yield { type: "exit", code: 124 };
         return;
       }
-      throw error;
+      if (!(error instanceof CommandExitError)) throw error;
+      result = error;
     }
+    if (result.stdout) yield { type: "stdout", data: result.stdout };
+    if (result.stderr) yield { type: "stderr", data: result.stderr };
+    yield { type: "exit", code: result.exitCode ?? 0 };
   }
 
   async connectScreen(
@@ -313,8 +330,16 @@ export class E2BSandboxProvider implements SandboxProvider {
     computer: ComputerRef,
     context: AdapterContext,
   ): AsyncIterable<PortableFile> {
+    const connectionStartedAt = performance.now();
     const desktop = await this.box(computer);
+    const browserStartedAt = performance.now();
     await this.desktops.stopBrowsers(computer, context);
+    getLogger().info("computer.workspace.export.ready", {
+      operationId: context.operationId,
+      runId: context.runId,
+      connectionWaitMs: browserStartedAt - connectionStartedAt,
+      browserStopMs: performance.now() - browserStartedAt,
+    });
     yield* walkE2BWorkspace(desktop, "", context);
   }
 
@@ -371,15 +396,17 @@ export class E2BSandboxProvider implements SandboxProvider {
     return this.desktops.releaseScreen(computer, context);
   }
 
-  async stop(computer: ComputerRef, _context: AdapterContext): Promise<void> {
+  async stop(computer: ComputerRef, context: AdapterContext): Promise<void> {
+    context.signal.throwIfAborted();
     const id = computer.providerRef || computer.id;
     const desktop = this.boxes.get(id);
     this.forget(id);
-    if (desktop) {
-      await desktop.pause().catch(() => undefined);
-      return;
+    try {
+      if (desktop) await desktop.pause();
+      else await this.sdk.pause(id, { apiKey: this.apiKey });
+    } catch (error) {
+      if (!isSandboxGoneError(error)) throw error;
     }
-    await this.sdk.pause(id, { apiKey: this.apiKey }).catch(() => undefined);
   }
 
   async destroy(computer: ComputerRef, _context: AdapterContext): Promise<void> {
@@ -452,38 +479,144 @@ async function* walkE2BWorkspace(
   directory: string,
   context: AdapterContext,
 ): AsyncIterable<PortableFile> {
-  const entries = await desktop.files.list(workspacePath(E2B_WORKSPACE, directory), {
-    signal: context.signal,
-  });
-  const files: Array<{ relative: string; mode: number }> = [];
-  const directories: string[] = [];
-  for (const entry of entries) {
-    const relative = normalizeWorkspacePath(directory ? `${directory}/${entry.name}` : entry.name);
-    if (shouldSkipPortableWorkspaceFile(relative)) continue;
-    if (entry.type === "dir") directories.push(relative);
-    else if (entry.type === "file") files.push({ relative, mode: entry.mode });
-  }
-  for (let index = 0; index < files.length; index += 8) {
-    const batch = await Promise.all(
-      files.slice(index, index + 8).map(async ({ relative, mode }) => {
-        const content = await desktop.files
-          .read(workspacePath(E2B_WORKSPACE, relative), {
-            format: "bytes",
-            signal: context.signal,
-          })
-          .catch((error) => {
-            if (relative.startsWith(".browser-profiles/")) return undefined;
-            throw error;
-          });
-        if (!content) return undefined;
-        return { path: relative, content, executable: Boolean(mode & 0o100) };
-      }),
-    );
-    for (const file of batch) {
-      if (file) yield file;
+  // ponytail: O(F + D) metadata fills batches; stream bounded metadata if trees grow.
+  const files: Array<{ relative: string; mode: number; size: number }> = [];
+  type Directory = { relative: string; files: typeof files; children: Directory[] };
+  const directories: Directory[] = [{ relative: directory, files: [], children: [] }];
+  const directoryByPath = new Map([[directory, directories[0]!]]);
+  let listCallCount = 0;
+  let selectedFileCount = 0;
+  let readCallCount = 0;
+  let readFileCount = 0;
+  let readBytes = 0;
+  let browserReadSkipCount = 0;
+  let metadataWallMs = 0;
+  let readBatchWaitMs = 0;
+  try {
+    const metadataStartedAt = performance.now();
+    try {
+      for (let index = 0; index < directories.length; ) {
+        const batch = directories.slice(index, index + EXPORT_CONCURRENCY);
+        index += batch.length;
+        const results = await Promise.allSettled(
+          batch.map(async ({ relative }) => {
+            context.signal.throwIfAborted();
+            listCallCount++;
+            // Profile branches retain per-directory pruning before entering transient folders.
+            const depth =
+              relative &&
+              relative !== ".browser-profiles" &&
+              !relative.startsWith(".browser-profiles/")
+                ? 8
+                : 1;
+            return {
+              depth,
+              entries: await desktop.files.list(workspacePath(E2B_WORKSPACE, relative), {
+                depth,
+                signal: context.signal,
+              }),
+            };
+          }),
+        );
+        context.signal.throwIfAborted();
+        for (const [offset, result] of results.entries()) {
+          if (result.status === "rejected") throw result.reason;
+          const parent = batch[offset]!;
+          const prefix = `${workspacePath(E2B_WORKSPACE, parent.relative)}/`;
+          for (const entry of result.value.entries) {
+            if (!entry.path.startsWith(prefix))
+              throw new Error("Path escapes the computer workspace");
+            const withinListed = normalizeWorkspacePath(entry.path.slice(prefix.length));
+            const relative = normalizeWorkspacePath(
+              parent.relative ? `${parent.relative}/${withinListed}` : withinListed,
+            );
+            if (shouldSkipPortableWorkspaceFile(relative)) continue;
+            if (entry.type !== "dir" && entry.type !== "file") continue;
+            const separator = relative.lastIndexOf("/");
+            const containing = directoryByPath.get(
+              separator < 0 ? "" : relative.slice(0, separator),
+            );
+            if (!containing) throw new Error("Invalid computer workspace listing");
+            if (entry.type === "dir") {
+              const child: Directory = { relative, files: [], children: [] };
+              containing.children.push(child);
+              directoryByPath.set(relative, child);
+              if (withinListed.split("/").length === result.value.depth) directories.push(child);
+            } else {
+              containing.files.push({ relative, mode: entry.mode, size: entry.size });
+              selectedFileCount++;
+            }
+          }
+        }
+      }
+      const pending = [directories[0]!];
+      while (pending.length) {
+        context.signal.throwIfAborted();
+        const current = pending.pop()!;
+        for (const file of current.files) files.push(file);
+        for (let index = current.children.length - 1; index >= 0; index--)
+          pending.push(current.children[index]!);
+      }
+    } finally {
+      metadataWallMs = performance.now() - metadataStartedAt;
     }
+    for (let index = 0; index < files.length; ) {
+      let end = index + 1;
+      for (let bytes = files[index]!.size; end < files.length; end++) {
+        bytes += files[end]!.size;
+        if (end - index >= EXPORT_CONCURRENCY || bytes > EXPORT_BATCH_BYTES) break;
+      }
+      const readBatch = files.slice(index, end);
+      index = end;
+      const readStartedAt = performance.now();
+      const results = await Promise.allSettled(
+        readBatch.map(async ({ relative, mode }) => {
+          context.signal.throwIfAborted();
+          readCallCount++;
+          const content = await desktop.files
+            .read(workspacePath(E2B_WORKSPACE, relative), {
+              format: "bytes",
+              signal: context.signal,
+            })
+            .catch((error) => {
+              context.signal.throwIfAborted();
+              if (relative.startsWith(".browser-profiles/")) {
+                browserReadSkipCount++;
+                return undefined;
+              }
+              throw error;
+            });
+          if (!content) return undefined;
+          readFileCount++;
+          readBytes += content.byteLength;
+          return { path: relative, content, executable: Boolean(mode & 0o100) };
+        }),
+      );
+      readBatchWaitMs += performance.now() - readStartedAt;
+      context.signal.throwIfAborted();
+      const batch = results.map((result) => {
+        if (result.status === "rejected") throw result.reason;
+        return result.value;
+      });
+      for (const file of batch) {
+        context.signal.throwIfAborted();
+        if (file) yield file;
+      }
+    }
+  } finally {
+    getLogger().info("computer.workspace.export.io", {
+      operationId: context.operationId,
+      runId: context.runId,
+      metadataWallMs,
+      readBatchWaitMs,
+      listCallCount,
+      selectedFileCount,
+      readCallCount,
+      readFileCount,
+      readBytes,
+      browserReadSkipCount,
+    });
   }
-  for (const relative of directories) yield* walkE2BWorkspace(desktop, relative, context);
 }
 
 function e2bCwd(cwd: string | undefined): string {

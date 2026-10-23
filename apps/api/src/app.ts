@@ -19,10 +19,12 @@ import type {
   RemoteConnectorDependencies,
 } from "@rakazo/adapters";
 import {
+  AutumnFileConnector,
   applyMessagingOutboundStatus,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   ComposioConnector,
+  createArtifactStore,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
   createConnectorStack,
@@ -49,7 +51,6 @@ import {
   isMessagingSurfaceEnabled,
   isPipedreamEnabled,
   LocalAgentHomeStore,
-  LocalArtifactStore,
   McpConnector,
   McpOAuthBroker,
   messagingPlatformsFromEnv,
@@ -71,7 +72,12 @@ import {
   toTeamChatInbound,
   withSecretPersistence,
 } from "@rakazo/adapters";
-import { createAuth, isBlockedAuthPath, loopbackTwinOrigins } from "@rakazo/auth";
+import {
+  createAuth,
+  getOidcAccessToken,
+  isBlockedAuthPath,
+  loopbackTwinOrigins,
+} from "@rakazo/auth";
 import type { Actor, AuthCapabilities } from "@rakazo/contracts";
 import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
@@ -303,8 +309,9 @@ export async function createApp(
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
   const oauthLogins = new PiOAuthLogins();
   const home = new LocalAgentHomeStore(env.dataDir);
-  const artifacts = new LocalArtifactStore(env.dataDir);
+  const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
+  const firstPartyOidc = env.oidc;
   const mcp = new McpConnector(
     prisma,
     secrets,
@@ -314,6 +321,14 @@ export async function createApp(
       network: remoteConnectors,
       events,
       allowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
+      firstParty:
+        env.firstPartyMcpUrl && firstPartyOidc
+          ? {
+              endpoint: env.firstPartyMcpUrl,
+              accessToken: (context, rejectedToken) =>
+                getOidcAccessToken(prisma, auth, firstPartyOidc, context, rejectedToken),
+            }
+          : undefined,
     },
     mcpOAuth,
   );
@@ -376,6 +391,7 @@ export async function createApp(
       .providers()
       .filter((provider) => !composioOverride || provider.describe().id !== "composio"),
     mcp,
+    new AutumnFileConnector(prisma, secrets, artifacts, remoteConnectors),
   ]);
   const connector = stack.destination;
   await connector.start();
@@ -513,6 +529,7 @@ export async function createApp(
     deploymentModelConfigured: env.deploymentModelConfigured,
     messaging,
     cloudAgent,
+    shutdownSignal: shutdown.signal,
   });
   if (inMemoryJobs) {
     await inMemoryJobs.start(jobHandlers);
@@ -576,10 +593,23 @@ export async function createApp(
       imageTag: env.imageTag,
       integrationsCatalogUrl: env.integrationsCatalogUrl,
       mcpAllowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
+      firstPartyMcpUrl: env.firstPartyMcpUrl,
+      oidc: env.oidc ? { issuer: env.oidc.issuer, clientId: env.oidc.clientId } : undefined,
     },
   });
   const rpc = new RPCHandler(router, {
-    clientInterceptors: [onError((error, { path }) => logUnexpectedRpcError(error, path))],
+    clientInterceptors: [
+      async ({ path, next }) => {
+        enrichLogContext({ "rpc.procedure": path.join(".") });
+        const started = performance.now();
+        try {
+          return await next();
+        } finally {
+          enrichLogContext({ "rpc.handler.duration_ms": Math.round(performance.now() - started) });
+        }
+      },
+      onError((error, { path }) => logUnexpectedRpcError(error, path)),
+    ],
   });
   const app = new Hono();
   app.use("*", requestLogging(logger));
@@ -631,8 +661,15 @@ export async function createApp(
     return auth.handler(emptyAuthBodyAsJson(c.req.raw));
   });
   mountLocalSettings(app, { token: env.desktopStackToken, prisma, rpc });
-  const requestSession = async (request: Request) => {
-    const session = await auth.api.getSession({ headers: sessionHeaders(request) });
+  const requestSession = async (request: Request, recordAuthTiming = false) => {
+    const sessionStarted = performance.now();
+    const session = await auth.api.getSession({ headers: sessionHeaders(request) }).finally(() => {
+      if (recordAuthTiming) {
+        enrichLogContext({
+          "rpc.auth.session.duration_ms": Math.round(performance.now() - sessionStarted),
+        });
+      }
+    });
     if (!session?.user) return null;
     const actor = await actorFromMembership(
       requireMembership(prisma, session.user.id, request.headers.get("x-rakazo-space-id")),
@@ -641,7 +678,24 @@ export async function createApp(
   };
   const sessionActor = async (request: Request) => (await requestSession(request))?.actor ?? null;
   app.use("/rpc/*", async (c, next) => {
-    const session = await requestSession(c.req.raw);
+    const authStarted = performance.now();
+    if (created.pool) {
+      enrichLogContext({
+        "rpc.auth.pool.start.waiting": created.pool.waitingCount,
+        "rpc.auth.pool.start.total": created.pool.totalCount,
+        "rpc.auth.pool.start.idle": created.pool.idleCount,
+      });
+    }
+    const session = await requestSession(c.req.raw, true).finally(() => {
+      enrichLogContext({ "rpc.auth.duration_ms": Math.round(performance.now() - authStarted) });
+      if (created.pool) {
+        enrichLogContext({
+          "rpc.auth.pool.end.waiting": created.pool.waitingCount,
+          "rpc.auth.pool.end.total": created.pool.totalCount,
+          "rpc.auth.pool.end.idle": created.pool.idleCount,
+        });
+      }
+    });
     const actor = session?.actor ?? null;
     if (actor) {
       enrichLogContext({ "user.id": actor.userId, "space.id": actor.spaceId });

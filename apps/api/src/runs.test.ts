@@ -2,6 +2,37 @@ import { describe, expect, it } from "vitest";
 import { activityNotificationsEnabled, activityPromptSnippet } from "./runs.js";
 
 describe("run activity copy", () => {
+  it.each(["user", "follow_up"])(
+    "shows original %s words instead of selected email metadata",
+    (trigger) => {
+      const sourceBlocks = [
+        {
+          kind: "text",
+          text: "Read this reply; don't send.",
+          correspondenceReference: {
+            threadId: "thread",
+            roleId: "role",
+            emailId: "display-id",
+            sourceId: "source-id",
+            providerMessageId: "provider-id",
+            savedRead: null,
+            sourceName: "Mailbox",
+            sender: null,
+            subject: "Selected reply",
+            date: null,
+            snippet: true,
+          },
+        },
+      ];
+      expect(
+        activityPromptSnippet({
+          trigger,
+          prompt: "internal selected email reference",
+          sourceBlocks,
+        }),
+      ).toBe(sourceBlocks[0]!.text);
+    },
+  );
   it("presents structured agent messages instead of their internal wake prompt", () => {
     expect(
       activityPromptSnippet({

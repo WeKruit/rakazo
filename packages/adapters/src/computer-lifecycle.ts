@@ -315,6 +315,7 @@ export async function provisionComputer(
   });
   if (claimed.count !== 1) throw new ComputerBusyError();
   let provisioned: ComputerRef | undefined;
+  let replacement = false;
   try {
     await onProgress?.("recreating");
     const ref = await deps.sandbox.provision(
@@ -327,12 +328,12 @@ export async function provisionComputer(
       context,
     );
     provisioned = ref;
-    await deps.sandbox.prepare(ref, context);
-    const replacement =
+    replacement =
       ref.fresh === true ||
       !existing.providerRef ||
       existing.providerRef !== ref.providerRef ||
       existing.kind !== ref.kind;
+    await deps.sandbox.prepare(ref, context);
     if (replacement) {
       await onProgress?.("restoring");
       await restoreComputerWorkspace(deps.home, deps.sandbox, existing.homeKey, ref, context);
@@ -388,8 +389,8 @@ export async function provisionComputer(
   } catch (error) {
     // A failed reconnect never owns an existing workspace, even if setup failed.
     const rollbackError =
-      provisioned && (!reconnecting || provisioned.fresh === true)
-        ? await rollbackProvisionedComputer(deps.sandbox, provisioned, context, error)
+      provisioned && replacement
+        ? await rollbackProvisionedComputer(deps.sandbox, provisioned, context)
         : undefined;
     try {
       await deps.prisma.computer.updateMany({
@@ -444,18 +445,11 @@ async function rollbackProvisionedComputer(
   sandbox: SandboxProvider,
   computer: ComputerRef,
   context: AdapterContext,
-  cause: unknown,
 ): Promise<unknown | undefined> {
   try {
     await sandbox.releaseScreen?.(computer, context).catch(() => undefined);
     if (computer.fresh) {
       await sandbox.destroy(computer, context);
-    } else if (cause instanceof ComputerBusyError) {
-      try {
-        await sandbox.stop(computer, context);
-      } catch {
-        await sandbox.destroy(computer, context);
-      }
     } else {
       await sandbox.stop(computer, context);
     }
@@ -489,55 +483,63 @@ export async function acquireComputerExecutionLease(
     resumeHeldLease?: boolean;
   },
 ): Promise<ComputerExecutionLease | null> {
-  const computer = await prisma.computer.findUniqueOrThrow({ where: { id: input.computerId } });
-  if (computer.maintenanceId && computer.maintenanceId !== input.runId)
-    throw new ComputerBusyError();
-  if (computer.scope !== "team") return null;
-  if (isLiveSuspending(computer)) throw new ComputerBusyError();
-  const now = new Date();
-  const expiresAt = new Date(now.getTime() + EXECUTION_LEASE_MS);
-  const [reclaimed] = await prisma.computerExecutionLease.updateManyAndReturn({
-    where: {
-      computerId: input.computerId,
-      botId: input.botId,
-      OR: [{ expiresAt: { lt: now } }, ...(input.resumeHeldLease ? [{ runId: input.runId }] : [])],
-    },
-    data: {
-      runId: input.runId,
-      expiresAt,
-      fence: { increment: 1 },
-    },
-    select: { fence: true },
-  });
-  if (reclaimed) {
-    return validateAcquiredComputerLease(prisma, {
-      computerId: input.computerId,
-      botId: input.botId,
-      runId: input.runId,
-      fence: reclaimed.fence,
-    });
-  }
-  try {
-    const created = await prisma.computerExecutionLease.create({
-      data: {
+  const lease = await prisma.$transaction(async (tx) => {
+    // Use the maintenance claim lock before reading either admission predicate.
+    await tx.$queryRaw`SELECT id FROM computers WHERE id = ${input.computerId} FOR UPDATE`;
+    const computer = await tx.computer.findUniqueOrThrow({ where: { id: input.computerId } });
+    if (computer.maintenanceId && computer.maintenanceId !== input.runId)
+      throw new ComputerBusyError();
+    if (computer.scope !== "team") return null;
+    if (isLiveSuspending(computer)) throw new ComputerBusyError();
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + EXECUTION_LEASE_MS);
+    const [reclaimed] = await tx.computerExecutionLease.updateManyAndReturn({
+      where: {
         computerId: input.computerId,
         botId: input.botId,
+        OR: [
+          { expiresAt: { lt: now } },
+          ...(input.resumeHeldLease ? [{ runId: input.runId }] : []),
+        ],
+      },
+      data: {
         runId: input.runId,
-        fence: 1,
         expiresAt,
+        fence: { increment: 1 },
       },
       select: { fence: true },
     });
-    return validateAcquiredComputerLease(prisma, {
-      computerId: input.computerId,
-      botId: input.botId,
-      runId: input.runId,
-      fence: created.fence,
-    });
-  } catch (error) {
-    if (isUniqueConstraintError(error)) throw new ComputerBusyError();
-    throw error;
-  }
+    if (reclaimed) {
+      return {
+        computerId: input.computerId,
+        botId: input.botId,
+        runId: input.runId,
+        fence: reclaimed.fence,
+      };
+    }
+    try {
+      const created = await tx.computerExecutionLease.create({
+        data: {
+          computerId: input.computerId,
+          botId: input.botId,
+          runId: input.runId,
+          fence: 1,
+          expiresAt,
+        },
+        select: { fence: true },
+      });
+      return {
+        computerId: input.computerId,
+        botId: input.botId,
+        runId: input.runId,
+        fence: created.fence,
+      };
+    } catch (error) {
+      if (isUniqueConstraintError(error)) throw new ComputerBusyError();
+      throw error;
+    }
+  });
+  return lease ? validateAcquiredComputerLease(prisma, lease) : null;
 }
 
 async function validateAcquiredComputerLease(
@@ -766,6 +768,14 @@ export async function replaceComputer(
     },
   });
   if (claimed.count !== 1) throw new ComputerBusyError();
+  getLogger().info("computer.suspension.claimed", {
+    owner: "replace",
+    mode,
+    computerId,
+    claimStamp: claimStamp.toISOString(),
+    operationId: context.operationId,
+    runId: context.runId,
+  });
   const releaseClaim = () =>
     deps.prisma.computer.updateMany({
       where: { id: computerId, state: "suspending", updatedAt: claimStamp },

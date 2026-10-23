@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import type { Group } from "@rakazo/contracts";
+import type { Bot, Group } from "@rakazo/contracts";
 import type { ComponentProps, ReactNode } from "react";
 import { act } from "react";
 import type { Root } from "react-dom/client";
@@ -18,6 +18,7 @@ vi.mock("@rakazo/ui-web", () => ({
   BotAvatar: () => <span />,
   Button: (props: ComponentProps<"button">) => <button {...props} />,
   Input: (props: ComponentProps<"input">) => <input {...props} />,
+  Textarea: (props: ComponentProps<"textarea">) => <textarea {...props} />,
   AlertDialog: ({
     children,
     onOpenChange,
@@ -45,7 +46,7 @@ vi.mock("@rakazo/ui-web", () => ({
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }));
 
-import { GroupSettings } from "./GroupPanel";
+import { CreateGroupForm, GroupSettings } from "./GroupPanel";
 
 const group: Group = {
   id: "group-1",
@@ -128,6 +129,211 @@ afterEach(async () => {
   await act(async () => root.unmount());
   container.remove();
   vi.unstubAllGlobals();
+});
+
+it("creates a role with the current native crew order after a membership refresh, without a specialist picker", async () => {
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  const renderRole = (current: Bot[]) =>
+    act(async () =>
+      root.render(
+        <CreateGroupForm bots={current} recruiting onCancel={() => {}} onCreate={onCreate} />,
+      ),
+    );
+  await renderRole(bots);
+  expect(container.textContent).not.toContain("Sourcer");
+  const input = container.querySelector("textarea")!;
+  expect(container.textContent).toContain("Who are you looking for?");
+  expect(container.querySelector("input")).toBeNull();
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      "We need a systems engineer. https://example.com/jobs/systems",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  const replacement = { id: "scheduler", name: "Scheduling", archivedAt: null } as Bot;
+  await renderRole([bots[1]!, bots[0]!, replacement]);
+  await click("Continue");
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+    name: "New role",
+    description: "We need a systems engineer. https://example.com/jobs/systems",
+    botIds: ["researcher", "coordinator", "scheduler"],
+  });
+});
+
+it("starts recruiting on Enter while keeping Shift Enter and IME composition as text", async () => {
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  const bots = [
+    { id: "main", archivedAt: null },
+    { id: "sourcer", archivedAt: null },
+  ] as Bot[];
+  await act(async () =>
+    root.render(
+      <CreateGroupForm
+        bots={bots}
+        recruiting
+        initialDescription="Find systems engineers"
+        onCancel={() => {}}
+        onCreate={onCreate}
+      />,
+    ),
+  );
+  const input = container.querySelector("textarea")!;
+  for (const options of [{ shiftKey: true }, { isComposing: true }, { keyCode: 229 }]) {
+    await act(async () =>
+      input.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...options }),
+      ),
+    );
+    expect(onCreate).not.toHaveBeenCalled();
+  }
+  await act(async () =>
+    input.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
+    ),
+  );
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+    name: "New role",
+    botIds: ["main", "sourcer"],
+    description: "Find systems engineers",
+  });
+});
+
+it("accepts a pasted screenshot using the supplied native attachment picker without intercepting text paste", async () => {
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  const pick = vi.fn().mockReturnValue(true);
+  const bots = [
+    { id: "main", archivedAt: null },
+    { id: "sourcer", archivedAt: null },
+  ] as Bot[];
+  await act(async () =>
+    root.render(
+      <CreateGroupForm
+        bots={bots}
+        recruiting
+        onCancel={() => {}}
+        onCreate={onCreate}
+        onAttachmentPick={pick}
+      />,
+    ),
+  );
+  const input = container.querySelector("textarea")!;
+  const plain = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(plain, "clipboardData", { value: { files: [], getData: () => "text" } });
+  await act(async () => input.dispatchEvent(plain));
+  expect(plain.defaultPrevented).toBe(false);
+  const files = [new File(["png"], "job.png", { type: "image/png" })];
+  const screenshot = new Event("paste", { bubbles: true, cancelable: true });
+  Object.defineProperty(screenshot, "clipboardData", {
+    value: { files, getData: () => "Use this role" },
+  });
+  await act(async () => input.dispatchEvent(screenshot));
+  expect(screenshot.defaultPrevented).toBe(true);
+  expect(pick).toHaveBeenCalledWith(files);
+  expect(input.value).toBe("Use this role");
+  expect(onCreate).not.toHaveBeenCalled();
+});
+
+it("keeps the typed recruiting request when native creation fails and retries that same request", async () => {
+  const onCreate = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Could not save the role"))
+    .mockResolvedValueOnce(undefined);
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  await act(async () =>
+    root.render(<CreateGroupForm bots={bots} recruiting onCancel={() => {}} onCreate={onCreate} />),
+  );
+  expect(button("Continue").disabled).toBe(true);
+  const input = container.querySelector("textarea")!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      "  Find engineers with robotics experience.  ",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click("Continue");
+  expect(container.querySelector('[role="alert"]')?.textContent).toBe("Could not save the role");
+  expect(input.value).toBe("  Find engineers with robotics experience.  ");
+  await click("Continue");
+  expect(onCreate).toHaveBeenCalledTimes(2);
+  expect(onCreate.mock.calls[1]).toEqual(onCreate.mock.calls[0]);
+  expect(onCreate.mock.calls[1]?.[0].description).toBe("Find engineers with robotics experience.");
+});
+
+it("lets the recruiter edit a supplied job description before explicitly starting the native role", async () => {
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  const renderForm = (initialDescription: string) =>
+    act(async () =>
+      root.render(
+        <CreateGroupForm
+          bots={bots}
+          recruiting
+          initialDescription={initialDescription}
+          onCancel={() => {}}
+          onCreate={onCreate}
+        />,
+      ),
+    );
+  await renderForm("Systems engineer · Example client\nOriginal job description");
+  const input = container.querySelector("textarea")!;
+  expect(input.value).toContain("Original job description");
+  expect(onCreate).not.toHaveBeenCalled();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(
+      input,
+      "Edited recruiting request",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await renderForm("New server metadata must not replace a typed request");
+  expect(input.value).toBe("Edited recruiting request");
+  await click("Continue");
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+    name: "New role",
+    description: "Edited recruiting request",
+    botIds: ["coordinator", "researcher"],
+  });
+});
+
+it("keeps the native group name and member picker in the developer form", async () => {
+  const bots = [
+    { id: "coordinator", name: "Main", archivedAt: null },
+    { id: "researcher", name: "Sourcer", archivedAt: null },
+  ] as Bot[];
+  const onCreate = vi.fn().mockResolvedValue(undefined);
+  await act(async () =>
+    root.render(<CreateGroupForm bots={bots} onCancel={() => {}} onCreate={onCreate} />),
+  );
+  expect(container.querySelector("textarea")).toBeNull();
+  expect(container.querySelector("input")).not.toBeNull();
+  expect(container.textContent).toContain("Members (pick");
+  await click("Main");
+  await click("Sourcer");
+  await act(async () => {
+    const input = container.querySelector("input")!;
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(
+      input,
+      "Working group",
+    );
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+  await click("Create group");
+  expect(onCreate).toHaveBeenCalledExactlyOnceWith({
+    name: "Working group",
+    botIds: ["coordinator", "researcher"],
+  });
 });
 
 describe("GroupSettings", () => {

@@ -14,6 +14,11 @@ describe("botProfileLabelsChanged", () => {
     expect(botProfileLabelsChanged({ description: "Helps with SEO" })).toBe(true);
     expect(botProfileLabelsChanged({ color: "#8B5CF6::shape_1" })).toBe(true);
   });
+
+  it("invalidates the bot profile when instructions alone are changed or cleared", () => {
+    expect(botProfileLabelsChanged({ instructions: "Ask before sending." })).toBe(true);
+    expect(botProfileLabelsChanged({ instructions: "" })).toBe(true);
+  });
 });
 
 describe("commitBotUpdate", () => {

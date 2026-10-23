@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
-import type { PrismaClient } from "./client.js";
-import { deleteUnreferencedCredentialSecret, retireModelCredential } from "./credential-secrets.js";
+import type { Prisma, PrismaClient } from "./client.js";
+import {
+  deleteUnreferencedCredentialSecret,
+  lockModelCredentialSecret,
+  retireModelCredential,
+} from "./credential-secrets.js";
 
 function credentialSecretPrisma(modelReferences: number, voiceReferences: number) {
   return {
@@ -9,6 +13,44 @@ function credentialSecretPrisma(modelReferences: number, voiceReferences: number
     secret: { deleteMany: vi.fn().mockResolvedValue({ count: 1 }) },
   } as unknown as PrismaClient;
 }
+
+describe("model credential refresh locks", () => {
+  it("locks exact credential ownership before its account-level model secret without another transaction", async () => {
+    const query = vi
+      .fn()
+      .mockResolvedValueOnce([{ id: "credential", secretId: "secret" }])
+      .mockResolvedValueOnce([{ id: "secret", ciphertext: "sealed" }]);
+    const execute = vi.fn(async () => 0);
+    const tx = { $queryRaw: query, $executeRaw: execute } as unknown as Prisma.TransactionClient;
+    await expect(
+      lockModelCredentialSecret(tx, {
+        userId: "owner",
+        provider: "provider",
+        credentialId: "credential",
+        secretId: "secret",
+      }),
+    ).resolves.toEqual({
+      credential: { id: "credential", secretId: "secret" },
+      secret: { id: "secret", ciphertext: "sealed" },
+    });
+    expect(execute.mock.calls[0]?.[0].join("")).toContain("SET LOCAL lock_timeout = '5s'");
+    expect(execute.mock.invocationCallOrder[0]).toBeLessThan(query.mock.invocationCallOrder[0]!);
+    const [credential, secret] = query.mock.calls.map(([sql]) => sql);
+    expect(credential.sql).toMatch(
+      /user_model_credentials[\s\S]*"userId" = \?[\s\S]*provider = \?[\s\S]*"secretId" = \?[\s\S]*id = \?[\s\S]*FOR UPDATE/,
+    );
+    expect(credential.values).toEqual(["owner", "provider", "secret", "credential"]);
+    expect(secret.sql).toMatch(
+      /"userId" = \?[\s\S]*"spaceId" IS NULL AND kind = 'model' FOR UPDATE/,
+    );
+    expect(secret.values).toEqual(["secret", "owner"]);
+    query.mockReset().mockResolvedValueOnce([]);
+    await expect(
+      lockModelCredentialSecret(tx, { userId: "other", provider: "provider", secretId: "secret" }),
+    ).resolves.toBeUndefined();
+    expect(query).toHaveBeenCalledOnce();
+  });
+});
 
 describe("deleteUnreferencedCredentialSecret", () => {
   it("deletes a replaced secret after both credential kinds release it", async () => {

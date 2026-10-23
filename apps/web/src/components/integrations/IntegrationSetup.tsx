@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import type { IntegrationCatalogResult, IntegrationSetupState } from "@rakazo/contracts";
 import { Button, Input } from "@rakazo/ui-web";
 import { Check } from "lucide-react";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { newClientId } from "../../lib/client-id";
 import { connectMcpOauth } from "../../lib/mcp-connect";
 import { rpc } from "../../lib/rpc";
@@ -17,6 +17,7 @@ export function IntegrationSetup({
   initialState,
   botId,
   onServerConnected,
+  productView = false,
 }: {
   onDone?: () => void;
   serverSetup?: boolean;
@@ -24,7 +25,8 @@ export function IntegrationSetup({
   managedOnly?: boolean;
   initialState?: IntegrationSetupState | null;
   botId?: string;
-  onServerConnected?: (id: string) => void;
+  onServerConnected?: (id: string) => void | Promise<void>;
+  productView?: boolean;
 }) {
   const { t } = useLingui();
   const fieldId = useId();
@@ -41,6 +43,16 @@ export function IntegrationSetup({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [connected, setConnected] = useState<string[]>([]);
+  const lifetime = useRef(0);
+  const activeBotId = useRef(botId);
+  activeBotId.current = botId;
+  useEffect(() => {
+    lifetime.current++;
+    setBusy(false);
+    return () => {
+      lifetime.current++;
+    };
+  }, [botId]);
   const choices: { id: Choice; label: string }[] = [
     { id: "direct", label: t`Direct MCP` },
     { id: "composio", label: "Composio" },
@@ -72,20 +84,27 @@ export function IntegrationSetup({
       .catch(() => setError(t`Could not load integrations`));
   }, [serverSetup, initialState]);
 
-  async function run(action: () => Promise<void>) {
+  async function run(action: (current: () => boolean) => Promise<void>) {
+    const generation = lifetime.current;
+    const current = () => lifetime.current === generation && activeBotId.current === botId;
     setBusy(true);
     setError(null);
     try {
-      await action();
+      await action(current);
     } catch (err) {
-      setError(errorText(err, t`Could not connect`));
+      if (current())
+        setError(
+          productView
+            ? t`Could not connect this app. Check your account settings and try again.`
+            : errorText(err, t`Could not connect`),
+        );
     } finally {
-      setBusy(false);
+      if (current()) setBusy(false);
     }
   }
 
   async function saveProvider() {
-    await run(async () => {
+    await run(async (current) => {
       await rpc.integrationSetup.save(
         choice === "composio"
           ? { provider: "composio", apiKey }
@@ -97,15 +116,19 @@ export function IntegrationSetup({
               environment: "production",
             },
       );
+      if (!current()) return;
       setApiKey("");
-      setState(await rpc.integrationSetup.get());
+      const updated = await rpc.integrationSetup.get();
+      if (!current()) return;
+      setState(updated);
       onDone?.();
     });
   }
 
   async function connect(name: string, url: string) {
-    await run(async () => {
+    await run(async (current) => {
       const existing = (await rpc.mcp.servers.list()).find((server) => server.endpoint === url);
+      if (!current()) return;
       const server =
         existing ??
         (await rpc.mcp.servers.create({
@@ -115,14 +138,18 @@ export function IntegrationSetup({
           endpoint: url,
           ...(apiKey.trim() ? { secret: apiKey.trim() } : {}),
         }));
+      if (!current()) return;
       if (existing && apiKey.trim()) {
         await rpc.mcp.servers.update({ id: existing.id, secret: apiKey.trim() });
       }
+      if (!current()) return;
       const result = await connectMcpOauth(server.id);
-      if (result === "cancelled") return;
+      if (!current() || result === "cancelled") return;
       if (botId) await rpc.mcp.assignments.approve({ botId, serverId: server.id });
+      if (!current()) return;
+      await onServerConnected?.(server.id);
+      if (!current()) return;
       setConnected((current) => [...current, url]);
-      onServerConnected?.(server.id);
     });
   }
 
@@ -131,7 +158,7 @@ export function IntegrationSetup({
   return (
     <div className="space-y-6">
       <h1 className="text-[32px] font-medium text-foreground">
-        {serverSetup ? t`Server integrations` : t`Add MCP server`}
+        {productView ? t`Connect an app` : serverSetup ? t`Server integrations` : t`Add MCP server`}
       </h1>
       {serverSetup ? (
         <fieldset
@@ -238,11 +265,12 @@ export function IntegrationSetup({
             className="flex gap-2"
             onSubmit={(event) => {
               event.preventDefault();
-              void run(async () => {
+              void run(async (current) => {
                 const response = await rpc.capabilities.catalogSearch({
                   query,
                   usePublicCatalog: true,
                 });
+                if (!current()) return;
                 setResults(response.results);
                 setSearched(true);
               });
@@ -255,7 +283,7 @@ export function IntegrationSetup({
               onChange={(event) => setQuery(event.target.value)}
             />
             <Button type="submit" disabled={busy || !query.trim()}>
-              <Trans>Search integrations.sh</Trans>
+              {productView ? <Trans>Search</Trans> : <Trans>Search integrations.sh</Trans>}
             </Button>
           </form>
           {remoteResults.map((result) => (
@@ -266,34 +294,44 @@ export function IntegrationSetup({
                 disabled={busy || connected.includes(result.endpoint)}
                 onClick={() => void connect(result.name, result.endpoint)}
               >
-                {connected.includes(result.endpoint) ? t`Connected` : t`Connect`}
+                {connected.includes(result.endpoint)
+                  ? productView
+                    ? t`Added`
+                    : t`Connected`
+                  : t`Connect`}
               </Button>
             </div>
           ))}
           {searched && !remoteResults.length ? (
             <p className="text-sm text-muted-foreground">
-              <Trans>No remote MCP servers found</Trans>
+              {productView ? (
+                <Trans>No apps found</Trans>
+              ) : (
+                <Trans>No remote MCP servers found</Trans>
+              )}
             </p>
           ) : null}
-          <details className="text-sm text-muted-foreground">
-            <summary className="cursor-pointer">
-              <Trans>Add server URL</Trans>
-            </summary>
-            <div className="mt-3 space-y-3">
-              <Input
-                aria-label={t`Server URL`}
-                value={endpoint}
-                onChange={(event) => setEndpoint(event.target.value)}
-                placeholder="https://example.com/mcp"
-              />
-              <Button
-                disabled={busy || !endpoint.trim()}
-                onClick={() => void connect("MCP server", endpoint.trim())}
-              >
-                <Trans>Connect</Trans>
-              </Button>
-            </div>
-          </details>
+          {!productView ? (
+            <details className="text-sm text-muted-foreground">
+              <summary className="cursor-pointer">
+                <Trans>Add server URL</Trans>
+              </summary>
+              <div className="mt-3 space-y-3">
+                <Input
+                  aria-label={t`Server URL`}
+                  value={endpoint}
+                  onChange={(event) => setEndpoint(event.target.value)}
+                  placeholder="https://example.com/mcp"
+                />
+                <Button
+                  disabled={busy || !endpoint.trim()}
+                  onClick={() => void connect("MCP server", endpoint.trim())}
+                >
+                  <Trans>Connect</Trans>
+                </Button>
+              </div>
+            </details>
+          ) : null}
         </>
       ) : null}
       {choice === "executor" ? (

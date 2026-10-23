@@ -58,7 +58,10 @@ const fake = vi.hoisted(() => {
   return { Agent, state, deferred };
 });
 
-vi.mock("@earendil-works/pi-agent-core", () => ({ Agent: fake.Agent }));
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  Agent: fake.Agent,
+}));
 vi.mock("@earendil-works/pi-ai/providers/all", () => ({
   builtinModels: () => ({
     getModel: () => ({ provider: "test", id: "fake-model" }),

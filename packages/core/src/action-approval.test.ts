@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   type ActionApprovalRule,
   applyJudgeDecision,
+  boundDirectApprovalDetails,
+  boundDirectApprovalRequest,
+  catalogApprovalDetails,
+  catalogApprovalRequest,
   connectorKindFromToolName,
   connectorToolRequiresApproval,
   isApprovalAskBlock,
@@ -15,6 +19,255 @@ import {
 } from "./action-approval.js";
 
 describe("toolRequiresApproval", () => {
+  it("keeps native internal CRM storage outside mandatory human approval", () => {
+    expect(toolRequiresExplicitApproval("recruiting_crm_bind")).toBe(false);
+    expect(toolRequiresApproval("recruiting_crm_bind", false)).toBe(false);
+    expect(toolRequiresExplicitApproval("recruiting_crm_target")).toBe(false);
+    expect(toolRequiresApproval("recruiting_crm_target", false)).toBe(false);
+  });
+
+  it("does not make CRM storage a mandatory one-time human decision", () => {
+    expect(
+      toolRequiresExplicitApproval("renamed_import", {
+        connectorId: "mcp",
+        toolName: "crm_import_candidate",
+      }),
+    ).toBe(false);
+    expect(toolRequiresExplicitApproval("mcp__crm__crm_import_candidate")).toBe(false);
+    expect(
+      toolRequiresExplicitApproval("renamed_import", {
+        connectorId: "demo",
+        toolName: "crm_import_candidate",
+      }),
+    ).toBe(false);
+    expect(
+      toolRequiresExplicitApproval("renamed_read", {
+        connectorId: "mcp",
+        toolName: "list_crm_candidates",
+      }),
+    ).toBe(false);
+  });
+
+  it.each([
+    "reply_to_email",
+    "create_lead",
+    "add_leads_to_campaign_or_list_bulk",
+    "activate_campaign",
+  ])("requires a one-time human decision for the resolved protected operation %s", (toolName) => {
+    expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "mcp", toolName })).toBe(
+      true,
+    );
+    expect(toolRequiresExplicitApproval(`mcp__example__${toolName}`)).toBe(false);
+    expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "demo", toolName })).toBe(
+      false,
+    );
+    expect(
+      toolRequiresExplicitApproval("renamed_read", { connectorId: "mcp", toolName: "list_emails" }),
+    ).toBe(false);
+  });
+
+  it.each([
+    "GMAIL_SEND_EMAIL",
+    "GMAIL_SEND_DRAFT",
+    "GMAIL_FORWARD_MESSAGE",
+    "GMAIL_REPLY_TO_THREAD",
+    "GOOGLECALENDAR_CREATE_EVENT",
+    "GOOGLECALENDAR_UPDATE_EVENT",
+    "GOOGLECALENDAR_PATCH_EVENT",
+    "GOOGLECALENDAR_DELETE_EVENT",
+    "GOOGLECALENDAR_EVENTS_MOVE",
+    "GOOGLECALENDAR_QUICK_ADD",
+    "GOOGLECALENDAR_REMOVE_ATTENDEE",
+    "GOOGLECALENDAR_EVENTS_IMPORT",
+  ])("requires one-time approval for the resolved Composio action %s", (operation) => {
+    for (const toolName of [operation, operation.toLowerCase(), `g${operation.slice(1)}`]) {
+      expect(
+        toolRequiresExplicitApproval("renamed_action", { connectorId: "composio", toolName }),
+      ).toBe(true);
+      expect(toolRequiresExplicitApproval(operation)).toBe(false);
+      expect(toolRequiresExplicitApproval("renamed_action", { connectorId: "mcp", toolName })).toBe(
+        false,
+      );
+    }
+  });
+
+  it.each(["GMAIL_SEND_EMAIL", "GOOGLECALENDAR_REMOVE_ATTENDEE", "GOOGLECALENDAR_EVENTS_IMPORT"])(
+    "finds protected %s in nested Composio batches without changing their arguments",
+    (operation) => {
+      const args = {
+        tools: [
+          { tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} },
+          {
+            tool_slug: "composio_multi_execute_tool",
+            arguments: {
+              tools: [{ tool_slug: operation.toLowerCase(), arguments: {} }],
+            },
+          },
+        ],
+      };
+      const original = structuredClone(args);
+      expect(
+        toolRequiresExplicitApproval(
+          "renamed_batch",
+          { connectorId: "composio", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+          args,
+        ),
+      ).toBe(true);
+      expect(args).toEqual(original);
+      expect(
+        toolRequiresExplicitApproval(
+          "renamed_batch",
+          { connectorId: "demo", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+          args,
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each([
+    "GMAIL_FETCH_EMAILS",
+    "GMAIL_FETCH_MESSAGE_BY_THREAD_ID",
+    "GMAIL_CREATE_EMAIL_DRAFT",
+    "GOOGLECALENDAR_FREE_BUSY_QUERY",
+    "GOOGLECALENDAR_FIND_FREE_SLOTS",
+    "GOOGLECALENDAR_EVENTS_GET",
+    "GOOGLECALENDAR_EVENTS_LIST",
+    "GMAIL_SEND_EMAIL_UNKNOWN",
+    "GOOGLECALENDAR_REMOVE_ATTENDEE_UNKNOWN",
+    "GOOGLECALENDAR_EVENTS_IMPORT_UNKNOWN",
+  ])("does not add mandatory approval to the Composio operation %s", (toolName) => {
+    const args = { tools: [{ tool_slug: "GMAIL_SEND_EMAIL", arguments: {} }] };
+    expect(
+      toolRequiresExplicitApproval("renamed_action", { connectorId: "composio", toolName }, args),
+    ).toBe(false);
+  });
+
+  it("does not add mandatory approval to a nested batch of reads", () => {
+    expect(
+      toolRequiresExplicitApproval(
+        "renamed_batch",
+        { connectorId: "composio", toolName: "COMPOSIO_MULTI_EXECUTE_TOOL" },
+        {
+          tools: [
+            { tool_slug: "GOOGLECALENDAR_FREE_BUSY_QUERY", arguments: {} },
+            {
+              tool_slug: "COMPOSIO_MULTI_EXECUTE_TOOL",
+              arguments: { tools: [{ tool_slug: "GMAIL_FETCH_EMAILS", arguments: {} }] },
+            },
+          ],
+        },
+      ),
+    ).toBe(false);
+  });
+
+  it("requires explicit human approval of recruiting packages even with an always-allow rule", () => {
+    const toolName = "recruiting_request_approval";
+    const rules: ActionApprovalRule[] = [
+      { effect: "always_allow", matchKind: "tool", matchValue: toolName },
+    ];
+
+    expect(resolveActionApprovalDetail({ toolName, rules }).source).toBe("always_allow");
+    expect(toolRequiresApproval(toolName, false)).toBe(true);
+    expect(toolRequiresExplicitApproval(toolName)).toBe(true);
+  });
+
+  it.each([
+    [
+      "https://calendarmcp.googleapis.com/mcp/v1",
+      ["create_event", "update_event", "delete_event", "respond_to_event"],
+      "calendar",
+    ],
+  ])(
+    "requires one-time approval only for exact official Google writes at %s",
+    (endpoint, operations, prefix) => {
+      for (const operation of operations)
+        for (const name of [operation, `${prefix}.${operation}`]) {
+          const route = { connectorId: "mcp", toolName: name };
+          expect(toolRequiresExplicitApproval("renamed", route, {}, endpoint)).toBe(true);
+          expect(
+            toolRequiresExplicitApproval("renamed", route, {}, "https://example.test/mcp"),
+          ).toBe(false);
+          for (const equivalent of [
+            `${endpoint}?other=1`,
+            `${endpoint}/`,
+            endpoint.replace(".com/", ".com:443/"),
+            endpoint.replace("googleapis.com", "GOOGLEAPIS.COM"),
+          ])
+            expect(toolRequiresExplicitApproval("renamed", route, {}, equivalent)).toBe(true);
+          for (const foreign of [
+            endpoint.replace("googleapis.com", "googleapis.com.evil.test"),
+            endpoint.replace("/mcp/v1", "/other"),
+            endpoint.replace("https:", "http:"),
+            "invalid",
+          ])
+            expect(toolRequiresExplicitApproval("renamed", route, {}, foreign)).toBe(false);
+        }
+      expect(
+        toolRequiresExplicitApproval(
+          "renamed",
+          { connectorId: "mcp", toolName: "list_events" },
+          {},
+          endpoint,
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it.each(["create_draft", "label_message", "label_thread", "unlabel_message", "unlabel_thread"])(
+    "does not require a human decision for internal Gmail %s",
+    (toolName) => {
+      for (const name of [toolName, `gmail.${toolName}`])
+        expect(
+          toolRequiresExplicitApproval(
+            "renamed",
+            { connectorId: "mcp", toolName: name },
+            {},
+            "https://gmailmcp.googleapis.com/mcp/v1",
+          ),
+        ).toBe(false);
+    },
+  );
+
+  it.each([
+    "create_booking",
+    "reschedule_booking",
+    "cancel_booking",
+    "confirm_booking",
+    "add_booking_attendee",
+  ])("requires one-time approval for the official Cal.com %s operation", (toolName) => {
+    const route = { connectorId: "mcp", toolName };
+    for (const endpoint of [
+      "https://mcp.cal.com/mcp",
+      "https://mcp.cal.com/mcp?toolsets=bookings,availability",
+      "https://MCP.CAL.COM:443/mcp/",
+    ])
+      expect(toolRequiresExplicitApproval("renamed", route, {}, endpoint)).toBe(true);
+    for (const endpoint of [
+      "https://example.test/mcp",
+      "https://mcp.cal.com.evil.test/mcp",
+      "https://mcp.cal.com/other",
+      "http://mcp.cal.com/mcp",
+    ])
+      expect(toolRequiresExplicitApproval("renamed", route, {}, endpoint)).toBe(false);
+    for (const read of [
+      "get_me",
+      "get_event_types",
+      "get_event_type",
+      "get_availability",
+      "get_busy_times",
+      "get_connected_calendars",
+      "get_conferencing_apps",
+    ])
+      expect(
+        toolRequiresExplicitApproval(
+          "renamed",
+          { ...route, toolName: read },
+          {},
+          "https://mcp.cal.com/mcp",
+        ),
+      ).toBe(false);
+  });
+
   it("requires approval for consequential builtins and destination writes", () => {
     expect(toolRequiresApproval("destination.write", false)).toBe(true);
     expect(toolRequiresApproval("destination.write", true)).toBe(true);
@@ -96,7 +349,7 @@ describe("resolveActionApprovalDetail", () => {
 
 describe("unattendedTriggerToolRequiresApproval", () => {
   it("forces approval for webhook-triggered local side effects", () => {
-    for (const name of ["shell", "write_file", "browser_act", "computer_act"]) {
+    for (const name of ["shell", "browser_act", "computer_act"]) {
       expect(unattendedTriggerToolRequiresApproval("webhook", name, false)).toBe(true);
     }
   });
@@ -109,6 +362,16 @@ describe("unattendedTriggerToolRequiresApproval", () => {
       "browser_snapshot",
       "request_takeover",
       "run_subagent",
+      "recruiting_candidates",
+      "recruiting_crm_target",
+      "recruiting_crm_import",
+      "recruiting_role",
+      "recruiting_feedback",
+      "recruiting_shortlist",
+      "remember",
+      "save_memory",
+      "save_shared_memory",
+      "write_file",
     ]) {
       expect(unattendedTriggerToolRequiresApproval("webhook", name, false)).toBe(false);
     }
@@ -372,5 +635,39 @@ describe("applyJudgeDecision", () => {
   it("fails closed on consequential checker errors and open on exempt", () => {
     expect(applyJudgeDecision({ decision: "error", consequential: true })).toBe("ask");
     expect(applyJudgeDecision({ decision: "error", consequential: false })).toBe("allow");
+  });
+});
+
+describe("native bound approval envelopes", () => {
+  it("preserves exact direct and catalog routes and arguments", () => {
+    const route = {
+      connectorId: "mcp",
+      resourceId: "server",
+      resourceRevision: 2,
+      toolName: "get_crm_role",
+    };
+    const args = { p_org: "exact organization", p_role: "exact role" };
+    const marker = "__rakazoCatalogTool";
+    expect(
+      boundDirectApprovalDetails(boundDirectApprovalRequest(route, args, marker), marker),
+    ).toEqual({ route, args });
+    const wrapperArgs = { id: "server:get_crm_role", arguments: args };
+    expect(
+      catalogApprovalDetails(
+        catalogApprovalRequest("connectors_execute_tool", wrapperArgs, marker, route),
+        marker,
+      ),
+    ).toEqual({ toolName: "connectors_execute_tool", args: wrapperArgs, route });
+  });
+
+  it("keeps legacy catalog parsing separate from bound direct envelopes", () => {
+    const marker = "__rakazoCatalogTool";
+    expect(
+      catalogApprovalDetails(catalogApprovalRequest("mcp_execute_tool", {}, marker), marker),
+    ).toEqual({ toolName: "mcp_execute_tool", args: {} });
+    expect(
+      boundDirectApprovalDetails([marker, "direct", { route: [], args: {} }], marker),
+    ).toBeUndefined();
+    expect(catalogApprovalDetails([marker, "other", {}], marker)).toBeUndefined();
   });
 });

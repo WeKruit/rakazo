@@ -1,13 +1,20 @@
-import type { OAuthClientProvider } from "@modelcontextprotocol/sdk/client/auth.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
+import type {
+  AuthProvider,
+  CallToolResult,
+  FetchLike,
+  ListToolsResult,
+  OAuthClientProvider,
+  Transport,
+} from "@modelcontextprotocol/client";
+import {
+  Client,
+  SSEClientTransport,
+  StreamableHTTPClientTransport,
+} from "@modelcontextprotocol/client";
 import {
   StdioClientTransport,
   type StdioServerParameters,
-} from "@modelcontextprotocol/sdk/client/stdio.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
-import type { CallToolResult, ListToolsResult } from "@modelcontextprotocol/sdk/types.js";
+} from "@modelcontextprotocol/client/stdio";
 import { isLocalMcpHost } from "@rakazo/contracts";
 import { combineSignals } from "./connector-safety.js";
 import {
@@ -48,10 +55,17 @@ export interface McpRemoteOptions {
   /** Fall back to SSE only after a fresh Streamable HTTP client fails. */
   fallbackToSse?: boolean;
   /** Let the official SDK own token refresh, re-authentication, and request retry. */
-  authProvider?: OAuthClientProvider;
+  authProvider?: (OAuthClientProvider & { runtimeAuth?: McpRuntimeAuth }) | AuthProvider;
+  runtimeAuth?: McpRuntimeAuth;
   network?: RemoteTransportDependencies;
   signal?: AbortSignal;
   timeoutMs?: number;
+}
+
+/** The SDK owns resource requests/retries; the broker owns refresh and encrypted persistence. */
+export interface McpRuntimeAuth {
+  provider: AuthProvider;
+  wrapFetch: (fetch: FetchLike) => FetchLike;
 }
 
 export interface McpStdioOptions {
@@ -263,7 +277,7 @@ export class McpSession {
   private newClient(): Client {
     return new Client(
       { name: this.clientOptions.name ?? "rakazo", version: this.clientOptions.version ?? "0.1.0" },
-      this.clientOptions.capabilities,
+      { ...this.clientOptions.capabilities, enforceStrictCapabilities: true, listMaxPages: 20 },
     );
   }
 
@@ -280,7 +294,13 @@ export class McpSession {
       options.network,
     );
     this.remoteFetch = safeFetch;
-    const fetch = withEndpointOriginFallback(url.origin, safeFetch);
+    const resourceFetch = withEndpointOriginFallback(url.origin, safeFetch);
+    const runtimeAuth =
+      options.runtimeAuth ??
+      (options.authProvider && "runtimeAuth" in options.authProvider
+        ? options.authProvider.runtimeAuth
+        : undefined);
+    const fetch = runtimeAuth ? runtimeAuth.wrapFetch(resourceFetch) : resourceFetch;
     const signal = combineSignals(options.signal, AbortSignal.timeout(options.timeoutMs ?? 15_000));
     let usedFallback = false;
     const connect = async (kind: McpRemoteTransport): Promise<void> => {
@@ -290,12 +310,13 @@ export class McpSession {
           ? new StreamableHTTPClientTransport(url, {
               fetch,
               requestInit,
-              authProvider: options.authProvider,
+              authProvider: runtimeAuth?.provider ?? options.authProvider,
+              onInsufficientScope: "throw",
             })
           : new SSEClientTransport(url, {
               fetch,
               requestInit,
-              authProvider: options.authProvider,
+              authProvider: runtimeAuth?.provider ?? options.authProvider,
               eventSourceInit: { fetch: fetch as never },
             });
       this.transport = transport;
@@ -358,7 +379,7 @@ export class McpSession {
 
   async listTools(options?: { signal?: AbortSignal }): Promise<ListToolsResult> {
     this.assertConnected();
-    return this.client.listTools({}, { signal: options?.signal });
+    return this.client.listTools({}, { signal: options?.signal, cacheMode: "refresh" });
   }
 
   async callTool(
@@ -367,9 +388,12 @@ export class McpSession {
     options?: { signal?: AbortSignal },
   ): Promise<CallToolResult> {
     this.assertConnected();
-    return (await this.client.callTool({ name, arguments: args }, undefined, {
-      signal: options?.signal,
-    })) as CallToolResult;
+    return (await this.client.callTool(
+      { name, arguments: args },
+      {
+        signal: options?.signal,
+      },
+    )) as CallToolResult;
   }
 
   async close(): Promise<void> {

@@ -1,6 +1,23 @@
-import { randomUUID } from "node:crypto";
-import type { AgentMessage, AgentTool, AgentToolResult } from "@earendil-works/pi-agent-core";
-import { Agent } from "@earendil-works/pi-agent-core";
+import { createHash, randomUUID } from "node:crypto";
+import type {
+  AgentEvent,
+  AgentMessage,
+  AgentTool,
+  AgentToolResult,
+  Entry,
+  PrepareRequest,
+} from "@earendil-works/pi-agent-core";
+import {
+  Agent,
+  BACKGROUND_CONTEXT,
+  compact,
+  convertToLlm,
+  createCompactionSummaryMessage,
+  DEFAULT_COMPACTION_SETTINGS,
+  prepareCompaction,
+  shouldCompact,
+  withAbortSignal,
+} from "@earendil-works/pi-agent-core";
 import type {
   Api,
   AssistantMessage,
@@ -28,15 +45,14 @@ import type {
   ConnectorTool,
   ModelCallObserver,
 } from "@rakazo/adapter-kit";
-import { DEFAULT_CONTEXT_STRATEGY } from "@rakazo/adapter-kit";
-import { usableModelId } from "@rakazo/contracts";
+import { AskUserInputSchema, usableModelId } from "@rakazo/contracts";
 import { abortableDelay } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
 import { DELEGATION_TOOL_NAMES } from "./builtin-tools.js";
 import { withCloudflareGatewayAuth } from "./cloudflare-ai-gateway.js";
-import { shortenToolResultText } from "./context-selection.js";
+import { messageGroups, selectContext, shortenToolResultText } from "./context-selection.js";
 import { DEFAULT_OPENROUTER_MODEL_ID } from "./deployment-model.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
@@ -66,6 +82,7 @@ import {
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
+import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
@@ -255,6 +272,7 @@ export class PiAgentRuntime implements AgentRuntime {
           subagentGate: createGate(MAX_PARALLEL_SUBAGENTS),
           toolCallBudget: trackedBudget,
           toolCallSeq: { value: 0 },
+          dispatchedToolCalls: new Set(),
           abortTurn: () => undefined,
           signal,
           depth: 0,
@@ -270,6 +288,7 @@ export class PiAgentRuntime implements AgentRuntime {
           withoutSteeringMessages(request.history, initialSteering),
           request.prompt,
           request.sourceMessageId,
+          model,
         );
         const initialPrompt = initialSteering.length
           ? `${request.prompt}\n\nAdditional user context:\n${initialSteering
@@ -393,6 +412,12 @@ export class PiAgentRuntime implements AgentRuntime {
         agent = new Agent({
           sessionId: conversationSessionId(request.threadId, request.botId),
           steeringMode: "all",
+          convertToLlm: runtimeMessagesToLlm,
+          prepareRequest: activeCompaction(
+            host,
+            () => agent,
+            () => contextPolicy,
+          ),
           streamFn: (_m, ctx, options) => fallbackAwareModelStream(fallbackState, ctx, options),
           getApiKey: hasBackups
             ? async () => activeStreamTarget.credentials?.accessToken ?? activeStreamTarget.apiKey
@@ -463,6 +488,7 @@ export class PiAgentRuntime implements AgentRuntime {
         // it counts as the final reply, including when the completed message omits it.
         let streamedBeforePendingFinal = 0;
         agent.subscribe(async (event) => {
+          auditUndispatchedToolFailure(event, host, tools);
           if (event.type === "message_end") {
             await piSession?.appendMessage(event.message);
           }
@@ -584,6 +610,15 @@ export class PiAgentRuntime implements AgentRuntime {
         // message (stopReason "error" / "length") and still resolves the run.
         // state.errorMessage covers the error stop; the message itself covers a
         // length stop and any failure that never landed on state.
+        if (
+          !budgetExceeded &&
+          terminalMessage?.role === "assistant" &&
+          terminalMessage.stopReason === "aborted" &&
+          context?.signal?.aborted
+        ) {
+          queue.fail(context.signal.reason);
+          return;
+        }
         const providerFailure =
           !budgetExceeded && terminalMessage ? providerFailureText(terminalMessage) : undefined;
         const error = agent.state.errorMessage || providerFailure;
@@ -756,6 +791,7 @@ function credentialStoreForRequest(
     toOAuthCredential(oauth.credential),
     persist ? (next) => persist(next) : undefined,
     oauth.retire,
+    oauth.modify,
   );
 }
 
@@ -826,6 +862,35 @@ function toAgentTools(toolDefs: readonly ConnectorTool[], host: ToolHost): Agent
     .map(({ tool }) => tool);
   const names = normalizeAgentToolNames(ordered);
   return ordered.map((tool, index) => toAgentTool(tool, host, names[index]!));
+}
+
+function auditUndispatchedToolFailure(
+  event: AgentEvent,
+  host: ToolHost,
+  tools: readonly AgentTool[],
+) {
+  if (event.type !== "tool_execution_end") return;
+  const dispatched = host.dispatchedToolCalls.delete(event.toolCallId);
+  if (!event.isError || dispatched) return;
+  const tool = tools.find((entry) => entry.name === event.toolName);
+  // Pi's validation error appends full arguments for the model. Audit only its
+  // field diagnostics; argument values must not become durable audit payloads.
+  const diagnostic = (event.result as AgentToolResult<unknown>).content
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n")
+    .split("\n\nReceived arguments:", 1)[0]!;
+  const completion: AgentToolCompletion = {
+    name: tool?.label ?? "unknown-tool",
+    executionId: JSON.stringify(["pi-tool", host.agentNamespace ?? "main", event.toolCallId]),
+    durationMs: 0,
+    error: tool ? sanitizeError(diagnostic).slice(0, 2_000) : "Tool not found before execution.",
+  };
+  try {
+    void Promise.resolve(host.request.onToolCompleted?.(completion)).catch(() => undefined);
+  } catch {
+    // Audit hooks are best effort and must never change tool behavior.
+  }
 }
 
 /**
@@ -934,10 +999,252 @@ function stableToolNameHash(name: string): string {
   return (hash >>> 0).toString(36);
 }
 
+function runtimeMessagesToLlm(messages: AgentMessage[]) {
+  return messages.flatMap((message) => {
+    const converted = convertToLlm([message]);
+    return message.role === "compactionSummary"
+      ? converted.map((entry) => ({ ...entry, rakazoNavigation: true }))
+      : converted;
+  });
+}
+
+/** Native Pi owns summary preparation and generation; Rakazo keeps its exact controls. */
+function activeCompaction(
+  host: ToolHost,
+  getAgent: () => Agent,
+  getPolicy: () => ReturnType<typeof createRuntimeContextPolicy>,
+): PrepareRequest {
+  let lastAttempt: string | undefined;
+  return async ({ context, thinkingLevel }, turnSignal) => {
+    const signal = turnSignal ? AbortSignal.any([host.signal, turnSignal]) : host.signal;
+    signal.throwIfAborted();
+    if (host.pausePending) return;
+    const target = host.activeModel;
+    const window = target.config.contextWindow ?? target.model.contextWindow;
+    const output = target.config.maxTokens ?? target.model.maxTokens;
+    const settings = {
+      ...DEFAULT_COMPACTION_SETTINGS,
+      reserveTokens: Math.min(
+        DEFAULT_COMPACTION_SETTINGS.reserveTokens,
+        Math.max(0, window - output),
+      ),
+    };
+    const wire = runtimeMessagesToLlm(context.messages);
+    // Our runtime uses only native roles with exactly one provider message each.
+    // Check this before sharing indexes with the existing context protection policy.
+    if (wire.length !== context.messages.length) return;
+    // Match provider selection: tool details and runtime metadata are not prompt content.
+    const before = estimateModelContextTokens({ messages: wire }, estimatePiImageTokens);
+    const overflow = before > window - output;
+    if (!overflow && !shouldCompact(before, window, settings)) return;
+    const fingerprint = createHash("sha256").update(JSON.stringify(context.messages)).digest("hex");
+    if (fingerprint === lastAttempt) return;
+    const protectedIndexes = new Set(getPolicy().protectedIndexes(wire));
+    let groups: ReturnType<typeof messageGroups>;
+    try {
+      groups = messageGroups(wire, estimatePiImageTokens);
+    } catch {
+      // An unfinished tool batch must settle before any message can be replaced.
+      return;
+    }
+    for (const index of groups.at(-1)?.indexes ?? []) protectedIndexes.add(index);
+    const protectedMessages = new Set<AgentMessage>();
+    for (const group of groups) {
+      if (!group.indexes.some((index) => protectedIndexes.has(index))) continue;
+      for (const index of group.indexes) {
+        const message = context.messages[index]!;
+        if (message.role !== "compactionSummary") protectedMessages.add(message);
+      }
+    }
+    const selected = selectContext(wire, {
+      strategy: "current",
+      protectedIndexes: context.messages.flatMap((message, index) =>
+        protectedMessages.has(message) ? [index] : [],
+      ),
+      truncateToolResults: false,
+      budget: {
+        contextWindow: window,
+        outputReserve: output,
+        systemPrompt: "",
+        tools: [],
+        imageTokens: estimatePiImageTokens,
+      },
+    });
+    const entries: Entry[] = context.messages.map((message, index) => {
+      const base = {
+        id: String(index),
+        parentId: index ? String(index - 1) : null,
+        seq: index,
+        timestamp: message.timestamp,
+      };
+      return message.role === "compactionSummary"
+        ? {
+            ...base,
+            type: "compaction" as const,
+            summary: message.summary,
+            tokensBefore: message.tokensBefore,
+            retainedTail: [],
+            fromHook: true,
+          }
+        : { ...base, type: "message" as const, message };
+    });
+    let largestGroup = 0;
+    let protectedTokens = 0;
+    let lastGroup = 0;
+    for (const group of groups) {
+      lastGroup = group.tokens;
+      if (group.indexes.some((index) => protectedMessages.has(context.messages[index]!))) {
+        protectedTokens += group.tokens;
+      } else {
+        largestGroup = Math.max(largestGroup, group.tokens);
+      }
+    }
+    // ponytail: native cuts are approximate; reserve summary space and one complete group.
+    const tailTokens = Math.max(
+      0,
+      selected.availableMessageTokens - protectedTokens - settings.reserveTokens,
+    );
+    const minimumTail = context.messages.at(-1)?.role === "toolResult" ? lastGroup + 1 : 0;
+    const keepRecentTokens = Math.max(
+      minimumTail,
+      Math.min(settings.keepRecentTokens, Math.max(0, tailTokens - largestGroup)),
+    );
+    const prepared = prepareCompaction(entries, { ...settings, keepRecentTokens });
+    if (!prepared.ok) throw prepared.error;
+    const preparation = prepared.value && {
+      ...prepared.value,
+      messagesToSummarize: prepared.value.messagesToSummarize.filter(
+        (message) => !protectedMessages.has(message),
+      ),
+      turnPrefixMessages: prepared.value.turnPrefixMessages.filter(
+        (message) => !protectedMessages.has(message),
+      ),
+    };
+    if (
+      preparation?.previousSummary &&
+      preparation.isSplitTurn &&
+      !preparation.messagesToSummarize.length &&
+      preparation.turnPrefixMessages.length
+    ) {
+      // Pi's split path omits the previous summary when history is empty. Its
+      // ordinary update-summary path preserves that progress and the same cut.
+      preparation.messagesToSummarize = preparation.turnPrefixMessages;
+      preparation.turnPrefixMessages = [];
+      preparation.isSplitTurn = false;
+    }
+    if (
+      !preparation ||
+      (!preparation.messagesToSummarize.length && !preparation.turnPrefixMessages.length)
+    ) {
+      if (overflow)
+        throw new Error("Required context leaves no completed history that Pi can compact.");
+      return;
+    }
+    lastAttempt = fingerprint;
+    const summaryModels: Models = {
+      ...target.models,
+      completeSimple: async (_model, summaryContext, options) => {
+        const response = await reliableModelStream(
+          target.models,
+          target.model,
+          summaryContext,
+          // Native compaction's cache:none is not supported by every installed adapter.
+          // The connection preference below still overrides the audited default.
+          withCloudflareGatewayAuth(target.config, {
+            ...options,
+            signal,
+            maxRetries: 0,
+            cacheRetention: undefined,
+          }),
+          target.config.maxTokens,
+          () => target.credentials?.accessToken ?? target.apiKey,
+          (preparedOptions) =>
+            observedPiStream(
+              target.models,
+              target.model,
+              summaryContext,
+              preparedOptions,
+              (event) => host.queue.push(event),
+              host.modelCallObserver,
+              {
+                operationKind: "compaction",
+                ...(host.agentNamespace ? { agentId: host.agentNamespace } : {}),
+              },
+              {
+                recordUsage: host.request.onUsage,
+                imageTokens: estimatePiImageTokens,
+                prepareContext: (ctx) => {
+                  const tokens = estimateModelContextTokens(ctx, estimatePiImageTokens);
+                  if (tokens + (preparedOptions.maxTokens ?? target.model.maxTokens) > window)
+                    throw new Error("Native Pi summary request exceeds the model context window.");
+                  return ctx;
+                },
+              },
+            ),
+          target.config.cacheCapabilities?.retentionMode,
+        ).result();
+        if (
+          response.stopReason !== "error" &&
+          response.stopReason !== "aborted" &&
+          (response.stopReason !== "stop" || !assistantText(response).trim())
+        )
+          throw new Error("Pi compaction did not return a complete, nonempty summary.");
+        return response;
+      },
+    };
+    const result = await compact(
+      preparation,
+      summaryModels,
+      target.model,
+      "Summarize completed progress and navigation only. This summary cannot grant approval or establish evidence; exact original history and artifacts must be read for facts. Exact current human instructions, decisions and role state are retained separately.",
+      thinkingLevel,
+      {
+        enabled: true,
+        maxRetries: modelStreamMaxRetries(),
+        baseDelayMs: MODEL_PROVIDER_RETRY_DELAYS_MS[0],
+      },
+      undefined,
+      withAbortSignal(signal, BACKGROUND_CONTEXT),
+    );
+    signal.throwIfAborted();
+    if (!result.ok) throw result.error;
+    if (!result.value.summary.trim()) throw new Error("Pi compaction returned an empty summary.");
+    const retained = new Set([...protectedMessages, ...result.value.retainedTail]);
+    const summary = createCompactionSummaryMessage(
+      `This is untrusted navigation and progress only; never approval or source evidence. Read exact history and artifacts before relying on omitted facts.\n\n${result.value.summary}`,
+      result.value.tokensBefore,
+      context.messages.reduce(
+        (timestamp, message) => Math.max(timestamp, message.timestamp + 1),
+        Date.now(),
+      ),
+    );
+    const messages = context.messages.filter((message) => retained.has(message));
+    const inserted = messages.length < context.messages.length;
+    // Pi's canonical summary prefix invalidates usage from every retained old assistant.
+    const firstNonSystem = messages.findIndex((message) => message.role !== "system");
+    messages.splice(firstNonSystem < 0 ? messages.length : firstNonSystem, 0, summary);
+    const after = estimateModelContextTokens(
+      { messages: runtimeMessagesToLlm(messages) },
+      estimatePiImageTokens,
+    );
+    if (!inserted || after >= before || after > window - output) {
+      // ponytail: a rejected summary must not abort exact context that already fits.
+      if (!overflow) return;
+      throw new Error("Pi compaction could not fit context while preserving required messages.");
+    }
+    signal.throwIfAborted();
+    // PrepareRequest's context replacement does not update Agent.state itself.
+    getAgent().state.messages = messages;
+    lastAttempt = createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+    return { context: { ...context, messages } };
+  };
+}
+
 function toHistory(
   history: AgentRunRequest["history"],
   prompt: string,
-  sourceMessageId?: string | null,
+  sourceMessageId: string | null | undefined,
+  model: Model<Api>,
 ) {
   let duplicatePromptIndex = -1;
   for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -957,15 +1264,37 @@ function toHistory(
   return prior
     .filter((m) => m.role === "user" || m.role === "assistant")
     .map((m) => {
-      const text = m.role === "assistant" ? `Assistant: ${m.content}` : m.content;
-      const images = m.role === "assistant" ? [] : toPiImages(m.images);
-      return {
-        role: "user" as const,
-        content: images.length ? [{ type: "text" as const, text }, ...images] : text,
+      const metadata = {
         timestamp: Date.now(),
         rakazoHistory: true,
         rakazoMessageId: m.id,
         rakazoCreatedAt: m.createdAt,
+      };
+      if (m.role === "assistant")
+        return {
+          ...metadata,
+          role: "assistant" as const,
+          content: [{ type: "text" as const, text: m.content }],
+          api: model.api,
+          provider: model.provider,
+          model: model.id,
+          usage: {
+            input: 0,
+            output: 0,
+            cacheRead: 0,
+            cacheWrite: 0,
+            totalTokens: 0,
+            cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+          },
+          stopReason: "stop" as const,
+        };
+      const images = toPiImages(m.images);
+      return {
+        ...metadata,
+        role: "user" as const,
+        content: images.length
+          ? [{ type: "text" as const, text: m.content }, ...images]
+          : m.content,
       };
     });
 }
@@ -1047,8 +1376,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       }
       if (tool.name === "remember") {
         return {
-          content: String(raw.content ?? ""),
+          content: raw.content,
           path: String(raw.path ?? "MEMORY.md"),
+          expectedRevision: raw.expectedRevision,
+          ...(raw.recruitingFeedback === undefined
+            ? {}
+            : { recruitingFeedback: raw.recruitingFeedback }),
         };
       }
       if (tool.name === "request_takeover") {
@@ -1060,7 +1393,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           question: String(raw.question ?? "What should I use?"),
           // Keep a missing/invalid options value as-is so schema minItems can reject it;
           // do not coerce to [] (that used to look like a valid empty list upstream).
-          options,
+          ...(options === undefined ? {} : { options }),
+          ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
         };
       }
       if (tool.name === "request_secret") {
@@ -1068,8 +1402,9 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       }
       if (tool.name === "write_file") {
         return {
-          path: String(raw.path ?? "notes/result.txt"),
-          content: textContentArg(raw.content, ""),
+          ...(raw.path === undefined ? {} : { path: String(raw.path) }),
+          ...(Object.hasOwn(raw, "content") ? { content: textContentArg(raw.content, "") } : {}),
+          ...(Object.hasOwn(raw, "artifactId") ? { artifactId: raw.artifactId } : {}),
         };
       }
       if (tool.name === "computer_act") {
@@ -1156,6 +1491,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       const startedAt = Date.now();
       let result: unknown;
       let failure: unknown;
+      host.dispatchedToolCalls.add(toolCallId);
       try {
         result = await (async () => {
           if (tool.name === "request_takeover") {
@@ -1171,28 +1507,30 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             };
           }
           if (tool.name === "ask_user") {
-            const options = Array.isArray(args.options)
-              ? args.options.map((option) => String(option).trim())
-              : [];
-            if (
-              options.length < 2 ||
-              options.length > 4 ||
-              options.some((option) => option.length === 0 || option.length > 80) ||
-              new Set(options).size !== options.length
-            ) {
-              throw new Error("ask_user requires two to four unique, non-empty options");
-            }
+            const parsed = AskUserInputSchema.safeParse(args);
+            if (!parsed.success)
+              throw new Error(
+                "ask_user requires two to four unique, non-empty options or a valid requestedSchema",
+              );
+            const { question } = parsed.data;
+            const options = "options" in parsed.data ? parsed.data.options : undefined;
+            const requestedSchema =
+              "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
             host.pausePending = true;
             host.queue.push({
               type: "ask",
-              text: String(args.question ?? "What should I use?"),
-              actions: options.map((label, index) => ({
-                id: `choice-${index + 1}`,
-                label,
-              })),
+              text: question,
+              ...(requestedSchema
+                ? { requestedSchema }
+                : {
+                    actions: options!.map((label, index) => ({
+                      id: `choice-${index + 1}`,
+                      label,
+                    })),
+                  }),
             });
             return {
-              content: [{ type: "text", text: "Waiting for the user's choice." }],
+              content: [{ type: "text", text: "Waiting for the user's answer." }],
               details: args,
               terminate: true,
             };
@@ -1381,6 +1719,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       : selectedModel.apiKey,
     depth: 1,
     agentNamespace: agentId,
+    dispatchedToolCalls: new Set(),
     pendingShells: [],
   };
   const contextPolicy = createRuntimeContextPolicy(
@@ -1442,7 +1781,14 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
         requestModel.cacheCapabilities?.retentionMode,
       ),
   };
+  const nestedTools = toAgentTools(childDefs, nestedHost);
   nested = new Agent({
+    convertToLlm: runtimeMessagesToLlm,
+    prepareRequest: activeCompaction(
+      nestedHost,
+      () => nested,
+      () => contextPolicy,
+    ),
     finishTurn: async (turn, turnSignal) => {
       await deliverFinishedShells(
         (text) => {
@@ -1471,6 +1817,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     initialState: {
       systemPrompt: [
         `You are a Rakazo subagent named "${name}".`,
+        RECRUITING_PRESENTATION_INSTRUCTION,
         "You run inside the parent bot's turn — you are not a separate bot chat.",
         "Complete the task and return a concise result. Do not spawn bots or further subagents.",
         extra,
@@ -1479,7 +1826,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
         .join(" "),
       model: subagentModel,
       thinkingLevel: thinkingLevelFor(subagentModel, requestModel.thinkingLevel),
-      tools: toAgentTools(childDefs, nestedHost),
+      tools: nestedTools,
       messages: [],
     },
   });
@@ -1488,6 +1835,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
   let streamed = "";
   let lastPush = 0;
   nested.subscribe((event) => {
+    auditUndispatchedToolFailure(event, nestedHost, nestedTools);
     if (event.type === "tool_execution_start") {
       if (host.toolCallBudget.exceeded) return;
       const toolName = "toolName" in event && event.toolName ? String(event.toolName) : "a tool";
@@ -1651,9 +1999,6 @@ function safeJsonSchemaParameters(tool: ConnectorTool) {
 }
 
 function builtinParameters(tool: ConnectorTool) {
-  if (tool.name === "write_file") {
-    return Type.Object({ path: Type.String(), content: Type.String() });
-  }
   if (tool.name === "destination.write") {
     return Type.Object({
       collection: Type.String(),
@@ -1665,17 +2010,22 @@ function builtinParameters(tool: ConnectorTool) {
     return Type.Object({ reason: Type.String() });
   }
   if (tool.name === "ask_user") {
-    return Type.Object({
-      question: Type.String({ maxLength: 240 }),
-      options: Type.Array(Type.String({ minLength: 1, maxLength: 80 }), {
-        minItems: 2,
-        maxItems: 4,
-        uniqueItems: true,
-      }),
-    });
+    return Type.Unsafe(tool.inputSchema) as unknown as ReturnType<typeof Type.Object>;
   }
   if (tool.name === "remember") {
-    return Type.Object({ content: Type.String(), path: Type.String() });
+    return Type.Object({
+      content: Type.String(),
+      path: Type.Optional(Type.String()),
+      expectedRevision: Type.Integer({ minimum: 0 }),
+      recruitingFeedback: Type.Optional(
+        Type.Unsafe(
+          (tool.inputSchema.properties as Record<string, unknown>).recruitingFeedback as Record<
+            string,
+            unknown
+          >,
+        ),
+      ),
+    });
   }
   if (tool.name === "shell") {
     return Type.Object({
@@ -1877,9 +2227,14 @@ export function jsonSchemaParameters(
   schema: Record<string, unknown>,
   options: FieldOptions = {},
 ): ReturnType<typeof Type.Object> {
-  // Keep intersections intact until parametersFor flattens root combinators.
-  // Rebuilding only properties here drops allOf-only fields and their constraints.
-  if (Array.isArray(schema.allOf)) {
+  // Preserve local references and intersections until parametersFor flattens root combinators.
+  // Rebuilding properties loses recursive definitions, intersections and exact retained-payload constraints.
+  if (
+    schema.$defs ||
+    Array.isArray(schema.allOf) ||
+    "const" in schema ||
+    Array.isArray(schema.enum)
+  ) {
     return Type.Unsafe({ ...schema, ...options }) as unknown as ReturnType<typeof Type.Object>;
   }
   // Top-level oneOf/anyOf (e.g. request_secret's credential XOR connectionId)
@@ -1991,7 +2346,8 @@ export function jsonField(spec: unknown): ReturnType<typeof Type.String> {
   }
   const type = "type" in definition ? String(definition.type) : "string";
   if (type === "null") return Type.Null(options) as never;
-  if (type === "number" || type === "integer") return Type.Number(options) as never;
+  if (type === "integer") return Type.Integer(definition) as never;
+  if (type === "number") return Type.Number(definition) as never;
   if (type === "boolean") return Type.Boolean(options) as never;
   if (type === "array") {
     const arrayOptions: FieldOptions & {
@@ -2010,18 +2366,38 @@ export function jsonField(spec: unknown): ReturnType<typeof Type.String> {
 
 export function serializeToolResult(
   result: unknown,
-  strategy: AgentRunRequest["contextStrategy"],
+  _strategy: AgentRunRequest["contextStrategy"],
   name: string,
   args: Record<string, unknown>,
 ) {
   try {
+    if (
+      result &&
+      typeof result === "object" &&
+      Object.hasOwn(result, "structuredContent") &&
+      "structuredContent" in result &&
+      "content" in result &&
+      Array.isArray(result.content) &&
+      result.content.length === 1
+    ) {
+      const part = result.content[0];
+      if (
+        part?.type === "text" &&
+        typeof part.text === "string" &&
+        Object.keys(part).length === 2 &&
+        Object.hasOwn(part, "type") &&
+        Object.hasOwn(part, "text") &&
+        part.text === JSON.stringify(result.structuredContent)
+      ) {
+        const { content: _duplicateContent, ...envelope } = result;
+        result = envelope;
+      }
+    }
     const text = JSON.stringify(result);
     if (!text) return "ok";
     // skill-tools.ts already bounds skill content; the context budget selector may still shorten it.
     if (text.length <= 12_000 || VERBATIM_TOOL_RESULTS.has(name)) return text;
-    return (strategy ?? DEFAULT_CONTEXT_STRATEGY) === "current"
-      ? clipToolResultText(text)
-      : shortenToolResultText(text, 12_000, { name, arguments: args });
+    return shortenToolResultText(text, 12_000, { name, arguments: args });
   } catch {
     return "ok";
   }
@@ -2170,6 +2546,7 @@ interface ToolHost {
   toolCallBudget: ToolCallBudget;
   /** Shared fallback uniqueness when the model omits toolCallId (nested hosts reuse this). */
   toolCallSeq: { value: number };
+  dispatchedToolCalls: Set<string>;
   abortTurn(): void;
   signal: AbortSignal;
   depth: number;

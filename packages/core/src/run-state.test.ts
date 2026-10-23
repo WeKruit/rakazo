@@ -13,7 +13,7 @@ describe("run state machine", () => {
     expect(canTransition("waiting_takeover", "running")).toBe(false);
   });
 
-  it("withholds user steering from routine, webhook, and creation intro turns", () => {
+  it("withholds user steering from routine, webhook, creation, and peer-message turns", () => {
     expect(isConversationalRun("user")).toBe(true);
     expect(isConversationalRun("follow_up")).toBe(true);
     expect(isConversationalRun("messaging")).toBe(true);
@@ -21,6 +21,7 @@ describe("run state machine", () => {
     expect(isConversationalRun("webhook")).toBe(false);
     expect(isConversationalRun("created")).toBe(false);
     expect(isConversationalRun("tickets")).toBe(false);
+    expect(isConversationalRun("bot_message")).toBe(false);
   });
 
   it("marks ticket runs as background work that stays out of the chat", () => {

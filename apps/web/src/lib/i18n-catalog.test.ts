@@ -1,5 +1,9 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { transformSync } from "@babel/core";
+import linguiMacro from "@lingui/babel-plugin-lingui-macro";
+import { createCompiledCatalog, getCatalogs } from "@lingui/cli/api";
+import { getConfig } from "@lingui/conf";
 import { i18n } from "@lingui/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import de from "../../scripts/translations-de.json";
@@ -14,6 +18,235 @@ describe("lingui catalogs", () => {
   beforeEach(() => {
     i18n.load("en", {});
     i18n.activate("en");
+  });
+
+  it("resolves every compiled artifact-card label from production catalogs", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const component = fileURLToPath(new URL("../components/ArtifactFileCard.tsx", import.meta.url));
+    const compiled = transformSync(readFileSync(component, "utf8"), {
+      filename: component,
+      babelrc: false,
+      configFile: false,
+      parserOpts: { plugins: ["typescript", "jsx"] },
+      plugins: [[linguiMacro, { linguiConfig: config }]],
+    });
+    const ids = [...new Set([...compiled!.code!.matchAll(/\bid:\s*"([^"]+)"/g)].map((m) => m[1]!))];
+    expect(ids.length).toBeGreaterThan(5);
+    const [catalog] = await getCatalogs(config);
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      for (const id of ids) expect(messages[id], `${locale} ${id}`).toBeDefined();
+      const result = createCompiledCatalog(
+        locale,
+        Object.fromEntries(ids.map((id) => [id, messages[id]!])),
+        { namespace: "json", strict: true },
+      );
+      expect(result.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(result.source).messages);
+      i18n.activate(locale);
+      for (const id of ids)
+        expect(
+          i18n._({ id, values: { 0: "Job description", name: "Job description" } }),
+          locale,
+        ).not.toBe(id);
+    }
+  });
+
+  it("compiles recruiter workspace labels in every production locale without source descriptors", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const labels = [
+      "Recruiting workspace",
+      "WeKruit home",
+      "All roles",
+      "New Role",
+      "Job Brief",
+      "Client feedback",
+      "Shortlist",
+      "Contacts",
+      "Sequence",
+      "Inbox",
+      "Interview",
+      "Recruiting workflow",
+      "Subject",
+      "Save draft",
+      "Recipients",
+      "Search roles",
+      "Role conversations",
+      "Unread",
+      "Collapse navigation",
+      "Show navigation",
+      "Hide navigation",
+    ];
+    const entries = labels.map((label) => {
+      const entry = Object.entries(source ?? {}).find(([, entry]) => entry.message === label);
+      expect(entry, label).toBeDefined();
+      return entry!;
+    });
+    expect(Object.fromEntries(entries.map(([id, entry]) => [id, entry.message]))).toMatchObject({
+      pzfKRn: "Search roles",
+      ipQKNM: "Sequence",
+    });
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(locale, messages, { namespace: "json", strict: true });
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const [id, entry] of entries) {
+        const rendered = i18n._({ id });
+        expect(rendered, `${locale} ${entry.message}`).not.toBe(id);
+        expect(rendered, `${locale} ${entry.message}`).not.toBe("");
+        if (locale === "en") expect(rendered).toBe(entry.message);
+      }
+    }
+  });
+
+  it("resolves the actual recruiting workspace component messages in production catalogs", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const ids = new Set<string>();
+    for (const path of [
+      "../pages/shell/RecruitingNavigation.tsx",
+      "../pages/RecruitingCorrespondence.tsx",
+      "../pages/GroupPanel.tsx",
+      "../pages/Shell.tsx",
+      "../pages/RecruitingPanel.tsx",
+    ]) {
+      const filename = fileURLToPath(new URL(path, import.meta.url));
+      const compiled = transformSync(readFileSync(filename, "utf8"), {
+        filename,
+        babelrc: false,
+        configFile: false,
+        parserOpts: { plugins: ["typescript", "jsx"] },
+        plugins: [[linguiMacro, { linguiConfig: config }]],
+      });
+      for (const match of compiled!.code!.matchAll(/\/\*\*\s*i18n\s*\*\/\s*\{\s*id:\s*"([^"]+)"/g))
+        ids.add(match[1]!);
+    }
+    expect(ids.size).toBeGreaterThan(40);
+    expect(ids.has("liuegf")).toBe(true);
+    const [catalog] = await getCatalogs(config);
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      for (const id of ids) expect(messages[id], `${locale} ${id}`).toBeDefined();
+      const compiled = createCompiledCatalog(
+        locale,
+        Object.fromEntries([...ids].map((id) => [id, messages[id]!])),
+        { namespace: "json", strict: true },
+      );
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const id of ids)
+        expect(i18n._({ id, values: { 0: 1, name: "Draft" } }), `${locale} ${id}`).not.toBe(id);
+    }
+  });
+
+  it("compiles match-score and member-stop labels without source-message descriptors", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const entries = ["Match score", "Stop {name}"].map((message) => {
+      const entry = Object.entries(source ?? {}).find(([, entry]) => entry.message === message);
+      expect(entry, message).toBeDefined();
+      return entry!;
+    });
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(
+        locale,
+        Object.fromEntries(entries.map(([id]) => [id, messages[id]!])),
+        { namespace: "json", strict: true },
+      );
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const [id, entry] of entries)
+        expect(i18n._({ id, values: { name: "Synthetic agent" } }), locale).toBe(
+          entry.message?.replaceAll("{name}", "Synthetic agent"),
+        );
+    }
+  });
+
+  it("compiles Recruiting messages for production without source-message descriptors", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const entries = Object.entries(source ?? {}).filter(([, entry]) =>
+      entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx"),
+    );
+    expect(entries.length).toBeGreaterThan(30);
+    for (const message of [
+      "Open original question",
+      "Cards",
+      "Table",
+      "Candidate",
+      "Saved assessments",
+      "Raw search results",
+      "Unassessed",
+      "No saved result rows",
+      "Could not load search results",
+    ])
+      expect(
+        entries.some(([, entry]) => entry.message === message),
+        message,
+      ).toBe(true);
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(locale, messages, { namespace: "json", strict: true });
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      expect(i18n._({ id: "bn0SqF" }), locale).toBe("Recruiting");
+      for (const [id, entry] of entries) {
+        const rendered = i18n._({ id, values: { 0: 2, count: 2 } });
+        expect(rendered, `${locale} ${id}`).not.toBe(id);
+        if (locale === "en")
+          expect(rendered, id).toBe(
+            entry.message?.replaceAll("{0}", "2").replaceAll("{count}", "2"),
+          );
+      }
+    }
+  });
+
+  it("compiles candidate counts with English fallback grammar in every locale", async () => {
+    const config = getConfig({
+      configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
+    });
+    const [catalog] = await getCatalogs(config);
+    const source = await catalog!.read("en");
+    const candidateCountId = Object.entries(source ?? {}).find(
+      ([, entry]) =>
+        entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx") &&
+        entry.message?.includes("# candidate"),
+    )?.[0];
+    expect(candidateCountId).toBeDefined();
+    for (const locale of config.locales) {
+      const { messages } = await catalog!.getTranslations(locale, config);
+      const compiled = createCompiledCatalog(
+        locale,
+        { [candidateCountId!]: messages[candidateCountId!]! },
+        { namespace: "json", strict: true },
+      );
+      expect(compiled.errors).toEqual([]);
+      i18n.load(locale, JSON.parse(compiled.source).messages);
+      i18n.activate(locale);
+      for (const count of [0, 1, 2])
+        expect(i18n._({ id: candidateCountId!, values: { 0: count } }), `${locale}: ${count}`).toBe(
+          `${count} candidate${count === 1 ? "" : "s"}`,
+        );
+    }
   });
 
   it("falls back to the English source message when a translation is missing", () => {

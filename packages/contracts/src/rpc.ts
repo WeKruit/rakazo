@@ -59,6 +59,7 @@ import {
   McpServerConfigInput,
   McpServerSchema,
   MemoryDocumentSchema,
+  MemoryRevisionSchema,
   MemoryScopeSchema,
   MeSchema,
   MessagingAgentConnectionSchema,
@@ -93,24 +94,105 @@ import {
   UpdateBotInput,
   UpdateExternalConversationPolicyInput,
   UpdateGroupInput,
+  UpdateRoutineInput,
   UsageRecordSchema,
   VoiceCatalogEntrySchema,
   VoiceCredentialSchema,
   VoiceInfoSchema,
   VoiceStatusSchema,
 } from "./domain.js";
-import { ComputerCommandSchema, ProductEventSchema } from "./events.js";
-import { Id, IsoDate } from "./ids.js";
+import {
+  AskAnswerSchema,
+  AskBlockSchema,
+  ComputerCommandSchema,
+  ProductEventSchema,
+} from "./events.js";
+import { Id, RunStatus } from "./ids.js";
 import {
   IntegrationProviderConfigSchema,
   IntegrationSetupStateSchema,
 } from "./integration-settings.js";
+import { McpOAuthConfigInput } from "./mcp.js";
 import { MessageReactionSchema } from "./reactions.js";
+import {
+  ConfirmRecruitingBriefInput,
+  CreateRecruitingRoleInput,
+  EditRecruitingCriteriaInput,
+  ListRecruitingCandidateSourcesInput,
+  ListRecruitingCandidateSourcesOutput,
+  ListRecruitingCandidatesInput,
+  ListRecruitingCandidatesOutput,
+  ListRecruitingFeedbackInput,
+  ListRecruitingFeedbackOutput,
+  ReadRecruitingSourceInput,
+  RecruitingAssessmentAskTargetSchema,
+  RecruitingAssessmentSchema,
+  RecruitingCandidateFeedbackSelectionSchema,
+  RecruitingCandidateReportSchema,
+  RecruitingCorrespondenceReferenceSchema,
+  RecruitingCorrespondenceSchema,
+  RecruitingCrmDataInputSchema,
+  RecruitingCrmDataOutputSchema,
+  RecruitingId,
+  RecruitingResearchActionSchema,
+  RecruitingResearchSavedObservationSchema,
+  RecruitingResearchTaskSchema,
+  RecruitingRoleRevisionSchema,
+  RecruitingRoleSchema,
+  ReviseRecruitingRoleInput,
+  SetRecruitingCandidateShortlistInput,
+  SetRecruitingCandidateShortlistOutput,
+} from "./recruiting.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
+const recruitingWorkspace = z.strictObject({
+  role: RecruitingRoleSchema,
+  revision: RecruitingRoleRevisionSchema,
+});
+export const RecruitingAssessmentSnapshotSchema = z
+  .strictObject({
+    assessment: RecruitingAssessmentSchema,
+    roleRevision: RecruitingRoleRevisionSchema,
+    isCurrent: z.boolean(),
+    sourceMessageTargets: z.array(
+      z.strictObject({
+        messageId: Id,
+        threadId: Id,
+        target: z.union([z.strictObject({ botId: Id }), z.strictObject({ groupId: Id })]),
+      }),
+    ),
+  })
+  .refine(
+    (snapshot) =>
+      snapshot.roleRevision.id === snapshot.assessment.roleRevisionId &&
+      snapshot.roleRevision.roleId === snapshot.assessment.roleId,
+    {
+      message: "Assessment role revision must match its saved snapshot",
+      path: ["roleRevision"],
+    },
+  );
+export type RecruitingAssessmentSnapshot = z.infer<typeof RecruitingAssessmentSnapshotSchema>;
+
+export const RecruitingQuestionSchema = z.strictObject({
+  effectId: RecruitingId,
+  roleId: RecruitingId,
+  roleRevisionId: RecruitingId,
+  target: RecruitingAssessmentAskTargetSchema,
+  threadId: Id,
+  botId: Id,
+  groupId: Id.nullable(),
+  runId: Id,
+  messageId: Id,
+  askIndex: z.number().int().nonnegative(),
+  block: AskBlockSchema,
+  runStatus: RunStatus,
+  isCurrent: z.boolean(),
+  canAnswer: z.boolean(),
+});
+export type RecruitingQuestion = z.infer<typeof RecruitingQuestionSchema>;
 
 const threadTarget = z
   .object({
@@ -139,7 +221,9 @@ const structuredMentionTarget = z.discriminatedUnion("kind", [
 const threadSendInput = threadTarget
   .safeExtend({
     text: z.string().optional(),
+    correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
     artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
+    addressing: z.enum(["coordinator", "mentions"]).optional(),
     /** Bare bot ids (legacy) or typed mention chips from the composer. */
     mentions: z
       .array(z.union([Id, structuredMentionTarget]))
@@ -150,6 +234,13 @@ const threadSendInput = threadTarget
     clientNonce: z.string().min(1).max(200).optional(),
   })
   .superRefine((input, ctx) => {
+    if (input.addressing && !input.groupId) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Addressing mode requires a group",
+        path: ["addressing"],
+      });
+    }
     const text = input.text?.trim() ?? "";
     const artifactIds = input.artifactIds ?? [];
     if (!text && artifactIds.length === 0) {
@@ -204,7 +295,16 @@ export const appContract = {
       .input(z.object({ spaceId: Id }))
       .output(z.object({ ok: z.literal(true), activeSpaceId: Id })),
   },
-  bootstrap: oc.input(z.object({ botId: Id.optional() })).output(AppBootstrapSchema),
+  bootstrap: oc
+    .input(
+      z
+        .object({ botId: Id.optional(), groupId: Id.optional() })
+        .refine((input) => !(input.botId && input.groupId), {
+          message: "Provide at most one of botId or groupId",
+          path: ["botId"],
+        }),
+    )
+    .output(AppBootstrapSchema),
   deployment: {
     get: oc.output(DeploymentSettingsSchema),
     update: oc
@@ -373,11 +473,16 @@ export const appContract = {
         }),
       )
       .output(z.object({ ok: z.literal(true) })),
-    stop: oc.input(threadTarget).output(z.object({ ok: z.literal(true) })),
+    stop: oc
+      .input(threadTarget.safeExtend({ runId: Id.optional() }))
+      .output(z.object({ ok: z.literal(true) })),
     followUp: oc
       .input(
         threadTarget.safeExtend({
           text: z.string().min(1),
+          artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
+          recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
+          mentions: z.array(Id).max(64).optional(),
           /** Carries the call id, so a turn taken mid-run stays in the call's card. */
           clientNonce: z.string().min(1).max(200).optional(),
         }),
@@ -402,7 +507,7 @@ export const appContract = {
         threadTarget.safeExtend({
           runId: Id,
           messageId: Id,
-          answer: z.string().min(1),
+          answer: AskAnswerSchema,
           /** Carries the call id for an answer spoken during a call. */
           clientNonce: z.string().min(1).max(200).optional(),
           /** Only for a login card; `answer` carries its password. */
@@ -470,13 +575,83 @@ export const appContract = {
     screenUrl: oc.input(botId).output(z.object({ url: z.string().nullable() })),
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
+  recruiting: {
+    crmData: oc
+      .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
+      .output(RecruitingCrmDataOutputSchema),
+    correspondence: oc
+      .input(threadTarget.safeExtend({ view: z.enum(["inbox", "interview", "contacts"]) }))
+      .output(RecruitingCorrespondenceSchema),
+    listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
+    readSource: oc.input(ReadRecruitingSourceInput).output(
+      z.discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.literal("text"),
+          text: z.string(),
+          start: z.number().int().nonnegative(),
+          end: z.number().int().positive(),
+        }),
+        z.strictObject({ kind: z.literal("report"), report: RecruitingCandidateReportSchema }),
+      ]),
+    ),
+    listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
+    listCandidateSources: oc
+      .input(ListRecruitingCandidateSourcesInput)
+      .output(ListRecruitingCandidateSourcesOutput),
+    setCandidateShortlist: oc
+      .input(SetRecruitingCandidateShortlistInput)
+      .output(SetRecruitingCandidateShortlistOutput),
+    listQuestions: oc
+      .input(z.strictObject({ threadId: Id, roleId: RecruitingId }))
+      .output(z.strictObject({ questions: z.array(RecruitingQuestionSchema) })),
+    createRole: oc.input(CreateRecruitingRoleInput).output(recruitingWorkspace),
+    bindRole: oc
+      .input(z.strictObject({ threadId: RecruitingId, roleId: RecruitingId.nullable() }))
+      .output(recruitingWorkspace.nullable()),
+    getWorkspace: oc
+      .input(z.strictObject({ threadId: RecruitingId }))
+      .output(
+        recruitingWorkspace
+          .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
+          .nullable(),
+      ),
+    reviseRole: oc.input(ReviseRecruitingRoleInput).output(recruitingWorkspace),
+    confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
+    editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
+    listAssessments: oc
+      .input(z.strictObject({ roleId: RecruitingId }))
+      .output(z.array(RecruitingAssessmentSnapshotSchema)),
+    getAssessment: oc
+      .input(
+        z.strictObject({
+          roleId: RecruitingId,
+          candidateKey: RecruitingId,
+          version: z.number().int().positive().optional(),
+        }),
+      )
+      .output(RecruitingAssessmentSnapshotSchema.nullable()),
+    listResearch: oc.input(z.strictObject({ roleId: RecruitingId })).output(
+      z.strictObject({
+        tasks: z.array(RecruitingResearchTaskSchema),
+        actions: z.array(RecruitingResearchActionSchema),
+        observations: z.array(RecruitingResearchSavedObservationSchema),
+      }),
+    ),
+  },
   memory: {
     list: oc
       .input(z.object({ botId: Id.optional(), scope: z.enum(["bot", "user"]).optional() }))
       .output(z.array(MemoryDocumentSchema)),
     update: oc
-      .input(z.object({ documentId: Id, content: z.string() }))
+      .input(
+        z.object({
+          documentId: Id,
+          content: z.string(),
+          expectedRevision: z.number().int().nonnegative(),
+        }),
+      )
       .output(MemoryDocumentSchema),
+    history: oc.input(z.object({ documentId: Id })).output(z.array(MemoryRevisionSchema)),
     exportMarkdown: oc.input(z.object({ botId: Id.optional() })).output(z.string()),
     providerConfig: oc.output(SpaceMemoryConfigSchema.nullable()),
     connectProvider: oc
@@ -500,50 +675,7 @@ export const appContract = {
       .input(z.object({ routineId: Id, before: RoutineRunCursorSchema.optional() }))
       .output(RoutineHistorySchema),
     create: oc.input(CreateRoutineInput).output(RoutineSchema),
-    update: oc
-      .input(
-        z
-          .object({
-            routineId: Id,
-            name: z.string().optional(),
-            prompt: z.string().optional(),
-            crons: z.array(z.string().min(1)).optional(),
-            timezone: z.string().optional(),
-            active: z.boolean().optional(),
-            notify: z.boolean().optional(),
-            webhookEnabled: z.boolean().optional(),
-            githubEnabled: z.boolean().optional(),
-            messageProvider: z
-              .string()
-              .min(1)
-              .max(50)
-              .regex(/^[a-z0-9._-]+$/i)
-              .nullable()
-              .optional(),
-            /** Null clears the routine's own model and runs it on the bot's. */
-            modelProvider: z.string().trim().min(1).max(80).nullable().optional(),
-            modelId: z.string().trim().min(1).max(200).nullable().optional(),
-            thinkingLevel: ThinkingLevelSchema.nullable().optional(),
-            /** ISO datetime to arm a never-run one-shot. */
-            runAt: IsoDate.optional(),
-          })
-          .superRefine((value, ctx) => {
-            if (
-              value.crons &&
-              value.crons.length === 0 &&
-              value.webhookEnabled === false &&
-              value.githubEnabled === false &&
-              value.messageProvider === null
-            ) {
-              ctx.addIssue({
-                code: "custom",
-                message: "Add a schedule, webhook, GitHub, or message trigger",
-                path: ["crons"],
-              });
-            }
-          }),
-      )
-      .output(RoutineSchema),
+    update: oc.input(UpdateRoutineInput).output(RoutineSchema),
     remove: oc.input(z.object({ routineId: Id })).output(z.object({ ok: z.literal(true) })),
     testRun: oc
       .input(
@@ -688,7 +820,14 @@ export const appContract = {
       list: oc.input(botId).output(z.array(BotMcpServerSchema)),
       all: oc.output(z.array(BotMcpServerSchema)),
       approve: oc
-        .input(z.object({ botId: Id, serverId: Id, threadId: Id.optional() }))
+        .input(
+          z.object({
+            botId: Id,
+            serverId: Id,
+            threadId: Id.optional(),
+            allowedTools: z.array(z.string().min(1).max(200)).max(500).optional(),
+          }),
+        )
         .output(BotMcpServerSchema),
       dismiss: oc
         .input(z.object({ botId: Id, serverId: Id, threadId: Id.optional() }))
@@ -709,25 +848,45 @@ export const appContract = {
         .output(z.array(BotMcpServerSchema)),
     },
     oauth: {
-      begin: oc.input(z.object({ serverId: Id, redirectUri: z.string().url() })).output(
-        z.discriminatedUnion("status", [
+      begin: oc
+        .input(
           z.object({
-            status: z.literal("authorization_required"),
-            sessionId: Id,
-            authorizationUrl: z.string().url(),
+            serverId: Id,
+            redirectUri: z.string().url(),
+            oauth: McpOAuthConfigInput.optional(),
           }),
-          z.object({
-            status: z.enum(["already_connected", "authorization_not_requested"]),
-          }),
-        ]),
-      ),
+        )
+        .output(
+          z.discriminatedUnion("status", [
+            z.object({
+              status: z.literal("authorization_required"),
+              sessionId: Id,
+              authorizationUrl: z.string().url(),
+            }),
+            z.object({
+              status: z.enum([
+                "already_connected",
+                "authorization_not_requested",
+                "product_sign_in_required",
+              ]),
+            }),
+          ]),
+        ),
       complete: oc
-        .input(z.object({ sessionId: Id, code: z.string().min(1), state: z.string().min(1) }))
+        .input(
+          z.object({
+            sessionId: Id,
+            code: z.string().min(1),
+            state: z.string().min(1),
+            iss: z.string().min(1).optional(),
+          }),
+        )
         .output(z.object({ ok: z.literal(true) })),
       disconnect: oc.input(z.object({ serverId: Id })).output(z.object({ ok: z.literal(true) })),
     },
   },
   onboarding: {
+    ensureRecruiting: oc.input(z.object({})).output(z.object({ botId: Id, groupId: Id })),
     /** Seed the first-run greeting into the bot's thread (focus card is separate). */
     start: oc.input(z.object({ botId: Id })).output(z.object({ ok: z.literal(true) })),
     /** Post the focus choice card when the thread is still idle. */
@@ -830,13 +989,16 @@ export const appContract = {
     set: oc.input(z.object({ enabled: z.boolean() })).output(ActionAutoReviewSettingsSchema),
   },
   artifacts: {
-    list: oc.input(botId).output(z.array(ArtifactSchema)),
+    list: oc
+      .input(botId.extend({ includeDiagnostics: z.boolean().optional() }))
+      .output(z.array(ArtifactSchema)),
     listSpace: oc
       .input(
         z.object({
           botId: Id.optional(),
           cursor: z.string().optional(),
           limit: z.number().int().min(1).max(60).optional(),
+          includeDiagnostics: z.boolean().optional(),
         }),
       )
       .output(
@@ -845,7 +1007,9 @@ export const appContract = {
           nextCursor: z.string().nullable(),
         }),
       ),
-    listVersions: oc.input(z.object({ familyId: Id })).output(z.array(ArtifactVersionSchema)),
+    listVersions: oc
+      .input(z.object({ familyId: Id, includeDiagnostics: z.boolean().optional() }))
+      .output(z.array(ArtifactVersionSchema)),
     create: oc
       .input(
         threadTarget.and(
@@ -860,8 +1024,14 @@ export const appContract = {
         ),
       )
       .output(ArtifactSchema),
-    get: oc.input(threadTarget.and(z.object({ artifactId: Id }))).output(ArtifactWithContentSchema),
-    getById: oc.input(z.object({ artifactId: Id })).output(ArtifactWithContentSchema),
+    get: oc
+      .input(
+        threadTarget.and(z.object({ artifactId: Id, includeDiagnostics: z.boolean().optional() })),
+      )
+      .output(ArtifactWithContentSchema),
+    getById: oc
+      .input(z.object({ artifactId: Id, includeDiagnostics: z.boolean().optional() }))
+      .output(ArtifactWithContentSchema),
     remove: oc.input(z.object({ artifactId: Id })).output(z.object({ ok: z.literal(true) })),
   },
   usage: {

@@ -17,10 +17,16 @@ import { LoadingState } from "./components/ai/primitives";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { SubscriptionGate } from "./components/SubscriptionGate";
 import { authClient } from "./lib/auth";
-import { getTicketBoardEnabled, subscribeTicketBoardEnabled } from "./lib/bootstrap";
+import {
+  getTicketBoardEnabled,
+  invalidateInitialBootstrap,
+  retainInitialBootstrapForIdentity,
+  subscribeTicketBoardEnabled,
+} from "./lib/bootstrap";
+import { discardCall } from "./lib/call-session";
 import { markAfterPaint, markOnce } from "./lib/performance";
 import { getRemoteImagesEnabled, subscribeRemoteImages } from "./lib/remote-images-preference";
-import { rpc } from "./lib/rpc";
+import { rpc, selectedSpaceId, subscribeSpaceSelection } from "./lib/rpc";
 import {
   holdUnreachableGate,
   sessionGate,
@@ -97,6 +103,27 @@ function SessionApp() {
     () => false,
   );
   const session = authClient.useSession();
+  const spaceId = useSyncExternalStore(subscribeSpaceSelection, selectedSpaceId, () => null);
+  const userId = session.data?.user.id ?? null;
+  const identity = JSON.stringify([userId, spaceId]);
+  useLayoutEffect(() => discardCall, [identity]);
+  const previousIdentity = useRef({ userId, spaceId });
+  const initialSessionResolved = useRef(false);
+  if (previousIdentity.current.userId !== userId || previousIdentity.current.spaceId !== spaceId) {
+    const firstAuthentication =
+      !initialSessionResolved.current &&
+      previousIdentity.current.userId === null &&
+      userId !== null &&
+      previousIdentity.current.spaceId === spaceId;
+    previousIdentity.current = { userId, spaceId };
+    // Retire the prior identity's preload before a new route can consume it.
+    if (!firstAuthentication) invalidateInitialBootstrap();
+  }
+  if (!initialSessionResolved.current && (userId !== null || !session.isPending)) {
+    initialSessionResolved.current = true;
+    if (userId !== null) retainInitialBootstrapForIdentity(userId, spaceId);
+    else invalidateInitialBootstrap();
+  }
   const gate = sessionGate(session);
   const [holdingUnreachable, setHoldingUnreachable] = useState(false);
   const nextHolding = holdUnreachableGate(gate, holdingUnreachable);
@@ -127,8 +154,8 @@ function SessionApp() {
   const user = session.data?.user;
   return (
     <div className="h-full" data-rakazo-app-state="ready">
-      <Suspense fallback={<div className="h-full bg-background" />}>
-        <Routes>
+      <Suspense fallback={<GateFallback />}>
+        <Routes key={identity}>
           <Route path="/" element={user ? <Navigate to="/app" replace /> : <WelcomePage />} />
           <Route
             path="/sign-in"

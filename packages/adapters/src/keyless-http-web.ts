@@ -163,7 +163,90 @@ function unwrapDuckDuckGoUrl(rawUrl: string): string {
   }
 }
 
+export function htmlToPlainText(html: string): string {
+  const content = JSDOM.fragment(html);
+  for (const node of content.querySelectorAll("script,style,noscript,template,title"))
+    node.remove();
+  for (const node of content.querySelectorAll("a[href]")) {
+    const url = URL.parse(node.getAttribute("href") ?? "");
+    if (
+      url &&
+      ["http:", "https:", "mailto:"].includes(url.protocol) &&
+      URL.parse(node.textContent?.trim() ?? "")?.href !== url.href
+    )
+      node.append(` (${url.href})`);
+  }
+  for (const node of content.querySelectorAll("br")) node.replaceWith("\n");
+  for (const node of content.querySelectorAll("p,li,div,h1,h2,h3,h4,h5,h6,blockquote,tr")) {
+    node.prepend("\n");
+    node.append("\n");
+  }
+  for (const node of content.querySelectorAll("td,th")) node.append("\t");
+  return normalizeArticleText(content.textContent ?? "");
+}
+
 export function extractReadableText(html: string, url: string): { title: string; text: string } {
+  try {
+    const document = new JSDOM(html, { url }).window.document;
+    const postings: Record<string, unknown>[] = [];
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      let data: unknown;
+      try {
+        data = JSON.parse(script.textContent ?? "");
+      } catch {
+        continue;
+      }
+      for (const root of Array.isArray(data) ? data : [data]) {
+        if (!root || typeof root !== "object" || Array.isArray(root)) continue;
+        for (const item of [root, ...(Array.isArray(root["@graph"]) ? root["@graph"] : [])]) {
+          if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+          const context = item["@context"] ?? root["@context"];
+          const schemaContext = [
+            "https://schema.org",
+            "https://schema.org/",
+            "http://schema.org",
+            "http://schema.org/",
+          ].includes(context);
+          const types = Array.isArray(item["@type"]) ? item["@type"] : [item["@type"]];
+          if (
+            types.some(
+              (type: unknown) =>
+                (schemaContext && type === "JobPosting") ||
+                type === "https://schema.org/JobPosting" ||
+                type === "http://schema.org/JobPosting",
+            )
+          )
+            postings.push(item);
+        }
+      }
+    }
+    // ponytail: only extract a unique posting; multi-job pages need explicit identity matching.
+    const posting = postings.length === 1 ? postings[0] : undefined;
+    if (
+      posting &&
+      typeof posting.description === "string" &&
+      (posting.url === undefined ||
+        (typeof posting.url === "string" && new URL(posting.url, url).href === new URL(url).href))
+    ) {
+      const content = JSDOM.fragment(posting.description);
+      for (const node of content.querySelectorAll("script,style,noscript")) node.remove();
+      for (const node of content.querySelectorAll("br")) node.replaceWith("\n");
+      for (const node of content.querySelectorAll("p,li,div,h1,h2,h3,h4,h5,h6")) node.append("\n");
+      const text = normalizeArticleText(content.textContent ?? "");
+      if (text) {
+        const { description: _description, ...metadata } = posting;
+        return {
+          title:
+            typeof posting.title === "string" && posting.title.trim()
+              ? posting.title.trim()
+              : document.title.trim() || "Untitled",
+          text: [text, JSON.stringify(metadata, null, 2)].join("\n\n"),
+        };
+      }
+    }
+  } catch {
+    // Unrecognized structured data leaves the existing readable HTML path unchanged.
+  }
   const readable = extractWithReadability(html, url);
   if (readable) return readable;
   return stripHtmlFallback(html);

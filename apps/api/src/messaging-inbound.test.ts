@@ -17,7 +17,13 @@ function createDeps(
     invitedMember?: unknown;
     approvedMember?: unknown;
     sendResult?: { messageId: string; runId: string | null; seq: number };
-    routines?: Array<{ id: string; name: string; prompt: string }>;
+    routines?: Array<{
+      id: string;
+      name: string;
+      prompt: string;
+      userId?: string;
+      threadId?: string | null;
+    }>;
   } = {},
 ) {
   const identity =
@@ -60,8 +66,18 @@ function createDeps(
     introPostedAt: null,
   };
   const outboundRows: Array<Record<string, unknown>> = [];
+  const sourceEvents: Array<{ payload: unknown }> = [];
+  const event = {
+    findFirst: vi.fn(async () => sourceEvents[0] ?? null),
+    create: vi.fn(async ({ data }: { data: { payload: unknown } }) => {
+      const saved = { id: "source-event", seq: 1, ...data };
+      sourceEvents.push(saved);
+      return saved;
+    }),
+  };
   const txMock = {
-    thread: { update: vi.fn(async () => ({ nextMessageSeq: 2 })) },
+    event,
+    thread: { update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 2 })) },
     message: {
       create: vi.fn(async ({ data }: { data: unknown }) => ({
         id: "note-1",
@@ -91,6 +107,7 @@ function createDeps(
     }),
   };
   const prisma = {
+    event,
     messagingIdentity: {
       findUnique: vi.fn(
         async ({
@@ -118,7 +135,15 @@ function createDeps(
     },
     messagingLinkCode,
     bot: { findUnique: vi.fn(async () => ({ name: "Chief" })) },
-    routine: { findMany: vi.fn(async () => overrides.routines ?? []) },
+    routine: {
+      findMany: vi.fn(async () =>
+        (overrides.routines ?? []).map((routine) => ({
+          userId: "user-1",
+          threadId: null,
+          ...routine,
+        })),
+      ),
+    },
     thread: { findFirst: vi.fn(async () => ({ id: "thread-1" })) },
     messagingChannel: {
       findUnique: vi.fn(async () => channel),
@@ -235,6 +260,7 @@ function createDeps(
         messagingChannelMember: prisma.messagingChannelMember,
         messagingOutbound: prisma.messagingOutbound,
         messagingIdentity: prisma.messagingIdentity,
+        externalMessage: (prisma as unknown as { externalMessage: unknown }).externalMessage,
         messagingLinkCode,
       }),
     ),
@@ -389,11 +415,12 @@ describe("createMessagingInboundHandler DM routing", () => {
       }),
     );
     expect(deps.prisma.routine.findMany.mock.calls[0]?.[0]).not.toHaveProperty("take");
-    expect(deps.sendUserMessage).toHaveBeenCalledTimes(1);
+    expect(deps.sendUserMessage).toHaveBeenCalledTimes(6);
     expect(deps.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         trigger: "webhook",
-        clientNonce: expect.stringMatching(/^messaging:bot-1:/),
+        clientNonce: expect.stringMatching(/^messaging:bot-1:.*:routine:routine-1$/),
+        routineEvent: { routineId: "routine-1", source: "messaging", provider: "slack" },
         prompt: expect.stringContaining('Run routine "Triage Slack 1":\nReview update 1'),
       }),
     );
@@ -401,10 +428,13 @@ describe("createMessagingInboundHandler DM routing", () => {
       expect.objectContaining({ trigger: "messaging" }),
     );
     const routinePrompt = deps.sendUserMessage.mock.calls[0]?.[0]?.prompt as string;
-    expect(routinePrompt).toContain('Run routine "Triage Slack 6":\nReview update 6');
+    expect(routinePrompt).not.toContain('Run routine "Triage Slack 6"');
+    expect(deps.sendUserMessage.mock.calls[5]?.[0]?.prompt).toContain(
+      'Run routine "Triage Slack 6":\nReview update 6',
+    );
     expect(routinePrompt).toContain("<untrusted_delivery_payload>");
     expect(routinePrompt).toContain("&lt;/untrusted_delivery_payload&gt;");
-    expect(deps.enqueue).toHaveBeenCalledTimes(1);
+    expect(deps.enqueue).toHaveBeenCalledTimes(6);
   });
 
   it("does not double-wake a DM when message routines match", async () => {
@@ -457,7 +487,7 @@ describe("createMessagingInboundHandler DM routing", () => {
     expect(deps.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         trigger: "webhook",
-        clientNonce: expected,
+        clientNonce: `${expected}:routine:routine-1`,
       }),
     );
     expect(expected).not.toBe(mismatched);
@@ -512,10 +542,37 @@ describe("createMessagingInboundHandler DM routing", () => {
     );
 
     expect(woken).toBe(true);
+    expect(deps.prisma.event.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        type: "thread.meta",
+        payload: {
+          routineDelivery: {
+            key: inboundDeliveryClientNonce(
+              "messaging",
+              "bot-1",
+              messagingWakeIdempotencyKey("slack", "Ev-reserve"),
+            ),
+            provider: "slack",
+            prompt: expect.stringContaining("<untrusted_delivery_payload>"),
+            routineIds: ["routine-1"],
+          },
+        },
+      }),
+    });
+    expect(vi.mocked(deps.prisma.event.create).mock.invocationCallOrder[0]).toBeLessThan(
+      deps.sendUserMessage.mock.invocationCallOrder[0],
+    );
     expect(updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           id: "external-deferred",
+          externalConversation: {
+            botId: "bot-1",
+            spaceId: "ws-1",
+            userId: "user-1",
+            thread: { id: "thread-1" },
+            provider: "slack",
+          },
           status: { in: ["deferred", "received", "observed"] },
           OR: [
             { engagementReason: null },

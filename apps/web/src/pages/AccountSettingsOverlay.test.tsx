@@ -113,7 +113,7 @@ afterEach(() => {
   localStorage.clear();
 });
 
-it("flips the stored tool activity preference from the settings toggle", async () => {
+it("lets a deployment owner opt in to developer diagnostics", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   const container = document.createElement("div");
   document.body.append(container);
@@ -125,6 +125,7 @@ it("flips the stored tool activity preference from the settings toggle", async (
           name="Jamie"
           avatarStyle="robot"
           onAvatarStyleChange={async () => undefined}
+          isDeploymentOwner
         />,
       );
     });
@@ -134,6 +135,7 @@ it("flips the stored tool activity preference from the settings toggle", async (
     );
     if (!toggle) throw new Error("Missing tool activity toggle");
     expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(container.textContent).toContain("Developer diagnostics");
 
     await act(async () => {
       toggle.click();
@@ -151,6 +153,30 @@ it("flips the stored tool activity preference from the settings toggle", async (
   } finally {
     await act(async () => root.unmount());
     container.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("does not offer diagnostics to a non-owner with a saved enabled preference", async () => {
+  localStorage.setItem(TOOL_ACTIVITY_STORAGE_KEY, "on");
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(
+        <GeneralSettingsPanels
+          name="Jamie"
+          avatarStyle="robot"
+          onAvatarStyleChange={async () => undefined}
+          isDeploymentOwner={false}
+        />,
+      );
+    });
+    expect(container.querySelector('[data-testid="tool-activity-toggle"]')).toBeNull();
+    expect(container.textContent).not.toContain("Developer diagnostics");
+  } finally {
+    await act(async () => root.unmount());
     vi.unstubAllGlobals();
   }
 });

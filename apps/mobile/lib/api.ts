@@ -1120,7 +1120,7 @@ export function blockText(message: MobileMessage) {
       if (block.kind === "cloud_agent")
         return `${block.title}: ${block.status}${block.prUrl ? ` ${block.prUrl}` : ""}`;
       if (block.kind === "subagent") {
-        return `${block.name ?? "subagent"}: ${block.result || block.progress || block.task || ""}`;
+        return `${block.name ?? "subagent"}: ${block.status}`;
       }
       if (block.kind === "child_bot") {
         return `${block.status === "archived" ? "Archived" : block.status === "deleted" ? "Deleted" : "Bot"} ${block.name ?? ""}`;
@@ -1143,6 +1143,7 @@ export function blockText(message: MobileMessage) {
 
 type ThreadEvent = {
   id?: string;
+  threadId?: string;
   createdAt?: string;
   botId?: string;
   type: string;
@@ -1227,6 +1228,36 @@ export function applyMobileThreadEvent(
   event: ThreadEvent,
 ): MobileSnapshot | null {
   if (!prev || event.type === "heartbeat") return prev;
+  if (event.type === "run.requeued" || event.type === "run.started") {
+    const status = event.type === "run.started" ? "running" : event.payload?.status;
+    const run = (prev.activeRuns ?? (prev.run ? [prev.run] : [])).find(
+      (run) => run.id === event.runId,
+    );
+    if (
+      event.threadId !== prev.threadId ||
+      event.seq === undefined ||
+      event.seq <= (prev.cursor ?? -1) ||
+      (status !== "queued" &&
+        status !== "waiting_takeover" &&
+        !(event.type === "run.started" && status === "running")) ||
+      !run ||
+      run.botId !== event.botId ||
+      !["queued", "leased", "running"].includes(run.status)
+    )
+      return prev;
+    return {
+      ...prev,
+      cursor: event.seq,
+      members: prev.members?.map((member) =>
+        member.botId === event.botId ? { ...member, status } : member,
+      ),
+      run: prev.run?.id === run.id ? { ...prev.run, status } : prev.run,
+      activeRuns: prev.activeRuns?.map((candidate) =>
+        candidate.id === run.id ? { ...candidate, status } : candidate,
+      ),
+      messages: prev.messages.filter((message) => message.id !== progressMessageId(event)),
+    };
+  }
   if (event.type === "thread.cleared") {
     return {
       ...prev,

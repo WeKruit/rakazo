@@ -440,6 +440,21 @@ export function LinkifiedText({ children }: { children: string }) {
   );
 }
 
+/** Static exports keep all rows and contain no interactive controls or remote images. */
+export function ChatMarkdownDocument({ children }: ChatMarkdownProps) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm]}
+      rehypePlugins={[preserveSkippedTableText]}
+      skipHtml
+      urlTransform={(url) => sanitizeMarkdownUrl(url) ?? ""}
+      components={{ img: ({ alt }) => <span>{alt}</span> }}
+    >
+      {children}
+    </ReactMarkdown>
+  );
+}
+
 export const ChatMarkdown = memo(function ChatMarkdown({
   children,
   streaming = false,

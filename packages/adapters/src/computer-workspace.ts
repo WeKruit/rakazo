@@ -11,9 +11,10 @@ import type {
 import type { ComputerMode } from "@rakazo/contracts";
 import { parseScreenLeaseId } from "@rakazo/core";
 import { browserProfilePathForScreen } from "@rakazo/core/node/desktop-runtime";
-import type { PrismaClient } from "@rakazo/db";
+import type { Prisma, PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { normalizeWorkspacePath, teamBotWorkspaceDirectory } from "./computer-support.js";
+import { isSandboxGoneError } from "./e2b-sandbox.js";
 import { LocalAgentHomeStore } from "./home.js";
 
 export const PORTABLE_TRANSFER_BATCH_BYTES = 8 * 1024 * 1024;
@@ -27,9 +28,22 @@ const skippedBrowserProfileDirectories = new Set([
   "DawnGraphiteCache",
   "DawnWebGPUCache",
   "Crashpad",
+  "component_crx_cache",
+  // Component-updater downloads Chromium fetches again on demand. Security lists stay.
+  "optimization_guide_model_store",
+  "WasmTtsEngine",
+  "WidevineCdm",
+  "OnDeviceHeadSuggestModel",
+  "OptimizationHints",
+  "hyphen-data",
+  "ZxcvbnData",
+  "Dictionaries",
+  "GraphiteDawnCache",
+  "extensions_crx_cache",
 ]);
 const skippedBrowserProfileFiles = new Set([
   "BrowserMetrics",
+  "BrowserMetrics-spare.pma",
   "DevToolsActivePort",
   "SingletonCookie",
   "SingletonLock",
@@ -273,22 +287,259 @@ async function listTeamBotEntries(
   return stdout.split("\n").filter(Boolean);
 }
 
+/** Workspace persistence owns the same reservation as update/recover until every call settles. */
+export async function claimComputerWorkspaceMaintenance(
+  prisma: PrismaClient,
+  input: {
+    computerId: string;
+    botId: string;
+    providerRef: string | null;
+    where: Prisma.ComputerWhereInput;
+    switchingBotId?: string;
+  },
+  context: AdapterContext,
+) {
+  const busy = new Error("Computer workspace is busy");
+  const operation = await prisma
+    .$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM computers WHERE id = ${input.computerId} FOR UPDATE`;
+      const row = await tx.computerUpdate.create({
+        data: {
+          computerId: input.computerId,
+          botId: input.botId,
+          action: "checkpoint",
+          status: "running",
+          stage: "saving",
+        },
+      });
+      const claimed = await tx.computer.updateMany({
+        where: {
+          id: input.computerId,
+          maintenanceId: null,
+          providerRef: input.providerRef,
+          AND: [
+            input.where,
+            {
+              bots: {
+                none: {
+                  computerSwitching: true,
+                  ...(input.switchingBotId ? { id: { not: input.switchingBotId } } : {}),
+                },
+              },
+            },
+          ],
+        },
+        data: { state: "suspending", maintenanceId: row.id, updatedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw busy;
+      return row;
+    })
+    .catch((error: unknown) => {
+      if (error === busy) return null;
+      throw error;
+    });
+  if (!operation) return null;
+
+  const where = {
+    id: input.computerId,
+    state: "suspending",
+    providerRef: input.providerRef,
+    maintenanceId: operation.id,
+  };
+  const controller = new AbortController();
+  const signal = AbortSignal.any([context.signal, controller.signal]);
+  const assertOwned = async () => {
+    signal.throwIfAborted();
+    try {
+      const renewed = await prisma.computerUpdate.updateMany({
+        where: { id: operation.id, status: "running", computer: where },
+        data: { updatedAt: new Date() },
+      });
+      if (renewed.count !== 1) throw new Error("Computer checkpoint interrupted");
+      signal.throwIfAborted();
+    } catch (error) {
+      controller.abort(error);
+      throw error;
+    }
+  };
+  let renewal: Promise<void> | undefined;
+  const heartbeat = setInterval(() => {
+    if (renewal) return;
+    renewal = assertOwned()
+      .catch(() => undefined)
+      .finally(() => {
+        renewal = undefined;
+      });
+  }, 30_000);
+  heartbeat.unref?.();
+  return {
+    context: { ...context, operationId: operation.id, signal },
+    assertOwned,
+    async recordRevision(revision: string) {
+      await assertOwned();
+      const recorded = await prisma.computer.updateMany({
+        where,
+        data: { homeRevision: revision },
+      });
+      if (recorded.count !== 1) {
+        const error = new Error("Computer checkpoint interrupted");
+        controller.abort(error);
+        throw error;
+      }
+    },
+    async finish(state: string, status: "completed" | "failed" | "interrupted") {
+      clearInterval(heartbeat);
+      await renewal;
+      // ponytail: age never proves a provider call stopped. Crash recovery uses the
+      // existing interrupted operation and attended workersStopped release.
+      const released = await prisma.$transaction(async (tx) => {
+        const finished = await tx.computerUpdate.updateMany({
+          where: { id: operation.id, status: { in: ["running", "interrupted"] } },
+          data: { status },
+        });
+        if (finished.count !== 1) return false;
+        if (status === "interrupted") return true;
+        const released = await tx.computer.updateMany({
+          where,
+          data: {
+            state,
+            maintenanceId: null,
+            ...(state === "suspended" || state === "stopped"
+              ? {
+                  controlHolder: "none",
+                  controlLeaseId: null,
+                  controlLeaseExpiresAt: null,
+                  controlBotId: null,
+                  controlRunId: null,
+                }
+              : {}),
+          },
+        });
+        return released.count === 1;
+      });
+      if (!released) throw new Error("Computer checkpoint interrupted");
+    },
+  };
+}
+
+/** Keep the reservation through persistence and a confirmed stop, including manual/archive callers. */
+export async function checkpointAndStopComputerWorkspace(
+  deps: { home: AgentHomeStore; sandbox: SandboxProvider },
+  computerRecord: { homeKey: string; state: string },
+  computer: ComputerRef | null,
+  maintenance: NonNullable<Awaited<ReturnType<typeof claimComputerWorkspaceMaintenance>>>,
+  options: {
+    state: "stopped" | "suspended";
+    beforeStop?: () => Promise<boolean>;
+    onFailure?: () => void;
+  },
+): Promise<boolean> {
+  let settledState = computerRecord.state;
+  let completed = false;
+  let pauseUncertain = false;
+  try {
+    await maintenance.assertOwned();
+    if (computer) {
+      const revision = await checkpointComputerWorkspace(
+        deps.home,
+        deps.sandbox,
+        computerRecord.homeKey,
+        computer,
+        maintenance.context,
+        maintenance.assertOwned,
+      );
+      await maintenance.recordRevision(revision);
+      if (options.beforeStop && !(await options.beforeStop())) {
+        completed = true;
+        return false;
+      }
+      await maintenance.assertOwned();
+      getLogger().info("computer.workspace.stop.begin", {
+        operationId: maintenance.context.operationId,
+      });
+      pauseUncertain = true;
+      await deps.sandbox.stop(computer, maintenance.context);
+      pauseUncertain = false;
+      settledState = options.state;
+      getLogger().info("computer.workspace.stop.complete", {
+        operationId: maintenance.context.operationId,
+      });
+      await maintenance.assertOwned();
+    }
+    settledState = options.state;
+    completed = true;
+    return true;
+  } catch (error) {
+    if (isSandboxGoneError(error)) {
+      pauseUncertain = false;
+      settledState = options.state;
+      completed = true;
+      return true;
+    }
+    if (!pauseUncertain) options.onFailure?.();
+    throw error;
+  } finally {
+    await maintenance.finish(
+      settledState,
+      pauseUncertain ? "interrupted" : completed ? "completed" : "failed",
+    );
+  }
+}
+
 export async function checkpointComputerWorkspace(
   home: AgentHomeStore,
   sandbox: SandboxProvider,
   homeKey: string,
   computer: ComputerRef,
   context: AdapterContext,
+  beforeCommit?: () => Promise<void>,
 ): Promise<string> {
+  context.signal.throwIfAborted();
   if (computer.kind === "docker" && home instanceof LocalAgentHomeStore) {
     return home.revise(homeKey);
   }
   const staging = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-"));
+  let stagedFileCount = 0;
+  let stagedBytes = 0;
+  let stagingWriteMs = 0;
   try {
+    getLogger().info("computer.workspace.export.begin", {
+      operationId: context.operationId,
+      runId: context.runId,
+    });
     for await (const file of sandbox.exportWorkspace(computer, context)) {
+      context.signal.throwIfAborted();
+      const writeStartedAt = performance.now();
       await writePortableFile(staging, file);
+      stagingWriteMs += performance.now() - writeStartedAt;
+      stagedFileCount++;
+      stagedBytes += file.content.byteLength;
     }
-    return await home.commit(homeKey, staging, context);
+    getLogger().info("computer.workspace.export.complete", {
+      operationId: context.operationId,
+      runId: context.runId,
+      stagedFileCount,
+      stagedBytes,
+      stagingWriteMs,
+    });
+    const guardStartedAt = performance.now();
+    await beforeCommit?.();
+    context.signal.throwIfAborted();
+    getLogger().info("computer.workspace.commit.begin", {
+      operationId: context.operationId,
+      runId: context.runId,
+      commitGuardMs: performance.now() - guardStartedAt,
+    });
+    const commitStartedAt = performance.now();
+    const revision = await home.commit(homeKey, staging, context);
+    const commitMs = performance.now() - commitStartedAt;
+    context.signal.throwIfAborted();
+    getLogger().info("computer.workspace.commit.complete", {
+      operationId: context.operationId,
+      runId: context.runId,
+      commitMs,
+    });
+    return revision;
   } finally {
     await rm(staging, { recursive: true, force: true });
   }
@@ -306,36 +557,58 @@ export async function checkpointRunComputerWorkspace(
   }
   const now = new Date();
   const ownLease = context.screenLeaseId ? parseScreenLeaseId(context.screenLeaseId) : undefined;
-  const claimed = await deps.prisma.computer.updateMany({
-    where: {
-      id: computerRecord.id,
-      state: "running",
+  if (!context.botId) throw new Error("Computer checkpoint requires a bot id");
+  const maintenance = await claimComputerWorkspaceMaintenance(
+    deps.prisma,
+    {
+      computerId: computerRecord.id,
+      botId: context.botId,
       providerRef: computer.providerRef,
-      executionLeases: {
-        none: {
-          expiresAt: { gt: now },
-          ...(ownLease ? { NOT: { runId: ownLease.ownerId, fence: ownLease.fence } } : {}),
+      where: {
+        state: "running",
+        providerRef: computer.providerRef,
+        executionLeases: {
+          none: {
+            expiresAt: { gt: now },
+            ...(ownLease ? { NOT: { runId: ownLease.ownerId, fence: ownLease.fence } } : {}),
+          },
         },
+        OR: [
+          { controlHolder: { not: "user" } },
+          { controlLeaseId: null },
+          { controlLeaseExpiresAt: null },
+          { controlLeaseExpiresAt: { lte: now } },
+          ...(context.botId ? [{ controlBotId: context.botId }] : []),
+        ],
       },
-      OR: [
-        { controlHolder: { not: "user" } },
-        { controlLeaseId: null },
-        { controlLeaseExpiresAt: null },
-        { controlLeaseExpiresAt: { lte: now } },
-        ...(context.botId ? [{ controlBotId: context.botId }] : []),
-      ],
     },
-    data: { state: "suspending", updatedAt: now },
-  });
+    context,
+  );
   // The last finishing run or the already scheduled idle job will checkpoint the shared home.
-  if (claimed.count !== 1) return undefined;
+  if (!maintenance) return undefined;
+  getLogger().info("computer.suspension.claimed", {
+    owner: "run_checkpoint",
+    computerId: computerRecord.id,
+    claimStamp: now.toISOString(),
+    operationId: context.operationId,
+    runId: context.runId,
+  });
+  let completed = false;
   try {
-    return await checkpointAndRecordComputerWorkspace(deps, computerRecord, computer, context);
+    await maintenance.assertOwned();
+    const revision = await checkpointComputerWorkspace(
+      deps.home,
+      deps.sandbox,
+      computerRecord.homeKey,
+      computer,
+      maintenance.context,
+      maintenance.assertOwned,
+    );
+    await maintenance.recordRevision(revision);
+    completed = true;
+    return revision;
   } finally {
-    await deps.prisma.computer.updateMany({
-      where: { id: computerRecord.id, state: "suspending", providerRef: computer.providerRef },
-      data: { state: "running" },
-    });
+    await maintenance.finish("running", completed ? "completed" : "failed");
   }
 }
 
@@ -352,10 +625,11 @@ export async function checkpointAndRecordComputerWorkspace(
     computer,
     context,
   );
-  await deps.prisma.computer.updateMany({
-    where: { id: computerRecord.id },
+  const recorded = await deps.prisma.computer.updateMany({
+    where: { id: computerRecord.id, providerRef: computer.providerRef },
     data: { homeRevision: revision },
   });
+  if (recorded.count !== 1) throw new Error("Computer checkpoint interrupted");
   return revision;
 }
 

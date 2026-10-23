@@ -1,3 +1,8 @@
+import {
+  boundDirectApprovalRequest,
+  catalogApprovalDetails,
+  catalogApprovalRequest,
+} from "@rakazo/core";
 import { approvalEffectKey } from "@rakazo/core/node/approval-effect-key";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -6,17 +11,15 @@ import {
   approvalReplayResourceError,
   approvedCatalogReplay,
   approvedReplayArgs,
-  boundDirectApprovalRequest,
   catalogApprovalConnectorId,
-  catalogApprovalDetails,
   catalogApprovalMatchesLiveRoute,
-  catalogApprovalRequest,
   catalogExecuteToolName,
   catalogToolPrefix,
   claimApprovedEffect,
   claimIntendedEffect,
   completeExternalEffect,
   createApprovedEffectReplayQueue,
+  inputPausedToolResult,
   isApprovalPausedResult,
   isToolPauseResult,
   replaceCompletedExternalEffectResult,
@@ -389,6 +392,29 @@ describe("completeExternalEffect", () => {
 });
 
 describe("approved effect resume", () => {
+  it("retains raw provider evidence only when settling an executing effect", async () => {
+    const providerResult = { structuredContent: { success: true } };
+    const store = {
+      externalEffect: {
+        updateMany: vi.fn(async () => ({ count: 1 })),
+        findUnique: vi.fn(),
+      },
+    };
+    await expect(
+      settleUncertainEffect(store, "effect-1", "reply", { providerResult }),
+    ).resolves.toMatchObject({ uncertain: true, providerResult });
+    expect(store.externalEffect.updateMany).toHaveBeenCalledWith({
+      where: { id: "effect-1", status: "executing" },
+      data: { status: "uncertain", result: expect.objectContaining({ providerResult }) },
+    });
+    const saved = { status: "sent_recorded" };
+    store.externalEffect.updateMany.mockResolvedValue({ count: 0 });
+    store.externalEffect.findUnique.mockResolvedValue({ status: "completed", result: saved });
+    await expect(
+      settleUncertainEffect(store, "effect-1", "reply", { providerResult }),
+    ).resolves.toEqual(saved);
+  });
+
   function createApprovedEffectStore(
     initialStatus: "approved" | "executing" | "completed" = "approved",
   ) {
@@ -487,6 +513,12 @@ describe("approved effect resume", () => {
 });
 
 describe("isToolPauseResult", () => {
+  it("pauses for a native question without labelling it an approval", () => {
+    const result = inputPausedToolResult();
+    expect(isToolPauseResult(result)).toBe(true);
+    expect(result).toMatchObject({ terminate: true, details: { input: "paused" } });
+    expect(result.details).not.toHaveProperty("approval");
+  });
   it("detects approval and secret pauses", () => {
     expect(isToolPauseResult(approvalPausedToolResult())).toBe(true);
     expect(

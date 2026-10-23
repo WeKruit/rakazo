@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { RunSchema } from "./domain.js";
-import { RUN_TRIGGERS, RunActivityRowSchema, RunTriggerSchema } from "./runs.js";
+import {
+  RoutineHistorySchema,
+  RUN_TRIGGERS,
+  RunActivityRowSchema,
+  RunTriggerSchema,
+} from "./runs.js";
 
 describe("run triggers", () => {
   it("accepts every shared trigger in the run output schemas", () => {
@@ -45,4 +50,37 @@ describe("run triggers", () => {
     expect(RUN_TRIGGERS).toContain("tickets");
     expect(() => RunTriggerSchema.parse("not-a-trigger")).toThrow();
   });
+});
+
+it("keeps independent delegated run states and parentage under the original routine page", () => {
+  const root = {
+    id: "root",
+    botId: "main",
+    groupId: null,
+    status: "completed",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    startedAt: null,
+    completedAt: null,
+    messageId: null,
+  };
+  const history = {
+    runs: [
+      {
+        ...root,
+        delegations: [
+          {
+            ...root,
+            id: "child",
+            parentRunId: root.id,
+            botId: "helper",
+            botName: "Helper",
+            status: "waiting_input",
+          },
+        ],
+      },
+    ],
+    nextCursor: null,
+  };
+  expect(RoutineHistorySchema.parse(history)).toEqual(history);
+  expect(RoutineHistorySchema.safeParse({ runs: [root], nextCursor: null }).success).toBe(false);
 });

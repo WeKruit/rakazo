@@ -8,6 +8,7 @@ const APPROVAL_EXEMPT_TOOLS = new Set([
   "browser_act",
   "list_files",
   "read_file",
+  "artifact_read",
   "read_history",
   "search_history",
   "write_file",
@@ -35,16 +36,95 @@ const APPROVAL_REQUIRED_BUILTIN_TOOLS = new Set([
   "cloud_agent_reply",
   "cloud_agent_cancel",
 ]);
-const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space"]);
+const EXPLICIT_APPROVAL_BUILTIN_TOOLS = new Set(["create_space", "recruiting_request_approval"]);
+// Lead enrollment may start an already-active campaign; it needs the same
+// one-time human decision as a direct reply or campaign activation.
+const EXPLICIT_APPROVAL_MCP_OPERATIONS = new Set([
+  "reply_to_email",
+  "create_lead",
+  "add_leads_to_campaign_or_list_bulk",
+  "activate_campaign",
+]);
+// Canonical actions in Composio's Gmail and Google Calendar toolkit catalogs.
+const EXPLICIT_APPROVAL_COMPOSIO_OPERATIONS = new Set([
+  "GMAIL_SEND_EMAIL",
+  "GMAIL_SEND_DRAFT",
+  "GMAIL_FORWARD_MESSAGE",
+  "GMAIL_REPLY_TO_THREAD",
+  "GOOGLECALENDAR_CREATE_EVENT",
+  "GOOGLECALENDAR_UPDATE_EVENT",
+  "GOOGLECALENDAR_PATCH_EVENT",
+  "GOOGLECALENDAR_DELETE_EVENT",
+  "GOOGLECALENDAR_EVENTS_MOVE",
+  "GOOGLECALENDAR_QUICK_ADD",
+  "GOOGLECALENDAR_REMOVE_ATTENDEE",
+  "GOOGLECALENDAR_EVENTS_IMPORT",
+]);
+
+const GOOGLE_MCP_GMAIL_WRITES = new Set([
+  "create_draft",
+  "label_message",
+  "label_thread",
+  "unlabel_message",
+  "unlabel_thread",
+]);
+const GOOGLE_MCP_CALENDAR_WRITES = new Set([
+  "create_event",
+  "update_event",
+  "delete_event",
+  "respond_to_event",
+]);
+const CAL_MCP_BOOKING_WRITES = new Set([
+  "create_booking",
+  "reschedule_booking",
+  "cancel_booking",
+  "confirm_booking",
+  "add_booking_attendee",
+]);
+
+/** Native non-sending mailbox writes; the executor must verify the assigned official endpoint. */
+export function internalMcpWriteEndpoint(toolName: string): string | undefined {
+  if (
+    GOOGLE_MCP_GMAIL_WRITES.has(toolName) ||
+    (toolName.startsWith("gmail.") && GOOGLE_MCP_GMAIL_WRITES.has(toolName.slice(6)))
+  )
+    return "https://gmailmcp.googleapis.com/mcp/v1";
+  return undefined;
+}
+
+/** Native MCP writes requiring a one-time decision at their exact official endpoint. */
+export function oneTimeMcpWriteEndpoint(toolName: string): string | undefined {
+  if (
+    GOOGLE_MCP_CALENDAR_WRITES.has(toolName) ||
+    (toolName.startsWith("calendar.") && GOOGLE_MCP_CALENDAR_WRITES.has(toolName.slice(9)))
+  )
+    return "https://calendarmcp.googleapis.com/mcp/v1";
+  if (CAL_MCP_BOOKING_WRITES.has(toolName)) return "https://mcp.cal.com/mcp";
+  return undefined;
+}
 
 const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
+  "recruiting_candidates",
+  "recruiting_crm_target",
+  "recruiting_crm_bind",
+  "recruiting_crm_import",
+  "recruiting_role",
+  "recruiting_feedback",
+  "recruiting_shortlist",
+  "recruiting_research",
+  "remember",
+  "save_memory",
+  "save_shared_memory",
+  "write_file",
   "browser_snapshot",
   "cloud_agent_status",
   "computer_observe",
   "list_files",
   "list_secrets",
   "read_file",
+  "artifact_read",
   "recall_memory",
+  "read_memory",
   "request_takeover",
   "run_subagent",
   "task_catalog",
@@ -103,12 +183,51 @@ export function toolRequiresApproval(
   return false;
 }
 
-/** Security-boundary changes cannot be auto-reviewed or permanently allowed. */
-export function toolRequiresExplicitApproval(toolName: string): boolean {
-  return EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName);
+/** These actions require a one-time human decision, without auto-review or permanent allowance. */
+export function toolRequiresExplicitApproval(
+  toolName: string,
+  route?: { connectorId: string; toolName: string },
+  args?: Record<string, unknown>,
+  serverEndpoint?: string | null,
+): boolean {
+  if (
+    EXPLICIT_APPROVAL_BUILTIN_TOOLS.has(toolName) ||
+    (route?.connectorId === "mcp" && EXPLICIT_APPROVAL_MCP_OPERATIONS.has(route.toolName))
+  )
+    return true;
+  if (route?.connectorId === "mcp" && serverEndpoint) {
+    try {
+      const url = new URL(serverEndpoint);
+      if (
+        `${url.origin}${url.pathname.replace(/\/$/, "")}` ===
+        oneTimeMcpWriteEndpoint(route.toolName)
+      )
+        return true;
+    } catch {
+      /* A malformed endpoint cannot identify the official service. */
+    }
+  }
+  if (route?.connectorId !== "composio") return false;
+  const operation = route.toolName.toUpperCase();
+  if (EXPLICIT_APPROVAL_COMPOSIO_OPERATIONS.has(operation)) return true;
+  if (operation !== "COMPOSIO_MULTI_EXECUTE_TOOL" || !Array.isArray(args?.tools)) return false;
+  return args.tools.some((item: unknown) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+    const call = item as Record<string, unknown>;
+    return (
+      typeof call.tool_slug === "string" &&
+      toolRequiresExplicitApproval(
+        toolName,
+        { ...route, toolName: call.tool_slug },
+        call.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments)
+          ? (call.arguments as Record<string, unknown>)
+          : undefined,
+      )
+    );
+  });
 }
 
-/** External webhook runs may inspect state unattended, but side effects always need the owner. */
+/** Webhooks may inspect and save native internal state; other side effects still need the owner. */
 export function unattendedTriggerToolRequiresApproval(
   trigger: string,
   toolName: string,
@@ -268,4 +387,109 @@ export function isApprovalAskBlock(block: {
     actionIds.has("deny") &&
     [...actionIds].every((id) => id === "allow" || id === "always" || id === "deny")
   );
+}
+
+export const DIRECT_APPROVAL_TAG = "direct";
+
+export type BoundApprovalRoute = {
+  connectorId: string;
+  resourceId: string;
+  toolName: string;
+  resourceRevision?: string | number;
+};
+
+export function catalogApprovalRequest(
+  toolName: string,
+  args: Record<string, unknown>,
+  marker: string,
+  route?: BoundApprovalRoute,
+): unknown[] {
+  return route ? [marker, toolName, args, route] : [marker, toolName, args];
+}
+
+export function catalogApprovalDetails(
+  request: unknown,
+  marker: string,
+): { toolName: string; args: Record<string, unknown>; route?: BoundApprovalRoute } | undefined {
+  if (
+    !Array.isArray(request) ||
+    (request.length !== 3 && request.length !== 4) ||
+    request[0] !== marker ||
+    typeof request[1] !== "string" ||
+    !request[1].endsWith("_execute_tool") ||
+    !request[2] ||
+    typeof request[2] !== "object" ||
+    Array.isArray(request[2])
+  ) {
+    return undefined;
+  }
+  if (request.length === 3) {
+    return { toolName: request[1], args: request[2] as Record<string, unknown> };
+  }
+  const route = request[3];
+  if (
+    !route ||
+    typeof route !== "object" ||
+    Array.isArray(route) ||
+    typeof (route as BoundApprovalRoute).connectorId !== "string" ||
+    typeof (route as BoundApprovalRoute).resourceId !== "string" ||
+    typeof (route as BoundApprovalRoute).toolName !== "string" ||
+    ((route as BoundApprovalRoute).resourceRevision !== undefined &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "string" &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "number")
+  ) {
+    return undefined;
+  }
+  return {
+    toolName: request[1],
+    args: request[2] as Record<string, unknown>,
+    route: route as BoundApprovalRoute,
+  };
+}
+
+export function boundDirectApprovalRequest(
+  route: BoundApprovalRoute,
+  args: Record<string, unknown>,
+  marker: string,
+): unknown[] {
+  return [marker, DIRECT_APPROVAL_TAG, { route, args }];
+}
+
+export function boundDirectApprovalDetails(
+  request: unknown,
+  marker: string,
+): { route: BoundApprovalRoute; args: Record<string, unknown> } | undefined {
+  if (
+    !Array.isArray(request) ||
+    request.length !== 3 ||
+    request[0] !== marker ||
+    request[1] !== DIRECT_APPROVAL_TAG ||
+    !request[2] ||
+    typeof request[2] !== "object" ||
+    Array.isArray(request[2])
+  ) {
+    return undefined;
+  }
+  const payload = request[2] as { route?: unknown; args?: unknown };
+  const route = payload.route;
+  if (
+    !route ||
+    typeof route !== "object" ||
+    Array.isArray(route) ||
+    typeof (route as BoundApprovalRoute).connectorId !== "string" ||
+    typeof (route as BoundApprovalRoute).resourceId !== "string" ||
+    typeof (route as BoundApprovalRoute).toolName !== "string" ||
+    ((route as BoundApprovalRoute).resourceRevision !== undefined &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "string" &&
+      typeof (route as BoundApprovalRoute).resourceRevision !== "number") ||
+    !payload.args ||
+    typeof payload.args !== "object" ||
+    Array.isArray(payload.args)
+  ) {
+    return undefined;
+  }
+  return {
+    route: route as BoundApprovalRoute,
+    args: payload.args as Record<string, unknown>,
+  };
 }

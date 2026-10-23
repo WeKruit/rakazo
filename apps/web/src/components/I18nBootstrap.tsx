@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { bootstrapI18n, getActiveUiLocale } from "../lib/i18n";
 import { resolveUiLocale } from "../lib/ui-locale";
+import { Shimmer } from "./ai/primitives";
 import { MarkdownLinkPrompt } from "./markdown-link-prompt";
 
 export function I18nBootstrap({ children }: { children: ReactNode }) {
@@ -23,9 +24,12 @@ export function I18nBootstrap({ children }: { children: ReactNode }) {
   if (!ready) {
     return (
       <div
+        role="status"
         className="grid h-full place-items-center text-muted-foreground/80"
         data-rakazo-app-state="i18n-pending"
-      />
+      >
+        <Shimmer>Loading…</Shimmer>
+      </div>
     );
   }
 

@@ -1,10 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   ContextBudgetError,
   ContextCacheTracker,
   estimateContextTokens,
   providerContextPrefix,
   selectContext,
+  shortenToolResultText,
 } from "./context-selection.js";
 
 const budget = {
@@ -44,7 +45,7 @@ describe("bounded context selection", () => {
       role: "assistant",
       content: [{ type: "toolCall", id: "call", name: "upload", arguments: args }],
     };
-    expect(estimateContextTokens(assistant, 100)).toBeGreaterThan(10000);
+    expect(estimateContextTokens(assistant, 100)).toBeGreaterThan(2500);
   });
   it("shortens every result in an indirectly protected tool group and rejects duplicate results", () => {
     const call = {
@@ -151,15 +152,15 @@ describe("bounded context selection", () => {
     expect(JSON.stringify(selected.messages[2]!.content)).toContain("Tool result truncated");
   });
   it("shortens history JSON evidence while preserving exact original offsets and pagination", () => {
-    const original = 'Quoted "value" and newline\n'.repeat(500);
+    const original = 'Quoted "value" and newline\n'.repeat(1000);
     const payload = {
       untrusted: true,
       messages: [
         {
           messageId: "anchor",
-          text: original.slice(250, 5000),
+          text: original.slice(250, 20000),
           textOffset: 250,
-          nextTextOffset: 5000,
+          nextTextOffset: 20000,
           truncated: true,
         },
       ],
@@ -226,7 +227,7 @@ describe("bounded context selection", () => {
               type: "text",
               text: JSON.stringify({
                 untrusted: true,
-                messages: Array.from({ length: 100 }, (_, index) => ({
+                messages: Array.from({ length: 400 }, (_, index) => ({
                   messageId: `anchor-${index}`,
                   text: "x",
                   textOffset: 0,
@@ -244,6 +245,44 @@ describe("bounded context selection", () => {
       needsRetry: true,
       retry: { messageId: "anchor", limit: 1 },
     });
+  });
+  it("keeps escaped structured cropping exact without reencoding the whole result per leaf", () => {
+    const text = 'a😀\n"\\\t'.repeat(60);
+    const payload = {
+      task_id: "exact-task",
+      next_cursor: 'opaque:"\\😀',
+      rows: Array.from({ length: 200 }, (_, index) => ({
+        id: `row-${index}`,
+        name: `Item ${index}`,
+        evidence: text,
+      })),
+      output_id: "exact-output",
+    };
+    const source = JSON.stringify(payload);
+    const encode = vi.spyOn(JSON, "stringify");
+    let result: string;
+    let wholeEncodings: number;
+    try {
+      result = shortenToolResultText(source, 70_000, { name: "mcp__example__read" });
+      wholeEncodings = encode.mock.calls.filter(
+        ([value]) => value !== null && typeof value === "object" && "rows" in value,
+      ).length;
+    } finally {
+      encode.mockRestore();
+    }
+    // Freeze the original longest-leaf policy, including JSON escaping and tie order.
+    const notice = "\n[Tool result truncated to fit context; omitted evidence is unavailable.]\n";
+    expect(result).toBe(
+      JSON.stringify({
+        ...payload,
+        rows: payload.rows.map((row, index) => {
+          const keep = index < 196 ? 71 : 105;
+          return { ...row, evidence: `${text.slice(0, keep)}${notice}${text.slice(-keep)}` };
+        }),
+        contextTruncated: true,
+      }),
+    );
+    expect(wholeEncodings).toBe(2);
   });
   it("preserves generic JSON controls and marks omitted diagnostic strings", () => {
     const selected = selectContext(
@@ -281,6 +320,26 @@ describe("bounded context selection", () => {
     });
     expect(decoded.diagnostic).toContain("Tool result truncated");
   });
+
+  it.each([undefined, false, true])(
+    "omits oversized metadata without inventing a tool failure (status %s)",
+    (isError) => {
+      const payload = {
+        ...(isError === undefined ? {} : { isError }),
+        rows: Array.from({ length: 100 }, (_, index) => ({ id: `row-${index}` })),
+        nextCursor: "exact-cursor",
+      };
+      const original = JSON.stringify(payload);
+      const projected = shortenToolResultText(original, 128);
+      expect(projected.length).toBeLessThanOrEqual(128);
+      expect(JSON.parse(projected)).toEqual({
+        contextTruncated: true,
+        ...(isError === undefined ? {} : { isError }),
+        notice: "Model excerpt omitted; original result unchanged. Never repeat writes.",
+      });
+      expect(JSON.stringify(payload)).toBe(original);
+    },
+  );
   it("fails explicitly if mandatory content cannot fit rather than silently losing the request", () => {
     expect(() =>
       selectContext([user("large ".repeat(2000))], { budget, strategy: "retrieval" }),
@@ -380,5 +439,87 @@ describe("cache request metadata", () => {
     expect(tracker.record(request)).toEqual({ observedReuse: null });
     expect(tracker.record(request, 0)).toEqual({ observedReuse: false });
     expect(tracker.record(request, 1)).toEqual({ observedReuse: true });
+  });
+});
+
+describe("saved artifact context projection", () => {
+  it("keeps contiguous Unicode text and truthful continuation offsets after shortening", () => {
+    const original = "😀English original material\n".repeat(1000);
+    const page = {
+      artifact: { id: "saved-v1", hash: "a".repeat(64), size: Buffer.byteLength(original) },
+      jsonPath: ["providerResult", "structuredContent", "rows", 0, "evidence", "value"],
+      text: original,
+      offset: 10,
+      endOffset: 10 + Array.from(original).length,
+      totalLength: 10 + Array.from(original).length,
+      offsetUnit: "unicode_code_point",
+      nextOffset: null,
+      hasMore: false,
+    };
+    const projected = JSON.parse(
+      shortenToolResultText(JSON.stringify(page), 1100, {
+        name: "artifact_read",
+        arguments: { artifactId: "saved-v1", offset: 10 },
+      }),
+    );
+    expect(projected.contextTruncated).toBe(true);
+    expect(projected.artifact).toEqual(page.artifact);
+    expect(projected.jsonPath).toEqual(page.jsonPath);
+    expect(projected.text).toBe(
+      Array.from(original).slice(0, Array.from(projected.text).length).join(""),
+    );
+    expect(projected.endOffset).toBe(10 + Array.from(projected.text).length);
+    expect(projected.nextOffset).toBe(projected.endOffset);
+    expect(projected.hasMore).toBe(true);
+    expect(projected.text).not.toContain("Tool result truncated");
+  });
+  it("requests a retry instead of returning a non-advancing empty continuation page", () => {
+    const page = {
+      text: "😀".repeat(128),
+      offset: 42,
+      totalLength: 170,
+      offsetUnit: "unicode_code_point",
+    };
+    const emptyPage = {
+      ...page,
+      text: "",
+      contextTruncated: true,
+      endOffset: 42,
+      nextOffset: 42,
+      hasMore: true,
+    };
+    expect(JSON.stringify(page).length).toBeGreaterThan(JSON.stringify(emptyPage).length);
+    const projected = JSON.parse(
+      shortenToolResultText(JSON.stringify(page), JSON.stringify(emptyPage).length, {
+        name: "artifact_read",
+        arguments: { artifactId: "saved-v1", offset: 42 },
+      }),
+    );
+    expect(projected.needsRetry).toBe(true);
+    expect(projected.retry).toEqual({ artifactId: "saved-v1", offset: 42, limit: 1 });
+    expect(projected).not.toHaveProperty("nextOffset");
+  });
+  it("requests the same original offset when metadata cannot fit", () => {
+    const page = {
+      artifact: { id: "saved-v1", description: "large ".repeat(1000) },
+      text: "😀",
+      offset: 42,
+      totalLength: 43,
+      offsetUnit: "unicode_code_point",
+    };
+    const projected = JSON.parse(
+      shortenToolResultText(JSON.stringify(page), 100, {
+        name: "artifact_read",
+        arguments: { artifactId: "saved-v1", offset: 42, jsonPath: ["evidence"] },
+      }),
+    );
+    expect(projected.needsRetry).toBe(true);
+    expect(projected.retry).toEqual({
+      artifactId: "saved-v1",
+      offset: 42,
+      jsonPath: ["evidence"],
+      limit: 1,
+    });
+    expect(projected).not.toHaveProperty("nextOffset");
   });
 });

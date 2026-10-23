@@ -1,3 +1,4 @@
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400..750&display=swap");
 @import "tailwindcss";
 @import "@rakazo/ui-web/styles.css";
 @import "@fontsource-variable/geist/wght.css";
@@ -42,6 +43,18 @@ body,
   -webkit-app-region: no-drag;
 }
 
+[data-product-view="recruiting"] {
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 14px;
+  letter-spacing: normal;
+}
+
+.recruiting-heading {
+  font-family: inherit;
+  font-weight: 650;
+  letter-spacing: -0.045em;
+}
+
 @keyframes rkPulse {
   0%,
   100% {
@@ -49,5 +62,1024 @@ body,
   }
   50% {
     opacity: 0.3;
+  }
+}
+
+/* The supplied WeKruit /hire workspace; native developer views keep their own chrome. */
+[data-product-view="recruiting"] .hire-navigation {
+  padding: 18px 12px 12px;
+}
+[data-product-view="recruiting"] .hire-brand-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 7px 31px;
+}
+[data-product-view="recruiting"] .hire-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--foreground);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.04em;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+[data-product-view="recruiting"] .hire-brand-logo {
+  display: block;
+  width: 23px;
+  height: 34px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+[data-product-view="recruiting"] .hire-sidebar-collapse {
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 5px;
+  padding: 5px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+[data-product-view="recruiting"] .hire-sidebar-collapse:hover {
+  background: var(--sidebar-accent);
+  color: var(--foreground);
+}
+[data-product-view="recruiting"] .hire-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+[data-product-view="recruiting"] .hire-nav > button,
+[data-product-view="recruiting"] .hire-sidebar-bottom > button {
+  width: 100%;
+  height: 39px;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 0 10px;
+  border-radius: 9px;
+  font-size: 14px;
+  font-weight: 400;
+  text-align: start;
+}
+[data-product-view="recruiting"] .hire-nav svg,
+[data-product-view="recruiting"] .hire-sidebar-bottom svg {
+  flex-shrink: 0;
+  stroke-width: 1.9;
+}
+[data-product-view="recruiting"] .hire-nav > button[aria-current="page"],
+[data-product-view="recruiting"] .hire-role-button[aria-current="page"],
+[data-product-view="recruiting"] .hire-sidebar-bottom > button[aria-current="page"] {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  font-weight: 600;
+}
+[data-product-view="recruiting"] .hire-role-heading {
+  margin: 34px 9px 8px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+[data-product-view="recruiting"] .hire-sidebar-bottom {
+  margin-top: auto;
+  padding-top: 12px;
+}
+[data-product-view="recruiting"] .recruiting-workspace-main {
+  min-width: 0;
+  flex: 1;
+  background: var(--background);
+}
+[data-product-view="recruiting"] .recruiting-workspace-content {
+  width: min(1240px, calc(100% - 72px));
+  min-width: 0;
+  margin: 0 auto;
+  padding: 16px 0 65px;
+}
+[data-product-view="recruiting"] .hire-role-chat-workspace {
+  --hire-role-chat-width: clamp(320px, 34vw, 420px);
+  position: relative;
+}
+[data-product-view="recruiting"] .hire-role-chat-open > .recruiting-workspace-main {
+  margin-inline-end: var(--hire-role-chat-width);
+  container-type: inline-size;
+}
+[data-product-view="recruiting"] .hire-role-chat {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-end: 0;
+  z-index: 20;
+  width: var(--hire-role-chat-width);
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-inline-start: 1px solid var(--border);
+  background: var(--background);
+}
+[data-product-view="recruiting"] .hire-role-chat:not([hidden]) {
+  display: flex;
+}
+[data-product-view="recruiting"] .hire-role-chat[hidden] {
+  display: none;
+}
+[data-product-view="recruiting"] :where(.hire-role-chat) .hire-assistant-identity > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+[data-product-view="recruiting"] :where(.hire-role-chat) .hire-assistant-identity span {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container (max-width: 680px) {
+  [data-product-view="recruiting"] .hire-role-chat-open .hire-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 940px) {
+  [data-product-view="recruiting"] .hire-role-chat-open > .recruiting-workspace-main {
+    margin-inline-end: 0;
+  }
+  [data-product-view="recruiting"] .hire-role-chat {
+    position: static;
+    width: 100%;
+    height: 55dvh;
+    max-height: 65%;
+    flex-shrink: 0;
+    border-inline-start: 0;
+    border-top: 1px solid var(--border);
+  }
+}
+[data-product-view="recruiting"] .hire-brief-view {
+  width: min(1200px, calc(100% - 80px));
+  min-height: 0;
+  flex: 1;
+  margin: 0 auto;
+  overflow-y: auto;
+  padding: 54px 0 70px;
+}
+[data-product-view="recruiting"] .hire-brief-top {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 30px;
+}
+[data-product-view="recruiting"] .hire-brief-top h1 {
+  margin: 0 0 7px;
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.045em;
+}
+[data-product-view="recruiting"] .hire-brief-top p {
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 1.6;
+}
+[data-product-view="recruiting"] .hire-brief-top .hire-brief-role {
+  margin-bottom: 6px;
+  color: var(--foreground);
+  font-weight: 600;
+}
+[data-product-view="recruiting"] .hire-brief-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 370px;
+  align-items: start;
+  gap: 20px;
+}
+[data-product-view="recruiting"] .hire-brief-grid > * {
+  min-width: 0;
+}
+[data-product-view="recruiting"] .hire-chat-panel,
+[data-product-view="recruiting"] .hire-live-criteria {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--background);
+}
+[data-product-view="recruiting"] .hire-chat-panel {
+  display: flex;
+  height: 640px;
+  min-height: 0;
+  flex-direction: column;
+}
+[data-product-view="recruiting"] .hire-panel-heading {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 15px 20px;
+}
+[data-product-view="recruiting"] .hire-panel-heading > div:has(> strong) {
+  min-width: 0;
+  flex: 1;
+}
+[data-product-view="recruiting"] .hire-panel-heading strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 650;
+}
+[data-product-view="recruiting"] .hire-panel-heading span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-assistant-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+[data-product-view="recruiting"] .hire-live-criteria {
+  padding-bottom: 15px;
+}
+[data-product-view="recruiting"] .hire-jd-summary {
+  max-height: 130px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+  padding: 17px 20px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+[data-product-view="recruiting"] .hire-criterion-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px;
+  overflow-wrap: anywhere;
+  font-size: 11px;
+  line-height: 1.6;
+}
+[data-product-view="recruiting"] .hire-criterion-row > span {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-criterion-row strong {
+  font-weight: 600;
+}
+[data-product-view="recruiting"] .hire-source-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 15px 20px 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.6;
+}
+[data-product-view="recruiting"] .hire-source-hint svg {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+@media (max-width: 1180px) {
+  [data-product-view="recruiting"] .hire-brief-view {
+    width: calc(100% - 40px);
+    padding-top: 30px;
+  }
+  [data-product-view="recruiting"] .hire-brief-grid {
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 16px;
+  }
+}
+@media (max-width: 940px) {
+  [data-product-view="recruiting"] .hire-brief-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-product-view="recruiting"] .hire-chat-panel {
+    height: min(640px, 78dvh);
+    min-height: 400px;
+  }
+}
+@media (max-width: 600px) {
+  [data-product-view="recruiting"] .hire-brief-view {
+    width: calc(100% - 28px);
+    padding-top: 24px;
+    padding-bottom: 28px;
+  }
+  [data-product-view="recruiting"] .hire-brief-top {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+  [data-product-view="recruiting"] .hire-brief-top h1 {
+    font-size: 26px;
+  }
+  [data-product-view="recruiting"] .hire-brief-top button {
+    min-height: 44px;
+  }
+}
+[data-product-view="recruiting"] .hire-results-filters {
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 14px;
+}
+[data-product-view="recruiting"] .hire-results-filters > input {
+  flex: 1 1 220px;
+  min-width: 0;
+  height: 38px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+[data-product-view="recruiting"] .hire-new {
+  display: flex;
+  min-height: 100%;
+  justify-content: center;
+}
+[data-product-view="recruiting"] .hire-new-inner {
+  position: relative;
+  width: min(750px, calc(100% - 48px));
+  padding-top: min(27vh, 330px);
+  padding-bottom: 48px;
+}
+[data-product-view="recruiting"] .hire-new-cancel {
+  position: absolute;
+  top: 24px;
+  right: 0;
+}
+[data-product-view="recruiting"] .hire-new h1 {
+  margin: 0 0 39px;
+  font-size: 24px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  text-align: center;
+}
+[data-product-view="recruiting"] .hire-composer {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 17px;
+  background: var(--background);
+  box-shadow: 0 10px 35px color-mix(in srgb, var(--foreground) 6%, transparent);
+}
+[data-product-view="recruiting"] .hire-composer textarea {
+  display: block;
+  width: 100%;
+  min-height: 103px;
+  max-height: 640px;
+  field-sizing: content;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 18px 20px;
+  font-size: 14px;
+  box-shadow: none;
+  resize: vertical;
+}
+[data-product-view="recruiting"] textarea[name="chat-message"] {
+  min-height: 72px;
+  max-height: 320px;
+}
+[data-product-view="recruiting"] .hire-composer-actions {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  justify-content: space-between;
+  padding: 0 19px 15px;
+}
+[data-product-view="recruiting"] .hire-composer-actions button,
+[data-product-view="recruiting"] .hire-black-button,
+[data-product-view="recruiting"] .hire-outline-button {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 7px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+[data-product-view="recruiting"] .hire-black-button {
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-product-view="recruiting"] .hire-outline-button {
+  border: 1px solid var(--input);
+  background: var(--background);
+  color: var(--foreground);
+}
+[data-product-view="recruiting"] .hire-black-button:disabled,
+[data-product-view="recruiting"] .hire-outline-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+[data-product-view="recruiting"] .hire-black-button:focus-visible,
+[data-product-view="recruiting"] .hire-outline-button:focus-visible,
+[data-product-view="recruiting"] .hire-step-list > button:focus-visible,
+[data-product-view="recruiting"] .hire-recipient-list > button:focus-visible,
+[data-product-view="recruiting"] .hire-step-editor input:focus-visible,
+[data-product-view="recruiting"] .hire-step-editor textarea:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+[data-product-view="recruiting"] .hire-standard-view {
+  width: min(1200px, calc(100% - 80px));
+  margin: 0 auto;
+  padding: 54px 0 70px;
+}
+[data-product-view="recruiting"] .hire-section-header {
+  padding: 20px 0 27px;
+}
+[data-product-view="recruiting"] .hire-section-header h1 {
+  margin: 0 0 7px;
+  font-size: 30px;
+  font-weight: 650;
+  letter-spacing: -0.045em;
+}
+[data-product-view="recruiting"] .hire-section-header p {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+[data-product-view="recruiting"] .hire-eyebrow {
+  display: block;
+  margin-bottom: 13px;
+  color: var(--link);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+[data-product-view="recruiting"] .hire-sequence-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+[data-product-view="recruiting"] .hire-sequence-stats > div {
+  display: flex;
+  min-height: 78px;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 14px 18px;
+}
+[data-product-view="recruiting"] .hire-sequence-stats strong {
+  font-size: 22px;
+  font-weight: 600;
+}
+[data-product-view="recruiting"] .hire-sequence-stats span {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-sequence-layout,
+[data-product-view="recruiting"] .hire-inbox-layout {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 15px;
+}
+[data-product-view="recruiting"] .hire-inbox-layout {
+  min-height: 540px;
+}
+[data-product-view="recruiting"] .hire-step-list,
+[data-product-view="recruiting"] .hire-step-editor,
+[data-product-view="recruiting"] .hire-inbox-list,
+[data-product-view="recruiting"] .hire-inbox-thread {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--background);
+}
+[data-product-view="recruiting"] .hire-subheading {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 18px;
+}
+[data-product-view="recruiting"] .hire-subheading strong {
+  font-size: 13px;
+}
+[data-product-view="recruiting"] .hire-subheading > span {
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-step-list > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding: 13px 17px;
+  text-align: left;
+}
+[data-product-view="recruiting"] .hire-step-list > button.active {
+  background: color-mix(in srgb, var(--secondary) 60%, var(--background));
+}
+[data-product-view="recruiting"] .hire-step-list > button:hover {
+  background: var(--muted);
+}
+[data-product-view="recruiting"] .hire-step-list > button > span:nth-child(2) {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow-wrap: anywhere;
+}
+[data-product-view="recruiting"] .hire-step-list > :where(button) strong {
+  font-size: 11px;
+}
+[data-product-view="recruiting"] .hire-step-list > :where(button) svg {
+  flex-shrink: 0;
+  color: var(--muted-foreground);
+}
+[data-product-view="recruiting"] .hire-step-number {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 11px;
+}
+[data-product-view="recruiting"] .hire-step-editor {
+  padding-bottom: 16px;
+}
+[data-product-view="recruiting"] .hire-step-list > :where(button) small {
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-product-view="recruiting"] .hire-recipient-list {
+  margin: 17px;
+  border-top: 1px solid var(--border);
+  padding-top: 15px;
+}
+[data-product-view="recruiting"] .hire-recipient-list > strong {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 11px;
+}
+[data-product-view="recruiting"] .hire-recipient-list > button {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 7px;
+  border-radius: 6px;
+  padding: 7px 5px;
+  font-size: 11px;
+  text-align: start;
+  overflow-wrap: anywhere;
+}
+[data-product-view="recruiting"] .hire-recipient-list > button[aria-pressed="true"] {
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+}
+[data-product-view="recruiting"] .hire-recipient-list small {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 9px;
+}
+[data-product-view="recruiting"] .hire-step-editor > label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 18px 20px;
+  font-size: 11px;
+  font-weight: 600;
+}
+[data-product-view="recruiting"] .hire-step-editor input,
+[data-product-view="recruiting"] .hire-step-editor textarea {
+  min-width: 0;
+  border: 1px solid var(--input);
+  border-radius: 8px;
+  background: var(--background);
+  padding: 10px 11px;
+  color: var(--foreground);
+  font-size: 12px;
+  font-weight: 400;
+}
+[data-product-view="recruiting"] .hire-step-editor input:disabled,
+[data-product-view="recruiting"] .hire-step-editor textarea:disabled {
+  opacity: 0.5;
+}
+[data-product-view="recruiting"] .hire-step-editor textarea {
+  min-height: 248px;
+  resize: vertical;
+  line-height: 1.55;
+}
+[data-product-view="recruiting"] .hire-step-editor-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 15px;
+  padding: 0 20px;
+}
+[data-product-view="recruiting"] .hire-step-editor-foot > label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-step-editor-foot input {
+  width: 52px;
+  border-radius: 5px;
+  padding: 5px;
+}
+[data-product-view="recruiting"] .hire-inbox-filter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+  padding: 17px;
+  font-size: 11px;
+}
+[data-product-view="recruiting"] .hire-inbox-filter strong {
+  color: var(--link);
+}
+[data-product-view="recruiting"] .hire-inbox-filter > span {
+  color: var(--muted-foreground);
+}
+[data-product-view="recruiting"] .hire-calendar-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 18px;
+}
+[data-product-view="recruiting"] .hire-empty {
+  display: flex;
+  min-height: 430px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  color: var(--link);
+  text-align: center;
+}
+[data-product-view="recruiting"] .hire-empty h2 {
+  margin: 20px 0 4px;
+  color: var(--foreground);
+  font-size: 20px;
+}
+[data-product-view="recruiting"] .hire-empty p {
+  max-width: 360px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 1.5;
+}
+[data-product-view="recruiting"] .hire-empty .hire-black-button {
+  margin-top: 12px;
+}
+[data-product-view="recruiting"] .hire-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding: 16px 0;
+}
+[data-product-view="recruiting"] .hire-candidate-card {
+  min-width: 0;
+  min-height: 266px;
+  padding: 17px 19px 14px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--card);
+  transition:
+    border-color 150ms,
+    box-shadow 150ms;
+}
+[data-product-view="recruiting"] .hire-candidate-card:hover {
+  border-color: color-mix(in srgb, var(--link) 25%, var(--border));
+  box-shadow: 0 6px 22px color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+[data-product-view="recruiting"] .hire-card-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+[data-product-view="recruiting"] .hire-card-top > input {
+  accent-color: var(--link);
+}
+[data-product-view="recruiting"] .hire-candidate-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  text-align: start;
+}
+[data-product-view="recruiting"] .hire-avatar {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 12px;
+  font-weight: 750;
+}
+[data-product-view="recruiting"] .hire-candidate-identity > span:last-child {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+[data-product-view="recruiting"] .hire-candidate-identity strong {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-product-view="recruiting"] .hire-candidate-identity small {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+[data-product-view="recruiting"] .hire-match-score {
+  align-self: flex-start;
+  border-radius: 100px;
+  padding: 5px 8px;
+  background: var(--secondary);
+  color: var(--secondary-foreground);
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+[data-product-view="recruiting"] .hire-card-history {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  padding-left: 26px;
+  text-align: start;
+}
+[data-product-view="recruiting"] .hire-card-history > span {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 9px;
+  font-size: 11px;
+}
+[data-product-view="recruiting"] .hire-card-history svg {
+  flex: 0 0 16px;
+  color: var(--muted-foreground);
+}
+[data-product-view="recruiting"] .hire-card-history strong {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-product-view="recruiting"] .hire-card-history em {
+  color: var(--muted-foreground);
+  font-style: normal;
+}
+[data-product-view="recruiting"] .hire-card-history small {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+[data-product-view="recruiting"] .hire-peer-evidence,
+[data-product-view="recruiting"] .hire-card-evidence {
+  display: flex;
+  gap: 8px;
+  margin-top: 15px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--secondary) 40%, var(--background));
+  padding: 8px 10px;
+  color: var(--link);
+}
+[data-product-view="recruiting"] .hire-peer-evidence {
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-card-evidence > div,
+[data-product-view="recruiting"] .hire-peer-evidence > div {
+  min-width: 0;
+}
+[data-product-view="recruiting"] .hire-card-evidence a,
+[data-product-view="recruiting"] .hire-peer-evidence a {
+  overflow-wrap: anywhere;
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-card-evidence svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+[data-product-view="recruiting"] .hire-card-evidence p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 10px;
+  line-height: 1.38;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+[data-product-view="recruiting"] .hire-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 17px;
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+[data-product-view="recruiting"] .hire-card-actions button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted-foreground);
+  font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-card-actions button:hover {
+  color: var(--link);
+}
+[data-product-view="recruiting"] .hire-card-actions button:last-child {
+  margin-left: auto;
+}
+[data-product-view="recruiting"] .hire-table-wrap {
+  overflow: auto;
+  margin-top: 17px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+[data-product-view="recruiting"] .hire-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+[data-product-view="recruiting"] .hire-table th {
+  padding: 13px;
+  background: var(--sidebar);
+  color: var(--muted-foreground);
+  font-weight: 600;
+  text-align: start;
+  white-space: nowrap;
+}
+[data-product-view="recruiting"] .hire-table td {
+  min-width: 100px;
+  border-top: 1px solid var(--border);
+  padding: 12px 13px;
+  color: var(--muted-foreground);
+}
+[data-product-view="recruiting"] .hire-table td:first-child button {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--foreground);
+}
+[data-product-view="recruiting"] .hire-table .hire-avatar {
+  width: 30px;
+  height: 30px;
+  font-size: 9px;
+}
+/* Native Dialog remains responsible for focus, dismissal and modal semantics. */
+.hire-profile-drawer[data-slot="dialog-content"] {
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: auto;
+  display: block;
+  width: min(960px, 72vw);
+  max-width: none;
+  height: 100dvh;
+  max-height: 100dvh;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--background);
+  padding: 25px;
+  color: var(--foreground);
+  font-size: 12px;
+  line-height: 1.6;
+  box-shadow: -12px 0 35px color-mix(in srgb, var(--foreground) 8%, transparent);
+  transform: none;
+  translate: none;
+}
+.hire-profile-drawer [data-slot="dialog-title"] {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+.hire-profile-drawer .hire-candidate-body > .hire-candidate-match,
+.hire-profile-drawer .hire-candidate-feedback-history,
+.hire-profile-drawer .hire-candidate-body > section {
+  margin-top: 24px;
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.hire-profile-drawer .hire-candidate-match > dt {
+  margin-bottom: 12px;
+  color: var(--foreground);
+  font-size: 14px;
+  font-weight: 600;
+}
+.hire-profile-drawer .hire-candidate-criterion {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  padding-block: 8px;
+}
+.hire-profile-drawer .hire-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 12px;
+  padding-block: 12px;
+}
+.hire-profile-drawer .hire-candidate-feedback {
+  display: contents;
+}
+.hire-profile-drawer .hire-candidate-feedback > form,
+.hire-profile-drawer .hire-candidate-feedback > p {
+  flex-basis: 100%;
+}
+.hire-profile-drawer .hire-candidate-report,
+.hire-profile-drawer .hire-candidate-match dd {
+  font-size: 14px;
+}
+.hire-profile-drawer .hire-candidate-report p,
+.hire-profile-drawer .hire-candidate-match p {
+  max-width: 75ch;
+}
+.hire-profile-drawer .hire-candidate-finding {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+.hire-profile-drawer .hire-candidate-finding-heading {
+  display: inline-flex;
+  width: calc(100% - 1rem);
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hire-profile-drawer .hire-candidate-header > :first-child,
+.hire-profile-drawer .hire-candidate-finding-heading > :first-child,
+.hire-profile-drawer .hire-candidate-criterion > dt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.hire-profile-drawer .hire-candidate-finding > div {
+  margin-top: 12px;
+}
+@media (max-width: 1100px) {
+  .hire-profile-drawer[data-slot="dialog-content"] {
+    width: min(900px, 80vw);
+  }
+  [data-product-view="recruiting"] .recruiting-workspace-content {
+    width: calc(100% - 45px);
+  }
+}
+@media (max-width: 850px) {
+  [data-product-view="recruiting"] .hire-sequence-layout,
+  [data-product-view="recruiting"] .hire-inbox-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  [data-product-view="recruiting"] .hire-standard-view {
+    width: calc(100% - 45px);
+  }
+  [data-product-view="recruiting"] .hire-step-editor-foot {
+    flex-wrap: wrap;
+  }
+  .hire-profile-drawer[data-slot="dialog-content"] {
+    width: min(680px, 94vw);
+  }
+}
+@media (max-width: 640px) {
+  [data-product-view="recruiting"] .hire-recipient-list > button,
+  [data-product-view="recruiting"] .hire-step-list > button,
+  [data-product-view="recruiting"] .hire-step-editor-foot button {
+    min-height: 44px;
+  }
+  [data-product-view="recruiting"] .hire-recipient-list > button {
+    flex-wrap: wrap;
+  }
+  [data-product-view="recruiting"] .hire-standard-view {
+    width: calc(100% - 28px);
+    padding-top: 28px;
+  }
+  .hire-profile-drawer[data-slot="dialog-content"] {
+    width: 100vw;
+    padding: 20px 16px;
+  }
+  [data-product-view="recruiting"] .recruiting-workspace-content {
+    width: calc(100% - 28px);
+  }
+  [data-product-view="recruiting"] .hire-card-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

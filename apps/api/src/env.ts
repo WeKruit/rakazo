@@ -1,10 +1,14 @@
+import type { ArtifactStorageOptions } from "@rakazo/adapters";
 import {
+  artifactStorageOptionsFromEnv,
+  firstPartyMcpUrl,
   resolveCloudAgentProvider,
   resolveDeploymentModel,
   resolveSandboxProvider,
   secretStoreOptionsFromEnv,
 } from "@rakazo/adapters";
 import type { OidcConfig } from "@rakazo/auth";
+import { oidcConfigFromEnv } from "@rakazo/auth";
 import {
   resolveAuthSecret,
   resolveEncryptionKey,
@@ -31,6 +35,7 @@ export interface AppEnv {
   signupAllowlist: string | undefined;
   encryptionKey: string;
   dataDir: string;
+  artifactStorage?: ArtifactStorageOptions;
   /** Opt-in Pi JSONL session recording under DATA_DIR/pi-sessions. Default off. */
   piSessionRecording: boolean;
   ticketBoardEnabled: boolean;
@@ -98,6 +103,8 @@ export interface AppEnv {
   mcpStdioAllowedCommands: string[];
   /** Deployment-owner escape for remote MCP on RFC1918 / Docker-network hosts. */
   mcpAllowPrivateEndpoint: boolean;
+  /** Exact trusted MCP endpoint that accepts this product's OIDC identity. */
+  firstPartyMcpUrl?: string;
   port: number;
   gitSha: string | undefined;
   /** Private Compose control-network URL for the opt-in updater sidecar. */
@@ -110,45 +117,12 @@ export interface AppEnv {
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   secretStoreOptionsFromEnv(source);
-  const issuer = optional(source.OIDC_ISSUER);
-  const clientId = optional(source.OIDC_CLIENT_ID);
-  const clientSecret = optional(source.OIDC_CLIENT_SECRET);
-  const credentials = [issuer, clientId, clientSecret];
-  if (credentials.some(Boolean) && !credentials.every(Boolean)) {
-    throw new Error(
-      "OIDC_ISSUER, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET must be configured together",
-    );
-  }
-  if (issuer) {
-    try {
-      const url = new URL(issuer);
-      if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash)
-        throw new Error();
-    } catch {
-      throw new Error("OIDC_ISSUER must be an HTTPS issuer URL");
-    }
-  }
-  for (const key of ["AUTH_PASSWORD_ENABLED", "OIDC_ALLOW_SIGNUP_BYPASS"]) {
-    const value = source[key];
-    if (value && !["true", "false"].includes(value))
-      throw new Error(`${key} must be true or false`);
-  }
+  const artifactStorage = artifactStorageOptionsFromEnv(source);
+  const oidc = oidcConfigFromEnv(source);
   const passwordAuth = source.AUTH_PASSWORD_ENABLED !== "false";
-  if (!passwordAuth && !issuer)
-    throw new Error("AUTH_PASSWORD_ENABLED=false requires OIDC configuration");
-  const oidc =
-    issuer && clientId && clientSecret
-      ? {
-          issuer,
-          clientId,
-          clientSecret,
-          name: optional(source.OIDC_NAME) ?? "SSO",
-          scopes: (optional(source.OIDC_SCOPES) ?? "openid email profile")
-            .split(/[\s,]+/)
-            .filter(Boolean),
-          allowSignupBypass: source.OIDC_ALLOW_SIGNUP_BYPASS === "true",
-        }
-      : undefined;
+  const trustedMcpEndpoint = firstPartyMcpUrl(source.FIRST_PARTY_MCP_URL);
+  if (trustedMcpEndpoint && !oidc)
+    throw new Error("FIRST_PARTY_MCP_URL requires OIDC configuration");
   const authSecret = resolveAuthSecret(source);
   const sandboxProvider = resolveSandboxProvider(source);
   const cloudAgentProvider = resolveCloudAgentProvider(source);
@@ -158,6 +132,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   return {
     passwordAuth,
     oidc,
+    firstPartyMcpUrl: trustedMcpEndpoint,
     nodeEnv: source.NODE_ENV ?? "",
     databaseUrl: required(source, "DATABASE_URL"),
     realtimeDatabaseUrl: source.REALTIME_DATABASE_URL ?? required(source, "DATABASE_URL"),
@@ -172,6 +147,7 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
     signupAllowlist: source.SIGNUP_ALLOWLIST,
     encryptionKey: resolveEncryptionKey(source),
     dataDir: source.DATA_DIR ?? "./data",
+    artifactStorage,
     piSessionRecording: source.PI_SESSION_RECORDING === "true",
     ticketBoardEnabled: source.TICKET_BOARD_ENABLED === "true",
     sandboxSupervisorUrl: source.SANDBOX_SUPERVISOR_URL ?? "http://127.0.0.1:7091",

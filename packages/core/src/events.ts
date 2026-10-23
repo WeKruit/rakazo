@@ -136,7 +136,8 @@ export function projectMessages(
     if (
       event.type === "run.completed" ||
       event.type === "run.failed" ||
-      event.type === "run.cancelled"
+      event.type === "run.cancelled" ||
+      event.type === "run.requeued"
     ) {
       clearLive(event);
     }

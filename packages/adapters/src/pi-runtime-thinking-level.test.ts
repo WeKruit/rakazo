@@ -24,7 +24,8 @@ type FakeAgentTool = {
   execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
 };
 
-vi.mock("@earendil-works/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
     state = { errorMessage: undefined, messages: [] };
     private readonly tools: FakeAgentTool[];

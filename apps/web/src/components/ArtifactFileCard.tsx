@@ -2,12 +2,14 @@ import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown } from "@rakazo/chat-ui/web";
+import type { ThreadMessage } from "@rakazo/contracts";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import { Code2, Download, FileText, X } from "lucide-react";
 import type { RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { downloadArtifact, downloadArtifactBytes, fetchArtifactBytes } from "../lib/artifact-open";
+import { rpc } from "../lib/rpc";
 import { errorText } from "../lib/user-error";
 import { PdfViewer } from "./PdfViewer";
 import { SandboxedHtmlViewer } from "./SandboxedHtmlViewer";
@@ -18,35 +20,51 @@ type ArtifactFileCardProps = {
   name: string;
   mimeType: string;
   size: number;
+  preview?: Extract<ThreadMessage["blocks"][number], { kind: "file" }>["preview"];
 };
 
-const PREVIEWABLE_MIME_TYPES = new Set(["text/markdown", "text/html", "application/pdf"]);
-const TEXT_MIME_TYPES = new Set(["text/markdown", "text/html"]);
+const PREVIEWABLE_MIME_TYPES = new Set([
+  "text/markdown",
+  "text/html",
+  "text/csv",
+  "application/pdf",
+]);
+const TEXT_MIME_TYPES = new Set(["text/markdown", "text/html", "text/csv"]);
 
 export function ArtifactFileCard(props: ArtifactFileCardProps) {
   const { t } = useLingui();
-  const previewable = PREVIEWABLE_MIME_TYPES.has(props.mimeType);
+  const preview = props.target.includeDiagnostics ? undefined : props.preview;
+  const name = preview?.label ?? props.name;
+  const previewable = Boolean(preview) || PREVIEWABLE_MIME_TYPES.has(props.mimeType);
   const previewButton = useRef<HTMLButtonElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
   const [previewOpen, setPreviewOpen] = useState(false);
-  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const downloadKey = JSON.stringify([props.target, props.artifactId, props.name, props.mimeType]);
+  const [downloadFailure, setDownloadError] = useState<{ key: string; message: string } | null>(
+    null,
+  );
+  const downloadError =
+    !preview && downloadFailure?.key === downloadKey ? downloadFailure.message : null;
 
   async function startDownload() {
     setDownloadError(null);
     try {
       await downloadArtifact(props.target, props.artifactId, props.name, props.mimeType);
     } catch {
-      setDownloadError(t`Could not download ${props.name}. Try again.`);
+      setDownloadError({
+        key: downloadKey,
+        message: t`Could not download ${props.name}. Try again.`,
+      });
     }
   }
 
   if (!previewable) {
     return (
-      <div>
+      <div className="min-w-0 max-w-full wrap-anywhere">
         <button
           type="button"
           onClick={() => void startDownload()}
-          className="rounded-2xl border border-border bg-card px-4 py-3 text-left text-[14px] text-foreground hover:bg-accent"
+          className="max-w-full rounded-2xl border border-border bg-card px-4 py-3 text-left text-[14px] text-foreground hover:bg-accent"
         >
           <div className="font-medium">{props.name}</div>
           <div className="mt-1 text-muted-foreground">
@@ -60,12 +78,13 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
 
   return (
     <>
-      <div>
-        <div className="flex min-w-[280px] overflow-hidden rounded-2xl border border-border bg-card text-left text-foreground">
+      <div className="min-w-0 max-w-full wrap-anywhere">
+        <div className="flex min-w-0 max-w-full overflow-hidden rounded-2xl border border-border bg-card text-left text-foreground">
           <button
             ref={previewButton}
             type="button"
-            aria-label={t`Preview ${props.name}`}
+            aria-label={t`Preview ${preview?.label ?? props.name}`}
+            disabled={preview?.source === null}
             onClick={() => setPreviewOpen(true)}
             className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left hover:bg-accent"
           >
@@ -77,21 +96,29 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
               )}
             </span>
             <span className="min-w-0">
-              <span className="block truncate text-[14px] font-medium">{props.name}</span>
+              <span title={name} className="block truncate text-[14px] font-medium">
+                {name}
+              </span>
               <span className="mt-0.5 block text-[13px] text-muted-foreground">
-                {formatBytes(props.size)}
+                {preview?.source === null ? (
+                  <Trans>Source unavailable</Trans>
+                ) : (
+                  formatBytes(props.size)
+                )}
               </span>
             </span>
           </button>
-          <button
-            type="button"
-            aria-label={t`Download ${props.name}`}
-            title={t`Download ${props.name}`}
-            onClick={() => void startDownload()}
-            className="grid w-14 shrink-0 place-items-center border-l border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-          >
-            <Download size={19} strokeWidth={1.8} />
-          </button>
+          {!preview ? (
+            <button
+              type="button"
+              aria-label={t`Download ${props.name}`}
+              title={t`Download ${props.name}`}
+              onClick={() => void startDownload()}
+              className="grid w-14 shrink-0 place-items-center border-l border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <Download size={19} strokeWidth={1.8} />
+            </button>
+          ) : null}
         </div>
         {downloadError ? <DownloadError message={downloadError} /> : null}
       </div>
@@ -102,7 +129,13 @@ export function ArtifactFileCard(props: ArtifactFileCardProps) {
           finalFocus={previewButton}
           className="flex h-[min(88vh,900px)] w-[min(960px,94vw)] flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
         >
-          <FilePreview {...props} closeButtonRef={closeButton} />
+          <FilePreview
+            key={JSON.stringify([props.target, props.artifactId, preview])}
+            {...props}
+            name={name}
+            preview={preview}
+            closeButtonRef={closeButton}
+          />
         </DialogContent>
       </Dialog>
     </>
@@ -114,6 +147,7 @@ function FilePreview({
   artifactId,
   name,
   mimeType,
+  preview,
   closeButtonRef,
 }: ArtifactFileCardProps & { closeButtonRef: RefObject<HTMLButtonElement | null> }) {
   const { t } = useLingui();
@@ -121,16 +155,40 @@ function FilePreview({
   const [state, setState] = useState<
     | { status: "loading" }
     | { status: "ready"; bytes: Uint8Array; text?: string }
+    | { status: "source"; text: string; start: number; end: number }
     | { status: "error"; message: string }
   >({ status: "loading" });
   const targetBotId = "botId" in target ? target.botId : undefined;
   const targetGroupId = "groupId" in target ? target.groupId : undefined;
+  const includeDiagnostics = target.includeDiagnostics;
 
   useEffect(() => {
     let cancelled = false;
+    if (preview) {
+      if (!preview.source) {
+        setState({ status: "error", message: t`Source unavailable` });
+      } else {
+        void rpc.recruiting.readSource(preview.source).then(
+          (source) => {
+            if (cancelled) return;
+            setState(
+              source.kind === "text"
+                ? { status: "source", text: source.text, start: source.start, end: source.end }
+                : { status: "error", message: t`Source unavailable` },
+            );
+          },
+          () => {
+            if (!cancelled) setState({ status: "error", message: t`Source unavailable` });
+          },
+        );
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
     const artifactTarget: ArtifactTarget =
       targetBotId !== undefined ? { botId: targetBotId } : { groupId: targetGroupId! };
-    void fetchArtifactBytes(artifactTarget, artifactId)
+    void fetchArtifactBytes({ ...artifactTarget, includeDiagnostics }, artifactId)
       .then((bytes) => {
         if (cancelled) return;
         if (!TEXT_MIME_TYPES.has(mimeType)) {
@@ -154,7 +212,7 @@ function FilePreview({
     return () => {
       cancelled = true;
     };
-  }, [artifactId, targetBotId, targetGroupId, mimeType, t]);
+  }, [artifactId, targetBotId, targetGroupId, includeDiagnostics, mimeType, t, preview]);
 
   return (
     <>
@@ -162,26 +220,28 @@ function FilePreview({
         <DialogTitle className="min-w-0 flex-1 truncate text-[14px] leading-5 font-medium text-foreground">
           {name}
         </DialogTitle>
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="rounded-full text-muted-foreground"
-          aria-label={t`Download ${name}`}
-          title={t`Download ${name}`}
-          onClick={() =>
-            void (async () => {
-              setDownloadError(null);
-              try {
-                if (state.status === "ready") downloadArtifactBytes(name, mimeType, state.bytes);
-                else await downloadArtifact(target, artifactId, name, mimeType);
-              } catch {
-                setDownloadError(t`Could not download ${name}. Try again.`);
-              }
-            })()
-          }
-        >
-          <Download />
-        </Button>
+        {!preview ? (
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            className="rounded-full text-muted-foreground"
+            aria-label={t`Download ${name}`}
+            title={t`Download ${name}`}
+            onClick={() =>
+              void (async () => {
+                setDownloadError(null);
+                try {
+                  if (state.status === "ready") downloadArtifactBytes(name, mimeType, state.bytes);
+                  else await downloadArtifact(target, artifactId, name, mimeType);
+                } catch {
+                  setDownloadError(t`Could not download ${name}. Try again.`);
+                }
+              })()
+            }
+          >
+            <Download />
+          </Button>
+        ) : null}
         <DialogClose
           ref={closeButtonRef}
           aria-label={t`Close preview`}
@@ -206,10 +266,18 @@ function FilePreview({
           <div className="m-5 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-3 text-destructive">
             {state.message}
           </div>
+        ) : state.status === "source" ? (
+          <div className="p-5">
+            <SourceText text={state.text} start={state.start} end={state.end} />
+          </div>
         ) : mimeType === "text/html" && state.text !== undefined ? (
           <SandboxedHtmlViewer html={state.text} title={name} />
         ) : mimeType === "application/pdf" ? (
           <PdfViewer bytes={state.bytes} title={name} />
+        ) : mimeType === "text/csv" && state.text !== undefined ? (
+          <pre className="whitespace-pre-wrap break-words p-5 font-mono text-sm text-foreground">
+            {state.text}
+          </pre>
         ) : state.text !== undefined ? (
           <article className="mx-auto w-full max-w-[760px] px-8 py-10 text-[16px] leading-7 text-foreground sm:px-12 sm:py-12">
             <ChatMarkdown>{state.text}</ChatMarkdown>
@@ -217,6 +285,26 @@ function FilePreview({
         ) : null}
       </div>
     </>
+  );
+}
+
+export function SourceText({ text, start, end }: { text: string; start: number; end: number }) {
+  const { t } = useLingui();
+  return (
+    <div className="space-y-1">
+      <p className="text-xs text-muted-foreground">
+        <Trans>Source text</Trans>
+      </p>
+      <pre
+        role="document"
+        aria-label={t`Source text`}
+        className="whitespace-pre-wrap break-words font-sans text-sm leading-relaxed"
+      >
+        {text.slice(0, start)}
+        <mark className="bg-accent text-accent-foreground">{text.slice(start, end)}</mark>
+        {text.slice(end)}
+      </pre>
+    </div>
   );
 }
 

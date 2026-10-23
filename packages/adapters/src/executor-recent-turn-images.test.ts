@@ -1,14 +1,21 @@
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
+import { acquireComputerExecutionLease, provisionComputer } from "./computer-lifecycle.js";
 import { createRunExecutor } from "./executor.js";
 
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
-  acquireComputerExecutionLease: async () => null,
-  provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
+  acquireComputerExecutionLease: vi.fn(async () => null),
+  provisionComputer: vi.fn(async () => ({ id: "computer-1", kind: "desktop" })),
 }));
+
+beforeEach(() => {
+  vi.mocked(acquireComputerExecutionLease).mockClear();
+  vi.mocked(provisionComputer).mockClear();
+});
 
 const TEXT_ONLY_MODEL = "deepseek/deepseek-v4-flash-0731";
 const VISION_MODEL = "openai/gpt-4o";
@@ -186,6 +193,10 @@ async function runWithModel(
 
   await executor.continueRun(run.id, "worker-1");
   expect(runtimeRun).toHaveBeenCalled();
+  if (!scripted) {
+    expect(acquireComputerExecutionLease).not.toHaveBeenCalled();
+    expect(provisionComputer).not.toHaveBeenCalled();
+  }
   expect(finalizeRun).not.toHaveBeenCalledWith(expect.objectContaining({ outcome: "failed" }));
   if (!request) throw new Error("runtime was not called");
   return { request, get, prisma, run };
@@ -198,6 +209,32 @@ describe("recent turn images follow model vision", () => {
     expect(request.model.id).toBe(TEXT_ONLY_MODEL);
     expect(request.history.find((entry) => entry.id === "earlier")?.images).toBeUndefined();
     expect(get).not.toHaveBeenCalled();
+  });
+
+  it("logs cumulative setup milestones for the lazy computer handle without provisioning", async () => {
+    const previous = getLogger();
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "setup-timing-check", sinks: [sink] }));
+    try {
+      await runWithModel(TEXT_ONLY_MODEL);
+    } finally {
+      installLogger(previous);
+    }
+    const setup = sink.events.filter((event) => event.message === "run.setup.timing");
+    expect(setup).toHaveLength(1);
+    const marks = [
+      "lease",
+      "contextLoad",
+      "runStarted",
+      "discoveryJoin",
+      "recruitingContext",
+      "modelKey",
+      "computerHandle",
+      "runtimeStart",
+    ].map((name) => setup[0]![`${name}Ms`] as number);
+    expect(marks.every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
+    expect(marks).toEqual([...marks].sort((a, b) => a - b));
+    expect(setup[0]!.computerMs).toBeUndefined();
   });
 
   it("attaches an earlier turn's image for a model that can see it", async () => {

@@ -1,7 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
+import { builtinAgentTools } from "./builtin-tools.js";
+import { serializeToolResult } from "./pi-runtime.js";
 import { TASK_CATALOG_GUIDANCE, taskCatalogFromTool } from "./task-catalog.js";
 
 describe("task catalog", () => {
+  it("fits the native builtin inventory without repeating runtime tool descriptions", async () => {
+    const prisma = {
+      scratchpadItem: { findMany: vi.fn(async () => []) },
+      routine: { findMany: vi.fn(async () => []) },
+      taughtSkill: { findMany: vi.fn(async () => []) },
+      agentSkill: { findMany: vi.fn(async () => []) },
+    };
+    const result = await taskCatalogFromTool(
+      { prisma: prisma as never },
+      { spaceId: "space-1", botId: "bot-1", userId: "user-1", tools: builtinAgentTools },
+    );
+    const projected = serializeToolResult(result, "retrieval", "task_catalog", {});
+
+    expect(projected.length).toBeLessThanOrEqual(12_000);
+    expect(JSON.parse(projected).contextTruncated).toBeUndefined();
+    expect(JSON.parse(projected)).toEqual(result);
+    expect(result.tools.map((tool) => tool.name)).toEqual(
+      builtinAgentTools.map((tool) => tool.name),
+    );
+    expect(builtinAgentTools.every((tool) => typeof tool.description === "string")).toBe(true);
+  });
+
   it("returns the bot's real work records and exposed tool roster", async () => {
     const prisma = {
       scratchpadItem: {
@@ -57,6 +81,11 @@ describe("task catalog", () => {
           { name: "task_catalog", description: "Catalog", readOnly: true },
           { name: "task_catalog", description: "Duplicate", readOnly: true },
           { name: "GITHUB_LIST_RELEASES", description: "List releases", readOnly: true },
+          {
+            name: "mcp__people__get_rows",
+            description: "Read existing rows",
+            route: { connectorId: "mcp", resourceId: "server-1", toolName: "get_rows" },
+          },
         ],
       },
     );
@@ -64,9 +93,11 @@ describe("task catalog", () => {
     expect(result.tasks).toEqual([
       expect.objectContaining({ id: "item-1", title: "Check the inbox", source: "scratchpad" }),
     ]);
+    expect(result.tasks[0]?.notes).toBe("Use the connected mail tool.");
     expect(result.routines).toEqual([
       expect.objectContaining({ routineId: "routine-1", name: "Morning report", active: true }),
     ]);
+    expect(result.routines[0]?.prompt).toBe("Read the report and summarize it.");
     expect(result.taughtSkills).toEqual([
       {
         id: "taught-1",
@@ -96,8 +127,13 @@ describe("task catalog", () => {
       ]),
     );
     expect(result.tools).toEqual([
-      { name: "task_catalog", description: "Catalog", readOnly: true },
-      { name: "GITHUB_LIST_RELEASES", description: "List releases", readOnly: true },
+      { name: "task_catalog", readOnly: true },
+      { name: "GITHUB_LIST_RELEASES", readOnly: true },
+      {
+        name: "mcp__people__get_rows",
+        readOnly: false,
+        resourceId: "server-1",
+      },
     ]);
     expect(result.guidance).toBe(TASK_CATALOG_GUIDANCE);
   });

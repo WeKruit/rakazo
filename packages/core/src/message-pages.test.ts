@@ -3,6 +3,7 @@ import {
   appendNewerThreadPage,
   forwardProbeAfterPage,
   leaveThreadWindow,
+  mergeThreadHistory,
   openThreadWindow,
   prependThreadHistoryPage,
   threadWindowMessages,
@@ -30,6 +31,37 @@ const latest = () => ({
 });
 
 describe("thread windows", () => {
+  it("keeps sparse waiting cards ordered when an older history page is loaded", () => {
+    const card = { id: "original-card", seq: 5, status: "answered" };
+    const previous = { ...page(200, 299), messages: [card, ...range(200, 299)] };
+    const older = {
+      ...page(100, 199),
+      messages: [{ ...card, status: "pending" }, ...range(100, 199)],
+    };
+    const merged = prependThreadHistoryPage(previous, older)!;
+    expect(merged.olderCursor).toBe(100);
+    expect(merged.messages).toEqual([card, ...range(100, 299)]);
+    expect(merged.messages[0]).toBe(card);
+  });
+
+  it("preserves loaded history between a pinned old question and the refreshed page", () => {
+    const oldCard = { id: "original-card", seq: 5 };
+    const currentCard = { ...oldCard };
+    const previous = {
+      ...page(0, 249),
+      messages: range(0, 249).map((message) => (message.seq === 5 ? oldCard : message)),
+    };
+    const recent = { ...page(200, 299), messages: [currentCard, ...range(200, 299)] };
+    const merged = mergeThreadHistory(previous, recent, true);
+    expect(merged.olderCursor).toBeNull();
+    expect(merged.messages).toHaveLength(300);
+    expect(merged.messages.map((message) => message.seq)).toEqual(
+      range(0, 299).map((message) => message.seq),
+    );
+    expect(merged.messages.filter((message) => message.id === oldCard.id)).toEqual([currentCard]);
+    expect(merged.messages.find((message) => message.id === oldCard.id)).toBe(currentCard);
+  });
+
   it("opens an older page without showing the gap to the latest messages", () => {
     const opened = openThreadWindow(latest(), page(25, 124));
 

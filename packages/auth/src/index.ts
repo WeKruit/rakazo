@@ -29,6 +29,7 @@ import type { OidcConfig } from "./oidc.js";
 import { oidcDiscovery } from "./oidc.js";
 
 export type { OidcConfig } from "./oidc.js";
+export { getOidcAccessToken, getOidcAccountStatus, oidcConfigFromEnv } from "./oidc.js";
 
 export interface AuthEnv {
   passwordAuth?: boolean;
@@ -254,10 +255,12 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     baseURL: env.baseURL,
     trustedOrigins: [...buildTrustedOrigins(env), "rakazo://"],
     account: {
+      encryptOAuthTokens: true,
       accountLinking: { enabled: true, disableImplicitLinking: true, trustedProviders: [] },
     },
     rateLimit: authRateLimitOptions(),
     database: prismaAdapter(prisma, { provider: "postgresql" }),
+    advanced: { database: { joins: true } },
     emailAndPassword: {
       enabled: env.passwordAuth !== false,
       // Signup policy is mutable deployment state, so the request hook below
@@ -359,7 +362,13 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
     plugins: [
       bearer(),
       expo(),
-      accountSecurity(env.email, env.oidc?.name, env.oidc?.issuer, env.passwordAuth !== false),
+      accountSecurity(
+        env.email,
+        env.oidc?.name,
+        env.oidc?.issuer,
+        env.oidc?.clientId,
+        env.passwordAuth !== false,
+      ),
       ...(discovery ? [discovery.plugin] : []),
       organization({
         allowUserToCreateOrganization: false,
@@ -673,7 +682,17 @@ export function loopbackTwinOrigins(origin: string): string[] {
  * route under it stays closed, including ones a future plugin version adds.
  */
 export function isBlockedAuthPath(path: string): boolean {
-  return path.startsWith("/organization");
+  let normalized: string;
+  try {
+    normalized = decodeURIComponent(path).replace(/\/+$/, "");
+  } catch {
+    return true;
+  }
+  // Upstream grants are consumed only by the row-locked server-side native helpers.
+  return (
+    normalized.startsWith("/organization") ||
+    ["/get-access-token", "/refresh-token", "/account-info"].includes(normalized)
+  );
 }
 
 function isOidcCallback(

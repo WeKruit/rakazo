@@ -6,7 +6,8 @@ const promptCalls = vi.hoisted(() => ({
   initialMessages: [] as unknown[],
 }));
 
-vi.mock("@earendil-works/pi-agent-core", () => ({
+vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
     state = { errorMessage: undefined, messages: [] };
     constructor(options: {
@@ -154,14 +155,14 @@ describe("Pi runtime attachments", () => {
         rakazoMessageId: "message-1",
         rakazoCreatedAt: undefined,
       },
-      {
-        role: "user",
-        content: "Assistant: Got it.",
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "Got it." }],
         timestamp: expect.any(Number),
         rakazoHistory: true,
         rakazoMessageId: "message-2",
         rakazoCreatedAt: undefined,
-      },
+      }),
     ]);
     expect(promptCalls.images).toBeUndefined();
   });

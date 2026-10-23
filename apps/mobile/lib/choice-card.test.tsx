@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.hoisted(() => vi.fn());
 const alert = vi.hoisted(() => vi.fn());
+const answerInput = vi.hoisted(() => ({ change: (_value: string) => {} }));
 
 vi.mock("react-native", async () => {
   const { createElement } = await import("react");
@@ -51,12 +52,32 @@ vi.mock("react-native", async () => {
     Pressable: MockPressable,
     StyleSheet: { create: <T,>(styles: T) => styles },
     Text: MockText,
+    TextInput: (props: {
+      value: string;
+      onChangeText: (value: string) => void;
+      accessibilityLabel: string;
+      editable: boolean;
+    }) => {
+      answerInput.change = props.onChangeText;
+      return createElement("textarea", {
+        value: props.value,
+        "aria-label": props.accessibilityLabel,
+        disabled: !props.editable,
+        readOnly: true,
+      });
+    },
+    ActivityIndicator: () => null,
     View: MockView,
     useWindowDimensions: () => ({ width: 393, height: 852, scale: 1, fontScale: 1 }),
   };
 });
 
 vi.mock("./api", () => ({ rpc }));
+vi.mock("./appearance", () => ({ mobileTokens: () => ({}) }));
+vi.mock("./i18n", () => ({
+  t: (text: string) => text,
+  useI18n: () => ({ t: (text: string) => text }),
+}));
 
 vi.mock("./native", () => ({
   native: { fill: "fill", fillPressed: "fill-pressed" },
@@ -73,6 +94,7 @@ vi.mock("../components/native-symbol", () => ({
   NativeSymbol: () => null,
 }));
 
+import { AskActions } from "../components/AskActions";
 import { ChoiceCard } from "../components/ChoiceCard";
 
 type ChoiceBlock = Extract<MessageBlock, { kind: "choice" }>;
@@ -235,5 +257,88 @@ describe("ChoiceCard", () => {
     expect(view.textContent).toContain("Inbox & email");
     expect(view.textContent).not.toContain("Day-to-day work");
     expect(rpc).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("native question answers", () => {
+  it("shows custom input immediately beside choices and preserves the answer on its original card", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    const actions = [
+      { id: "choice-1", label: "Evidence" },
+      { id: "choice-2", label: "Location" },
+    ];
+    try {
+      act(() =>
+        root.render(<AskActions actions={actions} allowCustomAnswer onAnswer={onAnswer} />),
+      );
+      expect(container.textContent).toContain("Evidence");
+      expect(container.textContent).toContain("Location");
+      expect(container.querySelector('textarea[aria-label="Answer"]')).not.toBeNull();
+      expect(button(container, "Send answer").disabled).toBe(true);
+      act(() => answerInput.change(" \n\t "));
+      expect(button(container, "Send answer").disabled).toBe(true);
+      const rawAnswer = " \n  Robotics evidence first 😀\n  ";
+      act(() => answerInput.change(rawAnswer));
+      await act(async () => button(container, "Send answer").click());
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith(rawAnswer);
+    } finally {
+      act(() => root.unmount());
+    }
+  });
+
+  it("keeps approval actions restricted to their offered decisions", () => {
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      act(() =>
+        root.render(
+          <AskActions
+            actions={[
+              { id: "allow", label: "Allow once" },
+              { id: "always", label: "Always allow this tool" },
+              { id: "deny", label: "Deny" },
+            ]}
+            onAnswer={vi.fn()}
+          />,
+        ),
+      );
+      expect(container.querySelector("textarea")).toBeNull();
+      expect([...container.querySelectorAll("button")].map((button) => button.textContent)).toEqual(
+        ["Allow once", "Always allow", "Deny"],
+      );
+    } finally {
+      act(() => root.unmount());
+    }
+  });
+
+  it.each([
+    ["allow", "Confirm requirements"],
+    ["allow", "Approve documents"],
+    ["allow", "Approve calibration"],
+    ["always", "Approve future documents"],
+    ["deny", "Keep the current documents"],
+    ["allow", "Create space"],
+    ["deny", "Cancel"],
+    ["allow", "Allow once"],
+    ["always", "Always allow"],
+    ["deny", "Deny"],
+  ])("preserves the server's %s action label %s and original answer id", async (id, label) => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    const onAnswer = vi.fn().mockResolvedValue(undefined);
+    try {
+      act(() => root.render(<AskActions actions={[{ id, label }]} onAnswer={onAnswer} />));
+      const action = container.querySelector("button");
+      expect(action?.textContent).toBe(label);
+      expect(container.querySelector("textarea")).toBeNull();
+      await act(async () => action!.click());
+      expect(onAnswer).toHaveBeenCalledExactlyOnceWith(id);
+    } finally {
+      act(() => root.unmount());
+    }
   });
 });

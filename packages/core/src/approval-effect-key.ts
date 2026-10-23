@@ -86,3 +86,36 @@ export function legacyScopedToolEffectIdempotencyKey(
   const digest = createHash("sha256").update(stableJsonValue(args)).digest("hex");
   return `${runId}:${toolName}:${executionId}:${digest}`;
 }
+
+function mcpRecord(value: unknown): Record<string, unknown> | undefined {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+export function mcpObject(raw: unknown): Record<string, unknown> | undefined {
+  const envelope = mcpRecord(raw);
+  if (!envelope) return undefined;
+  const bodies: Record<string, unknown>[] = [];
+  if (envelope.structuredContent !== undefined) {
+    const body = mcpRecord(envelope.structuredContent);
+    if (!body) return undefined;
+    bodies.push(body);
+  }
+  for (const block of Array.isArray(envelope.content) ? envelope.content : []) {
+    if (mcpRecord(block)?.type !== "text" || typeof block.text !== "string") continue;
+    try {
+      const body = mcpRecord(JSON.parse(block.text));
+      if (body) bodies.push(body);
+    } catch {
+      /* Narrative text is never a structured receipt. */
+    }
+  }
+  if (!bodies.length) return undefined;
+  try {
+    const first = stableJsonValue(bodies[0]);
+    if (bodies.some((body) => stableJsonValue(body) !== first)) return undefined;
+  } catch {
+    return undefined;
+  }
+  return bodies[0];
+}

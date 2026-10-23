@@ -10,6 +10,7 @@ import type {
 } from "@rakazo/contracts";
 import { RUN_TRIGGERS } from "@rakazo/contracts";
 import {
+  appendToolCallSegment,
   isActive,
   isBackgroundRunTrigger,
   isRunTerminalEvent,
@@ -119,15 +120,28 @@ export function threadRunError(
   return run.error ?? null;
 }
 
-export function clearActiveThreadRuns(snapshot: ThreadSnapshot): ThreadSnapshot {
-  const runIds = new Set(activeThreadRuns(snapshot).map((run) => run.id));
-  const computer = snapshot.computer?.busyBotName
-    ? { ...snapshot.computer, busyBotName: null }
-    : snapshot.computer;
+export function clearActiveThreadRuns(snapshot: ThreadSnapshot, runId?: string): ThreadSnapshot {
+  const runs = activeThreadRuns(snapshot);
+  const stopped = runs.filter((run) => runId === undefined || run.id === runId);
+  if (runId !== undefined && stopped.length === 0) return snapshot;
+  const runIds = new Set(stopped.map((run) => run.id));
+  const activeRuns = runs.filter((run) => !runIds.has(run.id));
+  const computer =
+    !activeRuns.length && snapshot.computer?.busyBotName
+      ? { ...snapshot.computer, busyBotName: null }
+      : snapshot.computer;
   return {
     ...snapshot,
-    run: null,
-    activeRuns: [],
+    run: runId !== undefined && snapshot.run?.id !== runId ? snapshot.run : (activeRuns[0] ?? null),
+    activeRuns,
+    members: snapshot.members?.map((member) =>
+      stopped.some((run) => run.botId === member.botId)
+        ? {
+            ...member,
+            status: activeRuns.find((run) => run.botId === member.botId)?.status ?? "idle",
+          }
+        : member,
+    ),
     messages: snapshot.messages.filter(
       (message) =>
         !message.runId || !runIds.has(message.runId) || !message.id.startsWith("progress:"),
@@ -246,6 +260,7 @@ export function isThreadSnapshotEvent(event: ProductEvent): boolean {
     event.type === "thread.message.updated" ||
     event.type === "thread.message.reaction" ||
     event.type === "run.started" ||
+    event.type === "run.requeued" ||
     event.type === "run.waiting_input" ||
     event.type === "computer.takeover.requested" ||
     isRunTerminalEvent(event)
@@ -257,6 +272,29 @@ export function reduceThreadSnapshot(
   event: ProductEvent,
 ): ThreadSnapshot | null {
   if (!prev) return prev;
+  if (event.type === "run.requeued") {
+    const status = event.payload.status;
+    const run = activeThreadRuns(prev).find((run) => run.id === event.runId);
+    if (
+      event.threadId !== prev.threadId ||
+      event.seq <= prev.cursor ||
+      (status !== "queued" && status !== "waiting_takeover") ||
+      !run ||
+      run.botId !== event.botId ||
+      !["queued", "leased", "running"].includes(run.status)
+    )
+      return prev;
+    return {
+      ...prev,
+      cursor: event.seq,
+      members: updateMemberStatus(prev.members, event.botId, status),
+      run: prev.run?.id === run.id ? { ...prev.run, status } : prev.run,
+      activeRuns: prev.activeRuns?.map((candidate) =>
+        candidate.id === run.id ? { ...candidate, status } : candidate,
+      ),
+      messages: prev.messages.filter((message) => message.id !== progressMessageId(event)),
+    };
+  }
   if (event.type === "thread.cleared") {
     return {
       ...prev,
@@ -425,6 +463,9 @@ export function reduceThreadSnapshot(
       type: "tool",
       name: String(event.payload.name ?? ""),
     });
+    // The hidden marker keeps a current call distinct from historical developer steps.
+    if (blocks.at(-1)?.kind === "steps")
+      blocks.push({ kind: "progress", activity: true, text: "" });
     const next: ThreadMessage = {
       id: liveId,
       threadId: event.threadId,
@@ -438,7 +479,25 @@ export function reduceThreadSnapshot(
     return { ...prev, cursor: event.seq, messages: [...remaining, next] };
   }
   if (event.type === "agent.tool.completed") {
-    return { ...prev, cursor: event.seq };
+    return {
+      ...prev,
+      cursor: event.seq,
+      messages: prev.messages.map((message) => {
+        if (
+          message.id !== progressMessageId(event) ||
+          !message.blocks.some((block) => block.kind === "progress" && block.activity === true)
+        )
+          return message;
+        let blocks: ThreadMessage["blocks"] = [];
+        for (const block of message.blocks) {
+          if (block.kind === "progress" && block.activity === true) {
+            for (const name of block.pendingToolNames ?? [])
+              blocks = appendToolCallSegment(blocks, name);
+          } else blocks.push(block);
+        }
+        return { ...message, blocks };
+      }),
+    };
   }
   if (event.type === "thread.subagent") {
     const block = subagentBlockFromPayload(event.payload);

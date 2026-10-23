@@ -1,13 +1,44 @@
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { runWithAdapter } from "@better-auth/core/context";
 import type * as Db from "@rakazo/db";
 import { memoryAdapter } from "better-auth/adapters/memory";
+import type * as PrismaAdapterModule from "better-auth/adapters/prisma";
+import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Auth, AuthEnv } from "./index.js";
 import { createAuth } from "./index.js";
-import { isCurrentOidcAccount, oidcAccountSubject } from "./oidc.js";
+import {
+  getOidcAccessToken,
+  getOidcAccountStatus,
+  isCurrentOidcAccount,
+  oidcAccountSubject,
+  oidcConfigFromEnv,
+} from "./oidc.js";
 
-const state = vi.hoisted(() => ({ db: {} as Record<string, Record<string, unknown>[]> }));
-vi.mock("better-auth/adapters/prisma", () => ({ prismaAdapter: () => memoryAdapter(state.db) }));
+const state = vi.hoisted(() => ({
+  db: {} as Record<string, Record<string, unknown>[]>,
+  blockRootAdapter: false,
+}));
+vi.mock("better-auth/adapters/prisma", async (original) => {
+  const native = await original<typeof PrismaAdapterModule>();
+  return {
+    prismaAdapter: (prisma: object, options: Parameters<typeof native.prismaAdapter>[1]) => {
+      if ("$queryRaw" in prisma) return native.prismaAdapter(prisma, options);
+      const create = memoryAdapter(state.db);
+      return (...args: Parameters<typeof create>) =>
+        new Proxy(create(...args), {
+          get(target, key, receiver) {
+            const value = Reflect.get(target, key, receiver);
+            if (state.blockRootAdapter && typeof value === "function")
+              return () => {
+                throw new Error("Root adapter used inside token transaction");
+              };
+            return value;
+          },
+        });
+    },
+  };
+});
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<typeof Db>()),
   bootstrapUserSpace: vi.fn(),
@@ -25,6 +56,7 @@ let cookies: string;
 let sentCodes: string[];
 let corruptSignature = false;
 let omitIdToken = false;
+let refreshTokenRequest: Mock<(init?: RequestInit) => Promise<Response>>;
 const codes = new Map<
   string,
   { challenge: string; nonce: string; claims: Record<string, unknown> }
@@ -156,6 +188,33 @@ async function signIn(claims?: Record<string, unknown>) {
 }
 const rows = (model: string) => state.db[model] ?? [];
 
+async function tokenTransaction(account: Record<string, unknown>) {
+  const stored = structuredClone(account);
+  const tx = {
+    account: {
+      findMany: vi.fn(async ({ where }: { where: { userId: { equals: string } } }) =>
+        where.userId.equals === stored.userId ? [structuredClone(stored)] : [],
+      ),
+      update: vi.fn(
+        async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          expect(where).toEqual({ id: account.id });
+          Object.assign(stored, data);
+          return structuredClone(stored);
+        },
+      ),
+    },
+  };
+  const { prismaAdapter } = await vi.importActual<typeof PrismaAdapterModule>(
+    "better-auth/adapters/prisma",
+  );
+  state.blockRootAdapter = true;
+  return {
+    tx,
+    stored,
+    adapter: prismaAdapter(tx, { provider: "postgresql" })(auth.options),
+  };
+}
+
 function expireOidcProofs() {
   for (const value of rows("verification")) {
     if (String(value.identifier).startsWith("oidc-reauth-")) value.expiresAt = new Date(0);
@@ -179,6 +238,15 @@ beforeEach(() => {
   sentCodes = [];
   corruptSignature = false;
   omitIdToken = false;
+  state.blockRootAdapter = false;
+  refreshTokenRequest = vi.fn(async () =>
+    json({
+      access_token: "rotated-access-token",
+      refresh_token: "rotated-refresh-token",
+      token_type: "Bearer",
+      expires_in: 300,
+    }),
+  );
   codes.clear();
   vi.stubGlobal(
     "fetch",
@@ -199,6 +267,12 @@ beforeEach(() => {
       if (url.pathname === "/jwks") return json({ keys: [jwk] });
       if (url.pathname === "/token") {
         const body = new URLSearchParams(String(init?.body));
+        if (body.get("grant_type") === "refresh_token") {
+          expect(["fake-refresh-token", "rotated-refresh-token"]).toContain(
+            body.get("refresh_token"),
+          );
+          return refreshTokenRequest(init);
+        }
         const code = body.get("code")!;
         const value = codes.get(code);
         codes.delete(code);
@@ -208,6 +282,7 @@ beforeEach(() => {
         if (!value || value.challenge !== challenge) return json({ error: "invalid_grant" }, 400);
         return json({
           access_token: "fake-access-token",
+          refresh_token: "fake-refresh-token",
           token_type: "Bearer",
           expires_in: 300,
           ...(omitIdToken ? {} : { id_token: jwt({ ...value.claims, nonce: value.nonce }) }),
@@ -224,6 +299,334 @@ afterEach(() => {
 });
 
 describe("OIDC callbacks", () => {
+  it("bounds refresh discovery, token exchange and body reads with one deadline", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    account.scope = "openid,email,profile";
+    const { adapter, stored, tx } = await tokenTransaction(account);
+    const fetch = vi.mocked(globalThis.fetch);
+    const original = fetch.getMockImplementation()!;
+    let discoverySignal: AbortSignal | null | undefined;
+    let tokenSignal: AbortSignal | null | undefined;
+    fetch.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("openid-configuration")) {
+        discoverySignal = init?.signal;
+        expect(init?.redirect).toBe("manual");
+      }
+      return original(input, init);
+    });
+    refreshTokenRequest.mockImplementation(async (init?: RequestInit) => {
+      tokenSignal = init?.signal;
+      expect(init?.redirect).toBe("manual");
+      expect(new URLSearchParams(String(init?.body))).toEqual(
+        new URLSearchParams({
+          grant_type: "refresh_token",
+          refresh_token: "fake-refresh-token",
+          client_id: "test-client",
+          client_secret: "test-client-secret",
+        }),
+      );
+      return json({
+        access_token: "rotated-access-token",
+        refresh_token: "rotated-refresh-token",
+        token_type: "Bearer",
+        expires_in: 300,
+        scope: "openid",
+      });
+    });
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    try {
+      await expect(
+        runWithAdapter(adapter, () =>
+          auth.api.getAccessToken({
+            body: { accountId: String(account.id), userId: String(account.userId) },
+          }),
+        ),
+      ).resolves.toMatchObject({
+        accessToken: "rotated-access-token",
+        scopes: ["openid", "email", "profile"],
+      });
+      expect(timeout).toHaveBeenCalledExactlyOnceWith(8_000);
+      expect(discoverySignal).toBeInstanceOf(AbortSignal);
+      expect(tokenSignal).toBe(discoverySignal);
+      expect(tx.account.update).toHaveBeenCalledTimes(1);
+      expect(stored.scope).toBe("openid,email,profile");
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it.each(["discovery", "discovery body", "token", "token body"])(
+    "aborts a stalled refresh %s without writing tokens",
+    async (stage) => {
+      setup();
+      await signIn();
+      const account = rows("account")[0]!;
+      account.accessTokenExpiresAt = new Date(0);
+      const before = structuredClone(account);
+      const { adapter, stored, tx } = await tokenTransaction(account);
+      const fetch = vi.mocked(globalThis.fetch);
+      const original = fetch.getMockImplementation()!;
+      let signal: AbortSignal | undefined;
+      fetch.mockImplementation(async (input, init) => {
+        const current = String(input).endsWith("openid-configuration") ? "discovery" : "token";
+        if (!stage.startsWith(current)) return original(input, init);
+        signal = init?.signal ?? undefined;
+        expect(signal).toBeInstanceOf(AbortSignal);
+        if (signal!.aborted) throw signal!.reason;
+        if (stage.endsWith("body"))
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                signal!.addEventListener("abort", () => controller.error(signal!.reason), {
+                  once: true,
+                });
+              },
+            }),
+            { headers: { "content-type": "application/json" } },
+          );
+        return new Promise<Response>((_, reject) => {
+          signal!.addEventListener("abort", () => reject(signal!.reason), { once: true });
+        });
+      });
+      const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+      const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+        expect(milliseconds).toBe(8_000);
+        return nativeTimeout(25);
+      });
+      try {
+        await expect(
+          runWithAdapter(adapter, () =>
+            auth.api.getAccessToken({
+              body: { accountId: String(account.id), userId: String(account.userId) },
+            }),
+          ),
+        ).rejects.toMatchObject({ body: { code: "FAILED_TO_GET_ACCESS_TOKEN" } });
+        expect(signal?.aborted).toBe(true);
+        expect(timeout).toHaveBeenCalledExactlyOnceWith(8_000);
+        expect(tx.account.update).not.toHaveBeenCalled();
+        expect(stored).toEqual(before);
+      } finally {
+        timeout.mockRestore();
+      }
+    },
+  );
+
+  it.each([
+    "issuer change",
+    "discovery redirect",
+    "HTTP endpoint",
+    "credential endpoint",
+    "fragment endpoint",
+    "token redirect",
+    "token error",
+  ])("rejects refresh %s without replacing the stored grant", async (failure) => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const before = structuredClone(account);
+    const { adapter, stored, tx } = await tokenTransaction(account);
+    const fetch = vi.mocked(globalThis.fetch);
+    const original = fetch.getMockImplementation()!;
+    fetch.mockImplementation(async (input, init) => {
+      if (String(input).endsWith("openid-configuration")) {
+        if (failure === "issuer change")
+          return json({
+            issuer: "https://other.example.test",
+            token_endpoint: `${issuer}/token`,
+          });
+        if (failure === "discovery redirect")
+          return new Response(null, {
+            status: 302,
+            headers: { location: `${issuer}/elsewhere` },
+          });
+        if (failure.endsWith("endpoint"))
+          return json({
+            issuer,
+            token_endpoint:
+              failure === "HTTP endpoint"
+                ? "http://identity.example.test/token"
+                : failure === "credential endpoint"
+                  ? "https://client:secret@identity.example.test/token"
+                  : `${issuer}/token#fragment`,
+          });
+      }
+      return original(input, init);
+    });
+    if (failure === "token redirect")
+      refreshTokenRequest.mockResolvedValue(
+        new Response(null, { status: 302, headers: { location: `${issuer}/elsewhere` } }),
+      );
+    if (failure === "token error")
+      refreshTokenRequest.mockResolvedValue(
+        json({ access_token: "must-not-be-stored", error: "invalid_grant" }),
+      );
+
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).rejects.toMatchObject({ body: { code: "FAILED_TO_GET_ACCESS_TOKEN" } });
+    expect(tx.account.update).not.toHaveBeenCalled();
+    expect(stored).toEqual(before);
+    if (
+      failure === "issuer change" ||
+      failure === "discovery redirect" ||
+      failure.endsWith("endpoint")
+    )
+      expect(refreshTokenRequest).not.toHaveBeenCalled();
+  });
+
+  it("keeps native account refresh reads and encrypted writes on the supplied Prisma adapter", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    cookies = "";
+    await signIn({ sub: "subject-2", email: "other@example.test", email_verified: true });
+    const other = rows("account").find((row) => row.userId !== account.userId)!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { adapter, stored, tx } = await tokenTransaction(account);
+
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).resolves.toMatchObject({ accessToken: "rotated-access-token" });
+    expect(tx.account.findMany).toHaveBeenCalledTimes(1);
+    expect(tx.account.findMany).toHaveBeenLastCalledWith({
+      where: { userId: { equals: account.userId } },
+      take: 100,
+      skip: 0,
+      select: undefined,
+    });
+    expect(tx.account.update).toHaveBeenCalledTimes(1);
+    expect(stored.accessToken).not.toBe("rotated-access-token");
+    expect(stored.refreshToken).not.toBe("rotated-refresh-token");
+    expect(stored.accessToken).not.toBe(account.accessToken);
+    expect(stored.refreshToken).not.toBe(account.refreshToken);
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(other.userId) },
+        }),
+      ),
+    ).rejects.toMatchObject({ body: { code: "ACCOUNT_NOT_FOUND" } });
+    expect(tx.account.findMany).toHaveBeenLastCalledWith({
+      where: { userId: { equals: other.userId } },
+      take: 100,
+      skip: 0,
+      select: undefined,
+    });
+    expect(tx.account.update).toHaveBeenCalledTimes(1);
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    await expect(
+      auth.api.getAccessToken({
+        body: { accountId: String(account.id), userId: String(account.userId) },
+      }),
+    ).rejects.toThrow("Root adapter used inside token transaction");
+  });
+
+  it.each(["provider failure", "transport cancellation"])(
+    "does not write account tokens after native refresh %s",
+    async (failure) => {
+      setup();
+      await signIn();
+      const account = rows("account")[0]!;
+      account.accessTokenExpiresAt = new Date(0);
+      const before = structuredClone(account);
+      const { adapter, stored, tx } = await tokenTransaction(account);
+      if (failure === "provider failure")
+        refreshTokenRequest.mockResolvedValue(json({ error: "temporarily_unavailable" }, 503));
+      else refreshTokenRequest.mockRejectedValue(new DOMException("Aborted", "AbortError"));
+
+      await expect(
+        runWithAdapter(adapter, () =>
+          auth.api.getAccessToken({
+            body: { accountId: String(account.id), userId: String(account.userId) },
+          }),
+        ),
+      ).rejects.toMatchObject({ body: { code: "FAILED_TO_GET_ACCESS_TOKEN" } });
+      expect(tx.account.findMany).toHaveBeenCalledTimes(1);
+      expect(tx.account.update).not.toHaveBeenCalled();
+      expect(stored).toEqual(before);
+      expect(account).toEqual(before);
+    },
+  );
+
+  it("persists successful native rotation when caller cancellation cannot be forwarded", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { adapter, stored, tx } = await tokenTransaction(account);
+    const caller = new AbortController();
+    refreshTokenRequest.mockImplementation(async (init?: RequestInit) => {
+      expect(init?.signal).not.toBe(caller.signal);
+      caller.abort();
+      expect(init?.signal?.aborted).not.toBe(true);
+      return json({
+        access_token: "rotated-access-token",
+        refresh_token: "rotated-refresh-token",
+        token_type: "Bearer",
+        expires_in: 300,
+      });
+    });
+
+    // Native getAccessToken has no AbortSignal input; do not race a rotating grant.
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).resolves.toMatchObject({ accessToken: "rotated-access-token" });
+    expect(caller.signal.aborted).toBe(true);
+    expect(tx.account.update).toHaveBeenCalledTimes(1);
+    expect(stored.accessToken).not.toBe(account.accessToken);
+    await expect(
+      runWithAdapter(adapter, () =>
+        auth.api.getAccessToken({
+          body: { accountId: String(account.id), userId: String(account.userId) },
+        }),
+      ),
+    ).resolves.toMatchObject({ accessToken: "rotated-access-token" });
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("encrypts upstream tokens and resolves them only for the selected native account owner", async () => {
+    setup();
+    expect((await signIn()).headers.get("location")).toBe(`${origin}/app`);
+    const account = rows("account")[0]!;
+    expect(account).toMatchObject({
+      accessToken: expect.any(String),
+      refreshToken: expect.any(String),
+      accountId: oidcAccountSubject(issuer, "subject-1"),
+    });
+    expect(account.accessToken).not.toBe("fake-access-token");
+    expect(account.refreshToken).not.toBe("fake-refresh-token");
+    await expect(
+      auth.api.getAccessToken({
+        body: { accountId: String(account.id), userId: String(account.userId) },
+      }),
+    ).resolves.toMatchObject({ accessToken: "fake-access-token" });
+
+    cookies = "";
+    await signIn({ sub: "subject-2", email: "other@example.test", email_verified: true });
+    const other = rows("account").find((row) => row.userId !== account.userId)!;
+    await expect(
+      auth.api.getAccessToken({
+        body: { accountId: String(account.id), userId: String(other.userId) },
+      }),
+    ).rejects.toMatchObject({ body: { code: "ACCOUNT_NOT_FOUND" } });
+  });
+
   it.each([true, false, undefined])(
     "preserves email_verified=%s through the real callback",
     async (verified) => {
@@ -305,6 +708,25 @@ describe("OIDC callbacks", () => {
       },
     });
     expect((await signIn()).headers.get("location")).toContain("error=account_not_linked");
+    expect(rows("user")).toHaveLength(1);
+    expect(rows("account")).toHaveLength(1);
+  });
+  it("does not mark an old client account as the current SSO link", async () => {
+    setup();
+    await signIn();
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: true });
+    auth.disposeOidcDiscovery();
+    setup({
+      oidc: {
+        issuer,
+        clientId: "replacement-client",
+        clientSecret: "fake-secret",
+        name: "SSO",
+        scopes: [],
+        allowSignupBypass: false,
+      },
+    });
+    expect(await (await request("/account-security")).json()).toMatchObject({ ssoLinked: false });
     expect(rows("user")).toHaveLength(1);
     expect(rows("account")).toHaveLength(1);
   });
@@ -628,17 +1050,356 @@ describe("SSO-only account deletion", () => {
   );
 });
 
-it("counts only stored OIDC subjects bound to the current issuer", () => {
+it("counts only stored OIDC subjects bound to the current issuer and client", () => {
   const account = {
     providerId: "oidc",
     accountId: oidcAccountSubject(issuer, "subject-1"),
     idToken: jwt({ sub: "subject-1" }),
   };
-  expect(isCurrentOidcAccount(account, issuer)).toBe(true);
-  expect(isCurrentOidcAccount(account, undefined)).toBe(false);
-  expect(isCurrentOidcAccount(account, "https://replacement.example.test")).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, providerId: "credential" }, issuer)).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, accountId: "unbound" }, issuer)).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, idToken: null }, issuer)).toBe(false);
-  expect(isCurrentOidcAccount({ ...account, idToken: "malformed" }, issuer)).toBe(false);
+  expect(isCurrentOidcAccount(account, issuer, "test-client")).toBe(true);
+  expect(isCurrentOidcAccount(account, issuer, "replacement-client")).toBe(false);
+  expect(isCurrentOidcAccount(account, issuer, undefined)).toBe(false);
+  expect(isCurrentOidcAccount(account, undefined, "test-client")).toBe(false);
+  expect(isCurrentOidcAccount(account, "https://replacement.example.test", "test-client")).toBe(
+    false,
+  );
+  expect(
+    isCurrentOidcAccount({ ...account, providerId: "credential" }, issuer, "test-client"),
+  ).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, accountId: "unbound" }, issuer, "test-client")).toBe(
+    false,
+  );
+  expect(isCurrentOidcAccount({ ...account, idToken: null }, issuer, "test-client")).toBe(false);
+  expect(isCurrentOidcAccount({ ...account, idToken: "malformed" }, issuer, "test-client")).toBe(
+    false,
+  );
+});
+
+it.each([
+  ["single audience", { aud: "test-client" }, true],
+  ["single audience array", { aud: ["test-client"] }, true],
+  ["single authorized party", { aud: "test-client", azp: "test-client" }, true],
+  [
+    "multiple authorized audiences",
+    { aud: ["other-client", "test-client"], azp: "test-client" },
+    true,
+  ],
+  ["wrong audience", { aud: "other-client" }, false],
+  ["missing audience", { aud: undefined }, false],
+  ["empty audience", { aud: [] }, false],
+  ["numeric audience", { aud: 1 }, false],
+  ["object audience", { aud: { client: "test-client" } }, false],
+  ["malformed audience array", { aud: ["test-client", null], azp: "test-client" }, false],
+  ["empty audience entry", { aud: ["test-client", ""], azp: "test-client" }, false],
+  ["multiple audiences without authorized party", { aud: ["test-client", "other-client"] }, false],
+  ["wrong authorized party", { aud: ["test-client", "other-client"], azp: "other-client" }, false],
+  ["wrong single authorized party", { aud: "test-client", azp: "other-client" }, false],
+  ["null authorized party", { aud: "test-client", azp: null }, false],
+] as const)("checks the stored OIDC %s", (_label, claims, accepted) => {
+  expect(
+    isCurrentOidcAccount(
+      {
+        providerId: "oidc",
+        accountId: oidcAccountSubject(issuer, "subject-1"),
+        idToken: jwt({ sub: "subject-1", ...claims }),
+      },
+      issuer,
+      "test-client",
+    ),
+  ).toBe(accepted);
+});
+
+describe("first-party CRM native OIDC access", () => {
+  function dbForToken(tx: Record<string, unknown>, stored: Record<string, unknown>) {
+    let tail = Promise.resolve();
+    const queryRaw = vi.fn(async (query: { strings?: string[] }) =>
+      String(query.strings?.join(" ")).includes("space_members")
+        ? [{ userId: stored.userId, spaceId: "space-1" }]
+        : [structuredClone(stored)],
+    );
+    Object.assign(tx, { $executeRaw: vi.fn(async () => 0), $queryRaw: queryRaw });
+    return {
+      queryRaw,
+      $transaction: vi.fn((run: (client: unknown) => Promise<unknown>) => {
+        const previous = tail;
+        let release!: () => void;
+        tail = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return previous.then(() => run(tx)).finally(release);
+      }),
+    };
+  }
+
+  it("shares existing OIDC env validation without inventing another login configuration", () => {
+    expect(oidcConfigFromEnv({})).toBeUndefined();
+    expect(() => oidcConfigFromEnv({ OIDC_CLIENT_ID: "id" })).toThrow(
+      "must be configured together",
+    );
+    expect(() => oidcConfigFromEnv({ AUTH_PASSWORD_ENABLED: "false" })).toThrow(
+      "requires OIDC configuration",
+    );
+    expect(
+      oidcConfigFromEnv({
+        OIDC_ISSUER: issuer,
+        OIDC_CLIENT_ID: "test-client",
+        OIDC_CLIENT_SECRET: "test-client-secret",
+      }),
+    ).toMatchObject({ issuer, scopes: ["openid", "email", "profile"] });
+  });
+
+  it("uses the native encrypted account adapter and adopts one rotation for concurrent readers and stale 401s", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { stored, tx } = await tokenTransaction(account);
+    const prisma = dbForToken(tx, stored);
+    const context = { userId: String(account.userId), spaceId: "space-1" };
+    const [a, b] = await Promise.all([
+      getOidcAccessToken(
+        prisma as never,
+        auth,
+        {
+          issuer,
+          clientId: "test-client",
+          clientSecret: "test-client-secret",
+          name: "SSO",
+          scopes: ["openid", "email", "profile"],
+          allowSignupBypass: false,
+        },
+        context,
+      ),
+      getOidcAccessToken(
+        prisma as never,
+        auth,
+        {
+          issuer,
+          clientId: "test-client",
+          clientSecret: "test-client-secret",
+          name: "SSO",
+          scopes: ["openid", "email", "profile"],
+          allowSignupBypass: false,
+        },
+        context,
+      ),
+    ]);
+    expect([a, b]).toEqual(["rotated-access-token", "rotated-access-token"]);
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    expect(stored.accessToken).not.toBe("rotated-access-token");
+    expect(stored.refreshToken).not.toBe("rotated-refresh-token");
+    await expect(
+      getOidcAccessToken(
+        prisma as never,
+        auth,
+        {
+          issuer,
+          clientId: "test-client",
+          clientSecret: "test-client-secret",
+          name: "SSO",
+          scopes: ["openid", "email", "profile"],
+          allowSignupBypass: false,
+        },
+        context,
+        "fake-access-token",
+      ),
+    ).resolves.toBe("rotated-access-token");
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(prisma.queryRaw.mock.calls)).toContain("FOR UPDATE");
+  });
+
+  it("refreshes a still-current 401 grant through native encrypted persistence, but never retries a failing rotation", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    const { stored, tx } = await tokenTransaction(account);
+    const prisma = dbForToken(tx, stored);
+    const config = {
+      issuer,
+      clientId: "test-client",
+      clientSecret: "test-client-secret",
+      name: "SSO",
+      scopes: ["openid", "email", "profile"],
+      allowSignupBypass: false,
+    };
+    const context = { userId: String(account.userId), spaceId: "space-1" };
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, context, "fake-access-token"),
+    ).resolves.toBe("rotated-access-token");
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+    const saved = structuredClone(stored);
+    refreshTokenRequest.mockImplementation(async (init) => {
+      expect(new URLSearchParams(String(init?.body)).get("refresh_token")).toBe(
+        "rotated-refresh-token",
+      );
+      return json({ error: "temporarily_unavailable" }, 503);
+    });
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, context, "rotated-access-token"),
+    ).rejects.toMatchObject({ body: { code: "FAILED_TO_REFRESH_ACCESS_TOKEN" } });
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(2);
+    expect(stored).toEqual(saved);
+  });
+
+  it("publishes a native successful rotation before honoring caller cancellation", async () => {
+    setup();
+    await signIn();
+    const account = rows("account")[0]!;
+    account.accessTokenExpiresAt = new Date(0);
+    const { stored, tx } = await tokenTransaction(account);
+    const prisma = dbForToken(tx, stored);
+    const caller = new AbortController();
+    const native = refreshTokenRequest.getMockImplementation()!;
+    refreshTokenRequest.mockImplementation(async (init) => {
+      caller.abort();
+      return native(init);
+    });
+    const config = {
+      issuer,
+      clientId: "test-client",
+      clientSecret: "test-client-secret",
+      name: "SSO",
+      scopes: ["openid", "email", "profile"],
+      allowSignupBypass: false,
+    };
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, {
+        userId: String(account.userId),
+        spaceId: "space-1",
+        signal: caller.signal,
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    const writes = tx.account.update.mock.calls.length;
+    expect(writes).toBe(1);
+    await expect(
+      getOidcAccessToken(prisma as never, auth, config, {
+        userId: String(account.userId),
+        spaceId: "space-1",
+      }),
+    ).resolves.toBe("rotated-access-token");
+    expect(refreshTokenRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["membership", "owner", "client", "issuer", "expired-without-refresh"])(
+    "rejects invalid %s before CRM dispatch",
+    async (failure) => {
+      setup();
+      await signIn();
+      const account = rows("account")[0]!;
+      const { stored, tx } = await tokenTransaction(account);
+      const prisma = dbForToken(tx, stored);
+      if (failure === "membership") prisma.queryRaw.mockResolvedValueOnce([]);
+      if (failure === "owner") stored.userId = "another-user";
+      if (failure === "expired-without-refresh") {
+        stored.accessTokenExpiresAt = new Date(0);
+        stored.refreshToken = null;
+      }
+      const config = {
+        issuer,
+        clientId: "test-client",
+        clientSecret: "test-client-secret",
+        name: "SSO",
+        scopes: ["openid", "email", "profile"],
+        allowSignupBypass: false,
+      };
+      if (failure === "client") config.clientId = "another-client";
+      if (failure === "issuer") config.issuer = "https://another.example.test";
+      await expect(
+        getOidcAccessToken(prisma as never, auth, config, {
+          userId: String(account.userId),
+          spaceId: "space-1",
+        }),
+      ).rejects.toThrow();
+      expect(refreshTokenRequest).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("read-only product OIDC connection metadata", () => {
+  const config = { issuer, clientId: "test-client" };
+  const context = { userId: "product-user", spaceId: "product-space" };
+  function metadata(extra: Record<string, unknown> = {}) {
+    return {
+      id: "product-account",
+      userId: context.userId,
+      providerId: "oidc",
+      accountId: oidcAccountSubject(issuer, "subject-1"),
+      idToken: jwt({ sub: "subject-1", aud: config.clientId }),
+      hasAccessToken: true,
+      hasRefreshToken: true,
+      accessTokenExpiresAt: new Date(Date.now() + 60_000) as Date | null,
+      refreshTokenExpiresAt: null as Date | null,
+      ...extra,
+    };
+  }
+  function client(rows: ReturnType<typeof metadata>[]) {
+    return {
+      $queryRaw: vi
+        .fn()
+        .mockResolvedValueOnce([{ userId: context.userId, spaceId: context.spaceId }])
+        .mockResolvedValueOnce(rows),
+      $transaction: vi.fn(),
+    };
+  }
+  it("reports an issuer/client-bound current account without decrypting or refreshing any grant", async () => {
+    const prisma = client([metadata()]);
+    expect(await getOidcAccountStatus(prisma as never, config, context)).toBe("connected");
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+    const sql = prisma.$queryRaw.mock.calls[1]![0].sql as string;
+    expect(sql).toContain('"accessToken" IS NOT NULL');
+    expect(sql).toContain('"refreshToken" IS NOT NULL');
+    expect(sql).not.toContain('SELECT "accessToken"');
+  });
+  it.each([
+    "missing",
+    "unlink",
+    "owner",
+    "issuer",
+    "client",
+    "expired",
+    "expired-refresh",
+    "missing-expiry",
+    "invalid-expiry",
+    "empty-token",
+    "ambiguous",
+  ])("does not claim a valid connection for %s account metadata", async (failure) => {
+    const row = metadata();
+    if (failure === "owner") row.userId = "another-user";
+    if (failure === "issuer")
+      row.accountId = oidcAccountSubject("https://other.example.test", "subject-1");
+    if (failure === "client") row.idToken = jwt({ sub: "subject-1", aud: "other-client" });
+    if (failure === "expired" || failure === "expired-refresh")
+      row.accessTokenExpiresAt = new Date(0);
+    if (failure === "expired") row.hasRefreshToken = false;
+    if (failure === "missing-expiry") row.accessTokenExpiresAt = null;
+    if (failure === "invalid-expiry") row.accessTokenExpiresAt = new Date(Number.NaN);
+    if (failure === "empty-token") {
+      row.hasAccessToken = false;
+      row.hasRefreshToken = false;
+    }
+    if (failure === "expired-refresh") row.refreshTokenExpiresAt = new Date(0);
+    const rows =
+      failure === "missing" || failure === "unlink"
+        ? []
+        : failure === "ambiguous"
+          ? [row, row]
+          : [row];
+    expect(await getOidcAccountStatus(client(rows) as never, config, context)).toBe("reconnect");
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+  it("recognizes refreshable expiry without exercising that refresh and rejects a removed Space membership", async () => {
+    expect(
+      await getOidcAccountStatus(
+        client([metadata({ accessTokenExpiresAt: new Date(0) })]) as never,
+        config,
+        context,
+      ),
+    ).toBe("connected");
+    const prisma = client([]);
+    prisma.$queryRaw.mockReset().mockResolvedValue([]);
+    await expect(getOidcAccountStatus(prisma as never, config, context)).rejects.toThrow();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
 });

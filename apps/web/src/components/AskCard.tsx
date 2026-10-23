@@ -1,11 +1,18 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown } from "@rakazo/chat-ui/web";
-import type { ThreadMessage } from "@rakazo/contracts";
-import { commandVariableName } from "@rakazo/contracts";
-import { isApprovalAskBlock, isSecretAskBlock, selectedAskActionLabel } from "@rakazo/core";
-import { Button, Input } from "@rakazo/ui-web";
-import { useState } from "react";
+import type { AskAnswer, AskFormContent, AskFormResponse, ThreadMessage } from "@rakazo/contracts";
+import { commandVariableName, parseAskFormResponse } from "@rakazo/contracts";
+import {
+  askFormContent,
+  askFormDefaults,
+  askFormOptions,
+  isApprovalAskBlock,
+  isSecretAskBlock,
+  selectedAskActionLabel,
+} from "@rakazo/core";
+import { Button, Input, Textarea } from "@rakazo/ui-web";
+import { useId, useState } from "react";
 import { errorText } from "../lib/user-error";
 
 export type AskBlock = Extract<ThreadMessage["blocks"][number], { kind: "ask" }>;
@@ -22,10 +29,15 @@ function formatAnsweredState(
   if (!approval) return t`Answered: ${selectedAskActionLabel(answer, actions)}`;
   if (outcome === "created") return t`Created`;
   if (outcome === "cancelled") return t`Cancelled`;
-  if (answer === "allow") return t`Allowed once`;
-  if (answer === "always") return t`Always allowed`;
-  if (answer === "deny") return t`Denied`;
-  return t`Answered: ${answer}`;
+  const label = actions?.find((action) => action.id === answer)?.label;
+  if (answer === "allow" && (label === undefined || label === "Allow once")) return t`Allowed once`;
+  if (
+    answer === "always" &&
+    (label === undefined || label === "Always allow this tool" || label === "Always allow")
+  )
+    return t`Always allowed`;
+  if (answer === "deny" && (label === undefined || label === "Deny")) return t`Denied`;
+  return t`Answered: ${selectedAskActionLabel(answer, actions)}`;
 }
 
 function approvalActionLabel(
@@ -35,9 +47,10 @@ function approvalActionLabel(
 ): string {
   if (outcome === "created") return t`Create space`;
   if (outcome === "cancelled") return t`Cancel`;
-  if (id === "allow") return t`Allow once`;
-  if (id === "always") return t`Always allow this tool`;
-  if (id === "deny") return t`Deny`;
+  if (id === "allow" && fallback === "Allow once") return t`Allow once`;
+  if (id === "always" && (fallback === "Always allow this tool" || fallback === "Always allow"))
+    return t`Always allow this tool`;
+  if (id === "deny" && fallback === "Deny") return t`Deny`;
   return fallback;
 }
 
@@ -54,14 +67,17 @@ export function AskCard({
 }: {
   block: AskBlock;
   canAnswer: boolean;
-  onAnswer: (text: string, username?: string) => Promise<void>;
+  onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
 }) {
   const { t } = useLingui();
-  const [editing, setEditing] = useState(false);
   const [answer, setAnswer] = useState("");
   const [username, setUsername] = useState("");
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [formValues, setFormValues] = useState<AskFormContent>(() =>
+    block.requestedSchema ? askFormDefaults(block.requestedSchema) : {},
+  );
+  const formId = useId();
   const submitting = pendingAction !== null;
   const approvalActions = isApprovalAskBlock(block) ? block.actions : undefined;
   const askActions = block.actions;
@@ -74,7 +90,7 @@ export function AskCard({
     if (secretInput ? value.length === 0 : !value.trim()) return;
     const submitUsername = loginInput ? username.trim() : undefined;
     if (loginInput && !submitUsername) return;
-    const submitValue = secretInput ? value : value.trim();
+    const submitValue = value;
     setPendingAction(secretInput ? "submit" : submitValue);
     setError(null);
     if (secretInput) {
@@ -95,12 +111,32 @@ export function AskCard({
     }
   }
 
+  async function submitForm(action: AskFormResponse["action"]) {
+    if (submitting || !block.requestedSchema) return;
+    setError(null);
+    try {
+      const response = parseAskFormResponse(
+        block.requestedSchema,
+        action === "accept"
+          ? { action, content: askFormContent(block.requestedSchema, formValues) }
+          : { action },
+      );
+      setPendingAction(action);
+      await onAnswer(response);
+    } catch (cause) {
+      setError(errorText(cause, t`Could not submit this answer`));
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   return (
-    <div
+    <fieldset
       data-testid={secretInput ? "secret-ask-card" : undefined}
-      className="max-w-[74%] rounded-2xl border border-border bg-card px-5 py-4"
+      aria-label={block.text}
+      className="min-w-0 w-full max-w-2xl rounded-2xl border border-border bg-card px-5 py-4"
     >
-      <div className="text-[15.5px] leading-[1.5] text-foreground">
+      <div className="text-base leading-relaxed text-foreground">
         <ChatMarkdown>{block.text}</ChatMarkdown>
       </div>
       {secretInput && block.credential ? (
@@ -114,17 +150,17 @@ export function AskCard({
         </div>
       ) : null}
       {block.detail && !secretInput ? (
-        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted px-3.5 py-3 font-mono text-[12.5px] leading-[1.7] text-muted-foreground">
+        <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted px-3.5 py-3 font-sans text-sm leading-relaxed text-foreground">
           {block.detail}
         </pre>
       ) : null}
       {block.status === "answered" ? (
-        <div className="mt-3.5 text-[13.5px] font-medium text-success">
+        <div className="mt-3.5 whitespace-pre-wrap text-[13.5px] font-medium text-success">
           {formatAnsweredState(
             block.answer,
-            Boolean(approvalActions),
+            Boolean(block.approvalEffectId),
             secretInput,
-            approvalActions?.find((action) => action.id === block.answer)?.outcome,
+            askActions?.find((action) => action.id === block.answer)?.outcome,
             askActions,
           )}
         </div>
@@ -132,13 +168,173 @@ export function AskCard({
         <div className="mt-3.5 text-[13.5px] font-medium text-muted-foreground">
           <Trans>No longer active</Trans>
         </div>
+      ) : block.requestedSchema ? (
+        <form
+          className="mt-3.5 flex flex-col gap-4"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void submitForm("accept");
+          }}
+        >
+          {Object.entries(block.requestedSchema.properties).map(([name, field], index) => {
+            const id = `${formId}-${index}`;
+            const label = field.title ?? name;
+            const required = block.requestedSchema!.required?.includes(name);
+            const options = askFormOptions(field);
+            const value = formValues[name];
+            const setValue = (next: AskFormContent[string] | undefined) =>
+              setFormValues((current) => {
+                const values = { ...current };
+                if (next === undefined) delete values[name];
+                else values[name] = next;
+                return values;
+              });
+            return (
+              <fieldset key={name} className="min-w-0 space-y-2" disabled={submitting}>
+                <legend className="text-sm font-medium">
+                  {label}
+                  {required ? " *" : ""}
+                </legend>
+                {field.description ? (
+                  <p id={`${id}-description`} className="text-sm text-muted-foreground">
+                    {field.description}
+                  </p>
+                ) : null}
+                {field.type === "array" ? (
+                  options?.map((option) => (
+                    <label key={option.value} className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        aria-label={option.label}
+                        aria-describedby={field.description ? `${id}-description` : undefined}
+                        checked={Array.isArray(value) && value.includes(option.value)}
+                        onChange={(event) =>
+                          setValue(
+                            event.target.checked
+                              ? [...(Array.isArray(value) ? value : []), option.value]
+                              : (Array.isArray(value) ? value : []).filter(
+                                  (item) => item !== option.value,
+                                ),
+                          )
+                        }
+                      />
+                      {option.label}
+                    </label>
+                  ))
+                ) : field.type === "boolean" ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      aria-label={label}
+                      checked={value === true}
+                      onChange={(event) => setValue(event.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ) : options ? (
+                  <select
+                    id={id}
+                    aria-label={label}
+                    aria-required={required}
+                    required={required}
+                    aria-describedby={field.description ? `${id}-description` : undefined}
+                    className="h-10 w-full rounded-md border border-input bg-background px-3 text-base"
+                    value={
+                      value === undefined
+                        ? ""
+                        : String(options.findIndex((option) => option.value === value))
+                    }
+                    onChange={(event) =>
+                      setValue(
+                        event.target.value === ""
+                          ? undefined
+                          : options[Number(event.target.value)]?.value,
+                      )
+                    }
+                  >
+                    <option value=""></option>
+                    {options.map((option, optionIndex) => (
+                      <option key={option.value} value={String(optionIndex)}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                ) : field.type === "string" && !("format" in field && field.format) ? (
+                  <Textarea
+                    id={id}
+                    aria-label={label}
+                    aria-required={required}
+                    required={required && "minLength" in field && (field.minLength ?? 0) > 0}
+                    aria-describedby={field.description ? `${id}-description` : undefined}
+                    value={typeof value === "string" ? value : ""}
+                    onChange={(event) => setValue(event.target.value)}
+                  />
+                ) : (
+                  <Input
+                    id={id}
+                    aria-label={label}
+                    aria-required={required}
+                    // JSON Schema permits an explicitly empty plain string unless constrained.
+                    required={
+                      required &&
+                      (field.type === "number" ||
+                        field.type === "integer" ||
+                        ("format" in field && Boolean(field.format)) ||
+                        ("minLength" in field && (field.minLength ?? 0) > 0))
+                    }
+                    aria-describedby={field.description ? `${id}-description` : undefined}
+                    type={
+                      field.type === "number" || field.type === "integer"
+                        ? "number"
+                        : "format" in field
+                          ? field.format === "uri"
+                            ? "url"
+                            : field.format === "email"
+                              ? "email"
+                              : field.format === "date"
+                                ? "date"
+                                : "text"
+                          : "text"
+                    }
+                    step={field.type === "integer" ? 1 : "any"}
+                    min={"minimum" in field ? field.minimum : undefined}
+                    max={"maximum" in field ? field.maximum : undefined}
+                    value={typeof value === "string" || typeof value === "number" ? value : ""}
+                    onChange={(event) => setValue(event.target.value)}
+                  />
+                )}
+              </fieldset>
+            );
+          })}
+          <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={submitting}>
+              {pendingAction === "accept" ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={submitting}
+              onClick={() => void submitForm("decline")}
+            >
+              <Trans>Decline</Trans>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={submitting}
+              onClick={() => void submitForm("cancel")}
+            >
+              <Trans>Cancel</Trans>
+            </Button>
+          </div>
+        </form>
       ) : askActions?.length ? (
         <div className="mt-3.5 space-y-1.5">
           {askActions.map((action) => (
             <Button
               key={action.id}
               variant={approvalActions && action.id === "allow" ? "default" : "outline"}
-              className="h-auto w-full justify-start whitespace-normal px-3.5 py-3 text-start font-normal"
+              className="h-auto w-full justify-start whitespace-normal px-3.5 py-3 text-start text-base font-normal"
               disabled={submitting}
               onClick={() => void submitAnswer(action.id)}
             >
@@ -189,7 +385,12 @@ export function AskCard({
             {submitting ? <Trans>Saving…</Trans> : <Trans>Save</Trans>}
           </Button>
         </form>
-      ) : editing ? (
+      ) : null}
+      {block.status !== "answered" &&
+      canAnswer &&
+      !secretInput &&
+      !approvalActions &&
+      !block.requestedSchema ? (
         <form
           className="mt-3.5 flex flex-col gap-2"
           onSubmit={(event) => {
@@ -197,39 +398,20 @@ export function AskCard({
             void submitAnswer(answer);
           }}
         >
-          <Input
+          <Textarea
             aria-label={t`Answer`}
+            className="text-base leading-relaxed md:text-base"
             value={answer}
+            disabled={submitting}
             onChange={(event) => setAnswer(event.target.value)}
             placeholder={t`Type your answer`}
           />
-          <div className="flex gap-2">
-            <Button type="submit" disabled={!answer.trim() || submitting}>
-              {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={submitting}
-              onClick={() => {
-                setAnswer("");
-                setEditing(false);
-              }}
-            >
-              <Trans>Cancel</Trans>
-            </Button>
-          </div>
+          <Button type="submit" className="self-start" disabled={!answer.trim() || submitting}>
+            {submitting ? <Trans>Sending…</Trans> : <Trans>Send answer</Trans>}
+          </Button>
         </form>
-      ) : (
-        <div className="mt-3.5 flex gap-2">
-          <Button disabled={submitting} onClick={() => void submitAnswer("approved")}>
-            {submitting ? <Trans>Sending…</Trans> : <Trans>Send it</Trans>}
-          </Button>
-          <Button variant="outline" disabled={submitting} onClick={() => setEditing(true)}>
-            <Trans>Edit first</Trans>
-          </Button>
-        </div>
-      )}
+      ) : null}
       {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
-    </div>
+    </fieldset>
   );
 }

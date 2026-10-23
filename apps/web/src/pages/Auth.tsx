@@ -40,9 +40,9 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
   const title = sent ? (
     <Trans>Check your email</Trans>
   ) : mode === "in" ? (
-    <Trans>Sign in to Rakazo</Trans>
+    <Trans>Sign in to WeKruit Headhunter</Trans>
   ) : mode === "up" ? (
-    <Trans>Create your Rakazo</Trans>
+    <Trans>Create your WeKruit Headhunter account</Trans>
   ) : (
     <Trans>Reset your password</Trans>
   );
@@ -128,6 +128,7 @@ export function AuthPage({ mode }: { mode: AuthMode }) {
 
   async function signInWithSso() {
     setError(null);
+    clearSpaceSelection();
     try {
       const result = await runSsoFlow(
         (disableRedirect, callbackURL) =>
@@ -416,10 +417,7 @@ export function AuthFrame({
   return (
     <div className="flex min-h-full items-center justify-center bg-background px-6 py-16 text-foreground">
       <form onSubmit={onSubmit} className="flex w-[460px] flex-col items-center">
-        <div className="flex h-[74px] w-[74px] items-center justify-center gap-[11px] rounded-full bg-muted">
-          <span className="h-5 w-[9px] rounded-full bg-primary" />
-          <span className="h-5 w-[9px] rounded-full bg-primary" />
-        </div>
+        <img src="/wekruit-logo.png" alt="WeKruit" className="h-[74px] w-[74px] object-contain" />
         <h1 aria-live="polite" className="mb-9 mt-7 text-4xl font-medium tracking-tight">
           {title}
         </h1>

@@ -197,7 +197,7 @@ export function createJobReconciler(
           },
           orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
           take: batchSize,
-          select: { id: true, updatedAt: true },
+          select: { id: true, updatedAt: true, status: true },
         }),
         deps.prisma.routine.findMany({
           where: {
@@ -326,11 +326,13 @@ export function createJobReconciler(
         );
       }
 
-      // A queued run already has a job while it waits out failure backoff.
-      // Default replace would zero that job's attempts and run it now. keepExisting
-      // leaves the job while attempts remain, and still replaces one that is exhausted.
+      // Preserve queued-run backoff, but replace expired owners' wakeups: deduping
+      // a dead worker's locked job would block native lease recovery for four hours.
+      // Graphile replacement leaves that handler locked; the run fence guards takeover.
       await Promise.all([
-        ...runs.map((run) => deps.jobs.enqueue({ ...runContinueJob(run.id), keepExisting: true })),
+        ...runs.map((run) =>
+          deps.jobs.enqueue({ ...runContinueJob(run.id), keepExisting: run.status === "queued" }),
+        ),
         ...routines.flatMap((routine) =>
           routine.nextRunAt
             ? [deps.jobs.enqueue(routineWakeupJob(routine.id, routine.nextRunAt))]

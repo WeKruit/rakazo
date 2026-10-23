@@ -84,6 +84,30 @@ describe("speakable", () => {
       ]),
     ).toContain("Ship it?");
   });
+
+  it.each([
+    { status: "running", label: "is working" },
+    { status: "failed", label: "failed" },
+    { status: "completed", label: "finished" },
+  ] as const)("keeps subagent internals out of speech when $status", ({ status, label }) => {
+    for (const name of ["Saved records", ""]) {
+      expect(
+        speechFromBlocks([
+          { kind: "text", text: "The review is ready." },
+          {
+            kind: "subagent",
+            agentId: "temporary-agent",
+            name,
+            status,
+            task: "Read internal role/source records",
+            progress: "using mcp__crm__list_candidates",
+            result: "Internal receipt artifact-123",
+          },
+          { kind: "ask", text: "Approve the displayed draft?", status: "pending" },
+        ]),
+      ).toBe(`The review is ready.\n${name || "Subagent"} ${label}\nApprove the displayed draft?`);
+    }
+  });
 });
 
 describe("toUtterances", () => {

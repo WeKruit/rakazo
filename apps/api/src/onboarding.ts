@@ -123,6 +123,7 @@ export async function promptFocus(
   botId: string,
 ): Promise<void> {
   const { bot, thread } = await requireBotThread(deps, actor, botId);
+  if ([bot.title, bot.description, bot.instructions].some((value) => value.trim())) return;
   const target = { spaceId: actor.spaceId, botId: bot.id, threadId: thread.id };
   const blocks: MessageBlock[] = [
     {

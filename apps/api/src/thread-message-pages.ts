@@ -1,16 +1,352 @@
-import type { MessageBlock, ThreadMessage, ThreadMessagePage } from "@rakazo/contracts";
-import { MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
+import { isDeepStrictEqual } from "node:util";
+import { buildApprovalAskBlock } from "@rakazo/adapters";
+import type {
+  Actor,
+  MessageBlock,
+  ProductEvent,
+  ThreadMessage,
+  ThreadMessagePage,
+} from "@rakazo/contracts";
 import {
+  MessageBlock as MessageBlockSchema,
+  RecruitingCriterionSchema,
+  RecruitingCrmBindingInputSchema,
+  RecruitingSourceRefSchema,
+  RetainedRecruitingApprovalRequestSchema,
+} from "@rakazo/contracts";
+import {
+  answerableAskMessageIds,
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
+  extractRecruitingCrmTarget,
   isBackgroundInputBlock,
   isBackgroundRunTrigger,
   isPeerReceiptBlocks,
+  mergeMessagesById,
 } from "@rakazo/core";
 import { messageReplyPreview } from "@rakazo/core/message-quote";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 
 type MessageDb = PrismaClient | Prisma.TransactionClient;
+
+/** Public DTO only: native approval targets and stored blocks remain unchanged. */
+export async function projectRecruitingApprovalFiles<
+  T extends Pick<ThreadMessage, "id" | "threadId" | "runId" | "botId" | "role" | "blocks">,
+>(prisma: MessageDb, actor: Actor, threadId: string, messages: readonly T[]): Promise<T[]> {
+  // preview is output metadata, never authority supplied by an artifact, message, or event.
+  let clean = messages.map((message) => {
+    if (!message.blocks.some((block) => block.kind === "file" && block.preview !== undefined))
+      return message;
+    return {
+      ...message,
+      blocks: message.blocks.map((block) => {
+        if (block.kind !== "file") return block;
+        const { preview: _, ...file } = block;
+        return file;
+      }),
+    };
+  });
+  const candidates = clean.filter(
+    (message) =>
+      message.id &&
+      message.threadId === threadId &&
+      message.role === "bot" &&
+      message.runId &&
+      message.botId &&
+      message.blocks.some((block) => block.kind === "ask" && block.approvalEffectId),
+  );
+  const ids = [
+    ...new Set(
+      candidates.flatMap((message) =>
+        message.blocks.flatMap((block) =>
+          block.kind === "ask" && block.approvalEffectId ? [block.approvalEffectId] : [],
+        ),
+      ),
+    ),
+  ];
+  if (!ids.length) return clean;
+
+  const scope = { spaceId: actor.spaceId, userId: actor.userId };
+  const where = {
+    spaceId: actor.spaceId,
+    run: { ...scope, threadId, thread: scope, bot: scope },
+  };
+  const select = {
+    id: true,
+    kind: true,
+    runId: true,
+    status: true,
+    request: true,
+    result: true,
+    run: { select: { botId: true } },
+  } as const;
+  const effects = await prisma.externalEffect.findMany({
+    where: {
+      ...where,
+      id: { in: ids },
+      kind: { in: ["recruiting_request_approval", "recruiting_crm_target"] },
+    },
+    select,
+  });
+  const connections = effects.flatMap((effect) => {
+    if (effect.kind !== "recruiting_crm_target") return [];
+    const parsed = RecruitingCrmBindingInputSchema.safeParse(effect.request);
+    return parsed.success ? [{ effect, input: parsed.data }] : [];
+  });
+  if (connections.length) {
+    const [reads, thread, stored] = await Promise.all([
+      prisma.externalEffect.findMany({
+        where: {
+          ...where,
+          id: { in: [...new Set(connections.map(({ input }) => input.crmRoleReadEffectId))] },
+          status: "completed",
+        },
+        select,
+      }),
+      prisma.thread.findFirst({
+        where: { id: threadId, ...scope, activeRecruitingRole: { ...scope, sourceThread: scope } },
+        select: {
+          activeRecruitingRole: {
+            select: {
+              id: true,
+              title: true,
+              crmBindingEffectId: true,
+              revision: true,
+              currentRevisionId: true,
+              currentRevision: { select: { id: true, roleId: true, revision: true } },
+            },
+          },
+        },
+      }),
+      prisma.message.findMany({
+        where: {
+          id: { in: candidates.map((message) => message.id) },
+          threadId,
+          thread: scope,
+          role: "bot",
+        },
+        select: { id: true, runId: true, botId: true, blocks: true },
+      }),
+    ]);
+    const role = thread?.activeRecruitingRole;
+    clean = clean.map((message) => {
+      if (
+        !connections.some(
+          ({ effect }) =>
+            effect.runId === message.runId &&
+            message.blocks.some(
+              (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+            ),
+        )
+      )
+        return message;
+      return {
+        ...message,
+        blocks: message.blocks.map((block) => {
+          if (block.kind !== "ask" || !candidates.includes(message)) return block;
+          const connection = connections.find(
+            ({ effect }) =>
+              effect.id === block.approvalEffectId &&
+              effect.runId === message.runId &&
+              effect.run.botId === message.botId,
+          );
+          const original = stored.find(
+            (row) =>
+              row.id === message.id && row.runId === message.runId && row.botId === message.botId,
+          );
+          const parsed = MessageBlockSchema.array().safeParse(original?.blocks);
+          if (
+            !connection ||
+            !parsed.success ||
+            !parsed.data.some(
+              (saved) => saved.kind === "ask" && saved.approvalEffectId === block.approvalEffectId,
+            ) ||
+            role?.id !== connection.input.roleId ||
+            role.revision !== connection.input.expectedRoleRevision ||
+            ((role.crmBindingEffectId ?? null) !== connection.input.expectedBindingEffectId &&
+              !(
+                connection.effect.status === "completed" &&
+                role.crmBindingEffectId === connection.effect.id
+              )) ||
+            role.currentRevision?.id !== role.currentRevisionId ||
+            role.currentRevision.roleId !== role.id ||
+            role.currentRevision.revision !== role.revision ||
+            !role.title.trim()
+          )
+            return block;
+          const source = reads.find(
+            (read) =>
+              read.id === connection.input.crmRoleReadEffectId && read.run.botId === message.botId,
+          );
+          const target = source && extractRecruitingCrmTarget(source);
+          if (!target) return block;
+          const display = buildApprovalAskBlock(
+            connection.effect.id,
+            "recruiting_crm_target",
+            { operation: "bind", roleTitle: role.title, target },
+            [],
+          );
+          // Presentation only: the original native actions, status and approval identity stay authoritative.
+          return { ...block, text: display.text, detail: display.detail };
+        }),
+      };
+    });
+  }
+  const approvals = effects.flatMap((effect) => {
+    const parsed = RetainedRecruitingApprovalRequestSchema.safeParse(effect.request);
+    return parsed.success ? [{ effect, input: parsed.data }] : [];
+  });
+  const inheritedIds = [
+    ...new Set(
+      approvals.flatMap(({ input }) =>
+        input.stage === "calibration" ? [input.documentsApprovalEffectId] : [],
+      ),
+    ),
+  ];
+  const inherited = inheritedIds.length
+    ? await prisma.externalEffect.findMany({
+        where: {
+          ...where,
+          kind: "recruiting_request_approval",
+          id: { in: inheritedIds },
+          status: "completed",
+        },
+        select,
+      })
+    : [];
+  const documents = approvals.flatMap(({ effect, input }) => {
+    if (input.stage === "documents") return [{ effect, input }];
+    if (input.stage !== "calibration") return [];
+    const parent = inherited.find(
+      (row) => row.id === input.documentsApprovalEffectId && row.status === "completed",
+    );
+    const parsed = RetainedRecruitingApprovalRequestSchema.safeParse(parent?.request);
+    return parsed.success &&
+      parsed.data.stage === "documents" &&
+      parsed.data.roleId === input.roleId &&
+      parsed.data.expectedRoleRevision === input.expectedRoleRevision
+      ? [{ effect, input: parsed.data }]
+      : [];
+  });
+  if (!documents.length) return clean;
+  const artifactIds = [...new Set(documents.map(({ input }) => input.documents.jdText.artifactId))];
+  const [artifacts, thread] = await Promise.all([
+    prisma.artifact.findMany({
+      where: { ...scope, id: { in: artifactIds } },
+      select: { id: true, hash: true, name: true, mimeType: true, size: true },
+    }),
+    prisma.thread.findFirst({
+      where: { id: threadId, ...scope, activeRecruitingRole: { ...scope, sourceThread: scope } },
+      select: {
+        activeRecruitingRole: {
+          select: {
+            id: true,
+            revision: true,
+            currentRevisionId: true,
+            currentRevision: {
+              select: { id: true, roleId: true, revision: true, sourceRefs: true, criteria: true },
+            },
+          },
+        },
+      },
+    }),
+  ]);
+  const role = thread?.activeRecruitingRole;
+  const revision = role?.currentRevision;
+  const sources = RecruitingSourceRefSchema.array().safeParse(revision?.sourceRefs);
+  const criteria = RecruitingCriterionSchema.array().safeParse(revision?.criteria);
+  const refs =
+    sources.success && criteria.success
+      ? [...sources.data, ...criteria.data.flatMap((criterion) => criterion.sourceRefs)]
+      : [];
+  return clean.map((message) => {
+    if (!candidates.includes(message)) return message;
+    const matches = documents.filter(
+      ({ effect }) =>
+        effect.runId === message.runId &&
+        effect.run.botId === message.botId &&
+        message.blocks.some(
+          (block) => block.kind === "ask" && block.approvalEffectId === effect.id,
+        ),
+    );
+    return {
+      ...message,
+      blocks: message.blocks.map((block) => {
+        if (block.kind !== "file") return block;
+        const match = matches.find(
+          ({ input }) => input.documents.jdText.artifactId === block.artifactId,
+        );
+        if (!match) return block;
+        const ref = match.input.documents.jdText;
+        const artifact = artifacts.find((row) => row.id === ref.artifactId);
+        if (
+          !artifact ||
+          artifact.hash !== ref.sha256 ||
+          artifact.name !== block.name ||
+          artifact.size !== block.size ||
+          artifact.mimeType !== block.mimeType
+        )
+          return block;
+        const source =
+          role?.id === match.input.roleId &&
+          role.revision === match.input.expectedRoleRevision &&
+          revision?.id === role.currentRevisionId &&
+          revision.roleId === role.id &&
+          revision.revision === role.revision
+            ? refs.find(
+                (source) =>
+                  source.readState === "read" &&
+                  source.quote &&
+                  source.anchor.kind === "artifact" &&
+                  source.anchor.locator === "text" &&
+                  source.anchor.artifact.artifactId === ref.artifactId &&
+                  source.anchor.artifact.sha256 === ref.sha256 &&
+                  refs.every((other) => other.id !== source.id || isDeepStrictEqual(other, source)),
+              )
+            : undefined;
+        return {
+          ...block,
+          preview: {
+            label: "Job description",
+            source:
+              source && revision
+                ? {
+                    kind: "role" as const,
+                    threadId,
+                    roleRevisionId: revision.id,
+                    sourceRefId: source.id,
+                  }
+                : null,
+          },
+        };
+      }),
+    };
+  });
+}
+
+export async function projectRecruitingApprovalEvent(
+  prisma: MessageDb,
+  actor: Actor,
+  threadId: string,
+  event: ProductEvent,
+): Promise<ProductEvent> {
+  if (
+    (event.type !== "thread.message.created" && event.type !== "thread.message.updated") ||
+    !Array.isArray(event.payload.blocks)
+  )
+    return event;
+  const [message] = await projectRecruitingApprovalFiles(prisma, actor, threadId, [
+    {
+      id: typeof event.payload.messageId === "string" ? event.payload.messageId : "",
+      threadId: event.threadId,
+      runId: event.runId,
+      botId: event.botId,
+      role: event.spaceId === actor.spaceId && event.payload.role === "bot" ? "bot" : "user",
+      blocks: event.payload.blocks as MessageBlock[],
+    },
+  ]);
+  return { ...event, payload: { ...event.payload, blocks: message!.blocks } };
+}
 
 const replySelection = {
   threadId: true,
@@ -18,6 +354,53 @@ const replySelection = {
   botId: true,
   blocks: true,
 } as const;
+
+/** Waiting cards remain accessible independently of the ordinary history page. */
+export async function includeWaitingAskMessages(
+  prisma: MessageDb,
+  page: ThreadMessagePage,
+  runs: readonly Pick<
+    Prisma.RunGetPayload<Record<string, never>>,
+    "id" | "botId" | "spaceId" | "userId" | "status"
+  >[],
+): Promise<ThreadMessagePage> {
+  const loaded = new Set(answerableAskMessageIds({ messages: page.messages, activeRuns: runs }));
+  const missing = runs.filter(
+    (run) =>
+      run.status === "waiting_input" &&
+      !page.messages.some((message) => message.runId === run.id && loaded.has(message.id)),
+  );
+  if (!missing.length) return page;
+  const pending = (
+    await Promise.all(
+      missing.map(async (run) => {
+        const where: Prisma.MessageWhereInput = {
+          threadId: page.threadId,
+          runId: run.id,
+          botId: run.botId,
+          role: "bot",
+          thread: { id: page.threadId, spaceId: run.spaceId, userId: run.userId },
+          blocks: { array_contains: [{ kind: "ask" }] },
+        };
+        const rows = await prisma.message.findMany({
+          where,
+          orderBy: { seq: "desc" },
+          // Native answer lookup inspects the last 50 messages of a paused run.
+          take: 50,
+          include: { replyTo: { select: replySelection } },
+        });
+        const messages = rows.reverse().map(toThreadMessage);
+        const ids = new Set(answerableAskMessageIds({ messages, activeRuns: [run] }));
+        return messages.filter((message) => ids.has(message.id));
+      }),
+    )
+  ).flat();
+  if (!pending.length) return page;
+  return {
+    ...page,
+    messages: mergeMessagesById(page.messages, pending).sort((left, right) => left.seq - right.seq),
+  };
+}
 
 export async function loadMessagePage(
   prisma: MessageDb,

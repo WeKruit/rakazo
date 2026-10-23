@@ -1,9 +1,558 @@
+import type { ToolCall } from "@earendil-works/pi-ai";
+import { validateToolArguments } from "@earendil-works/pi-ai";
+import { ElicitRequestFormParamsSchema } from "@modelcontextprotocol/core";
+import {
+  ArtifactReadInputSchema,
+  AskUserInputSchema,
+  RecruitingCandidatesToolInputSchema,
+  RecruitingPreferenceFeedbackSchema,
+  RecruitingRoleToolInputSchema,
+} from "@rakazo/contracts";
 import { describe, expect, it } from "vitest";
 import { builtinAgentTools } from "./builtin-tools.js";
 import { parseConnectorToolArgs } from "./lazy-tool-catalog.js";
 import { jsonSchemaParameters, parametersFor } from "./pi-runtime.js";
 
 describe("jsonSchemaParameters", () => {
+  it("preserves artifact paging integers and path indexes on the native Pi wire", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "artifact_read")!;
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    expect(wire.properties.offset).toMatchObject({ type: "integer", minimum: 0 });
+    expect(wire.properties.limit).toMatchObject({ type: "integer", minimum: 1, maximum: 16000 });
+    expect(wire.properties.jsonPath.items.anyOf).toContainEqual(
+      expect.objectContaining({ type: "integer", minimum: 0 }),
+    );
+    const base = { artifactId: "artifact-1", jsonPath: ["rows", 0, "text"], offset: 0, limit: 1 };
+    for (const args of [base, { ...base, jsonPath: [], offset: 2, limit: 16000 }]) {
+      expect(ArtifactReadInputSchema.parse(args)).toEqual(args);
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "artifact-page", name: tool.name, arguments: args },
+        ),
+      ).toEqual(args);
+    }
+    for (const args of [
+      { ...base, offset: -1 },
+      { ...base, offset: 0.5 },
+      { ...base, limit: 0 },
+      { ...base, limit: 16001 },
+      { ...base, limit: 1.5 },
+      { ...base, jsonPath: ["rows", -1, "text"] },
+      { ...base, jsonPath: ["rows", 0.5, "text"] },
+    ]) {
+      expect(ArtifactReadInputSchema.safeParse(args).success).toBe(false);
+      expect(() => parseConnectorToolArgs(wire, args)).toThrow();
+    }
+  });
+
+  it("preserves declared number constraints without turning decimals into integers", () => {
+    const value = {
+      type: "number",
+      minimum: -1,
+      maximum: 2,
+      exclusiveMinimum: -1,
+      exclusiveMaximum: 2,
+      multipleOf: 0.25,
+      description: "A bounded decimal",
+    };
+    const tool = {
+      name: "bounded_decimal",
+      description: "Read a numeric value",
+      inputSchema: { type: "object", properties: { value }, required: ["value"] },
+    };
+    const parameters = parametersFor(tool);
+    expect(JSON.parse(JSON.stringify(parameters)).properties.value).toEqual(value);
+    for (const number of [0, 0.5, 1.75]) {
+      const args = { value: number };
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "decimal-value", name: tool.name, arguments: args },
+        ),
+      ).toEqual(args);
+    }
+    for (const number of [-1, 2, 0.1]) {
+      expect(() =>
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          {
+            type: "toolCall",
+            id: "invalid-decimal-value",
+            name: tool.name,
+            arguments: { value: number },
+          },
+        ),
+      ).toThrow();
+    }
+  });
+
+  it("preserves the standard elicitation schema through the native ask tool parameters", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "ask_user")!;
+    const parameters = parametersFor(tool);
+    const requestedSchema = {
+      type: "object",
+      properties: {
+        url: { type: "string", format: "uri", title: "Website" },
+        choice: { type: "string", oneOf: [{ const: "a", title: "Option A" }] },
+        tags: {
+          type: "array",
+          minItems: 1,
+          maxItems: 2,
+          items: {
+            anyOf: [
+              { const: "a", title: "A" },
+              { const: "b", title: "B" },
+            ],
+          },
+        },
+      },
+      required: ["url", "tags"],
+    };
+    const args = { question: "Details?", requestedSchema };
+    expect(
+      ElicitRequestFormParamsSchema.parse({ message: args.question, requestedSchema })
+        .requestedSchema,
+    ).toEqual(requestedSchema);
+    expect(AskUserInputSchema.parse(args)).toEqual(args);
+    expect(
+      validateToolArguments(
+        { name: tool.name, description: tool.description, parameters },
+        { type: "toolCall", id: "ask-form", name: tool.name, arguments: args },
+      ),
+    ).toEqual(args);
+  });
+  it("preserves candidate list/source pagination and rejects model-selected scope", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_candidates")!;
+    expect(tool).toBeDefined();
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const inputs: ToolCall["arguments"][] = [
+      { operation: "list" },
+      { operation: "list", query: "Example Candidate", cursor: "opaque+/=", limit: 100 },
+      { operation: "sources", candidateKey: "candidate", cursor: "unchanged", limit: 1 },
+    ];
+    for (const input of inputs) {
+      expect(RecruitingCandidatesToolInputSchema.parse(input)).toEqual(input);
+      expect(parseConnectorToolArgs(wire, input)).toEqual(input);
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "synthetic-candidate-read", name: tool.name, arguments: input },
+        ),
+      ).toEqual(input);
+      for (const override of [
+        { actor: { userId: "foreign" } },
+        { roleId: "foreign" },
+        { spaceId: "foreign" },
+        { threadId: "foreign" },
+      ])
+        expect(() => parseConnectorToolArgs(wire, { ...input, ...override })).toThrow();
+    }
+    for (const input of [
+      { operation: "list", limit: 0 },
+      { operation: "list", limit: 101 },
+      { operation: "list", query: "x".repeat(241) },
+      { operation: "sources" },
+      { operation: "sources", candidateKey: "candidate", query: "Example" },
+    ]) {
+      expect(() => parseConnectorToolArgs(tool.inputSchema, input)).toThrow();
+      expect(() => RecruitingCandidatesToolInputSchema.parse(input)).toThrow();
+    }
+  });
+
+  it.each([
+    "recruiting_role",
+    "recruiting_research",
+    "recruiting_feedback",
+    "remember",
+    "save_shared_memory",
+  ])("preserves exact human quote guidance in the %s model schema", (name) => {
+    const tool = builtinAgentTools.find((entry) => entry.name === name)!;
+    const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
+    expect(JSON.stringify(wire)).toContain(
+      "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
+    );
+  });
+
+  it.each(["recruiting_feedback", "remember", "save_shared_memory"])(
+    "preserves unique-quote preference edits through the %s native Pi wire",
+    (name) => {
+      const tool = builtinAgentTools.find((entry) => entry.name === name)!;
+      const parameters = parametersFor(tool);
+      const wire = JSON.parse(JSON.stringify(parameters));
+      for (const operation of ["replace", "revoke"] as const) {
+        const feedback = {
+          target: "preference",
+          scope: name === "remember" ? "bot" : "user",
+          path: "preferences.md",
+          expectedRevision: 2,
+          intent: { basis: "direct", quote: "Remove only the obsolete reminder." },
+          sourceRefs: [],
+          anchor: { quote: "  obsolete\r\n🙂" },
+          ...(operation === "replace" ? { operation, content: "updated" } : { operation }),
+        };
+        expect(RecruitingPreferenceFeedbackSchema.parse(feedback)).toEqual(feedback);
+        const args =
+          name === "recruiting_feedback"
+            ? feedback
+            : {
+                path: feedback.path,
+                expectedRevision: 2,
+                content: "remaining",
+                recruitingFeedback: feedback,
+              };
+        expect(parseConnectorToolArgs(tool.inputSchema, args)).toEqual(args);
+        expect(parseConnectorToolArgs(wire, args)).toEqual(args);
+        expect(
+          validateToolArguments(
+            { name, description: tool.description, parameters },
+            { type: "toolCall", id: "quote-only-edit", name, arguments: args },
+          ),
+        ).toEqual(args);
+      }
+    },
+  );
+
+  it("explains operation-specific role inputs without inventing source identifiers", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_role")!;
+    for (const field of [
+      "title",
+      "sourceRefs:[]",
+      "criteria",
+      "preferences:[]",
+      "definitionQuestions:[]",
+      "intent",
+    ])
+      expect(tool.description).toContain(field);
+    expect(tool.description).toContain("runtime attaches the verified current human message");
+    expect(tool.description).toContain("Never invent message IDs, artifact IDs or read timestamps");
+    expect(tool.description).not.toContain("expectedRevision:0");
+    expect(tool.description).toContain("For JD URLs, call web_fetch before creating the role");
+    expect(tool.description).toContain("sourceMaterial");
+    expect(tool.description).toContain("before role creation");
+    expect(tool.description).toContain("not complete JD coverage");
+    for (const guidance of [
+      'expression:{kind:"atom",id:',
+      'anchor:{kind:"artifact",artifact:sourceMaterial.artifact,locator:',
+      "readAt:sourceMaterial.readAt",
+      "url:sourceMaterial.url",
+      "Assign stable local criterion, atom and source IDs",
+      "quote:<one exact contiguous excerpt of returned text>",
+      "Never omit words or join separate passages within a quote; cite separate excerpts with separate sourceRefs.",
+      "Correct deterministic schema rejections using the actual validator error and read receipt",
+    ])
+      expect(tool.description).toContain(guidance);
+    expect(tool.description).toContain(
+      "copy unchanged criteria, IDs, sourceRefs, preferences and definitionQuestions",
+    );
+    expect(tool.description).not.toContain(
+      "For the current human JD URL, description or attachment request, send sourceRefs:[]",
+    );
+    const incomplete = {
+      operation: "create",
+      title: "Synthetic engineer",
+      sourceRefs: [],
+      criteria: [],
+      definitionQuestions: [],
+    };
+    const parsed = RecruitingRoleToolInputSchema.safeParse(incomplete);
+    expect(parsed.success).toBe(false);
+    if (parsed.success) throw new Error("Incomplete role creation must not validate");
+    expect(parsed.error.issues.map((issue) => issue.path.join("."))).toEqual([
+      "preferences",
+      "intent",
+    ]);
+    const complete = {
+      ...incomplete,
+      preferences: [],
+      intent: { basis: "direct", quote: "Create a role for this job description" },
+    };
+    expect(RecruitingRoleToolInputSchema.parse(complete)).toEqual(complete);
+    expect(parseConnectorToolArgs(tool.inputSchema, complete)).toEqual(complete);
+    expect(
+      parseConnectorToolArgs(JSON.parse(JSON.stringify(parametersFor(tool))), complete),
+    ).toEqual(complete);
+    expect(
+      RecruitingRoleToolInputSchema.safeParse({ ...complete, expectedRevision: 0 }).success,
+    ).toBe(false);
+    const revise = { ...complete, operation: "revise", roleId: "role", expectedRevision: 2 };
+    expect(parseConnectorToolArgs(tool.inputSchema, revise)).toEqual(revise);
+    expect(() =>
+      parseConnectorToolArgs(tool.inputSchema, {
+        ...complete,
+        operation: "revise",
+        roleId: "role",
+      }),
+    ).toThrow();
+    const source = {
+      id: "jd-material",
+      kind: "original_material",
+      anchor: {
+        kind: "artifact",
+        artifact: { artifactId: "read-jd", sha256: "b".repeat(64) },
+        locator: "text",
+      },
+      readState: "read",
+      readAt: "2026-10-16T00:00:00.000Z",
+      url: "https://example.test/job",
+      quote: "Five years of engineering experience",
+    };
+    const sourced = {
+      ...complete,
+      sourceRefs: [source],
+      criteria: [
+        {
+          id: "experience",
+          priority: "hard",
+          expression: { kind: "atom", id: "engineering", statement: source.quote },
+          sourceRefs: [source],
+          definitionQuestions: [],
+        },
+      ],
+    };
+    expect(RecruitingRoleToolInputSchema.parse(sourced)).toEqual(sourced);
+    const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
+    for (const guidance of [
+      "One local ID identifies one exact full reference across the role and all criteria",
+      "Full source reference objects, never source ID strings",
+      "Known non-inferred fields require sourceRefIds",
+      "user_instruction must cite the actual human-message reference",
+      "One rule for every criterion",
+    ])
+      expect(JSON.stringify(wire)).toContain(guidance);
+    expect(tool.description).toContain("Different quotes require different source IDs");
+    expect(
+      validateToolArguments(
+        { name: tool.name, description: tool.description, parameters: wire },
+        { type: "toolCall", id: "create-jd", name: tool.name, arguments: sourced },
+      ),
+    ).toEqual(sourced);
+    const { readState: _state, ...withoutState } = source;
+    const { readAt: _time, ...withoutTime } = source;
+    const { locator: _locator, ...withoutLocator } = source.anchor;
+    const invalid = [
+      {
+        ...sourced,
+        criteria: [
+          { ...sourced.criteria[0], expression: { kind: "atom", statement: source.quote } },
+        ],
+      },
+      ...[
+        source.id,
+        withoutState,
+        withoutTime,
+        { ...source, anchor: withoutLocator, locator: "text" },
+        { ...source, anchor: { kind: "artifact", ...source.anchor.artifact, locator: "text" } },
+      ].map((badSource) => ({
+        ...sourced,
+        criteria: [{ ...sourced.criteria[0], sourceRefs: [badSource] }],
+      })),
+    ];
+    for (const input of invalid) {
+      expect(RecruitingRoleToolInputSchema.safeParse(input).success).toBe(false);
+      expect(() =>
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters: wire },
+          { type: "toolCall", id: "invalid-create-jd", name: tool.name, arguments: input },
+        ),
+      ).toThrow();
+    }
+    expect(incomplete.sourceRefs).toEqual([]);
+  });
+
+  it("explains every required preparation field after root union normalization", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research")!;
+    for (const field of [
+      "expectedRoleRevision",
+      "clientNonce",
+      "instructions",
+      "output",
+      "recallScope",
+      "intent",
+      "mcpServerId",
+      "taskId",
+    ])
+      expect(tool.description).toContain(field);
+    expect(tool.description).toContain("recallScope:null");
+  });
+
+  it("preserves all five closed recruiting research inputs through the installed Pi validator", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
+    expect(tool).toBeDefined();
+    expect(tool!.readOnly).not.toBe(true);
+    const parameters = parametersFor(tool!);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const round = {
+      expectedRoleRevision: 1,
+      purpose: "calibration",
+      approvalEffectId: "documents-approval",
+      clientNonce: "round-nonce",
+      instructions: "  Preserve the complete current role.\r\nKeep every hard gate.\n",
+      output: "  Include original evidence columns.\n",
+      recallScope: "  This round only.\r\n",
+      intent: { basis: "direct", quote: "Search for this role" },
+    };
+    const inputs: ToolCall["arguments"][] = [
+      { ...round, operation: "prepare", mcpServerId: "research-server" },
+      { ...round, operation: "continue", taskId: "local-task", recallScope: null },
+      { operation: "start", actionId: "prepared-action" },
+      { operation: "status", taskId: "local-task" },
+      { operation: "rows", taskId: "local-task", limit: 7, cursor: "  opaque+/=\r\n " },
+    ];
+    for (const input of inputs) {
+      expect(parseConnectorToolArgs(tool!.inputSchema, input)).toEqual(input);
+      expect(parseConnectorToolArgs(wire, input)).toEqual(input);
+      expect(
+        validateToolArguments(
+          { name: tool!.name, description: tool!.description, parameters },
+          { type: "toolCall", id: "synthetic-research-call", name: tool!.name, arguments: input },
+        ),
+      ).toEqual(input);
+      expect(() =>
+        parseConnectorToolArgs(tool!.inputSchema, { ...input, sourceMessageId: "forged" }),
+      ).toThrow();
+    }
+    expect(wire.type).toBe("object");
+    expect(wire).not.toHaveProperty("oneOf");
+  });
+
+  it("explains full reassessment inputs and exact source preservation after validation errors", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
+    for (const guidance of [
+      "Reassess shape:",
+      "questions:[]",
+      "atomJudgments:[]",
+      "employmentEvaluations:[]",
+      "including quote, selection and readAt",
+      "Correct a deterministic validation rejection",
+    ])
+      expect(tool.description).toContain(guidance);
+  });
+
+  it("preserves typed assessment sources, reassessment and original-card questions through the native Pi validator", () => {
+    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess")!;
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const quote = "  Built geometry transforms.\r\n";
+    const save = {
+      operation: "save",
+      roleId: "role-1",
+      roleRevisionId: "role-revision-1",
+      candidateKey: "candidate-1",
+      expectedRevision: 0,
+      facts: [
+        {
+          id: "fact-1",
+          kind: "statement",
+          statement: "Personally implemented transforms",
+          sourceRefIds: ["source-1"],
+        },
+      ],
+      questions: [],
+      sourceRefs: [
+        {
+          id: "source-1",
+          kind: "original_material",
+          anchor: { kind: "message", messageId: "message-1", locator: "text" },
+          readState: "read",
+          readAt: "2026-10-16T00:00:00.000Z",
+          quote,
+          selection: { kind: "message_text", blockIndex: 0, start: 0, end: quote.length },
+        },
+      ],
+      atomJudgments: [
+        {
+          atomId: "geometry",
+          verdict: "met",
+          factIds: ["fact-1"],
+          evidence: ["source-1"],
+          missing: [],
+        },
+      ],
+      employmentEvaluations: [],
+    };
+    const inputs: ToolCall["arguments"][] = [
+      save,
+      { operation: "read", candidateKey: "candidate-1" },
+      { ...save, operation: "reassess", expectedRevision: 1, atomJudgments: [] },
+      {
+        operation: "ask",
+        roleId: save.roleId,
+        roleRevisionId: save.roleRevisionId,
+        target: {
+          kind: "candidate",
+          candidateKey: save.candidateKey,
+          assessmentVersion: 1,
+          criterionIds: ["geometry"],
+        },
+        question: "  What did you implement?  ",
+        options: ["Code", "Library"],
+      },
+    ];
+    for (const input of inputs) {
+      for (const schema of [tool.inputSchema, wire]) {
+        expect(parseConnectorToolArgs(schema, input)).toEqual(input);
+        expect(() => parseConnectorToolArgs(schema, { ...input, hardGate: "met" })).toThrow();
+      }
+      expect(
+        validateToolArguments(
+          { name: tool.name, description: tool.description, parameters },
+          { type: "toolCall", id: "assessment-call", name: tool.name, arguments: input },
+        ),
+      ).toEqual(input);
+    }
+  });
+
+  it("keeps the recruiting feedback guard in native memory tool parameters", () => {
+    const schema = parametersFor(builtinAgentTools.find((tool) => tool.name === "remember")!);
+    expect(schema.properties).toHaveProperty("recruitingFeedback");
+    expect(schema.required).not.toContain("recruitingFeedback");
+  });
+
+  it("preserves recursive recruiting criteria through the native Pi tool schema", () => {
+    const tool = builtinAgentTools.find((tool) => tool.name === "recruiting_role")!;
+    const parameters = parametersFor(tool);
+    const wire = JSON.parse(JSON.stringify(parameters));
+    const input: ToolCall["arguments"] = {
+      operation: "create",
+      title: "Synthetic engineer",
+      sourceRefs: [],
+      criteria: [
+        {
+          id: "geometry",
+          priority: "hard",
+          sourceRefs: [],
+          definitionQuestions: [],
+          expression: {
+            kind: "all",
+            items: [
+              { kind: "atom", id: "implementation", statement: "Personal implementation" },
+              {
+                kind: "not",
+                item: { kind: "atom", id: "xml", statement: "Only XML configuration" },
+              },
+            ],
+          },
+        },
+      ],
+      preferences: [],
+      definitionQuestions: [],
+      intent: { basis: "direct", quote: "Require personal implementation" },
+    };
+    expect(parseConnectorToolArgs(tool.inputSchema, input)).toEqual(input);
+    expect(parseConnectorToolArgs(wire, input)).toEqual(input);
+    expect(
+      validateToolArguments(
+        { name: tool.name, description: tool.description, parameters },
+        { type: "toolCall", id: "synthetic-role-call", name: tool.name, arguments: input },
+      ),
+    ).toEqual(input);
+    expect(wire.type).toBe("object");
+    expect(wire).not.toHaveProperty("oneOf");
+  });
+
   it("exposes fields from a locally referenced allOf branch", () => {
     const tool = {
       name: "catalog_search",

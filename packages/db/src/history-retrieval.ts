@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import type { HistoryReadInput, HistorySearchInput, MessageBlock } from "@rakazo/contracts";
+import type { BoundApprovalRoute } from "@rakazo/core";
+import {
+  boundDirectApprovalDetails,
+  catalogApprovalDetails,
+  messageFileReferences,
+} from "@rakazo/core";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 
@@ -27,8 +33,24 @@ interface HistoryRow {
 // result clipping; newer strategies preserve structured results within their context budget.
 const MAX_RESPONSE_BYTES = 10_000;
 const LINK_PAGE_SIZE = 5;
-function bounded<T extends { messages: ReturnType<typeof reference>[] }>(response: T): T {
-  const refs = [...response.messages];
+function bounded<
+  T extends {
+    messages: ReturnType<typeof reference>[];
+    receipt?: {
+      text: string;
+      textOffset: number;
+      nextTextOffset: number | null;
+      truncated: boolean;
+    } | null;
+  },
+>(response: T): T {
+  const refs: Array<{
+    text: string;
+    textOffset: number;
+    nextTextOffset: number | null;
+    truncated: boolean;
+  }> = [...response.messages];
+  if (response.receipt) refs.push(response.receipt);
   if ("runs" in response) {
     const runs = response.runs as Array<{
       outcomes: ReturnType<typeof reference>[];
@@ -36,13 +58,20 @@ function bounded<T extends { messages: ReturnType<typeof reference>[] }>(respons
     refs.push(...runs.flatMap((run) => run.outcomes));
   }
   while (Buffer.byteLength(JSON.stringify(response), "utf8") > MAX_RESPONSE_BYTES) {
-    const longest = refs.reduce<ReturnType<typeof reference> | undefined>(
+    const longest = refs.reduce<(typeof refs)[number] | undefined>(
       (best, ref) => (!best || ref.text.length > best.text.length ? ref : best),
       undefined,
     );
     if (!longest || longest.text.length < 2)
       throw new Error("History metadata exceeds response budget");
-    longest.text = longest.text.slice(0, Math.floor(longest.text.length / 2));
+    let end = Math.floor(longest.text.length / 2);
+    if (
+      /^[\uDC00-\uDFFF]/.test(longest.text.slice(end)) &&
+      /[\uD800-\uDBFF]$/.test(longest.text.slice(0, end))
+    )
+      end--;
+    if (end === 0) throw new Error("History metadata exceeds response budget");
+    longest.text = longest.text.slice(0, end);
     longest.truncated = true;
     longest.nextTextOffset = longest.textOffset + longest.text.length;
   }
@@ -130,6 +159,7 @@ function reference(row: HistoryRow, query = "", maxLength = 800, textOffset = 0)
     createdAt: row.createdAt.toISOString(),
     runId: row.runId,
     replyToMessageId: row.replyToMessageId,
+    files: messageFileReferences(row.blocks),
     text: text.slice(textOffset, textOffset + maxLength),
     textOffset,
     nextTextOffset: textOffset + maxLength < text.length ? textOffset + maxLength : null,
@@ -164,13 +194,26 @@ export async function searchHistory(
     input.beforeSeq ?? Number.POSITIVE_INFINITY,
     scope.searchBeforeSeq ?? Number.POSITIVE_INFINITY,
   );
+  const searchScope = Prisma.sql`${visible(scope)}
+    ${before ? Prisma.sql`AND m."createdAt" < ${before}` : Prisma.empty}
+    ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
+    ${Number.isFinite(beforeSeq) ? Prisma.sql`AND m.seq < ${beforeSeq}` : Prisma.empty}`;
+  // ponytail: filename matching scans scoped message blocks; add a filename index if scale requires it.
+  // Separate ID branches preserve the conversational GIN expression; IN deduplicates exact messages.
   const rows = await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
     SELECT ${columns} FROM messages m JOIN threads t ON t.id = m."threadId"
-    WHERE ${visible(scope)}
-      AND to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${query})
-      ${before ? Prisma.sql`AND m."createdAt" < ${before}` : Prisma.empty}
-      ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
-      ${Number.isFinite(beforeSeq) ? Prisma.sql`AND m.seq < ${beforeSeq}` : Prisma.empty}
+    WHERE m.id IN (
+      SELECT m.id FROM messages m JOIN threads t ON t.id = m."threadId"
+      WHERE ${searchScope}
+        AND to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${query})
+      UNION ALL
+      SELECT m.id FROM messages m JOIN threads t ON t.id = m."threadId"
+      WHERE ${searchScope}
+        AND m.blocks @> '[{"kind":"file"}]'::jsonb
+        AND to_tsvector('simple', ${searchableText} || jsonb_path_query_array(m.blocks,
+          '$[*] ? (@.kind == "file").name')::text || regexp_replace(jsonb_path_query_array(m.blocks,
+          '$[*] ? (@.kind == "file").name')::text, '[[:punct:]]+', ' ', 'g')) @@ plainto_tsquery('simple', ${query})
+    )
     ORDER BY m.seq DESC LIMIT ${limit + 1}
   `);
   const page = rows.slice(0, limit);
@@ -202,6 +245,7 @@ export async function readHistory(
   prisma: PrismaClient,
   scope: HistoryScope,
   input: HistoryReadInput,
+  authorizeReceipt?: (route: BoundApprovalRoute) => Promise<boolean>,
 ) {
   const limit = Math.min(pageSize(input.limit), 5);
   const direction = input.direction ?? "around";
@@ -226,6 +270,8 @@ export async function readHistory(
       nextRunId: null,
       nextArtifactId: null,
       nextOutcomeSeq: null,
+      nextEffectId: null,
+      receipt: null,
       olderMessageId: null,
       newerMessageId: null,
     };
@@ -236,7 +282,7 @@ export async function readHistory(
         ? Prisma.sql`m.seq > ${anchor.seq}`
         : Prisma.sql`m.seq >= ${Math.max(0, anchor.seq - Math.floor(limit / 2))}`;
   const rows =
-    input.textOffset !== undefined
+    input.textOffset !== undefined && !input.effectId
       ? [anchor]
       : await prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
     SELECT ${columns} FROM messages m JOIN threads t ON t.id = m."threadId"
@@ -283,6 +329,7 @@ export async function readHistory(
     },
     select: {
       id: true,
+      botId: true,
       sourceMessageId: true,
       status: true,
       createdAt: true,
@@ -326,18 +373,138 @@ export async function readHistory(
   ]);
   const outcomes = outcomeRows.slice(0, LINK_PAGE_SIZE);
   const artifacts = artifactRows.slice(0, LINK_PAGE_SIZE);
+  const effectRunIds = runs.filter((run) => run.botId === scope.botId).map((run) => run.id);
+  const effectWhere: Prisma.ExternalEffectWhereInput = {
+    spaceId: scope.spaceId,
+    status: "completed",
+    runId: { in: effectRunIds },
+    run: {
+      spaceId: scope.spaceId,
+      userId: scope.userId,
+      threadId: scope.threadId,
+      botId: scope.botId,
+    },
+    request: { path: ["0"], equals: "__rakazoCatalogTool" },
+  };
+  const effectSelect = {
+    id: true,
+    runId: true,
+    kind: true,
+    status: true,
+    createdAt: true,
+    request: true,
+  } as const;
+  const effects: Array<Prisma.ExternalEffectGetPayload<{ select: typeof effectSelect }>> = [];
+  let receipt: {
+    effectId: string;
+    runId: string;
+    kind: string;
+    text: string;
+    textOffset: number;
+    nextTextOffset: number | null;
+    truncated: boolean;
+    offsetUnit: "utf16";
+  } | null = null;
+  if (input.linkedRunId && authorizeReceipt && effectRunIds.length) {
+    let afterId = input.effectAfterId;
+    // ponytail: scan only bounded metadata batches; denied routes never become public cursors.
+    // If inaccessible receipts dominate at scale, move this filter into an authorized SQL join.
+    while (effects.length <= LINK_PAGE_SIZE) {
+      const batch = input.effectId
+        ? [
+            await prisma.externalEffect.findFirst({
+              where: { ...effectWhere, id: input.effectId },
+              select: effectSelect,
+            }),
+          ].filter((effect) => effect !== null)
+        : await prisma.externalEffect.findMany({
+            where: { ...effectWhere, ...(afterId ? { id: { gt: afterId } } : {}) },
+            select: effectSelect,
+            orderBy: { id: "asc" },
+            take: LINK_PAGE_SIZE + 1,
+          });
+      for (const effect of batch) {
+        const details =
+          boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool") ??
+          catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+        const route = details?.route;
+        if (
+          (!effect.kind.startsWith("mcp__") &&
+            !["connectors_execute_tool", "mcp_execute_tool"].includes(effect.kind)) ||
+          route?.connectorId !== "mcp" ||
+          !(await authorizeReceipt(route))
+        )
+          continue;
+        effects.push(effect);
+        if (input.effectId) {
+          // Fetch the result only after current host authorization, preserving the exact bound request.
+          const saved = await prisma.externalEffect.findFirst({
+            where: {
+              ...effectWhere,
+              id: effect.id,
+              AND: [{ request: { equals: effect.request as Prisma.InputJsonValue } }],
+            },
+            select: { result: true },
+          });
+          if (saved) {
+            const text = JSON.stringify(saved.result);
+            const offset = input.textOffset ?? 0;
+            if (
+              offset > text.length ||
+              (offset > 0 &&
+                /^[\uDC00-\uDFFF]/.test(text.slice(offset)) &&
+                /[\uD800-\uDBFF]$/.test(text.slice(0, offset)))
+            )
+              throw new Error("Invalid history receipt text offset");
+            let selected = text.slice(offset, offset + 2000);
+            if (/[\uD800-\uDBFF]$/.test(selected)) selected = selected.slice(0, -1);
+            const end = offset + selected.length;
+            receipt = {
+              effectId: effect.id,
+              runId: effect.runId,
+              kind: effect.kind,
+              text: selected,
+              textOffset: offset,
+              nextTextOffset: end < text.length ? end : null,
+              truncated: offset > 0 || end < text.length,
+              offsetUnit: "utf16",
+            };
+          }
+        }
+        if (effects.length > LINK_PAGE_SIZE) break;
+      }
+      if (input.effectId || batch.length < LINK_PAGE_SIZE + 1) break;
+      afterId = batch.at(-1)!.id;
+    }
+  }
+  const effectPage = effects.slice(0, LINK_PAGE_SIZE);
   return bounded({
     untrusted: true as const,
     nextRunId: runRows.length > LINK_PAGE_SIZE ? runs.at(-1)!.id : null,
     nextArtifactId: artifactRows.length > LINK_PAGE_SIZE ? artifacts.at(-1)!.id : null,
     nextOutcomeSeq: outcomeRows.length > LINK_PAGE_SIZE ? outcomes.at(-1)!.seq : null,
+    nextEffectId: effects.length > LINK_PAGE_SIZE ? effectPage.at(-1)!.id : null,
+    receipt,
     messages: rows.map((row) =>
-      reference(row, "", 2000, row.id === anchor.id ? (input.textOffset ?? 0) : 0),
+      reference(
+        row,
+        "",
+        2000,
+        row.id === anchor.id && !input.effectId ? (input.textOffset ?? 0) : 0,
+      ),
     ),
     runs: runs.map((run) => ({
       ...run,
       outcomes: outcomes.filter((row) => row.runId === run.id).map((row) => reference(row)),
       artifacts: artifacts.filter((artifact) => artifact.runId === run.id),
+      effects: effectPage
+        .filter((effect) => effect.runId === run.id)
+        .map((effect) => ({
+          effectId: effect.id,
+          kind: effect.kind,
+          status: effect.status,
+          createdAt: effect.createdAt,
+        })),
     })),
     snapshots: rows.map((row) => {
       const linkedRuns = runs.filter(

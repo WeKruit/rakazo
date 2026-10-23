@@ -6,7 +6,14 @@ import {
   runThreadSubscription,
 } from "@rakazo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { ECHO_GUARD_MS, endCall, getSnapshot, startCall, toggleMute } from "./call-session";
+import {
+  discardCall,
+  ECHO_GUARD_MS,
+  endCall,
+  getSnapshot as readCallSnapshot,
+  startCall as startOwnedCall,
+  toggleMute,
+} from "./call-session";
 import { dictation } from "./dictation.js";
 import { rpc } from "./rpc.js";
 import { reduceThreadSnapshot } from "./thread-events.js";
@@ -53,6 +60,10 @@ vi.mock("./rpc.js", () => ({
   },
 }));
 
+const getSnapshot = () => readCallSnapshot("owner", "space");
+const startCall = (call: Omit<Parameters<typeof startOwnedCall>[0], "userId" | "spaceId">) =>
+  startOwnedCall({ ...call, userId: "owner", spaceId: "space" });
+
 const listen = vi.mocked(dictation.listen);
 const speak = vi.mocked(speaker.speak);
 const isSpeaking = vi.mocked(speaker.isSpeaking);
@@ -91,6 +102,26 @@ describe("call session", () => {
       muted: false,
     });
     expect(listen).toHaveBeenCalledWith(expect.objectContaining({ transcribe: true }));
+  });
+
+  it("does not expose a retained call to a different actor or Space before cleanup", () => {
+    startCall({ botId: "call-bot", botName: "Ada", transcribe: false });
+    expect(readCallSnapshot("different-owner", "space")).toBeNull();
+    expect(readCallSnapshot("owner", "different-space")).toBeNull();
+    expect(readCallSnapshot(undefined, "space")).toBeNull();
+    expect(readCallSnapshot("owner", "space")).toMatchObject({ botId: "call-bot" });
+    startOwnedCall({
+      userId: "different-owner",
+      spaceId: "different-space",
+      botId: "next-bot",
+      botName: "Next",
+      transcribe: false,
+    });
+    expect(endCallRpc).not.toHaveBeenCalled();
+    expect(readCallSnapshot("owner", "space")).toBeNull();
+    expect(readCallSnapshot("different-owner", "different-space")).toMatchObject({
+      botId: "next-bot",
+    });
   });
 
   it("releases the microphone after an empty give-up without retrying automatically", async () => {
@@ -147,6 +178,33 @@ describe("call session", () => {
       }),
     );
     expect(callIdFromClientNonce(String(answer.mock.calls[0]?.[0]?.clientNonce))).toBeDefined();
+  });
+
+  it("keeps a structured form on its original card instead of answering by dictation", async () => {
+    const ask = {
+      ...botMessage("ask-form", ""),
+      blocks: [
+        {
+          kind: "ask" as const,
+          text: "Details",
+          status: "pending" as const,
+          requestedSchema: {
+            type: "object" as const,
+            properties: { website: { type: "string" as const, format: "uri" as const } },
+            required: ["website"],
+          },
+        },
+      ],
+    };
+    getThread.mockResolvedValue(
+      snapshot([ask], { ...runningRun, status: "waiting_input" } as ThreadSnapshot["run"]) as never,
+    );
+    startCall({ botId: "call-bot", botName: "Ada", transcribe: false });
+    await vi.mocked(runThreadSubscription).mock.calls.at(-1)?.[0]?.refresh();
+    await heard("https://example.com");
+    expect(answer).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(followUp).not.toHaveBeenCalled();
   });
 
   it("drops a send that finishes after the same bot is called again", async () => {
@@ -403,6 +461,56 @@ describe("call session", () => {
     expect(feed?.signal.aborted).toBe(true);
     expect(getSnapshot()).toBeNull();
     expect(speaker.stop).toHaveBeenCalled();
+  });
+
+  it("discards a departing owner's call without retaining its late feed or microphone input", async () => {
+    const unsubSpeech = vi.fn();
+    const unsubDictation = vi.fn();
+    vi.mocked(speaker.subscribe).mockReturnValueOnce(unsubSpeech);
+    vi.mocked(dictation.subscribe).mockReturnValueOnce(unsubDictation);
+    startCall({ botId: "call-bot", botName: "Ada", transcribe: false });
+    await heard("private recruiting notes");
+    const oldInput = listen.mock.calls.at(-1)?.[0]?.onFinal;
+    const oldFeed = vi.mocked(runThreadSubscription).mock.calls.at(-1)?.[0];
+    const lateRead = deferred<ThreadSnapshot>();
+    getThread.mockReturnValueOnce(lateRead.promise as never);
+    const refreshing = oldFeed?.refresh();
+
+    discardCall();
+
+    expect(getSnapshot()).toBeNull();
+    expect(oldFeed?.signal.aborted).toBe(true);
+    expect(dictation.stop).toHaveBeenLastCalledWith("cancel");
+    expect(speaker.stop).toHaveBeenCalled();
+    expect(unsubSpeech).toHaveBeenCalledOnce();
+    expect(unsubDictation).toHaveBeenCalledOnce();
+    expect(endCallRpc).not.toHaveBeenCalled();
+    startCall({ botId: "next-bot", botName: "Next", transcribe: false });
+    oldInput?.("late private input");
+    lateRead.resolve(snapshot([botMessage("late-message", "Earlier owner's private reply")]));
+    await refreshing;
+    await flushMicrotasks();
+
+    expect(getSnapshot()).toMatchObject({ botId: "next-bot", exchanges: [] });
+    expect(send).toHaveBeenCalledOnce();
+    expect(speak).not.toHaveBeenCalled();
+    expect(oldFeed?.currentSnapshot()).toBeNull();
+  });
+
+  it("does not submit an earlier owner's delayed hang-up after auth changes", async () => {
+    const pendingSend = deferred<{ runId: string; taskId: string }>();
+    send.mockReturnValueOnce(pendingSend.promise as never);
+    startCall({ botId: "call-bot", botName: "Ada", transcribe: false });
+    listen.mock.calls.at(-1)?.[0]?.onFinal("private recruiting notes");
+    endCall();
+    discardCall();
+    startCall({ botId: "next-bot", botName: "Next", transcribe: false });
+    pendingSend.resolve({ runId: "run-1", taskId: "task-1" });
+    await pendingSend.promise;
+    await flushMicrotasks();
+
+    expect(endCallRpc).not.toHaveBeenCalled();
+    expect(getSnapshot()).toMatchObject({ botId: "next-bot", exchanges: [] });
   });
 
   it("closes the call server-side when the caller presses hang up", async () => {

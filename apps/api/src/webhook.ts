@@ -72,6 +72,8 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
       },
       select: {
         id: true,
+        userId: true,
+        threadId: true,
         name: true,
         prompt: true,
         modelProvider: true,
@@ -79,7 +81,6 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
         thinkingLevel: true,
       },
       orderBy: { updatedAt: "desc" },
-      take: 5,
     });
 
     const idempotencyKey =

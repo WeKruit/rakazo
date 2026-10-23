@@ -7,6 +7,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
 import type {
+  AgentRunModel,
   ModelCredentialFailedState,
   ModelCredentialRetireReason,
   SecretStore,
@@ -24,8 +25,10 @@ import {
   ThinkingLevelSchema,
 } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { lockModelCredentialSecret, retireModelCredentialInTransaction } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { createManualAnthropicOAuthLogin } from "./pi-anthropic-oauth.js";
+import { deferSecretChanges } from "./secret-changes.js";
 
 export const CHATGPT_OAUTH_PROVIDER = "openai-codex";
 export const COPILOT_OAUTH_PROVIDER = "github-copilot";
@@ -579,6 +582,59 @@ type ResolveModelOpts = {
   signal?: AbortSignal;
 };
 
+/** Pi and the stored refresh operation share the same account and retirement checks. */
+export async function modifyModelCredential(
+  current: Credential | undefined,
+  fn: (current: Credential | undefined) => Promise<Credential | undefined>,
+  options: {
+    persist?: (credential: OAuthCredential) => Promise<void>;
+    retire?: ResolveModelOpts["retire"];
+  },
+): Promise<Credential | undefined> {
+  let next: Credential | undefined;
+  try {
+    next = await fn(current);
+  } catch (error) {
+    const marker = terminalOAuthRefreshErrorMarker(error);
+    if (marker && options.retire) {
+      try {
+        const retired = await options.retire(
+          "terminal-refresh-failure",
+          marker,
+          current?.type === "oauth" ? current : undefined,
+        );
+        if (retired) markRetiredModelCredentialError(error);
+      } catch (retireError) {
+        getLogger().error("model credential retirement failed", retireError);
+      }
+    }
+    throw error;
+  }
+  if (next?.type === "oauth" && next !== current) {
+    const storedAccountId =
+      current?.type === "oauth" ? oauthCredentialAccountId(current) : undefined;
+    const refreshedAccountId = oauthCredentialAccountId(next);
+    if (storedAccountId && refreshedAccountId && storedAccountId !== refreshedAccountId) {
+      let deleted = false;
+      try {
+        deleted =
+          (await options.retire?.(
+            "account-changed",
+            `stored account ${storedAccountId}, refreshed account ${refreshedAccountId}`,
+            current?.type === "oauth" ? current : undefined,
+          )) === true;
+      } catch (error) {
+        getLogger().error("model credential retirement failed", error);
+      }
+      if (deleted) throw new RetiredModelCredentialError(OAUTH_ACCOUNT_CHANGED_ERROR);
+      throw new Error(OAUTH_ACCOUNT_CHANGED_ERROR);
+    }
+    // Persist a successfully rotated token even if the initiating request was canceled.
+    await options.persist?.(next);
+  }
+  return next ?? current;
+}
+
 export async function resolveModelAuth(
   plaintext: string,
   provider: string,
@@ -682,30 +738,143 @@ export async function resolveModelApiKey(
   return resolved.apiKey;
 }
 
-const modelCredentialLocks = new Map<string, Promise<void>>();
+type StoredCredentialScope = { userId: string; spaceId: string };
+type StoredCredentialRef = { id?: string; secretId: string; provider: string };
+type StoredCredentialClient = Pick<PrismaClient, "$transaction" | "secret" | "userModelCredential">;
 
-/**
- * Serialize every load-resolve-persist cycle for one stored credential so
- * concurrent runs — or a detached refresh kick — cannot double-refresh or
- * clobber each other's token write.
- */
-export async function withModelCredentialLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
-  const previous = modelCredentialLocks.get(key) ?? Promise.resolve();
-  let release!: () => void;
-  const current = previous.then(
-    () =>
-      new Promise<void>((resolve) => {
-        release = resolve;
-      }),
-  );
-  modelCredentialLocks.set(key, current);
-  await previous;
-  try {
-    return await fn();
-  } finally {
-    release();
-    if (modelCredentialLocks.get(key) === current) modelCredentialLocks.delete(key);
+/** One connection owns the native refresh and encrypted write; rotating I/O is never retried. */
+export async function withStoredModelCredential<T>(
+  prisma: StoredCredentialClient,
+  secretStore: Pick<SecretStore, "load" | "put">,
+  scope: StoredCredentialScope,
+  credential: StoredCredentialRef,
+  operation: (
+    plaintext: string,
+    callbacks: {
+      persist: (next: string) => Promise<void>;
+      retire: NonNullable<ResolveModelOpts["retire"]>;
+      signal: AbortSignal;
+    },
+  ) => Promise<T>,
+  signal?: AbortSignal,
+): Promise<T | undefined> {
+  signal?.throwIfAborted();
+  const [owner, initial] = await Promise.all([
+    prisma.userModelCredential.findFirst({
+      where: {
+        ...(credential.id ? { id: credential.id } : {}),
+        userId: scope.userId,
+        provider: credential.provider,
+        secretId: credential.secretId,
+      },
+      select: { id: true },
+    }),
+    prisma.secret.findFirst({
+      where: { id: credential.secretId, userId: scope.userId, spaceId: null },
+      select: { id: true, ciphertext: true },
+    }),
+  ]);
+  if (!owner || !initial) return undefined;
+  const initialPlaintext = await secretStore.load(initial.ciphertext, initial.id);
+  if (parseModelSecret(initialPlaintext).kind !== "oauth") {
+    return operation(initialPlaintext, {
+      persist: persistStoredModelSecret(prisma, secretStore, scope, initial.id),
+      retire: async () => false,
+      signal: signal ?? new AbortController().signal,
+    });
   }
+  const outcome = await deferSecretChanges(() =>
+    prisma.$transaction(
+      async (tx) => {
+        const selected = await lockModelCredentialSecret(tx, {
+          userId: scope.userId,
+          provider: credential.provider,
+          credentialId: credential.id,
+          secretId: credential.secretId,
+        });
+        if (!selected) return undefined;
+        signal?.throwIfAborted();
+        const refreshSignal = AbortSignal.any([
+          ...(signal ? [signal] : []),
+          AbortSignal.timeout(15_000),
+        ]);
+        const plaintext = await secretStore.load(selected.secret.ciphertext, selected.secret.id);
+        const persist = persistStoredModelSecret(tx, secretStore, scope, selected.secret.id);
+        const retire: NonNullable<ResolveModelOpts["retire"]> = (_reason, _detail, failed) =>
+          retireModelCredentialInTransaction(tx, {
+            userId: scope.userId,
+            credentialId: selected.credential.id,
+            secretId: selected.secret.id,
+            matchesFailedSecret: failed
+              ? matchesFailedOAuthSecret(
+                  (ciphertext, recordId) => secretStore.load(ciphertext, recordId),
+                  failed,
+                )
+              : undefined,
+          });
+        try {
+          return { value: await operation(plaintext, { persist, retire, signal: refreshSignal }) };
+        } catch (error) {
+          // Native retirement must commit before a terminal refresh error is surfaced.
+          return { error };
+        }
+      },
+      { timeout: 40_000, maxWait: 5_000 },
+    ),
+  );
+  if (outcome && "error" in outcome) throw outcome.error;
+  signal?.throwIfAborted();
+  return outcome?.value;
+}
+
+export function storedModelOAuthModifier(
+  prisma: StoredCredentialClient,
+  secretStore: Pick<SecretStore, "load" | "put">,
+  scope: StoredCredentialScope,
+  credential: StoredCredentialRef,
+): NonNullable<NonNullable<AgentRunModel["oauth"]>["modify"]> {
+  return async (fn, signal) => {
+    const result = await withStoredModelCredential(
+      prisma,
+      secretStore,
+      scope,
+      credential,
+      async (plaintext, callbacks) => {
+        const parsed = parseModelSecret(plaintext);
+        if (parsed.kind !== "oauth")
+          throw new RetiredModelCredentialError("Model connection changed. Connect it again.");
+        const next = await modifyModelCredential(
+          parsed.credential,
+          async (current) => {
+            if (current?.type !== "oauth") return undefined;
+            const updated = await fn(current);
+            return updated && updated !== current ? { ...updated, type: "oauth" } : undefined;
+          },
+          {
+            persist: (updated) =>
+              callbacks.persist(
+                serializeModelSecret({
+                  ...parsed,
+                  credential: updated,
+                }),
+              ),
+            retire: callbacks.retire,
+          },
+        );
+        if (next?.type !== "oauth")
+          throw new RetiredModelCredentialError(
+            "Model connection is no longer available. Connect it again.",
+          );
+        return next;
+      },
+      signal,
+    );
+    if (!result)
+      throw new RetiredModelCredentialError(
+        "Model connection is no longer available. Connect it again.",
+      );
+    return result;
+  };
 }
 
 /**
@@ -747,31 +916,27 @@ export function persistStoredModelSecret(
  * The catalog itself never writes credentials — this is the run path's writer.
  */
 export async function refreshExpiredModelCredential(
-  prisma: Pick<PrismaClient, "secret">,
+  prisma: Pick<PrismaClient, "secret" | "userModelCredential" | "$transaction">,
   secretStore: Pick<SecretStore, "load" | "put">,
   scope: { userId: string; spaceId: string },
   secretId: string,
   provider: string,
   opts?: Pick<ResolveModelOpts, "oauth" | "signal" | "now">,
 ): Promise<void> {
-  await withModelCredentialLock(secretId, async () => {
-    const row = await prisma.secret.findFirst({
-      where: { id: secretId, userId: scope.userId, spaceId: null },
-      select: { id: true, ciphertext: true },
-    });
-    if (!row) return;
-    let plaintext: string;
-    try {
-      plaintext = await secretStore.load(row.ciphertext, row.id);
+  await withStoredModelCredential(
+    prisma,
+    secretStore,
+    scope,
+    { secretId, provider },
+    async (plaintext, callbacks) => {
       if (parseModelSecret(plaintext).kind !== "oauth") return;
-    } catch {
-      return;
-    }
-    await resolveModelAuth(plaintext, provider, {
-      ...opts,
-      persist: persistStoredModelSecret(prisma, secretStore, scope, row.id),
-    });
-  });
+      await resolveModelAuth(plaintext, provider, {
+        ...opts,
+        ...callbacks,
+      });
+    },
+    opts?.signal,
+  );
 }
 
 const credentialRefreshKicks = new Map<string, Promise<void>>();
@@ -783,7 +948,7 @@ const credentialRefreshKicks = new Map<string, Promise<void>>();
  * kick frees the slot so the next expired read can retry.
  */
 export function kickModelCredentialRefresh(
-  prisma: Pick<PrismaClient, "secret">,
+  prisma: Pick<PrismaClient, "secret" | "userModelCredential" | "$transaction">,
   secretStore: Pick<SecretStore, "load" | "put">,
   scope: { userId: string; spaceId: string },
   secretId: string,
