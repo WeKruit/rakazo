@@ -1706,6 +1706,11 @@ const CrmBrowseCandidate = z.strictObject({
   roleSpecId: z.uuid().nullable(),
   legacyClientLabel: z.string(),
   legacyRoleLabel: z.string(),
+  /** Present when the connected CRM returns them. */
+  interest: z.string().nullable().optional(),
+  reviewed: z.boolean().nullable().optional(),
+  lastReplyAt: IsoDate.nullable().optional(),
+  resumeReceived: z.boolean().nullable().optional(),
 });
 const CrmBrowseTracking = z.strictObject({
   roleKey: z.string().min(1),
@@ -2000,6 +2005,10 @@ export const RecruitingCrmCandidatesReadSchema = z.object({
       role_spec_id: z.uuid().nullable(),
       client_label: z.string(),
       role_label: z.string(),
+      interest: z.string().nullable().optional(),
+      reviewed: z.boolean().nullable().optional(),
+      last_reply_at: IsoDate.nullable().optional().catch(null),
+      resume_received: z.boolean().nullable().optional(),
     }),
   ),
 });
@@ -2162,3 +2171,79 @@ export const RecruitingRemindersToolInputSchema = z.discriminatedUnion("operatio
   DeleteRecruitingReminderInput.extend({ operation: z.literal("delete") }),
 ]);
 export type RecruitingRemindersToolInput = z.infer<typeof RecruitingRemindersToolInputSchema>;
+
+/** Copies the user's CRM roles, contacts, role links and role mail into the product's own rows. */
+export const RecruitingCrmSyncInputFields = {
+  /** Reads everything and reports what would change; writes nothing. */
+  dryRun: z.boolean().optional(),
+  /** Pass back `nextCursor` until it is null; each call does a bounded slice of the reads. */
+  cursor: z.string().max(65_536).optional(),
+};
+const RecruitingCrmSyncCounts = z.strictObject({
+  seen: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  updated: z.number().int().nonnegative(),
+  unchanged: z.number().int().nonnegative(),
+  archived: z.number().int().nonnegative(),
+  restored: z.number().int().nonnegative(),
+});
+export type RecruitingCrmSyncCounts = z.infer<typeof RecruitingCrmSyncCounts>;
+export const RecruitingCrmSyncOutputSchema = z.strictObject({
+  dryRun: z.boolean(),
+  startedAt: IsoDate,
+  nextCursor: z.string().nullable(),
+  organizations: z.number().int().nonnegative(),
+  roles: RecruitingCrmSyncCounts,
+  contacts: RecruitingCrmSyncCounts,
+  links: RecruitingCrmSyncCounts,
+  messages: RecruitingCrmSyncCounts,
+  /** Reads that could not complete; their rows are left as they were (nothing archived). */
+  skipped: z.array(
+    z.strictObject({
+      organizationId: z.uuid().nullable(),
+      crmRoleId: z.uuid().nullable(),
+      step: z.enum(["organizations", "roles", "contacts", "links", "mail"]),
+      reason: z.string(),
+    }),
+  ),
+});
+export type RecruitingCrmSyncOutput = z.infer<typeof RecruitingCrmSyncOutputSchema>;
+
+/** Server-side progress of a CRM sync, carried between calls; every read it names is re-authorized. */
+const CrmSyncCursorCounts = z.object({
+  seen: z.number().int().nonnegative(),
+  created: z.number().int().nonnegative(),
+  updated: z.number().int().nonnegative(),
+  unchanged: z.number().int().nonnegative(),
+  archived: z.number().int().nonnegative(),
+  restored: z.number().int().nonnegative(),
+});
+export const RecruitingCrmSyncCursorSchema = z.object({
+  v: z.literal(1),
+  dryRun: z.boolean(),
+  startedAt: z.iso.datetime(),
+  orgs: z.array(
+    z.object({
+      s: z.string(),
+      r: z.number().int().positive(),
+      o: z.uuid(),
+      roles: z.array(z.uuid()),
+    }),
+  ),
+  at: z.object({
+    g: z.number().int().nonnegative(),
+    step: z.enum(["contacts", "links", "mail"]),
+    j: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    /** Stored active rows this pass has matched so far, for the dry-run archive count. */
+    matched: z.number().int().nonnegative(),
+  }),
+  totals: z.object({
+    roles: CrmSyncCursorCounts,
+    contacts: CrmSyncCursorCounts,
+    links: CrmSyncCursorCounts,
+    messages: CrmSyncCursorCounts,
+  }),
+  skipped: RecruitingCrmSyncOutputSchema.shape.skipped,
+});
+export type RecruitingCrmSyncCursor = z.infer<typeof RecruitingCrmSyncCursorSchema>;

@@ -71,6 +71,7 @@ import {
 import { getLogger } from "@rakazo/logging";
 import type { ParseError } from "jsonc-parser";
 import { findNodeAtLocation, parseTree } from "jsonc-parser";
+import { recordCrmRoleRead } from "./recruiting-crm-sync.js";
 import type { ThreadTarget } from "./thread-target.js";
 
 async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
@@ -1991,7 +1992,7 @@ function mailItem(row: ReturnType<typeof RecruitingCrmMailReadSchema.parse>["mes
 }
 
 /** Live read-only CRM view. The CRM remains the store; browsing creates no agent work. */
-type RecruitingCrmReadDeps = {
+export type RecruitingCrmReadDeps = {
   prisma: PrismaClient;
   connectors: Pick<ConnectorProvider, "execute">;
   firstPartyMcpUrl?: string;
@@ -2402,6 +2403,10 @@ export async function getRecruitingCrmData(
       roleSpecId: row.role_spec_id,
       legacyClientLabel: row.client_label,
       legacyRoleLabel: row.role_label,
+      ...(row.interest !== undefined ? { interest: row.interest } : {}),
+      ...(row.reviewed !== undefined ? { reviewed: row.reviewed } : {}),
+      ...(row.last_reply_at !== undefined ? { lastReplyAt: row.last_reply_at } : {}),
+      ...(row.resume_received !== undefined ? { resumeReceived: row.resume_received } : {}),
     });
     const tracking = (
       row: Omit<
@@ -3015,6 +3020,11 @@ export async function getRecruitingRoleCandidates(
       ),
     async crm(binding) {
       const rows: RoleCandidatesCrmRow[] = [];
+      let selectedRole: Extract<
+        RecruitingCrmDataOutput,
+        { operation: "candidates" }
+      >["selectedRole"] = null;
+      let complete = false;
       try {
         // ponytail: whole role contact list per request, capped at 10×50; page by email/URL if roles outgrow it.
         for (let offset: number | null = 0, pages = 0; offset !== null && pages < 10; pages++) {
@@ -3034,13 +3044,24 @@ export async function getRecruitingRoleCandidates(
               serverId: page.source.serverId,
               organizationId: page.source.organizationId,
             });
+          selectedRole ??= page.selectedRole;
           offset = page.nextOffset;
+          complete = offset === null;
         }
       } catch (error) {
         // The CRM side fails closed to no CRM data; Autumn rows were authorized by their own read.
         if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
         return { status: "unavailable" };
       }
+      // Incremental CRM sync from the read just made; never delays or fails this list.
+      if (selectedRole)
+        void recordCrmRoleRead(deps.prisma, actor, {
+          serverId: binding.mcpServerId,
+          organizationId: binding.organizationId,
+          role: selectedRole,
+          items: rows,
+          complete,
+        }).catch((error) => getLogger().error("recruiting.crm_sync.write_failed", error));
       return { status: "ok", rows };
     },
   });

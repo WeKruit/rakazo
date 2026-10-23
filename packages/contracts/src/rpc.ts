@@ -139,6 +139,8 @@ import {
   RecruitingCorrespondenceSchema,
   RecruitingCrmDataInputSchema,
   RecruitingCrmDataOutputSchema,
+  RecruitingCrmSyncInputFields,
+  RecruitingCrmSyncOutputSchema,
   RecruitingId,
   RecruitingReminderSchema,
   RecruitingResearchActionSchema,
@@ -643,6 +645,9 @@ export const appContract = {
     roleCandidates: oc
       .input(threadTarget.safeExtend(RecruitingRoleCandidatesInputFields))
       .output(RecruitingRoleCandidatesOutputSchema),
+    crmSync: oc
+      .input(threadTarget.safeExtend(RecruitingCrmSyncInputFields))
+      .output(RecruitingCrmSyncOutputSchema),
     listCandidateSources: oc
       .input(ListRecruitingCandidateSourcesInput)
       .output(ListRecruitingCandidateSourcesOutput),
