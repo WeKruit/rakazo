@@ -326,6 +326,7 @@ import {
   useRecruitingDetailController,
 } from "./recruiting";
 import { RetryNotice } from "./recruiting/RetryNotice";
+import { RoleSetupCard } from "./recruiting/RoleSetup";
 import { TabLoading } from "./recruiting/shared";
 import type { SettingsSection } from "./SettingsOverlay";
 import { SpaceSearchResults } from "./SpaceSearch";
@@ -5242,6 +5243,16 @@ export function ShellPage() {
         ) : null}
         {workspaceFull && !workspaceNewRole && !activeSnapshot && !(workspaceCandidates && knownThreadId) ? (
           <MessageSkeleton label={t`Loading…`} />
+        ) : null}
+        {roleChatWorkspace && (inGroup ? groupId : active?.id) ? (
+          <RoleSetupCard
+            conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
+            refreshSignal={recruitingRefresh}
+            readCache={recruitingReadCache.current}
+            readCacheScope={recruitingCacheScope}
+            onAsk={(prompt) => void sendFromComposer(prompt, [], newClientNonce())}
+            onConnect={() => setPluginsOpen(true)}
+          />
         ) : null}
         {workspaceNewRole ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">

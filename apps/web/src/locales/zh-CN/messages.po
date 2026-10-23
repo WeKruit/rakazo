@@ -1007,10 +1007,11 @@ msgstr ""
 msgid "Calendar event"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
-msgstr ""
+msgstr "邮件活动"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign details unavailable"
@@ -1519,6 +1520,10 @@ msgid "Configured servers"
 msgstr "已配置的服务器"
 
 #: src/components/AskCard.tsx
+msgid "Confirm adding candidates to the campaign"
+msgstr "确认将候选人加入邮件活动"
+
+#: src/components/AskCard.tsx
 msgid "Confirm and send"
 msgstr "确认发送"
 
@@ -1531,10 +1536,38 @@ msgstr ""
 msgid "Confirm delete"
 msgstr "确认删除"
 
+#: src/components/AskCard.tsx
+msgid "Confirm forwarding email"
+msgstr "确认转发邮件"
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview booking"
+msgstr "确认预约面试"
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview cancellation"
+msgstr "确认取消面试"
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview change"
+msgstr "确认修改面试"
+
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "确认密码"
+
+#: src/components/AskCard.tsx
+msgid "Confirm reply"
+msgstr "确认回复"
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending email"
+msgstr "确认发送邮件"
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending the first email"
+msgstr "确认发送首封邮件"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
@@ -1549,6 +1582,7 @@ msgstr "信息存在冲突"
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "连接"
@@ -2386,9 +2420,10 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM"
-msgstr ""
+msgstr "CRM"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM contacts"
@@ -3541,6 +3576,10 @@ msgstr ""
 msgid "Launched {app}"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Leads"
+msgstr "候选人名单"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "退出"
@@ -3960,9 +3999,10 @@ msgstr "分钟"
 msgid "minutes"
 msgstr "分钟"
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Missing"
-msgstr ""
+msgstr "未设置"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Missing info"
@@ -4490,6 +4530,7 @@ msgid "Not checked yet"
 msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 msgid "Not connected"
 msgstr "未连接"
 
@@ -5073,6 +5114,10 @@ msgstr "正在阅读网页"
 msgid "Reading files"
 msgstr "正在读取文件"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Ready"
+msgstr "已就绪"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr ""
@@ -5531,10 +5576,6 @@ msgstr "返回 WeKruit Headhunter"
 msgid "rev {0}"
 msgstr "版本 {0}"
 
-#: src/components/AskCard.tsx
-msgid "Review before sending the first campaign email"
-msgstr "发送第一封活动邮件前请确认"
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr ""
@@ -5614,6 +5655,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
 msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Role setup"
+msgstr "岗位设置"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role sources"
@@ -6067,6 +6112,10 @@ msgstr ""
 msgid "Send with Enter"
 msgstr "按 Enter 发送"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Sender mailbox"
+msgstr "发件邮箱"
+
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
@@ -6132,6 +6181,10 @@ msgstr "服务器 URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Set up"
+msgstr "设置"
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx

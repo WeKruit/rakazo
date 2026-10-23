@@ -127,6 +127,9 @@ export function buildApprovalAskBlock(
         options?.crmImportTarget,
       );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
+  const outboundAction = outboundTitle(toolName);
+  const outboundTarget = outboundAction && pickScopeLabel(args);
+  const outbound = outboundTarget ? `${outboundAction} → ${outboundTarget}` : outboundAction;
   return {
     kind: "ask",
     approvalEffectId: effectId,
@@ -135,8 +138,10 @@ export function buildApprovalAskBlock(
         scheduleUpdate
           ? "Review routine change"
           : options?.instantlyActivation
-            ? "Review before sending the first campaign email"
-            : crmTarget
+            ? "Confirm sending the first email"
+            : outbound
+              ? outbound
+              : crmTarget
               ? "Review CRM role connection"
               : crmImport
                 ? "Review CRM import"
@@ -227,6 +232,34 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     "",
     "Confirm sending the first email to these recipients",
   ].join("\n");
+}
+
+// Recruiter-facing titles for outbound mail and calendar actions; never the
+// provider or tool name.
+const OUTBOUND_TITLES: Record<string, string> = {
+  activate_campaign: "Confirm sending the first email",
+  reply_to_email: "Confirm reply",
+  gmail_reply_to_thread: "Confirm reply",
+  gmail_send_email: "Confirm sending email",
+  gmail_send_draft: "Confirm sending email",
+  gmail_forward_message: "Confirm forwarding email",
+  create_lead: "Confirm adding candidates to the campaign",
+  add_leads_to_campaign_or_list_bulk: "Confirm adding candidates to the campaign",
+  googlecalendar_create_event: "Confirm interview booking",
+  googlecalendar_quick_add: "Confirm interview booking",
+  googlecalendar_events_import: "Confirm interview booking",
+  googlecalendar_update_event: "Confirm interview change",
+  googlecalendar_patch_event: "Confirm interview change",
+  googlecalendar_events_move: "Confirm interview change",
+  googlecalendar_delete_event: "Confirm interview cancellation",
+  googlecalendar_remove_attendee: "Confirm interview change",
+};
+
+function outboundTitle(toolName: string): string | undefined {
+  const operation = (toolName.split("__").at(-1) ?? toolName)
+    .toLowerCase()
+    .replace(/^(native_)?(instantly_)*/, "");
+  return OUTBOUND_TITLES[operation];
 }
 
 function describeApprovalAction(

@@ -34,13 +34,14 @@ const button = (label: string) =>
   [...container!.querySelectorAll("button")].find((item) => item.textContent === label)!;
 
 it("shows nothing for a ready role", async () => {
-  await mount({ ready: true, items: [{ key: "campaign", state: "ready" }] });
+  await mount({ ready: true, attention: null, items: [{ key: "campaign", state: "ready" }] });
   expect(container!.textContent).toBe("");
 });
 
 it("offers each missing step's own fix", async () => {
   const props = await mount({
     ready: false,
+    attention: null,
     items: [
       {
         key: "campaign",

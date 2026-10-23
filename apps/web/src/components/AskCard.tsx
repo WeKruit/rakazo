@@ -66,6 +66,24 @@ function approvalActionLabel(
   return fallback;
 }
 
+/** Translates the outbound approval titles; the exact target after "→" stays as sent. */
+function approvalTitle(text: string): string {
+  const [action, ...rest] = text.split(" → ");
+  const target = rest.length ? ` → ${rest.join(" → ")}` : "";
+  const titles: Record<string, string> = {
+    "Confirm sending the first email": t`Confirm sending the first email`,
+    "Confirm reply": t`Confirm reply`,
+    "Confirm sending email": t`Confirm sending email`,
+    "Confirm forwarding email": t`Confirm forwarding email`,
+    "Confirm adding candidates to the campaign": t`Confirm adding candidates to the campaign`,
+    "Confirm interview booking": t`Confirm interview booking`,
+    "Confirm interview change": t`Confirm interview change`,
+    "Confirm interview cancellation": t`Confirm interview cancellation`,
+  };
+  const title = action === undefined ? undefined : titles[action];
+  return title ? title + target : text;
+}
+
 function secretFieldLabel(purpose: AskBlock["purpose"]): string {
   if (purpose === "password") return t`Password`;
   if (purpose === "api_key") return t`API key`;
@@ -285,9 +303,7 @@ function QuestionAskCard({
     >
       <div className="text-base leading-relaxed text-foreground">
         <ChatMarkdown>
-          {block.approvalEffectId && block.text === "Review before sending the first campaign email"
-            ? t`Review before sending the first campaign email`
-            : block.text}
+          {block.approvalEffectId ? approvalTitle(block.text) : block.text}
         </ChatMarkdown>
       </div>
       {secretInput && block.credential ? (

@@ -1007,6 +1007,7 @@ msgstr ""
 msgid "Calendar event"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
@@ -1519,6 +1520,10 @@ msgid "Configured servers"
 msgstr "Настроенные серверы"
 
 #: src/components/AskCard.tsx
+msgid "Confirm adding candidates to the campaign"
+msgstr ""
+
+#: src/components/AskCard.tsx
 msgid "Confirm and send"
 msgstr ""
 
@@ -1531,10 +1536,38 @@ msgstr ""
 msgid "Confirm delete"
 msgstr "Подтвердить удаление"
 
+#: src/components/AskCard.tsx
+msgid "Confirm forwarding email"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview booking"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview cancellation"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview change"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "Подтвердите пароль"
+
+#: src/components/AskCard.tsx
+msgid "Confirm reply"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending email"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending the first email"
+msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
@@ -1549,6 +1582,7 @@ msgstr ""
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Подключить"
@@ -2386,6 +2420,7 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM"
 msgstr ""
@@ -3541,6 +3576,10 @@ msgstr ""
 msgid "Launched {app}"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Leads"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "Выйти"
@@ -3960,6 +3999,7 @@ msgstr "минута"
 msgid "minutes"
 msgstr "минуты"
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Missing"
 msgstr ""
@@ -4490,6 +4530,7 @@ msgid "Not checked yet"
 msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 msgid "Not connected"
 msgstr "Не подключена"
 
@@ -5073,6 +5114,10 @@ msgstr ""
 msgid "Reading files"
 msgstr ""
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Ready"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr ""
@@ -5531,10 +5576,6 @@ msgstr "Вернуться в WeKruit Headhunter"
 msgid "rev {0}"
 msgstr "версия {0}"
 
-#: src/components/AskCard.tsx
-msgid "Review before sending the first campaign email"
-msgstr ""
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr ""
@@ -5613,6 +5654,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Role setup"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -6067,6 +6112,10 @@ msgstr ""
 msgid "Send with Enter"
 msgstr "Отправлять по Enter"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Sender mailbox"
+msgstr ""
+
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
@@ -6131,6 +6180,10 @@ msgstr "URL-адрес сервера"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Set up"
 msgstr ""
 
 #: src/components/call/CallCard.tsx

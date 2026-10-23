@@ -1007,6 +1007,7 @@ msgstr "Calendar booking details are not included in these manual CRM workflow r
 msgid "Calendar event"
 msgstr "Calendar event"
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Campaign"
@@ -1519,6 +1520,10 @@ msgid "Configured servers"
 msgstr "Configured servers"
 
 #: src/components/AskCard.tsx
+msgid "Confirm adding candidates to the campaign"
+msgstr "Confirm adding candidates to the campaign"
+
+#: src/components/AskCard.tsx
 msgid "Confirm and send"
 msgstr "Confirm and send"
 
@@ -1531,10 +1536,38 @@ msgstr "Confirm brief"
 msgid "Confirm delete"
 msgstr "Confirm delete"
 
+#: src/components/AskCard.tsx
+msgid "Confirm forwarding email"
+msgstr "Confirm forwarding email"
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview booking"
+msgstr "Confirm interview booking"
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview cancellation"
+msgstr "Confirm interview cancellation"
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview change"
+msgstr "Confirm interview change"
+
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "Confirm password"
+
+#: src/components/AskCard.tsx
+msgid "Confirm reply"
+msgstr "Confirm reply"
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending email"
+msgstr "Confirm sending email"
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending the first email"
+msgstr "Confirm sending the first email"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
@@ -1549,6 +1582,7 @@ msgstr "Conflicting information"
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Connect"
@@ -2386,6 +2420,7 @@ msgstr "Criterion"
 msgid "Criterion {0}"
 msgstr "Criterion {0}"
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM"
 msgstr "CRM"
@@ -3541,6 +3576,10 @@ msgstr "Latest messages"
 msgid "Launched {app}"
 msgstr "Launched {app}"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Leads"
+msgstr "Leads"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "Leave"
@@ -3960,6 +3999,7 @@ msgstr "minute"
 msgid "minutes"
 msgstr "minutes"
 
+#: src/pages/recruiting/RoleSetup.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Missing"
 msgstr "Missing"
@@ -4490,6 +4530,7 @@ msgid "Not checked yet"
 msgstr "Not checked yet"
 
 #: src/pages/ModelBackupsSettings.tsx
+#: src/pages/recruiting/RoleSetup.tsx
 msgid "Not connected"
 msgstr "Not connected"
 
@@ -5073,6 +5114,10 @@ msgstr "Reading a page"
 msgid "Reading files"
 msgstr "Reading files"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Ready"
+msgstr "Ready"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr "Reason"
@@ -5531,10 +5576,6 @@ msgstr "Return to WeKruit Headhunter"
 msgid "rev {0}"
 msgstr "rev {0}"
 
-#: src/components/AskCard.tsx
-msgid "Review before sending the first campaign email"
-msgstr "Review before sending the first campaign email"
-
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Review in conversation"
 msgstr "Review in conversation"
@@ -5614,6 +5655,10 @@ msgstr "Role interest"
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
 msgstr "Role revision"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Role setup"
+msgstr "Role setup"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role sources"
@@ -6067,6 +6112,10 @@ msgstr "Send to"
 msgid "Send with Enter"
 msgstr "Send with Enter"
 
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Sender mailbox"
+msgstr "Sender mailbox"
+
 #: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
@@ -6132,6 +6181,10 @@ msgstr "Server URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "Service connections"
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Set up"
+msgstr "Set up"
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
