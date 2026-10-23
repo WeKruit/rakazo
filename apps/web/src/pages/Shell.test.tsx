@@ -1731,6 +1731,18 @@ it.each([
   },
 );
 
+it("shows an archived role's link as archived instead of opening another role", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    allGroupsArchived: true,
+    openFeedback: false,
+    initialPath: "/app/g/group-1",
+  });
+  expect(view.getPath()).toBe("/app/g/group-1");
+  expect(container!.textContent).toContain("Recruiting crew is archived.");
+});
+
 it("uses the authorized role navigation order after the initial bootstrap fails", async () => {
   setToolActivityPreference("off");
   let reject!: (error: Error) => void;

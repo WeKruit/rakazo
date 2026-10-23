@@ -567,6 +567,8 @@ export function ShellPage() {
   const [spaces, setSpaces] = useState<Space[]>([]);
   const [archivedBots, setArchivedBots] = useState<Bot[]>([]);
   const [archivedGroups, setArchivedGroups] = useState<Group[]>([]);
+  const archivedGroupsRef = useRef(archivedGroups);
+  archivedGroupsRef.current = archivedGroups;
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [newRoleSourceId, setNewRoleSourceId] = useState<string | null>(null);
   const [newRoleDescription, setNewRoleDescription] = useState("");
@@ -1021,6 +1023,9 @@ export function ShellPage() {
   computerOpenRef.current = computerOpen;
   computerBotIdRef.current = computerBotId ?? active?.id;
   const activeGroup = groups.find((group) => group.id === groupId);
+  const archivedRouteGroup = activeGroup
+    ? undefined
+    : archivedGroups.find((group) => group.id === groupId);
   const roleSourceGroup =
     panel === "create-group" && newRoleSourceId
       ? [...groups, ...archivedGroups].find((group) => group.id === newRoleSourceId)
@@ -1309,7 +1314,12 @@ export function ShellPage() {
               if (developerView === null) continue;
               const currentGroupId = routeGroupId.current;
               if (currentGroupId) {
-                if (!groupList.some((group) => group.id === currentGroupId)) {
+                if (
+                  !groupList.some((group) => group.id === currentGroupId) &&
+                  !(archivedGroupList ?? archivedGroupsRef.current).some(
+                    (group) => group.id === currentGroupId,
+                  )
+                ) {
                   navigate(firstThreadRoute(list, groupList, !developerView), {
                     replace: true,
                   });
@@ -1681,7 +1691,11 @@ export function ShellPage() {
           return;
         }
         if (routeGroupId.current) {
-          if (!groupList.some((group) => group.id === routeGroupId.current)) {
+          // An archived role's link shows that role as archived, never a different role.
+          if (
+            !groupList.some((group) => group.id === routeGroupId.current) &&
+            !bootstrap.archivedGroups.some((group) => group.id === routeGroupId.current)
+          ) {
             navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
           }
           return;
@@ -5295,7 +5309,16 @@ export function ShellPage() {
             </Button>
           </div>
         ) : null}
-        {workspaceFull && !workspaceNewRole && !activeSnapshot && !(workspaceCandidates && knownThreadId) ? (
+        {archivedRouteGroup ? (
+          <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              <Trans>{archivedRouteGroup.name} is archived.</Trans>
+            </p>
+            <Button variant="outline" onClick={() => void restoreGroup(archivedRouteGroup.id)}>
+              <Trans>Restore</Trans>
+            </Button>
+          </div>
+        ) : workspaceFull && !workspaceNewRole && !activeSnapshot && !(workspaceCandidates && knownThreadId) ? (
           <MessageSkeleton label={t`Loading…`} />
         ) : null}
         {roleChatWorkspace && (inGroup ? groupId : active?.id) ? (
