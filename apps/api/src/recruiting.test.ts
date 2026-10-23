@@ -2467,6 +2467,40 @@ describe("saved recruiting correspondence", () => {
       expect.objectContaining({ id: "calendar:booking:booking-three", status: "accepted" }),
     ]);
   });
+  it("marks only verified replaced bookings as superseded across a multi-hop chain", async () => {
+    const result = await calObservation(
+      "get_bookings",
+      {},
+      {
+        status: "success",
+        pagination: { hasNextPage: false, hasPreviousPage: false },
+        data: ["booking-one", "booking-two", "booking-three"].map(
+          (uid) => rescheduledRead(uid).data,
+        ),
+      },
+      undefined,
+      [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
+    );
+    expect(result.events.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: "calendar:booking:booking-one", status: "superseded" },
+      { id: "calendar:booking:booking-two", status: "superseded" },
+      { id: "calendar:booking:booking-three", status: "accepted" },
+    ]);
+  });
+  it("does not retire an owned original from an uncertain replacement receipt", async () => {
+    const proof = rescheduleProof();
+    proof.status = "uncertain";
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-one" },
+      rescheduledRead("booking-one"),
+      undefined,
+      [proof, calBookingProof()],
+    );
+    expect(result.events).toEqual([
+      expect.objectContaining({ id: "calendar:booking:booking-one", status: "accepted" }),
+    ]);
+  });
   it.each([
     "foreign-original",
     "wrong-role",

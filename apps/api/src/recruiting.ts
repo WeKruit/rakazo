@@ -1501,6 +1501,7 @@ export async function getRecruitingCorrespondence(
     // completed creation in this exact role establishes initial ownership. A successful
     // reschedule receipt may then prove the provider's replacement UID, never a name/time guess.
     const bookingProofs = new Set<string>();
+    const supersededBookings = new Set<string>();
     if (
       reads.some(
         ({ provider, call }) =>
@@ -1625,6 +1626,7 @@ export async function getRecruitingCorrespondence(
           }
           bookingProofs.add(stableJsonValue([link.sourceId, link.revision, link.to]));
           adopted.push(link);
+          supersededBookings.add(stableJsonValue([link.sourceId, link.revision, link.from]));
           advanced = true;
         }
         if (!advanced) break;
@@ -2098,7 +2100,13 @@ export async function getRecruitingCorrespondence(
                       correspondenceRecord(attendee)?.email ?? correspondenceRecord(attendee)?.name,
                   )
                 : [],
-            status: availability ? null : (row?.status ?? null),
+            // Exact successful replacement lineage retires the old observation without claiming
+            // that the provider cancelled it. Retain it as history, never as an upcoming booking.
+            status: availability
+              ? null
+              : supersededBookings.has(stableJsonValue([source.id, source.revision, row!.uid]))
+                ? "superseded"
+                : (row?.status ?? null),
             location,
             url: typeof location === "string" && /^https?:\/\//u.test(location) ? location : null,
           });
