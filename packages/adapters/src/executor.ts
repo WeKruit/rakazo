@@ -2829,6 +2829,7 @@ export function toolCompletionFromResult(
 export function toolCompletionAuditPayload(
   completion: AgentToolCompletion,
   secrets: string[] = [],
+  wrote = false,
 ): Record<string, unknown> {
   const durationMs = Number.isFinite(completion.durationMs)
     ? Math.max(0, Math.round(completion.durationMs))
@@ -2841,6 +2842,8 @@ export function toolCompletionAuditPayload(
     durationMs,
     outcome: completion.paused ? "paused" : error === undefined ? "succeeded" : "error",
   };
+  // Lets open workbenches refresh after a connector write instead of at run end.
+  if (wrote && error === undefined && !completion.paused) payload.wrote = true;
   if (error !== undefined) {
     payload.error = sanitizeConnectorError(error, secrets);
   }
@@ -2876,6 +2879,7 @@ export async function appendToolCompletionAudit(
   target: { spaceId: string; threadId: string; botId: string; runId: string },
   completion: AgentToolCompletion,
   secrets: string[] = [],
+  wrote = false,
 ): Promise<void> {
   try {
     await deps.events.append({
@@ -2884,7 +2888,7 @@ export async function appendToolCompletionAudit(
       botId: target.botId,
       runId: target.runId,
       type: "agent.tool.completed",
-      payload: toolCompletionAuditPayload(completion, secrets),
+      payload: toolCompletionAuditPayload(completion, secrets, wrote),
     });
   } catch (error) {
     // Audit persistence must not change the tool result or strand the run.
@@ -4444,6 +4448,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
 
         const mutatingEffectOccurrences = new Map<string, number>();
+        // Executions whose connector call was not declared read-only and returned without error.
+        const connectorWrites = new Set<string>();
         const consumedEffectIds = new Set<string>();
         const nextMutatingEffectOccurrence = (toolName: string, args: Record<string, unknown>) => {
           const fingerprint = toolEffectIdempotencyKey(runId, toolName, args);
@@ -8577,6 +8583,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
               }
             }
+            if (declaredReadOnly !== true && toolResultError(result) === undefined)
+              connectorWrites.add(executionId);
             if (researchAdmission) {
               if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
               if (!applied) throw new Error("Recruiting receipt requires its native effect");
@@ -8988,6 +8996,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   completion,
                   runSecrets,
+                  connectorWrites.delete(completion.executionId),
                 ),
               claimSteering: scripted
                 ? undefined
