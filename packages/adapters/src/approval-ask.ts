@@ -220,7 +220,7 @@ function describeApprovalAction(
   }
   const mcp = displayToolName.match(/^mcp__(.+?)__(.+)$/);
   const action = mcp
-    ? `${humanizeToolName(mcp[1]!)}: ${humanizeToolName(mcp[2]!)}`
+    ? `${humanizeToolName(mcp[1]!)}: ${humanizeToolName(mcp[2]!.replace(new RegExp(`^${mcp[1]!.replace(/[^\w]/g, "")}_`, "i"), ""))}`
     : humanizeToolName(displayToolName);
   const target = pickScopeLabel(args);
   return target ? `${action} → ${target}` : action;

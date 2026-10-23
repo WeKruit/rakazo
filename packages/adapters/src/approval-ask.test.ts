@@ -438,6 +438,8 @@ describe("buildApprovalAskBlock", () => {
   it.each([
     ["mcp__autumn__research", "Autumn: Research"],
     ["gmail_send_email", "Gmail send email"],
+    ["instantly_instantly_activate_campaign", "Instantly activate campaign"],
+    ["mcp__instantly__instantly_activate_campaign", "Instantly: Activate campaign"],
   ])("names %s readably while preserving the exact consent and destination", (tool, label) => {
     const args = {
       to: "Exact Recipient <recipient+review@example.test>",
