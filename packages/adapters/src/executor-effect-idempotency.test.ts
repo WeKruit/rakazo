@@ -1075,6 +1075,41 @@ describe("explicit artifact workspace writes", () => {
   });
 });
 
+describe("tool audit ordering", () => {
+  it("appends agent.tool.called before agent.tool.completed for a tool that finishes while narration is pending", async () => {
+    const f = fixture("tool-audit-order");
+    const executionId = JSON.stringify(["pi-tool", "main", "fast-call"]);
+    f.runtimeRun.mockImplementation(async function* (request) {
+      yield { type: "text" as const, text: "Looking that up now." };
+      // Pi starts the tool as soon as it queues the "tool" event; a fast tool reports its
+      // completion before the executor has flushed narration and appended "called".
+      const completed = Promise.resolve(
+        request.onToolCompleted?.({
+          name: "web_search",
+          executionId,
+          durationMs: 0,
+          result: { content: [{ type: "text", text: "ok" }] },
+        }),
+      );
+      yield { type: "tool" as const, name: "web_search", args: { query: "fixture" }, executionId };
+      await completed;
+      yield { type: "done" as const, text: "Done." };
+    });
+
+    await f.run();
+
+    const audits = f.executorDeps.events.append.mock.calls
+      .map(([event]) => event as { type: string; payload: { executionId?: string } })
+      .filter(
+        (event) =>
+          (event.type === "agent.tool.called" || event.type === "agent.tool.completed") &&
+          event.payload.executionId === executionId,
+      )
+      .map((event) => event.type);
+    expect(audits).toEqual(["agent.tool.called", "agent.tool.completed"]);
+  });
+});
+
 describe("durable mid-turn narration", () => {
   it.each(["web_search", "message_user"])(
     "retries the message transaction before %s without repeating narration or tool execution",
