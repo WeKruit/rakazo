@@ -184,6 +184,33 @@ describe("contracts", () => {
       }).success,
     ).toBe(false);
   });
+  it("accepts a connect ask and keeps it apart from other ask variants", () => {
+    const connection = {
+      serverId: "server-1",
+      name: "Gmail",
+      iconUrl: "https://example.com/gmail.png",
+      reason: "To send the approved intro email.",
+    };
+    expect(
+      MessageBlock.safeParse({ kind: "ask", text: "Connect Gmail", connection, status: "pending" })
+        .success,
+    ).toBe(true);
+    expect(
+      MessageBlock.safeParse({
+        kind: "ask",
+        text: "Connect Gmail",
+        connection: { ...connection, iconUrl: "http://example.com/gmail.png" },
+      }).success,
+    ).toBe(false);
+    expect(
+      MessageBlock.safeParse({
+        kind: "ask",
+        text: "Connect Gmail",
+        connection,
+        actions: [{ id: "a", label: "A" }],
+      }).success,
+    ).toBe(false);
+  });
   it("accepts structured live activity progress", () => {
     expect(MessageBlock.parse({ kind: "progress", text: "Using browser", activity: true })).toEqual(
       { kind: "progress", text: "Using browser", activity: true },
