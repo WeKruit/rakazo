@@ -144,6 +144,7 @@ import {
   RecruitingRoleCandidatesOutputSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
+  RecruitingRoleSetupSchema,
   ReviseRecruitingRoleInput,
   SetRecruitingCandidateShortlistInput,
   SetRecruitingCandidateShortlistOutput,
@@ -619,6 +620,7 @@ export const appContract = {
       )
       .output(RecruitingCorrespondenceSchema),
     roleCampaign: oc.input(threadTarget).output(RecruitingRoleCampaignSchema),
+    roleSetup: oc.input(threadTarget).output(RecruitingRoleSetupSchema),
     listFeedback: oc.input(ListRecruitingFeedbackInput).output(ListRecruitingFeedbackOutput),
     readSource: oc.input(ReadRecruitingSourceInput).output(
       z.discriminatedUnion("kind", [

@@ -59,16 +59,27 @@ const UpdateLeadInterestInput = z.strictObject({
     ),
 });
 const CampaignIdInput = z.strictObject({ campaign_id: Uuid });
+const RoleId = z
+  .string()
+  .min(1)
+  .max(100)
+  .optional()
+  .describe("Recruiting role id; omit inside a role conversation (its linked role is used).");
+const ActivateCampaignInput = z.strictObject({
+  campaign_id: Uuid.optional().describe(
+    "Omit inside a role conversation to activate the role's own campaign (created if needed).",
+  ),
+});
 const EnsureRoleCampaignInput = z.strictObject({
-  role_id: z.string().min(1).max(100),
+  role_id: RoleId,
   eaccount: CampaignSetup.eaccount
     .optional()
-    .describe("Sending mailbox; omit when exactly one Instantly account is connected."),
+    .describe("Sending mailbox; omit to use the last-used or first connected Instantly account."),
   steps: CampaignSetup.steps,
   timezone: CampaignSetup.timezone,
 });
 const AddShortlistLeadsInput = z.strictObject({
-  role_id: z.string().min(1).max(100),
+  role_id: RoleId,
   candidates: z
     .array(
       z.strictObject({
@@ -126,7 +137,7 @@ export const nativeInstantlyWrites = [
   ),
   tool(
     "activate_campaign",
-    CampaignIdInput,
+    ActivateCampaignInput,
     false,
     "Sends the campaign's first email to its leads by activating it (also resumes a paused one). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
   ),
@@ -135,13 +146,13 @@ export const nativeInstantlyWrites = [
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
     false,
-    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on) only if none exists. Idempotent. Also returns candidate_key -> lead id mappings.",
+    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Also returns candidate_key -> lead id mappings.",
   ),
   tool(
     "add_shortlist_leads",
     AddShortlistLeadsInput,
     false,
-    "Adds shortlisted candidates of a role to its campaign as leads. Skips candidates without an email and ones already in the campaign; records candidate_key -> lead id.",
+    "Adds shortlisted candidates of a role to its campaign as leads (ensuring the campaign first). Skips candidates without an email and ones already in the campaign; records candidate_key -> lead id.",
   ),
 ];
 const TOOL_NAMES = new Set(nativeInstantlyWrites.map((entry) => entry.toolName));
@@ -258,14 +269,64 @@ type RoleBinding = {
 const bindingKey = (serverId: string, roleId: string) =>
   `instantly-role-campaign:${serverId}:${roleId}`;
 
-async function requireRole(prisma: PrismaClient, context: AdapterContext, roleId: string) {
+/** The recruiting role linked to this run's conversation, if any. */
+async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
+  if (!context.runId) return null;
+  const run = await prisma.run.findFirst({
+    where: { id: context.runId, spaceId: context.spaceId, userId: context.userId },
+    select: { thread: { select: { activeRecruitingRoleId: true } } },
+  });
+  return run?.thread.activeRecruitingRoleId ?? null;
+}
+
+async function requireRole(prisma: PrismaClient, context: AdapterContext, roleId?: string) {
+  const id = roleId ?? (await activeRoleId(prisma, context));
+  if (!id) throw new Error("Pass role_id: this conversation has no linked recruiting role");
   const role = await prisma.recruitingRole.findFirst({
-    where: { id: roleId, spaceId: context.spaceId, userId: context.userId },
+    where: { id, spaceId: context.spaceId, userId: context.userId },
     select: { id: true, title: true },
   });
   if (!role) throw new IsolationError("Recruiting role not found");
   return role;
 }
+
+/** The mailbox this space last bound a role campaign to on this Instantly connection. */
+export async function lastUsedMailbox(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  spaceId: string,
+  serverId: string,
+) {
+  const effect = await prisma.externalEffect.findFirst({
+    where: {
+      spaceId,
+      kind: "instantly_role_campaign",
+      status: "completed",
+      request: { path: ["serverId"], equals: serverId },
+    },
+    orderBy: { updatedAt: "desc" },
+    select: { result: true },
+  });
+  const eaccount = (effect?.result as Partial<RoleBinding> | null)?.eaccount;
+  return typeof eaccount === "string" ? eaccount : null;
+}
+
+/** Default sender: the last-used mailbox if still connected, else the first connected one. */
+async function defaultMailbox(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+) {
+  const accounts = await rest("GET", "/accounts?limit=100");
+  const emails = (Array.isArray(accounts.items) ? (accounts.items as { email?: unknown }[]) : [])
+    .map((item) => item.email)
+    .filter((email): email is string => typeof email === "string");
+  const last = await lastUsedMailbox(prisma, context.spaceId, serverId);
+  const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
+  if (!picked) throw new Error("No Instantly mailbox is connected; connect one in Instantly first");
+  return picked;
+}
+const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 async function readBinding(prisma: PrismaClient, context: AdapterContext, key: string) {
   const effect = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
@@ -314,14 +375,9 @@ async function ensureRoleCampaign(
     });
   }
   if (!context.runId) throw new IsolationError("A run is required to bind a role campaign");
-  let eaccount = input.eaccount ?? (stale ? existing!.binding.eaccount : undefined);
-  if (!eaccount) {
-    const accounts = await rest("GET", "/accounts?limit=2");
-    const items = Array.isArray(accounts.items) ? (accounts.items as { email?: string }[]) : [];
-    if (items.length !== 1 || typeof items[0]?.email !== "string")
-      throw new Error("Pass eaccount: the sending mailbox is ambiguous or none is connected");
-    eaccount = items[0].email;
-  }
+  const eaccount =
+    input.eaccount ??
+    (stale ? existing!.binding.eaccount : await defaultMailbox(prisma, rest, context, serverId));
   // The user-visible name is the role title; the role id lives in the stored mapping's request.
   const name = role.title;
   const adopt = (await sameTitleCampaigns(rest, role)).find(
@@ -408,11 +464,7 @@ async function bindCreatedCampaign(
   eaccount: string,
 ) {
   if (!context.runId || typeof campaign.id !== "string") return;
-  const run = await prisma.run.findFirst({
-    where: { id: context.runId, spaceId: context.spaceId, userId: context.userId },
-    select: { thread: { select: { activeRecruitingRoleId: true } } },
-  });
-  const roleId = run?.thread.activeRecruitingRoleId;
+  const roleId = await activeRoleId(prisma, context);
   if (!roleId) return;
   const key = bindingKey(serverId, roleId);
   if (await readBinding(prisma, context, key)) return;
@@ -432,8 +484,14 @@ async function addShortlistLeads(
   input: z.output<typeof AddShortlistLeadsInput>,
 ) {
   const role = await requireRole(prisma, context, input.role_id);
+  // Out of the box: a role without a campaign gets one here instead of failing.
+  if (!(await readBinding(prisma, context, bindingKey(serverId, role.id))))
+    await ensureRoleCampaign(prisma, rest, context, serverId, {
+      role_id: role.id,
+      timezone: "America/Chicago",
+    });
   const existing = await readBinding(prisma, context, bindingKey(serverId, role.id));
-  if (!existing) throw new Error("No campaign for this role yet; call ensure_role_campaign first");
+  if (!existing) throw new IsolationError("Role campaign binding missing after ensure");
   const { binding } = existing;
   const shortlisted = new Set(
     (
@@ -553,8 +611,16 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_update_lead_interest":
       return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));
-    case "native_instantly_activate_campaign":
-      return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/activate`);
+    case "native_instantly_activate_campaign": {
+      const campaignId =
+        ActivateCampaignInput.parse(args).campaign_id ??
+        (
+          await ensureRoleCampaign(prisma, rest, context, serverId, {
+            timezone: "America/Chicago",
+          })
+        ).campaignId;
+      return rest("POST", `/campaigns/${campaignId}/activate`);
+    }
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
     case "native_instantly_ensure_role_campaign":
