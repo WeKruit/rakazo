@@ -1504,6 +1504,7 @@ msgstr "请确认此浏览器会话可以访问该 URL，然后重新测试。"
 msgid "Conflicting information"
 msgstr "信息存在冲突"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
@@ -1511,6 +1512,10 @@ msgstr "信息存在冲突"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "连接"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "连接 {name}"
 
 #: src/pages/Onboarding.tsx
 msgid "Connect a model"
@@ -1553,6 +1558,7 @@ msgstr "连接此提供方，作为你的个人模型。"
 msgid "Connect Treg"
 msgstr "连接 Treg"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpOAuthCallback.tsx
 #: src/pages/MemorySettingsOverlay.tsx
@@ -1582,6 +1588,7 @@ msgstr "已连接并使用 {0}。"
 msgid "Connected. Its tools are available from your next message."
 msgstr "已连接，下一条消息起即可使用其工具。"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -1767,6 +1774,10 @@ msgstr "无法连接此语音提供方"
 #: src/pages/Shell.tsx
 msgid "Could not connect to the computer screen"
 msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "无法连接，请重试。"
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
@@ -2677,7 +2688,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
-#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -4417,6 +4428,7 @@ msgstr "未连接"
 msgid "Not in the plugin catalog"
 msgstr "不在插件目录中"
 
+#: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "暂不"

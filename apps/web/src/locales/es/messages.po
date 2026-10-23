@@ -1504,6 +1504,7 @@ msgstr "Confirma que la URL es accesible desde esta sesión del navegador y vuel
 msgid "Conflicting information"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
@@ -1511,6 +1512,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Conectar"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "Conectar {name}"
 
 #: src/pages/Onboarding.tsx
 msgid "Connect a model"
@@ -1553,6 +1558,7 @@ msgstr "Conecta este proveedor para usarlo como tu modelo personal."
 msgid "Connect Treg"
 msgstr "Conectar Treg"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpOAuthCallback.tsx
 #: src/pages/MemorySettingsOverlay.tsx
@@ -1582,6 +1588,7 @@ msgstr "Conectado y usando {0}."
 msgid "Connected. Its tools are available from your next message."
 msgstr "Conectado: sus herramientas estarán disponibles desde tu próximo mensaje."
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -1767,6 +1774,10 @@ msgstr "No se pudo conectar este proveedor de voz"
 #: src/pages/Shell.tsx
 msgid "Could not connect to the computer screen"
 msgstr "No se pudo conectar a la pantalla de la computadora"
+
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "No se pudo conectar. Inténtalo de nuevo."
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
@@ -2677,7 +2688,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
-#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -4417,6 +4428,7 @@ msgstr "No conectado"
 msgid "Not in the plugin catalog"
 msgstr "No está en el catálogo de plugins"
 
+#: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "Ahora no"

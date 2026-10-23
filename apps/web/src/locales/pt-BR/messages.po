@@ -1504,6 +1504,7 @@ msgstr "Confirme que a URL está acessível nesta sessão do navegador e teste n
 msgid "Conflicting information"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
@@ -1511,6 +1512,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Conectar"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "Conectar {name}"
 
 #: src/pages/Onboarding.tsx
 msgid "Connect a model"
@@ -1553,6 +1558,7 @@ msgstr "Conecte este provedor para usá-lo como seu modelo pessoal."
 msgid "Connect Treg"
 msgstr "Conectar Treg"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpOAuthCallback.tsx
 #: src/pages/MemorySettingsOverlay.tsx
@@ -1582,6 +1588,7 @@ msgstr "Conectado e usando {0}."
 msgid "Connected. Its tools are available from your next message."
 msgstr "Conectado. Suas ferramentas estão disponíveis na sua próxima mensagem."
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -1767,6 +1774,10 @@ msgstr "Não foi possível conectar este provedor de voz"
 #: src/pages/Shell.tsx
 msgid "Could not connect to the computer screen"
 msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "Não foi possível conectar. Tente novamente."
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
@@ -2677,7 +2688,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
-#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -4417,6 +4428,7 @@ msgstr "Não conectado"
 msgid "Not in the plugin catalog"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "Agora não"

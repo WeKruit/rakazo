@@ -1504,6 +1504,7 @@ msgstr "Prüfe, ob die URL aus dieser Browsersitzung erreichbar ist, und teste e
 msgid "Conflicting information"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
@@ -1511,6 +1512,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Verbinden"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "{name} verbinden"
 
 #: src/pages/Onboarding.tsx
 msgid "Connect a model"
@@ -1553,6 +1558,7 @@ msgstr "Verbinde diesen Anbieter, um ihn als persönliches Modell zu verwenden."
 msgid "Connect Treg"
 msgstr "Treg verbinden"
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpOAuthCallback.tsx
 #: src/pages/MemorySettingsOverlay.tsx
@@ -1582,6 +1588,7 @@ msgstr "Verbunden, {0} wird verwendet."
 msgid "Connected. Its tools are available from your next message."
 msgstr "Verbunden. Die Tools sind ab deiner nächsten Nachricht verfügbar."
 
+#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -1767,6 +1774,10 @@ msgstr "Stimmanbieter konnte nicht verbunden werden"
 #: src/pages/Shell.tsx
 msgid "Could not connect to the computer screen"
 msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "Verbindung fehlgeschlagen. Bitte erneut versuchen."
 
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
@@ -2677,7 +2688,7 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
-#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Draft reply"
 msgstr ""
@@ -4417,6 +4428,7 @@ msgstr "Nicht verbunden"
 msgid "Not in the plugin catalog"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/shell/message-cards.tsx
 msgid "Not now"
 msgstr "Jetzt nicht"
