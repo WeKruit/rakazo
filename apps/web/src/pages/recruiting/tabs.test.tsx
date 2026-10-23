@@ -488,3 +488,52 @@ it("falls back to this role's interview workflow rows without the stage filter",
   expect(view.textContent).toContain("Scheduled");
   expect(view.textContent).not.toContain("Ben");
 });
+
+it("totals Sequence statuses over every CRM page, not only the loaded rows", async () => {
+  const people = [
+    ...Array.from({ length: 32 }, (_, i) => ["replied", i] as const),
+    ...Array.from({ length: 9 }, (_, i) => ["reached_out", i] as const),
+    ...Array.from({ length: 9 }, (_, i) => ["not_contacted", i] as const),
+  ].map(([status, i]) =>
+    person(
+      `00000000-0000-4000-8000-${status.length}${String(i).padStart(11, "0")}`,
+      `P${status}${i}`,
+      {
+        outreachStatus: status,
+      },
+    ),
+  );
+  roleCampaign.mockResolvedValue({ status: "none", campaign: null, leads: [] });
+  crmData.mockImplementation(
+    async (input: { operation: string; limit?: number; offset?: number }) => {
+      if (input.operation !== "candidates")
+        return {
+          operation: input.operation,
+          source,
+          checkedAt,
+          items: [],
+          total: 0,
+          offset: 0,
+          nextOffset: null,
+        };
+      const offset = input.offset ?? 0;
+      const items = people.slice(offset, offset + (input.limit ?? 25));
+      const end = offset + items.length;
+      return {
+        ...candidatesPage,
+        items,
+        total: people.length,
+        offset,
+        nextOffset: end < people.length ? end : null,
+      };
+    },
+  );
+  const view = await mount(<SequenceTab {...props} />);
+  await settle();
+  await settle();
+  expect(view.textContent).toContain("Replied · 32");
+  expect(view.textContent).toContain("Reached out · 9");
+  expect(view.textContent).toContain("Not contacted · 9");
+  // The list itself still shows only its first page.
+  expect(view.querySelectorAll("button[aria-pressed]")).toHaveLength(25);
+});
