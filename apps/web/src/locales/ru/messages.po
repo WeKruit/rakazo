@@ -2281,6 +2281,10 @@ msgid "Credentials are encrypted and never sent to the model."
 msgstr "Учётные данные зашифрованы и никогда не передаются модели."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Criterion"
 msgstr ""
 
