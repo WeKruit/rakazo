@@ -2431,10 +2431,7 @@ function CrmRecruitingPanel({
     readCacheScope,
   };
   // The role tabs read their own CRM data; stored CRM views read only when they are shown.
-  const storedCrmReads =
-    !agent ||
-    !["contacts", "sequence", "inbox", "interview"].includes(browse.view) ||
-    (bound.done && !bound.role);
+  const storedCrmReads = !agent || (bound.done && !bound.role);
   const [mailPageSelection, setMailPageSelection] = useState<{
     candidateId: string;
     cursor: Extract<RecruitingCrmDataInput, { operation: "mail" }>["cursor"];
@@ -3599,14 +3596,12 @@ function CrmRecruitingPanel({
         </h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
       </header>
-      {browse.view === "contacts" && agent ? (
-        <>
-          {agent}
-          {bound.done && !bound.role ? crmHistory : null}
-        </>
+      {agent && !bound.done ? (
+        <TabLoading />
+      ) : bound.role && !["sequence", "interview"].includes(browse.view) ? (
+        agent
       ) : ["sequence", "inbox", "interview"].includes(browse.view) ? (
         <>
-          {agent}
           <CorrespondenceTabMount
             view={browse.view}
             role={boundRole}

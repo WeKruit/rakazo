@@ -159,6 +159,15 @@ it.each(["inbox", "interview"] as const)(
 
 it("renders only retained email fields, supports selection and never treats assistant narration as mail", async () => {
   const selection = vi.fn();
+  const crm = {
+    serverRevision: 2,
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    crmRoleId: "22222222-2222-4222-8222-222222222222",
+    candidateId: "33333333-3333-4333-8333-333333333333",
+    threadId: "original-crm-thread",
+    direction: "received" as const,
+    eaccount: "recruiter@example.test",
+  };
   readCorrespondence.mockResolvedValue({
     roleId: "role-1",
     status: "ready",
@@ -171,6 +180,7 @@ it("renders only retained email fields, supports selection and never treats assi
         sourceId: "mailbox-1",
         providerMessageId: "provider-message-1",
         savedRead: null,
+        crm,
         sender: "one@example.test",
         recipients: ["team@example.test"],
         subject: "Interview question",
@@ -203,6 +213,7 @@ it("renders only retained email fields, supports selection and never treats assi
       roleId: "role-1",
       emailId: "email-1",
       sourceName: "Selected mailbox",
+      crm,
     }),
   );
   expect(view.container.textContent).toContain("Can we speak Thursday?");

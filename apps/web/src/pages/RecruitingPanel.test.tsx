@@ -8821,7 +8821,7 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
   api.getWorkspace.mockResolvedValue({ role, revision, crmTarget });
   api.crmData.mockClear();
   // Contacts is the role's unified candidate list, so only the mail views mount a role tab.
-  for (const tab of ["sequence", "inbox", "interview"] as const) {
+  for (const tab of ["sequence", "interview"] as const) {
     await view.render("thread-1", 1, false, undefined, {
       groupId: "group-1",
       crmBrowse: { ...browse, view: tab },

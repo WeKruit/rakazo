@@ -3652,6 +3652,77 @@ export function ShellPage() {
       t,
     ],
   );
+  const [openingCrmRole, setOpeningCrmRole] = useState<{
+    selection: CrmBrowseSelection;
+    view: RecruitingWorkspaceView;
+    error?: string;
+  } | null>(null);
+  const crmRoleOpenRequest = useRef(0);
+  const crmOpenLocation = JSON.stringify([groupId, active?.id, searchParams.toString()]);
+  const currentCrmOpenLocation = useRef(crmOpenLocation);
+  currentCrmOpenLocation.current = crmOpenLocation;
+  function crmRoleBotIds() {
+    return activeGroup && canCreateRoleFrom(activeGroup.id)
+      ? activeGroup.members.map((member) => member.botId)
+      : ["main", "outreach", "scheduling"].flatMap((key) => {
+          const bot = managedConnectionBots.find(
+            (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
+          );
+          return bot ? [bot.id] : [];
+        });
+  }
+  async function openCrmRole(selection: CrmBrowseSelection, view: RecruitingWorkspaceView = "results") {
+    if (!selection.crmRoleId) return;
+    const request = ++crmRoleOpenRequest.current;
+    const submittedScope = crmComposerScope;
+    const submittedUser = botsRefreshUser.current;
+    const submittedSpace = bootstrapMe?.spaceId;
+    const stillCurrent = () => request === crmRoleOpenRequest.current &&
+      currentCrmOpenLocation.current === crmOpenLocation &&
+      currentCrmComposerScope.current === submittedScope &&
+      botsRefreshUser.current === submittedUser &&
+      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
+    setOpeningCrmRole({ selection, view });
+    try {
+      const botIds = crmRoleBotIds();
+      if (botIds.length < GROUP_MEMBER_MIN) throw new Error(t`The recruiting team is not ready yet.`);
+      const group = await rpc.groups.create({
+        name: t`Recruiting`, botIds,
+        crmRoleReference: {
+          sourceId: selection.serverId, serverRevision: selection.serverRevision,
+          organizationId: selection.organizationId, crmRoleId: selection.crmRoleId,
+        },
+      });
+      if (!stillCurrent()) return;
+      setGroups((current) => current.some((item) => item.id === group.id)
+        ? current.map((item) => item.id === group.id ? group : item) : [group, ...current]);
+      setSelectedContact(null);
+      setSelectedCorrespondence(null);
+      setPanel(null);
+      setMobileSidebarOpen(false);
+      setRoleChatOpen(true);
+      setOpeningCrmRole(null);
+      const search = new URLSearchParams({ view });
+      // Preserve an exact person link while converting an older role URL.
+      if (matchesCrmRole(selection, crmSelection) && searchParams.get("crmCandidate"))
+        search.set("crmCandidate", searchParams.get("crmCandidate")!);
+      navigate(`/app/g/${group.id}?${search}`);
+      void refreshBots().catch(() => undefined);
+    } catch (error) {
+      if (stillCurrent()) setOpeningCrmRole({ selection, view, error: errorText(error, t`Could not open this role.`) });
+    } finally {
+      if (!stillCurrent() && request === crmRoleOpenRequest.current) setOpeningCrmRole(null);
+    }
+  }
+  const legacyCrmOpenKey = crmMode && crmSelection?.crmRoleId
+    ? JSON.stringify([userId, bootstrapMe?.spaceId, crmSelection]) : null;
+  const openedLegacyCrmKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!legacyCrmOpenKey) { openedLegacyCrmKey.current = null; return; }
+    if (!initialBotsLoaded || !crmSelection || openedLegacyCrmKey.current === legacyCrmOpenKey) return;
+    openedLegacyCrmKey.current = legacyCrmOpenKey;
+    void openCrmRole(crmSelection, recruitingWorkspaceView);
+  }, [legacyCrmOpenKey, initialBotsLoaded]);
   const pendingCrmRoleSends = useRef(
     new Map<
       string,
@@ -3676,15 +3747,7 @@ export function ShellPage() {
       (selectedSpaceId() ?? submittedSpace) === submittedSpace;
     const attachments = attachmentsForThread(pendingAttachments, composerDraftKey);
     if (!text.trim() && !attachments.length) return false;
-    const botIds =
-      activeGroup && canCreateRoleFrom(activeGroup.id)
-        ? activeGroup.members.map((member) => member.botId)
-        : ["main", "outreach", "scheduling"].flatMap((key) => {
-            const bot = managedConnectionBots.find(
-              (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
-            );
-            return bot ? [bot.id] : [];
-          });
+    const botIds = crmRoleBotIds();
     if (botIds.length < GROUP_MEMBER_MIN) return false;
     const reference = {
       sourceId: crmSelection.serverId,
@@ -4437,14 +4500,14 @@ export function ShellPage() {
 
   // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
   const nativeCorrespondence =
-    activeSnapshot?.threadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
+    knownThreadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
       <RecruitingCorrespondence
         view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
         messages={transcriptMessages}
         artifactTarget={transcriptArtifactTarget}
-        threadId={activeSnapshot.threadId}
+        threadId={knownThreadId}
         onEmailSelection={selectCorrespondence}
-        outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
+        outreachBotIds={(activeSnapshot?.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
         onConversation={(text) => {
           openRoleChat(text);
         }}
@@ -4543,12 +4606,7 @@ export function ShellPage() {
               onPrefetchRole={(id) => prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)}
               crmContext={recruitingCacheScope ? { target: transcriptArtifactTarget, scope: recruitingCacheScope, cache: recruitingReadCache.current, refreshSignal: recruitingRefresh } : undefined}
               crmSelection={effectiveCrmSelection}
-              onOpenCrmRole={(selection, linkedGroupId) => {
-                setPanel(null); setMobileSidebarOpen(false); setRoleChatOpen(true);
-                const search = new URLSearchParams({ view: "contacts", crmServer: selection.serverId, crmRevision: String(selection.serverRevision), crmOrganization: selection.organizationId, ...(selection.crmRoleId ? { crmRole: selection.crmRoleId } : {}) });
-                if (linkedGroupId) navigate(`/app/g/${linkedGroupId}?view=contacts`);
-                else setSearchParams(search);
-              }}
+              onOpenCrmRole={(selection) => void openCrmRole(selection)}
               groups={groups}
               archivedGroups={archivedGroups}
               archivedOpen={archivedOpen}
@@ -5368,6 +5426,9 @@ export function ShellPage() {
             readCacheScope={recruitingCacheScope}
           />
         ) : null}
+        {openingCrmRole ? <div className="px-6 py-3">
+          {openingCrmRole.error ? <RetryNotice onRetry={() => void openCrmRole(openingCrmRole.selection, openingCrmRole.view)}>{openingCrmRole.error}</RetryNotice> : <p role="status"><Trans>Opening role…</Trans></p>}
+        </div> : null}
         {workspaceNewRole ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             {roleCreationForm}
@@ -5703,7 +5764,7 @@ export function ShellPage() {
             enterToSend={enterToSend}
             activeName={emptyCrmChat ? t`Role conversation` : inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
             running={!emptyCrmChat && composerRunning}
-            disabled={Boolean(recordingSkill) || (emptyCrmChat && !crmSelection?.crmRoleId)}
+            disabled={Boolean(recordingSkill) || Boolean(openingCrmRole && !openingCrmRole.error) || (emptyCrmChat && !crmSelection?.crmRoleId)}
             pendingAttachments={emptyCrmChat ? attachmentsForThread(pendingAttachments, composerDraftKey) : activePendingAttachments}
             attachmentNotice={attachmentNotice}
             sendError={sendError}

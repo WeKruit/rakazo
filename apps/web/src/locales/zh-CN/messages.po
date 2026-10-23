@@ -7731,3 +7731,19 @@ msgstr "确认招聘材料"
 #: src/components/AskCard.tsx
 msgid "Approve calibration"
 msgstr "确认候选人校准"
+
+#: src/pages/Shell.tsx
+msgid "Opening role…"
+msgstr "正在打开岗位…"
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team is not ready yet."
+msgstr "招聘团队尚未准备就绪。"
+
+#: src/pages/Shell.tsx
+msgid "Could not open this role."
+msgstr "无法打开此岗位。"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
+msgstr "请为选中的邮件起草回复供我审阅。阅读原始对话并核实候选人和岗位。不要发送。"

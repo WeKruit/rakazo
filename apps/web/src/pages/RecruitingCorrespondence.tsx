@@ -454,6 +454,7 @@ function SavedCorrespondenceView({
             sourceId: selected.sourceId,
             providerMessageId: selected.providerMessageId,
             savedRead: selected.savedRead,
+            ...(selected.crm ? { crm: selected.crm } : {}),
             sourceName: selected.sourceName.slice(0, 160),
             sender: selected.sender?.slice(0, 320) ?? null,
             subject: selected.subject.slice(0, 1000),
@@ -600,11 +601,26 @@ function SavedCorrespondenceView({
         </section>
       ) : null}
       {data?.status === "ready" && !interview ? (
-        <CorrespondenceEmails
-          emails={data.emails}
-          selectedId={selected?.id}
-          onSelect={setSelectedId}
-        />
+        <>
+          <CorrespondenceEmails
+            emails={data.emails}
+            selectedId={selected?.id}
+            onSelect={setSelectedId}
+          />
+          {selected && current?.fresh && !current.failed ? (
+            <button
+              type="button"
+              className="hire-outline-button mt-4"
+              onClick={() =>
+                onConversation(
+                  t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
+                )
+              }
+            >
+              <Trans>Draft reply</Trans>
+            </button>
+          ) : null}
+        </>
       ) : null}
       {data?.status === "ready" && interview ? (
         <div className="space-y-4">
