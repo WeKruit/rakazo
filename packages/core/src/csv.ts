@@ -35,8 +35,10 @@ export function parseCsv(input: string): ParsedCsv {
     const c = text[i];
     if (quoted) {
       if (c !== '"') field += c;
-      else if (text[i + 1] === '"') (field += '"'), i++;
-      else quoted = false;
+      else if (text[i + 1] === '"') {
+        field += '"';
+        i++;
+      } else quoted = false;
     } else if (c === '"') {
       quoted = true;
       pending = true;
