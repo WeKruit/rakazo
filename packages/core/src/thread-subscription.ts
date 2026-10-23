@@ -1,5 +1,6 @@
 import type { ProductEvent } from "@rakazo/contracts";
 import { abortableDelay } from "./async.js";
+import { eventNeedsSnapshotRead, isRunBoundaryEvent } from "./thread-reducer.js";
 
 type ThreadHead = { threadId: string; cursor: number };
 
@@ -16,7 +17,12 @@ export async function runThreadSubscription(options: {
   subscribe: (cursor: number) => Promise<AsyncIterable<ProductEvent>>;
   beforeEvent?: (event: ProductEvent) => void;
   applyEvent: (event: ProductEvent) => void;
-  onEvent: (event: ProductEvent, initial: ThreadHead) => void;
+  /**
+   * sync.snapshotStale is set only on a run boundary (end or input pause) when an event since
+   * the last read was not folded into the snapshot. Otherwise the event log already produced
+   * the state a full threads.get would return, and the caller can skip that read.
+   */
+  onEvent: (event: ProductEvent, initial: ThreadHead, sync?: { snapshotStale: boolean }) => void;
 }): Promise<void> {
   const { signal } = options;
   const wait = async (ms: number) => {
@@ -35,6 +41,7 @@ export async function runThreadSubscription(options: {
   if (!initial || signal.aborted) return;
   const head = initial;
   let cursor = head.cursor;
+  let unfolded = false;
   let snapshotReady = options.currentSnapshot()?.threadId === head.threadId;
   const pendingSnapshotEvents: ProductEvent[] = [];
   if (!snapshotReady) {
@@ -85,8 +92,15 @@ export async function runThreadSubscription(options: {
             options.applyEvent(event);
           } else if (!snapshotReady) {
             pendingSnapshotEvents.push(event);
+          } else {
+            // Dropped while history paging or a jump owns the snapshot; only a read recovers it.
+            unfolded = true;
           }
-          options.onEvent(event, head);
+          if (eventNeedsSnapshotRead(event)) unfolded = true;
+          const boundary = isRunBoundaryEvent(event);
+          options.onEvent(event, head, { snapshotStale: boundary && unfolded });
+          // The caller reads on a stale boundary, which covers everything before it.
+          if (boundary) unfolded = false;
         }
       } finally {
         // Not awaited: a half-open iterator can take as long to close as it took to go quiet.
@@ -97,6 +111,7 @@ export async function runThreadSubscription(options: {
     }
     if (signal.aborted) return;
     await options.refresh().catch(() => null);
+    unfolded = false;
     if (!(await wait(retryMs))) return;
     retryMs = Math.min(retryMs * 2, 5_000);
   }

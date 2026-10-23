@@ -27,6 +27,7 @@ import {
   attachmentsForThread,
   buildComposerMentionOptions,
   cloudAgentHttpsUrl,
+  eventNeedsSnapshotRead,
   formatFileSize,
   formatMessageTime,
   forwardProbeAfterPage,
@@ -1407,6 +1408,8 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       if (abort.signal.aborted || readOnly) return;
       let cursor = next?.cursor ?? -1;
       let retryMs = 250;
+      // Set when an event since the last read was not folded into the snapshot.
+      let unfolded = false;
       while (!abort.signal.aborted && sessionGeneration === currentSessionGeneration()) {
         try {
           liveSubscribed.current = true;
@@ -1449,9 +1452,12 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
                 readVisibleTarget.current = null;
                 markReadIfVisible();
               }
+              if (eventNeedsSnapshotRead(event)) unfolded = true;
               if (isRunTerminalEvent(event)) {
                 void refreshMentionBots();
-                if (!jumpScrollTarget.current && !expandedHistoryThread.current) {
+                // The event log already holds the finished turn unless something was not folded.
+                if (unfolded && !jumpScrollTarget.current && !expandedHistoryThread.current) {
+                  unfolded = false;
                   void refresh().catch(() => undefined);
                 }
               }
@@ -1468,6 +1474,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         if (abort.signal.aborted) break;
         if (!jumpScrollTarget.current && !expandedHistoryThread.current) {
           await refresh().catch(() => undefined);
+          unfolded = false;
         }
         await abortableDelay(retryMs, abort.signal);
         retryMs = Math.min(retryMs * 2, 5_000);

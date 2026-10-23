@@ -94,7 +94,7 @@ describe("thread subscription recovery", () => {
     await vi.advanceTimersByTimeAsync(250);
     expect(callbacks.subscribe.mock.calls.map(([cursor]) => cursor)).toEqual([10, 10, 12]);
     expect(callbacks.refresh).toHaveBeenCalledTimes(2);
-    expect(callbacks.onEvent).toHaveBeenLastCalledWith(event(11), head);
+    expect(callbacks.onEvent).toHaveBeenLastCalledWith(event(11), head, { snapshotStale: false });
     abort.abort();
     channel.end();
     await running;
@@ -178,7 +178,7 @@ describe("thread subscription recovery", () => {
     channel.send(event(11));
     await vi.advanceTimersByTimeAsync(0);
     expect(callbacks.applyEvent).not.toHaveBeenCalled();
-    expect(callbacks.onEvent).toHaveBeenCalledWith(event(11), head);
+    expect(callbacks.onEvent).toHaveBeenCalledWith(event(11), head, { snapshotStale: false });
     state.committed = head;
     channel.send(event(12));
     await vi.advanceTimersByTimeAsync(0);
@@ -237,6 +237,66 @@ describe("thread subscription recovery", () => {
       await vi.advanceTimersByTimeAsync(0);
     }
     expect(callbacks.subscribe).toHaveBeenCalledTimes(1);
+    abort.abort();
+    channel.end();
+    await running;
+  });
+
+  it("ends a run without a full read when the event log folded everything", async () => {
+    vi.useFakeTimers();
+    const { abort, channel, callbacks } = setup();
+    const running = runThreadSubscription(callbacks);
+    await vi.advanceTimersByTimeAsync(0);
+    channel.send(event(11));
+    await vi.advanceTimersByTimeAsync(0);
+    channel.send({ ...event(12), type: "usage.recorded" });
+    await vi.advanceTimersByTimeAsync(0);
+    channel.send({ ...event(13), type: "run.completed", runId: "run" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(callbacks.onEvent.mock.calls.map(([item, , sync]) => [item.seq, sync])).toEqual([
+      [11, { snapshotStale: false }],
+      [12, { snapshotStale: false }],
+      [13, { snapshotStale: false }],
+    ]);
+    abort.abort();
+    channel.end();
+    await running;
+  });
+
+  it("asks for one read at the boundary after an event the reducer cannot fold", async () => {
+    vi.useFakeTimers();
+    const { abort, channel, callbacks } = setup();
+    const running = runThreadSubscription(callbacks);
+    await vi.advanceTimersByTimeAsync(0);
+    channel.send({ ...event(11), type: "routine.created" });
+    await vi.advanceTimersByTimeAsync(0);
+    channel.send({ ...event(12), type: "run.waiting_input", runId: "run" });
+    await vi.advanceTimersByTimeAsync(0);
+    channel.send({ ...event(13), type: "run.completed", runId: "run" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(callbacks.onEvent.mock.calls.map(([, , sync]) => sync.snapshotStale)).toEqual([
+      false,
+      true,
+      false,
+    ]);
+    abort.abort();
+    channel.end();
+    await running;
+  });
+
+  it("treats events dropped while another view owns the snapshot as stale", async () => {
+    vi.useFakeTimers();
+    const { abort, channel, state, callbacks } = setup();
+    const running = runThreadSubscription(callbacks);
+    await vi.advanceTimersByTimeAsync(0);
+    state.committed = null;
+    channel.send(event(11));
+    await vi.advanceTimersByTimeAsync(0);
+    state.committed = head;
+    channel.send({ ...event(12), type: "run.completed", runId: "run" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(callbacks.applyEvent.mock.calls.map(([item]) => item.seq)).toEqual([12]);
+    expect(callbacks.onEvent.mock.calls.at(-1)?.[2]).toEqual({ snapshotStale: true });
     abort.abort();
     channel.end();
     await running;

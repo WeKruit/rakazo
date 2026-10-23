@@ -17,6 +17,14 @@ msgstr ""
 msgid " (unread)"
 msgstr " (non lu)"
 
+#: src/lib/roster-status.ts
+msgid "Compacting…"
+msgstr "Compactage…"
+
+#: src/lib/roster-status.ts
+msgid "Working in background…"
+msgstr "Travail en arrière-plan…"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"

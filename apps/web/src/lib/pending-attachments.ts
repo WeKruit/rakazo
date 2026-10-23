@@ -39,3 +39,45 @@ export function readFileAsBase64(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
+
+type UploadTarget = { botId: string } | { groupId: string };
+
+/**
+ * Attachments are read the moment they are picked, and Send uploads them all in parallel.
+ * Nothing is stored on the server before Send, so a removed or redirected attachment
+ * (new role, feedback) never leaves a file behind.
+ */
+export function createAttachmentUploads(
+  upload: (file: File, contentBase64: string, target: UploadTarget) => Promise<string>,
+  read: (file: File) => Promise<string> = readFileAsBase64,
+) {
+  const reads = new Map<string, Promise<string>>();
+  const begin = (id: string, file: File) => {
+    const content = read(file);
+    // Send awaits it and reports the failure; until then it must not be unhandled.
+    content.catch(() => undefined);
+    reads.set(id, content);
+    return content;
+  };
+  return {
+    start: begin,
+    discard(id: string) {
+      reads.delete(id);
+    },
+    /** Artifact ids in pick order. A failed early read is retried once. */
+    async resolve(
+      attachments: ReadonlyArray<{ id: string; file: File }>,
+      target: UploadTarget,
+    ): Promise<string[]> {
+      const ids = await Promise.all(
+        attachments.map(async ({ id, file }) => {
+          const early = reads.get(id);
+          const content = await (early ?? begin(id, file)).catch(() => begin(id, file));
+          return upload(file, content, target);
+        }),
+      );
+      for (const { id } of attachments) reads.delete(id);
+      return ids;
+    },
+  };
+}

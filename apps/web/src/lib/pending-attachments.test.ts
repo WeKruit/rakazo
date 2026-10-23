@@ -60,3 +60,46 @@ describe("revokePendingAttachmentPreviews", () => {
     revoke.mockRestore();
   });
 });
+
+describe("attachment uploads", () => {
+  it("reads on pick and uploads every file at once on send", async () => {
+    const { createAttachmentUploads } = await import("./pending-attachments.js");
+    const started: string[] = [];
+    const finish: Array<() => void> = [];
+    const uploads = createAttachmentUploads(
+      (file, content) =>
+        new Promise<string>((resolve) => {
+          started.push(`${file.name}:${content}`);
+          finish.push(() => resolve(`artifact-${file.name}`));
+        }),
+      async (file) => `read-${file.name}`,
+    );
+    const a = new File(["a"], "a.txt");
+    const b = new File(["b"], "b.txt");
+    uploads.start("a", a);
+    uploads.start("b", b);
+    const ids = uploads.resolve(
+      [
+        { id: "a", file: a },
+        { id: "b", file: b },
+      ],
+      { botId: "bot" },
+    );
+    await vi.waitFor(() => expect(started).toEqual(["a.txt:read-a.txt", "b.txt:read-b.txt"]));
+    for (const done of finish) done();
+    expect(await ids).toEqual(["artifact-a.txt", "artifact-b.txt"]);
+  });
+
+  it("retries a failed early read once at send", async () => {
+    const { createAttachmentUploads } = await import("./pending-attachments.js");
+    const read = vi
+      .fn<(file: File) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("busy"))
+      .mockResolvedValue("content");
+    const uploads = createAttachmentUploads(async (_file, content) => content, read);
+    const file = new File(["x"], "x.txt");
+    uploads.start("x", file);
+    expect(await uploads.resolve([{ id: "x", file }], { botId: "bot" })).toEqual(["content"]);
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+});

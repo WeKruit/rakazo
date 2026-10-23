@@ -17,6 +17,14 @@ msgstr ""
 msgid " (unread)"
 msgstr " (अपठित)"
 
+#: src/lib/roster-status.ts
+msgid "Compacting…"
+msgstr "संक्षिप्त किया जा रहा है…"
+
+#: src/lib/roster-status.ts
+msgid "Working in background…"
+msgstr "बैकग्राउंड में काम जारी है…"
+
 #. placeholder {0}: candidatePage.counts.candidates
 #: src/pages/RecruitingPanel.tsx
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
