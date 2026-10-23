@@ -1164,6 +1164,10 @@ msgstr "서버 URL과 네트워크를 확인한 뒤 다시 테스트하세요."
 msgid "Check your email"
 msgstr "이메일을 확인하세요"
 
+#: src/pages/Shell.tsx
+msgid "Checking available connections…"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr ""
@@ -2238,8 +2242,8 @@ msgid "Create space"
 msgstr "스페이스 만들기"
 
 #: src/pages/Auth.tsx
-msgid "Create your Rakazo"
-msgstr "Rakazo 계정 만들기"
+msgid "Create your WeKruit Headhunter account"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Created"
@@ -2582,6 +2586,10 @@ msgstr ""
 #: src/pages/HostComputerPrompt.tsx
 msgid "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 msgstr "Docker는 보안을 위해 컴퓨터 접근을 제한합니다. {hostLabel}에서는 Bot이 로컬 파일과 도구로 작업할 수 있습니다."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Does not match"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Don’t have an account?"
@@ -3630,6 +3638,10 @@ msgstr "읽지 않음으로 표시"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Match"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4727,6 +4739,34 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Prepared"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing a search…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing connected work…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to check availability…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read a page…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read emails…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read files…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read saved context…"
 msgstr ""
 
 #. placeholder {0}: preview?.label ?? props.name
@@ -5989,8 +6029,8 @@ msgid "Sign in again"
 msgstr ""
 
 #: src/pages/Auth.tsx
-msgid "Sign in to Rakazo"
-msgstr "Rakazo 로그인"
+msgid "Sign in to WeKruit Headhunter"
+msgstr ""
 
 #: src/lib/user-error.ts
 msgid "Sign in to your existing account to link SSO"
@@ -6620,6 +6660,10 @@ msgstr "섹션 없음"
 msgid "Unavailable"
 msgstr "사용할 수 없음"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unclear"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Uninstall"
 msgstr ""
@@ -7003,5 +7047,5 @@ msgid "Your name"
 msgstr "이름"
 
 #: src/pages/Welcome.tsx
-msgid "Your team of always-on agents<0/>that you can give real work to."
-msgstr "언제든 실제 작업을 맡길 수 있는<0/>나만의 Agent 팀"
+msgid "Your recruiting workspace."
+msgstr ""

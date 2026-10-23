@@ -1164,6 +1164,10 @@ msgstr "Check the server URL and network, then test again."
 msgid "Check your email"
 msgstr "Check your email"
 
+#: src/pages/Shell.tsx
+msgid "Checking available connections…"
+msgstr "Checking available connections…"
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr "Checking computer setup…"
@@ -2238,8 +2242,8 @@ msgid "Create space"
 msgstr "Create space"
 
 #: src/pages/Auth.tsx
-msgid "Create your Rakazo"
-msgstr "Create your Rakazo"
+msgid "Create your WeKruit Headhunter account"
+msgstr "Create your WeKruit Headhunter account"
 
 #: src/components/AskCard.tsx
 msgid "Created"
@@ -2582,6 +2586,10 @@ msgstr "Docker is configured but computers are not responding. Confirm the sandb
 #: src/pages/HostComputerPrompt.tsx
 msgid "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 msgstr "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Does not match"
+msgstr "Does not match"
 
 #: src/pages/Auth.tsx
 msgid "Don’t have an account?"
@@ -3631,6 +3639,10 @@ msgstr "Mark as Unread"
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
 msgstr "Marked as sent"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Match"
+msgstr "Match"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Match score"
@@ -4728,6 +4740,34 @@ msgstr "Prepare personalized first email drafts and follow-up sequences for the 
 #: src/pages/RecruitingPanel.tsx
 msgid "Prepared"
 msgstr "Prepared"
+
+#: src/pages/Shell.tsx
+msgid "Preparing a search…"
+msgstr "Preparing a search…"
+
+#: src/pages/Shell.tsx
+msgid "Preparing connected work…"
+msgstr "Preparing connected work…"
+
+#: src/pages/Shell.tsx
+msgid "Preparing to check availability…"
+msgstr "Preparing to check availability…"
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read a page…"
+msgstr "Preparing to read a page…"
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read emails…"
+msgstr "Preparing to read emails…"
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read files…"
+msgstr "Preparing to read files…"
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read saved context…"
+msgstr "Preparing to read saved context…"
 
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
@@ -5989,8 +6029,8 @@ msgid "Sign in again"
 msgstr "Sign in again"
 
 #: src/pages/Auth.tsx
-msgid "Sign in to Rakazo"
-msgstr "Sign in to Rakazo"
+msgid "Sign in to WeKruit Headhunter"
+msgstr "Sign in to WeKruit Headhunter"
 
 #: src/lib/user-error.ts
 msgid "Sign in to your existing account to link SSO"
@@ -6620,6 +6660,10 @@ msgstr "Unassigned"
 msgid "Unavailable"
 msgstr "Unavailable"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unclear"
+msgstr "Unclear"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Uninstall"
 msgstr "Uninstall"
@@ -7003,5 +7047,5 @@ msgid "Your name"
 msgstr "Your name"
 
 #: src/pages/Welcome.tsx
-msgid "Your team of always-on agents<0/>that you can give real work to."
-msgstr "Your team of always-on agents<0/>that you can give real work to."
+msgid "Your recruiting workspace."
+msgstr "Your recruiting workspace."

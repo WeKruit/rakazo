@@ -1164,6 +1164,10 @@ msgstr "Vérifiez l'URL du serveur et le réseau, puis testez à nouveau."
 msgid "Check your email"
 msgstr "Vérifiez votre e-mail"
 
+#: src/pages/Shell.tsx
+msgid "Checking available connections…"
+msgstr ""
+
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr ""
@@ -2238,8 +2242,8 @@ msgid "Create space"
 msgstr "Créer un espace"
 
 #: src/pages/Auth.tsx
-msgid "Create your Rakazo"
-msgstr "Créez votre Rakazo"
+msgid "Create your WeKruit Headhunter account"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Created"
@@ -2582,6 +2586,10 @@ msgstr ""
 #: src/pages/HostComputerPrompt.tsx
 msgid "Docker limits access to your computer for added security. Using {hostLabel} lets bots work with your local files and tools."
 msgstr "Docker limite l'accès à votre ordinateur pour une sécurité renforcée. Utiliser {hostLabel} permet aux bots de travailler avec vos fichiers et outils locaux."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Does not match"
+msgstr ""
 
 #: src/pages/Auth.tsx
 msgid "Don’t have an account?"
@@ -3630,6 +3638,10 @@ msgstr "Marquer comme non lu"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Match"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4727,6 +4739,34 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Prepared"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing a search…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing connected work…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to check availability…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read a page…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read emails…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read files…"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Preparing to read saved context…"
 msgstr ""
 
 #. placeholder {0}: preview?.label ?? props.name
@@ -5989,8 +6029,8 @@ msgid "Sign in again"
 msgstr ""
 
 #: src/pages/Auth.tsx
-msgid "Sign in to Rakazo"
-msgstr "Connectez-vous à Rakazo"
+msgid "Sign in to WeKruit Headhunter"
+msgstr ""
 
 #: src/lib/user-error.ts
 msgid "Sign in to your existing account to link SSO"
@@ -6620,6 +6660,10 @@ msgstr "Non assigné"
 msgid "Unavailable"
 msgstr "Indisponible"
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Unclear"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Uninstall"
 msgstr "Désinstaller"
@@ -7003,5 +7047,5 @@ msgid "Your name"
 msgstr "Votre nom"
 
 #: src/pages/Welcome.tsx
-msgid "Your team of always-on agents<0/>that you can give real work to."
-msgstr "Votre équipe d'agents toujours actifs<0/>à qui vous pouvez confier de vrais travaux."
+msgid "Your recruiting workspace."
+msgstr ""
