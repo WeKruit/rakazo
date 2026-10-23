@@ -3371,7 +3371,7 @@ function CrmRecruitingPanel({
                                   : interest.source === "ai"
                                     ? t`AI interpretation`
                                     : interest.source === "instantly"
-                                      ? "Instantly"
+                                      ? t`Email reply`
                                       : t`Unknown`}
                               </td>
                             </tr>
