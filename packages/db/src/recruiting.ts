@@ -7432,12 +7432,24 @@ function candidateIndexQuery(
     includeMatches
       ? Prisma.sql`rank_scope AS MATERIALIZED (
     SELECT ${
+      sort === "score" && displayScope?.sourceEffectId === undefined
+        ? Prisma.sql`COALESCE((
+        -- Scores compare within the newest saved result that carries them, so a later result
+        -- without scores (a re-check, a contact lookup) does not hide the role's scores.
+        SELECT page."effectId" FROM "recruiting_candidate_pages" page
+        WHERE page."roleId" = ${roleId} ${sourceScope} AND EXISTS (
+          SELECT 1 FROM "recruiting_candidate_occurrences" scored
+          WHERE scored."pageId" = page."effectId"
+            AND (scored."matchFields" ? 'match_score' OR scored."matchFields" ? 'score'))
+        ORDER BY page."observedAt" DESC, page."effectId" DESC LIMIT 1), `
+        : Prisma.empty
+    }${
       rankDomainPageId === undefined
         ? Prisma.sql`(SELECT CASE WHEN count(*) = 1 THEN min("effectId") END FROM (
           SELECT "effectId" FROM "recruiting_candidate_pages" page WHERE "roleId" = ${roleId} ${sourceScope} LIMIT 2
         ) rank_pages)`
         : Prisma.sql`${rankDomainPageId}::text`
-    } AS "pageId"
+    }${sort === "score" && displayScope?.sourceEffectId === undefined ? Prisma.sql`)` : Prisma.empty} AS "pageId"
   ),`
       : Prisma.empty
   } base AS (
