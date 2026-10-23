@@ -290,8 +290,10 @@ import {
   archiveRecruitingRole,
   bindRecruitingRole,
   confirmRecruitingBrief,
+  createRecruitingCandidateNote,
   createRecruitingReminder,
   createRecruitingRole,
+  deleteRecruitingCandidateNote,
   deleteRecruitingReminder,
   editRecruitingCriteria,
   getRecruitingAssessment,
@@ -302,6 +304,7 @@ import {
   getRecruitingRoleSetup,
   getRecruitingWorkspace,
   listRecruitingAssessments,
+  listRecruitingCandidateNotes,
   listRecruitingCandidateSources,
   listRecruitingCandidates,
   listRecruitingFeedback,
@@ -312,6 +315,7 @@ import {
   readRecruitingSource,
   reviseRecruitingRole,
   setRecruitingCandidateShortlist,
+  updateRecruitingCandidateNote,
   updateRecruitingReminder,
 } from "./recruiting.js";
 import { listRoutineRuns } from "./routine-runs.js";
@@ -3756,6 +3760,20 @@ export function createRouter(deps: RouterDeps) {
         ),
         delete: authed.recruiting.reminders.delete.handler(({ context, input }) =>
           deleteRecruitingReminder(deps.prisma, context.actor, input),
+        ),
+      },
+      notes: {
+        list: authed.recruiting.notes.list.handler(({ context, input }) =>
+          listRecruitingCandidateNotes(deps.prisma, context.actor, input),
+        ),
+        create: authed.recruiting.notes.create.handler(({ context, input }) =>
+          createRecruitingCandidateNote(deps.prisma, context.actor, input),
+        ),
+        update: authed.recruiting.notes.update.handler(({ context, input }) =>
+          updateRecruitingCandidateNote(deps.prisma, context.actor, input),
+        ),
+        delete: authed.recruiting.notes.delete.handler(({ context, input }) =>
+          deleteRecruitingCandidateNote(deps.prisma, context.actor, input),
         ),
       },
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>

@@ -2186,3 +2186,44 @@ export const RecruitingRemindersToolInputSchema = z.discriminatedUnion("operatio
   DeleteRecruitingReminderInput.extend({ operation: z.literal("delete") }),
 ]);
 export type RecruitingRemindersToolInput = z.infer<typeof RecruitingRemindersToolInputSchema>;
+
+// Owner-scoped candidate notes, shared by RPC and the agent tool. Same candidate keys as reminders.
+const NoteBody = Text.max(8000);
+export const RecruitingCandidateNoteSchema = z.strictObject({
+  id: RecruitingId,
+  roleId: RecruitingId.nullable(),
+  candidateKey: z.string(),
+  body: z.string(),
+  createdBy: z.enum(["user", "agent"]),
+  authorName: z.string().optional(),
+  createdAt: IsoDate,
+  updatedAt: IsoDate,
+});
+export type RecruitingCandidateNote = z.infer<typeof RecruitingCandidateNoteSchema>;
+export const ListRecruitingCandidateNotesInput = z.strictObject({
+  candidateKeys: z.array(ReminderCandidateKey).min(1).max(10),
+  roleId: RecruitingId.optional(),
+});
+export type ListRecruitingCandidateNotesInput = z.infer<typeof ListRecruitingCandidateNotesInput>;
+export const ListRecruitingCandidateNotesOutput = z.strictObject({
+  items: z.array(RecruitingCandidateNoteSchema),
+});
+export const CreateRecruitingCandidateNoteInput = z.strictObject({
+  candidateKey: ReminderCandidateKey,
+  roleId: RecruitingId.optional(),
+  body: NoteBody,
+});
+export type CreateRecruitingCandidateNoteInput = z.infer<typeof CreateRecruitingCandidateNoteInput>;
+export const UpdateRecruitingCandidateNoteInput = z.strictObject({
+  id: RecruitingId,
+  body: NoteBody,
+});
+export type UpdateRecruitingCandidateNoteInput = z.infer<typeof UpdateRecruitingCandidateNoteInput>;
+export const DeleteRecruitingCandidateNoteInput = z.strictObject({ id: RecruitingId });
+export const RecruitingNotesToolInputSchema = z.discriminatedUnion("operation", [
+  ListRecruitingCandidateNotesInput.extend({ operation: z.literal("list") }),
+  CreateRecruitingCandidateNoteInput.extend({ operation: z.literal("create") }),
+  UpdateRecruitingCandidateNoteInput.extend({ operation: z.literal("update") }),
+  DeleteRecruitingCandidateNoteInput.extend({ operation: z.literal("delete") }),
+]);
+export type RecruitingNotesToolInput = z.infer<typeof RecruitingNotesToolInputSchema>;

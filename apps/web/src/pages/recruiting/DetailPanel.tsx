@@ -21,6 +21,7 @@ import type { RecruitingDetailController, RecruitingDetailView } from "./detail"
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
+import { NotesTab, noteCandidateKeys } from "./NotesTab";
 import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import { candidateSections, initials, linkedinHandle, sourceLabel } from "./profile";
 import { statusText } from "./shared";
@@ -119,6 +120,7 @@ export function RecruitingDetailPanel({
         ]
       : []),
     ...(reminderKey ? [{ view: "tasks" as const, label: t`Tasks` }] : []),
+    ...(reminderKey ? [{ view: "notes" as const, label: t`Notes` }] : []),
   ];
   const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
@@ -369,6 +371,16 @@ export function RecruitingDetailPanel({
               roleId={current.role.roleId}
               candidateKey={reminderKey}
               candidateKeys={reminderKeys}
+            />
+          ) : view === "notes" && reminderKey ? (
+            <NotesTab
+              key={reminderKey}
+              roleId={current.role.roleId}
+              createKey={reminderKey}
+              candidateKeys={noteCandidateKeys(
+                current.candidate?.candidateKey,
+                crm && person.candidateId,
+              )}
             />
           ) : view === "thread" ? (
             <InboxWithReply

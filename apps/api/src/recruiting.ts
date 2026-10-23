@@ -3068,3 +3068,24 @@ export const deleteRecruitingReminder = (
   actor: Actor,
   input: { id: string },
 ) => authenticated(() => recruiting.deleteRecruitingReminder(prisma, actor, input.id));
+
+export const listRecruitingCandidateNotes = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.listRecruitingCandidateNotes>[2],
+) => authenticated(() => recruiting.listRecruitingCandidateNotes(prisma, actor, input));
+export const createRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.createRecruitingCandidateNote>[2],
+) => authenticated(() => recruiting.createRecruitingCandidateNote(prisma, actor, input));
+export const updateRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: Parameters<typeof recruiting.updateRecruitingCandidateNote>[2],
+) => authenticated(() => recruiting.updateRecruitingCandidateNote(prisma, actor, input));
+export const deleteRecruitingCandidateNote = (
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { id: string },
+) => authenticated(() => recruiting.deleteRecruitingCandidateNote(prisma, actor, input.id));
