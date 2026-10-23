@@ -724,6 +724,10 @@ describe("candidate listing and shortlist boundaries", () => {
           take: 1,
         });
         if (sort === "score") {
+          // The newest result that carries scores wins over a newer unscored one.
+          expect(firstQuery.sql).toContain(
+            `AND (scored."matchFields" ? 'match_score' OR scored."matchFields" ? 'score'))`,
+          );
           expect(firstQuery.sql).toContain("WHEN source.kind = 'score' THEN");
           const numericScore = firstQuery.sql.slice(
             firstQuery.sql.indexOf("WHEN source.kind = 'score' THEN"),
