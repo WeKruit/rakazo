@@ -635,14 +635,14 @@ export async function getRecruitingRoleSetup(
       items.push(
         email
           ? { key: "sender", state: "ready", label: email, detail: { email } }
-          : { key: "sender", state: "unavailable", label: "Sender mailbox unknown" },
+          : { key: "sender", state: "unavailable", label: "Sender unknown" },
       );
     } else {
       items.push({
         key: "campaign",
         state: "missing",
-        label: "No campaign yet; created automatically on first outreach",
-        action: { kind: "ask_agent", prompt: "为这个岗位准备 outreach campaign" },
+        label: "First email not prepared yet; prepared automatically on first outreach",
+        action: { kind: "ask_agent", prompt: "为这个岗位准备第一封邮件" },
       });
       const email = await lastUsedMailbox(deps.prisma, actor.spaceId, campaign.serverId);
       items.push(
@@ -651,7 +651,7 @@ export async function getRecruitingRoleSetup(
           : {
               key: "sender",
               state: "missing",
-              label: "Picked automatically from your connected Instantly mailboxes on first use",
+              label: "Sender picked automatically on first use",
             },
       );
     }
@@ -667,20 +667,20 @@ export async function getRecruitingRoleSetup(
         : {
             key: "crm",
             state: "missing",
-            label: "No CRM role linked",
-            action: { kind: "ask_agent", prompt: "把这个岗位关联到 CRM 里的同名岗位" },
+            label: "Role record not linked yet",
+            action: { kind: "ask_agent", prompt: "为这个岗位准备候选人名单" },
           },
     );
     const count = campaign.leads.length;
     items.push(
       count
-        ? { key: "leads", state: "ready", label: `${count} leads`, detail: { count } }
+        ? { key: "leads", state: "ready", label: `${count} recipients`, detail: { count } }
         : {
             key: "leads",
             state: "missing",
-            label: "No leads in the campaign yet",
+            label: "No recipients for the first email yet",
             detail: { count },
-            action: { kind: "ask_agent", prompt: "把入围候选人加入 campaign" },
+            action: { kind: "ask_agent", prompt: "把入围候选人加入第一封邮件的收件人" },
           },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");

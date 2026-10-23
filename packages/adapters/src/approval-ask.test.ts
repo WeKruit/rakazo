@@ -488,13 +488,12 @@ describe("buildApprovalAskBlock", () => {
     expect(block.text).toBe("Confirm sending the first email");
     expect(block.detail).toBe(
       [
-        "Campaign: Founding Engineer",
-        "Sender: team@example.test",
-        "Recipients (2):",
+        "岗位: Founding Engineer",
+        "发件人: team@example.test",
+        "收件人 (2):",
         "- Ada Lovelace <ada@example.test>",
         "- bob@example.test",
-        "Send window: Weekdays 09:00-17:00 America/Chicago",
-        "Stop on reply: on",
+        "发送时间: Weekdays 09:00-17:00 America/Chicago",
         "",
         "Confirm sending the first email to these recipients",
       ].join("\n"),
@@ -564,8 +563,9 @@ describe("buildApprovalAskBlock", () => {
         schedule: null,
       },
     });
-    expect(pending.detail).toContain("Campaign: created for this role on approval");
-    expect(pending.detail).toContain("Recipients (unknown):");
+    expect(pending.detail).toContain("岗位: this role");
+    expect(pending.detail).toContain("收件人 (unknown):");
+    expect(pending.detail).not.toMatch(/crm|campaign|lead|stop on reply/i);
   });
 
   it("redacts known secrets before changing the tool name's case and underscores", () => {
