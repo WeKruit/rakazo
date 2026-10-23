@@ -893,3 +893,63 @@ it.each(["source", "revision", "organization", "role"])(
     expect(openDetail).not.toHaveBeenCalled();
   },
 );
+
+it("filters only observed unread mail without treating unknown status as read or modifying messages", async () => {
+  const selected = vi.fn();
+  const emails = [true, false, null, undefined].map((unread, index) => ({
+    id: `observed-${index}`,
+    sourceName: "Mailbox",
+    sourceId: "source",
+    providerMessageId: `provider-${index}`,
+    savedRead: null,
+    sender: "candidate@example.test",
+    recipients: ["owner@example.test"],
+    subject: `Observed ${index}`,
+    body: `Body ${index}`,
+    snippet: false,
+    date: "2026-10-23T12:00:00Z",
+    url: null,
+    unread,
+    ...(index === 0
+      ? {
+          leadId: "11111111-1111-4111-8111-111111111111",
+          step: "2",
+          observedAt: "2026-10-23T13:00:00Z",
+        }
+      : {}),
+  }));
+  readCorrespondence.mockResolvedValue({
+    roleId: "role",
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    emails,
+    events: [],
+    partial: true,
+  });
+  const view = await mount({ view: "inbox", threadId: "thread", onEmailSelection: selected });
+  expect(view.container.textContent).toContain(
+    "Loaded observations: 4 emails · 1 unread · 2 read status unknown",
+  );
+  expect(view.container.textContent).toContain("Observed unread");
+  expect(view.container.textContent).toContain("11111111-1111-4111-8111-111111111111");
+  await view.click("Unread");
+  expect(view.container.querySelectorAll('[aria-label="Candidate conversations"] li')).toHaveLength(
+    1,
+  );
+  expect(view.container.textContent).not.toContain("Observed 1");
+  expect(selected).toHaveBeenLastCalledWith(
+    expect.objectContaining({ emailId: "observed-0", providerMessageId: "provider-0" }),
+  );
+  await view.click("All");
+  const rows = view.container.querySelectorAll<HTMLButtonElement>(
+    '[aria-label="Candidate conversations"] li button',
+  );
+  await act(async () => rows[2]!.click());
+  expect(view.container.querySelector('[aria-label="Observed email metadata"]')?.textContent).toBe(
+    "Read status unknown",
+  );
+  expect(readCorrespondence).toHaveBeenCalledTimes(1);
+  expect(view.conversation).not.toHaveBeenCalled();
+  expect(view.container.querySelector('a[href*="instantly"]')).toBeNull();
+});

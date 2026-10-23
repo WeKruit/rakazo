@@ -383,6 +383,7 @@ function SavedCorrespondenceView({
   const [selectedCampaign, setSelectedCampaign] = useState<string>();
   const [chosenCandidate, setChosenCandidate] = useState<string>();
   const [candidateQuery, setCandidateQuery] = useState("");
+  const [mailFilter, setMailFilter] = useState<"all" | "unread">("all");
   const [mobileConversation, setMobileConversation] = useState(false);
   const railTrigger = useRef<HTMLButtonElement | null>(null);
   const backButton = useRef<HTMLButtonElement | null>(null);
@@ -506,6 +507,11 @@ function SavedCorrespondenceView({
             email.crm?.candidateId,
           ])
         : `message:${email.id}`;
+  const loadedEmails = data?.emails ?? [];
+  const unreadCount = loadedEmails.filter((email) => email.unread === true).length;
+  const unknownReadCount = loadedEmails.filter((email) => email.unread == null).length;
+  const visibleEmails =
+    mailFilter === "unread" ? loadedEmails.filter((email) => email.unread === true) : loadedEmails;
   const rail = new Map<
     string,
     {
@@ -513,19 +519,19 @@ function SavedCorrespondenceView({
       email?: SavedCorrespondence["emails"][number];
     }
   >();
-  for (const email of data?.emails ?? [])
+  for (const email of visibleEmails)
     if (!rail.has(candidateOf(email))) rail.set(candidateOf(email), { email });
-  for (const person of people.data?.items ?? [])
+  for (const person of people.data?.items ?? []) {
+    if (mailFilter === "unread" && !rail.has(`candidate:${person.candidateId}`)) continue;
     rail.set(`candidate:${person.candidateId}`, {
       ...rail.get(`candidate:${person.candidateId}`),
       person,
     });
+  }
   const candidateKey =
     chosenCandidate && rail.has(chosenCandidate) ? chosenCandidate : rail.keys().next().value;
   const selectedPerson = candidateKey ? rail.get(candidateKey)?.person : undefined;
-  const candidateEmails = (data?.emails ?? []).filter(
-    (email) => candidateOf(email) === candidateKey,
-  );
+  const candidateEmails = visibleEmails.filter((email) => candidateOf(email) === candidateKey);
   const sourceOf = (email: SavedCorrespondence["emails"][number]) =>
     JSON.stringify([email.sourceId, email.eaccount ?? null]);
   // Only recorded source/thread/candidate identity can combine messages. Unknown threads stay separate.
@@ -721,6 +727,36 @@ function SavedCorrespondenceView({
       ) : null}
       {data && ["ready", "empty"].includes(data.status) && !interview ? (
         <section aria-label={t`Inbox`}>
+          <fieldset
+            className="mb-3 flex flex-wrap items-center gap-3"
+            aria-label={t`Loaded email filters`}
+          >
+            <Button
+              variant="outline"
+              aria-pressed={mailFilter === "all"}
+              onClick={() => setMailFilter("all")}
+            >
+              <Trans>All</Trans>
+            </Button>
+            <Button
+              variant="outline"
+              aria-pressed={mailFilter === "unread"}
+              onClick={() => setMailFilter("unread")}
+            >
+              <Trans>Unread</Trans>
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              <Trans>
+                Loaded observations: {loadedEmails.length} emails · {unreadCount} unread ·{" "}
+                {unknownReadCount} read status unknown
+              </Trans>
+            </span>
+          </fieldset>
+          {mailFilter === "unread" && !visibleEmails.length ? (
+            <p>
+              <Trans>No unread emails among loaded observations.</Trans>
+            </p>
+          ) : null}
           {workspaceRead.failed || people.failed ? (
             <p role="alert">
               <Trans>Could not load candidate records. Try refreshing.</Trans>
@@ -857,6 +893,40 @@ function SavedCorrespondenceView({
                     </NativeSelectOption>
                   ))}
                 </NativeSelect>
+              ) : null}
+              {selected ? (
+                <section
+                  className="space-y-1 text-xs text-muted-foreground"
+                  aria-label={t`Observed email metadata`}
+                >
+                  <p>
+                    {selected.unread === true ? (
+                      <Trans>Observed unread</Trans>
+                    ) : selected.unread === false ? (
+                      <Trans>Observed read</Trans>
+                    ) : (
+                      <Trans>Read status unknown</Trans>
+                    )}
+                  </p>
+                  {selected.step != null ? (
+                    <p>
+                      <Trans>Step</Trans> · {selected.step}
+                    </p>
+                  ) : null}
+                  {selected.leadId ? (
+                    <p className="break-all">
+                      <Trans>Lead ID</Trans> · {selected.leadId}
+                    </p>
+                  ) : null}
+                  {selected.observedAt ? (
+                    <p>
+                      <Trans>Observed at</Trans> ·{" "}
+                      <time dateTime={selected.observedAt}>
+                        {new Date(selected.observedAt).toLocaleString()}
+                      </time>
+                    </p>
+                  ) : null}
+                </section>
               ) : null}
               <EmailConversation
                 candidateName={selectedPerson?.name}
