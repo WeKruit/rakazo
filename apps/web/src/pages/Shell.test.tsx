@@ -69,6 +69,7 @@ const shellApi = vi.hoisted(() => ({
   archiveBot: vi.fn(),
   updateBot: vi.fn(),
   reorderBots: vi.fn(),
+  dropStreams: new Set<(reason: Error) => void>(),
   recruiting: {
     crmData: vi.fn(),
     correspondence: vi.fn(),
@@ -122,9 +123,10 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       // An open, quiet stream: a rejected one makes the client resync on a real-time retry timer.
       subscribe: vi.fn(
         (_input: unknown, options?: { signal?: AbortSignal }) =>
-          new Promise<never>((_resolve, reject) =>
-            options?.signal?.addEventListener("abort", () => reject(options.signal?.reason)),
-          ),
+          new Promise<never>((_resolve, reject) => {
+            shellApi.dropStreams.add(reject);
+            options?.signal?.addEventListener("abort", () => reject(options.signal?.reason));
+          }),
       ),
       head: vi.fn().mockResolvedValue(null),
       markRead: vi.fn().mockResolvedValue({ ok: true }),
@@ -186,6 +188,7 @@ afterEach(() => {
   root = null;
   container = null;
   localStorage.clear();
+  shellApi.dropStreams.clear();
   vi.restoreAllMocks();
   vi.clearAllMocks();
   vi.useRealTimers();
@@ -1104,6 +1107,67 @@ it("does not map a failed or late role binding into the current role", async () 
     shellApi.recruiting.crmData.mock.calls.every(([input]) => input.operation === "memberships"),
   ).toBe(true);
   expect(container?.textContent).not.toContain("Stored CRM history");
+});
+
+it("keeps the role list through a thread resync and drops a response for a previous Space", async () => {
+  const source = { serverId: "crm-source", serverRevision: 2, name: "CRM", status: "ready" };
+  const roles = (roleLabel: string) => ({
+    operation: "roles",
+    source: { ...source, organizationId: "org-1" },
+    checkedAt: "2026-10-22T00:00:00Z",
+    items: [
+      {
+        crmRoleId: "crm-role",
+        clientId: "client-1",
+        clientLabel: "Client",
+        roleLabel,
+        summary: null,
+      },
+    ],
+  });
+  const memberships = {
+    operation: "memberships",
+    checkedAt: "2026-10-22T00:00:00Z",
+    sources: [
+      {
+        ...source,
+        memberships: [{ organizationId: "org-1", name: "Organization", role: "member" }],
+      },
+    ],
+  };
+  let label = "Existing role";
+  shellApi.recruiting.crmData.mockImplementation(async (input) =>
+    input.operation === "memberships" ? memberships : roles(label),
+  );
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const navigation = () =>
+    document.querySelector('[data-testid="recruiting-navigation"]')?.textContent ?? "";
+  expect(navigation()).toContain("Existing role · Client");
+  let finish!: (value: unknown) => void;
+  shellApi.recruiting.crmData.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => {
+    for (const drop of shellApi.dropStreams) drop(new Error("Stream closed"));
+    shellApi.dropStreams.clear();
+  });
+  expect(
+    shellApi.recruiting.crmData.mock.calls.filter(([input]) => input.operation === "memberships"),
+  ).toHaveLength(2);
+  expect(navigation()).toContain("Existing role · Client");
+  label = "Other Space role";
+  view.bootstrap.me.spaceId = "other-space";
+  await view.render();
+  label = "Late role";
+  await act(async () => finish(memberships));
+  expect(navigation()).not.toContain("Late role");
+  expect(navigation()).not.toContain("Existing role · Client");
 });
 
 it.each(["retry", "role-change", "space", "attachment-space"])(

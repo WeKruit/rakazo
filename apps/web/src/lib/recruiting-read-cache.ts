@@ -22,3 +22,8 @@ export function clearRecruitingReads(cache: RecruitingReadCache | undefined, sco
     for (const key of cache.entries.keys())
       if (key.startsWith(`${scope}:`)) cache.entries.delete(key);
 }
+
+/** Rejects in-flight reads while keeping the last data on screen until fresh reads replace it. */
+export function revalidateRecruitingReads(cache: RecruitingReadCache | undefined) {
+  if (cache) cache.epoch++;
+}

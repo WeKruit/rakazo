@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { clearRecruitingReads, rememberRecruitingRead } from "./recruiting-read-cache";
+import {
+  clearRecruitingReads,
+  rememberRecruitingRead,
+  revalidateRecruitingReads,
+} from "./recruiting-read-cache";
 
 it("bounds saved reads and rejects an in-flight write after scoped invalidation", () => {
   const cache = { entries: new Map<string, unknown>(), epoch: 0 };
@@ -16,4 +20,15 @@ it("bounds saved reads and rejects an in-flight write after scoped invalidation"
   expect(cache.entries.has("actor:space:role:candidates")).toBe(false);
   clearRecruitingReads(cache);
   expect(cache.entries.size).toBe(0);
+});
+
+it("keeps the last read during revalidation while rejecting a response from before it", () => {
+  const cache = { entries: new Map<string, unknown>(), epoch: 0 };
+  rememberRecruitingRead(cache, "actor:space:role:crm:roles", ["saved"], 0);
+  revalidateRecruitingReads(cache);
+  expect(cache.entries.get("actor:space:role:crm:roles")).toEqual(["saved"]);
+  rememberRecruitingRead(cache, "actor:space:role:crm:roles", ["late"], 0);
+  expect(cache.entries.get("actor:space:role:crm:roles")).toEqual(["saved"]);
+  rememberRecruitingRead(cache, "actor:space:role:crm:roles", ["fresh"], cache.epoch);
+  expect(cache.entries.get("actor:space:role:crm:roles")).toEqual(["fresh"]);
 });
