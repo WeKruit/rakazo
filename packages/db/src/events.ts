@@ -24,6 +24,8 @@ import {
   messagingChannelId,
   resolveAskChoice,
   sanitizeJsonValue,
+  type WorkActivity,
+  workActivityForTool,
 } from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { getLogger } from "@rakazo/logging";
@@ -1595,6 +1597,26 @@ export function completedRunBlocks(
   );
 }
 
+/** run.completed summary: wall time since start and finished steps grouped by category. */
+export function completedRunSummary(
+  blocks: MessageBlock[],
+  startedAt: Date | null,
+  completedAt: Date,
+): { startedAt?: string; activeMs?: number; steps: { category: WorkActivity; count: number }[] } {
+  const counts = new Map<WorkActivity, number>();
+  for (const block of blocks)
+    if (block.kind === "steps")
+      for (const step of block.steps) {
+        const category = workActivityForTool(step.label);
+        counts.set(category, (counts.get(category) ?? 0) + step.count);
+      }
+  const steps = [...counts].map(([category, count]) => ({ category, count }));
+  if (!startedAt) return { steps };
+  // ponytail: wall time since run start; pauses are counted until runs record resumedAt.
+  const activeMs = Math.max(0, Math.round(completedAt.getTime() - startedAt.getTime()));
+  return { startedAt: startedAt.toISOString(), activeMs, steps };
+}
+
 async function finalizeRunOnce(
   prisma: PrismaClient,
   input: FinalizeRunInput,
@@ -1684,7 +1706,10 @@ async function finalizeRunOnce(
       botId: input.botId,
       type: input.outcome === "completed" ? "run.completed" : "run.failed",
       runId: input.runId,
-      payload: input.outcome === "completed" ? {} : { error: input.error },
+      payload:
+        input.outcome === "completed"
+          ? completedRunSummary(input.blocks, writableRun?.startedAt ?? null, now)
+          : { error: input.error },
     });
     // The final message and the terminal event share one sequence reservation and insert.
     const lastEvent = (await appendEventsInTransaction(tx, events)).at(-1)!;

@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArtifactFileCard } from "../components/ArtifactFileCard";
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { fetchArtifactBytes } from "../lib/artifact-open";
+import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
@@ -393,6 +394,7 @@ function SavedCorrespondenceView({
   }>();
   useEffect(() => {
     let cancelled = false;
+    const abort = new AbortController();
     const cacheEpoch = readCache?.epoch;
     setRead((current) => ({
       key,
@@ -402,13 +404,17 @@ function SavedCorrespondenceView({
           ? (readCache?.entries.get(cacheKey) as SavedCorrespondence | undefined)
           : undefined) ?? (readCache && current?.scopeKey === scopeKey ? current?.data : undefined),
     }));
-    void rpc.recruiting
-      .correspondence({ ...artifactTarget, view })
+    void retryTransientRead(
+      () => rpc.recruiting.correspondence({ ...artifactTarget, view }),
+      abort.signal,
+    )
       .then((data) => {
-        if (!cancelled && (!readCache || cacheEpoch === readCache.epoch)) {
-          rememberRecruitingRead(readCache, cacheKey, data, cacheEpoch);
-          setRead({ key, scopeKey, data, fresh: true });
-        }
+        if (cancelled) return;
+        // Invalidated in flight: not trusted, but the view must not stay loading.
+        if (readCache && cacheEpoch !== readCache.epoch)
+          return setRead({ key, scopeKey, failed: true });
+        rememberRecruitingRead(readCache, cacheKey, data, cacheEpoch);
+        setRead({ key, scopeKey, data, fresh: true });
       })
       .catch((error) => {
         if (!cancelled) {
@@ -430,6 +436,7 @@ function SavedCorrespondenceView({
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [key, cacheKey, readCache, readCacheScope, scopeKey]);
   const current = read?.key === key && read.scopeKey === scopeKey ? read : undefined;

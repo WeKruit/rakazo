@@ -14,6 +14,7 @@ import {
   claimSteering,
   clearThread,
   completedRunBlocks,
+  completedRunSummary,
   discardAnsweredSteering,
   finalizeComputerControlRelease,
   finalizeRun,
@@ -742,6 +743,35 @@ describe("finalizeRun", () => {
       ),
     ).toEqual([blocks[0], blocks[1], { ...blocks[2], durationMs: 103_000 }]);
     expect(completedRunBlocks(blocks, null, new Date())).toBe(blocks);
+  });
+
+  it("summarizes active time and finished steps by category for run.completed", () => {
+    const blocks = [
+      { kind: "steps" as const, steps: [{ label: "Recruiting candidates", count: 2 }] },
+      { kind: "text" as const, text: "Checked." },
+      {
+        kind: "steps" as const,
+        steps: [
+          { label: "recruiting_shortlist", count: 1 },
+          { label: "Shell exec", count: 1 },
+        ],
+      },
+    ];
+    expect(
+      completedRunSummary(
+        blocks,
+        new Date("2026-09-01T12:00:00.000Z"),
+        new Date("2026-09-01T12:01:43.000Z"),
+      ),
+    ).toEqual({
+      startedAt: "2026-09-01T12:00:00.000Z",
+      activeMs: 103_000,
+      steps: [
+        { category: "candidates", count: 3 },
+        { category: "working", count: 1 },
+      ],
+    });
+    expect(completedRunSummary([], null, new Date())).toEqual({ steps: [] });
   });
 
   it("retries a transaction conflict without duplicating the terminal event or notification", async () => {

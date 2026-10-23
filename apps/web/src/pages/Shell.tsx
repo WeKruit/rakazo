@@ -237,6 +237,7 @@ import {
 } from "../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { quoteDraftForSelection } from "../lib/quote-selection";
+import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import {
   clearRecruitingReads,
@@ -1040,11 +1041,14 @@ export function ShellPage() {
   // second, and not at all while the page is hidden.
   const recruitingRefreshQueue = useRef<ReturnType<typeof createCoalescedRefresh>>(undefined);
   const lastRecruitingRefreshAt = useRef(0);
+  /** Set when a resync could not reach the backend, whose workbench reads may have failed too. */
+  const recruitingOutage = useRef(false);
   /** A reconnect re-reads the workbench only if it missed events, or to retry after a while. */
   const reconnectNeedsRecruitingRead = (
     before: { threadId: string; cursor: number } | null | undefined,
     fresh: { threadId: string; cursor: number },
   ) =>
+    recruitingOutage.current ||
     before?.threadId !== fresh.threadId ||
     before.cursor !== fresh.cursor ||
     Date.now() - lastRecruitingRefreshAt.current >= RECONNECT_RECRUITING_RETRY_MS;
@@ -1052,6 +1056,7 @@ export function ShellPage() {
     const queue = createCoalescedRefresh(
       () => {
         lastRecruitingRefreshAt.current = Date.now();
+        recruitingOutage.current = false;
         revalidateRecruitingReads(recruitingReadCache.current);
         setRecruitingRefresh((value) => value + 1);
       },
@@ -1560,6 +1565,7 @@ export function ShellPage() {
 
   useEffect(() => {
     let cancelled = false;
+    const bootstrapAbort = new AbortController();
     const user = { id: userId };
     botsRefreshUser.current = user;
     let bootstrapReady = false;
@@ -1663,8 +1669,8 @@ export function ShellPage() {
         setBootstrapMe(null);
         showToolActivityRef.current = null;
         const spaceId = selectedSpaceId();
-        return rpc
-          .me()
+        // A deploy can refuse requests for about a minute; keep trying until the account answers.
+        return retryTransientRead(() => rpc.me(), bootstrapAbort.signal)
           .then((me) => {
             if (
               cancelled ||
@@ -1689,6 +1695,7 @@ export function ShellPage() {
     document.addEventListener("visibilitychange", refreshVisibleBots);
     return () => {
       cancelled = true;
+      bootstrapAbort.abort();
       botsRefreshUser.current = { id: undefined };
       pendingBotsRefresh.current = null;
       botsRefreshEpoch.current++;
@@ -1823,7 +1830,12 @@ export function ShellPage() {
         rpc.threads.head({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) }),
       refresh: async () => {
         const before = snapshotRef.current;
-        const fresh = await refreshThread(active.id, threadSnapshotSignal(abort.signal));
+        const fresh = await refreshThread(active.id, threadSnapshotSignal(abort.signal)).catch(
+          (error: unknown) => {
+            if (!abort.signal.aborted) recruitingOutage.current = true;
+            throw error;
+          },
+        );
         if (
           !abort.signal.aborted &&
           epoch === historyEpoch.current &&
@@ -1962,7 +1974,12 @@ export function ShellPage() {
       loadHead: () => rpc.threads.head({ groupId }, { signal: threadSnapshotSignal(abort.signal) }),
       refresh: async () => {
         const before = snapshotRef.current;
-        const fresh = await refreshGroupThread(groupId, threadSnapshotSignal(abort.signal));
+        const fresh = await refreshGroupThread(groupId, threadSnapshotSignal(abort.signal)).catch(
+          (error: unknown) => {
+            if (!abort.signal.aborted) recruitingOutage.current = true;
+            throw error;
+          },
+        );
         if (
           !abort.signal.aborted &&
           epoch === historyEpoch.current &&
@@ -2348,6 +2365,7 @@ export function ShellPage() {
   const bindingReadKey = JSON.stringify([recruitingCacheScope, recruitingRefresh]);
   const [bindingRead, setBindingRead] = useState<{
     key: string;
+    scope: string;
     workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
     failed?: boolean;
   }>();
@@ -2357,12 +2375,12 @@ export function ShellPage() {
       return;
     }
     let cancelled = false;
+    const abort = new AbortController();
     const cache = recruitingReadCache.current;
     const epoch = cache.epoch;
     const threadId = knownThreadId;
     const isCurrent = () =>
       !cancelled &&
-      epoch === cache.epoch &&
       botsRefreshUser.current.id === userId &&
       (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
       knownThreadIdRef.current === threadId &&
@@ -2370,21 +2388,40 @@ export function ShellPage() {
     const cached = cache.entries.get(`${recruitingCacheScope}:workspace`) as
       | { workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
       | undefined;
-    setBindingRead({ key: bindingReadKey, workspace: cached?.workspace });
-    void rpc.recruiting
-      .getWorkspace({ threadId })
+    setBindingRead({
+      key: bindingReadKey,
+      scope: recruitingCacheScope,
+      workspace: cached?.workspace,
+    });
+    void retryTransientRead(() => rpc.recruiting.getWorkspace({ threadId }), abort.signal)
       .then((workspace) => {
         if (!isCurrent()) return;
+        // A read invalidated in flight is not trusted, but must not leave the view loading.
+        if (epoch !== cache.epoch)
+          return setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, failed: true });
         rememberRecruitingRead(cache, `${recruitingCacheScope}:workspace`, { workspace }, epoch);
-        setBindingRead({ key: bindingReadKey, workspace });
+        setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, workspace });
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (!isCurrent()) return;
-        clearRecruitingReads(cache, recruitingCacheScope);
-        setBindingRead({ key: bindingReadKey, failed: true });
+        // An outage keeps sibling reads; only a denial drops this conversation's saved reads.
+        if (
+          error instanceof ORPCError &&
+          ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+        )
+          clearRecruitingReads(cache, recruitingCacheScope);
+        // A conversation without a recruiting role has no CRM binding; that is not a failure.
+        if (error instanceof ORPCError && error.code === "NOT_FOUND")
+          return setBindingRead({
+            key: bindingReadKey,
+            scope: recruitingCacheScope,
+            workspace: null,
+          });
+        setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, failed: true });
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [
     boundRoleView,
@@ -2395,7 +2432,13 @@ export function ShellPage() {
     bootstrapMe?.spaceId,
     groupId,
   ]);
-  const currentBindingRead = bindingRead?.key === bindingReadKey ? bindingRead : undefined;
+  // Until a refresh's effect runs, keep this conversation's binding so the workbench is not remounted.
+  const currentBindingRead =
+    bindingRead?.key === bindingReadKey
+      ? bindingRead
+      : bindingRead?.workspace && bindingRead.scope === recruitingCacheScope
+        ? { key: bindingReadKey, scope: bindingRead.scope, workspace: bindingRead.workspace }
+        : undefined;
   const boundCrmTarget = currentBindingRead?.workspace?.crmTarget;
   const boundCrmSelection: CrmBrowseSelection | undefined = boundCrmTarget
     ? {
@@ -2574,6 +2617,11 @@ export function ShellPage() {
       : undefined;
   const chatRoleTitle =
     !showToolActivity && inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : undefined;
+  // A message sent while the role chat is closed opens it, so the send and its reply are seen.
+  const sendFromComposer: typeof sendMessage = (...args) => {
+    if (roleChatWorkspace && !roleChatOpen) setRoleChatOpen(true);
+    return (emptyCrmChat ? sendCrmRoleMessage : sendMessage)(...args);
+  };
   function openRoleChat(text?: string) {
     if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
     if (roleChatWorkspace) setRoleChatOpen(true);
@@ -5520,7 +5568,7 @@ export function ShellPage() {
             fileInputRef={fileInputRef}
             onAttachmentPick={emptyCrmChat ? files => onAttachmentPick(files, composerDraftKey) : onAttachmentPick}
             onRemoveAttachment={removeAttachment}
-            onSend={emptyCrmChat ? sendCrmRoleMessage : sendMessage}
+            onSend={sendFromComposer}
             onStop={stopRun}
             onVoice={
               !emptyCrmChat && !inGroup && active

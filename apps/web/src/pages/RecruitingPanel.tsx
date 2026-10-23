@@ -79,6 +79,7 @@ import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
 import { decodeArtifactBase64 } from "../lib/artifact-open";
 import { authClient } from "../lib/auth";
+import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import type { RecruitingPanelState } from "../lib/right-panel-state";
@@ -2370,13 +2371,16 @@ function useBoundRole(
   enabled: boolean,
   refreshSignal: number,
   cache: Pick<Props, "readCache" | "readCacheScope">,
-): { done: boolean; role?: BoundRole } {
+): { done: boolean; role?: BoundRole; title?: string } {
   const read = useKeyedRead(
     enabled ? JSON.stringify([threadId, refreshSignal]) : null,
-    async (): Promise<{ role?: BoundRole }> => {
+    async (): Promise<{ role?: BoundRole; title?: string }> => {
       const workspace = await rpc.recruiting.getWorkspace({ threadId });
+      // The native role names the workbench, bound to a CRM role or not.
+      const title = workspace?.role.title;
       return workspace?.crmTarget
         ? {
+            title,
             role: {
               roleId: workspace.role.id,
               spaceId: workspace.role.spaceId,
@@ -2384,11 +2388,15 @@ function useBoundRole(
               crmTarget: workspace.crmTarget.target,
             },
           }
-        : {};
+        : { title };
     },
     tabCacheSlot(cache, ["boundRole", threadId]),
   );
-  return { done: !enabled || Boolean(read.data) || read.failed, role: read.data?.role };
+  return {
+    done: !enabled || Boolean(read.data) || read.failed,
+    role: read.data?.role,
+    title: read.data?.title,
+  };
 }
 
 function CrmRecruitingPanel({
@@ -2458,16 +2466,18 @@ function CrmRecruitingPanel({
   useEffect(() => {
     if (!storedCrmReads) return;
     let cancelled = false;
+    const abort = new AbortController();
     const epoch = readCache?.epoch;
     setRead({
       key,
       loading: true,
       data: cacheKey ? (readCache?.entries.get(cacheKey) as CandidatePage | undefined) : undefined,
     });
-    void rpc.recruiting
-      .crmData(input)
+    void retryTransientRead(() => rpc.recruiting.crmData(input), abort.signal)
       .then((value) => {
-        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (cancelled) return;
+        // Invalidated in flight: not trusted, but the view must not stay loading.
+        if (readCache && epoch !== readCache.epoch) return setRead({ key, failed: true });
         if (
           value.operation !== "candidates" ||
           value.source.serverId !== browse.selection.serverId ||
@@ -2491,6 +2501,7 @@ function CrmRecruitingPanel({
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [key, cacheKey, readCache, readCacheScope, storedCrmReads]);
   const page = read?.key === key ? read.data : undefined;
@@ -2521,6 +2532,7 @@ function CrmRecruitingPanel({
       return;
     }
     let cancelled = false;
+    const abort = new AbortController();
     const epoch = readCache?.epoch;
     const savedKey = readCacheScope
       ? `${readCacheScope}:crm:${JSON.stringify(mailInput)}`
@@ -2529,10 +2541,11 @@ function CrmRecruitingPanel({
       key: mailKey,
       data: savedKey ? (readCache?.entries.get(savedKey) as MailPage | undefined) : undefined,
     });
-    void rpc.recruiting
-      .crmData(mailInput)
+    void retryTransientRead(() => rpc.recruiting.crmData(mailInput), abort.signal)
       .then((value) => {
-        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (cancelled) return;
+        // Invalidated in flight: not trusted, but the view must not stay loading.
+        if (readCache && epoch !== readCache.epoch) return setMail({ key: mailKey, failed: true });
         if (
           value.operation !== "mail" ||
           value.source.serverId !== browse.selection.serverId ||
@@ -2560,6 +2573,7 @@ function CrmRecruitingPanel({
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [mailKey, browse.view, readCache, readCacheScope, storedCrmReads]);
   const currentMail = mail?.key === mailKey ? mail : undefined;
@@ -2663,6 +2677,7 @@ function CrmRecruitingPanel({
   useEffect(() => {
     if (!sectionInput || !storedCrmReads) return;
     let cancelled = false;
+    const abort = new AbortController();
     const epoch = readCache?.epoch;
     const savedKey = readCacheScope
       ? `${readCacheScope}:crm:${JSON.stringify(sectionInput)}`
@@ -2672,10 +2687,12 @@ function CrmRecruitingPanel({
       loading: true,
       data: savedKey ? (readCache?.entries.get(savedKey) as SectionPage | undefined) : undefined,
     });
-    void rpc.recruiting
-      .crmData(sectionInput)
+    void retryTransientRead(() => rpc.recruiting.crmData(sectionInput), abort.signal)
       .then((value) => {
-        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (cancelled) return;
+        // Invalidated in flight: not trusted, but the view must not stay loading.
+        if (readCache && epoch !== readCache.epoch)
+          return setSectionRead({ key: sectionKey, failed: true });
         if (
           (value.operation !== "important" && value.operation !== "roleCampaigns") ||
           value.operation !== sectionInput.operation ||
@@ -2699,6 +2716,7 @@ function CrmRecruitingPanel({
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [sectionKey, readCache, readCacheScope, storedCrmReads]);
   const section = sectionRead?.key === sectionKey ? sectionRead : undefined;
@@ -2729,6 +2747,7 @@ function CrmRecruitingPanel({
   useEffect(() => {
     if (!detailsInput || !storedCrmReads) return;
     let cancelled = false;
+    const abort = new AbortController();
     const epoch = readCache?.epoch;
     const savedKey = readCacheScope
       ? `${readCacheScope}:crm:${JSON.stringify(detailsInput)}`
@@ -2738,10 +2757,12 @@ function CrmRecruitingPanel({
       loading: true,
       data: savedKey ? (readCache?.entries.get(savedKey) as DetailsPage | undefined) : undefined,
     });
-    void rpc.recruiting
-      .crmData(detailsInput)
+    void retryTransientRead(() => rpc.recruiting.crmData(detailsInput), abort.signal)
       .then((value) => {
-        if (cancelled || (readCache && epoch !== readCache.epoch)) return;
+        if (cancelled) return;
+        // Invalidated in flight: not trusted, but the view must not stay loading.
+        if (readCache && epoch !== readCache.epoch)
+          return setDetailsRead({ key: detailsKey, failed: true });
         if (
           value.operation !== "candidateDetails" ||
           value.source.serverId !== pinned.serverId ||
@@ -2764,6 +2785,7 @@ function CrmRecruitingPanel({
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [detailsKey, readCache, readCacheScope, storedCrmReads]);
   const currentDetails = detailsRead?.key === detailsKey ? detailsRead : undefined;
@@ -3565,9 +3587,11 @@ function CrmRecruitingPanel({
     <div className="hire-standard-view">
       <header className="hire-section-header">
         <h1>
-          {page?.selectedRole?.roleLabel ??
-            bound.role?.title ??
-            (bound.done && read?.key === key && !read.loading ? t`CRM contacts` : null)}
+          {bound.title ??
+            (bound.done
+              ? (page?.selectedRole?.roleLabel ??
+                (read?.key === key && !read.loading ? t`CRM contacts` : null))
+              : null)}
         </h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
       </header>
@@ -3819,9 +3843,13 @@ function RecruitingWorkspace({
       if (!cancelled && epoch === readEpoch.current) denyAccess(error);
       throw error;
     };
+    const abort = new AbortController();
+    /** Retries a deploy's or an edge's transient failure before reporting it. */
+    const read = <T,>(call: () => Promise<T>) =>
+      retryTransientRead(call, abort.signal).catch(onReadError);
     async function load() {
       try {
-        let workspace = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
+        let workspace = await read(() => rpc.recruiting.getWorkspace({ threadId }));
         while (!cancelled && epoch === readEpoch.current) {
           updateEditScope(workspace);
           setSnapshot((current) =>
@@ -3838,27 +3866,26 @@ function RecruitingWorkspace({
           rememberRecruitingRead(readCache, workspaceCacheKey, { workspace }, cacheEpoch);
           setValidatedWorkspaceRead(workspaceReadKey);
           if (summary) return;
+          const roleId = workspace?.role.id;
           const [assessments, research, questions, documents] = await Promise.all([
-            workspace && !candidateWorkspace
-              ? rpc.recruiting.listAssessments({ roleId: workspace.role.id }).catch(onReadError)
+            roleId && !candidateWorkspace
+              ? read(() => rpc.recruiting.listAssessments({ roleId }))
               : Promise.resolve([]),
-            workspace
-              ? rpc.recruiting.listResearch({ roleId: workspace.role.id }).catch(onReadError)
+            roleId
+              ? read(() => rpc.recruiting.listResearch({ roleId }))
               : Promise.resolve({ tasks: [], actions: [], observations: [] }),
-            workspace && !candidateWorkspace
-              ? rpc.recruiting
-                  .listQuestions({ threadId, roleId: workspace.role.id })
-                  .catch(onReadError)
+            roleId && !candidateWorkspace
+              ? read(() => rpc.recruiting.listQuestions({ threadId, roleId }))
               : Promise.resolve({ questions: [] }),
             candidateWorkspace
               ? Promise.resolve([])
               : Promise.all([
-                  rpc.memory.list({ scope: "user" }).catch(onReadError),
-                  ...(botId ? [rpc.memory.list({ scope: "bot", botId }).catch(onReadError)] : []),
+                  read(() => rpc.memory.list({ scope: "user" })),
+                  ...(botId ? [read(() => rpc.memory.list({ scope: "bot", botId }))] : []),
                 ]).then((lists) => lists.flat()),
           ]);
           if (cancelled || epoch !== readEpoch.current) return;
-          const verified = await rpc.recruiting.getWorkspace({ threadId }).catch(onReadError);
+          const verified = await read(() => rpc.recruiting.getWorkspace({ threadId }));
           if (cancelled || epoch !== readEpoch.current) return;
           if (
             workspace?.role.id !== verified?.role.id ||
@@ -3885,6 +3912,7 @@ function RecruitingWorkspace({
     void load();
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [
     userId,
@@ -3925,6 +3953,7 @@ function RecruitingWorkspace({
   useEffect(() => {
     if (!contactsKey) return;
     let cancelled = false;
+    const abort = new AbortController();
     const cacheEpoch = readCache?.epoch;
     setContactsRead((current) => ({
       key: contactsKey,
@@ -3935,13 +3964,20 @@ function RecruitingWorkspace({
           : undefined) ??
         (readCache && current?.cacheKey === contactsCacheKey ? current?.data : undefined),
     }));
-    void rpc.recruiting
-      .correspondence({ ...(groupId ? { groupId } : { botId: botId! }), view: "contacts" })
+    void retryTransientRead(
+      () =>
+        rpc.recruiting.correspondence({
+          ...(groupId ? { groupId } : { botId: botId! }),
+          view: "contacts",
+        }),
+      abort.signal,
+    )
       .then((data) => {
-        if (!cancelled && (!readCache || cacheEpoch === readCache.epoch)) {
-          rememberRecruitingRead(readCache, contactsCacheKey, data, cacheEpoch);
-          setContactsRead({ key: contactsKey, cacheKey: contactsCacheKey, data });
-        }
+        if (cancelled) return;
+        if (readCache && cacheEpoch !== readCache.epoch)
+          return setContactsRead({ key: contactsKey, failed: true });
+        rememberRecruitingRead(readCache, contactsCacheKey, data, cacheEpoch);
+        setContactsRead({ key: contactsKey, cacheKey: contactsCacheKey, data });
       })
       .catch((error) => {
         if (!cancelled) {
@@ -3955,6 +3991,7 @@ function RecruitingWorkspace({
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [contactsKey, botId, groupId, denyAccess, readCache, contactsCacheKey]);
   const currentContacts = contactsRead?.key === contactsKey ? contactsRead : undefined;

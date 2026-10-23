@@ -71,6 +71,7 @@ import {
   isRetryableProviderUnavailable,
   keepInterruptedAssistantMessage,
   PiAgentRuntime,
+  thinkingSummary,
 } from "./pi-runtime.js";
 import { MODEL_STREAM_IDLE_TIMEOUT_MS } from "./pi-runtime-limits.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
@@ -3177,4 +3178,60 @@ describe("Pi runtime interject", () => {
     keepInterruptedAssistantMessage(kept);
     expect(kept[0]).toMatchObject({ content: [{ type: "text", text: "keep" }] });
   });
+});
+
+it("publishes a safe thinking progress at most once per 5 seconds", async () => {
+  let clock = 1_000_000;
+  vi.spyOn(Date, "now").mockImplementation(() => clock);
+  providerState.stream.mockImplementation((target: Model<"openai-completions">) => {
+    const response = message(target, [{ type: "text", text: "Done." }], "stop");
+    const result = new AssistantMessageEventStream();
+    const partial = { ...response, content: [] };
+    const think = (delta: string) =>
+      result.push({ type: "thinking_delta", contentIndex: 0, delta, partial });
+    void (async () => {
+      result.push({ type: "start", partial });
+      think("secret plan step one");
+      think("secret plan step two");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      clock += 4_999;
+      think("still within the window");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      clock += 1;
+      think("window elapsed");
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      result.push({ type: "done", reason: "stop", message: response });
+      result.end(response);
+    })();
+    return result;
+  });
+  const events = await run(request());
+  const thinking = events.filter(
+    (event) => event.type === "progress" && event.phase === "thinking",
+  );
+  expect(thinking).toEqual([
+    {
+      type: "progress",
+      text: "",
+      activity: true,
+      phase: "thinking",
+      summary: "Thinking",
+      at: new Date(1_000_000).toISOString(),
+    },
+    {
+      type: "progress",
+      text: "",
+      activity: true,
+      phase: "thinking",
+      summary: "Thinking",
+      at: new Date(1_005_000).toISOString(),
+    },
+  ]);
+  expect(JSON.stringify(thinking)).not.toContain("secret");
+});
+
+it("derives the thinking summary from the last tool category only", () => {
+  expect(thinkingSummary(undefined)).toBe("Thinking");
+  expect(thinkingSummary("recruiting_candidates")).toBe("Reviewing candidates");
+  expect(thinkingSummary("unknown_tool")).toBe("Thinking");
 });

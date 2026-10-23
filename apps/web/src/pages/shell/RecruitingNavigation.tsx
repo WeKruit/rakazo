@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ArtifactTarget } from "../../lib/artifact-open";
+import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
 import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
@@ -134,8 +135,15 @@ export function RecruitingNavigation({
   useEffect(() => {
     if (!crmContext) return;
     let cancelled = false;
+    const abort = new AbortController();
     const { cache, scope, target } = crmContext;
     const epoch = cache.epoch;
+    // A sibling read that invalidated this scope in flight leaves a retryable failure, not a spinner.
+    const invalidated = () => {
+      if (cache.epoch === epoch) return false;
+      setCrm({ key: crmKey, roles: [], failed: true });
+      return true;
+    };
     const cacheKey = `${scope}:crm:roles`;
     const cached = cache.entries.get(cacheKey) as CrmRole[] | undefined;
     setCrm((previous) => {
@@ -148,10 +156,12 @@ export function RecruitingNavigation({
         loading: true,
       };
     });
-    void rpc.recruiting
-      .crmData({ ...target, operation: "memberships" })
+    void retryTransientRead(
+      () => rpc.recruiting.crmData({ ...target, operation: "memberships" }),
+      abort.signal,
+    )
       .then(async (result) => {
-        if (cancelled || cache.epoch !== epoch) return;
+        if (cancelled || invalidated()) return;
         if (result.operation !== "memberships") throw new Error("Unexpected CRM response");
         const lists = await Promise.all(
           result.sources.flatMap((source) =>
@@ -162,11 +172,10 @@ export function RecruitingNavigation({
                     serverRevision: source.serverRevision,
                     organizationId: membership.organizationId,
                   };
-                  const roles = await rpc.recruiting.crmData({
-                    ...target,
-                    ...selection,
-                    operation: "roles",
-                  });
+                  const roles = await retryTransientRead(
+                    () => rpc.recruiting.crmData({ ...target, ...selection, operation: "roles" }),
+                    abort.signal,
+                  );
                   if (
                     roles.operation !== "roles" ||
                     roles.source.serverId !== source.serverId ||
@@ -183,7 +192,7 @@ export function RecruitingNavigation({
               : [],
           ),
         );
-        if (cancelled || cache.epoch !== epoch) return;
+        if (cancelled || invalidated()) return;
         const roles = lists.flat();
         rememberRecruitingRead(cache, cacheKey, roles, epoch);
         setCrm({
@@ -197,6 +206,7 @@ export function RecruitingNavigation({
       });
     return () => {
       cancelled = true;
+      abort.abort();
     };
   }, [crmKey]);
   const currentCrm = crm?.key === crmKey ? crm : undefined;
