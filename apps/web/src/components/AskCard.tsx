@@ -1,7 +1,14 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown } from "@rakazo/chat-ui/web";
-import type { AskAnswer, AskFormContent, AskFormResponse, ThreadMessage } from "@rakazo/contracts";
+import type {
+  AskAnswer,
+  AskConnection,
+  AskFormContent,
+  AskFormResponse,
+  ConnectionAskAnswer,
+  ThreadMessage,
+} from "@rakazo/contracts";
 import { commandVariableName, parseAskFormResponse } from "@rakazo/contracts";
 import {
   askFormContent,
@@ -12,8 +19,11 @@ import {
   selectedAskActionLabel,
 } from "@rakazo/core";
 import { Button, Input, Textarea } from "@rakazo/ui-web";
+import { Plug } from "lucide-react";
 import { useId, useState } from "react";
+import { connectMcpOauth } from "../lib/mcp-connect";
 import { errorText } from "../lib/user-error";
+import { SuccessPop } from "./ai/primitives";
 
 export type AskBlock = Extract<ThreadMessage["blocks"][number], { kind: "ask" }>;
 
@@ -61,6 +71,141 @@ function secretFieldLabel(purpose: AskBlock["purpose"]): string {
 }
 
 export function AskCard({
+  block,
+  canAnswer,
+  onAnswer,
+}: {
+  block: AskBlock;
+  canAnswer: boolean;
+  onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
+}) {
+  if (block.connection) {
+    return (
+      <ConnectionAskCard
+        connection={block.connection}
+        answer={block.status === "answered" ? block.answer : undefined}
+        canAnswer={canAnswer}
+        onAnswer={onAnswer}
+      />
+    );
+  }
+  return <QuestionAskCard block={block} canAnswer={canAnswer} onAnswer={onAnswer} />;
+}
+
+type ConnectionState = "idle" | "connecting" | "connected" | "failed";
+
+/** Asks the user to connect an integration through the existing MCP OAuth flow,
+ * then answers the same ask so the waiting run continues. */
+function ConnectionAskCard({
+  connection,
+  answer,
+  canAnswer,
+  onAnswer,
+}: {
+  connection: AskConnection;
+  answer: string | undefined;
+  canAnswer: boolean;
+  onAnswer: (text: AskAnswer) => Promise<void>;
+}) {
+  const { t } = useLingui();
+  const [state, setState] = useState<ConnectionState>("idle");
+  const [declining, setDeclining] = useState(false);
+  const busy = state === "connecting" || declining;
+  const { name } = connection;
+
+  async function connect() {
+    if (busy) return;
+    setState("connecting");
+    try {
+      const result = await connectMcpOauth(connection.serverId);
+      if (result === "cancelled") {
+        setState("failed");
+        return;
+      }
+      setState("connected");
+      await onAnswer("connected" satisfies ConnectionAskAnswer);
+    } catch {
+      setState("failed");
+    }
+  }
+
+  async function decline() {
+    if (busy) return;
+    setDeclining(true);
+    try {
+      await onAnswer("not_connected" satisfies ConnectionAskAnswer);
+    } catch {
+      setState("failed");
+    } finally {
+      setDeclining(false);
+    }
+  }
+
+  const connected = answer === "connected" || (answer === undefined && state === "connected");
+  return (
+    <fieldset
+      data-testid="connection-ask-card"
+      aria-label={t`Connect ${name}`}
+      className="min-w-0 w-full max-w-md rounded-2xl border border-border bg-card px-4 py-3.5"
+    >
+      <div className="flex items-center gap-3">
+        {connection.iconUrl ? (
+          <img
+            src={connection.iconUrl}
+            alt=""
+            className="h-10 w-10 shrink-0 rounded-[10px] bg-muted object-contain p-1"
+          />
+        ) : (
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-muted text-foreground">
+            <Plug size={18} strokeWidth={1.8} aria-hidden />
+          </span>
+        )}
+        <span className="min-w-0 flex-1">
+          <span className="block text-[15px] font-medium text-foreground">
+            <Trans>Connect {name}</Trans>
+          </span>
+          <span className="block text-[13px] text-muted-foreground">{connection.reason}</span>
+        </span>
+      </div>
+      {connected ? (
+        <div className="mt-3">
+          <SuccessPop label={t`Connected`} />
+        </div>
+      ) : answer !== undefined ? (
+        <div className="mt-3 text-[13px] text-muted-foreground">
+          <Trans>Not now</Trans>
+        </div>
+      ) : !canAnswer ? (
+        <div className="mt-3 text-[13.5px] font-medium text-muted-foreground">
+          <Trans>No longer active</Trans>
+        </div>
+      ) : (
+        <>
+          {state === "failed" ? (
+            <p className="mt-3 text-[13px] text-destructive">
+              <Trans>Could not connect. Try again.</Trans>
+            </p>
+          ) : null}
+          <div className="mt-3 flex gap-2">
+            <Button className="rounded-full" disabled={busy} onClick={() => void connect()}>
+              {state === "connecting" ? <Trans>Connecting…</Trans> : <Trans>Connect</Trans>}
+            </Button>
+            <Button
+              variant="ghost"
+              className="rounded-full text-muted-foreground"
+              disabled={busy}
+              onClick={() => void decline()}
+            >
+              <Trans>Not now</Trans>
+            </Button>
+          </div>
+        </>
+      )}
+    </fieldset>
+  );
+}
+
+function QuestionAskCard({
   block,
   canAnswer,
   onAnswer,
