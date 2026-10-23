@@ -2308,6 +2308,10 @@ msgid "Credentials are encrypted and never sent to the model."
 msgstr "Las credenciales se cifran y nunca se envían al modelo."
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Criteria"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Criterion"
 msgstr ""
 
