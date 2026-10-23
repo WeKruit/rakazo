@@ -98,6 +98,16 @@ vi.mock("./shell/recruiting-chat-context", async (importOriginal) => {
     },
   };
 });
+// A failure here stands for exhausted retries unless a test turns real retries on.
+const readRetries = vi.hoisted(() => ({ real: false }));
+vi.mock("../lib/read-retry", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/read-retry")>();
+  return {
+    ...actual,
+    retryTransientRead: async <T,>(read: () => Promise<T>, signal?: AbortSignal) =>
+      readRetries.real ? actual.retryTransientRead(read, signal) : read(),
+  };
+});
 vi.mock("../lib/auth", () => ({ authClient: { useSession: () => shellApi.session } }));
 vi.mock("./PluginsOverlay", () => ({
   PluginsOverlay: (props: unknown) => {
@@ -171,6 +181,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
 
 import * as ComputerUpdateProgressModule from "../components/ComputerUpdateProgress";
 import * as LocalTimezoneModule from "../lib/local-timezone";
+import { clearRecruitingReads } from "../lib/recruiting-read-cache";
 import { setToolActivityPreference } from "../lib/tool-activity-preference";
 import * as RecruitingCorrespondenceModule from "./RecruitingCorrespondence";
 import * as RecruitingPanelModule from "./RecruitingPanel";
@@ -183,6 +194,7 @@ let container: HTMLDivElement | null = null;
 let composerProps: ComponentProps<typeof Composer>;
 
 afterEach(() => {
+  readRetries.real = false;
   act(() => root?.unmount());
   container?.remove();
   root = null;
@@ -1008,6 +1020,54 @@ it.each(["inbox", "feedback", "sequence"])(
   },
 );
 
+it("titles a bound role workbench with its native role however its reads arrive", async () => {
+  let stream!: Parameters<typeof CoreModule.runThreadSubscription>[0];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial();
+    stream = options;
+  });
+  shellApi.recruiting.crmData.mockResolvedValue({
+    operation: "candidates",
+    source: { serverId: "crm-source", serverRevision: 2, organizationId: "org-1", name: "CRM" },
+    checkedAt: "2026-10-22T00:00:00Z",
+    scope: "legacy_role_labels",
+    selectedRole: {
+      crmRoleId: "crm-role",
+      clientId: "client-1",
+      clientLabel: "Example client",
+      roleLabel: "Existing role",
+      summary: null,
+    },
+    items: [],
+    total: 0,
+    offset: 0,
+    nextOffset: null,
+  });
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=feedback",
+    crmTarget: boundCrmTarget,
+  });
+  const title = () => container?.querySelector(".hire-section-header h1")?.textContent;
+  expect(title()).toBe("Systems engineer");
+  // The native read is slow this time; the CRM page answers first.
+  const workspace = await shellApi.recruiting.getWorkspace({ threadId: view.thread.threadId });
+  let finish!: (value: typeof workspace) => void;
+  shellApi.recruiting.getWorkspace.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => {
+    await stream.refresh();
+  });
+  expect(title()).toBe("Systems engineer");
+  await act(async () => finish(workspace));
+  expect(title()).toBe("Systems engineer");
+});
+
 it("rejects a role binding that completes after the selected Space changes", async () => {
   let resolve!: () => void;
   const ready = new Promise<void>((done) => {
@@ -1151,6 +1211,211 @@ it("re-reads the CRM workbench once for a burst of reconnects that missed no eve
     });
   // The first reconnect may retry once; the other 19 missed nothing and stay quiet.
   expect(shellApi.recruiting.crmData.mock.calls.length - initialReads).toBeLessThanOrEqual(2);
+});
+
+it("re-reads the role list and inbox once when the stream recovers from an outage", async () => {
+  let stream!: Parameters<typeof CoreModule.runThreadSubscription>[0];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    await options.loadInitial();
+    stream = options;
+  });
+  const source = { serverId: "crm-source", serverRevision: 2, name: "CRM", status: "ready" };
+  const crmData = async (input: { operation: string }) =>
+    input.operation === "memberships"
+      ? {
+          operation: "memberships",
+          checkedAt: "2026-10-22T00:00:00Z",
+          sources: [
+            { ...source, memberships: [{ organizationId: "org-1", name: "Org", role: "member" }] },
+          ],
+        }
+      : {
+          operation: "roles",
+          source: { ...source, organizationId: "org-1" },
+          checkedAt: "2026-10-22T00:00:00Z",
+          items: [
+            {
+              crmRoleId: "crm-role",
+              clientId: "client-1",
+              clientLabel: "Client",
+              roleLabel: "Existing role",
+              summary: null,
+            },
+          ],
+        };
+  shellApi.recruiting.crmData.mockImplementation(crmData);
+  await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=inbox",
+  });
+  const text = () => document.body.textContent ?? "";
+  expect(text()).toContain("Existing role · Client");
+  expect(text()).not.toContain("Loading saved results");
+  // The backend goes away while the workbench is re-reading: those requests never answer.
+  const savedCorrespondence = shellApi.recruiting.correspondence.getMockImplementation()!;
+  shellApi.recruiting.crmData.mockImplementation(() => new Promise(() => {}));
+  shellApi.recruiting.correspondence.mockImplementation(() => new Promise(() => {}));
+  await act(async () => {
+    await stream.refresh();
+  });
+  expect(text()).toContain("Loading roles…");
+  shellApi.get.mockRejectedValueOnce(new Error("Backend unavailable"));
+  await act(async () => {
+    await expect(stream.refresh()).rejects.toThrow("Backend unavailable");
+  });
+  shellApi.recruiting.crmData.mockImplementation(crmData);
+  shellApi.recruiting.correspondence.mockImplementation(savedCorrespondence);
+  const memberships = () =>
+    shellApi.recruiting.crmData.mock.calls.filter(([input]) => input.operation === "memberships")
+      .length;
+  const before = memberships();
+  const inboxReads = shellApi.recruiting.correspondence.mock.calls.length;
+  await act(async () => {
+    await stream.refresh();
+  });
+  // Coalesced with the read that started the outage; it runs at the end of that window.
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
+  expect(memberships() - before).toBe(1);
+  expect(shellApi.recruiting.correspondence.mock.calls.length - inboxReads).toBe(1);
+  expect(text()).not.toContain("Loading roles…");
+  expect(text()).not.toContain("Loading saved results");
+  expect(text()).toContain("Existing role · Client");
+});
+
+it.each(["bot", "group"] as const)(
+  "clears a %s workbench failure from an outage once the recovered stream re-reads it",
+  async (kind) => {
+    let stream!: Parameters<typeof CoreModule.runThreadSubscription>[0];
+    vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+      await options.loadInitial();
+      stream = options;
+    });
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const view = await renderFeedbackShell(kind, undefined, {
+      openFeedback: false,
+      isDeploymentOwner: false,
+      initialPath: kind === "group" ? "/app/g/group-1?view=results" : "/app/bot-1?view=results",
+    });
+    const banner =
+      kind === "group" ? "Could not load this role’s CRM connection." : "Could not load recruiting";
+    expect(container?.textContent).toContain(view.candidate.name);
+    const workspace = shellApi.recruiting.getWorkspace.getMockImplementation()!;
+    // A refusal that is not retried leaves the failure on screen until a later read.
+    shellApi.recruiting.getWorkspace.mockRejectedValue(new ORPCError("TOO_MANY_REQUESTS"));
+    await act(async () => {
+      await stream.refresh();
+    });
+    expect(container?.textContent).toContain(banner);
+    shellApi.get.mockRejectedValueOnce(new Error("Backend unavailable"));
+    await act(async () => {
+      await expect(stream.refresh()).rejects.toThrow("Backend unavailable");
+    });
+    shellApi.recruiting.getWorkspace.mockImplementation(workspace);
+    await act(async () => {
+      await stream.refresh();
+    });
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
+    expect(container?.textContent).not.toContain(banner);
+    expect(container?.textContent).toContain(view.candidate.name);
+  },
+);
+
+async function renderRoleNavigation(cache: { epoch: number; entries: Map<string, unknown> }) {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  await act(async () =>
+    root!.render(
+      <RecruitingNavigation
+        groups={[]}
+        archivedGroups={[]}
+        archivedOpen={false}
+        query=""
+        view="results"
+        canOpenDashboard
+        canCreateRole={false}
+        onQueryChange={() => {}}
+        onView={() => {}}
+        onCollapse={() => {}}
+        onOpenRole={() => {}}
+        onNewRole={() => {}}
+        canCreateRoleFrom={() => false}
+        onNewRoleFrom={() => {}}
+        onRoleMenu={() => {}}
+        onToggleArchived={() => {}}
+        onRestoreRole={() => {}}
+        crmContext={{ target: { groupId: "group-1" }, scope: "actor:space:thread", cache }}
+      />,
+    ),
+  );
+  return container;
+}
+
+it("ends a CRM role read in a retryable failure when another read invalidates the cache", async () => {
+  let finish!: (value: unknown) => void;
+  shellApi.recruiting.crmData
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+    )
+    .mockReturnValue(new Promise(() => {}));
+  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const view = await renderRoleNavigation(cache);
+  expect(view.textContent).toContain("Loading roles…");
+  // A sibling read was denied and dropped this scope; nothing re-renders the navigation.
+  clearRecruitingReads(cache, "actor:space:thread");
+  await act(async () => finish({ operation: "memberships", sources: [] }));
+  expect(view.textContent).not.toContain("Loading roles…");
+  expect(view.textContent).toContain("Try again");
+});
+
+it("retries the CRM role list through a deploy's unavailable window but not after a denial", async () => {
+  readRetries.real = true;
+  const roles = {
+    operation: "roles",
+    source: { serverId: "crm", serverRevision: 1, organizationId: "org" },
+    items: [
+      {
+        crmRoleId: "crm-role",
+        clientId: "client-1",
+        clientLabel: "Client",
+        roleLabel: "Existing role",
+        summary: null,
+      },
+    ],
+  };
+  const memberships = {
+    operation: "memberships",
+    sources: [
+      {
+        serverId: "crm",
+        serverRevision: 1,
+        name: "CRM",
+        status: "ready",
+        memberships: [{ organizationId: "org", name: "Organization", role: "member" }],
+      },
+    ],
+  };
+  shellApi.recruiting.crmData
+    .mockRejectedValueOnce(new ORPCError("SERVICE_UNAVAILABLE", { status: 503 }))
+    .mockImplementation(async (input) => (input.operation === "memberships" ? memberships : roles));
+  const view = await renderRoleNavigation({ epoch: 0, entries: new Map() });
+  expect(view.textContent).toContain("Loading roles…");
+  expect(view.textContent).not.toContain("Could not read a CRM connection.");
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
+  expect(view.textContent).toContain("Existing role · Client");
+  expect(view.textContent).not.toContain("Could not read a CRM connection.");
+  act(() => root?.unmount());
+  view.remove();
+  shellApi.recruiting.crmData.mockReset();
+  shellApi.recruiting.crmData.mockRejectedValue(new ORPCError("FORBIDDEN"));
+  const denied = await renderRoleNavigation({ epoch: 0, entries: new Map() });
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
+  expect(shellApi.recruiting.crmData).toHaveBeenCalledTimes(1);
+  expect(denied.textContent).toContain("Could not read a CRM connection.");
 });
 
 it("keeps the role list through a thread resync and drops a response for a previous Space", async () => {
@@ -2499,6 +2764,37 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   expect(container?.querySelector("main")?.classList.contains("hire-role-chat-open")).toBe(false);
   expect(shellApi.followUp).not.toHaveBeenCalled();
   expect(shellApi.answer).not.toHaveBeenCalled();
+});
+
+it("does not report a missing CRM binding as a failure", async () => {
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=conversation",
+  });
+  shellApi.recruiting.getWorkspace.mockRejectedValue(new ORPCError("NOT_FOUND"));
+  await view.navigate("/app/g/group-1?view=contacts");
+  expect(shellApi.recruiting.getWorkspace).toHaveBeenCalled();
+  expect(container?.textContent).not.toContain("Could not load this role’s CRM connection.");
+});
+
+it("never drops a message typed while the role chat is closed", async () => {
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results",
+  });
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  const chat = composer.closest<HTMLElement>('section[aria-label="Role conversation"]')!;
+  expect(chat.hidden).toBe(true);
+  shellApi.send.mockResolvedValue({ runId: "closed-chat-run" });
+  type(composer, "Find two more robotics engineers");
+  await view.click("Send");
+  expect(shellApi.send).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ groupId: "group-1", text: "Find two more robotics engineers" }),
+  );
+  expect(chat.hidden).toBe(false);
+  expect(view.getPath()).toBe("/app/g/group-1?view=results");
 });
 
 it("sends the currently selected saved email as separate native context and drops it on view changes", async () => {
@@ -5058,4 +5354,72 @@ it("shows a sent message at once and finishes the turn from events without re-re
   expect(shellApi.get.mock.calls.length).toBe(reads);
   // One navigation read at run end for the sidebar preview; none for send or run start.
   expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
+});
+
+it("shows ordinary users the turn's work in plain words and folds it once the reply lands", async () => {
+  const streams: Array<{
+    options: Parameters<typeof CoreModule.runThreadSubscription>[0];
+    head: { threadId: string; cursor: number };
+  }> = [];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    const head = await options.loadInitial();
+    if (head) streams.push({ options, head });
+  });
+  setToolActivityPreference("off");
+  await renderFeedbackShell("bot", undefined, { isDeploymentOwner: false, openFeedback: false });
+  const stream = streams.at(-1)!;
+  const event = (seq: number, type: string, payload: Record<string, unknown> = {}) => ({
+    id: `work-${seq}`,
+    type,
+    threadId: stream.head.threadId,
+    botId: "bot-1",
+    spaceId: "space-1",
+    runId: "run-work",
+    seq,
+    payload,
+    createdAt: new Date().toISOString(),
+  });
+  const apply = (items: ReturnType<typeof event>[]) =>
+    act(async () => {
+      for (const item of items) {
+        stream.options.applyEvent(item as never);
+        stream.options.onEvent(item as never, stream.head, { snapshotStale: false });
+      }
+    });
+  const status = () =>
+    [...container!.querySelectorAll('[role="status"]')].find((element) =>
+      /Searching|Working/.test(element.textContent ?? ""),
+    );
+  await apply([
+    event(60, "thread.message.created", {
+      messageId: "work-user",
+      role: "user",
+      blocks: [{ kind: "text", text: "Find staff engineers" }],
+    }),
+    event(61, "run.started", { trigger: "user" }),
+    event(62, "agent.tool.called", { name: "recruiting_role", executionId: "e1" }),
+    event(63, "agent.tool.completed", { name: "recruiting_role", executionId: "e1" }),
+    event(64, "agent.tool.called", { name: "mcp__autumn__research", executionId: "e2" }),
+  ]);
+  expect(status()?.textContent).toContain("Searching candidates…");
+  expect(container!.querySelector('[data-testid="live-work"]')?.textContent).toContain(
+    "Reviewing the role",
+  );
+  expect(container!.querySelector('[data-testid="live-work"]')?.textContent).toMatch(/\d:\d\d/);
+  expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
+  await apply([
+    event(65, "agent.tool.completed", { name: "mcp__autumn__research", executionId: "e2" }),
+    event(66, "thread.message.created", {
+      messageId: "work-reply",
+      role: "bot",
+      blocks: [{ kind: "text", text: "Here are ten people." }],
+    }),
+    event(67, "run.completed"),
+  ]);
+  expect(container!.querySelector('[data-testid="live-work"]')).toBeNull();
+  const summary = container!.querySelector<HTMLDetailsElement>('[data-testid="work-summary"]');
+  expect(summary?.querySelector("summary")?.textContent).toMatch(/^Worked for \d+s$/);
+  expect(summary?.open).toBe(false);
+  expect(summary?.textContent).toContain("Searching candidates");
+  expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
 });

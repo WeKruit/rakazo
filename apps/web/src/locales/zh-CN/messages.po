@@ -735,6 +735,10 @@ msgstr ""
 msgid "Ask the server owner to configure this provider."
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Asking a specialist"
+msgstr "正在请专员协助"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Assessment date"
 msgstr ""
@@ -1206,13 +1210,29 @@ msgstr "请检查服务器 URL 和网络，然后重新测试。"
 msgid "Check your email"
 msgstr "请查看邮箱"
 
-#: src/pages/Shell.tsx
-msgid "Checking available connections…"
-msgstr ""
+#: src/components/LiveWork.tsx
+msgid "Checking availability"
+msgstr "正在查看空闲时间"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking connections"
+msgstr "正在检查连接"
+
+#: src/components/LiveWork.tsx
+msgid "Checking email"
+msgstr "正在查看邮件"
+
+#: src/components/LiveWork.tsx
+msgid "Checking saved context"
+msgstr "正在查看已保存的上下文"
+
+#: src/components/LiveWork.tsx
+msgid "Checking the CRM"
+msgstr "正在查看 CRM"
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/components/DesktopUpdates.tsx
@@ -2718,6 +2738,10 @@ msgstr ""
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Draft skill"
 msgstr "技能草稿"
+
+#: src/components/LiveWork.tsx
+msgid "Drafting email"
+msgstr "正在起草邮件"
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Drag, drop, or paste an image"
@@ -4885,33 +4909,9 @@ msgstr ""
 msgid "Prepared"
 msgstr ""
 
-#: src/pages/Shell.tsx
-msgid "Preparing a search…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing connected work…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to check availability…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read a page…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read emails…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read files…"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Preparing to read saved context…"
-msgstr ""
+#: src/components/LiveWork.tsx
+msgid "Preparing a question"
+msgstr "正在准备问题"
 
 #. placeholder {0}: preview?.label ?? props.name
 #: src/components/ArtifactFileCard.tsx
@@ -5058,6 +5058,14 @@ msgstr ""
 msgid "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Reading a page"
+msgstr "正在阅读网页"
+
+#: src/components/LiveWork.tsx
+msgid "Reading files"
+msgstr "正在读取文件"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr ""
@@ -5107,6 +5115,10 @@ msgstr "重新连接 OAuth"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "正在重新连接"
+
+#: src/components/LiveWork.tsx
+msgid "Recording feedback"
+msgstr "正在记录反馈"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Recording may have started, but the view could not refresh"
@@ -5532,6 +5544,14 @@ msgstr ""
 msgid "Reviewed"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Reviewing candidates"
+msgstr "正在查看候选人"
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing the role"
+msgstr "正在查看职位"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Revise in chat"
 msgstr ""
@@ -5794,6 +5814,10 @@ msgstr "已保存。"
 msgid "Saved. Rotate to reveal."
 msgstr "已保存。轮换后可查看。"
 
+#: src/components/LiveWork.tsx
+msgid "Saving notes"
+msgstr "正在保存笔记"
+
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Saving your workspace"
 msgstr ""
@@ -5946,6 +5970,14 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
 msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Searching candidates"
+msgstr "正在搜索候选人"
+
+#: src/components/LiveWork.tsx
+msgid "Searching the web"
+msgstr "正在搜索网页"
 
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
@@ -7058,6 +7090,10 @@ msgstr ""
 msgid "Uses this server's own {hostCredentialSource} credentials to access {selectedProviderName}."
 msgstr "使用此服务器自己的 {hostCredentialSource} 凭据访问 {selectedProviderName}。"
 
+#: src/components/LiveWork.tsx
+msgid "Using a connected app"
+msgstr "正在使用已连接的应用"
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "Value"
 msgstr ""
@@ -7217,6 +7253,10 @@ msgstr ""
 msgid "Won't do"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Worked for {duration}"
+msgstr "用时 {duration}"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Workflow filter"
 msgstr ""
@@ -7228,6 +7268,10 @@ msgstr ""
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "后台任务进行中…"
+
+#: src/components/LiveWork.tsx
+msgid "Working on it"
+msgstr "正在处理"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx

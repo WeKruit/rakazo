@@ -702,6 +702,26 @@ export async function authorizeRecruitingCrmRoleReference(
     throw new IsolationError();
 }
 
+/**
+ * The role snapshot alone, without the CRM binding receipt reads. Run-start context
+ * needs only the role and revision; CRM tools verify their binding at the point of use.
+ */
+export async function getRecruitingRoleSnapshot(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: { threadId: string },
+): Promise<RoleSnapshot | null> {
+  return prisma.$transaction(
+    async (tx) => {
+      const thread = await requireThread(tx, actor, input.threadId);
+      if (!thread.activeRecruitingRoleId) return null;
+      const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+      return roleSnapshot(tx, actor, role, thread);
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+}
+
 export async function getRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
@@ -4714,6 +4734,10 @@ async function researchContextInTransaction(
   actor: Actor,
   input: RecruitingResearchContextInput,
   requireLive = false,
+  // Internal only (never from caller input): page-provenance reads skip re-validating the
+  // action's request/context/receipt/output artifacts; run, thread, role, task, action, source
+  // message and effect isolation checks below still run.
+  skipActionArtifacts = false,
 ) {
   const live =
     input.historical && !requireLive ? null : await lockLiveRecruitingRun(tx, actor, input.runId);
@@ -4855,13 +4879,14 @@ async function researchContextInTransaction(
         !input.historical,
       );
     const snapshot = recruitingResearchSnapshot(task, action).action;
-    for (const ref of [
-      snapshot.requestArtifact,
-      snapshot.contextArtifact,
-      ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
-      ...snapshot.outputArtifacts,
-    ])
-      await validateArtifact(tx, actor, ref, { run, thread });
+    if (!skipActionArtifacts)
+      for (const ref of [
+        snapshot.requestArtifact,
+        snapshot.contextArtifact,
+        ...(snapshot.receiptArtifact ? [snapshot.receiptArtifact] : []),
+        ...snapshot.outputArtifacts,
+      ])
+        await validateArtifact(tx, actor, ref, { run, thread });
     requestArtifact = await tx.artifact.findUniqueOrThrow({
       where: { id: action.requestArtifactId },
     });
@@ -5917,6 +5942,7 @@ async function researchReadBinding(
   effect: ResearchEffectRow,
   lease?: ResearchLease,
   memo: ProofMemo = unmemoized,
+  pageOnly = false,
 ) {
   const owner = await memo(`run:${effect.runId}`, () => requireRun(tx, actor, effect.runId));
   const events = await memo(`read-events:${owner.id}:${effect.id}`, () =>
@@ -5946,8 +5972,8 @@ async function researchReadBinding(
     toolName: binding.toolName,
     historical: !lease,
   };
-  const saved = await memo(`context:${stableJsonValue(context)}`, () =>
-    researchContextInTransaction(tx, actor, context),
+  const saved = await memo(`context:${pageOnly}:${stableJsonValue(context)}`, () =>
+    researchContextInTransaction(tx, actor, context, false, pageOnly),
   );
   if (lease) requireResearchLease(saved.run, lease);
   if (!saved.task || !saved.action || saved.task.id !== binding.taskId) throw new IsolationError();
@@ -7035,6 +7061,7 @@ async function candidatePageArtifact(
   page: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>,
   canonical = false,
   memo: ProofMemo = unmemoized,
+  pageOnly = false,
 ) {
   if (page.taskId === null && page.actionId === null) {
     const artifacts = await candidatePageArtifacts(tx, actor, [page], canonical);
@@ -7050,7 +7077,7 @@ async function candidatePageArtifact(
     }),
   );
   if (effect?.status !== "completed") throw new IsolationError();
-  const read = await researchReadBinding(tx, actor, effect, undefined, memo);
+  const read = await researchReadBinding(tx, actor, effect, undefined, memo, pageOnly);
   if (
     read?.toolName !== "get_rows" ||
     read.binding.taskId !== page.taskId ||
@@ -7072,6 +7099,7 @@ async function candidatePageArtifacts(
   pages: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>[],
   canonical = false,
   afterRead?: Array<() => void>,
+  pageOnly = false,
 ): Promise<Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>> {
   const nativeIds = pages
     .filter((page) => page.taskId === null && page.actionId === null)
@@ -7179,7 +7207,10 @@ async function candidatePageArtifacts(
   );
   for (const page of pages) {
     if (page.taskId !== null || page.actionId !== null) {
-      artifacts.set(page.effectId, await candidatePageArtifact(tx, actor, page, canonical, memo));
+      artifacts.set(
+        page.effectId,
+        await candidatePageArtifact(tx, actor, page, canonical, memo, pageOnly),
+      );
       continue;
     }
     const effect = byEffect.get(page.effectId);
@@ -7373,15 +7404,19 @@ function candidateIndexQuery(
         WHEN returned.value ? 'rank' THEN returned.value -> 'rank'
         WHEN returned.value ? 'batch_rank' THEN returned.value -> 'batch_rank'
         ELSE returned.value -> 'rank_this_batch_only' END`;
+  // Providers send numbers either as JSON numbers or as plain numeric strings ("45"); both are
+  // the same provider value. Anything else ("Unknown", "45/100") stays NULL.
+  const numericCell = Prisma.sql`CASE WHEN jsonb_typeof(match."value") = 'number' OR
+      (jsonb_typeof(match."value") = 'string' AND
+        match."value" #>> '{}' ~ '^-?[0-9]{1,30}([.][0-9]{1,30})?$')
+      THEN (match."value" #>> '{}')::numeric END`;
   const matchValue = Prisma.sql`CASE WHEN source.kind = 'rank' THEN
-      CASE WHEN jsonb_typeof(match."value") = 'number' THEN
-        CASE WHEN (match."value" #>> '{}')::numeric BETWEEN 1 AND 9007199254740991
-          AND trunc((match."value" #>> '{}')::numeric) = (match."value" #>> '{}')::numeric
-          THEN (match."value" #>> '{}')::numeric::bigint END END
+      CASE WHEN ${numericCell} BETWEEN 1 AND 9007199254740991
+        AND trunc(${numericCell}) = ${numericCell}
+        THEN (${numericCell})::bigint END
       WHEN source.kind = 'score' THEN
-        CASE WHEN jsonb_typeof(match."value") = 'number' THEN
-          CASE WHEN abs((match."value" #>> '{}')::numeric) <= ${Number.MAX_VALUE}::numeric
-            THEN (match."value" #>> '{}')::numeric END END
+        CASE WHEN abs(${numericCell}) <= ${Number.MAX_VALUE}::numeric
+          THEN ${numericCell} END
       ELSE CASE match."value" #>> '{}'
         WHEN 'Strong' THEN 0 WHEN 'Promising' THEN 1 WHEN 'Partial' THEN 2 WHEN 'Uncertain' THEN 3 END END`;
   const fields = [
@@ -7557,6 +7592,7 @@ async function candidateProfilePages(
   roleId: string,
   rows: Pick<CandidateQueryRow, "sourcePageId" | "profileSourcePageIds">[],
   afterRead?: Array<() => void>,
+  pageOnly = false,
 ) {
   const pageIds = [
     ...new Set(
@@ -7579,7 +7615,7 @@ async function candidateProfilePages(
   for (const page of pages.values()) {
     if (page.roleId !== roleId) throw new IsolationError();
   }
-  await candidatePageArtifacts(tx, actor, [...pages.values()], false, afterRead);
+  await candidatePageArtifacts(tx, actor, [...pages.values()], false, afterRead, pageOnly);
   return pages;
 }
 
@@ -9883,7 +9919,8 @@ export async function listRecruitingCandidates(
         }) => (row.candidateKey === null ? [] : [row]),
       );
       const selected = rows.slice(0, limit);
-      const pages = await candidateProfilePages(tx, actor, role.id, selected, afterRead);
+      // The list renders match fields and page provenance only, never action artifacts.
+      const pages = await candidateProfilePages(tx, actor, role.id, selected, afterRead, true);
 
       const last = selected.at(-1);
       const {
@@ -9959,8 +9996,15 @@ export async function listRecruitingCandidates(
             ...profile
           }) => {
             const decision = candidateConsideration(actor, consideration);
+            const numeric = (value: unknown) =>
+              value === null || value === undefined ? null : Number(value);
             return {
               ...profile,
+              match: {
+                rank: numeric(_rank),
+                tier: ["Strong", "Promising", "Partial", "Uncertain"][numeric(_tier) ?? -1] ?? null,
+                score: numeric(_score),
+              },
               crm: syncs.get(profile.candidateKey) ?? null,
               decision: decision?.operation ?? null,
               decisionReason: decision?.source.quote ?? null,
@@ -10000,6 +10044,23 @@ export async function listRecruitingCandidates(
   );
   for (const verify of afterRead) verify();
   return result;
+}
+
+/** Every LinkedIn URL Autumn observed for a role (owner-fenced); identity only, never a profile. */
+export async function listRecruitingCandidateLinkedinUrls(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<string[]> {
+  return prisma.$transaction(async (tx) => {
+    const role = await requireRole(tx, actor, roleId);
+    const rows = await tx.recruitingCandidateOccurrence.findMany({
+      where: { roleId: role.id, linkedinUrl: { not: null } },
+      select: { linkedinUrl: true },
+      distinct: ["linkedinUrl"],
+    });
+    return rows.flatMap((row) => (row.linkedinUrl ? [row.linkedinUrl] : []));
+  });
 }
 
 export async function setRecruitingCandidateShortlist(

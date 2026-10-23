@@ -4,7 +4,8 @@ import type { Actor, RecruitingArtifactRef, RecruitingFeedbackRecord } from "@ra
 import { recruitingBriefClarifications } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
-  getRecruitingWorkspace,
+  getRecruitingRoleSnapshot,
+  type getRecruitingWorkspace,
   listRecruitingFeedback,
   recordRecruitingContextAdoption,
 } from "@rakazo/db";
@@ -78,9 +79,10 @@ export async function loadRecruitingRunContext(
     isDeploymentOwner: false,
   };
   // ponytail: reuse the native role read only; locked adoption below still checks current state.
+  // The CRM binding receipt is not part of this context; CRM tools verify it when they run.
   const workspace =
     options.trustedWorkspace ??
-    (await getRecruitingWorkspace(deps.prisma, actor, { threadId: run.threadId }));
+    (await getRecruitingRoleSnapshot(deps.prisma, actor, { threadId: run.threadId }));
   if (!workspace) return undefined;
   const redact = options.redact ?? ((value: string) => value);
   const roleText = [

@@ -209,7 +209,11 @@ import {
   settleUncertainEffect,
   uncertainEffectResult,
 } from "./approval-effect.js";
-import { artifactReadFromTool, readActorArtifact } from "./artifact-read.js";
+import {
+  artifactReadFromTool,
+  INTERNAL_ARTIFACT_ERROR,
+  readActorArtifact,
+} from "./artifact-read.js";
 import {
   autoReviewTimeoutMs,
   deploymentAutoReviewDefault,
@@ -3807,6 +3811,40 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 context,
               )
             : Promise.resolve(null);
+        const memoryContextPromise = messagingChannelRun
+          ? Promise.resolve({ text: undefined, documents: [] })
+          : loadAgentMemoryContext(deps.memory, bot.id, context, undefined, (text) =>
+              redactSecrets(text, runSecrets),
+            );
+        // The run-start recruiting context needs only memory, so it overlaps tool discovery
+        // and the other setup reads instead of starting after them. Joined after the model key.
+        const recruitingContextStartedAt = performance.now();
+        const initialRecruitingContextPending = awaitLater(
+          !messagingChannelRun && thread.activeRecruitingRoleId
+            ? memoryContextPromise
+                .then((memory) => {
+                  if (!deps.artifacts)
+                    throw new Error("Recruiting context requires artifact storage");
+                  return loadRecruitingRunContext(
+                    { prisma: deps.prisma, artifacts: deps.artifacts, events: deps.events },
+                    run,
+                    memory,
+                    context,
+                    {
+                      reason: "run",
+                      placement: "instructions",
+                      sourceMessageId: run.sourceMessageId ?? null,
+                      redact: (text) => redactSecrets(text, runSecrets),
+                    },
+                  );
+                })
+                .finally(() => {
+                  setupMarks.recruitingContextOwnMs = Math.round(
+                    performance.now() - recruitingContextStartedAt,
+                  );
+                })
+            : Promise.resolve(undefined),
+        );
         const [
           discovered,
           currentTurnImages,
@@ -3820,11 +3858,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ] = await Promise.all([
           discoveredPromise,
           loadCurrentTurnImages(deps, turnBlocks, context),
-          messagingChannelRun
-            ? Promise.resolve({ text: undefined, documents: [] })
-            : loadAgentMemoryContext(deps.memory, bot.id, context, undefined, (text) =>
-                redactSecrets(text, runSecrets),
-              ),
+          memoryContextPromise,
           messagingChannelRun
             ? Promise.resolve("")
             : loadAgentScratchpadContext(deps, {
@@ -3891,17 +3925,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           return currentRecruitingContext;
         };
-        // Started here, joined with the model key below: the two do not depend on each other.
-        const recruitingContextStartedAt = performance.now();
-        const initialRecruitingContextPending = awaitLater(
-          !messagingChannelRun && thread.activeRecruitingRoleId
-            ? adoptRecruitingContext("run", "instructions").finally(() => {
-                setupMarks.recruitingContextOwnMs = Math.round(
-                  performance.now() - recruitingContextStartedAt,
-                );
-              })
-            : Promise.resolve(undefined),
-        );
         // ponytail: only reference context already present in the immutable run instructions.
         const unchangedRecruitingContextText =
           "<recruiting_role>\nCurrent recruiting role and memory exactly match the run instructions. This context supersedes earlier role and memory snapshots.\n</recruiting_role>";
@@ -4071,6 +4094,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }),
         );
         const initialRecruitingContext = await initialRecruitingContextPending();
+        currentRecruitingContext = initialRecruitingContext;
         setupMark("recruitingContext");
         // An incompatible saved model is a configuration error. Record it on the run.
         // Leaving it for the setup catch would retry and replace the message.
@@ -6653,7 +6677,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return finish({
                   error:
                     error instanceof IsolationError
-                      ? "Artifact is unavailable."
+                      ? error.message === INTERNAL_ARTIFACT_ERROR
+                        ? INTERNAL_ARTIFACT_ERROR
+                        : "Artifact is unavailable."
                       : "Saved artifact could not be read or verified.",
                 });
               }

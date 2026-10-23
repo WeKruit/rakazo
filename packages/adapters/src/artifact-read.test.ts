@@ -8,7 +8,11 @@ import * as pdfText from "@rakazo/core/node/pdf-text";
 import type { PrismaClient } from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { artifactReadFromTool, readActorArtifact } from "./artifact-read.js";
+import {
+  artifactReadFromTool,
+  INTERNAL_ARTIFACT_ERROR,
+  readActorArtifact,
+} from "./artifact-read.js";
 import { LocalArtifactStore } from "./artifacts.js";
 import { selectBuiltinToolsForRun } from "./executor.js";
 
@@ -58,7 +62,7 @@ describe("native saved artifact reading", () => {
           artifactId: f.row.id,
           jsonPath: ["memory", "documents", 0, "includedContent"],
         }),
-      ).toEqual({ error: "Artifact is unavailable." });
+      ).toEqual({ error: INTERNAL_ARTIFACT_ERROR });
       expect(f.queryRaw).toHaveBeenCalledOnce();
       expect(f.get).not.toHaveBeenCalled();
 
@@ -91,8 +95,17 @@ describe("native saved artifact reading", () => {
     f.row.rootArtifactId = "adopted-context-root";
     f.queryRaw.mockResolvedValue([{ id: f.row.rootArtifactId }]);
     expect(await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id })).toEqual({
-      error: "Artifact is unavailable.",
+      error: INTERNAL_ARTIFACT_ERROR,
     });
+    expect(f.get).not.toHaveBeenCalled();
+  });
+  it("explains an internal role-context/request record and points to the readable tools", async () => {
+    const f = fixture("formal research request");
+    f.queryRaw.mockResolvedValue([{ id: f.row.id }]);
+    const result = await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id });
+    expect(result.error).toMatch(/internal recruiting/);
+    expect(result.error).toContain("recruiting_role");
+    expect(result.error).toContain("recruiting_candidates");
     expect(f.get).not.toHaveBeenCalled();
   });
   it("binds actor and family while matching authoritative adoption and formal request hashes", async () => {
