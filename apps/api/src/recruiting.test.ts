@@ -38,6 +38,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     getRecruitingWorkspace: vi.fn(),
     getRecruitingCrmTarget: vi.fn(),
     getRecruitingCrmCandidateSyncs: vi.fn(),
+    readRecruitingNativeCorrespondence: vi.fn(async () => null),
     reviseRecruitingRole: vi.fn(),
     listRecruitingAssessments: vi.fn(),
     listRecruitingFeedback: vi.fn(),
@@ -59,6 +60,9 @@ const actor: Actor = {
 };
 
 describe("saved recruiting correspondence", () => {
+  beforeEach(() =>
+    vi.mocked(db.readRecruitingNativeCorrespondence).mockReset().mockResolvedValue(null),
+  );
   const target = {
     kind: "group" as const,
     groupId: "role-group",
@@ -143,6 +147,186 @@ describe("saved recruiting correspondence", () => {
   }
   const crmIdentity = { endpoint: "https://crm.example.test/mcp", connected: true };
   const crmCandidate = "9dbe8bb7-8fbc-4f73-9fef-5deae2b32dc7";
+  it.each(["sent_recorded", "scheduled", "unknown"] as const)(
+    "projects scoped native %s and exact full reads without an old campaign snapshot",
+    async (status) => {
+      const f = fixture();
+      f.client.externalEffect.findMany.mockReset().mockResolvedValue([]);
+      const mailServer = {
+        ...actor,
+        id: "mail",
+        name: "Instantly",
+        revision: 1,
+        enabled: true,
+        endpoint: "https://mcp.instantly.ai/mcp",
+        transport: "streamable_http",
+        secretId: null,
+      };
+      const grant = {
+        ...actor,
+        serverId: "mail",
+        botId: "main",
+        allowAllTools: false,
+        allowedTools: ["get_email", "reply_to_email"],
+      };
+      f.client.mcpServer.findMany.mockResolvedValue([
+        { ...mailServer, assignments: [grant] },
+      ] as never);
+      Object.assign(f.client, { botMcpServer: { findMany: vi.fn(async () => [grant]) } });
+      Object.assign(f.client, {
+        $transaction: async (callback: (tx: typeof f.client) => Promise<unknown>) =>
+          callback(f.client),
+      });
+      const membership = vi.fn(async () => [actor]);
+      Object.assign(f.client, { $queryRaw: membership });
+      const anchor = { ...email, ue_type: 2, thread_id: "provider-thread" };
+      const outbound = {
+        ...anchor,
+        id: "d1495a46-b3f5-4afe-8e0f-8886bedb6933",
+        message_id: "<reply@example.test>",
+        from_address_email: "team@example.test",
+        to_address_email_list: "person@example.test",
+        ue_type: status === "scheduled" ? 4 : 3,
+        body: { text: "Exact native reply" },
+      };
+      const read = {
+        id: "native-email-read",
+        status: "completed",
+        request: catalogApprovalRequest(
+          "connectors_execute_tool",
+          { id: "mail:get_email", arguments: { id: anchor.id } },
+          "__rakazoCatalogTool",
+          { connectorId: "mcp", resourceId: "mail", resourceRevision: 1, toolName: "get_email" },
+        ),
+        result: { structuredContent: anchor },
+        run: { id: "run", sourceMessageId: "human" },
+        createdAt: new Date(email.timestamp_created),
+        updatedAt: new Date(email.timestamp_created),
+      };
+      const evidence = {
+        roleId: "role",
+        bindingEffectId: "binding",
+        target: { crmRoleId: "50000000-0000-4000-8000-000000000005" },
+        crmSource: { endpoint: crmIdentity.endpoint, transport: "streamable_http" },
+        partial: false,
+        authorizations: ["get_email", "reply_to_email"].map((tool) => ({
+          server: { ...mailServer },
+          botId: "main",
+          tool,
+        })),
+        records: [
+          {
+            scope: { candidateId: crmCandidate },
+            source: {
+              id: "mail",
+              name: "Instantly",
+              endpoint: "https://mcp.instantly.ai/mcp",
+              transport: "streamable_http",
+            },
+            emailRead: read,
+            reads: [read],
+            args: {
+              reply_to_uuid: anchor.id,
+              eaccount: "team@example.test",
+              to: "person@example.test",
+              subject: anchor.subject,
+              body_text: outbound.body.text,
+              skip_validation: false,
+            },
+            effect: {
+              id: "native-reply",
+              status: status === "unknown" ? "uncertain" : "completed",
+              result: {
+                status,
+                sourceReadEffectId: read.id,
+                receipt: {
+                  emailId: outbound.id,
+                  messageId: outbound.message_id,
+                  threadId: outbound.thread_id,
+                  organizationId: outbound.organization_id,
+                  replyToEmailId: anchor.id,
+                  timestampCreated: outbound.timestamp_created,
+                  timestampEmail: outbound.timestamp_email,
+                },
+                providerResult: { structuredContent: outbound },
+              },
+              run: { id: "run", sourceMessageId: "human" },
+              createdAt: new Date(email.timestamp_created),
+              updatedAt: new Date(email.timestamp_created),
+            },
+          },
+        ],
+      };
+      vi.mocked(db.readRecruitingNativeCorrespondence).mockResolvedValue(evidence as never);
+      const output = await api.getRecruitingCorrespondence(
+        f.prisma,
+        actor,
+        target,
+        "inbox",
+        crmIdentity,
+      );
+      expect(output.emails).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ providerMessageId: anchor.id, body: anchor.body.text }),
+        ]),
+      );
+      expect(output.emails.some((row) => row.providerMessageId === outbound.id)).toBe(
+        status !== "unknown",
+      );
+      if (status === "sent_recorded") {
+        const fresh = {
+          ...read,
+          id: "fresh-outbound-read",
+          request: catalogApprovalRequest(
+            "connectors_execute_tool",
+            { id: "mail:get_email", arguments: { id: outbound.id } },
+            "__rakazoCatalogTool",
+            { connectorId: "mcp", resourceId: "mail", resourceRevision: 1, toolName: "get_email" },
+          ),
+          result: { structuredContent: { ...outbound, body: { text: "Fresh full readback" } } },
+          updatedAt: new Date(Date.parse(email.timestamp_created) + 1000),
+        };
+        evidence.records[0]!.reads.push(fresh);
+        expect(
+          (
+            await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox", crmIdentity)
+          ).emails.find((row) => row.providerMessageId === outbound.id)?.body,
+        ).toBe("Fresh full readback");
+        fresh.result.structuredContent.thread_id = "another-provider-thread";
+        expect(
+          (
+            await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox", crmIdentity)
+          ).emails.find((row) => row.providerMessageId === outbound.id)?.body,
+        ).toBe(outbound.body.text);
+        evidence.records[0]!.reads.pop();
+      }
+      grant.allowedTools = [];
+      await expect(
+        api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox", crmIdentity),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      grant.allowedTools = ["get_email", "reply_to_email"];
+      f.client.mcpServer.findMany.mockResolvedValue([
+        { ...mailServer, revision: 2, assignments: [grant] },
+      ] as never);
+      await expect(
+        api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox", crmIdentity),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      f.client.mcpServer.findMany.mockResolvedValue([
+        { ...mailServer, assignments: [grant] },
+      ] as never);
+      membership.mockResolvedValue([]);
+      await expect(
+        api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox", crmIdentity),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      membership.mockResolvedValue([actor]);
+      Object.assign(read.result, { isError: true });
+      evidence.records[0]!.effect.status = "approved";
+      expect(
+        (await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox", crmIdentity))
+          .emails,
+      ).toEqual([]);
+    },
+  );
   const crmTarget = {
     mcpServerId: "mail",
     serverRevision: 1,
@@ -3754,6 +3938,150 @@ describe("live CRM browser reads", () => {
       ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     },
   );
+  it("adds exact-role native correspondence to original CRM mail without another provider read", async () => {
+    const f = browserFixture();
+    const mailServer = {
+      ...actor,
+      id: "mail",
+      name: "Instantly",
+      revision: 1,
+      enabled: true,
+      endpoint: "https://mcp.instantly.ai/mcp",
+      transport: "streamable_http",
+      secretId: null,
+    };
+    const grant = {
+      ...actor,
+      serverId: "mail",
+      botId: "main",
+      allowAllTools: false,
+      allowedTools: ["get_email", "reply_to_email"],
+    };
+    f.mockPrisma.mcpServer.findMany.mockResolvedValue([mailServer] as never);
+    Object.assign(f.mockPrisma.botMcpServer, { findMany: vi.fn(async () => [grant]) });
+    Object.assign(f.mockPrisma, {
+      $transaction: async (callback: (tx: typeof f.mockPrisma) => Promise<unknown>) =>
+        callback(f.mockPrisma),
+    });
+    const currentThread = { findFirst: vi.fn(async () => ({ id: target.threadId })) };
+    Object.assign(f.mockPrisma, { thread: currentThread });
+    const anchor = {
+      id: "70000000-0000-4000-8000-000000000007",
+      timestamp_created: timestamp,
+      timestamp_email: timestamp,
+      message_id: "<native@example.test>",
+      subject: "Actual native subject",
+      from_address_email: "person@example.test",
+      to_address_email_list: "team@example.test",
+      body: { text: "Full native body" },
+      organization_id: "80000000-0000-4000-8000-000000000008",
+      eaccount: "team@example.test",
+      thread_id: "actual-native-thread",
+      ue_type: 2,
+    };
+    const request = catalogApprovalRequest(
+      "connectors_execute_tool",
+      { id: "mail:get_email", arguments: { id: anchor.id } },
+      "__rakazoCatalogTool",
+      { connectorId: "mcp", resourceId: "mail", resourceRevision: 1, toolName: "get_email" },
+    );
+    const read = {
+      id: "native-read",
+      request,
+      status: "completed",
+      result: { structuredContent: anchor },
+      run: { id: "native-run", sourceMessageId: "human" },
+      createdAt: new Date(timestamp),
+      updatedAt: new Date(timestamp),
+    };
+    const record = {
+      scope: { candidateId },
+      source: {
+        id: "mail",
+        name: "Instantly",
+        endpoint: "https://mcp.instantly.ai/mcp",
+        transport: "streamable_http",
+      },
+      emailRead: read,
+      reads: [read],
+      args: { reply_to_uuid: anchor.id },
+      effect: { ...read, id: "uncertain-native-reply", status: "uncertain" },
+    };
+    const evidence = {
+      roleId: "local-role",
+      bindingEffectId: "binding",
+      target: { crmRoleId: roleId },
+      crmSource: { endpoint: f.server.endpoint, transport: "streamable_http" },
+      partial: false,
+      authorizations: [{ server: mailServer, botId: "main", tool: "get_email" }],
+      records: [record, { ...record, scope: { candidateId: roleId } }],
+    };
+    vi.mocked(db.readRecruitingNativeCorrespondence).mockResolvedValue(evidence as never);
+    try {
+      const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "mail",
+        ...pinned,
+        candidateId,
+        crmRoleId: roleId,
+      });
+      expect(result).toMatchObject({
+        items: [{ body: "Stored actual body" }],
+        nativeCorrespondence: [
+          {
+            status: "read",
+            candidateId,
+            email: { sourceId: "mail", providerMessageId: anchor.id, body: "Full native body" },
+          },
+          { status: "unknown", candidateId, email: null },
+        ],
+      });
+      expect(db.readRecruitingNativeCorrespondence).toHaveBeenCalledWith(f.deps.prisma, actor, {
+        threadId: target.threadId,
+        roleId: undefined,
+        target: {
+          mcpServerId: f.server.id,
+          serverRevision: f.server.revision,
+          organizationId: org,
+          crmRoleId: roleId,
+        },
+      });
+      expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).toEqual([
+        "list_crm_memberships",
+        "list_crm_candidate_messages",
+        "list_crm_candidate_correspondence",
+      ]);
+      let afterCapture = false;
+      vi.mocked(db.readRecruitingNativeCorrespondence).mockImplementation(async () => {
+        afterCapture = true;
+        return evidence as never;
+      });
+      f.reauthorize.mockImplementation(async () => {
+        if (afterCapture) grant.allowedTools = [];
+        return target;
+      });
+      await expect(
+        api.getRecruitingCrmData(f.deps, actor, target, {
+          operation: "mail",
+          ...pinned,
+          candidateId,
+          crmRoleId: roleId,
+        }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+      grant.allowedTools = ["get_email", "reply_to_email"];
+      f.reauthorize.mockImplementation(async () => target);
+      currentThread.findFirst.mockResolvedValue(null as never);
+      await expect(
+        api.getRecruitingCrmData(f.deps, actor, target, {
+          operation: "mail",
+          ...pinned,
+          candidateId,
+          crmRoleId: roleId,
+        }),
+      ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    } finally {
+      vi.mocked(db.readRecruitingNativeCorrespondence).mockReset().mockResolvedValue(null);
+    }
+  });
   it.each(["mail", "candidateDetails"] as const)(
     "rechecks the CRM outbox grant after the other %s read completes",
     async (operation) => {

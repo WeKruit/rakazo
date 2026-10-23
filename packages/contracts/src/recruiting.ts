@@ -1426,6 +1426,23 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
 });
 export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;
 
+/** A retained native operation record, never delivery confirmation or permission to retry. */
+export const RecruitingNativeCorrespondenceSchema = z
+  .strictObject({
+    id: Id,
+    roleId: RecruitingId,
+    bindingEffectId: Id,
+    crmRoleId: z.uuid(),
+    candidateId: z.uuid(),
+    status: z.enum(["read", "sent_recorded", "scheduled", "unknown"]),
+    checkedAt: IsoDate,
+    email: RecruitingCorrespondenceSchema.shape.emails.element.nullable(),
+  })
+  .refine(
+    (value) => (value.status === "unknown") === (value.email === null),
+    "Only unknown operations have no message record",
+  );
+
 const CrmBrowseSource = z.strictObject({
   serverId: Id,
   serverRevision: Revision,
@@ -1558,6 +1575,7 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ...crmBrowsePinned,
     ...crmBrowsePage,
     candidateId: z.uuid(),
+    crmRoleId: z.uuid().optional(),
     cursor: CrmBrowseCursor.optional(),
   }),
 ]);
@@ -1666,6 +1684,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     scope: z.literal("stored_candidate_correspondence"),
     outbox: CrmBrowseOutbox,
     candidateId: z.uuid(),
+    nativeCorrespondence: z.array(RecruitingNativeCorrespondenceSchema),
     items: z.array(
       z.strictObject({
         id: Id,

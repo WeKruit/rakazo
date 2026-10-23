@@ -103,6 +103,7 @@ it("browses scoped CRM contacts and stored mail without inventing a native recru
     input.operation === "mail"
       ? {
           operation: "mail",
+          nativeCorrespondence: [],
           outbox: ["pending", "processing", "failed", "sent"].map((status) => ({
             id: status,
             status,
@@ -191,6 +192,9 @@ it("browses scoped CRM contacts and stored mail without inventing a native recru
     crmBrowse: { ...crmBrowse, view: "inbox", candidateId: "crm-person" },
   });
   expect(view.container.textContent).toContain("Full stored reply");
+  expect(api.crmData).toHaveBeenCalledWith(
+    expect.objectContaining({ operation: "mail", crmRoleId: "crm-role" }),
+  );
   await view.click("Draft reply");
   expect(onDraftReply).toHaveBeenCalledWith({
     threadId: "thread-1",
@@ -252,6 +256,159 @@ it("browses scoped CRM contacts and stored mail without inventing a native recru
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
 });
 
+it("shows exact candidate native correspondence with CRM history without treating unknown or scheduled replies as sent", async () => {
+  const selection = {
+    serverId: "crm-source",
+    serverRevision: 2,
+    organizationId: "org-1",
+    crmRoleId: "crm-role",
+  };
+  const source = { ...selection, name: "CRM" };
+  const email = (subject: string) => ({
+    id: `instantly-source:${subject}`,
+    sourceName: "Instantly account",
+    sourceId: "instantly-source",
+    providerMessageId: subject,
+    savedRead: { messageId: "source-message", linkedRunId: "run", effectId: "read" },
+    sender: "team@example.test",
+    recipients: ["person@example.test"],
+    subject,
+    body: `${subject} full body`,
+    snippet: false,
+    date: "2026-10-22T00:00:00Z",
+    url: null,
+  });
+  const native: Extract<RecruitingCrmDataOutput, { operation: "mail" }>["nativeCorrespondence"] = (
+    ["read", "sent_recorded", "scheduled", "unknown"] as const
+  ).map((status) => ({
+    id: status,
+    roleId: "native-role",
+    bindingEffectId: "binding",
+    crmRoleId: "crm-role",
+    candidateId: "person",
+    status,
+    checkedAt: "2026-10-22T00:00:00Z",
+    email: status === "unknown" ? null : email(status),
+  }));
+  api.crmData.mockImplementation(async (input) =>
+    input.operation === "mail"
+      ? {
+          operation: "mail",
+          source,
+          checkedAt: "2026-10-22T00:00:00Z",
+          scope: "stored_candidate_correspondence",
+          candidateId: input.candidateId,
+          outbox: [],
+          nativeCorrespondence: native,
+          items: [
+            {
+              id: "instantly-source:read",
+              providerMessageId: "legacy-id",
+              threadId: "legacy-thread",
+              direction: "received",
+              sender: "person@example.test",
+              recipients: ["team@example.test"],
+              subject: "Historical email",
+              body: "Historical original body",
+              date: "2026-10-21T00:00:00Z",
+              partial: false,
+            },
+          ],
+          nextCursor: null,
+        }
+      : {
+          operation: "candidates",
+          source,
+          checkedAt: "2026-10-22T00:00:00Z",
+          scope: "legacy_role_labels",
+          selectedRole: {
+            crmRoleId: "crm-role",
+            clientId: "client",
+            clientLabel: "Client",
+            roleLabel: "Role",
+            summary: null,
+          },
+          items: [],
+          total: 0,
+          offset: 0,
+          nextOffset: null,
+        },
+  );
+  const onDraftReply = vi.fn();
+  const browse = {
+    selection,
+    view: "inbox" as const,
+    candidateId: "person",
+    onSelectCandidate: vi.fn(),
+    onDraftReply,
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: browse,
+  });
+  expect(view.container.textContent).toContain("read full body");
+  expect(view.container.textContent).toContain("Instantly account");
+  expect(view.container.textContent).toContain("Send outcome unknown");
+  expect(view.container.querySelectorAll('[aria-label="Saved emails"] button')).toHaveLength(4);
+  await view.click("sent_recorded");
+  expect(view.container.textContent).toContain("Send recorded");
+  expect(view.container.textContent).toContain("sent_recorded full body");
+  native.push({
+    ...native[0]!,
+    id: "fresh-readback",
+    checkedAt: "2026-10-22T00:01:00Z",
+    email: {
+      ...email("sent_recorded"),
+      subject: "Fresh sent readback",
+      body: "Latest readback full body",
+    },
+  });
+  native.push({ ...native[1]!, id: "older-replayed-receipt" });
+  await view.render("thread-1", 1, false, undefined, { groupId: "group-1", crmBrowse: browse });
+  expect(view.container.querySelectorAll('[aria-label="Saved emails"] button')).toHaveLength(4);
+  expect(view.container.textContent).toContain("Latest readback full body");
+  expect(view.container.textContent).not.toContain("sent_recorded full body");
+  expect(view.container.textContent).not.toContain("Send recorded");
+  expect(onDraftReply).not.toHaveBeenCalled();
+  await view.click("Draft reply");
+  expect(onDraftReply).toHaveBeenCalledWith(
+    expect.objectContaining({
+      candidateId: "person",
+      email: expect.objectContaining({ subject: "Fresh sent readback" }),
+    }),
+  );
+  expect(JSON.stringify(onDraftReply.mock.calls)).not.toMatch(
+    /instantly-source|source-message|native:|stored-mail/,
+  );
+  await view.click("scheduled");
+  expect(view.container.textContent).toContain("Scheduled");
+  expect(view.container.textContent).not.toContain("Send recorded");
+  await view.click("Historical email");
+  expect(view.container.textContent).toContain("Historical original body");
+  expect(onDraftReply).toHaveBeenCalledOnce();
+  const originalRead = api.crmData.getMockImplementation()!;
+  let finishLate!: (value: unknown) => void;
+  api.crmData.mockImplementation((input) =>
+    input.operation === "mail" && input.candidateId === "person"
+      ? new Promise((resolve) => {
+          finishLate = resolve;
+        })
+      : originalRead(input),
+  );
+  await view.render("thread-1", 2, false, undefined, { groupId: "group-1", crmBrowse: browse });
+  // A response for another canonical person cannot be rendered just because the email matches.
+  await view.render("thread-1", 2, false, undefined, {
+    groupId: "group-1",
+    crmBrowse: { ...browse, candidateId: "other-person" },
+  });
+  await act(async () =>
+    finishLate(await originalRead({ operation: "mail", candidateId: "person" })),
+  );
+  expect(view.container.textContent).toContain("Could not load stored messages");
+  expect(view.container.textContent).not.toContain("Historical original body");
+  expect(view.container.textContent).not.toContain("sent_recorded full body");
+});
+
 it("reveals selected CRM mail from contact clicks and Inbox navigation without stealing focus on background refresh", async () => {
   const scroll = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(() => {});
   try {
@@ -267,6 +424,7 @@ it("reveals selected CRM mail from contact clicks and Inbox navigation without s
     const mail = (candidateId: string, body: string): MailPage => ({
       operation: "mail",
       outbox: [],
+      nativeCorrespondence: [],
       source,
       checkedAt: "2026-10-22T00:00:00Z",
       scope: "stored_candidate_correspondence",

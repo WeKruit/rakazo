@@ -7980,6 +7980,341 @@ async function retainedReplyProof(
   return { effectId: effect.id, result };
 }
 
+/** Capture authorized immutable native reply evidence; parsing runs after the read transaction. */
+export async function readRecruitingNativeCorrespondence(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: {
+    threadId: string;
+    roleId?: string;
+    target?: Pick<
+      RecruitingCrmTarget,
+      "mcpServerId" | "serverRevision" | "organizationId" | "crmRoleId"
+    >;
+  },
+) {
+  const captured = await prisma.$transaction(
+    async (tx) => {
+      const thread = await requireThread(tx, actor, input.threadId);
+      if (!thread.activeRecruitingRoleId) return null;
+      if (input.roleId && input.roleId !== thread.activeRecruitingRoleId)
+        throw new IsolationError();
+      const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, false, thread);
+      if (!role.crmBindingEffectId) return null;
+      const binding = await crmBindingReceipt(tx, actor, role.id, role.crmBindingEffectId);
+      if (
+        input.target &&
+        Object.entries(input.target).some(
+          ([key, value]) => binding.target[key as keyof RecruitingCrmTarget] !== value,
+        )
+      )
+        return null;
+      const where = {
+        spaceId: actor.spaceId,
+        run: {
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          threadId: thread.id,
+          bot: { userId: actor.userId, spaceId: actor.spaceId },
+        },
+      };
+      const include = {
+        run: {
+          select: {
+            id: true,
+            botId: true,
+            userId: true,
+            spaceId: true,
+            threadId: true,
+            sourceMessageId: true,
+          },
+        },
+      } as const;
+      // ponytail: retain 200 scoped operations; native fresh reads provide newer coverage without replay.
+      const effects = await tx.externalEffect.findMany({
+        where: {
+          ...where,
+          OR: [
+            { request: { path: ["2", "recruitingReply", "roleId"], equals: role.id } },
+            { request: { path: ["3", "recruitingReply", "roleId"], equals: role.id } },
+          ],
+        },
+        include,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 201,
+      });
+      const scopedEffects = effects.slice(0, 200).filter((effect) => replyScope(effect.request));
+      if (!scopedEffects.length) return null;
+      const proofIds = [
+        ...new Set(
+          scopedEffects.flatMap((effect) => {
+            const saved = replyScope(effect.request)!;
+            return [
+              saved.emailReadEffectId,
+              saved.crmContextReadEffectId,
+              saved.membershipReadEffectId,
+            ];
+          }),
+        ),
+      ];
+      const records = await tx.externalEffect.findMany({
+        where: { ...where, id: { in: proofIds } },
+        include,
+      });
+      const revisions = await tx.recruitingRoleRevision.findMany({
+        where: {
+          id: {
+            in: [
+              ...new Set(scopedEffects.map((effect) => replyScope(effect.request)!.roleRevisionId)),
+            ],
+          },
+          roleId: role.id,
+        },
+        select: { id: true, roleId: true, revision: true },
+      });
+      const serverIds = [
+        ...new Set([
+          binding.target.mcpServerId,
+          ...scopedEffects.flatMap((effect) => {
+            const route =
+              boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool")?.route ??
+              catalogApprovalDetails(effect.request, "__rakazoCatalogTool")?.route;
+            return route?.connectorId === "mcp" && typeof route.resourceId === "string"
+              ? [route.resourceId]
+              : [];
+          }),
+        ]),
+      ];
+      const observations = await tx.externalEffect.findMany({
+        where: {
+          ...where,
+          OR: serverIds.flatMap((serverId) =>
+            ["get_email", "list_crm_candidate_roles"].flatMap((tool) => [
+              {
+                AND: [
+                  { request: { path: ["2", "route", "resourceId"], equals: serverId } },
+                  { request: { path: ["2", "route", "toolName"], equals: tool } },
+                ],
+              },
+              {
+                AND: [
+                  { request: { path: ["3", "resourceId"], equals: serverId } },
+                  { request: { path: ["3", "toolName"], equals: tool } },
+                ],
+              },
+            ]),
+          ),
+        },
+        include,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        take: 201,
+      });
+      const servers = await tx.mcpServer.findMany({
+        where: {
+          id: { in: serverIds },
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+          enabled: true,
+        },
+      });
+      const assignments = await tx.botMcpServer.findMany({
+        where: {
+          serverId: { in: serverIds },
+          botId: {
+            in: [...new Set([...scopedEffects, ...observations].map((effect) => effect.run.botId))],
+          },
+          userId: actor.userId,
+          spaceId: actor.spaceId,
+        },
+      });
+      return {
+        ...binding,
+        effects: scopedEffects,
+        records,
+        revisions,
+        observations: observations.slice(0, 200),
+        servers,
+        assignments,
+        partial: effects.length > 200 || observations.length > 200,
+      };
+    },
+    { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+  );
+  if (!captured) return null;
+  const authorizations = new Map<
+    string,
+    { server: (typeof captured.servers)[number]; botId: string; tool: string }
+  >();
+  const authorized = (effect: (typeof captured.records)[number], operation: string) => {
+    if (
+      effect.spaceId !== actor.spaceId ||
+      effect.run.userId !== actor.userId ||
+      effect.run.spaceId !== actor.spaceId ||
+      effect.run.threadId !== input.threadId ||
+      effect.run.id !== effect.runId
+    )
+      throw new IsolationError();
+    const call = replyNativeCall(effect.request, operation);
+    const server = captured.servers.find((row) => row.id === call.route.resourceId);
+    const assignment = captured.assignments.find(
+      (row) => row.serverId === server?.id && row.botId === effect.run.botId,
+    );
+    if (
+      !server?.enabled ||
+      server.userId !== actor.userId ||
+      server.spaceId !== actor.spaceId ||
+      server.revision !== call.route.resourceRevision ||
+      !assignment ||
+      assignment.userId !== actor.userId ||
+      assignment.spaceId !== actor.spaceId ||
+      (!assignment.allowAllTools &&
+        (!Array.isArray(assignment.allowedTools) || !assignment.allowedTools.includes(operation)))
+    )
+      throw new IsolationError();
+    authorizations.set(stableJsonValue([server.id, effect.run.botId, operation]), {
+      server,
+      botId: effect.run.botId,
+      tool: operation,
+    });
+    return { ...call, server };
+  };
+  const successful = (effect: (typeof captured.records)[number]) => {
+    const result = effect.result;
+    return (
+      effect.status === "completed" &&
+      result &&
+      typeof result === "object" &&
+      !Array.isArray(result) &&
+      result.error === undefined &&
+      (result.isError === undefined || result.isError === false)
+    );
+  };
+  const byId = new Map(captured.records.map((effect) => [effect.id, effect]));
+  const latest = new Map<string, (typeof captured.records)[number]>();
+  for (const effect of captured.observations) {
+    for (const tool of ["get_email", "list_crm_candidate_roles"]) {
+      try {
+        const call = authorized(effect, tool);
+        const key = stableJsonValue([call.route, call.args]);
+        if (!latest.has(key)) latest.set(key, effect);
+      } catch {
+        /* Other tools or revoked sources cannot establish a current association. */
+      }
+    }
+  }
+  const records = (captured.effects ?? []).flatMap((effect) => {
+    try {
+      const scope = replyScope(effect.request)!;
+      if (
+        scope.roleId !== captured.roleId ||
+        scope.bindingEffectId !== captured.bindingEffectId ||
+        [
+          scope.candidateId,
+          scope.roleRevisionId,
+          scope.emailReadEffectId,
+          scope.crmContextReadEffectId,
+          scope.membershipReadEffectId,
+        ].some((id) => typeof id !== "string" || !id.trim()) ||
+        !captured.revisions.some(
+          (row) =>
+            row.id === scope.roleRevisionId &&
+            row.roleId === captured.roleId &&
+            row.revision === scope.expectedRoleRevision,
+        )
+      )
+        throw new IsolationError();
+      const reply = authorized(effect, "reply_to_email");
+      const proof = (
+        id: string,
+        tool: string,
+        route: typeof reply.route,
+        args: Record<string, unknown>,
+      ) => {
+        const value = byId.get(id);
+        if (!value || value.runId !== effect.runId || !successful(value))
+          throw new IsolationError();
+        authorized(value, tool);
+        assertCrmImportRequest(value.request, { ...route, toolName: tool }, args);
+        return value;
+      };
+      const crmRoute = {
+        connectorId: "mcp" as const,
+        resourceId: captured.target.mcpServerId,
+        resourceRevision: captured.target.serverRevision,
+        toolName: "get_crm_candidate_outreach_context",
+      };
+      const crmArgs = { p_org: captured.target.organizationId, p_candidate: scope.candidateId };
+      const emailRead = proof(scope.emailReadEffectId, "get_email", reply.route, {
+        id: reply.args.reply_to_uuid,
+      });
+      const crmRead = proof(scope.crmContextReadEffectId, crmRoute.toolName, crmRoute, crmArgs);
+      proof(scope.membershipReadEffectId, "list_crm_candidate_roles", crmRoute, crmArgs);
+      const membershipRoute = { ...crmRoute, toolName: "list_crm_candidate_roles" };
+      const membership = latest.get(stableJsonValue([membershipRoute, crmArgs]));
+      if (!membership || !successful(membership)) throw new IsolationError();
+      const members = mcpObject(membership.result)?.data;
+      const candidate = (
+        mcpObject(crmRead.result)?.data as { candidate?: Record<string, unknown> } | undefined
+      )?.candidate;
+      if (
+        !candidate ||
+        candidate.id !== scope.candidateId ||
+        candidate.organization_id !== captured.target.organizationId ||
+        candidate.email !== reply.args.to ||
+        !Array.isArray(members) ||
+        members.some(
+          (row) =>
+            !row ||
+            typeof row !== "object" ||
+            row.organization_id !== captured.target.organizationId ||
+            row.candidate_id !== scope.candidateId ||
+            typeof row.membership_id !== "string",
+        ) ||
+        !members.some(
+          (row) =>
+            row.role_spec_id === captured.target.crmRoleId &&
+            row.client_id === captured.target.crmClientId,
+        )
+      )
+        throw new IsolationError();
+      return [
+        {
+          effect,
+          scope,
+          source: reply.server,
+          args: reply.args,
+          emailRead,
+          reads: [...latest.values()].filter((read) => {
+            try {
+              const call = authorized(read, "get_email");
+              return (
+                call.route.resourceId === reply.route.resourceId &&
+                call.route.resourceRevision === reply.route.resourceRevision
+              );
+            } catch {
+              return false;
+            }
+          }),
+        },
+      ];
+    } catch (error) {
+      if (!(error instanceof IsolationError)) throw error;
+      captured.partial = true;
+      return [];
+    }
+  });
+  const crmSource = captured.servers.find((server) => server.id === captured.target.mcpServerId);
+  return {
+    roleId: captured.roleId,
+    bindingEffectId: captured.bindingEffectId,
+    target: captured.target,
+    crmSource,
+    authorizations: [...authorizations.values()],
+    partial: captured.partial,
+    records,
+  };
+}
+
 async function nativeReplyContext(
   tx: Tx,
   actor: Actor,
