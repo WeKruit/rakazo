@@ -205,7 +205,8 @@ it("shows campaign state and stored messages without any send control", async ()
   );
   const view = await mount(<SequenceTab {...props} />);
   expect(view.textContent).toContain("Staff outreach");
-  expect(view.textContent).toContain("Active");
+  expect(view.querySelector("tbody td")?.textContent).toBe("1");
+  expect(view.textContent).not.toContain("Active");
   expect(view.textContent).toContain("Replied · 1");
   const ada = [...view.querySelectorAll("button")].find((button) =>
     button.textContent?.includes("Ada"),

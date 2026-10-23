@@ -13,18 +13,8 @@ import {
   useRoleCrm,
 } from "./shared";
 
-function useCampaignStatus() {
-  const { t } = useLingui();
-  // Instantly's stored campaign status codes; unknown codes stay visible as stored.
-  const labels: Record<number, string> = {
-    0: t`Draft`,
-    1: t`Active`,
-    2: t`Paused`,
-    3: t`Completed`,
-    4: t`Running subsequences`,
-  };
-  return (status: number | null) => (status === null ? "—" : (labels[status] ?? String(status)));
-}
+// The CRM mirrors the provider's integer campaign status without defining its meaning; show it as stored.
+const campaignStatus = (status: number | null) => (status === null ? "—" : String(status));
 
 function useOutboxStatus() {
   const { t } = useLingui();
@@ -40,7 +30,6 @@ function useOutboxStatus() {
 export function SequenceTab(props: RecruitingTabProps) {
   const { t } = useLingui();
   const crm = useRoleCrm(props);
-  const campaignStatus = useCampaignStatus();
   const outboxStatus = useOutboxStatus();
   const [candidateId, setCandidateId] = useState<string>();
   const ready = crm.status === "ready" ? crm.target : null;
@@ -81,7 +70,7 @@ export function SequenceTab(props: RecruitingTabProps) {
               <table className="hire-table w-full text-left text-sm">
                 <thead>
                   <tr>
-                    {[t`Campaign`, t`Status`, t`Last synced`].map((label) => (
+                    {[t`Campaign`, t`Provider status code`, t`Last synced`].map((label) => (
                       <th scope="col" key={label}>
                         {label}
                       </th>
