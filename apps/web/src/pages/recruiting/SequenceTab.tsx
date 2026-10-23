@@ -96,13 +96,13 @@ export function RoleCampaignCard(props: CampaignScope) {
       </div>
       {read.data?.status === "unavailable" ? (
         <p className="mt-2 text-xs text-muted-foreground">
-          <Trans>Could not read this campaign from Instantly.</Trans>
+          <Trans>Could not read this campaign.</Trans>
         </p>
       ) : null}
       {campaign.stopOnReply === false ? (
         <p role="alert" className="mt-2 text-xs text-destructive">
           <Trans>
-            Stop on reply is off, so Instantly keeps sending follow-ups after a candidate replies.
+            Stop on reply is off, so follow-ups keep going after a candidate replies.
           </Trans>
         </p>
       ) : null}

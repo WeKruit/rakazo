@@ -1058,7 +1058,7 @@ it("shows Important role rows, sourced interest, internal notes and stored campa
   expect(view.container.textContent).not.toContain("Original send failure");
   expect(view.container.textContent).toContain("Human-entered");
   expect(view.container.textContent).toContain("AI interpretation");
-  expect(view.container.textContent).toContain("Instantly");
+  expect(view.container.textContent).toContain("Email reply");
   expect(view.container.textContent).not.toContain("Client approved");
   await view.click("View details");
   expect(onSelectCandidate).toHaveBeenCalledWith("crm-person", "feedback");
