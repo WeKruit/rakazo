@@ -1156,6 +1156,18 @@ describe("linked offline scheduling receipts", () => {
           start: cancelling ? selected : "2026-10-28T15:00:00Z",
         }),
       );
+      if (!cancelling) {
+        expect(changedProjection.events).toContainEqual(
+          expect.objectContaining({ id: `cal-1:booking:${returned.uid}`, status: "superseded" }),
+        );
+        expect(
+          changedProjection.events.some(
+            (event) =>
+              event.id === `cal-1:booking:${returned.uid}` &&
+              ["accepted", "confirmed"].includes(event.status ?? ""),
+          ),
+        ).toBe(false);
+      }
       if (scenario === "reschedule_confirmation_rejected") {
         await approveAndExecute(
           mail.name,
