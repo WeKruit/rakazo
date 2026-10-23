@@ -2,9 +2,11 @@
 
 This is development evidence, not live acceptance. No live CRM read/sync, production migration or outbound operation was performed. Source publication triggered external Vercel deployments; see the root delivery incident, whose main environment is unverified.
 
-## Scope and dependencies
+The release SHAs and historical test results below describe the earlier CRM release. For the current unpublished unified-workspace review, use [the current handoff](unified-workspace-delivery.md); the updated local-owner procedure below includes its additional source and product prerequisites.
 
-Current product code is Rakazo `fa2a2a0d29c57ebff9147c3467bb0d5c3bdaaa81` (merged #72, including #74 and concurrent #78). Documentation-only main `bb2a23c66a6891ce9380827282807d4ef8c562a0` and this documentation cleanup do not change that code. Source is pinned to merged #67, `11ca9c2df226782eee241fc5b36ba15600f4efcb`. Source SQL and existing MCP updates must precede product sync; Vercel success does not establish either prerequisite. Exact-ID version-2 presence checks and stored-profile reads are required.
+## Historical release scope and dependencies
+
+The earlier released product code was Rakazo `fa2a2a0d29c57ebff9147c3467bb0d5c3bdaaa81` (merged #72, including #74 and concurrent #78). Documentation-only main `bb2a23c66a6891ce9380827282807d4ef8c562a0` and this documentation cleanup do not change that code. Source is pinned to merged #67, `11ca9c2df226782eee241fc5b36ba15600f4efcb`. Source SQL and existing MCP updates must precede product sync; Vercel success does not establish either prerequisite. Exact-ID version-2 presence checks and stored-profile reads are required.
 
 Ordered product migrations across the coordinated delivery:
 
@@ -69,7 +71,11 @@ async function runCrmSync(dryRun, groupId) {
   return report;
 }
 await runCrmSync(true, "<authorized-group-id>");
-// After reviewing the dry-run report, start a new run (no reused cursor):
+```
+
+Only after the owner has reviewed the completed dry-run report and separately authorized actual synchronization, start a new pass with no reused cursor:
+
+```js
 await runCrmSync(false, "<authorized-group-id>");
 ```
 
