@@ -28,6 +28,8 @@ export function countTrailingAutoContinues(
 export type TurnEndGuardDeps = {
   prisma: Pick<PrismaClient, "message" | "recruitingCandidatePage"> & {
     recruitingRole: PrismaClient["recruitingRole"];
+    recruitingCalibrationRound: PrismaClient["recruitingCalibrationRound"];
+    externalEffect: PrismaClient["externalEffect"];
     recruitingRoleRevision: PrismaClient["recruitingRoleRevision"];
     recruitingCandidate: PrismaClient["recruitingCandidate"];
   };
@@ -76,6 +78,34 @@ export async function guardRecruitingTurnEnd(
     _sum: { rowCount: true },
   });
   const playbook = await readRecruitingPlaybookStep(deps.prisma, input.roleId);
+  // The Results panel is a real feedback surface. Only the latest unapproved round,
+  // recorded by this run's completed native effect, can satisfy this turn.
+  if (playbook?.stage === "feedback" || playbook?.stage === "calibration_10") {
+    const round = await deps.prisma.recruitingCalibrationRound.findFirst({
+      where: { roleId: input.roleId },
+      orderBy: { round: "desc" },
+      select: { effectId: true, candidateKeys: true, approvedAt: true },
+    });
+    if (
+      round &&
+      !round.approvedAt &&
+      round.candidateKeys.length === 10 &&
+      new Set(round.candidateKeys).size === 10
+    ) {
+      const effect = await deps.prisma.externalEffect.findFirst({
+        where: {
+          id: round.effectId,
+          runId: run.id,
+          spaceId: run.spaceId,
+          kind: "recruiting_research",
+          status: "completed",
+          request: { path: ["operation"], equals: "calibration_round" },
+        },
+        select: { id: true },
+      });
+      if (effect) return { action: "ended", classification: "question" };
+    }
+  }
   const classification = classifyTurnEnd(
     { blocks: input.blocks },
     {

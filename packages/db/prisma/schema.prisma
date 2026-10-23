@@ -1542,9 +1542,30 @@ model RecruitingRole {
   assessments RecruitingAssessment[]
   reminders RecruitingReminder[]
   candidateNotes RecruitingCandidateNote[]
+  calibrationRounds RecruitingCalibrationRound[]
 
   @@index([spaceId, userId])
   @@map("recruiting_roles")
+}
+
+/// One calibration review round: the exact ten saved people shown to the recruiter and their decision.
+/// Feedback stays on the native messages/effects; this row only marks which people a round showed.
+model RecruitingCalibrationRound {
+  id String @id @default(cuid())
+  roleId String
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  round Int
+  candidateKeys String[]
+  /// The native recruiting_research effect that recorded this round.
+  effectId String @unique
+  createdAt DateTime @default(now())
+  approvedAt DateTime?
+  approvedByUserId String?
+  /// What carried the human decision: {kind:"control"} or {kind:"message",messageId} or {kind:"approval",effectId}.
+  approvalSource Json?
+
+  @@unique([roleId, round])
+  @@map("recruiting_calibration_rounds")
 }
 
 model RecruitingRoleRevision {

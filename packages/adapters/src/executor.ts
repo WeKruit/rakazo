@@ -169,6 +169,7 @@ import {
   prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
+  RecruitingCalibrationRoundError,
   RecruitingConflictError,
   RecruitingSourceValidationError,
   readHistory,
@@ -181,6 +182,7 @@ import {
   resolveRecruitingCrmImport,
   resolveRecruitingReply,
   SpaceLimitError,
+  saveRecruitingCalibrationRound,
   searchHistory,
   settleUncertainRecruitingResearchAction,
   withTransactionRetry,
@@ -4617,7 +4619,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             name === "recruiting_shortlist" ||
             (researchInput?.success === true &&
               (researchInput.data.operation === "save_results" ||
-                researchInput.data.operation === "import_csv"));
+                researchInput.data.operation === "import_csv" ||
+                researchInput.data.operation === "calibration_round"));
           const researchActor = {
             actor: {
               spaceId: run.spaceId,
@@ -4810,7 +4813,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (
             researchInput?.success &&
-            !["prepare", "continue", "save_results", "import_csv"].includes(
+            !["prepare", "continue", "save_results", "import_csv", "calibration_round"].includes(
               researchInput.data.operation,
             )
           ) {
@@ -4821,7 +4824,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 input.operation === "prepare" ||
                 input.operation === "continue" ||
                 input.operation === "save_results" ||
-                input.operation === "import_csv"
+                input.operation === "import_csv" ||
+                input.operation === "calibration_round"
               )
                 throw new IsolationError();
               researchSelection = await resolveRecruitingResearchTool(
@@ -7285,6 +7289,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
               if (
                 error instanceof RecruitingFeedbackValidationError ||
+                error instanceof RecruitingCalibrationRoundError ||
                 (error instanceof Error && error.name === "ZodError")
               )
                 return finish({ error: sanitizeConnectorError(error, runSecrets) });
@@ -7298,7 +7303,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (researchInput.data.operation !== "prepare" &&
                 researchInput.data.operation !== "continue" &&
                 researchInput.data.operation !== "save_results" &&
-                researchInput.data.operation !== "import_csv")
+                researchInput.data.operation !== "import_csv" &&
+                researchInput.data.operation !== "calibration_round")
             )
               return finish({
                 error: "Recruiting research requires a valid preparation and artifact storage",
@@ -7308,6 +7314,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (early !== undefined) return early;
             }
             try {
+              if (researchInput.data.operation === "calibration_round") {
+                if (!applied || !claimedEffect) throw new IsolationError();
+                // Internal record keeping: the round and this native effect complete together.
+                return await saveRecruitingCalibrationRound(
+                  deps.prisma,
+                  researchActor.actor,
+                  {
+                    runId,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                    effectId: applied.effect.id,
+                    effectRequest: applied.effect.request,
+                  },
+                  researchInput.data,
+                );
+              }
               if (researchInput.data.operation === "import_csv") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // Internal record keeping like save_results: page, rows and effect commit together.
@@ -7353,7 +7375,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               if (
                 (researchInput.data.operation === "save_results" ||
-                  researchInput.data.operation === "import_csv") &&
+                  researchInput.data.operation === "import_csv" ||
+                  researchInput.data.operation === "calibration_round") &&
                 applied &&
                 claimedEffect &&
                 error instanceof Prisma.PrismaClientKnownRequestError &&
@@ -7377,7 +7400,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
               if (
                 error instanceof RecruitingCandidateOutputError ||
-                error instanceof RecruitingCsvImportError
+                error instanceof RecruitingCsvImportError ||
+                error instanceof RecruitingCalibrationRoundError
               )
                 return finish({ error: error.message });
               if (error instanceof IsolationError)

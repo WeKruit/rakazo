@@ -11,7 +11,7 @@ Ordered product migrations across the coordinated delivery:
 1. `20261023153000_recruiting_role_playbook_stage` (already merged #65).
 2. `20261023160000_recruiting_crm_sync` (#72 projection tables).
 3. `20261023170000_recruiting_candidate_notes` and `20261023171000_recruiting_candidate_shortlisted_at` (#74, when integrated).
-4. `20261023172000_recruiting_crm_sync_progress` (opaque progress tokens and contact profile JSON).
+4. `20261023172000_recruiting_calibration_rounds` (concurrent main PR #78), then `20261023172000_recruiting_crm_sync_progress` (opaque progress tokens and contact profile JSON).
 
 The separate CRM source migrations are `20261023180000_crm_candidate_presence` then `20261023181000_crm_candidate_presence_secondary_roles`; its authenticated read function reproduces the CRM's role-label matching and explicitly rejects unauthorized organizations. The existing MCP edge adapter exposes it through `list_crm_candidates` with `p_view: "presence"`. There is no new MCP server, dependency, credential, or cloud resource.
 
@@ -92,3 +92,5 @@ Commands and observed results before root integration:
 - `pnpm exec biome check` on changed TypeScript files and `git diff --check`: passed.
 
 A Docker-local synthetic database was briefly used before the inherited no-Docker restriction was relayed. Its six original tests passed; the owned container was then stopped and its data preserved. All expanded fourteen-test evidence above is from the native PostgreSQL instance, not Docker. No production access occurred.
+
+Published source correction: PR #67 merged as `11ca9c2df226782eee241fc5b36ba15600f4efcb`; use that source revision instead of manually applying the included archival patch when available. Existing Vercel reports success, but source SQL/MCP deployment remains owner-only and unverified.

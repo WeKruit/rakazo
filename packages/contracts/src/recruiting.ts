@@ -919,7 +919,12 @@ function validateCandidateDecision(
 }
 export const RecruitingFeedbackInputSchema = z.discriminatedUnion("target", [
   z.strictObject({ ...ScopedFeedback, target: z.literal("role"), operation: z.literal("revise") }),
-  z.strictObject({ ...ScopedFeedback, target: z.literal("round"), operation: z.literal("scope") }),
+  // approve: the recruiter's own words accept the current calibration round and allow scale.
+  z.strictObject({
+    ...ScopedFeedback,
+    target: z.literal("round"),
+    operation: z.enum(["scope", "approve"]),
+  }),
   z
     .strictObject({
       ...ScopedFeedback,
@@ -1059,7 +1064,17 @@ const ResearchRoundInput = {
   recallScope: ResearchText.nullable(),
   intent: RecruitingHumanIntentSchema,
 };
+export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
+  // Marks the exact ten saved people this calibration round shows the recruiter.
+  z.strictObject({
+    operation: z.literal("calibration_round"),
+    expectedRoleRevision: Revision,
+    candidateKeys: z
+      .array(RecruitingId)
+      .length(RECRUITING_CALIBRATION_ROUND_SIZE)
+      .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
+  }),
   z.strictObject({
     operation: z.literal("save_results"),
     expectedRoleRevision: Revision,
@@ -1453,6 +1468,7 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
     operation: z.literal("sources"),
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
+  z.strictObject({ operation: z.literal("round") }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
@@ -2359,3 +2375,24 @@ export const RecruitingNotesToolInputSchema = z.discriminatedUnion("operation", 
   DeleteRecruitingCandidateNoteInput.extend({ operation: z.literal("delete") }),
 ]);
 export type RecruitingNotesToolInput = z.infer<typeof RecruitingNotesToolInputSchema>;
+export const RecruitingCalibrationRoundSchema = z.strictObject({
+  round: z.number().int().positive(),
+  createdAt: IsoDate,
+  approvedAt: IsoDate.nullable(),
+  candidates: z.array(
+    z.strictObject({
+      candidateKey: RecruitingId,
+      name: z.string().nullable(),
+      title: z.string().nullable(),
+      company: z.string().nullable(),
+      location: z.string().nullable(),
+      linkedinUrl: z.string().nullable(),
+    }),
+  ),
+});
+export type RecruitingCalibrationRound = z.infer<typeof RecruitingCalibrationRoundSchema>;
+export const RecruitingCalibrationRoundOutput = z.strictObject({
+  roleId: RecruitingId.nullable(),
+  round: RecruitingCalibrationRoundSchema.nullable(),
+});
+export type RecruitingCalibrationRoundOutput = z.infer<typeof RecruitingCalibrationRoundOutput>;
