@@ -96,6 +96,11 @@ msgstr ""
 msgid "{0} handling"
 msgstr ""
 
+#. placeholder {0}: archivedRouteGroup.name
+#: src/pages/Shell.tsx
+msgid "{0} is archived."
+msgstr "{0} 已归档。"
+
 #. placeholder {0}: format(size / 1024)
 #: src/components/ArtifactFileCard.tsx
 msgid "{0} KB"
