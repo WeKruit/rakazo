@@ -547,6 +547,10 @@ msgstr "사용 Bot:"
 msgid "AI interpretation"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "All"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr ""
@@ -2755,6 +2759,10 @@ msgstr ""
 msgid "days"
 msgstr "일"
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Days unavailable."
+msgstr ""
+
 #: src/components/AskCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Decline"
@@ -2787,6 +2795,15 @@ msgstr "기본값 ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "기본 기억 범위"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay unavailable."
+msgstr ""
+
+#. placeholder {0}: step.delay
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay: {0} days"
+msgstr ""
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -3093,6 +3110,10 @@ msgstr "이메일"
 msgid "Email content"
 msgstr ""
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email content unavailable."
+msgstr ""
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -3141,6 +3162,18 @@ msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Email sent"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email step unavailable."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps unavailable."
 msgstr ""
 
 #: src/pages/recruiting/EmailConversation.tsx
@@ -3475,6 +3508,10 @@ msgstr ""
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "전체 화면"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Future confirmed events from saved calendar checks, shown in your local time. This is a recorded subset, not all bookings or availability."
+msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -4040,7 +4077,16 @@ msgid "Load web images automatically"
 msgstr "웹 이미지 자동으로 불러오기"
 
 #: src/pages/RecruitingCorrespondence.tsx
+msgid "Loaded email filters"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "Loaded files"
+msgstr ""
+
+#. placeholder {0}: loadedEmails.length
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
 msgstr ""
 
 #: src/pages/ActivityList.tsx
@@ -4711,9 +4757,17 @@ msgstr ""
 msgid "No dated sends in the available records."
 msgstr ""
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No email variants returned."
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No evidence provided."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No future confirmed event appears in these saved checks."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4894,6 +4948,14 @@ msgstr "저장된 결과 행 없음"
 msgid "No saved results"
 msgstr ""
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No schedules returned."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No sequences returned."
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No service configured for this role."
 msgstr ""
@@ -4909,6 +4971,10 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "아직 스킬이 없습니다"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No steps returned."
+msgstr ""
 
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -4963,6 +5029,10 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "No trigger"
 msgstr "트리거 없음"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No unread emails among loaded observations."
+msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
 msgid "None yet"
@@ -5086,6 +5156,22 @@ msgstr "OAuth 연결 실패"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "OAuth expired"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed at"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed email metadata"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed read"
+msgstr ""
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed unread"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5231,6 +5317,14 @@ msgstr ""
 #: src/App.tsx
 msgid "Opening your Space…"
 msgstr "작업공간을 여는 중…"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Opens the role’s full shortlist. The selected week is not applied there."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Opens this role’s records. The destination is not filtered to this metric’s exact candidates."
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -5682,6 +5776,10 @@ msgstr "반응"
 msgid "Read replies aloud"
 msgstr "답변을 자동으로 읽기"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Read status unknown"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Read the attached materials for this role."
 msgstr ""
@@ -5764,6 +5862,10 @@ msgstr "OAuth 다시 연결"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "다시 연결 중"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Recorded event"
+msgstr ""
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Recorded send activity"
@@ -6587,6 +6689,10 @@ msgstr ""
 msgid "Schedule interview"
 msgstr ""
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Schedule unavailable."
+msgstr ""
+
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -6818,6 +6924,10 @@ msgstr "Enter 키로 전송"
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Sending schedule"
 msgstr ""
 
 #: src/components/AskCard.tsx
@@ -7096,6 +7206,10 @@ msgid "Software update"
 msgstr "소프트웨어 업데이트"
 
 #: src/pages/recruiting/HomeDashboard.tsx
+msgid "Some role calendar records are unavailable or partial."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
 msgid "Some roles could not be read."
 msgstr ""
 
@@ -7256,6 +7370,10 @@ msgstr ""
 msgid "Status not recorded"
 msgstr ""
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Step"
+msgstr ""
+
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Step {0}"
@@ -7323,6 +7441,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Subject not set"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Subject unavailable."
 msgstr ""
 
 #. placeholder {0}: draft.email.subject
@@ -7792,6 +7914,7 @@ msgstr ""
 msgid "Unpin"
 msgstr "고정 해제"
 
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
 msgstr ""
@@ -7814,6 +7937,10 @@ msgstr "최신 상태"
 #. placeholder {0}: upcoming.length
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Upcoming ({0})"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Upcoming recorded bookings"
 msgstr ""
 
 #: src/components/SoftwareUpdateSection.tsx

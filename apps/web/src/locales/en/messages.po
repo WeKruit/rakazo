@@ -547,6 +547,10 @@ msgstr "Agents:"
 msgid "AI interpretation"
 msgstr "AI interpretation"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "All"
+msgstr "All"
+
 #: src/pages/Artifacts.tsx
 msgid "All bots"
 msgstr "All bots"
@@ -2755,6 +2759,10 @@ msgstr "Day-to-day work"
 msgid "days"
 msgstr "days"
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Days unavailable."
+msgstr "Days unavailable."
+
 #: src/components/AskCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Decline"
@@ -2787,6 +2795,15 @@ msgstr "Default ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "Default scope"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay unavailable."
+msgstr "Delay unavailable."
+
+#. placeholder {0}: step.delay
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay: {0} days"
+msgstr "Delay: {0} days"
 
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
@@ -3093,6 +3110,10 @@ msgstr "Email"
 msgid "Email content"
 msgstr "Email content"
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email content unavailable."
+msgstr "Email content unavailable."
+
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -3142,6 +3163,18 @@ msgstr "Email scheduled"
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Email sent"
 msgstr "Email sent"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email step unavailable."
+msgstr "Email step unavailable."
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps"
+msgstr "Email steps"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps unavailable."
+msgstr "Email steps unavailable."
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Email thread or message"
@@ -3475,6 +3508,10 @@ msgstr "From this role’s saved requirements"
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "Fullscreen"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Future confirmed events from saved calendar checks, shown in your local time. This is a recorded subset, not all bookings or availability."
+msgstr "Future confirmed events from saved calendar checks, shown in your local time. This is a recorded subset, not all bookings or availability."
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -4040,8 +4077,17 @@ msgid "Load web images automatically"
 msgstr "Load web images automatically"
 
 #: src/pages/RecruitingCorrespondence.tsx
+msgid "Loaded email filters"
+msgstr "Loaded email filters"
+
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "Loaded files"
 msgstr "Loaded files"
+
+#. placeholder {0}: loadedEmails.length
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
+msgstr "Loaded observations: {0} emails · {unreadCount} unread · {unknownReadCount} read status unknown"
 
 #: src/pages/ActivityList.tsx
 msgid "Loading activity…"
@@ -4711,10 +4757,18 @@ msgstr "No credentials saved for this bot."
 msgid "No dated sends in the available records."
 msgstr "No dated sends in the available records."
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No email variants returned."
+msgstr "No email variants returned."
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No evidence provided."
 msgstr "No evidence provided."
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No future confirmed event appears in these saved checks."
+msgstr "No future confirmed event appears in these saved checks."
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No group chats yet."
@@ -4894,6 +4948,14 @@ msgstr "No saved result rows"
 msgid "No saved results"
 msgstr "No saved results"
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No schedules returned."
+msgstr "No schedules returned."
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No sequences returned."
+msgstr "No sequences returned."
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No service configured for this role."
 msgstr "No service configured for this role."
@@ -4909,6 +4971,10 @@ msgstr "No shortlisted candidates yet."
 #: src/pages/KnowledgeSection.tsx
 msgid "No skills yet"
 msgstr "No skills yet"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No steps returned."
+msgstr "No steps returned."
 
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -4963,6 +5029,10 @@ msgstr "No tools available."
 #: src/pages/RoutineEditor.tsx
 msgid "No trigger"
 msgstr "No trigger"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No unread emails among loaded observations."
+msgstr "No unread emails among loaded observations."
 
 #: src/pages/ScratchpadSection.tsx
 msgid "None yet"
@@ -5087,6 +5157,22 @@ msgstr "OAuth connection failed"
 #: src/pages/McpServersOverlay.tsx
 msgid "OAuth expired"
 msgstr "OAuth expired"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed at"
+msgstr "Observed at"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed email metadata"
+msgstr "Observed email metadata"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed read"
+msgstr "Observed read"
+
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Observed unread"
+msgstr "Observed unread"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Older messages"
@@ -5231,6 +5317,14 @@ msgstr "Opening role…"
 #: src/App.tsx
 msgid "Opening your Space…"
 msgstr "Opening your Space…"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Opens the role’s full shortlist. The selected week is not applied there."
+msgstr "Opens the role’s full shortlist. The selected week is not applied there."
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Opens this role’s records. The destination is not filtered to this metric’s exact candidates."
+msgstr "Opens this role’s records. The destination is not filtered to this metric’s exact candidates."
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -5682,6 +5776,10 @@ msgstr "Reactions"
 msgid "Read replies aloud"
 msgstr "Read replies aloud"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Read status unknown"
+msgstr "Read status unknown"
+
 #: src/pages/Shell.tsx
 msgid "Read the attached materials for this role."
 msgstr "Read the attached materials for this role."
@@ -5764,6 +5862,10 @@ msgstr "Reconnect OAuth"
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "Reconnecting"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Recorded event"
+msgstr "Recorded event"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Recorded send activity"
@@ -6587,6 +6689,10 @@ msgstr "Schedule an interview with {0}. Check availability and prepare the invit
 msgid "Schedule interview"
 msgstr "Schedule interview"
 
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Schedule unavailable."
+msgstr "Schedule unavailable."
+
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingPanel.tsx
@@ -6819,6 +6925,10 @@ msgstr "Send with Enter"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sender unavailable"
 msgstr "Sender unavailable"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Sending schedule"
+msgstr "Sending schedule"
 
 #: src/components/AskCard.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
@@ -7096,6 +7206,10 @@ msgid "Software update"
 msgstr "Software update"
 
 #: src/pages/recruiting/HomeDashboard.tsx
+msgid "Some role calendar records are unavailable or partial."
+msgstr "Some role calendar records are unavailable or partial."
+
+#: src/pages/recruiting/HomeDashboard.tsx
 msgid "Some roles could not be read."
 msgstr "Some roles could not be read."
 
@@ -7256,6 +7370,10 @@ msgstr "Status changed to “{label}”"
 msgid "Status not recorded"
 msgstr "Status not recorded"
 
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "Step"
+msgstr "Step"
+
 #. placeholder {0}: index + 1
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Step {0}"
@@ -7324,6 +7442,10 @@ msgstr "Subject"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Subject not set"
 msgstr "Subject not set"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Subject unavailable."
+msgstr "Subject unavailable."
 
 #. placeholder {0}: draft.email.subject
 #: src/pages/Shell.tsx
@@ -7792,6 +7914,7 @@ msgstr "Unnamed candidate"
 msgid "Unpin"
 msgstr "Unpin"
 
+#: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
 msgstr "Unread"
@@ -7815,6 +7938,10 @@ msgstr "Up to date"
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Upcoming ({0})"
 msgstr "Upcoming ({0})"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Upcoming recorded bookings"
+msgstr "Upcoming recorded bookings"
 
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Update"
