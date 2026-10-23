@@ -4194,6 +4194,7 @@ msgid "Needs connection"
 msgstr "Needs connection"
 
 #: src/pages/ActivityList.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs input"
 msgstr "Needs input"
 
@@ -4229,6 +4230,7 @@ msgid "New password"
 msgstr "New password"
 
 #: src/pages/GroupPanel.tsx
+#: src/pages/Shell.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "New role"
 msgstr "New role"

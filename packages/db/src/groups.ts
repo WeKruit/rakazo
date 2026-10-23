@@ -30,6 +30,7 @@ type GroupRecord = {
     id: string;
     unread: boolean;
     messages: Array<{ blocks: unknown }>;
+    runs?: Array<{ id: string }>;
   } | null;
   members: Array<{
     bot: {
@@ -74,6 +75,7 @@ function mapGroup(group: GroupRecord): Group {
     threadId: group.thread.id,
     preview,
     unread: group.thread.unread,
+    ...(group.thread.runs ? { needsInput: group.thread.runs.length > 0 } : {}),
     updatedAt: group.updatedAt.toISOString(),
     createdAt: group.createdAt.toISOString(),
   };
@@ -147,6 +149,8 @@ const groupInclude = {
   thread: {
     include: {
       messages: { orderBy: { seq: "desc" as const }, take: 1 },
+      // A run paused on the user's answer or approval in this conversation.
+      runs: { where: { status: "waiting_input" }, take: 1, select: { id: true } },
     },
   },
   members: {

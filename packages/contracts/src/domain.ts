@@ -126,6 +126,8 @@ export const GroupSchema = z.object({
   crmRoleReference: RecruitingCrmRoleReferenceSchema.optional(),
   preview: z.string(),
   unread: z.boolean(),
+  /** A reply in this conversation is waiting on the user's answer or approval. */
+  needsInput: z.boolean().optional(),
   updatedAt: z.string(),
   createdAt: z.string(),
 });
