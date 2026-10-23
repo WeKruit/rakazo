@@ -32,9 +32,9 @@ import {
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type * as AutoReviewModule from "./auto-review.js";
+import { runAutoReviewJudge } from "./auto-review.js";
 import type * as BotSecretsModule from "./bot-secrets.js";
 import { shellCommandEnvironment } from "./bot-secrets.js";
-import { runAutoReviewJudge } from "./auto-review.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";

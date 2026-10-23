@@ -84,6 +84,7 @@ import {
   createStreamingRedactor,
   endsSentence,
   expandSkillReferencesInPrompt,
+  externalTextTriggerToolRefusal,
   formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
   humanizeToolName,
@@ -116,7 +117,6 @@ import {
   toolRequiresExplicitApproval,
   truncatedPlainText,
   unattendedTriggerToolRequiresApproval,
-  externalTextTriggerToolRefusal,
   userTurnMessageForRun,
 } from "@rakazo/core";
 import {
