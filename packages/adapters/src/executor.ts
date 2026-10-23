@@ -10000,6 +10000,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               blocks: finalBlocks.length ? finalBlocks : blocks,
               handedOff,
               pendingApproval: approvalPausePending,
+              returnsToRequester:
+                Boolean(peerMessage) &&
+                ["request", "question"].includes(peerMessage?.intent ?? "request"),
               postAssistant: (text) =>
                 publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
             }).catch((error) => getLogger().error("run.autocontinue guard", error));

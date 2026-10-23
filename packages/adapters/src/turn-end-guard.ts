@@ -4,8 +4,15 @@ import { classifyTurnEnd, type TurnEndClass } from "@rakazo/core";
 import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
+
+/**
+ * Turns the guard may push: human turns, its own continuations, the research wake that brings
+ * results, and a coordinator woken by a specialist's reply.
+ */
+const GUARDED_TRIGGERS = new Set(["user", "follow_up", "recruiting_research", "bot_message"]);
 
 /** RAKAZO_AUTOCONTINUE_MAX: auto-continues per human turn; 0 disables. Default 3. */
 export function autoContinueMax(env: NodeJS.ProcessEnv = process.env): number {
@@ -32,6 +39,8 @@ export type TurnEndGuardDeps = {
     externalEffect: PrismaClient["externalEffect"];
     recruitingRoleRevision: PrismaClient["recruitingRoleRevision"];
     recruitingCandidate: PrismaClient["recruitingCandidate"];
+    recruitingResearchTask: PrismaClient["recruitingResearchTask"];
+    run: Pick<PrismaClient["run"], "findFirst">;
   };
   events: Pick<ExecutorDeps["events"], "sendUserMessage">;
   jobs: Pick<ExecutorDeps["jobs"], "enqueue">;
@@ -50,6 +59,8 @@ export type TurnEndGuardInput = {
   blocks: readonly MessageBlock[];
   handedOff: boolean;
   pendingApproval: boolean;
+  /** A delegated bot_message run whose outcome returns to the requesting bot, which owns the next step. */
+  returnsToRequester?: boolean;
   /** Posts a final assistant message when the cap is reached. */
   postAssistant: (text: string) => Promise<unknown>;
   max?: number;
@@ -71,7 +82,11 @@ export async function guardRecruitingTurnEnd(
 ): Promise<TurnEndGuardResult> {
   const max = input.max ?? autoContinueMax();
   const { run } = input;
-  if (max === 0 || !["user", "follow_up"].includes(run.trigger))
+  if (
+    max === 0 ||
+    !GUARDED_TRIGGERS.has(run.trigger) ||
+    (run.trigger === "bot_message" && input.returnsToRequester)
+  )
     return { action: "ended", classification: "none" };
   const savedRows = await deps.prisma.recruitingCandidatePage.aggregate({
     where: { roleId: input.roleId, effect: { runId: run.id } },
@@ -123,6 +138,11 @@ export async function guardRecruitingTurnEnd(
   );
   if (classification !== "none") return { action: "ended", classification };
   if (!playbook?.step) return { action: "ended", classification };
+  // Waiting on a running search is not a stall: its wake brings the results.
+  if (await recruitingResearchInFlight(deps.prisma, input.roleId)) {
+    getLogger().info("run.autocontinue.waiting_research", { runId: run.id, roleId: input.roleId });
+    return { action: "ended", classification };
+  }
   const { stage, step } = playbook;
   const recent = await deps.prisma.message.findMany({
     where: {
