@@ -1,7 +1,7 @@
 import { createLogger, createTestSink, installLogger, runWithLogContext } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Prisma, PrismaClient } from "./client.js";
-import { IsolationError, invalidateMembershipCache, requireMembership } from "./scope.js";
+import { IsolationError, requireMembership } from "./scope.js";
 
 function prismaForMembership(found: boolean) {
   return {
@@ -22,12 +22,10 @@ function prismaForMembership(found: boolean) {
 
 describe("requireMembership", () => {
   afterEach(() => {
-    invalidateMembershipCache();
-    vi.useRealTimers();
     installLogger(createLogger({ service: "rakazo-test", level: "off", sinks: [] }));
   });
 
-  it("records each lookup in the existing request context and serves repeats from cache", async () => {
+  it("records each fresh lookup in the existing request context", async () => {
     const sink = createTestSink();
     installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
     const prisma = prismaForMembership(true);
@@ -37,11 +35,10 @@ describe("requireMembership", () => {
       await requireMembership(prisma, "user-1", "space-support");
     });
 
-    expect(prisma.$queryRaw).toHaveBeenCalledOnce();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
     expect(sink.events).toHaveLength(2);
-    expect(sink.events[0]).toMatchObject({ cache: "miss", queryMs: expect.any(Number) });
-    expect(sink.events[1]).toMatchObject({ cache: "hit" });
-    expect(sink.events[1]).not.toHaveProperty("queryMs");
+    expect(sink.events[0]).toMatchObject({ queryMs: expect.any(Number) });
+    expect(sink.events[1]).toMatchObject({ queryMs: expect.any(Number) });
     for (const event of sink.events) {
       expect(event).toMatchObject({
         message: "membership.lookup.timing",
@@ -56,27 +53,40 @@ describe("requireMembership", () => {
     }
   });
 
-  it("keys the cache by user and requested space, expires after 60s, and invalidates on writes", async () => {
-    vi.useFakeTimers();
+  it("rejects a revoked membership immediately after an authorized lookup", async () => {
     const prisma = prismaForMembership(true);
-
     await requireMembership(prisma, "user-1", "space-a");
-    await requireMembership(prisma, "user-1", "space-b");
-    await requireMembership(prisma, "user-2", "space-a");
-    await requireMembership(prisma, "user-1", null);
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(4);
+    vi.mocked(prisma.$queryRaw).mockResolvedValueOnce([]);
+    await expect(requireMembership(prisma, "user-1", "space-a")).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(2);
+  });
 
+  it("does not reuse authorization across database clients", async () => {
+    await requireMembership(prismaForMembership(true), "user-1", "space-a");
+    const denied = prismaForMembership(false);
+    await expect(requireMembership(denied, "user-1", "space-a")).rejects.toBeInstanceOf(
+      IsolationError,
+    );
+    expect(denied.$queryRaw).toHaveBeenCalledOnce();
+  });
+
+  it("observes a deployment-owner change on the next lookup", async () => {
+    const prisma = prismaForMembership(true);
+    const actor = await requireMembership(prisma, "user-1", "space-a");
+    vi.mocked(prisma.$queryRaw).mockResolvedValueOnce([{ ...actor, isDeploymentOwner: false }]);
+    await expect(requireMembership(prisma, "user-1", "space-a")).resolves.toMatchObject({
+      isDeploymentOwner: false,
+    });
+  });
+
+  it("propagates database failure after a successful membership lookup", async () => {
+    const prisma = prismaForMembership(true);
     await requireMembership(prisma, "user-1", "space-a");
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(4);
-
-    invalidateMembershipCache("user-1");
-    await requireMembership(prisma, "user-1", "space-a");
-    await requireMembership(prisma, "user-2", "space-a");
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(5);
-
-    vi.advanceTimersByTime(60_001);
-    await requireMembership(prisma, "user-2", "space-a");
-    expect(prisma.$queryRaw).toHaveBeenCalledTimes(6);
+    const failure = new Error("database unavailable");
+    vi.mocked(prisma.$queryRaw).mockRejectedValueOnce(failure);
+    await expect(requireMembership(prisma, "user-1", "space-a")).rejects.toBe(failure);
   });
 
   it("does not cache a missing membership", async () => {
