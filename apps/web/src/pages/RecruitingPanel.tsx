@@ -274,7 +274,7 @@ function CandidateFeedbackForm({
     }
   }
   return (
-    <div className="space-y-2">
+    <div className="hire-candidate-feedback space-y-2">
       <Button size="sm" variant="outline" aria-expanded={open} onClick={() => setOpen(!open)}>
         <Trans>Give feedback</Trans>
       </Button>
@@ -392,6 +392,7 @@ function FeedbackHistory({
   refreshSignal,
   onAccessError,
   showEmpty = false,
+  collapsed = false,
   readCache,
   readCacheScope,
 }: {
@@ -400,6 +401,7 @@ function FeedbackHistory({
   refreshSignal?: number;
   onAccessError: (error: unknown) => void;
   showEmpty?: boolean;
+  collapsed?: boolean;
   readCache?: RecruitingReadCache;
   readCacheScope?: string;
 }) {
@@ -456,11 +458,13 @@ function FeedbackHistory({
     };
   }, [read, refreshSignal]);
   if (!records.length && !failed && !showEmpty) return null;
+  const Container = collapsed ? "details" : "section";
+  const Heading = collapsed ? "summary" : "h4";
   return (
-    <section className="space-y-2">
-      <h4 className="font-medium">
+    <Container className="hire-candidate-feedback-history space-y-2">
+      <Heading className={collapsed ? "cursor-pointer font-medium" : "font-medium"}>
         <Trans>Feedback history</Trans>
-      </h4>
+      </Heading>
       {showEmpty && !records.length && !failed ? (
         <p role={pending ? "status" : undefined} className="text-sm text-muted-foreground">
           {pending ? <Trans>Loading…</Trans> : <Trans>No saved feedback yet.</Trans>}
@@ -509,7 +513,7 @@ function FeedbackHistory({
           {failed ? <Trans>Retry</Trans> : <Trans>More</Trans>}
         </Button>
       ) : null}
-    </section>
+    </Container>
   );
 }
 
@@ -751,7 +755,7 @@ function CandidateResearchMatch({
     ["Score", "Match score", "Match tier", "Grade"].includes(field.label),
   );
   return (
-    <dl aria-label={t`Research match`} className="space-y-1 text-xs">
+    <dl aria-label={t`Research match`} className="hire-candidate-match space-y-1 text-xs">
       <dt className="text-muted-foreground">
         <Trans>Research match</Trans>
       </dt>
@@ -775,7 +779,10 @@ function CandidateResearchMatch({
             {fields?.length ? (
               <dl>
                 {fields.map((field) => (
-                  <div key={field.label} className="flex flex-wrap gap-x-2">
+                  <div
+                    key={field.label}
+                    className={`flex flex-wrap gap-x-2 ${field.providerStatus ? "hire-candidate-criterion" : ""}`}
+                  >
                     <dt className="text-muted-foreground">{field.label}</dt>
                     <dd
                       className={`wrap-anywhere ${
@@ -1053,24 +1060,31 @@ function CrmDetails({
 function CandidateReport({
   report,
   showDiagnostics = false,
+  condensed = false,
 }: {
   report: RecruitingCandidateReport;
   showDiagnostics?: boolean;
+  condensed?: boolean;
 }) {
   const fieldUrls = new Set(report.fields.flatMap((field) => field.sourceUrls));
+  const fields = condensed
+    ? report.fields.toSorted((a, b) => Number(!!b.providerStatus) - Number(!!a.providerStatus))
+    : report.fields;
+  const FieldList = condensed ? "div" : "dl";
   return (
-    <div className="space-y-3 break-words font-sans text-base leading-relaxed">
-      <dl className="space-y-3">
-        {report.fields.map((field, index) => (
-          <div key={index}>
-            <dt className="font-medium">{field.label}</dt>
-            <dd className="space-y-1">
-              <CandidateReportValue
-                label={field.label}
-                value={field.value}
-                providerStatus={field.providerStatus}
-                showDiagnostics={showDiagnostics}
-              />
+    <div className="hire-candidate-report space-y-3 break-words font-sans text-base leading-relaxed">
+      <FieldList className="space-y-3">
+        {fields.map((field, index) => {
+          const content = (
+            <div key={index} className="space-y-1">
+              {!condensed || !field.providerStatus ? (
+                <CandidateReportValue
+                  label={field.label}
+                  value={field.value}
+                  providerStatus={field.providerStatus}
+                  showDiagnostics={showDiagnostics}
+                />
+              ) : null}
               {field.evidence ? (
                 <p className="whitespace-pre-wrap text-muted-foreground">{field.evidence}</p>
               ) : null}
@@ -1088,10 +1102,32 @@ function CandidateReport({
                   {new URL(url).hostname}
                 </a>
               ))}
-            </dd>
-          </div>
-        ))}
-      </dl>
+            </div>
+          );
+          return condensed ? (
+            <details key={index} className="hire-candidate-finding">
+              <summary className="cursor-pointer">
+                <span className="hire-candidate-finding-heading">
+                  <span className="font-medium">{field.label}</span>
+                  {field.providerStatus ? (
+                    <CandidateReportValue
+                      label={field.label}
+                      value={field.value}
+                      providerStatus={field.providerStatus}
+                    />
+                  ) : null}
+                </span>
+              </summary>
+              {content}
+            </details>
+          ) : (
+            <div key={index}>
+              <dt className="font-medium">{field.label}</dt>
+              <dd>{content}</dd>
+            </div>
+          );
+        })}
+      </FieldList>
       {report.sourceUrls
         .filter((url) => !fieldUrls.has(url))
         .map((url) => (
@@ -1313,7 +1349,11 @@ function CandidateSources({
                   </time>
                 </summary>
                 {source.report ? (
-                  <CandidateReport report={source.report} showDiagnostics={showDiagnostics} />
+                  <CandidateReport
+                    report={source.report}
+                    showDiagnostics={showDiagnostics}
+                    condensed
+                  />
                 ) : (
                   <p className="text-muted-foreground">
                     <Trans>Source unavailable</Trans>
@@ -6126,8 +6166,8 @@ function RecruitingWorkspace({
           }
         >
           {selection ? (
-            <div className="space-y-3">
-              <div className="flex items-start justify-between gap-3">
+            <div className="hire-candidate-body space-y-3">
+              <div className="hire-candidate-header flex items-start justify-between gap-3">
                 <DialogTitle className="break-words">
                   {selection.name ??
                     (showDiagnostics ? selection.candidateKey : t`Unnamed candidate`)}
@@ -6141,66 +6181,75 @@ function RecruitingWorkspace({
                   <X size={16} aria-hidden />
                 </DialogClose>
               </div>
-              {selection.title || selection.company ? (
+              {selection.title || selection.company || selection.location ? (
                 <p className="text-muted-foreground">
-                  {[selection.title, selection.company].filter(Boolean).join(" · ")}
+                  {[selection.title, selection.company, selection.location]
+                    .filter(Boolean)
+                    .join(" · ")}
                 </p>
               ) : null}
               <CandidateProfile candidate={selection} showDiagnostics={showDiagnostics} />
-              {onDiscussCandidate && workspace ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    candidateHandoff.current = () =>
-                      onDiscussCandidate({
-                        threadId,
-                        roleTitle: workspace.role.title,
-                        name: selection.name,
-                        title: selection.title,
-                        company: selection.company,
-                        linkedinUrl: selection.linkedinUrl,
-                        resumeUrl: selection.resumeUrl,
-                      });
-                    setCandidateDetailOpen(false);
-                  }}
-                >
-                  <Trans>Discuss candidate</Trans>
-                </Button>
-              ) : null}
-              {onCandidateFeedback && workspace && candidateDetailOpen ? (
-                <CandidateFeedbackForm
-                  key={`${threadId}:${workspace.role.id}:${workspace.revision.id}:${selection.candidateKey}`}
-                  candidate={{
-                    threadId,
-                    roleTitle: workspace.role.title,
-                    roleVersion: workspace.revision.revision,
-                    roleId: workspace.role.id,
-                    roleRevisionId: workspace.revision.id,
-                    candidateKey: selection.candidateKey,
-                    candidateRevision: selection.revision,
-                    name: selection.name,
-                    title: selection.title,
-                    company: selection.company,
-                    linkedinUrl: selection.linkedinUrl,
-                    resumeUrl: selection.resumeUrl,
-                  }}
-                  onSend={(...args) =>
-                    candidateFresh &&
-                    (!readCache || candidateValidation.current === readCache.epoch)
-                      ? onCandidateFeedback(...args)
-                      : Promise.resolve(false)
-                  }
-                  disabled={!candidateFresh}
-                  recipients={candidateFeedbackRecipients}
-                  onAccessError={denyAccess}
-                  onRecorded={() => {
-                    clearRecruitingReads(readCache, readCacheScope);
-                    setRefresh((value) => value + 1);
-                    setFeedbackRefresh((value) => value + 1);
-                  }}
-                />
-              ) : null}
+              <CandidateResearchMatch
+                candidate={selection}
+                roleRevisionId={workspace?.revision.id}
+                showDiagnostics={showDiagnostics}
+              />
+              <div className="hire-candidate-actions">
+                {onDiscussCandidate && workspace ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      candidateHandoff.current = () =>
+                        onDiscussCandidate({
+                          threadId,
+                          roleTitle: workspace.role.title,
+                          name: selection.name,
+                          title: selection.title,
+                          company: selection.company,
+                          linkedinUrl: selection.linkedinUrl,
+                          resumeUrl: selection.resumeUrl,
+                        });
+                      setCandidateDetailOpen(false);
+                    }}
+                  >
+                    <Trans>Discuss candidate</Trans>
+                  </Button>
+                ) : null}
+                {onCandidateFeedback && workspace && candidateDetailOpen ? (
+                  <CandidateFeedbackForm
+                    key={`${threadId}:${workspace.role.id}:${workspace.revision.id}:${selection.candidateKey}`}
+                    candidate={{
+                      threadId,
+                      roleTitle: workspace.role.title,
+                      roleVersion: workspace.revision.revision,
+                      roleId: workspace.role.id,
+                      roleRevisionId: workspace.revision.id,
+                      candidateKey: selection.candidateKey,
+                      candidateRevision: selection.revision,
+                      name: selection.name,
+                      title: selection.title,
+                      company: selection.company,
+                      linkedinUrl: selection.linkedinUrl,
+                      resumeUrl: selection.resumeUrl,
+                    }}
+                    onSend={(...args) =>
+                      candidateFresh &&
+                      (!readCache || candidateValidation.current === readCache.epoch)
+                        ? onCandidateFeedback(...args)
+                        : Promise.resolve(false)
+                    }
+                    disabled={!candidateFresh}
+                    recipients={candidateFeedbackRecipients}
+                    onAccessError={denyAccess}
+                    onRecorded={() => {
+                      clearRecruitingReads(readCache, readCacheScope);
+                      setRefresh((value) => value + 1);
+                      setFeedbackRefresh((value) => value + 1);
+                    }}
+                  />
+                ) : null}
+              </div>
               {workspace ? (
                 <FeedbackHistory
                   key={`feedback:${workspace.role.id}:${selection.candidateKey}`}
@@ -6210,6 +6259,7 @@ function RecruitingWorkspace({
                   readCache={readCache}
                   readCacheScope={readCacheScope}
                   onAccessError={denyAccess}
+                  collapsed
                 />
               ) : null}
               {selectedCrmTarget ? (
@@ -6221,11 +6271,6 @@ function RecruitingWorkspace({
                   />
                 </section>
               ) : null}
-              <CandidateResearchMatch
-                candidate={selection}
-                roleRevisionId={workspace?.revision.id}
-                showDiagnostics={showDiagnostics}
-              />
               {selection.latestAssessment && evidenceFailed ? (
                 <p role="alert">
                   <Trans>Could not load assessment</Trans>
