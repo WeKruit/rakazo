@@ -14,15 +14,17 @@ export const RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS = 10;
 /** Shown to the model when a task is still working after the foreground wait. */
 export const RECRUITING_RESEARCH_BACKGROUND_NOTICE =
   "Research continues in the background. Its results are delivered to this conversation automatically when the provider finishes; do not poll status.";
-/** Polls stop after this many checks (~4 hours at the capped interval). */
-export const RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS = 240;
+/** Polls stop after this many checks (2 hours at the fixed interval). */
+export const RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS = 720;
+/** A status probe is a free provider read; a short fixed interval keeps the handoff delay small. */
+export const RECRUITING_RESEARCH_POLL_INTERVAL_MS = 10_000;
 
 export function recruitingResearchWakeNonce(taskId: string, providerTaskId: string): string {
   return `recruiting-research-wake:${taskId}:${providerTaskId}`;
 }
 
-export function recruitingResearchPollDelay(attempt: number): Date {
-  return new Date(Date.now() + Math.min(60_000, 15_000 * 2 ** Math.min(attempt, 2)));
+export function recruitingResearchPollDelay(_attempt: number): Date {
+  return new Date(Date.now() + RECRUITING_RESEARCH_POLL_INTERVAL_MS);
 }
 
 export type RecruitingResearchPollDeps = {
