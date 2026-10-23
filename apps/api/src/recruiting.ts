@@ -15,6 +15,7 @@ import {
 } from "@rakazo/adapters";
 import type {
   Actor,
+  ListRecruitingCandidatesOutput,
   ReadRecruitingSourceInput,
   RecruitingAssessmentSourceRef,
   RecruitingCandidateSource,
@@ -24,6 +25,8 @@ import type {
   RecruitingCrmRoleReference,
   RecruitingCrmTarget,
   RecruitingRoleCampaign,
+  RecruitingRoleCandidate,
+  RecruitingRoleCandidatesOutput,
   RecruitingSourceRef,
   RecruitingSourceSelection,
 } from "@rakazo/contracts";
@@ -2597,5 +2600,262 @@ export async function getRecruitingCrmData(
       items: page.messages.map(mailItem),
       nextCursor: page.next_cursor,
     });
+  });
+}
+
+type RoleCandidatesInput = {
+  threadId: string;
+  limit?: number | undefined;
+  cursor?: string | undefined;
+  sort?: "score" | "rank" | "name" | "recent" | undefined;
+  query?: string | undefined;
+  shortlistedOnly?: boolean | undefined;
+};
+type RoleCandidatesAutumnPage = Pick<
+  ListRecruitingCandidatesOutput,
+  "items" | "nextCursor" | "total" | "counts" | "crmTarget"
+>;
+type RoleCandidatesCrmRow = Extract<
+  RecruitingCrmDataOutput,
+  { operation: "candidates" }
+>["items"][number] & { serverId: string; organizationId: string };
+export type RoleCandidatesSources = {
+  autumn(cursor: string | undefined, limit: number): Promise<RoleCandidatesAutumnPage>;
+  autumnLinkedinUrls(): Promise<string[]>;
+  crm(
+    target: RecruitingCrmTarget,
+  ): Promise<{ status: "ok"; rows: RoleCandidatesCrmRow[] } | { status: "unavailable" }>;
+};
+
+/** `linkedin.com/in/<slug>` regardless of scheme, subdomain, case, query or trailing slash. */
+export function linkedinIdentity(url: string | null | undefined): string | null {
+  const text = url?.trim().toLowerCase();
+  if (!text) return null;
+  const profile = /^(?:https?:\/\/)?(?:[a-z0-9-]+\.)?linkedin\.com\/in\/([^/?#\s]+)/.exec(text);
+  return profile ? `linkedin.com/in/${profile[1]}` : text.replace(/[/?#]+$/, "");
+}
+
+const roleCandidatesCursor = {
+  read(raw: string | undefined, scope: string): { a?: string; o?: number } {
+    if (raw === undefined) return {};
+    try {
+      const value = JSON.parse(Buffer.from(raw, "base64url").toString("utf8"));
+      if (
+        value?.s === scope &&
+        (value.a === undefined || (typeof value.a === "string" && value.a)) &&
+        (value.o === undefined || (Number.isSafeInteger(value.o) && value.o >= 0)) &&
+        (value.a === undefined) !== (value.o === undefined)
+      )
+        return value.a === undefined ? { o: value.o } : { a: value.a };
+    } catch {}
+    throw new RecruitingConflictError();
+  },
+  write: (scope: string, position: { a: string } | { o: number }) =>
+    Buffer.from(JSON.stringify({ s: scope, ...position })).toString("base64url"),
+};
+
+/**
+ * Merges one page of Autumn results with the role's CRM contacts. Pages Autumn first (its own
+ * cursor/sort), then the CRM-only contacts by offset; the cursor carries whichever position is live.
+ */
+export async function mergeRoleCandidates(
+  input: RoleCandidatesInput,
+  sources: RoleCandidatesSources,
+): Promise<RecruitingRoleCandidatesOutput> {
+  const limit = input.limit ?? 25;
+  const scope = JSON.stringify([
+    input.threadId,
+    input.sort ?? "score",
+    input.query ?? "",
+    input.shortlistedOnly === true,
+  ]);
+  const position = roleCandidatesCursor.read(input.cursor, scope);
+  const autumnPhase = position.o === undefined;
+  // ponytail: the CRM phase still reads one Autumn row for totals, counts and the CRM binding.
+  const autumn = await sources.autumn(position.a, autumnPhase ? limit : 1);
+  const crm = autumn.crmTarget
+    ? await sources.crm(autumn.crmTarget.target)
+    : ({ status: "not_bound" } as const);
+  // One slot per person: LinkedIn identity first, then lowercased email. Autumn rows have no email.
+  type Slot = { autumn: boolean; crm: RoleCandidatesCrmRow | null };
+  const owners = new Map<string, Slot>();
+  const crmOnly: RoleCandidatesCrmRow[] = [];
+  const outreach: Record<string, number> = {};
+  if (crm.status === "ok" && crm.rows.length) {
+    for (const url of await sources.autumnLinkedinUrls()) {
+      const key = linkedinIdentity(url);
+      if (key && !owners.has(`li:${key}`)) owners.set(`li:${key}`, { autumn: true, crm: null });
+    }
+    for (const row of crm.rows) {
+      const li = linkedinIdentity(row.linkedinUrl);
+      const email = row.email?.trim().toLowerCase() || null;
+      const keys = [li && `li:${li}`, email && `em:${email}`].filter((key) => key !== null);
+      let slot = keys.map((key) => owners.get(key)).find((found) => found !== undefined);
+      if (!slot) {
+        slot = { autumn: false, crm: row };
+        crmOnly.push(row);
+      } else if (!slot.crm) slot.crm = row;
+      else continue; // Same person listed twice in the CRM.
+      outreach[row.outreachStatus] = (outreach[row.outreachStatus] ?? 0) + 1;
+      for (const key of keys) if (!owners.has(key)) owners.set(key, slot);
+    }
+  }
+  const needle = input.query?.trim().replace(/\s+/g, " ").toLowerCase();
+  const visibleCrmOnly = input.shortlistedOnly
+    ? []
+    : crmOnly.filter(
+        (row) =>
+          !needle ||
+          [row.name, row.email, row.title].some((text) =>
+            text?.replace(/\s+/g, " ").toLowerCase().includes(needle),
+          ),
+      );
+  if (input.sort === "name")
+    visibleCrmOnly.sort(
+      (left, right) =>
+        left.name.toLowerCase().localeCompare(right.name.toLowerCase()) ||
+        left.candidateId.localeCompare(right.candidateId),
+    );
+  const crmSide = (row: RoleCandidatesCrmRow | null | undefined) =>
+    row
+      ? {
+          serverId: row.serverId,
+          organizationId: row.organizationId,
+          candidateId: row.candidateId,
+          stage: row.stage,
+          contactStatus: row.contactStatus,
+          outreachStatus: row.outreachStatus,
+        }
+      : null;
+  const items: RecruitingRoleCandidate[] = [];
+  let nextCursor: string | null = null;
+  if (autumnPhase)
+    for (const candidate of autumn.items) {
+      const li = linkedinIdentity(candidate.linkedinUrl);
+      const slot = li ? owners.get(`li:${li}`) : undefined;
+      const contact = (slot?.autumn && slot.crm) || null;
+      const fields = candidate.latestSource?.report?.fields ?? [];
+      items.push({
+        key: `autumn:${candidate.candidateKey}`,
+        name: candidate.name ?? contact?.name ?? null,
+        title: candidate.title ?? contact?.title ?? null,
+        location: candidate.location ?? contact?.location ?? null,
+        email: contact?.email ?? null,
+        linkedinUrl: candidate.linkedinUrl ?? contact?.linkedinUrl ?? null,
+        autumn: {
+          candidateKey: candidate.candidateKey,
+          score: candidate.match?.score ?? null,
+          rank: candidate.match?.rank ?? null,
+          tier: candidate.match?.tier ?? null,
+          matchSummary: fields.find((field) => /summary/i.test(field.label))?.value ?? null,
+          criteria: fields.flatMap((field) =>
+            field.providerStatus
+              ? [
+                  {
+                    label: field.label,
+                    status: field.providerStatus,
+                    evidence: field.evidence ?? null,
+                  },
+                ]
+              : [],
+          ),
+        },
+        crm: crmSide(contact),
+        shortlisted: candidate.shortlisted,
+      });
+    }
+  if (autumnPhase && autumn.nextCursor)
+    nextCursor = roleCandidatesCursor.write(scope, { a: autumn.nextCursor });
+  else {
+    const offset = position.o ?? 0;
+    const page = visibleCrmOnly.slice(offset, offset + limit - items.length);
+    for (const row of page)
+      items.push({
+        key: `crm:${row.candidateId}`,
+        name: row.name,
+        title: row.title,
+        location: row.location,
+        email: row.email,
+        linkedinUrl: row.linkedinUrl,
+        autumn: null,
+        crm: crmSide(row),
+        shortlisted: false,
+      });
+    if (offset + page.length < visibleCrmOnly.length)
+      nextCursor = roleCandidatesCursor.write(scope, { o: offset + page.length });
+  }
+  return {
+    items,
+    nextCursor,
+    total: autumn.total + visibleCrmOnly.length,
+    counts: { ...outreach, shortlisted: autumn.counts.shortlisted, replied: outreach.replied ?? 0 },
+    crmStatus: crm.status,
+  };
+}
+
+/** `recruiting.roleCandidates`: existing Autumn list + existing CRM candidates read, merged. */
+export async function getRecruitingRoleCandidates(
+  deps: RecruitingReadDeps & Omit<RecruitingCrmReadDeps, "prisma">,
+  actor: Actor,
+  target: ThreadTarget,
+  input: RoleCandidatesInput,
+): Promise<RecruitingRoleCandidatesOutput> {
+  if (target.threadId !== input.threadId) throw new IsolationError();
+  const roleId = await authenticated(() =>
+    recruiting.getRecruitingWorkspaceRoleId(deps.prisma, actor, { threadId: input.threadId }),
+  );
+  if (!roleId)
+    return {
+      items: [],
+      nextCursor: null,
+      total: 0,
+      counts: { shortlisted: 0, replied: 0 },
+      crmStatus: "not_bound",
+    };
+  const sort = input.sort ?? "score";
+  return mergeRoleCandidates(input, {
+    autumn: (cursor, limit) =>
+      listRecruitingCandidates(deps, actor, {
+        roleId,
+        limit,
+        sort,
+        ...(cursor ? { cursor } : {}),
+        ...(input.query ? { query: input.query } : {}),
+        ...(input.shortlistedOnly ? { shortlisted: true } : {}),
+      }),
+    autumnLinkedinUrls: () =>
+      authenticated(() =>
+        recruiting.listRecruitingCandidateLinkedinUrls(deps.prisma, actor, roleId),
+      ),
+    async crm(binding) {
+      const rows: RoleCandidatesCrmRow[] = [];
+      try {
+        // ponytail: whole role contact list per request, capped at 10×50; page by email/URL if roles outgrow it.
+        for (let offset: number | null = 0, pages = 0; offset !== null && pages < 10; pages++) {
+          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(deps, actor, target, {
+            operation: "candidates",
+            serverId: binding.mcpServerId,
+            serverRevision: binding.serverRevision,
+            organizationId: binding.organizationId,
+            crmRoleId: binding.crmRoleId,
+            limit: 50,
+            offset,
+          });
+          if (page.operation !== "candidates") throw new IsolationError();
+          for (const item of page.items)
+            rows.push({
+              ...item,
+              serverId: page.source.serverId,
+              organizationId: page.source.organizationId,
+            });
+          offset = page.nextOffset;
+        }
+      } catch (error) {
+        // The CRM side fails closed to no CRM data; Autumn rows were authorized by their own read.
+        if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
+        return { status: "unavailable" };
+      }
+      return { status: "ok", rows };
+    },
   });
 }

@@ -1001,6 +1001,10 @@ export const ThreadSnapshotSchema = z.object({
   cursor: z.number().int().min(-1),
   messages: z.array(ThreadMessageSchema),
   olderCursor: z.number().int().nonnegative().nullable(),
+  /** Oldest seq of the latest-message window (excludes merged waiting cards); null when empty. */
+  messagesCursor: z.number().int().nonnegative().nullable().optional(),
+  /** True when history older than messagesCursor exists (page it via threads.messages). */
+  hasOlder: z.boolean().optional(),
   botId: Id.optional(),
   groupId: Id.optional(),
   groupName: z.string().optional(),

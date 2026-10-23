@@ -49,6 +49,7 @@ import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
 } from "./recruiting-research.js";
+import { unresolvedContactEmailError } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { createSafeRemoteFetch } from "./remote-mcp.js";
 
@@ -69,7 +70,14 @@ const ContactEmailsInput = ThreadHistoryInput.omit({ anchor_id: true }).extend({
   email: z
     .email()
     .max(254)
-    .describe("The other party (candidate/contact) address. Never your own Instantly mailbox."),
+    .describe(
+      "The person's STORED address from recruiting_candidates resolve. Never a guessed address or your own Instantly mailbox.",
+    ),
+  name: z
+    .string()
+    .max(240)
+    .optional()
+    .describe("The resolved person's name, checked against the stored address."),
   eaccount: z
     .email()
     .max(254)
@@ -272,12 +280,20 @@ export async function loadMcpCredentialRecord(
   return { secret, plaintext };
 }
 
+/** How long a worker reuses a server's discovered tool list before listing it again. */
+export const DISCOVERY_CACHE_TTL_MS = 10 * 60_000;
+
 export class McpConnector implements ConnectorProvider {
   private readonly sessions = new Map<string, SessionEntry>();
   private readonly connecting = new Map<string, PendingSession>();
   // Discovery runs more than once per run: once up front, then again on every lazy
   // catalog access. Each attempt needs its own executionId.
   private discoverySeq = 0;
+  private readonly toolCatalog = new Map<
+    string,
+    { version: string; at: number; listed: Awaited<ReturnType<McpSession["listTools"]>> }
+  >();
+  private catalogGeneration = 0;
   private readonly unsubscribe: () => void;
   private readonly firstPartyEndpoint?: string;
   constructor(
@@ -300,6 +316,9 @@ export class McpConnector implements ConnectorProvider {
     this.firstPartyEndpoint = firstPartyMcpUrl(options.firstParty?.endpoint);
     this.unsubscribe =
       this.secrets.onChange?.((ref) => {
+        // ponytail: any credential change drops every cached tool list; changes are rare.
+        this.toolCatalog.clear();
+        this.catalogGeneration += 1;
         for (const [key, entry] of this.sessions)
           if (entry.ref === ref) {
             // OAuth may renew inside the active request. Static credential changes
@@ -360,8 +379,7 @@ export class McpConnector implements ConnectorProvider {
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
         const startedAt = Date.now();
         try {
-          const session = await this.sessionFor(assignment.server, context);
-          const listed = await session.listTools({ signal: context.signal });
+          const listed = await this.listServerTools(assignment.server, context);
           reportAllowlistDrift(assignment, listed.tools, context);
           const remoteTools: ConnectorTool[] = listed.tools
             .filter(
@@ -691,6 +709,16 @@ export class McpConnector implements ConnectorProvider {
     const isHistory = call.route!.toolName === THREAD_HISTORY;
     const isMailbox = call.route!.toolName === MAILBOX_EMAILS;
     const operation = isHistory ? "thread history" : isMailbox ? "mailbox email" : "contact email";
+    if (!isHistory && !isMailbox && context.runId) {
+      const parsed = ContactEmailsInput.safeParse(call.args);
+      const refused =
+        parsed.success &&
+        unresolvedContactEmailError(context.runId, parsed.data.email, parsed.data.name);
+      if (refused) {
+        yield { type: "error", message: refused };
+        return;
+      }
+    }
     let rejectedStatus: number | undefined;
     let hint = "";
     const redactions: string[] = [];
@@ -965,6 +993,40 @@ export class McpConnector implements ConnectorProvider {
     this.connecting.clear();
   }
 
+  /**
+   * The server's raw tool list, cached per worker for DISCOVERY_CACHE_TTL_MS. Only the list
+   * shape is cached: the assignment, allowlist and enabled state are read on every discovery,
+   * and sessionFor still revalidates the credential first (a rotated or deleted credential
+   * evicts the session and this entry). The version holds every field a server or credential
+   * write changes (revision, secretId), so such a write misses the cache in every worker.
+   */
+  private async listServerTools(server: McpServer, context: AdapterContext) {
+    const key = this.sessionKey(server, context);
+    const version = `${server.revision} ${server.secretId ?? ""} ${server.transport} ${server.endpoint}`;
+    const startedAt = performance.now();
+    const session = await this.sessionFor(server, context);
+    const cached = this.toolCatalog.get(key);
+    if (cached?.version === version && Date.now() - cached.at < DISCOVERY_CACHE_TTL_MS) {
+      getLogger().info("discovery.cache", {
+        hit: true,
+        server: server.slug,
+        ms: Math.round(performance.now() - startedAt),
+      });
+      return cached.listed;
+    }
+    const generation = this.catalogGeneration;
+    const listed = await session.listTools({ signal: context.signal });
+    // A credential change during the list call leaves it uncached.
+    if (generation === this.catalogGeneration)
+      this.toolCatalog.set(key, { version, at: Date.now(), listed });
+    getLogger().info("discovery.cache", {
+      hit: false,
+      server: server.slug,
+      ms: Math.round(performance.now() - startedAt),
+    });
+    return listed;
+  }
+
   private sessionKey(server: McpServer, context: AdapterContext): string {
     // Identity headers are applied once, at connect time, so a session is only
     // valid for the identity it connected as. The key has to carry that identity.
@@ -972,6 +1034,7 @@ export class McpConnector implements ConnectorProvider {
   }
 
   private async evict(sessionKey: string): Promise<void> {
+    this.toolCatalog.delete(sessionKey);
     const entry = this.sessions.get(sessionKey);
     if (!entry) return;
     this.sessions.delete(sessionKey);

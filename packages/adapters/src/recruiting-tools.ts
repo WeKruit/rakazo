@@ -1,14 +1,16 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   AdapterContext,
   ArtifactStore,
   ConnectorCall,
+  ConnectorProvider,
   JobPublisher,
 } from "@rakazo/adapter-kit";
 import { recruitingResearchPollJob } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingResearchToolInput } from "@rakazo/contracts";
 import {
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
+  RecruitingCrmCandidatesReadSchema,
   RecruitingResearchReadArtifactSchema,
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
@@ -29,6 +31,7 @@ import {
   executeRecruitingRoleMutation,
   getRecruitingWorkspace,
   IsolationError,
+  listRecruitingCandidates,
   listUnmappedRecruitingResearchReads,
   prepareRecruitingResearchAction,
   RecruitingConflictError,
@@ -908,4 +911,178 @@ export async function completeRecruitingResearchCall(
     providerResult: raw,
     ...(background ? { background: RECRUITING_RESEARCH_BACKGROUND_NOTICE } : {}),
   };
+}
+
+const fold = (text: string) =>
+  text.normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+/** Case/diacritics-insensitive partial match: every query word appears in the stored name. */
+export function personNameMatches(name: string | null | undefined, query: string) {
+  const words = fold(query).split(" ").filter(Boolean);
+  const stored = fold(name ?? "");
+  return words.length > 0 && words.every((word) => stored.includes(word));
+}
+
+const sameUrl = (url: string | null | undefined) =>
+  url
+    ? fold(url)
+        .replace(/^https?:\/\/(www\.)?/, "")
+        .replace(/\/+$/, "")
+    : null;
+
+export type ResolvedRecruitingContact = {
+  name: string | null;
+  email: string | null;
+  linkedinUrl: string | null;
+  sources: ("crm_contact" | "saved_pool")[];
+  crmCandidateId: string | null;
+  candidateKey: string | null;
+  stage: string | null;
+  outreachStatus: string | null;
+};
+type CrmRow = ReturnType<typeof RecruitingCrmCandidatesReadSchema.parse>["rows"][number];
+type PoolRow = { candidateKey: string; name: string | null; linkedinUrl: string | null };
+
+/** The role's own records for one person: CRM contacts first, then the saved pool. */
+export function matchRecruitingContacts(nameOrEmail: string, crmRows: CrmRow[], pool: PoolRow[]) {
+  const email = nameOrEmail.includes("@") ? fold(nameOrEmail) : null;
+  const matches: ResolvedRecruitingContact[] = crmRows
+    .filter((row) =>
+      email ? fold(row.email ?? "") === email : personNameMatches(row.full_name, nameOrEmail),
+    )
+    .map((row) => ({
+      name: row.full_name,
+      email: row.email,
+      linkedinUrl: row.linkedin_url,
+      sources: ["crm_contact"],
+      crmCandidateId: row.candidate_id,
+      candidateKey: null,
+      stage: row.stage,
+      outreachStatus: row.outreach_status,
+    }));
+  // The pool stores no email, so an email query resolves through CRM contacts only.
+  for (const row of email ? [] : pool.filter((row) => personNameMatches(row.name, nameOrEmail))) {
+    // Merge only on the same LinkedIn profile, never by name.
+    const same = matches.find(
+      (match) => match.linkedinUrl && sameUrl(match.linkedinUrl) === sameUrl(row.linkedinUrl),
+    );
+    if (same) {
+      same.sources.push("saved_pool");
+      same.candidateKey = row.candidateKey;
+    } else
+      matches.push({
+        name: row.name,
+        email: null,
+        linkedinUrl: row.linkedinUrl,
+        sources: ["saved_pool"],
+        crmCandidateId: null,
+        candidateKey: row.candidateKey,
+        stage: null,
+        outreachStatus: null,
+      });
+  }
+  return {
+    status: !matches.length
+      ? ("not_found" as const)
+      : matches.length === 1
+        ? ("resolved" as const)
+        : ("ambiguous" as const),
+    matches,
+  };
+}
+
+// ponytail: per-process, per-run memory of resolved stored emails; a restarted run re-resolves.
+const resolvedEmails = new Map<string, Map<string, string | null>>();
+export function rememberResolvedContactEmails(runId: string, matches: ResolvedRecruitingContact[]) {
+  const emails = resolvedEmails.get(runId) ?? new Map<string, string | null>();
+  for (const match of matches) if (match.email) emails.set(fold(match.email), match.name);
+  resolvedEmails.delete(runId);
+  resolvedEmails.set(runId, emails);
+  if (resolvedEmails.size > 500) resolvedEmails.delete(resolvedEmails.keys().next().value!);
+}
+
+/** Correspondence lookups use only an address stored for that person in this run's resolution. */
+export function unresolvedContactEmailError(runId: string, email: string, name?: string) {
+  const stored = resolvedEmails.get(runId)?.get(fold(email));
+  return stored === undefined || (name && stored && !personNameMatches(stored, name))
+    ? `No stored email for ${name ?? email}; resolve the contact first, never guess an address`
+    : null;
+}
+
+/** Resolve a named person through the role's CRM-bound contacts and saved candidate pool. */
+export async function resolveRecruitingContact(
+  deps: { prisma: PrismaClient; connector?: Pick<ConnectorProvider, "execute"> },
+  actor: Actor,
+  input: { roleId: string; nameOrEmail: string },
+  context: AdapterContext,
+) {
+  const pool: PoolRow[] = [];
+  let crmTarget: Awaited<ReturnType<typeof listRecruitingCandidates>>["crmTarget"] = null;
+  // ponytail: scans at most 1,000 saved people and 1,000 CRM contacts per role; add a folded-name index past that.
+  for (let cursor: string | undefined, page = 0; page < 5; page++) {
+    const result = await listRecruitingCandidates(deps.prisma, actor, {
+      roleId: input.roleId,
+      limit: 200,
+      sort: "name",
+      ...(cursor ? { cursor } : {}),
+    });
+    crmTarget = result.crmTarget;
+    pool.push(...result.items);
+    if (!result.nextCursor) break;
+    cursor = result.nextCursor;
+  }
+  const crmRows: CrmRow[] = [];
+  let crm: "read" | "not_bound" | "unavailable" = crmTarget ? "read" : "not_bound";
+  const target = crmTarget?.target;
+  if (target && !deps.connector) crm = "unavailable";
+  else if (target)
+    try {
+      for (let offset = 0; offset < 1000; ) {
+        let data: unknown;
+        for await (const event of deps.connector!.execute(
+          {
+            tool: "list_crm_candidates",
+            route: {
+              connectorId: "mcp",
+              resourceId: target.mcpServerId,
+              resourceRevision: target.serverRevision,
+              toolName: "list_crm_candidates",
+            },
+            // list_crm_candidates filters by client/role LABELS, not role_spec_id; unreviewed-only is its default.
+            args: {
+              p_org: target.organizationId,
+              p_client: target.clientLabel,
+              p_role: target.roleLabel,
+              p_not_reviewed: false,
+              p_limit: 50,
+              p_offset: offset,
+            },
+            executionId: randomUUID(),
+          },
+          context,
+        )) {
+          if (event.type === "error") throw new Error(event.message);
+          if (event.type === "result")
+            data = (event.data as { structuredContent?: { data?: unknown } } | null)
+              ?.structuredContent?.data;
+        }
+        const page = RecruitingCrmCandidatesReadSchema.parse(data);
+        crmRows.push(
+          ...page.rows.filter(
+            (row) =>
+              row.client_label.trim() === target.clientLabel.trim() &&
+              row.role_label.trim() === target.roleLabel.trim(),
+          ),
+        );
+        offset += page.rows.length;
+        if (!page.rows.length || offset >= page.total) break;
+      }
+    } catch (error) {
+      context.signal.throwIfAborted();
+      getLogger().warn("recruiting.contact.resolve.crm_unavailable", { error: String(error) });
+      crm = "unavailable";
+    }
+  const result = matchRecruitingContacts(input.nameOrEmail, crmRows, pool);
+  if (context.runId) rememberResolvedContactEmails(context.runId, result.matches);
+  return { ...result, crm };
 }

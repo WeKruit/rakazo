@@ -11,6 +11,7 @@ import type {
   RecruitingCorrespondenceReference,
   ReplyPreview,
   RunStatus,
+  ThreadMessagePage,
   ThreadSnapshot,
 } from "@rakazo/contracts";
 import { GROUP_MEMBER_MIN, MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
@@ -64,7 +65,17 @@ export type ThreadTarget =
       memberBotIds: string[];
     };
 
-const THREAD_MESSAGE_PAGE_SIZE = 100;
+// threads.get returns only the newest window; older history pages via threads.messages.
+export const THREAD_SNAPSHOT_PAGE_SIZE = 30;
+
+/** Paging fields for the snapshot window, read before waiting cards are merged in. */
+function windowCursor(page: ThreadMessagePage) {
+  return {
+    messagesCursor: page.olderCursor ?? page.messages[0]?.seq ?? null,
+    hasOlder: page.olderCursor !== null,
+  };
+}
+
 const RUNS_NEEDING_CONTINUE = new Set(["queued", "waiting_takeover"]);
 
 const STEERABLE_RUN_STATUSES = new Set(["queued", "leased", "running", "waiting_takeover"]);
@@ -357,7 +368,7 @@ export async function threadSnapshot(
         async (tx) => {
           await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
           const [messagePage, last, waitingRun, busyOrFailed] = await Promise.all([
-            loadMessagePage(tx, target.threadId, undefined, THREAD_MESSAGE_PAGE_SIZE),
+            loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
             tx.event.findFirst({
               where: { threadId: target.threadId },
               orderBy: { seq: "desc" },
@@ -428,6 +439,7 @@ export async function threadSnapshot(
                 })
               : [];
           return {
+            window: windowCursor(messagePage),
             messagePage: await includeWaitingAskMessages(
               tx,
               messagePage,
@@ -447,6 +459,7 @@ export async function threadSnapshot(
       cursor: core.last?.seq ?? -1,
       messages: messagesWithLiveEvents(core.messagePage.messages, core.liveEvents),
       olderCursor: core.messagePage.olderCursor,
+      ...core.window,
       run: core.run ? mapRun(core.run) : null,
       computer: toComputerStatus(target.botId, target.bot.computer, busyBotName),
     };
@@ -456,7 +469,7 @@ export async function threadSnapshot(
     async (tx) => {
       await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
       const [messagePage, last, activeRuns, recentTerminals] = await Promise.all([
-        loadMessagePage(tx, target.threadId, undefined, THREAD_MESSAGE_PAGE_SIZE),
+        loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
         tx.event.findFirst({
           where: { threadId: target.threadId },
           orderBy: { seq: "desc" },
@@ -507,6 +520,7 @@ export async function threadSnapshot(
             })
           : [];
       return {
+        window: windowCursor(messagePage),
         messagePage: await includeWaitingAskMessages(tx, messagePage, activeRuns),
         last,
         activeRuns,
@@ -525,6 +539,7 @@ export async function threadSnapshot(
     cursor: core.last?.seq ?? -1,
     messages: messagesWithLiveEvents(core.messagePage.messages, core.liveEvents),
     olderCursor: core.messagePage.olderCursor,
+    ...core.window,
     // Match the live reducer: a failed latest terminal stays in run even while siblings are
     // still active or start late. A newer completed/cancelled terminal clears it.
     run:

@@ -5167,3 +5167,71 @@ describe("chat open latency with 300 ms reads", () => {
     expect(shellApi.get.mock.calls.filter(([input]) => input.botId === "bot-2")).toHaveLength(1);
   });
 });
+
+it("shows ordinary users the turn's work in plain words and folds it once the reply lands", async () => {
+  const streams: Array<{
+    options: Parameters<typeof CoreModule.runThreadSubscription>[0];
+    head: { threadId: string; cursor: number };
+  }> = [];
+  vi.spyOn(CoreModule, "runThreadSubscription").mockImplementation(async (options) => {
+    const head = await options.loadInitial();
+    if (head) streams.push({ options, head });
+  });
+  setToolActivityPreference("off");
+  await renderFeedbackShell("bot", undefined, { isDeploymentOwner: false, openFeedback: false });
+  const stream = streams.at(-1)!;
+  const event = (seq: number, type: string, payload: Record<string, unknown> = {}) => ({
+    id: `work-${seq}`,
+    type,
+    threadId: stream.head.threadId,
+    botId: "bot-1",
+    spaceId: "space-1",
+    runId: "run-work",
+    seq,
+    payload,
+    createdAt: new Date().toISOString(),
+  });
+  const apply = (items: ReturnType<typeof event>[]) =>
+    act(async () => {
+      for (const item of items) {
+        stream.options.applyEvent(item as never);
+        stream.options.onEvent(item as never, stream.head, { snapshotStale: false });
+      }
+    });
+  const status = () =>
+    [...container!.querySelectorAll('[role="status"]')].find((element) =>
+      /Searching|Working/.test(element.textContent ?? ""),
+    );
+  await apply([
+    event(60, "thread.message.created", {
+      messageId: "work-user",
+      role: "user",
+      blocks: [{ kind: "text", text: "Find staff engineers" }],
+    }),
+    event(61, "run.started", { trigger: "user" }),
+    event(62, "agent.tool.called", { name: "recruiting_role", executionId: "e1" }),
+    event(63, "agent.tool.completed", { name: "recruiting_role", executionId: "e1" }),
+    event(64, "agent.tool.called", { name: "mcp__autumn__research", executionId: "e2" }),
+  ]);
+  expect(status()?.textContent).toContain("Searching candidates…");
+  expect(container!.querySelector('[data-testid="live-work"]')?.textContent).toContain(
+    "Reviewing the role",
+  );
+  expect(container!.querySelector('[data-testid="live-work"]')?.textContent).toMatch(/\d:\d\d/);
+  expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
+  await apply([
+    event(65, "agent.tool.completed", { name: "mcp__autumn__research", executionId: "e2" }),
+    event(66, "thread.message.created", {
+      messageId: "work-reply",
+      role: "bot",
+      blocks: [{ kind: "text", text: "Here are ten people." }],
+    }),
+    event(67, "run.completed"),
+  ]);
+  expect(container!.querySelector('[data-testid="live-work"]')).toBeNull();
+  const summary = container!.querySelector<HTMLDetailsElement>('[data-testid="work-summary"]');
+  expect(summary?.querySelector("summary")?.textContent).toMatch(/^Worked for \d+s$/);
+  expect(summary?.open).toBe(false);
+  expect(summary?.textContent).toContain("Searching candidates");
+  expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
+});

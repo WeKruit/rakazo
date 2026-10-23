@@ -39,7 +39,7 @@ import {
   normalizeCreateBotProfile,
   RecruitingOutreachSequenceSchema,
 } from "@rakazo/contracts";
-import type { ComposerMention, SlashActionId, ThreadTailPhase } from "@rakazo/core";
+import type { ComposerMention, SlashActionId, ThreadTailPhase, WorkTracker } from "@rakazo/core";
 import {
   addPendingUserMessage,
   answerableAskMessageIds,
@@ -47,6 +47,7 @@ import {
   buildComposerMentionOptions,
   clampMentionHighlightIndex,
   cronFromPreset,
+  EMPTY_WORK_TRACKER,
   formatMessageTime,
   groupVoiceChats,
   inferAttachmentMimeType,
@@ -73,6 +74,7 @@ import {
   speechFromBlocks,
   threadTailPhase,
   timeSeparatorIds,
+  trackWork,
   truncateSlashDescription,
   userVisibleMessages,
   withLiveStreamingProgress,
@@ -168,6 +170,7 @@ import { CallCard } from "../components/call/CallCard";
 import { VoiceChatCard } from "../components/call/VoiceChatCard";
 import { ComputerWorkspace } from "../components/computer/ComputerWorkspace";
 import { lazyOverlay } from "../components/ErrorBoundary";
+import { LiveWork } from "../components/LiveWork";
 import { MessageHoverMetadata } from "../components/MessageHoverMetadata";
 import {
   LIVE_TOOL_STEP_WINDOW,
@@ -278,7 +281,6 @@ import { createThreadPrefetch, threadPrefetchKey } from "../lib/thread-prefetch"
 import { getToolActivityEnabled, subscribeToolActivity } from "../lib/tool-activity-preference";
 import {
   isToolOnlyNarration,
-  latestNativeToolActivity,
   messageHasVisibleBlocks,
   renderableMessageBlocks,
   shouldRenderToolCard,
@@ -5442,9 +5444,7 @@ export function ShellPage() {
             running={!emptyCrmChat && transcriptRunning}
             tailPhase={emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })}
             workingBots={emptyCrmChat ? [] : workingBots}
-            runningRunIds={(emptyCrmChat ? [] : workingRuns)
-              .filter((run) => run.status === "running")
-              .map((run) => run.id)}
+            workRuns={emptyCrmChat ? [] : workingRuns}
             onLoadOlder={loadOlder}
             onOpenBot={openBot}
             onAnswer={answerMessage}
@@ -6711,7 +6711,7 @@ const Transcript = memo(function Transcript({
   running,
   tailPhase,
   workingBots,
-  runningRunIds,
+  workRuns,
   onLoadOlder,
   onOpenBot,
   onAnswer,
@@ -6744,7 +6744,13 @@ const Transcript = memo(function Transcript({
   running: boolean;
   tailPhase: ThreadTailPhase | null;
   workingBots: GroupAvatarMember[];
-  runningRunIds: string[];
+  /** Runs still working, with their start times, for the turn's clock and steps. */
+  workRuns: ReadonlyArray<{
+    id: string;
+    status: string;
+    startedAt: string | null;
+    createdAt: string;
+  }>;
   onLoadOlder: () => void | Promise<void>;
   onOpenBot: (botId: string) => void;
   onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
@@ -6788,18 +6794,15 @@ const Transcript = memo(function Transcript({
       messageHasVisibleBlocks(message.blocks, showToolActivity),
     ),
   );
-  const nativeActivity = latestNativeToolActivity(messages, runningRunIds);
-  const activityLabels = {
-    files: t`Preparing to read files…`,
-    search: t`Preparing a search…`,
-    page: t`Preparing to read a page…`,
-    context: t`Preparing to read saved context…`,
-    connections: t`Checking available connections…`,
-    connected_action: t`Preparing connected work…`,
-    emails: t`Preparing to read emails…`,
-    availability: t`Preparing to check availability…`,
-    working: t`Working…`,
-  };
+  // The turn's work survives narration messages that replace the live row, and its
+  // summary stays after the reply; the fold returns the same object when nothing changed.
+  const workTracker = useRef<WorkTracker>(EMPTY_WORK_TRACKER);
+  workTracker.current = trackWork(
+    workTracker.current,
+    { runs: workRuns, messages },
+    new Date(Date.now()).toISOString(),
+  );
+  const workSession = workTracker.current.session;
   const workingLabel =
     showToolActivity && isRunPhase(tailPhase) && workingBots.length
       ? workingBots
@@ -6807,9 +6810,7 @@ const Transcript = memo(function Transcript({
             [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
           )
           .join("; ")
-      : tailPhase === "working" && nativeActivity
-        ? activityLabels[nativeActivity]
-        : threadTailLabel(tailPhase);
+      : threadTailLabel(tailPhase);
   const [quoteDraft, setQuoteDraft] = useState<{
     message: ThreadMessage;
     text: string;
@@ -7033,6 +7034,15 @@ const Transcript = memo(function Transcript({
             lastScrollTop.current,
             event.currentTarget.scrollTop,
           );
+          // threads.get returns only the latest page; reading upward pages in older history.
+          if (
+            !scrolledDown &&
+            event.currentTarget.scrollTop < 200 &&
+            olderCursor != null &&
+            !loadingOlder &&
+            !jumpScrolling.current
+          )
+            void loadOlder()?.catch(() => undefined);
           lastScrollTop.current = event.currentTarget.scrollTop;
           const nearEnd = transcriptIsNearEnd(event.currentTarget);
           setAtEnd(nearEnd);
@@ -7224,6 +7234,19 @@ const Transcript = memo(function Transcript({
         ) ? (
           showToolActivity && isRunPhase(tailPhase) && workingBots.length ? (
             <ActiveBotGlyph bots={workingBots} label={workingLabel} />
+          ) : tailPhase === "working" || tailPhase === "starting" || tailPhase === "compacting" ? (
+            <LiveWork
+              session={
+                workSession?.endedAt
+                  ? null
+                  : workSession && tailPhase === "compacting"
+                    ? { ...workSession, current: null }
+                    : workSession
+              }
+              live
+              label={workingLabel}
+              showSteps={!showToolActivity}
+            />
           ) : (
             <LoadingState
               label={workingLabel}
@@ -7234,6 +7257,8 @@ const Transcript = memo(function Transcript({
               }
             />
           )
+        ) : !tailPhase && !showToolActivity && messages.at(-1)?.role !== "user" ? (
+          <LiveWork session={workSession} live={false} label="" />
         ) : null}
       </div>
       {quoteDraft ? (

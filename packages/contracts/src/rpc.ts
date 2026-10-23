@@ -140,6 +140,8 @@ import {
   RecruitingResearchSavedObservationSchema,
   RecruitingResearchTaskSchema,
   RecruitingRoleCampaignSchema,
+  RecruitingRoleCandidatesInputFields,
+  RecruitingRoleCandidatesOutputSchema,
   RecruitingRoleRevisionSchema,
   RecruitingRoleSchema,
   ReviseRecruitingRoleInput,
@@ -630,6 +632,9 @@ export const appContract = {
       ]),
     ),
     listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
+    roleCandidates: oc
+      .input(threadTarget.safeExtend(RecruitingRoleCandidatesInputFields))
+      .output(RecruitingRoleCandidatesOutputSchema),
     listCandidateSources: oc
       .input(ListRecruitingCandidateSourcesInput)
       .output(ListRecruitingCandidateSourcesOutput),

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import {
   allowlistDrift,
+  DISCOVERY_CACHE_TTL_MS,
   firstPartyMcpUrl,
   loadMcpCredentialRecord,
   McpConnector,
@@ -13,6 +14,7 @@ import {
 import type { OAuthMaterial } from "./mcp-oauth.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
+import { rememberResolvedContactEmails } from "./recruiting-tools.js";
 import { migrateSecrets } from "./secret-migration.js";
 import { ComposedSecretStore } from "./secret-store-factory.js";
 import { infisicalFake } from "./secret-store-fake.js";
@@ -415,6 +417,37 @@ describe("local native Instantly thread history", () => {
           },
         },
       ]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("refuses an agent contact lookup with an email not stored for that person", async () => {
+    const f = fixture();
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
+    const run = { ...f.context, runId: "run-contact-gate" };
+    f.state.page = { items: [] };
+    try {
+      await f.connector.discoverTools(f.context as never);
+      expect(
+        await f.collect({ email: "sumeet.parekh@gmail.com", name: "Sumeet" }, contactRoute, run),
+      ).toEqual([
+        {
+          type: "error",
+          message: "No stored email for Sumeet; resolve the contact first, never guess an address",
+        },
+      ]);
+      expect(f.rest).not.toHaveBeenCalled();
+      rememberResolvedContactEmails(run.runId, [
+        { name: "Sumeet Parekh", email: "SumeetParekh1@gmail.com" } as never,
+      ]);
+      expect(
+        await f.collect({ email: "sumeetparekh1@gmail.com", name: "Bob" }, contactRoute, run),
+      ).toMatchObject([
+        { type: "error", message: expect.stringMatching(/No stored email for Bob/) },
+      ]);
+      expect(
+        await f.collect({ email: "sumeetparekh1@gmail.com", name: "sumeet" }, contactRoute, run),
+      ).toMatchObject([{ type: "result" }]);
     } finally {
       await f.connector.close();
     }
@@ -1610,7 +1643,7 @@ describe("MCP connector session cache", () => {
       }
       expect(events).toMatchObject([{ type: "result" }]);
       expect(state.initializations).toBe(1);
-      expect(sink.events).toHaveLength(2);
+      expect(sink.events.filter((event) => event.message !== "discovery.cache")).toHaveLength(2);
       const log = JSON.stringify(sink.events);
       expect(log).toContain("MCP secret revalidation failed");
       expect(log).not.toContain("private response value");
@@ -2993,6 +3026,8 @@ describe("local native Instantly campaign and lead tools", () => {
       accounts: ["team@example.test"],
       campaign: { id: CAMPAIGN, status: 0, stop_on_reply: true } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
+      campaigns: [] as Record<string, unknown>[],
+      activeRoleId: null as string | null,
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -3000,6 +3035,11 @@ describe("local native Instantly campaign and lead tools", () => {
       botMcpServer: { findFirst: vi.fn(async () => assignment) },
       secret: { findFirst: vi.fn(async () => ({ id: "key-1", ciphertext: "encrypted" })) },
       mcpServer: { findFirst: vi.fn(async () => server) },
+      run: {
+        findFirst: vi.fn(async ({ where }) =>
+          where.id === "run-1" ? { thread: { activeRecruitingRoleId: state.activeRoleId } } : null,
+        ),
+      },
       recruitingRole: {
         findFirst: vi.fn(async ({ where }) =>
           where.id === "role-1" && where.spaceId === "w1" && where.userId === "u1"
@@ -3048,7 +3088,7 @@ describe("local native Instantly campaign and lead tools", () => {
         if (url.pathname === "/api/v2/accounts")
           return Response.json({ items: state.accounts.map((email) => ({ email })) });
         if (url.pathname === "/api/v2/campaigns" && request.method === "GET")
-          return Response.json({ items: [] });
+          return Response.json({ items: state.campaigns });
         if (url.pathname === "/api/v2/campaigns") return Response.json({ id: CAMPAIGN, ...body });
         if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}`) {
           if (request.method === "PATCH") Object.assign(state.campaign, body);
@@ -3056,6 +3096,8 @@ describe("local native Instantly campaign and lead tools", () => {
         }
         if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
           return Response.json(state.campaign);
+        if (url.pathname === "/api/v2/leads/list" && body.campaign && !body.contacts)
+          return Response.json({ items: body.campaign === "with-leads" ? [{ id: "l" }] : [] });
         if (url.pathname === "/api/v2/leads/list")
           return Response.json({
             items: state.existingLeads.filter((lead) =>
@@ -3271,6 +3313,45 @@ describe("local native Instantly campaign and lead tools", () => {
     ]);
   });
 
+  it("create_campaign in a role conversation binds the role, so ensure_role_campaign reuses it", async () => {
+    const f = fixture();
+    f.state.activeRoleId = "role-1";
+    await f.run("create_campaign", {
+      name: "Dyna Data Infra — internal test",
+      eaccount: "team@example.test",
+    });
+    f.state.requests.length = 0;
+    const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(ensured).toMatchObject({ created: false, campaignId: CAMPAIGN });
+    expect(f.state.requests.filter((r) => r.method === "POST")).toEqual([]);
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+    // A second create never steals an existing mapping.
+    await f.run("create_campaign", { name: "Another", eaccount: "team@example.test" });
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("ensure_role_campaign adopts an unbound draft named after the role title before creating", async () => {
+    const f = fixture();
+    f.state.campaigns = [
+      { id: "active", name: "Founding Engineer old", status: 1, timestamp_created: "2026-10-23" },
+      { id: "empty", name: "founding engineer — v2", status: 0, timestamp_created: "2026-10-22" },
+      {
+        id: "with-leads",
+        name: "Founding Engineer",
+        status: 2,
+        timestamp_created: "2026-10-01",
+        stop_on_reply: true,
+      },
+      { id: "other", name: "Designer", status: 0, timestamp_created: "2026-10-23" },
+    ];
+    const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(ensured).toMatchObject({ adopted: true, created: false, campaignId: "with-leads" });
+    expect(
+      f.state.requests.some((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
+    ).toBe(false);
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+  });
+
   it("add_shortlist_leads dedups, skips missing emails and records candidate -> lead ids", async () => {
     const f = fixture();
     expect(
@@ -3310,5 +3391,88 @@ describe("local native Instantly campaign and lead tools", () => {
     });
     const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(again.leads).toMatchObject({ a: { leadId: "lead-a@x.test" } });
+  });
+});
+
+describe("MCP discovery tool-list cache", () => {
+  function fixture() {
+    const state = { failNext: false, initializations: 0, lists: 0 };
+    const fetch = mcpFetch(state);
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "POST" && (await request.clone().text()).includes('"tools/list"'))
+        state.lists += 1;
+      return fetch(input, init);
+    });
+    let assignment = {
+      ...ASSIGNMENT,
+      server: { ...SERVER },
+    } as Record<string, unknown> & { server: typeof SERVER };
+    const prisma = { botMcpServer: { findMany: vi.fn(async () => [assignment]) } };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    } as never;
+    return {
+      state,
+      connector,
+      context,
+      prisma,
+      setAssignment: (next: Partial<typeof assignment>) => {
+        assignment = { ...assignment, ...next };
+      },
+    };
+  }
+
+  it("serves a warm discovery from the cache without a remote tools/list", async () => {
+    const sink = createTestSink();
+    const previousLogger = getLogger();
+    installLogger(createLogger({ service: "test", sinks: [sink] }));
+    const f = fixture();
+    try {
+      const first = await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(1);
+      const second = await f.connector.discoverTools(f.context);
+      expect(second).toEqual(first);
+      expect(f.state.lists).toBe(1);
+      // Authorization is never cached: the assignment is read on every discovery.
+      expect(f.prisma.botMcpServer.findMany).toHaveBeenCalledTimes(2);
+      expect(
+        sink.events
+          .filter((event) => event.message === "discovery.cache")
+          .map((event) => event.hit),
+      ).toEqual([false, true]);
+    } finally {
+      await f.connector.close();
+      installLogger(previousLogger);
+    }
+  });
+
+  it("applies assignment changes at once and lists again after a server change or TTL", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    try {
+      expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
+      // Allowlist narrowed: filtered from the cached list, no remote call needed.
+      f.setAssignment({ allowAllTools: false, allowedTools: [] });
+      expect(await f.connector.discoverTools(f.context)).toEqual([]);
+      expect(f.state.lists).toBe(1);
+      // Server or credential write bumps the revision (or secretId): a miss.
+      f.setAssignment({ allowAllTools: true, server: { ...SERVER, revision: 2 } });
+      const tools = await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(2);
+      expect(tools[0]!.route?.resourceRevision).toBe(2);
+      await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(2);
+      await vi.advanceTimersByTimeAsync(DISCOVERY_CACHE_TTL_MS);
+      await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(3);
+    } finally {
+      await f.connector.close();
+      vi.useRealTimers();
+    }
   });
 });
