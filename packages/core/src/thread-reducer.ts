@@ -49,6 +49,8 @@ export type LiveThread = {
   activeRuns?: readonly LiveThreadRun[];
   members?: ReadonlyArray<{ botId: string; status?: string }>;
   computer?: { busyBotName: string | null } | null;
+  /** Tool calls by execution id, so a start and its completion close as a pair in any order. */
+  toolExecutions?: { open: string[]; done: string[] };
 };
 
 export type LiveThreadEvent = {
@@ -199,6 +201,53 @@ function liveMessage(
 function replacedSubagent(message: LiveThreadMessage, agentIds: ReadonlySet<string>) {
   if (agentIds.size === 0) return false;
   return message.blocks.some((block) => block.kind === "subagent" && agentIds.has(block.agentId));
+}
+
+function toolExecutionId(payload: Record<string, unknown>): string | undefined {
+  return typeof payload.executionId === "string" && payload.executionId
+    ? payload.executionId
+    : undefined;
+}
+
+/** Ends every pending call: used when completions carry no execution id. */
+function closeAllToolCalls(message: LiveThreadMessage): LiveThreadMessage {
+  if (!message.blocks.some((block) => block.kind === "progress" && block.activity === true))
+    return message;
+  let blocks: MessageBlock[] = [];
+  for (const block of message.blocks) {
+    if (block.kind === "progress" && block.activity === true) {
+      for (const name of block.pendingToolNames ?? []) blocks = appendToolCallSegment(blocks, name);
+    } else blocks.push(block);
+  }
+  return { ...message, blocks };
+}
+
+/** Ends one call; the activity marker stays while another call is still open. */
+function closeToolExecution(
+  message: LiveThreadMessage,
+  executions: { open: string[]; done: string[] },
+  executionId: string,
+  name: string,
+): { message: LiveThreadMessage; toolExecutions: { open: string[]; done: string[] } } {
+  const toolExecutions = {
+    open: executions.open.filter((id) => id !== executionId),
+    done: executions.done.filter((id) => id !== executionId),
+  };
+  if (!toolExecutions.open.length) return { message: closeAllToolCalls(message), toolExecutions };
+  let blocks: MessageBlock[] = [];
+  for (const block of message.blocks) {
+    if (block.kind === "progress" && block.activity === true) {
+      const pending = [...(block.pendingToolNames ?? [])];
+      const index = pending.indexOf(name);
+      if (index >= 0) {
+        pending.splice(index, 1);
+        blocks = appendToolCallSegment(blocks, name);
+      }
+      const { pendingToolNames: _settled, ...marker } = block;
+      blocks.push(pending.length ? { ...marker, pendingToolNames: pending } : marker);
+    } else blocks.push(block);
+  }
+  return { message: { ...message, blocks }, toolExecutions };
 }
 
 export function reduceThreadEvent<S extends LiveThread>(prev: S, event: LiveThreadEvent): S {
@@ -362,6 +411,8 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
       cursor,
       messages: prev.messages.filter((message) => message.id !== progressMessageId(event)),
       members: updateMemberStatus(prev.members, event.botId, nextMemberRun?.status ?? "idle"),
+      // Execution ids only pair calls within live runs.
+      toolExecutions: activeRuns?.length ? prev.toolExecutions : undefined,
       // A failed run stays in run (activeRuns already excludes it) so the transcript can say
       // why it stopped, matching what threads.get returns on the next load.
       run:
@@ -376,38 +427,53 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
   if (event.type === "thread.progress" || event.type === "agent.tool.called") {
     const liveId = progressMessageId(event);
     const { previous, remaining } = takeLiveMessage(prev.messages, liveId);
+    const name = String(payload.name ?? "");
     const blocks = reduceLiveMessageBlocks(
       previous?.blocks ?? [],
-      event.type === "thread.progress"
-        ? { type: "progress", payload }
-        : { type: "tool", name: String(payload.name ?? "") },
+      event.type === "thread.progress" ? { type: "progress", payload } : { type: "tool", name },
     );
     // The hidden marker keeps a current call distinct from historical developer steps.
     if (event.type === "agent.tool.called" && blocks.at(-1)?.kind === "steps")
       blocks.push({ kind: "progress", activity: true, text: "" });
-    return { ...prev, cursor, messages: [...remaining, liveMessage(event, liveId, blocks)] };
-  }
-  if (event.type === "agent.tool.completed") {
-    const liveId = progressMessageId(event);
+    const message = liveMessage(event, liveId, blocks);
+    const executionId = toolExecutionId(payload);
+    if (event.type !== "agent.tool.called" || !executionId)
+      return { ...prev, cursor, messages: [...remaining, message] };
+    const open = [...(prev.toolExecutions?.open ?? []), executionId];
+    const done = prev.toolExecutions?.done ?? [];
+    // Its completion was stored first, so the call is already over.
+    const closed = done.includes(executionId)
+      ? closeToolExecution(message, { open, done }, executionId, name)
+      : { message, toolExecutions: { open, done } };
     return {
       ...prev,
       cursor,
-      messages: prev.messages.map((message) => {
-        if (
-          message.id !== liveId ||
-          !message.blocks.some((block) => block.kind === "progress" && block.activity === true)
-        )
-          return message;
-        let blocks: MessageBlock[] = [];
-        for (const block of message.blocks) {
-          if (block.kind === "progress" && block.activity === true) {
-            for (const name of block.pendingToolNames ?? [])
-              blocks = appendToolCallSegment(blocks, name);
-          } else blocks.push(block);
-        }
-        return { ...message, blocks };
-      }),
+      messages: [...remaining, closed.message],
+      toolExecutions: closed.toolExecutions,
     };
+  }
+  if (event.type === "agent.tool.completed") {
+    const liveId = progressMessageId(event);
+    const executionId = toolExecutionId(payload);
+    if (executionId && !prev.toolExecutions?.open.includes(executionId)) {
+      const open = prev.toolExecutions?.open ?? [];
+      const done = [...(prev.toolExecutions?.done ?? []), executionId];
+      return { ...prev, cursor, toolExecutions: { open, done } };
+    }
+    let toolExecutions = prev.toolExecutions;
+    const messages = prev.messages.map((message) => {
+      if (message.id !== liveId) return message;
+      if (!executionId || !prev.toolExecutions) return closeAllToolCalls(message);
+      const closed = closeToolExecution(
+        message,
+        prev.toolExecutions,
+        executionId,
+        String(payload.name ?? ""),
+      );
+      toolExecutions = closed.toolExecutions;
+      return closed.message;
+    });
+    return { ...prev, cursor, messages, toolExecutions };
   }
   if (event.type === "thread.subagent") {
     const block = subagentBlockFromPayload(payload);

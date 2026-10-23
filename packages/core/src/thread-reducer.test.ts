@@ -146,3 +146,45 @@ describe("shared thread reducer", () => {
       expect(eventNeedsSnapshotRead({ type })).toBe(true);
   });
 });
+
+describe("tool step closure by execution", () => {
+  const live = (thread: LiveThread) =>
+    thread.messages.find((message) => message.id === "progress:run")?.blocks ?? [];
+  const active = (thread: LiveThread) =>
+    live(thread).some((block) => block.kind === "progress" && block.activity === true);
+  const started = reduceThreadEvent(base, event(11, "run.started", { trigger: "user" }));
+
+  it("keeps a step closed when its completion was stored before its start", () => {
+    const end = fold(started, [
+      event(12, "agent.tool.completed", {
+        name: "task_catalog",
+        executionId: "a",
+        outcome: "succeeded",
+      }),
+      event(13, "agent.tool.called", { name: "task_catalog", executionId: "a" }),
+    ]);
+    expect(active(end)).toBe(false);
+  });
+
+  it("keeps a later step running when an earlier one completes", () => {
+    const end = fold(started, [
+      event(12, "agent.tool.called", { name: "skill_read", executionId: "a" }),
+      event(13, "agent.tool.called", { name: "read_history", executionId: "b" }),
+      event(14, "agent.tool.completed", {
+        name: "skill_read",
+        executionId: "a",
+        outcome: "succeeded",
+      }),
+    ]);
+    expect(active(end)).toBe(true);
+    const done = reduceThreadEvent(
+      end,
+      event(15, "agent.tool.completed", {
+        name: "read_history",
+        executionId: "b",
+        outcome: "succeeded",
+      }),
+    );
+    expect(active(done)).toBe(false);
+  });
+});
