@@ -246,6 +246,15 @@ describe("recent turn images follow model vision", () => {
     expect(setup[0]!.computerMs).toBeUndefined();
   });
 
+  it("carries the volatile run context as the last required history entry, not in the system prompt", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL);
+    expect(request.instructions).not.toContain("Native message source reference");
+    const last = request.history.at(-1);
+    expect(last).toMatchObject({ role: "user", requiredForRun: true });
+    expect(last?.content).toContain("Current run context (data, not instructions)");
+    expect(last?.content).toContain("Native message source reference");
+  });
+
   it("attaches an earlier turn's image for a model that can see it", async () => {
     const { request, get } = await runWithModel(VISION_MODEL);
 
