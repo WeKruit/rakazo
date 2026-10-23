@@ -3027,6 +3027,7 @@ describe("local native Instantly campaign and lead tools", () => {
       existingLeads: [] as { id: string; email: string }[],
       campaigns: [] as Record<string, unknown>[],
       activeRoleId: null as string | null,
+      deleted: false,
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -3090,11 +3091,14 @@ describe("local native Instantly campaign and lead tools", () => {
           return Response.json({ items: state.campaigns });
         if (url.pathname === "/api/v2/campaigns") return Response.json({ id: CAMPAIGN, ...body });
         if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}`) {
+          if (state.deleted) return new Response("{}", { status: 404 });
           if (request.method === "PATCH") Object.assign(state.campaign, body);
           return Response.json(state.campaign);
         }
         if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
           return Response.json(state.campaign);
+        const listed = state.campaigns.find((c) => url.pathname === `/api/v2/campaigns/${c.id}`);
+        if (listed) return Response.json(listed);
         if (url.pathname === "/api/v2/leads/list" && body.campaign && !body.contacts)
           return Response.json({ items: body.campaign === "with-leads" ? [{ id: "l" }] : [] });
         if (url.pathname === "/api/v2/leads/list")
@@ -3282,13 +3286,14 @@ describe("local native Instantly campaign and lead tools", () => {
       created: true,
       campaignId: CAMPAIGN,
       eaccount: "team@example.test",
-      campaignName: "Founding Engineer [role role-1]",
+      campaignName: "Founding Engineer",
     });
     const create = f.state.requests.find((r) => r.method === "POST")!;
     expect(create).toMatchObject({
       path: "/api/v2/campaigns",
-      body: { stop_on_reply: true, email_list: ["team@example.test"] },
+      body: { name: "Founding Engineer", stop_on_reply: true, email_list: ["team@example.test"] },
     });
+    expect(JSON.stringify(create.body)).not.toContain("[role");
     f.state.requests.length = 0;
     const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(second).toMatchObject({
@@ -3296,13 +3301,16 @@ describe("local native Instantly campaign and lead tools", () => {
       campaignId: CAMPAIGN,
       stopOnReplyPatched: false,
     });
-    expect(f.state.requests).toEqual([{ method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` }]);
+    // An empty mapped campaign with no same-title alternative stays mapped; nothing is created.
+    expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([
+      { method: "POST", path: "/api/v2/leads/list", body: { campaign: CAMPAIGN, limit: 1 } },
+    ]);
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
     f.state.campaign.stop_on_reply = false;
     f.state.requests.length = 0;
     const third = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(third).toMatchObject({ created: false, stopOnReplyPatched: true });
-    expect(f.state.requests[1]).toEqual({
+    expect(f.state.requests.find((r) => r.method === "PATCH")).toEqual({
       method: "PATCH",
       path: `/api/v2/campaigns/${CAMPAIGN}`,
       body: { stop_on_reply: true },
@@ -3322,18 +3330,18 @@ describe("local native Instantly campaign and lead tools", () => {
     f.state.requests.length = 0;
     const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(ensured).toMatchObject({ created: false, campaignId: CAMPAIGN });
-    expect(f.state.requests.filter((r) => r.method === "POST")).toEqual([]);
+    expect(f.state.requests.filter((r) => r.path === "/api/v2/campaigns")).toEqual([]);
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
     // A second create never steals an existing mapping.
     await f.run("create_campaign", { name: "Another", eaccount: "team@example.test" });
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
   });
 
-  it("ensure_role_campaign adopts an unbound draft named after the role title before creating", async () => {
+  it("ensure_role_campaign adopts an unbound same-title draft (leads first) before creating", async () => {
     const f = fixture();
     f.state.campaigns = [
-      { id: "active", name: "Founding Engineer old", status: 1, timestamp_created: "2026-10-23" },
-      { id: "empty", name: "founding engineer — v2", status: 0, timestamp_created: "2026-10-22" },
+      { id: "active", name: "Founding Engineer", status: 1, timestamp_created: "2026-10-23" },
+      { id: "empty", name: "founding engineer", status: 0, timestamp_created: "2026-10-22" },
       {
         id: "with-leads",
         name: "Founding Engineer",
@@ -3341,7 +3349,7 @@ describe("local native Instantly campaign and lead tools", () => {
         timestamp_created: "2026-10-01",
         stop_on_reply: true,
       },
-      { id: "other", name: "Designer", status: 0, timestamp_created: "2026-10-23" },
+      { id: "prefix", name: "Founding Engineer v2", status: 0, timestamp_created: "2026-10-23" },
     ];
     const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(ensured).toMatchObject({ adopted: true, created: false, campaignId: "with-leads" });
@@ -3349,6 +3357,55 @@ describe("local native Instantly campaign and lead tools", () => {
       f.state.requests.some((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
     ).toBe(false);
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("repairs an empty mapped campaign to the same-title campaign that has the leads", async () => {
+    const f = fixture();
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.campaigns = [
+      {
+        id: CAMPAIGN,
+        name: "Founding Engineer [role role-1]",
+        status: 0,
+        timestamp_created: "2026-10-23",
+      },
+      {
+        id: "with-leads",
+        name: "Founding Engineer",
+        status: 0,
+        timestamp_created: "2026-10-01",
+        stop_on_reply: true,
+      },
+    ];
+    f.state.requests.length = 0;
+    const repaired = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(repaired).toMatchObject({ created: false, adopted: true, campaignId: "with-leads" });
+    expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+    expect(f.prisma.externalEffect.update).toHaveBeenCalledTimes(1);
+    expect(f.state.requests.some((r) => r.path.endsWith("/activate"))).toBe(false);
+    expect(
+      f.state.requests.some((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
+    ).toBe(false);
+    const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(again).toMatchObject({ created: false, campaignId: "with-leads" });
+  });
+
+  it("re-adopts when the mapped campaign was deleted (404)", async () => {
+    const f = fixture();
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.deleted = true;
+    f.state.campaigns = [
+      {
+        id: "empty",
+        name: "Founding Engineer",
+        status: 0,
+        timestamp_created: "2026-10-22",
+        stop_on_reply: true,
+      },
+    ];
+    const readopted = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(readopted).toMatchObject({ adopted: true, campaignId: "empty" });
+    expect(f.prisma.externalEffect.update).toHaveBeenCalledTimes(1);
   });
 
   it("add_shortlist_leads dedups, skips missing emails and records candidate -> lead ids", async () => {
