@@ -16,6 +16,20 @@ export function activityPromptSnippet(
   input: { trigger: string; prompt: string; sourceBlocks?: unknown },
   max = 120,
 ): string {
+  if (input.trigger === "user" || input.trigger === "follow_up") {
+    const source = MessageBlock.array().safeParse(input.sourceBlocks);
+    if (
+      source.success &&
+      source.data.some((block) => block.kind === "text" && block.correspondenceReference)
+    )
+      return promptSnippet(
+        source.data
+          .filter((block) => block.kind === "text")
+          .map((block) => block.text)
+          .join("\n"),
+        max,
+      );
+  }
   if (input.trigger !== "bot_message") return promptSnippet(input.prompt, max);
   const parsed = MessageBlock.array().safeParse(input.sourceBlocks);
   const message = parsed.success ? botMessageContext(parsed.data) : undefined;

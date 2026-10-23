@@ -7,6 +7,7 @@ import type {
   GroupMember,
   MessageBlock,
   MessageReaction,
+  RecruitingCorrespondenceReference,
   ReplyPreview,
   RunStatus,
   ThreadSnapshot,
@@ -630,6 +631,7 @@ export async function sendThreadMessage(
   target: ThreadTarget,
   input: {
     text?: string;
+    correspondenceReference?: RecruitingCorrespondenceReference;
     artifactIds?: string[];
     addressing?: "coordinator" | "mentions";
     mentions?: MentionTargetInput[];
@@ -657,6 +659,23 @@ export async function sendThreadMessage(
   const commit = () =>
     deps.prisma.$transaction(
       async (tx) => {
+        const assertCorrespondenceScope = async () => {
+          if (!input.correspondenceReference) return;
+          // The native message counter already locks this thread. A role switch cannot race this check.
+          const current = await tx.thread.findFirst({
+            where: {
+              id: target.threadId,
+              spaceId: actor.spaceId,
+              activeRecruitingRoleId: input.correspondenceReference.roleId,
+              activeRecruitingRole: { userId: actor.userId, spaceId: actor.spaceId },
+            },
+            select: { id: true },
+          });
+          if (!current || input.correspondenceReference.threadId !== target.threadId)
+            throw new ORPCError("CONFLICT", {
+              message: "Open the current role's email before sending this message.",
+            });
+        };
         let replyToMessageId: string | undefined;
         let replyQuote: string | undefined;
         let replyPreview: ReplyPreview | null | undefined;
@@ -716,7 +735,11 @@ export async function sendThreadMessage(
             actor,
             mentionTargets.connectorMentionIds,
           );
-          const blocks = buildUserMessageBlocks(input.text, attachmentBlocks);
+          const blocks = buildUserMessageBlocks(
+            input.text,
+            attachmentBlocks,
+            input.correspondenceReference,
+          );
           const message = await createThreadMessageInTransaction(tx, {
             threadId: target.threadId,
             role: "user",
@@ -725,6 +748,7 @@ export async function sendThreadMessage(
             replyQuote,
             clientNonce: input.clientNonce,
           });
+          await assertCorrespondenceScope();
           const activeRuns = await tx.run.findMany({
             where: {
               threadId: target.threadId,
@@ -823,7 +847,12 @@ export async function sendThreadMessage(
               botId: target.botId,
               threadId: target.threadId,
               userId: actor.userId,
-              prompt: buildSendPrompt(input.text, artifacts, connectorNames),
+              prompt: buildSendPrompt(
+                input.text,
+                artifacts,
+                connectorNames,
+                input.correspondenceReference,
+              ),
               status: "queued",
             },
           });
@@ -888,7 +917,11 @@ export async function sendThreadMessage(
           actor,
           mentionTargets.connectorMentionIds,
         );
-        const blocks = buildUserMessageBlocks(input.text, attachmentBlocks);
+        const blocks = buildUserMessageBlocks(
+          input.text,
+          attachmentBlocks,
+          input.correspondenceReference,
+        );
         const message = await createThreadMessageInTransaction(tx, {
           threadId: target.threadId,
           role: "user",
@@ -897,6 +930,7 @@ export async function sendThreadMessage(
           replyQuote,
           clientNonce: input.clientNonce,
         });
+        await assertCorrespondenceScope();
         const activeRuns = await tx.run.findMany({
           where: {
             threadId: target.threadId,
@@ -974,7 +1008,12 @@ export async function sendThreadMessage(
               botId,
               threadId: target.threadId,
               userId: actor.userId,
-              prompt: buildSendPrompt(input.text, artifacts, connectorNames),
+              prompt: buildSendPrompt(
+                input.text,
+                artifacts,
+                connectorNames,
+                input.correspondenceReference,
+              ),
               status: "queued",
             },
           });

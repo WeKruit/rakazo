@@ -1,6 +1,8 @@
 import { isDeepStrictEqual } from "node:util";
 import { ORPCError } from "@orpc/server";
 import type { ArtifactStore } from "@rakazo/adapter-kit";
+import { SecretStoreUnavailableError } from "@rakazo/adapter-kit";
+import type { McpOAuthBroker } from "@rakazo/adapters";
 import {
   createRecruitingCandidateReportReader,
   hasPlatformMcpCredential,
@@ -175,6 +177,7 @@ export async function getRecruitingCorrespondence(
   target: ThreadTarget,
   view: "inbox" | "interview" | "contacts",
   productIdentity?: { endpoint: string; connected: boolean },
+  oauth?: Pick<McpOAuthBroker, "statusFor">,
 ): Promise<RecruitingCorrespondence> {
   return authenticated(async () => {
     const workspace = await recruiting.getRecruitingWorkspace(prisma, actor, {
@@ -202,13 +205,12 @@ export async function getRecruitingCorrespondence(
       provider: correspondenceProvider(
         server.endpoint,
         view,
-        server.transport === "streamable_http" && !server.secretId
-          ? productIdentity?.endpoint
-          : undefined,
+        server.transport === "streamable_http" ? productIdentity?.endpoint : undefined,
       ),
     }));
     const sources = sourceRows.filter((source) => source.provider !== null);
     const output: RecruitingCorrespondence = {
+      roleId: workspace?.role.id ?? null,
       status: "not_checked",
       checkedAt: null,
       connectionChanged: false,
@@ -216,26 +218,40 @@ export async function getRecruitingCorrespondence(
       events: [],
       contacts: [],
       partial: false,
-      connections: sources.map((source) => ({
-        name: source.name,
-        checkIssue: null,
-        status: !source.enabled
-          ? "disabled"
-          : (
-                source.provider?.kind === "crm"
-                  ? !productIdentity?.connected
-                  : !source.secretId && !hasPlatformMcpCredential(source)
-              )
-            ? "needs_connection"
-            : !source.assignments.some((assignment) =>
-                  source.provider?.tools.some(
-                    (tool) =>
-                      tool !== "list_crm_candidate_roles" && correspondenceAllows(assignment, tool),
-                  ),
-                )
-              ? "needs_access"
-              : "configured",
-      })),
+      connections: await Promise.all(
+        sources.map(async (source): Promise<RecruitingCorrespondence["connections"][number]> => {
+          let identityConnected = productIdentity?.connected;
+          if (source.enabled && source.provider?.kind === "crm" && source.secretId) {
+            try {
+              identityConnected = (await oauth?.statusFor(source, actor)) === "connected";
+            } catch (error) {
+              if (!(error instanceof SecretStoreUnavailableError)) throw error;
+              return { name: source.name, status: "unavailable", checkIssue: null };
+            }
+          }
+          return {
+            name: source.name,
+            checkIssue: null,
+            status: !source.enabled
+              ? "disabled"
+              : (
+                    source.provider?.kind === "crm"
+                      ? !identityConnected
+                      : !source.secretId && !hasPlatformMcpCredential(source)
+                  )
+                ? "needs_connection"
+                : !source.assignments.some((assignment) =>
+                      source.provider?.tools.some(
+                        (tool) =>
+                          tool !== "list_crm_candidate_roles" &&
+                          correspondenceAllows(assignment, tool),
+                      ),
+                    )
+                  ? "needs_access"
+                  : "configured",
+          };
+        }),
+      ),
     };
     if (!workspace) return output;
     const readTools =
@@ -310,7 +326,7 @@ export async function getRecruitingCorrespondence(
         request: true,
         status: true,
         updatedAt: true,
-        run: { select: { id: true, botId: true } },
+        run: { select: { id: true, botId: true, sourceMessageId: true } },
       },
     });
     // ponytail: bound saved display history to 200 matching reads; a native fresh check refreshes older coverage.
@@ -474,6 +490,9 @@ export async function getRecruitingCorrespondence(
       ...reads.filter((read) => read.call.route.toolName === "get_email"),
     ];
     for (const { effect, call, source, provider } of projections) {
+      const savedRead = effect.run.sourceMessageId
+        ? { messageId: effect.run.sourceMessageId, linkedRunId: effect.run.id, effectId: effect.id }
+        : null;
       if (
         provider.kind === "instantly" &&
         call.route.toolName === "get_email" &&
@@ -553,6 +572,10 @@ export async function getRecruitingCorrespondence(
             return null;
           const message = RecruitingCorrespondenceSchema.shape.emails.element.safeParse({
             id: stableJsonValue([source.id, call.args.p_org, call.args.p_candidate, row.id]),
+            sourceName: source.name,
+            sourceId: source.id,
+            providerMessageId: row.id,
+            savedRead,
             sender: row.from_address,
             recipients: row.to_address === null ? [] : [row.to_address],
             subject: row.subject ?? "",
@@ -876,6 +899,10 @@ export async function getRecruitingCorrespondence(
             typeof plain === "string" ? plain : typeof row.snippet === "string" ? row.snippet : "";
           const message = RecruitingCorrespondenceSchema.shape.emails.element.safeParse({
             id,
+            sourceName: source.name,
+            sourceId: source.id,
+            providerMessageId: row.id,
+            savedRead,
             sender: row.sender ?? null,
             recipients: row.toRecipients ?? [],
             subject: row.subject ?? "",
@@ -948,6 +975,10 @@ export async function getRecruitingCorrespondence(
             : text;
         emails.set(id, {
           id,
+          sourceName: source.name,
+          sourceId: source.id,
+          providerMessageId: email.id,
+          savedRead,
           sender: email.from_address_email ?? null,
           recipients: email.to_address_email_list ? [email.to_address_email_list] : [],
           subject: email.subject,

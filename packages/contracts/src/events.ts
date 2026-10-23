@@ -9,6 +9,7 @@ import {
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskTargetSchema,
   RecruitingCandidateFeedbackSelectionSchema,
+  RecruitingCorrespondenceReferenceSchema,
   RecruitingId,
 } from "./recruiting.js";
 
@@ -270,6 +271,7 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     kind: z.literal("text"),
     text: z.string(),
     recruitingFeedback: RecruitingCandidateFeedbackSelectionSchema.optional(),
+    correspondenceReference: RecruitingCorrespondenceReferenceSchema.optional(),
   }),
   z.object({
     kind: z.literal("card"),

@@ -158,13 +158,19 @@ it.each(["inbox", "interview"] as const)(
 );
 
 it("renders only retained email fields, supports selection and never treats assistant narration as mail", async () => {
+  const selection = vi.fn();
   readCorrespondence.mockResolvedValue({
+    roleId: "role-1",
     status: "ready",
     checkedAt: "2026-10-22T01:00:00Z",
     connections: [{ name: "Mailbox", status: "configured" }],
     emails: [
       {
         id: "email-1",
+        sourceName: "Selected mailbox",
+        sourceId: "mailbox-1",
+        providerMessageId: "provider-message-1",
+        savedRead: null,
         sender: "one@example.test",
         recipients: ["team@example.test"],
         subject: "Interview question",
@@ -175,6 +181,10 @@ it("renders only retained email fields, supports selection and never treats assi
       },
       {
         id: "email-2",
+        sourceName: "Other mailbox",
+        sourceId: "mailbox-2",
+        providerMessageId: "provider-message-2",
+        savedRead: null,
         sender: "two@example.test",
         recipients: [],
         subject: "Another reply",
@@ -187,14 +197,90 @@ it("renders only retained email fields, supports selection and never treats assi
     events: [],
     partial: true,
   });
-  const view = await mount({ view: "inbox" });
+  const view = await mount({ view: "inbox", threadId: "role-thread", onEmailSelection: selection });
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      roleId: "role-1",
+      emailId: "email-1",
+      sourceName: "Selected mailbox",
+    }),
+  );
   expect(view.container.textContent).toContain("Can we speak Thursday?");
   expect(view.container.querySelector("script")).toBeNull();
   expect(view.container.textContent).toContain("More results may be available");
   await view.click("Another reply");
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({ emailId: "email-2", sourceName: "Other mailbox", snippet: true }),
+  );
   expect(view.container.textContent).toContain("Please share the role.");
   expect(view.container.textContent).toContain("Preview only");
   expect(view.conversation).not.toHaveBeenCalled();
+  await view.render({ view: "interview" });
+  expect(selection).toHaveBeenLastCalledWith(undefined);
+});
+
+it("never supplies a previous principal's selected email while the same target is being reauthorized", async () => {
+  const email = {
+    id: "old-email",
+    sourceName: "Mailbox",
+    sourceId: "mailbox",
+    providerMessageId: "original",
+    savedRead: null,
+    sender: null,
+    recipients: [],
+    subject: "Old private mail",
+    body: "Private",
+    date: null,
+    snippet: true,
+    url: null,
+  };
+  readCorrespondence.mockResolvedValueOnce({
+    roleId: "role-1",
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    emails: [email],
+    events: [],
+    contacts: [],
+    partial: false,
+  });
+  const view = await mount({
+    view: "inbox",
+    threadId: "role-thread",
+    readCacheScope: "first-principal",
+    onEmailSelection: vi.fn(),
+  });
+  readCorrespondence.mockReturnValueOnce(new Promise(() => {}));
+  const nextSelection = vi.fn();
+  await view.render({ readCacheScope: "second-principal", onEmailSelection: nextSelection });
+  expect(nextSelection).not.toHaveBeenCalledWith(expect.objectContaining({ emailId: email.id }));
+  expect(view.container.textContent).not.toContain(email.subject);
+});
+
+it("shows a credential-store outage without asking the user to reconnect or hiding saved mail", async () => {
+  readCorrespondence.mockResolvedValue({
+    status: "ready",
+    checkedAt: null,
+    connections: [{ name: "Recruiting CRM", status: "unavailable", checkIssue: null }],
+    emails: [
+      {
+        id: "saved",
+        sender: "person@example.test",
+        recipients: [],
+        subject: "Saved reply",
+        body: "Original reply remains",
+        snippet: false,
+        date: null,
+        url: null,
+      },
+    ],
+    events: [],
+    partial: false,
+  });
+  const view = await mount({ view: "inbox" });
+  expect(view.container.textContent).toContain("Temporarily unavailable");
+  expect(view.container.textContent).toContain("Original reply remains");
+  expect(view.container.textContent).not.toContain("Connect account");
 });
 
 it.each([
@@ -327,25 +413,42 @@ it.each(["empty", "failed", "unsupported"])(
 );
 
 it("discards late mail from the previous role and refreshes after native completion, not streamed messages", async () => {
+  const selection = vi.fn();
   let finish!: (value: unknown) => void;
   readCorrespondence.mockReturnValueOnce(
     new Promise((resolve) => {
       finish = resolve;
     }),
   );
-  const view = await mount({ view: "inbox", refreshSignal: 0 });
-  await view.render({ artifactTarget: { groupId: "another-role" } });
+  const view = await mount({
+    view: "inbox",
+    threadId: "role-thread",
+    onEmailSelection: selection,
+    refreshSignal: 0,
+  });
+  await view.render({ artifactTarget: { groupId: "another-role" }, threadId: "another-thread" });
   await act(async () =>
     finish({
+      roleId: "old-role",
       status: "ready",
       checkedAt: null,
       connections: [],
-      emails: [{ id: "old", sender: "old@example.test", subject: "Old role email" }],
+      emails: [
+        {
+          id: "old",
+          sourceName: "Old mailbox",
+          sender: "old@example.test",
+          subject: "Old role email",
+          date: null,
+          snippet: true,
+        },
+      ],
       events: [],
       partial: false,
     }),
   );
   expect(view.container.textContent).not.toContain("Old role email");
+  expect(selection).not.toHaveBeenCalledWith(expect.objectContaining({ emailId: "old" }));
   expect(readCorrespondence).toHaveBeenCalledTimes(2);
   await view.render({
     messages: [message("stream", "main", [{ kind: "text", text: "Still checking" }])],

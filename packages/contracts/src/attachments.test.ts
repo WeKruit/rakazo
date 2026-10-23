@@ -1,7 +1,54 @@
 import { describe, expect, it } from "vitest";
-import { MessageBlock, validateThreadsSendInput } from "./index.js";
+import { appContract, MessageBlock, validateThreadsSendInput } from "./index.js";
 
 describe("attachment contracts", () => {
+  it("retains a bounded selected email reference without making it a message or approval", () => {
+    const reference = {
+      threadId: "thread-1",
+      roleId: "role-1",
+      emailId: "email-1",
+      sourceId: "mailbox-1",
+      providerMessageId: "provider-message-1",
+      savedRead: null,
+      sourceName: "Mailbox",
+      sender: null,
+      subject: "A reply",
+      date: null,
+      snippet: true,
+    };
+    expect(
+      MessageBlock.parse({
+        kind: "text",
+        text: "Original words",
+        correspondenceReference: reference,
+      }),
+    ).toEqual({ kind: "text", text: "Original words", correspondenceReference: reference });
+    expect(
+      appContract.threads.send["~orpc"].inputSchema!.safeParse({
+        groupId: "group",
+        text: "Read this",
+        correspondenceReference: { ...reference, subject: "x".repeat(4097) },
+      }).success,
+    ).toBe(false);
+    expect(
+      MessageBlock.safeParse({
+        kind: "text",
+        text: "Original",
+        correspondenceReference: {
+          ...reference,
+          emailId: "x".repeat(1600),
+          providerMessageId: "y".repeat(1600),
+          subject: "z".repeat(1000),
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      appContract.threads.send["~orpc"].inputSchema!.safeParse({
+        groupId: "group",
+        correspondenceReference: reference,
+      }).success,
+    ).toBe(false);
+  });
   it("parses image and file message blocks", () => {
     expect(
       MessageBlock.parse({

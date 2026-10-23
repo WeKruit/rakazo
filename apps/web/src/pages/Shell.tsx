@@ -17,6 +17,7 @@ import type {
   Me,
   MessageReaction,
   ProductEvent,
+  RecruitingCorrespondenceReference,
   Routine,
   SearchHit,
   Space,
@@ -2250,6 +2251,31 @@ export function ShellPage() {
     () => createRef<ComposerHandle>(),
     [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
   );
+  const correspondenceScope = useMemo(
+    () => ({}),
+    [composerRef, recruitingWorkspaceView, recruitingRefresh, workspaceNewRole],
+  );
+  const currentCorrespondenceScope = useRef(correspondenceScope);
+  currentCorrespondenceScope.current = correspondenceScope;
+  const [selectedCorrespondence, setSelectedCorrespondence] = useState<{
+    scope: typeof correspondenceScope;
+    reference: RecruitingCorrespondenceReference;
+  } | null>(null);
+  const selectCorrespondence = useCallback(
+    (reference: RecruitingCorrespondenceReference | undefined) => {
+      if (
+        currentCorrespondenceScope.current !== correspondenceScope ||
+        !discussionScope.current.active
+      )
+        return;
+      setSelectedCorrespondence(
+        reference && recruitingWorkspaceView === "inbox" && !workspaceNewRole
+          ? { scope: correspondenceScope, reference }
+          : null,
+      );
+    },
+    [correspondenceScope, recruitingWorkspaceView, workspaceNewRole],
+  );
   function openRoleChat(text?: string) {
     if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
     if (roleChatWorkspace) setRoleChatOpen(true);
@@ -2862,6 +2888,15 @@ export function ShellPage() {
       );
       const groupTarget = plan.rerouteGroupId ?? initialGroupTarget;
       const botTarget = reroutedToGroup ? undefined : initialBotTarget;
+      const submittedComposer = composerRef;
+      const submittedUser = botsRefreshUser.current;
+      const selectedEmail = selectedCorrespondence;
+      const correspondenceReference =
+        !reroutedToGroup &&
+        selectedEmail?.scope === currentCorrespondenceScope.current &&
+        discussionScope.current.active
+          ? selectedEmail.reference
+          : undefined;
       if (
         plan.shouldSend &&
         (groupTarget || botsRef.current.find((bot) => bot.id === botTarget)?.notifyOnFinish)
@@ -2928,12 +2963,21 @@ export function ShellPage() {
           );
           artifactIds.push(artifact.id);
         }
+        if (
+          !discussionScope.current.active ||
+          (selectedSpaceId() ?? bootstrapMe?.spaceId) !== bootstrapMe?.spaceId ||
+          botsRefreshUser.current !== submittedUser ||
+          discussionScope.current.composerRef !== submittedComposer ||
+          (correspondenceReference && currentCorrespondenceScope.current !== selectedEmail?.scope)
+        )
+          return false;
         if (groupTarget) {
           await rpc.threads.send({
             groupId: groupTarget,
             addressing: showToolActivity ? undefined : "coordinator",
             clientNonce,
             text: trimmed || undefined,
+            ...(correspondenceReference ? { correspondenceReference } : {}),
             mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
@@ -2945,6 +2989,7 @@ export function ShellPage() {
             botId: botTarget,
             clientNonce,
             text: trimmed || undefined,
+            ...(correspondenceReference ? { correspondenceReference } : {}),
             mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
             artifactIds: artifactIds.length ? artifactIds : undefined,
             replyToMessageId: activeReplyTarget?.id,
@@ -3000,10 +3045,13 @@ export function ShellPage() {
       activeReplyTarget?.id,
       activeReplyQuote,
       clearReply,
+      composerRef,
+      bootstrapMe?.spaceId,
       flushPendingBrowserNotifications,
       navigate,
       pendingAttachments,
       sending,
+      selectedCorrespondence,
       showToolActivity,
       t,
     ],
@@ -4497,6 +4545,8 @@ export function ShellPage() {
               view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
               messages={transcriptMessages}
               artifactTarget={transcriptArtifactTarget}
+              threadId={activeSnapshot.threadId}
+              onEmailSelection={selectCorrespondence}
               outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
               onConversation={(text) => {
                 openRoleChat(text);
@@ -4799,6 +4849,7 @@ export function ShellPage() {
             key={`${userId}:${bootstrapMe?.spaceId}:${composerDraftKey}:${showToolActivity ? "developer" : "recruiting"}`}
             ref={composerRef}
             draftKey={composerDraftKey}
+            contextKey={selectedCorrespondence?.scope === correspondenceScope ? JSON.stringify([userId, bootstrapMe?.spaceId, selectedCorrespondence.reference.threadId, selectedCorrespondence.reference.roleId, selectedCorrespondence.reference.sourceId, selectedCorrespondence.reference.providerMessageId, selectedCorrespondence.reference.emailId]) : undefined}
             enterToSend={enterToSend}
             activeName={inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
             running={composerRunning}
@@ -6634,6 +6685,7 @@ export const Composer = memo(function Composer({
   onSlashOpen,
   onSlashAction,
   draftKey,
+  contextKey,
   enterToSend,
 }: {
   ref?: Ref<ComposerHandle>;
@@ -6664,6 +6716,7 @@ export const Composer = memo(function Composer({
   onSlashOpen?: () => void;
   onSlashAction?: (action: SlashActionId) => void;
   draftKey: string;
+  contextKey?: string;
   enterToSend: boolean;
 }) {
   const { t } = useLingui();
@@ -6689,7 +6742,7 @@ export const Composer = memo(function Composer({
       }),
     [draftKey],
   );
-  const retryNonce = useRef<string | null>(null);
+  const retryNonce = useRef<{ nonce: string; contextKey?: string } | null>(null);
   const replyId = replyTarget?.id ?? null;
   const quote = replyTarget ? (replyQuote ?? null) : null;
   const previousReply = useRef({ id: replyId, quote });
@@ -6966,7 +7019,10 @@ export const Composer = memo(function Composer({
   async function send() {
     if (!canSend || sending || disabled) return;
     const revision = editRevision.current;
-    const clientNonce = retryNonce.current ?? newClientNonce();
+    const clientNonce =
+      retryNonce.current?.contextKey === contextKey
+        ? (retryNonce.current?.nonce ?? newClientNonce())
+        : newClientNonce();
     retryNonce.current = null;
     const text = serializeComposerPrompt(draft, selectedSkill, selectedMentions);
     const submission = beginComposerDraftSubmission(draftKey, draft);
@@ -6988,7 +7044,7 @@ export const Composer = memo(function Composer({
     }
     // Restore only an untouched draft, retaining its nonce for an unchanged retry.
     if (editRevision.current !== revision) return;
-    retryNonce.current = clientNonce;
+    retryNonce.current = { nonce: clientNonce, contextKey };
     setDraft(draft);
     setSelectedSkill(selectedSkill);
     setSelectedMentions(mentions);
@@ -8227,11 +8283,32 @@ const MessageView = memo(function MessageView({
             <div key={i} className="flex w-fit max-w-full justify-end [@media(hover:none)]:w-full">
               <div
                 data-testid="message-user-bubble"
-                data-quote-message-id={quoteMessageId}
                 className="max-w-full whitespace-pre-wrap wrap-anywhere rounded-[20px] bg-chat-user px-[18px] py-3 text-base leading-relaxed text-chat-user-foreground"
                 dir="auto"
               >
-                <LinkifiedText>{block.text}</LinkifiedText>
+                <div data-quote-message-id={quoteMessageId}>
+                  <LinkifiedText>{block.text}</LinkifiedText>
+                </div>
+                {block.correspondenceReference ? (
+                  <div
+                    className="mt-2 border-t border-border pt-2 text-sm text-muted-foreground"
+                    data-testid="message-email-reference"
+                  >
+                    <span>{block.correspondenceReference.sourceName}</span>
+                    {block.correspondenceReference.sender ? (
+                      <span> · {block.correspondenceReference.sender}</span>
+                    ) : null}
+                    <div>{block.correspondenceReference.subject || <Trans>No subject</Trans>}</div>
+                    {block.correspondenceReference.date ? (
+                      <div>{new Date(block.correspondenceReference.date).toLocaleString()}</div>
+                    ) : null}
+                    {block.correspondenceReference.snippet ? (
+                      <div>
+                        <Trans>Preview only</Trans>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             </div>
           );

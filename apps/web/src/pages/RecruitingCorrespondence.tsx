@@ -1,10 +1,14 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type {
+  RecruitingCorrespondenceReference,
   RecruitingOutreachSequence,
   RecruitingCorrespondence as SavedCorrespondence,
   ThreadMessage,
 } from "@rakazo/contracts";
-import { RecruitingOutreachSequenceSchema } from "@rakazo/contracts";
+import {
+  RecruitingCorrespondenceReferenceSchema,
+  RecruitingOutreachSequenceSchema,
+} from "@rakazo/contracts";
 import { NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ArrowRight, CalendarDays, ChevronRight, Inbox, Mail, Settings2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -26,8 +30,10 @@ type Props = {
   view: "sequence" | "inbox" | "interview";
   messages: readonly ThreadMessage[];
   artifactTarget: ArtifactTarget;
+  threadId?: string;
   outreachBotIds?: readonly string[];
   onConversation: (text?: string) => void;
+  onEmailSelection?: (reference: RecruitingCorrespondenceReference | undefined) => void;
   onOpenConnections: () => void;
   onSaveDraft?: (input: RecruitingSequenceSaveInput) => Promise<void>;
   refreshSignal?: number;
@@ -267,16 +273,20 @@ function SequenceEditor({
 function SavedCorrespondenceView({
   view,
   artifactTarget,
+  threadId,
   onConversation,
   onOpenConnections,
+  onEmailSelection,
   refreshSignal = 0,
   readCache,
   readCacheScope,
 }: Pick<
   Props,
   | "artifactTarget"
+  | "threadId"
   | "onConversation"
   | "onOpenConnections"
+  | "onEmailSelection"
   | "refreshSignal"
   | "readCache"
   | "readCacheScope"
@@ -302,6 +312,7 @@ function SavedCorrespondenceView({
     scopeKey?: string;
     data?: SavedCorrespondence;
     failed?: boolean;
+    fresh?: boolean;
   }>();
   useEffect(() => {
     let cancelled = false;
@@ -319,7 +330,7 @@ function SavedCorrespondenceView({
       .then((data) => {
         if (!cancelled && (!readCache || cacheEpoch === readCache.epoch)) {
           rememberRecruitingRead(readCache, cacheKey, data, cacheEpoch);
-          setRead({ key, scopeKey, data });
+          setRead({ key, scopeKey, data, fresh: true });
         }
       })
       .catch((error) => {
@@ -331,10 +342,12 @@ function SavedCorrespondenceView({
             ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(String(error.code))
           ) {
             clearRecruitingReads(readCache, readCacheScope);
-            setRead({ key, failed: true });
+            setRead({ key, scopeKey, failed: true });
           } else
             setRead((current) =>
-              current?.key === key ? { ...current, failed: true } : { key, failed: true },
+              current?.key === key && current.scopeKey === scopeKey
+                ? { ...current, failed: true }
+                : { key, scopeKey, failed: true },
             );
         }
       });
@@ -342,9 +355,30 @@ function SavedCorrespondenceView({
       cancelled = true;
     };
   }, [key, cacheKey, readCache, readCacheScope, scopeKey]);
-  const current = read?.key === key ? read : undefined;
+  const current = read?.key === key && read.scopeKey === scopeKey ? read : undefined;
   const data = current?.data;
   const selected = data?.emails.find((email) => email.id === selectedId) ?? data?.emails[0];
+  useEffect(() => {
+    // Cached mail stays readable, but only the current authorized read supplies new message context.
+    const parsed =
+      view === "inbox" && current?.fresh && !current.failed && data?.roleId && selected && threadId
+        ? RecruitingCorrespondenceReferenceSchema.safeParse({
+            threadId,
+            roleId: data.roleId,
+            emailId: selected.id,
+            sourceId: selected.sourceId,
+            providerMessageId: selected.providerMessageId,
+            savedRead: selected.savedRead,
+            sourceName: selected.sourceName.slice(0, 160),
+            sender: selected.sender?.slice(0, 320) ?? null,
+            subject: selected.subject.slice(0, 1000),
+            date: selected.date,
+            snippet: selected.snippet,
+          })
+        : undefined;
+    onEmailSelection?.(parsed?.success ? parsed.data : undefined);
+    return () => onEmailSelection?.(undefined);
+  }, [view, threadId, current?.fresh, current?.failed, data?.roleId, selected, onEmailSelection]);
   const interview = view === "interview";
   const check = () =>
     onConversation(
@@ -403,6 +437,8 @@ function SavedCorrespondenceView({
                 <Trans>Enable for this role</Trans>
               ) : connection.status === "disabled" ? (
                 <Trans>Disabled</Trans>
+              ) : connection.status === "unavailable" ? (
+                <Trans>Temporarily unavailable</Trans>
               ) : (
                 <Trans>Connect account</Trans>
               )}
@@ -595,9 +631,11 @@ export function RecruitingCorrespondence({
   view,
   messages,
   artifactTarget,
+  threadId,
   outreachBotIds = [],
   onConversation,
   onOpenConnections,
+  onEmailSelection,
   onSaveDraft,
   refreshSignal,
   readCache,
@@ -815,8 +853,10 @@ export function RecruitingCorrespondence({
     <SavedCorrespondenceView
       view={view}
       artifactTarget={artifactTarget}
+      threadId={threadId}
       onConversation={onConversation}
       onOpenConnections={onOpenConnections}
+      onEmailSelection={onEmailSelection}
       refreshSignal={refreshSignal}
       readCache={readCache}
       readCacheScope={readCacheScope}
