@@ -46,7 +46,7 @@ import type {
   ModelCallObserver,
 } from "@rakazo/adapter-kit";
 import { AskUserInputSchema, usableModelId } from "@rakazo/contracts";
-import { abortableDelay } from "@rakazo/core";
+import { abortableDelay, type WorkActivity, workActivityForTool } from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
@@ -131,6 +131,27 @@ const DEFAULT_COMPUTER_SCREENSHOTS_TO_KEEP = 2;
 // reasoning (e.g. google/gemini-3.7-flash). Keep a real level when model.reasoning
 // is set; plain models stay off.
 const REASONING_MODEL_THINKING_LEVEL: ModelThinkingLevel = "medium";
+const THINKING_PROGRESS_INTERVAL_MS = 5_000;
+
+const THINKING_SUMMARIES: Partial<Record<WorkActivity, string>> = {
+  files: "Reviewing files",
+  search: "Reviewing search results",
+  page: "Reviewing the page",
+  context: "Reviewing context",
+  emails: "Reviewing emails",
+  availability: "Reviewing availability",
+  drafting: "Working on the draft",
+  role: "Reviewing the role",
+  candidates: "Reviewing candidates",
+  research: "Reviewing research results",
+  crm: "Reviewing CRM records",
+};
+
+/** User-safe, ≤8-word thinking label derived from the last tool's category only. */
+export function thinkingSummary(lastToolName: string | undefined): string {
+  return (lastToolName && THINKING_SUMMARIES[workActivityForTool(lastToolName)]) || "Thinking";
+}
+
 function thinkingLevelFor(
   model: Model<Api>,
   preferred?: ModelThinkingLevel | null,
@@ -525,6 +546,8 @@ export class PiAgentRuntime implements AgentRuntime {
         // Text streamed before this point is tool-turn narration. Only text after
         // it counts as the final reply, including when the completed message omits it.
         let streamedBeforePendingFinal = 0;
+        let lastToolName: string | undefined;
+        let lastThinkingAt = Number.NEGATIVE_INFINITY;
         agent.subscribe(async (event) => {
           auditUndispatchedToolFailure(event, host, tools);
           if (event.type === "message_end") {
@@ -533,6 +556,7 @@ export class PiAgentRuntime implements AgentRuntime {
           if (event.type === "tool_execution_start") {
             if (host.toolCallBudget.exceeded) return;
             toolCalls += 1;
+            lastToolName = event.toolName;
             // Live activity feedback: without this the thread shows a bare
             // "working…" for the whole tool call with nothing actionable.
             toolActivityShowing = true;
@@ -548,6 +572,26 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
             modelStreaming = false;
+          }
+          if (
+            event.type === "message_update" &&
+            event.assistantMessageEvent.type === "thinking_delta" &&
+            event.assistantMessageEvent.delta
+          ) {
+            // Transient "still thinking" signal. Never forwards reasoning text: the summary
+            // comes only from the last tool's closed category.
+            const now = Date.now();
+            if (now - lastThinkingAt >= THINKING_PROGRESS_INTERVAL_MS) {
+              lastThinkingAt = now;
+              queue.push({
+                type: "progress",
+                text: "",
+                activity: true,
+                phase: "thinking",
+                summary: thinkingSummary(lastToolName),
+                at: new Date(now).toISOString(),
+              });
+            }
           }
           if (
             event.type === "message_update" &&

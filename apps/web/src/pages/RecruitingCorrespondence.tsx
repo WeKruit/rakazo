@@ -19,6 +19,7 @@ import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
+import { AvailabilityRanges } from "./recruiting/AvailabilityRanges";
 
 export type RecruitingSequenceSaveInput = {
   sourceArtifactId: string;
@@ -613,14 +614,13 @@ function SavedCorrespondenceView({
               been verified.
             </Trans>
           </p>
-          {data.events.map((event) => (
+          <AvailabilityRanges
+            slots={data.events.filter((event) => event.kind === "availability")}
+          />
+          {data.events.filter((event) => event.kind !== "availability").map((event) => (
             <article key={event.id} className="rounded-xl border border-border p-5">
               <div className="mb-3 flex flex-wrap justify-between gap-2">
-                <h2 className="font-semibold">
-                  {event.kind === "availability"
-                    ? t`Available time`
-                    : event.title || t`Calendar event`}
-                </h2>
+                <h2 className="font-semibold">{event.title || t`Calendar event`}</h2>
                 {event.status ? (
                   <span className="text-sm text-muted-foreground">{event.status}</span>
                 ) : null}

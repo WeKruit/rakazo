@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
-import { Button, Input } from "@rakazo/ui-web";
+import { Button, Input, Skeleton } from "@rakazo/ui-web";
 import {
   Bookmark,
   CalendarDays,
@@ -36,6 +36,24 @@ export type RecruitingWorkspaceView =
   | "interview"
   | "workflow";
 
+/** Whether two CRM role reads belong to the same user and Space (scope is [user, Space, thread]). */
+function sameAccount(previousKey: string, nextKey: string) {
+  const account = (key: string) => {
+    try {
+      const [scope] = JSON.parse(key) as [unknown];
+      if (typeof scope !== "string") return undefined;
+      const [userId, spaceId] = JSON.parse(scope) as unknown[];
+      return typeof userId === "string" && typeof spaceId === "string"
+        ? JSON.stringify([userId, spaceId])
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const previous = account(previousKey);
+  return previous !== undefined && previous === account(nextKey);
+}
+
 /** The supplied WeKruit /hire navigation over native recruiting conversations. */
 export function RecruitingNavigation({
   groups,
@@ -59,7 +77,13 @@ export function RecruitingNavigation({
   crmContext,
   crmSelection,
   onOpenCrmRole,
+  loading = false,
+  onPrefetchRole,
 }: {
+  /** The role list has not arrived yet. */
+  loading?: boolean;
+  /** Hover or focus on a role: start reading its conversation before the click. */
+  onPrefetchRole?: (id: string) => void;
   crmContext?: {
     target: ArtifactTarget;
     scope: string;
@@ -103,6 +127,8 @@ export function RecruitingNavigation({
     key: string;
     roles: CrmRole[];
     loading?: boolean;
+    /** Another conversation's list for the same account, shown until this one returns. */
+    stale?: boolean;
     failed?: boolean;
     unavailable?: boolean;
   }>();
@@ -119,10 +145,16 @@ export function RecruitingNavigation({
       return true;
     };
     const cacheKey = `${scope}:crm:roles`;
-    setCrm({
-      key: crmKey,
-      roles: (cache.entries.get(cacheKey) as CrmRole[] | undefined) ?? [],
-      loading: true,
+    const cached = cache.entries.get(cacheKey) as CrmRole[] | undefined;
+    setCrm((previous) => {
+      const keepPrevious =
+        !cached && previous && !previous.failed && sameAccount(previous.key, crmKey);
+      return {
+        key: crmKey,
+        roles: cached ?? (keepPrevious ? previous.roles : []),
+        stale: !cached && Boolean(keepPrevious),
+        loading: true,
+      };
     });
     void retryTransientRead(
       () => rpc.recruiting.crmData({ ...target, operation: "memberships" }),
@@ -178,6 +210,8 @@ export function RecruitingNavigation({
     };
   }, [crmKey]);
   const currentCrm = crm?.key === crmKey ? crm : undefined;
+  // Routing uses only this conversation's own (or cached) roles, never a stale placeholder.
+  const routableCrmRoles = currentCrm?.stale ? [] : (currentCrm?.roles ?? []);
   const visibleGroups = groups.filter((group) =>
     group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
@@ -268,7 +302,16 @@ export function RecruitingNavigation({
         />
       </div>
       <div className="rk-scroll min-h-0 flex-1 space-y-1 overflow-y-auto">
-        {currentCrm?.loading ? (
+        {loading ? (
+          <div role="status" aria-label={t`Loading roles…`} className="space-y-1 px-2.5">
+            {[0, 1, 2].map((row) => (
+              <div key={row} className="flex min-h-[39px] items-center gap-3">
+                <Skeleton className="size-2 rounded-full" />
+                <Skeleton className="h-3 flex-1" />
+              </div>
+            ))}
+          </div>
+        ) : currentCrm?.loading && currentCrm.roles.length === 0 ? (
           <p role="status" className="px-3 text-xs text-muted-foreground">
             <Trans>Loading roles…</Trans>
           </p>
@@ -292,8 +335,10 @@ export function RecruitingNavigation({
                 variant="ghost"
                 className="hire-role-button h-auto min-h-[39px] min-w-0 flex-1 justify-start gap-3 rounded-[9px] px-2.5 py-2 text-start text-sm font-normal"
                 aria-current={group.id === groupId && view === "results" ? "page" : undefined}
+                onMouseEnter={() => onPrefetchRole?.(group.id)}
+                onFocus={() => onPrefetchRole?.(group.id)}
                 onClick={() => {
-                  const role = currentCrm?.roles.find(
+                  const role = routableCrmRoles.find(
                     (role) =>
                       group.crmRoleReference?.sourceId === role.selection.serverId &&
                       group.crmRoleReference.organizationId === role.selection.organizationId &&
