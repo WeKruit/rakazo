@@ -5818,22 +5818,43 @@ function researchReadRequest(
   return { toolName: route.toolName, args, route };
 }
 
+/**
+ * Request-local memo for repeated proof lookups while verifying several saved pages in one call.
+ * Created per call and dropped with it; never shared across requests or transactions.
+ */
+type ProofMemo = <T>(key: string, load: () => Promise<T>) => Promise<T>;
+const unmemoized: ProofMemo = (_key, load) => load();
+function proofMemo(): ProofMemo {
+  const loaded = new Map<string, Promise<unknown>>();
+  return <T>(key: string, load: () => Promise<T>) => {
+    let value = loaded.get(key);
+    if (!value) {
+      value = load();
+      loaded.set(key, value);
+    }
+    return value as Promise<T>;
+  };
+}
+
 async function researchReadBinding(
   tx: Tx,
   actor: Actor,
   effect: ResearchEffectRow,
   lease?: ResearchLease,
+  memo: ProofMemo = unmemoized,
 ) {
-  const owner = await requireRun(tx, actor, effect.runId);
-  const events = await tx.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      // The binding must belong to the owner run (checked below); index-scoped, not space-wide.
-      runId: owner.id,
-      type: "recruiting.read",
-      payload: { path: ["effectId"], equals: effect.id },
-    },
-  });
+  const owner = await memo(`run:${effect.runId}`, () => requireRun(tx, actor, effect.runId));
+  const events = await memo(`read-events:${owner.id}:${effect.id}`, () =>
+    tx.event.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        // The binding must belong to the owner run (checked below); index-scoped, not space-wide.
+        runId: owner.id,
+        type: "recruiting.read",
+        payload: { path: ["effectId"], equals: effect.id },
+      },
+    }),
+  );
   if (events.length === 0) return null;
   const parsed = events.map((event) => ({ event, payload: researchReadPayload(event) }));
   const bindings = parsed.filter((item) => item.payload.phase === "bound");
@@ -5844,12 +5865,15 @@ async function researchReadBinding(
   if (lease && effect.runId !== lease.runId) throw new IsolationError();
   if (event.runId !== owner.id || event.threadId !== owner.threadId || event.botId !== owner.botId)
     throw new IsolationError();
-  const saved = await researchContextInTransaction(tx, actor, {
+  const context = {
     runId: owner.id,
     actionId: binding.actionId,
     toolName: binding.toolName,
     historical: !lease,
-  });
+  };
+  const saved = await memo(`context:${stableJsonValue(context)}`, () =>
+    researchContextInTransaction(tx, actor, context),
+  );
   if (lease) requireResearchLease(saved.run, lease);
   if (!saved.task || !saved.action || saved.task.id !== binding.taskId) throw new IsolationError();
   const call = researchReadRequest(effect.request, saved.task, binding.toolName);
@@ -5878,21 +5902,22 @@ async function recordedResearchReadArtifact(
   tx: Tx,
   actor: Actor,
   read: NonNullable<Awaited<ReturnType<typeof researchReadBinding>>>,
+  memo: ProofMemo = unmemoized,
 ) {
-  const artifact = await tx.artifact.findUnique({
-    where: {
-      spaceId_userId_clientNonce: {
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-        clientNonce: `recruiting-observation:${read.effect.id}`,
+  const clientNonce = `recruiting-observation:${read.effect.id}`;
+  const artifact = await memo(`artifact:${clientNonce}`, () =>
+    tx.artifact.findUnique({
+      where: {
+        spaceId_userId_clientNonce: { spaceId: actor.spaceId, userId: actor.userId, clientNonce },
       },
-    },
-  });
+    }),
+  );
   if (!artifact && !read.recorded) return null;
   if (!artifact || !read.recorded) throw new IsolationError();
   const { event, payload } = read.recorded;
   if (!event.runId) throw new IsolationError();
-  const owner = await requireRun(tx, actor, event.runId);
+  const runId = event.runId;
+  const owner = await memo(`run:${runId}`, () => requireRun(tx, actor, runId));
   if (
     event.threadId !== owner.threadId ||
     event.botId !== owner.botId ||
@@ -5905,7 +5930,9 @@ async function recordedResearchReadArtifact(
       .some((ref) => ref.artifactId === artifact.id && ref.sha256 === artifact.hash)
   )
     throw new IsolationError();
-  await validateArtifact(tx, actor, payload.outputArtifact);
+  await memo(`valid:${payload.outputArtifact.artifactId}:${payload.outputArtifact.sha256}`, () =>
+    validateArtifact(tx, actor, payload.outputArtifact),
+  );
   return artifact;
 }
 
@@ -6876,25 +6903,79 @@ export async function saveRecruitingCandidateCsvImport(
 }
 
 /** One provenance check for both historical action pages and native candidate saves. */
+/**
+ * Loads the per-page proof rows of research-action pages in three `IN` queries and seeds a
+ * call-local memo with exactly the rows the per-page lookups would have read; every per-page
+ * check in candidatePageArtifact still runs unchanged against them.
+ */
+async function researchPageProofs(
+  tx: Tx,
+  actor: Actor,
+  pages: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>[],
+): Promise<ProofMemo> {
+  const memo = proofMemo();
+  if (pages.length < 2) return memo;
+  const ids = pages.map((page) => page.effectId);
+  const effects = await tx.externalEffect.findMany({
+    where: { id: { in: ids }, spaceId: actor.spaceId, status: "completed" },
+  });
+  const runIds = [...new Set(effects.map((effect) => effect.runId))];
+  const nonces = ids.map((id) => `recruiting-observation:${id}`);
+  const [events, artifacts] = await Promise.all([
+    tx.event.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        runId: { in: runIds },
+        type: "recruiting.read",
+        OR: ids.map((id) => ({ payload: { path: ["effectId"], equals: id } })),
+      },
+    }),
+    tx.artifact.findMany({
+      where: { spaceId: actor.spaceId, userId: actor.userId, clientNonce: { in: nonces } },
+    }),
+  ]);
+  for (const id of ids) {
+    const effect = effects.find((row) => row.id === id) ?? null;
+    void memo(`effect:${id}`, async () => effect);
+    if (effect)
+      void memo(`read-events:${effect.runId}:${id}`, async () =>
+        events.filter(
+          (event) =>
+            event.runId === effect.runId &&
+            (event.payload as { effectId?: unknown } | null)?.effectId === id,
+        ),
+      );
+  }
+  for (const nonce of nonces)
+    void memo(
+      `artifact:${nonce}`,
+      async () => artifacts.find((artifact) => artifact.clientNonce === nonce) ?? null,
+    );
+  return memo;
+}
+
 async function candidatePageArtifact(
   tx: Tx,
   actor: Actor,
   page: Prisma.RecruitingCandidatePageGetPayload<Record<string, never>>,
   canonical = false,
+  memo: ProofMemo = unmemoized,
 ) {
   if (page.taskId === null && page.actionId === null) {
     const artifacts = await candidatePageArtifacts(tx, actor, [page], canonical);
     return artifacts.get(page.effectId)!;
   }
-  const effect = await tx.externalEffect.findFirst({
-    where: {
-      id: page.effectId,
-      spaceId: actor.spaceId,
-      status: "completed",
-    },
-  });
+  const effect = await memo(`effect:${page.effectId}`, () =>
+    tx.externalEffect.findFirst({
+      where: {
+        id: page.effectId,
+        spaceId: actor.spaceId,
+        status: "completed",
+      },
+    }),
+  );
   if (effect?.status !== "completed") throw new IsolationError();
-  const read = await researchReadBinding(tx, actor, effect);
+  const read = await researchReadBinding(tx, actor, effect, undefined, memo);
   if (
     read?.toolName !== "get_rows" ||
     read.binding.taskId !== page.taskId ||
@@ -6904,7 +6985,7 @@ async function candidatePageArtifact(
     (canonical && read.saved.action.candidateOutputSchema !== RECRUITING_CANDIDATE_OUTPUT_SCHEMA)
   )
     throw new IsolationError();
-  const artifact = await recordedResearchReadArtifact(tx, actor, read);
+  const artifact = await recordedResearchReadArtifact(tx, actor, read, memo);
   if (!artifact || artifact.id !== page.artifactId || artifact.hash !== page.artifactHash)
     throw new IsolationError();
   return artifact;
@@ -7016,9 +7097,14 @@ async function candidatePageArtifacts(
     byEvent.set(id, saved);
   }
   const artifacts = new Map<string, Prisma.ArtifactGetPayload<Record<string, never>>>();
+  const memo = await researchPageProofs(
+    tx,
+    actor,
+    pages.filter((page) => page.taskId !== null || page.actionId !== null),
+  );
   for (const page of pages) {
     if (page.taskId !== null || page.actionId !== null) {
-      artifacts.set(page.effectId, await candidatePageArtifact(tx, actor, page, canonical));
+      artifacts.set(page.effectId, await candidatePageArtifact(tx, actor, page, canonical, memo));
       continue;
     }
     const effect = byEffect.get(page.effectId);
