@@ -2335,6 +2335,11 @@ msgstr "深色"
 msgid "Dashboard"
 msgstr ""
 
+#. placeholder {0}: draft.email.date
+#: src/pages/Shell.tsx
+msgid "Date: {0}"
+msgstr ""
+
 #: src/lib/billing.ts
 #: src/pages/RoutineSchedule.tsx
 msgid "day"
@@ -2604,6 +2609,10 @@ msgstr ""
 msgid "Draft"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Draft reply"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft saved"
 msgstr ""
@@ -2665,6 +2674,11 @@ msgstr ""
 msgid "Email verification required"
 msgstr "需要验证邮箱"
 
+#. placeholder {0}: draft.candidateEmail
+#: src/pages/Shell.tsx
+msgid "Email: {0}"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Emails"
 msgstr ""
@@ -2719,6 +2733,10 @@ msgstr "测试前请输入 API 密钥。"
 #: src/lib/roster-status.ts
 #: src/pages/Shell.tsx
 msgid "Error"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Error details"
 msgstr ""
 
 #: src/pages/ExternalConversationSettings.tsx
@@ -2810,6 +2828,10 @@ msgstr "失败"
 #: src/pages/ActivityList.tsx
 msgid "Failed"
 msgstr "失败"
+
+#: src/pages/Shell.tsx
+msgid "Failed to load recruiting data"
+msgstr ""
 
 #: src/pages/Shell.tsx
 msgid "Failed to send message"
@@ -3587,6 +3609,10 @@ msgid "Mark as Unread"
 msgstr "标为未读"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Match score"
 msgstr ""
 
@@ -3895,6 +3921,7 @@ msgid "Name this routine"
 msgstr "给这个例行任务命名"
 
 #. placeholder {0}: candidate.name ?? t`Name missing`
+#. placeholder {0}: draft.candidateName
 #: src/pages/Shell.tsx
 msgid "Name: {0}"
 msgstr ""
@@ -4110,6 +4137,10 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "未找到提供方。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "No recruiter messages were found."
+msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
@@ -4479,9 +4510,23 @@ msgstr ""
 msgid "Original job description"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
+msgid "Original message"
+msgstr ""
+
 #: src/pages/shell/chat-context.tsx
 msgid "Original message unavailable"
 msgstr "原消息不可用"
+
+#. placeholder {0}: draft.email.recipients.join(", ")
+#: src/pages/Shell.tsx
+msgid "Original recipients: {0}"
+msgstr ""
+
+#. placeholder {0}: draft.email.sender
+#: src/pages/Shell.tsx
+msgid "Original sender: {0}"
+msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Original source"
@@ -4608,6 +4653,10 @@ msgid "Plugin"
 msgstr "插件"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Polished message"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Pooled in internal review"
 msgstr ""
 
@@ -4674,6 +4723,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous contact campaigns"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Previously processing"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4773,6 +4826,10 @@ msgstr "朗读回复"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read the latest candidate email replies for this role using the connected mailbox. Show the sender, subject, date and original reply. Don't send, label, archive or modify any messages."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Read this person's original email and complete conversation using the connected CRM and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -4875,6 +4932,10 @@ msgstr "重建无法正常工作的电脑。"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Recreating the computer"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiter messages"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5058,6 +5119,10 @@ msgstr "回复"
 
 #: src/pages/Shell.tsx
 msgid "Reply cancelled"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Reply to the selected email"
 msgstr ""
 
 #. placeholder {0}: replyNameRef.current
@@ -5289,6 +5354,7 @@ msgid "Role version: {0}"
 msgstr ""
 
 #. placeholder {0}: candidate.roleTitle
+#. placeholder {0}: workspace.role.title
 #: src/pages/Shell.tsx
 msgid "Role: {0}"
 msgstr ""
@@ -5462,6 +5528,10 @@ msgstr ""
 #: src/pages/ScratchpadSection.tsx
 msgid "Saved, but list refresh failed"
 msgstr "已保存，但列表刷新失败"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Saved, not sent"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Saved."
@@ -5664,6 +5734,10 @@ msgid "Send deletion code"
 msgstr "发送删除验证码"
 
 #: src/pages/RecruitingPanel.tsx
+msgid "Send failed"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
 msgid "Send feedback"
 msgstr ""
 
@@ -5691,6 +5765,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "正在发送…"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Sent at"
+msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Sentry alert"
@@ -6101,6 +6179,11 @@ msgstr ""
 msgid "Subject not set"
 msgstr ""
 
+#. placeholder {0}: draft.email.subject
+#: src/pages/Shell.tsx
+msgid "Subject: {0}"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Submit"
@@ -6255,6 +6338,10 @@ msgstr ""
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "The selected memory provider is not available in this build."
 msgstr "所选记忆提供方在此构建中不可用。"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "There was a problem sending this message."
+msgstr ""
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "These saved settings can't be read. Remove it and add it again."
