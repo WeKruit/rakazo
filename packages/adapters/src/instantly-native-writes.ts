@@ -96,6 +96,25 @@ const AddShortlistLeadsInput = z.strictObject({
     .max(100),
 });
 
+const EmailIdInput = z.strictObject({
+  id: Uuid.describe(
+    "Provider email id from list_mailbox_emails, search_contact_emails or get_thread_history.",
+  ),
+});
+const ReplyToEmailInput = z.strictObject({
+  reply_to_uuid: Uuid.describe(
+    "Provider id of the email being answered (from list_mailbox_emails, search_contact_emails or get_thread_history).",
+  ),
+  eaccount: Email.optional().describe(
+    "Your connected mailbox that sends the reply; omit to use the mailbox that holds the original email.",
+  ),
+  subject: z.string().min(1).max(500).optional().describe('Omit for "Re: <original subject>".'),
+  body: z.strictObject({
+    text: z.string().min(1).max(20_000),
+    html: z.string().min(1).max(50_000).optional(),
+  }),
+});
+
 const LOCAL = "Local native REST integration for the existing authorized Instantly connection.";
 const tool = (name: string, schema: z.ZodType, readOnly: boolean, description: string) => ({
   name,
@@ -142,6 +161,18 @@ export const nativeInstantlyWrites = [
     "Sends the campaign's first email to its leads by activating it (also resumes a paused one). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
+  tool(
+    "get_email",
+    EmailIdInput,
+    true,
+    "Reads one email (subject, sender, recipients, mailbox, thread, body) by its provider id.",
+  ),
+  tool(
+    "reply_to_email",
+    ReplyToEmailInput,
+    false,
+    "Sends a reply in the existing thread of one received email from your connected mailbox. This is the only way to answer a candidate's email; it shows the native confirmation card and nothing is sent until the human confirms — call it, never refuse or say there is no approval flow.",
+  ),
   tool(
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
@@ -424,6 +455,71 @@ export async function describeCampaignActivation(
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
     schedule: describeSchedule(campaign),
   };
+}
+
+export type InstantlyReplyDisplay = {
+  to: string | null;
+  from: string | null;
+  subject: string;
+  inReplyTo: string | null;
+  body: string;
+};
+/** Vendor-free facts for the reply confirmation card; the original is read with the native get_email tool. */
+export async function describeReplyToEmail(
+  read: (
+    tool: "native_instantly_get_email",
+    args: Record<string, unknown>,
+  ) => Promise<Record<string, unknown> | undefined>,
+  args: Record<string, unknown>,
+): Promise<InstantlyReplyDisplay> {
+  const input = ReplyToEmailInput.safeParse(args);
+  const original =
+    input.success && typeof args.reply_to_uuid === "string"
+      ? await read("native_instantly_get_email", { id: args.reply_to_uuid }).catch(() => undefined)
+      : undefined;
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
+  const originalSubject = text(original?.subject);
+  const wanted = input.success ? input.data : undefined;
+  return {
+    to: text(original?.from_address_email),
+    from: text(wanted?.eaccount) ?? text(original?.eaccount),
+    subject:
+      text(wanted?.subject) ??
+      (originalSubject ? `Re: ${originalSubject.replace(/^(re:\s*)+/iu, "")}` : "unknown"),
+    inReplyTo: original
+      ? [originalSubject ?? "(no subject)", text(original.timestamp_email)]
+          .filter(Boolean)
+          .join(", ")
+      : null,
+    body: input.success ? input.data.body.text : "",
+  };
+}
+
+async function readEmail(rest: InstantlyRest, id: string) {
+  const email = await rest("GET", `/emails/${id}`);
+  if (email.id !== id) throw new Error("The provider returned a different email");
+  return email;
+}
+
+async function replyToEmail(rest: InstantlyRest, input: z.output<typeof ReplyToEmailInput>) {
+  const original = await readEmail(rest, input.reply_to_uuid);
+  const eaccount =
+    input.eaccount ?? (typeof original.eaccount === "string" ? original.eaccount : "");
+  if (!eaccount) throw new Error("The original email names no mailbox; pass eaccount");
+  await requireOwnMailbox(rest, eaccount);
+  if (typeof original.eaccount === "string" && !sameAddress(original.eaccount, eaccount))
+    throw new Error(`${input.reply_to_uuid} is not in the ${eaccount} mailbox`);
+  const subject =
+    input.subject ??
+    (typeof original.subject === "string" && original.subject.trim()
+      ? `Re: ${original.subject.replace(/^(re:\s*)+/iu, "")}`
+      : "Re:");
+  return rest("POST", "/emails/reply", {
+    reply_to_uuid: input.reply_to_uuid,
+    eaccount,
+    subject,
+    body: input.body,
+  });
 }
 
 async function readBinding(prisma: PrismaClient, context: AdapterContext, key: string) {
@@ -723,6 +819,10 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
+    case "native_instantly_get_email":
+      return readEmail(rest, EmailIdInput.parse(args).id);
+    case "native_instantly_reply_to_email":
+      return replyToEmail(rest, ReplyToEmailInput.parse(args));
     case "native_instantly_ensure_role_campaign":
       return ensureRoleCampaign(
         prisma,

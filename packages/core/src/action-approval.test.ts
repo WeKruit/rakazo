@@ -40,6 +40,13 @@ describe("internalMcpWriteEndpoint", () => {
         toolName: "native_instantly_activate_campaign",
       }),
     ).toBe(true);
+    expect(internalMcpWriteEndpoint("native_instantly_reply_to_email")).toBeUndefined();
+    expect(
+      toolRequiresExplicitApproval("reply", {
+        connectorId: "mcp",
+        toolName: "native_instantly_reply_to_email",
+      }),
+    ).toBe(true);
   });
 });
 

@@ -1495,6 +1495,133 @@ describe("saved recruiting correspondence", () => {
       expect(output.emails).toHaveLength(1);
     },
   );
+  it("projects a candidate reply read through the native thread history in a specialist sub-run", async () => {
+    // Live gap: the Outreach sub-run read the reply via native get_thread_history (no official
+    // list_emails/get_email on this space) and the Inbox still said "Not checked yet".
+    const { client, prisma, retained } = fixture();
+    const reply = {
+      ...email,
+      id: "7a0a8e6e-4c2a-4d5f-9d4e-2d1f3c4b5a69",
+      campaign_id: null,
+      thread_id: "thread-1",
+      subject: "Re: Original subject",
+      body: { text: "收到，谢谢。周四可以聊。" },
+    };
+    const history = {
+      ...retained,
+      id: "history",
+      run: { botId: "outreach" },
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "mail",
+            resourceRevision: 1,
+            toolName: "native_instantly_get_thread_history",
+          },
+          args: { anchor_id: reply.id, limit: 100 },
+        },
+      ],
+    };
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "mail",
+        name: "Instantly",
+        endpoint: "https://mcp.instantly.ai/mcp",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [
+          { botId: "main", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+          { botId: "outreach", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+        ],
+      },
+    ]);
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([history])
+      .mockResolvedValueOnce([
+        {
+          id: history.id,
+          result: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              anchor: { structuredContent: reply },
+              page: { items: [reply], next_starting_after: null },
+              coverage: { scope: "exact_thread" },
+            },
+          },
+        },
+      ]);
+    const output = await api.getRecruitingCorrespondence(
+      prisma,
+      actor,
+      { ...target, memberBotIds: ["main", "outreach"] },
+      "inbox",
+    );
+    expect(output).toMatchObject({
+      status: "ready",
+      partial: false,
+      emails: [{ providerMessageId: reply.id, body: reply.body.text, snippet: false }],
+    });
+    expect(client.externalEffect.findMany.mock.calls[0]![0].where.OR).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          AND: expect.arrayContaining([
+            {
+              request: {
+                path: ["2", "route", "toolName"],
+                equals: "native_instantly_get_thread_history",
+              },
+            },
+          ]),
+        }),
+      ]),
+    );
+  });
+  it("projects a standalone get_email read of a reply without a campaign list snapshot", async () => {
+    const { client, prisma, retained } = fixture();
+    client.mcpServer.findMany.mockResolvedValueOnce([
+      {
+        id: "mail",
+        name: "Instantly",
+        endpoint: "https://mcp.instantly.ai/mcp",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [
+          { botId: "main", allowAllTools: false, allowedTools: ["list_emails", "get_email"] },
+        ],
+      },
+    ]);
+    const detail = {
+      ...retained,
+      id: "detail",
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "mail",
+            resourceRevision: 1,
+            toolName: "get_email",
+          },
+          args: { id: email.id },
+        },
+      ],
+    };
+    client.externalEffect.findMany
+      .mockReset()
+      .mockResolvedValueOnce([detail])
+      .mockResolvedValueOnce([{ id: detail.id, result: { structuredContent: email } }]);
+    expect(await api.getRecruitingCorrespondence(prisma, actor, target, "inbox")).toMatchObject({
+      status: "ready",
+      emails: [{ body: email.body.text, snippet: false }],
+    });
+  });
   it.each([{ enabled: false }, { permission: false }])(
     "does not fetch provider payloads after native permission is unavailable: %j",
     async (options) => {
