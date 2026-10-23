@@ -33,6 +33,8 @@ export class MarkdownMemoryStore implements MemoryStore {
   }
 
   async read(request: MemoryReadRequest, context: AdapterContext): Promise<MemorySnapshot> {
+    // Bot-private memory is addressed by bot; without one it would span sibling bots.
+    if (request.scope === "bot" && !request.botId) return { documents: [] };
     const documents = await this.prisma.memoryDocument.findMany({
       where: {
         spaceId: context.spaceId,
@@ -58,6 +60,7 @@ export class MarkdownMemoryStore implements MemoryStore {
     request: MemorySearchRequest,
     context: AdapterContext,
   ): Promise<MemorySearchResult[]> {
+    if (request.scope === "bot" && !request.botId) return [];
     const documents = await this.prisma.memoryDocument.findMany({
       where: {
         spaceId: context.spaceId,

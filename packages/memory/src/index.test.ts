@@ -97,6 +97,45 @@ describe("memory actor isolation", () => {
   });
 });
 
+describe("sibling bot memory", () => {
+  const table = [
+    { id: "u", scope: "user", botId: null, path: "profile.md" },
+    { id: "b1", scope: "bot", botId: "bot-1", path: "m.md" },
+    { id: "b2", scope: "bot", botId: "bot-2", path: "m.md" },
+  ].map((row) => ({
+    ...row,
+    spaceId: "space-1",
+    userId: "user-a",
+    content: `secret ${row.id}`,
+    revision: 1,
+    updatedAt: new Date(0),
+  }));
+  const findMany = vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+    table.filter((row) =>
+      Object.entries(where).every(([key, value]) => row[key as keyof typeof row] === value),
+    ),
+  );
+  const store = new MarkdownMemoryStore({ memoryDocument: { findMany } } as never);
+  const ctx: AdapterContext = { ...context, spaceId: "space-1", userId: "user-a" };
+  const ids = (docs: Array<{ id: string }>) => docs.map((doc) => doc.id);
+
+  it("shares user-scope memory with every bot but keeps bot-private memory private", async () => {
+    expect(ids((await store.read({ scope: "user" }, ctx)).documents)).toEqual(["u"]);
+    expect(ids((await store.read({ scope: "bot", botId: "bot-1" }, ctx)).documents)).toEqual([
+      "b1",
+    ]);
+    expect(ids((await store.read({ scope: "bot", botId: "bot-2" }, ctx)).documents)).toEqual([
+      "b2",
+    ]);
+  });
+
+  it("never returns every bot's private memory when the bot id is missing", async () => {
+    expect((await store.read({ scope: "bot" }, ctx)).documents).toEqual([]);
+    // "all" is the owner's own cross-bot search (no agent caller); it stays user+actor scoped.
+    expect(await store.search({ scope: "bot", query: "secret" }, ctx)).toEqual([]);
+  });
+});
+
 describe("memory import CAS", () => {
   it("carries the prepared target revision into the native commit", async () => {
     const store = new MarkdownMemoryStore({} as PrismaClient);
