@@ -3780,7 +3780,10 @@ describe("stopThreadRuns", () => {
           ),
           findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
         },
-        steeringMessage: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+        steeringMessage: {
+          deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+          updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        },
         computerExecutionLease: {
           findMany: vi
             .fn()
@@ -3833,9 +3836,18 @@ describe("stopThreadRuns", () => {
           where: { threadId: "thread-1", id: runId, status: expect.anything() },
         }),
       );
-      expect(tx.steeringMessage.deleteMany).toHaveBeenCalledWith({
-        where: { runId: { in: cancelled }, message: { threadId: "thread-1" } },
-      });
+      if (cancelled.length) {
+        expect(tx.steeringMessage.deleteMany).toHaveBeenCalledWith({
+          where: { runId: { in: cancelled }, claimedAt: { not: null } },
+        });
+        expect(tx.steeringMessage.updateMany).toHaveBeenCalledWith({
+          where: { runId: { in: cancelled } },
+          data: { runId: null },
+        });
+      } else {
+        expect(tx.steeringMessage.deleteMany).not.toHaveBeenCalled();
+        expect(tx.steeringMessage.updateMany).not.toHaveBeenCalled();
+      }
       expect(tx.event.create).toHaveBeenCalledTimes(cancelled.length);
       expect(execute).toHaveBeenCalledTimes(cancelled.length);
       if (cancelled.length) {
@@ -3865,6 +3877,51 @@ describe("stopThreadRuns", () => {
     },
   );
 
+  it("keeps unclaimed steering as pending input for the next run on a stop-all", async () => {
+    const tx = {
+      $queryRaw: vi.fn(),
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 2 }) },
+      run: {
+        updateManyAndReturn: vi.fn().mockResolvedValue([{ id: "run-a", botId: "bot-a" }]),
+        findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
+      },
+      steeringMessage: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      computerExecutionLease: { findMany: vi.fn().mockResolvedValue([]) },
+      computer: { findMany: vi.fn().mockResolvedValue([]) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => data),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof tx) => Promise<unknown>) =>
+        callback(tx),
+      ),
+      computerExecutionLease: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      computer: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    } as unknown as PrismaClient;
+    await stopThreadRuns(
+      {
+        prisma,
+        sandbox: {} as unknown as SandboxProvider,
+        events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
+      },
+      { spaceId: "space-1", userId: "user-1" } as Actor,
+      { kind: "bot", botId: "bot-a", threadId: "thread-1" } as ThreadTarget,
+    );
+    // Only steering the stopped run already read is gone; never the bot's pending rows.
+    expect(tx.steeringMessage.deleteMany).toHaveBeenCalledExactlyOnceWith({
+      where: { runId: { in: ["run-a"] }, claimedAt: { not: null } },
+    });
+    expect(tx.steeringMessage.updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { runId: { in: ["run-a"] } },
+      data: { runId: null },
+    });
+  });
+
   it("snapshots every lease when group members share a team computer", async () => {
     const releaseScreen = vi.fn().mockResolvedValue(undefined);
     const execute = vi.fn(async function* () {
@@ -3883,7 +3940,10 @@ describe("stopThreadRuns", () => {
         ]),
         findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
       },
-      steeringMessage: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      steeringMessage: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       computer: {
         // Production team ownership is lease-only: Computer.executionRunId stays null.
         findMany: vi.fn().mockImplementation(async ({ where }: { where: { OR?: unknown[] } }) => {
@@ -4019,7 +4079,10 @@ describe("stopThreadRuns", () => {
         updateManyAndReturn: vi.fn().mockResolvedValue([{ id: "run-a", botId: "bot-a" }]),
         findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
       },
-      steeringMessage: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      steeringMessage: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       computer: {
         // Selected via lease for cancelled run A, but legacy columns still name
         // unrelated live run B. Legacy teardown must not cancel/release B.
@@ -4130,7 +4193,10 @@ describe("stopThreadRuns", () => {
         // appendEventInTransaction re-reads the run after the flip.
         findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
       },
-      steeringMessage: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      steeringMessage: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       computer: { findMany: vi.fn().mockResolvedValue([]) },
       computerExecutionLease: { findMany: vi.fn().mockResolvedValue([]) },
       event: {
@@ -4215,7 +4281,10 @@ describe("stopThreadRuns", () => {
         updateManyAndReturn: vi.fn().mockResolvedValue([]),
         findUnique: vi.fn(),
       },
-      steeringMessage: { deleteMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      steeringMessage: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
       computer: { findMany: vi.fn() },
       computerExecutionLease: { findMany: vi.fn() },
       event: { create: vi.fn(), deleteMany: vi.fn() },
