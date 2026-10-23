@@ -58,6 +58,7 @@ import {
   RecruitingArtifactRefSchema,
   RecruitingAssessmentAskInputSchema,
   RecruitingAssessmentSchema,
+  RecruitingBriefDraftSchema,
   RecruitingCandidateConsiderationSchema,
   RecruitingCandidateFeedbackSelectionSchema,
   RecruitingCandidateOutputSchemaId,
@@ -89,6 +90,7 @@ import {
   SaveRecruitingAssessmentInput,
   SetRecruitingCandidateShortlistInput,
 } from "@rakazo/contracts";
+import type { RecruitingPlaybookStage, RecruitingPlaybookStep } from "@rakazo/core";
 import {
   applyRecruitingPreferenceEdit,
   boundDirectApprovalDetails,
@@ -99,7 +101,10 @@ import {
   evaluateRecruitingAssessment,
   extractLinksFromText,
   extractRecruitingCrmTarget,
+  isRecruitingPlaybookStage,
+  laterPlaybookStage,
   mergeRecruitingReassessment,
+  nextPlaybookStep,
   normalizeRecruitingCandidateRow,
   parseRecruitingCrmImportReceipt,
   projectRecruitingCandidateReport,
@@ -128,7 +133,70 @@ import {
 import { IsolationError, scoped } from "./scope.js";
 
 type Tx = Prisma.TransactionClient;
-type RoleSnapshot = { role: RecruitingRole; revision: RecruitingRoleRevision };
+type RoleSnapshot = {
+  role: RecruitingRole;
+  revision: RecruitingRoleRevision;
+  /** Short Chinese label of the agent's next playbook step; null when the human owns the move. */
+  nextStep?: string | null;
+};
+
+/** Stages only advance (playbook S1→S12); a stale writer never regresses a role. */
+export async function advanceRecruitingPlaybookStage(
+  tx: Pick<Tx, "recruitingRole">,
+  roleId: string,
+  next: RecruitingPlaybookStage,
+): Promise<RecruitingPlaybookStage> {
+  const row = await tx.recruitingRole.findUnique({
+    where: { id: roleId },
+    select: { playbookStage: true },
+  });
+  if (!row) return next;
+  const current = isRecruitingPlaybookStage(row.playbookStage) ? row.playbookStage : "intake";
+  const target = laterPlaybookStage(current, next);
+  if (target !== current)
+    await tx.recruitingRole.update({ where: { id: roleId }, data: { playbookStage: target } });
+  return target;
+}
+
+const CALIBRATION_FEEDBACK_THRESHOLD = 10;
+
+/** After candidates are saved: ten or more saved people move the role into the feedback loop. */
+async function advanceStageAfterSave(tx: Tx, roleId: string) {
+  const saved = await tx.recruitingCandidate.count({ where: { roleId } });
+  if (saved >= CALIBRATION_FEEDBACK_THRESHOLD)
+    await advanceRecruitingPlaybookStage(tx, roleId, "feedback");
+}
+
+/** Stage plus the next playbook step for a role; used by snapshots and the run turn-end guard. */
+export async function readRecruitingPlaybookStep(
+  tx: Pick<Tx, "recruitingRole" | "recruitingRoleRevision" | "recruitingCandidate">,
+  roleId: string,
+): Promise<{ stage: RecruitingPlaybookStage; step: RecruitingPlaybookStep | null } | null> {
+  const role = await tx.recruitingRole.findUnique({
+    where: { id: roleId },
+    select: { title: true, playbookStage: true, currentRevisionId: true, archivedAt: true },
+  });
+  if (!role || role.archivedAt) return null;
+  const [revision, savedCandidates] = await Promise.all([
+    tx.recruitingRoleRevision.findUnique({
+      where: { id: role.currentRevisionId },
+      select: { brief: true },
+    }),
+    tx.recruitingCandidate.count({ where: { roleId } }),
+  ]);
+  const stage = isRecruitingPlaybookStage(role.playbookStage) ? role.playbookStage : "intake";
+  const brief = revision?.brief ? RecruitingBriefDraftSchema.safeParse(revision.brief) : null;
+  const openClarifications = brief?.success ? recruitingBriefClarifications(brief.data).length : 0;
+  return {
+    stage,
+    step: nextPlaybookStep(stage, {
+      title: role.title,
+      hasBrief: Boolean(revision?.brief),
+      openClarifications,
+      savedCandidates,
+    }),
+  };
+}
 
 export type { RecruitingAssessmentSnapshot } from "@rakazo/contracts";
 
@@ -485,7 +553,15 @@ async function roleSnapshot(
     crmBindingEffectId?: string | null;
     archivedAt?: Date | null;
   };
-  return { role: RecruitingRoleSchema.parse(publicRole), revision };
+  const playbook = await readRecruitingPlaybookStep(tx, role.id);
+  return {
+    role: RecruitingRoleSchema.parse({
+      ...publicRole,
+      playbookStage: playbook?.stage ?? (publicRole as { playbookStage?: string }).playbookStage,
+    }),
+    revision,
+    nextStep: playbook?.step?.label ?? null,
+  };
 }
 
 /**
@@ -551,6 +627,8 @@ async function createRoleInTransaction(
     where: { id: input.sourceThreadId },
     data: { activeRecruitingRoleId: role.id },
   });
+  if (input.brief && input.title)
+    await advanceRecruitingPlaybookStage(tx, role.id, "calibration_10");
   await syncRoleGroupName(tx, actor, thread, input.title);
   await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, role);
@@ -822,6 +900,8 @@ async function reviseRoleInTransaction(
     data: { title: input.title, revision: revision.revision, currentRevisionId: revision.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
+  if (input.brief && input.title)
+    await advanceRecruitingPlaybookStage(tx, role.id, "calibration_10");
   const sourceThread = authorizedThread ?? (await requireThread(tx, actor, role.sourceThreadId));
   await syncRoleGroupName(tx, actor, sourceThread, input.title, role.title);
   await recordRecruitingChange(tx, actor, sourceThread, role.id);
@@ -944,6 +1024,7 @@ async function confirmRecruitingBriefInTransaction(
     data: { revision: nextRevision, currentRevisionId: saved.id },
   });
   if (changed.count !== 1) throw new RecruitingConflictError();
+  await advanceRecruitingPlaybookStage(tx, role.id, "calibration_10");
   await recordRecruitingChange(tx, actor, thread, role.id);
   return roleSnapshot(tx, actor, {
     ...role,
@@ -6600,6 +6681,7 @@ async function indexRecruitingCandidateRows(
     })),
     skipDuplicates: true,
   });
+  await advanceStageAfterSave(tx, task.roleId);
   await tx.recruitingCandidateOccurrence.createMany({ data: rows });
   await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${effect.id}`);
   return rows.map(({ rowIndex, candidateKey }) => ({ rowIndex, candidateKey }));
@@ -6974,6 +7056,7 @@ export async function saveRecruitingCandidateCsvImport(
       });
       await tx.recruitingCandidateOccurrence.createMany({ data: rows });
       await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
+      await advanceStageAfterSave(tx, role.id);
     }
     const result = {
       status: "saved",

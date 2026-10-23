@@ -54,9 +54,11 @@ import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   INSTANTLY_MCP_ENDPOINT,
+  type RecruitingPlaybookStage,
   RecruitingPlaybookValidationError,
   readRecruitingJsonString,
   recruitingCalibrationIdentity,
+  recruitingPlaybookStageLabels,
   validateRecruitingTextSelection,
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
@@ -684,7 +686,20 @@ export async function getRecruitingRoleSetup(
           },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
-    return { ready: ready("campaign") && ready("sender") && ready("leads"), attention, items };
+    const playbook = await recruiting.readRecruitingPlaybookStep(deps.prisma, workspace.role.id);
+    return {
+      ready: ready("campaign") && ready("sender") && ready("leads"),
+      attention,
+      items,
+      playbookStage: {
+        stage: playbook?.stage ?? workspace.role.playbookStage,
+        label:
+          recruitingPlaybookStageLabels[
+            (playbook?.stage ?? workspace.role.playbookStage) as RecruitingPlaybookStage
+          ] ?? workspace.role.playbookStage,
+        nextStep: playbook?.step?.label ?? null,
+      },
+    };
   });
 }
 

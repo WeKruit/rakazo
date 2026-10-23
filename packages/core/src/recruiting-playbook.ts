@@ -269,3 +269,186 @@ export function recruitingOutboundDisposition(input: {
 export function recruitingDiscoveryAnswer(source: { label: string; verified: boolean } | null) {
   return source?.verified ? `I found your profile through ${source.label}.` : null;
 }
+
+// ---------------------------------------------------------------------------
+// Role stage machine (playbook S1→S12) and the turn-end guard that keeps the
+// agent moving instead of ending a turn with "saved, not started yet".
+// ---------------------------------------------------------------------------
+
+export const RECRUITING_PLAYBOOK_STAGES = [
+  "intake",
+  "calibration_10",
+  "feedback",
+  "scale",
+  "enrichment",
+  "outreach",
+  "replies",
+  "screening",
+  "submission",
+  "interview",
+  "closed",
+] as const;
+export type RecruitingPlaybookStage = (typeof RECRUITING_PLAYBOOK_STAGES)[number];
+
+export const recruitingPlaybookStageLabels = {
+  intake: "岗位录入",
+  calibration_10: "校准搜寻（10 人）",
+  feedback: "校准反馈",
+  scale: "规模化搜寻",
+  enrichment: "联系方式补全",
+  outreach: "外联",
+  replies: "候选人回复",
+  screening: "初筛",
+  submission: "推荐提交",
+  interview: "面试",
+  closed: "已关闭",
+} as const satisfies Record<RecruitingPlaybookStage, string>;
+
+export function isRecruitingPlaybookStage(value: unknown): value is RecruitingPlaybookStage {
+  return (RECRUITING_PLAYBOOK_STAGES as readonly unknown[]).includes(value);
+}
+
+/** Stages only move forward; a stale writer never regresses a role. */
+export function laterPlaybookStage(
+  current: RecruitingPlaybookStage,
+  next: RecruitingPlaybookStage,
+): RecruitingPlaybookStage {
+  return RECRUITING_PLAYBOOK_STAGES.indexOf(next) > RECRUITING_PLAYBOOK_STAGES.indexOf(current)
+    ? next
+    : current;
+}
+
+export type RecruitingPlaybookRoleFacts = {
+  title?: string | null;
+  hasBrief: boolean;
+  /** Clarifications still open on the brief (see recruitingBriefClarifications). */
+  openClarifications?: number;
+  savedCandidates: number;
+};
+
+export type RecruitingPlaybookStep = {
+  stage: RecruitingPlaybookStage;
+  label: string;
+  prompt: string;
+};
+
+const CALIBRATION_TARGET = 10;
+
+/**
+ * What the agent should do next for a role in `stage`. Null means the stage has no
+ * runtime-driven next step (the human owns the move, or the role is closed).
+ */
+export function nextPlaybookStep(
+  stage: RecruitingPlaybookStage,
+  facts: RecruitingPlaybookRoleFacts,
+): RecruitingPlaybookStep | null {
+  const open = facts.openClarifications ?? 0;
+  if (open > 0 && (stage === "intake" || stage === "calibration_10"))
+    return {
+      stage,
+      label: `还有 ${open} 个待确认问题`,
+      prompt:
+        "把剩余的待确认问题一次性列出来向用户提问（一张卡片），不要只保存答案就结束。问题没问完不能停。",
+    };
+  switch (stage) {
+    case "intake":
+      return facts.hasBrief && facts.title
+        ? {
+            stage,
+            label: "开始校准搜寻",
+            prompt: `岗位已保存。立即启动校准搜寻，目标 ${CALIBRATION_TARGET} 人；开始前在聊天里告诉用户你在做什么，完成后在这里列出。`,
+          }
+        : {
+            stage,
+            label: "完成岗位信息",
+            prompt: "从已有材料整理岗位标题与 brief 并保存；缺少的关键信息一次性问清。",
+          };
+    case "calibration_10": {
+      const remaining = Math.max(0, CALIBRATION_TARGET - facts.savedCandidates);
+      return {
+        stage,
+        label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
+        prompt: remaining
+          ? `继续校准搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}）。开始前告诉用户，完成后列出名单。`
+          : "把 10 位校准候选人以名单形式列给用户，并请用户逐个反馈（通过/不通过及原因）。",
+      };
+    }
+    case "feedback":
+      return {
+        stage,
+        label: "收集校准反馈",
+        prompt: "向用户展示校准名单并收集反馈；有反馈后更新筛选标准，再进入规模化搜寻。",
+      };
+    case "scale":
+      return {
+        stage,
+        label: "规模化搜寻",
+        prompt: "按确认后的标准启动规模化搜寻；开始前告知用户，完成后汇总数量与亮点。",
+      };
+    case "enrichment":
+      return {
+        stage,
+        label: "补全候选人联系方式",
+        prompt: "为入围候选人补全联系方式；完成后汇报可触达人数。",
+      };
+    case "outreach":
+      return {
+        stage,
+        label: "准备外联",
+        prompt: "准备外联序列与名单，向用户请求发送确认。",
+      };
+    case "replies":
+      return {
+        stage,
+        label: "处理候选人回复",
+        prompt: "汇总新回复并给出建议的下一步（约面/跟进/关闭）。",
+      };
+    case "screening":
+    case "submission":
+    case "interview":
+    case "closed":
+      return null;
+  }
+}
+
+export type TurnEndClass = "deliverable" | "question" | "card" | "handoff" | "none";
+
+type TurnEndBlock = { kind: string; text?: string; steps?: unknown };
+
+const DELIVERABLE_BLOCKS = new Set(["candidate", "report", "artifact", "chart", "assessment"]);
+const CARD_BLOCKS = new Set(["approval", "mcp_approval", "connect", "app_connect", "choice"]);
+const QUESTION_RE = /[?？]\s*$/;
+// A list of ≥3 bullets or numbered rows reads as a delivered list, not a status note.
+const LIST_ROW_RE = /^\s*(?:[-*•]|\d+[.)、])\s+\S/gm;
+
+/**
+ * How the final assistant turn ended, from the persisted blocks plus what the run did.
+ * Pure: the executor passes facts, no I/O here.
+ */
+export function classifyTurnEnd(
+  message: { blocks: readonly TurnEndBlock[] },
+  events: {
+    handedOff?: boolean;
+    pendingApproval?: boolean;
+    savedRows?: number;
+    /** Minimum saved rows that count as a deliverable (default 1). */
+    deliverableRows?: number;
+  } = {},
+): TurnEndClass {
+  if (events.handedOff) return "handoff";
+  if (events.pendingApproval) return "card";
+  const blocks = message.blocks;
+  if (blocks.some((block) => block.kind === "ask")) return "question";
+  if (blocks.some((block) => CARD_BLOCKS.has(block.kind))) return "card";
+  if ((events.savedRows ?? 0) >= (events.deliverableRows ?? 1)) return "deliverable";
+  if (blocks.some((block) => DELIVERABLE_BLOCKS.has(block.kind))) return "deliverable";
+  const text = blocks
+    .filter((block) => block.kind === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n")
+    .trim();
+  if (!text) return "none";
+  if (QUESTION_RE.test(text)) return "question";
+  if ((text.match(LIST_ROW_RE)?.length ?? 0) >= 3) return "deliverable";
+  return "none";
+}

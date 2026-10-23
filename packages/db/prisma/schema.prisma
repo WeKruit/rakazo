@@ -1519,6 +1519,7 @@ model RecruitingRole {
   revision Int
   currentRevisionId String @unique
   archivedAt DateTime?
+  playbookStage String @default("intake")
   currentRevision RecruitingRoleRevision @relation("CurrentRecruitingRevision", fields: [currentRevisionId], references: [id], onDelete: NoAction)
   revisions RecruitingRoleRevision[] @relation("RecruitingRoleRevisions")
   activeThreads Thread[] @relation("ActiveRecruitingRole")
