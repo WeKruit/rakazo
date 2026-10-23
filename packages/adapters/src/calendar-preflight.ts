@@ -50,7 +50,14 @@ export async function preflightCalBooking(input: {
     duration: lengthInMinutes,
     format: "range",
   };
-  const route = { ...input.route, toolName: "get_availability" };
+  if (!input.route.resourceId || typeof input.route.resourceRevision !== "number")
+    return unavailable("the approved calendar source identity is incomplete");
+  const route = {
+    ...input.route,
+    resourceId: input.route.resourceId,
+    resourceRevision: input.route.resourceRevision,
+    toolName: "get_availability",
+  };
   const same = (candidate: ConnectorRoute | undefined) =>
     candidate?.connectorId === route.connectorId &&
     candidate.resourceId === route.resourceId &&

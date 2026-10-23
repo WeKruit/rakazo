@@ -6156,7 +6156,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     route,
                     route.toolName,
                   );
-                  const endpoint = URL.parse(server.endpoint);
+                  const endpoint = server.endpoint ? URL.parse(server.endpoint) : null;
                   if (
                     !endpoint ||
                     `${endpoint.origin}${endpoint.pathname.replace(/\/$/, "")}` !==
