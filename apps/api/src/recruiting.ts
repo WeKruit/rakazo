@@ -2902,6 +2902,7 @@ export async function getRecruitingCrmData(
       if (
         page.organization_id !== input.organizationId ||
         page.role_id !== input.crmRoleId ||
+        page.candidate_id != null ||
         page.messages.length > limit ||
         page.messages.some((row) => row.organization_id !== input.organizationId) ||
         new Set(page.messages.map((row) => row.id)).size !== page.messages.length ||
@@ -3055,6 +3056,77 @@ export async function getRecruitingCrmData(
             : null,
       });
     }
+    if (input.crmRoleId) {
+      if (
+        input.cursor &&
+        (!("p_role" in input.cursor) ||
+          input.cursor.p_org !== input.organizationId ||
+          input.cursor.p_role !== input.crmRoleId ||
+          input.cursor.p_candidate !== input.candidateId)
+      )
+        throw new IsolationError();
+      const offset = input.cursor && "offset" in input.cursor ? input.cursor.offset : 0;
+      const limit = input.limit ?? 25;
+      const page = parse(
+        RecruitingCrmRoleMailReadSchema,
+        await read(server, "list_crm_role_correspondence", {
+          p_org: input.organizationId,
+          p_role: input.crmRoleId,
+          p_candidate: input.candidateId,
+          p_limit: limit,
+          p_offset: offset,
+        }),
+      );
+      if (
+        page.organization_id !== input.organizationId ||
+        page.role_id !== input.crmRoleId ||
+        page.candidate_id !== input.candidateId ||
+        page.messages.length > limit ||
+        page.messages.some(
+          (row) =>
+            row.organization_id !== input.organizationId || row.candidate_id !== input.candidateId,
+        ) ||
+        new Set(page.messages.map((row) => row.id)).size !== page.messages.length ||
+        (page.next_offset !== null &&
+          (!page.messages.length || page.next_offset !== offset + page.messages.length))
+      )
+        throw unavailable();
+      const native = await nativeRecruitingCorrespondence(deps.prisma, actor, target.threadId, {
+        target: {
+          mcpServerId: server.id,
+          serverRevision: server.revision,
+          organizationId: input.organizationId,
+          crmRoleId: input.crmRoleId,
+        },
+        candidateId: input.candidateId,
+        crmEndpoint: deps.firstPartyMcpUrl,
+      });
+      invalidateFences();
+      await sourceFence(server, "list_crm_role_correspondence");
+      await native.assertCurrent?.();
+      return finish({
+        operation: input.operation,
+        scope: "stored_candidate_correspondence",
+        outboxScope: "unavailable_for_role",
+        outbox: [],
+        candidateId: input.candidateId,
+        nativeCorrespondence: native.items,
+        items: page.messages.map((row) => ({
+          ...mailItem(row),
+          ...(row.eaccount !== undefined ? { eaccount: row.eaccount } : {}),
+        })),
+        nextCursor:
+          page.next_offset === null
+            ? null
+            : {
+                p_org: input.organizationId,
+                p_role: input.crmRoleId,
+                p_candidate: input.candidateId,
+                offset: page.next_offset,
+              },
+      });
+    }
+    if (input.cursor && "p_role" in input.cursor) throw new IsolationError();
     if (
       input.cursor &&
       (input.cursor.p_org !== input.organizationId ||
@@ -3090,27 +3162,13 @@ export async function getRecruitingCrmData(
             (input.cursor?.linked_offset ?? 0) + (input.cursor?.unlinked_offset ?? 0)))
     )
       throw unavailable();
-    const native = input.crmRoleId
-      ? await nativeRecruitingCorrespondence(deps.prisma, actor, target.threadId, {
-          target: {
-            mcpServerId: server.id,
-            serverRevision: server.revision,
-            organizationId: input.organizationId,
-            crmRoleId: input.crmRoleId,
-          },
-          candidateId: input.candidateId,
-          crmEndpoint: deps.firstPartyMcpUrl,
-        })
-      : { items: [], partial: false, assertCurrent: null };
-    if (input.crmRoleId) invalidateFences();
     await sourceFence(server, "list_crm_candidate_messages");
-    await native.assertCurrent?.();
     return finish({
       operation: input.operation,
       scope: "stored_candidate_correspondence",
       outbox: messages,
       candidateId: input.candidateId,
-      nativeCorrespondence: native.items,
+      nativeCorrespondence: [],
       items: page.messages.map(mailItem),
       nextCursor: page.next_cursor,
     });

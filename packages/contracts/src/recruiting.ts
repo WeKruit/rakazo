@@ -1759,6 +1759,13 @@ const CrmBrowseCursor = z.strictObject({
     .min(0)
     .max(Number.MAX_SAFE_INTEGER - 51),
 });
+const CrmRoleMailCursor = z.strictObject({
+  p_org: z.uuid(),
+  p_role: z.uuid(),
+  p_candidate: z.uuid(),
+  offset: z.number().int().min(0).max(1_000_000),
+});
+const CrmMailCursor = z.union([CrmBrowseCursor, CrmRoleMailCursor]);
 const CrmBrowseWorkflow = z.enum([
   "waiting_resume",
   "resume_ready",
@@ -1898,7 +1905,7 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ...crmBrowsePage,
     candidateId: z.uuid(),
     crmRoleId: z.uuid().optional(),
-    cursor: CrmBrowseCursor.optional(),
+    cursor: CrmMailCursor.optional(),
   }),
   z.object({
     operation: z.literal("roleMail"),
@@ -2021,11 +2028,12 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
     checkedAt: IsoDate,
     scope: z.literal("stored_candidate_correspondence"),
+    outboxScope: z.literal("unavailable_for_role").optional(),
     outbox: CrmBrowseOutbox,
     candidateId: z.uuid(),
     nativeCorrespondence: z.array(RecruitingNativeCorrespondenceSchema),
     items: z.array(CrmMailItem),
-    nextCursor: CrmBrowseCursor.nullable(),
+    nextCursor: CrmMailCursor.nullable(),
   }),
   z.strictObject({
     operation: z.literal("roleMail"),
@@ -2123,6 +2131,7 @@ const CrmStoredEmail = z.object({
 });
 export const RecruitingCrmRoleMailReadSchema = z.object({
   version: z.literal(2),
+  candidate_id: z.uuid().nullable().optional(),
   organization_id: z.uuid(),
   role_id: z.uuid(),
   pagination: z.literal("offset"),

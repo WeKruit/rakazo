@@ -55,7 +55,7 @@ function fixture(
     nextCursor: null,
   } as never);
   const calls: ConnectorCall[] = [];
-  const mail = { messages: [] as Record<string, unknown>[], fail: false };
+  const mail = { messages: [] as Record<string, unknown>[], fail: false, roleId };
   const connector = {
     async *execute(call: ConnectorCall) {
       calls.push(call);
@@ -69,12 +69,19 @@ function fixture(
           data: {
             structuredContent: {
               data: {
-                organization_id: org,
-                role_id: roleId,
                 version: 2,
+                organization_id: org,
+                role_id: mail.roleId,
+                candidate_id: (call.args as { p_candidate: string }).p_candidate,
                 pagination: "offset",
-                messages: mail.messages,
-                next_offset: null,
+                messages: mail.messages.slice(
+                  Number(call.args.p_offset),
+                  Number(call.args.p_offset) + Number(call.args.p_limit),
+                ),
+                next_offset:
+                  Number(call.args.p_offset) + Number(call.args.p_limit) < mail.messages.length
+                    ? Number(call.args.p_offset) + Number(call.args.p_limit)
+                    : null,
               },
             },
           },
@@ -252,6 +259,40 @@ describe("agent list_crm_candidates arguments", () => {
     ).rejects.toThrow(/workspace/);
   });
 
+  it("finds incoming candidate mail beyond the former twenty-page cutoff", async () => {
+    const f = fixture([crmRow("4", "Example Person", "person@example.test")]);
+    f.mail.messages = Array.from({ length: 1051 }, (_, index) => ({
+      id: `mail-${index}`,
+      organization_id: org,
+      candidate_id: "40000000-0000-4000-8000-000000000004",
+      lead_email: null,
+      thread_id: "thread",
+      direction: index === 1050 ? "received" : "sent",
+      timestamp_email: "2026-10-22T00:00:00Z",
+      campaign_id: null,
+      from_address: "person@example.test",
+      to_address: "team@example.test",
+      subject: "Role",
+      body_text: `body-${index}`,
+    }));
+    const result = await f.resolve("Example");
+    expect(result.matches[0]).toMatchObject({
+      correspondence: { status: "read", latestReceived: { preview: "body-1050" } },
+    });
+    const calls = f.calls.filter((call) => call.route?.toolName === "list_crm_role_correspondence");
+    expect(calls).toHaveLength(22);
+    expect(calls.at(-1)?.args).toMatchObject({
+      p_candidate: "40000000-0000-4000-8000-000000000004",
+      p_offset: 1050,
+    });
+  });
+  it("does not report a foreign role correspondence page as successfully read", async () => {
+    const f = fixture([crmRow("4", "Example Person", "person@example.test")]);
+    f.mail.roleId = org;
+    expect((await f.resolve("Example")).matches[0]).toMatchObject({
+      correspondence: { status: "unavailable", latest: null },
+    });
+  });
   it("answers latest mail from the role's stored correspondence (the Inbox source)", async () => {
     const f = fixture([crmRow("4", "Sumeet Parekh", "sumeetparekh1@gmail.com")]);
     const message = (id: string, direction: string, at: string, from: string, to: string) => ({

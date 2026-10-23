@@ -4676,6 +4676,13 @@ describe("live CRM browser reads", () => {
   );
   it("adds exact-role native correspondence to original CRM mail without another provider read", async () => {
     const f = browserFixture();
+    roleMail(f);
+    f.results.list_crm_role_correspondence = {
+      ...(f.results.list_crm_role_correspondence as object),
+      candidate_id: candidateId,
+      next_offset: null,
+      messages: (f.results.list_crm_candidate_correspondence as { messages: unknown[] }).messages,
+    };
     const mailServer = {
       ...actor,
       id: "mail",
@@ -4783,8 +4790,7 @@ describe("live CRM browser reads", () => {
       });
       expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).toEqual([
         "list_crm_memberships",
-        "list_crm_candidate_messages",
-        "list_crm_candidate_correspondence",
+        "list_crm_role_correspondence",
       ]);
       let afterCapture = false;
       vi.mocked(db.readRecruitingNativeCorrespondence).mockImplementation(async () => {
@@ -5239,6 +5245,83 @@ describe("live CRM browser reads", () => {
     const f = inboxBridgeFixture();
     delete (f.results.list_crm_role_correspondence as { version?: number }).version;
     await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("reads shared candidate history only through the exact role-scoped source", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    const page = f.results.list_crm_role_correspondence as {
+      candidate_id?: string;
+      next_offset: number | null;
+    };
+    page.candidate_id = candidateId;
+    page.next_offset = 1;
+    const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "mail",
+      ...pinned,
+      candidateId,
+      crmRoleId: roleId,
+      limit: 1,
+    });
+    expect(result).toMatchObject({
+      items: [{ providerMessageId: "role-mail" }],
+      outboxScope: "unavailable_for_role",
+      outbox: [],
+      nextCursor: { p_org: org, p_role: roleId, p_candidate: candidateId, offset: 1 },
+    });
+    expect(f.execute.mock.calls.map(([call]) => call.route!.toolName)).toEqual([
+      "list_crm_memberships",
+      "list_crm_role_correspondence",
+    ]);
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual({
+      p_org: org,
+      p_role: roleId,
+      p_candidate: candidateId,
+      p_offset: 0,
+      p_limit: 1,
+    });
+  });
+  it.each(["role", "candidate", "missing-echo", "foreign-row"])(
+    "rejects mismatched scoped candidate mail %s",
+    async (boundary) => {
+      const f = browserFixture();
+      roleMail(f);
+      const page = f.results.list_crm_role_correspondence as {
+        candidate_id?: string;
+        role_id: string;
+        messages: { candidate_id: string }[];
+      };
+      page.candidate_id = candidateId;
+      if (boundary === "role") page.role_id = clientId;
+      if (boundary === "candidate") page.candidate_id = roleId;
+      if (boundary === "missing-echo") delete page.candidate_id;
+      if (boundary === "foreign-row") page.messages[0]!.candidate_id = roleId;
+      await expect(
+        api.getRecruitingCrmData(f.deps, actor, target, {
+          operation: "mail",
+          ...pinned,
+          candidateId,
+          crmRoleId: roleId,
+        }),
+      ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    },
+  );
+  it("rejects candidate mail cursors belonging to another role", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "mail",
+        ...pinned,
+        candidateId,
+        crmRoleId: roleId,
+        cursor: { p_org: org, p_role: clientId, p_candidate: candidateId, offset: 1 },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(
+      f.execute.mock.calls.some(
+        ([call]) => call.route!.toolName === "list_crm_role_correspondence",
+      ),
+    ).toBe(false);
   });
   it("reads every stored email for the exact CRM role in one scoped read", async () => {
     const f = browserFixture();
