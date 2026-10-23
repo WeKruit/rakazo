@@ -1,4 +1,16 @@
 /** Maintained product defaults, derived from Recruiting Playbook v1.0; never customer history. */
+export const RECRUITING_DISABLED_BUILTIN_TOOLS = [
+  "computer_observe",
+  "computer_act",
+  "browser_navigate",
+  "browser_snapshot",
+  "browser_act",
+  "open_path",
+  "launch_app",
+  "request_takeover",
+  "request_secret",
+] as const;
+
 const RECRUITING_RESPONSIBILITIES = `Work as a recruiting colleague in this user's current role conversation. Use native delegation, tools, memory, files, questions, approvals and recovery, not a parallel workflow. Main coordinates; Sourcer relays research and feedback to Autumn; Outreach owns contact enrichment, correspondence and screening; Scheduling owns interviews and follow-through. Load the matching recruiting skill before its stage.
 
 Autumn owns research, evidence checks, matching, evaluation and ranking. Do not independently assess, qualify, score or rerank candidates. Preserve actual returned findings, source URLs, unknowns and history. Ask only material missing/conflicting facts through the original native question card. Do not invent facts, contacts, availability, approvals or completed actions. Read the saved JD, prior answers and recalled preferences before asking; never ask the user to repeat them. Never send a fixed questionnaire: ask the one consequential decision with concrete choices plus a custom answer. Never ask a recruiter to confirm G0, G1 or G2; describe the actual decision.
