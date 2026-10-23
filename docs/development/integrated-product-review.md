@@ -1,5 +1,7 @@
 # Integrated product review checkpoint
 
+> Historical immutable checkpoint. For the newer Draft preparation, main #83 reconciliation and original six-task review, start with [Draft review handoff](draft-review-handoff.md).
+
 Current tested code: `11bc10727a1b1176db1a73ebb26fd6a961bc1b32`. The transfer manifest pins the following documentation-only HEAD separately. This is a local review deliverable, not a published PR or live acceptance. No new production evidence was received during these integrations.
 
 ## Preserved increments
@@ -18,4 +20,4 @@ Read [the 59-item matrix](unified-workspace-final-status.md), [scheduling correc
 
 Recorded calendar mutation freshness is not a live Cal.com GET or atomicity across calendar/mail providers. Actual candidate raw Autumn rows, supported upstream rich-history export, and real logo availability remain unverified. Plain-only history is preserved rather than parsed into invented jobs/degrees. Automatic outreach-pause policy, unsupported availability/busy semantics, automatic immutable plan revision and unsupported cohorts/deep links remain explicitly bounded in the matrix.
 
-The source role-correspondence patch, ordered migrations, narrow actual-caller grant and local-owner dryRun/readback procedure remain in [the earlier functional delivery](unified-workspace-delivery.md). These two UI/profile increments and the confirmation correction add no migrations, dependencies or grants. No current bot permissions were expanded. Production dry run, actual sync, email/calendar operations and live acceptance remain with the authorized local owner. This cloud task did not connect to production, deploy, send, book, run Docker or create resources. Current instruction forbids push/PR/merge/deploy; this checkpoint respects that instruction.
+The source role-correspondence patch, ordered migrations, narrow actual-caller grant and local-owner dryRun/readback procedure remain in [the earlier functional delivery](unified-workspace-delivery.md). These two UI/profile increments and the confirmation correction add no migrations, dependencies or grants. No current bot permissions were expanded. Production dry run, actual sync, email/calendar operations and live acceptance remain with the authorized local owner. This cloud task did not connect to production, deploy, send, book, run Docker or create resources. At this checkpoint publication was forbidden. The later request authorizes a Draft PR subject to the deployment-hook audit gate; merge and deployment remain forbidden.
