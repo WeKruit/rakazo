@@ -4291,6 +4291,10 @@ msgstr ""
 msgid "Needs an answer"
 msgstr ""
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Needs confirmation"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Needs connection"
 msgstr ""
@@ -4374,6 +4378,11 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Next contact campaigns"
+msgstr ""
+
+#. placeholder {0}: stage.nextStep
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Next: {0}"
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx

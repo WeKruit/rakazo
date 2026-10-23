@@ -56,6 +56,11 @@ function sameAccount(previousKey: string, nextKey: string) {
 }
 
 /** The supplied WeKruit /hire navigation over native recruiting conversations. */
+/** The role waits on the recruiter: a confirmation, an answer, or a paused reply. */
+function waitsOnUser(group: Group) {
+  return Boolean(group.attention ?? group.needsInput);
+}
+
 export function RecruitingNavigation({
   groups,
   archivedGroups,
@@ -216,7 +221,7 @@ export function RecruitingNavigation({
   // Roles waiting on the recruiter come first; the rest keep their order.
   const visibleGroups = groups
     .filter((group) => group.name.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()))
-    .sort((a, b) => Number(Boolean(b.needsInput)) - Number(Boolean(a.needsInput)));
+    .sort((a, b) => Number(waitsOnUser(b)) - Number(waitsOnUser(a)));
   const destinations = [
     { view: "shortlist", label: t`Shortlist`, Icon: Bookmark },
     { view: "contacts", label: t`Contacts`, Icon: Users },
@@ -359,15 +364,19 @@ export function RecruitingNavigation({
                 <span
                   className={cn(
                     "min-w-0 flex-1 truncate",
-                    (group.needsInput || group.unread) && "font-semibold",
+                    (waitsOnUser(group) || group.unread) && "font-semibold",
                   )}
                   dir="auto"
                 >
                   {group.name}
                 </span>
-                {group.needsInput ? (
+                {waitsOnUser(group) ? (
                   <Badge variant="secondary" className="shrink-0">
-                    <Trans>Needs input</Trans>
+                    {group.attention === "approval" ? (
+                      <Trans>Needs confirmation</Trans>
+                    ) : (
+                      <Trans>Needs input</Trans>
+                    )}
                   </Badge>
                 ) : group.unread ? (
                   <span

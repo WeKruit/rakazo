@@ -59,3 +59,15 @@ it("offers each missing step's own fix", async () => {
   await act(async () => button("Connect").click());
   expect(props.onConnect).toHaveBeenCalledWith("instantly");
 });
+
+it("shows a ready role's playbook stage and next step", async () => {
+  await mount({
+    ready: true,
+    attention: null,
+    playbookStage: { stage: "calibration_10", label: "10 人校准", nextStep: "给这 10 位候选人反馈" },
+    items: [{ key: "campaign", state: "ready" }],
+  });
+  expect(container!.textContent).toContain("10 人校准");
+  expect(container!.textContent).toContain("Next: 给这 10 位候选人反馈");
+  expect(container!.querySelector("button")).toBeNull();
+});
