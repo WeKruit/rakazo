@@ -3895,6 +3895,38 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it.each([
+    ["candidates", ["list_crm_roles", "get_crm_role"]],
+    ["candidateDetails", ["list_crm_candidate_messages", "get_crm_candidate_review"]],
+    ["mail", ["list_crm_candidate_messages", "list_crm_candidate_correspondence"]],
+  ] as const)(
+    "overlaps the independent CRM reads of one %s request after the membership gate",
+    async (operation, pair) => {
+      const f = browserFixture();
+      f.results.get_crm_candidate_review = details();
+      const original = f.execute.getMockImplementation()!;
+      let inFlight = 0;
+      let overlapped = false;
+      f.execute.mockImplementation(async function* (call, context) {
+        const tracked = (pair as readonly string[]).includes(call.route!.toolName);
+        if (tracked && ++inFlight === pair.length) overlapped = true;
+        // Each provider read takes real wall time; sequential reads never overlap.
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        if (tracked) inFlight--;
+        yield* original(call, context);
+      });
+      await api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        operation === "candidates"
+          ? { operation, ...pinned, crmRoleId: roleId }
+          : { operation, ...pinned, candidateId },
+      );
+      expect(f.execute.mock.calls[0]![0].route!.toolName).toBe("list_crm_memberships");
+      expect(overlapped).toBe(true);
+    },
+  );
   it("freshly reads one exact canonical role for native conversation creation without scanning candidates or the role catalog", async () => {
     const f = browserFixture("existing-personal-oauth");
     const reference = {

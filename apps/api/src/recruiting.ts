@@ -2046,19 +2046,19 @@ export async function getRecruitingCrmData(
       });
     }
     if (input.operation === "candidateDetails") {
-      const messages = await outbox(input.candidateId);
       const offset = input.offset ?? 0;
       const limit = input.limit ?? 25;
-      const page = parse(
-        RecruitingCrmDetailsReadSchema,
-        await read(server, "get_crm_candidate_review", {
+      // Independent reads behind the same membership gate; each keeps its own fences.
+      const [messages, page] = await Promise.all([
+        outbox(input.candidateId),
+        read(server, "get_crm_candidate_review", {
           p_view: "details",
           p_org: input.organizationId,
           p_candidate: input.candidateId,
           p_campaign_limit: limit,
           p_campaign_offset: offset,
-        }),
-      );
+        }).then((value) => parse(RecruitingCrmDetailsReadSchema, value)),
+      ]);
       const associations = page.campaign_associations;
       if (
         page.organization_id !== input.organizationId ||
@@ -2171,14 +2171,13 @@ export async function getRecruitingCrmData(
       const trim = (text: string) => text.replace(/^ +| +$/g, "");
       let selectedRole = null;
       if (input.crmRoleId) {
-        const choices = await roles();
-        const row = parse(
-          RecruitingCrmRoleReadSchema,
-          await read(server, "get_crm_role", {
+        const [choices, row] = await Promise.all([
+          roles(),
+          read(server, "get_crm_role", {
             p_org: input.organizationId,
             p_role: input.crmRoleId,
-          }),
-        );
+          }).then((value) => parse(RecruitingCrmRoleReadSchema, value)),
+        ]);
         const sameLabels = choices.filter(
           (role) =>
             trim(role.clientLabel) === trim(row.client_label) &&
@@ -2251,16 +2250,15 @@ export async function getRecruitingCrmData(
         input.cursor.p_candidate !== input.candidateId)
     )
       throw new IsolationError();
-    const messages = await outbox(input.candidateId);
-    const page = parse(
-      RecruitingCrmMailReadSchema,
-      await read(server, "list_crm_candidate_correspondence", {
+    const [messages, page] = await Promise.all([
+      outbox(input.candidateId),
+      read(server, "list_crm_candidate_correspondence", {
         p_org: input.organizationId,
         p_candidate: input.candidateId,
         p_limit: input.limit ?? 25,
         ...(input.cursor ? { p_cursor: input.cursor } : {}),
-      }),
-    );
+      }).then((value) => parse(RecruitingCrmMailReadSchema, value)),
+    ]);
     if (
       page.messages.length > (input.limit ?? 25) ||
       page.organization_id !== input.organizationId ||
