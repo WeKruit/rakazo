@@ -2360,19 +2360,32 @@ export function createRouter(deps: RouterDeps) {
         return threadHead(deps.prisma, target);
       }),
       get: authed.threads.get.handler(async ({ context, input }) => {
+        // Chat shell only: routines, skills, workspace and binding load via their own RPCs.
+        const startedAt = performance.now();
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
           includeArchived: true,
         });
+        const resolvedAt = performance.now();
         const snapshot = await threadSnapshot(deps, target);
-        return {
-          ...snapshot,
-          messages: await projectRecruitingApprovalFiles(
-            deps.prisma,
-            context.actor,
-            target.threadId,
-            snapshot.messages,
-          ),
-        };
+        const snapshotAt = performance.now();
+        const messages = await projectRecruitingApprovalFiles(
+          deps.prisma,
+          context.actor,
+          target.threadId,
+          snapshot.messages,
+        );
+        const finishedAt = performance.now();
+        getLogger().info("thread.get.timing", {
+          threadId: target.threadId,
+          kind: target.kind,
+          messageCount: messages.length,
+          hasOlder: snapshot.hasOlder,
+          resolveMs: Math.round(resolvedAt - startedAt),
+          snapshotMs: Math.round(snapshotAt - resolvedAt),
+          projectMs: Math.round(finishedAt - snapshotAt),
+          totalMs: Math.round(finishedAt - startedAt),
+        });
+        return { ...snapshot, messages };
       }),
       messages: authed.threads.messages.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
