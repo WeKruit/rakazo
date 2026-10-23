@@ -1261,7 +1261,8 @@ it("re-reads the role list and inbox once when the stream recovers from an outag
   await act(async () => {
     await stream.refresh();
   });
-  expect(text()).toContain("Loading roles…");
+  // The previous roles stay on screen while the list re-reads.
+  expect(text()).toContain("Existing role · Client");
   shellApi.get.mockRejectedValueOnce(new Error("Backend unavailable"));
   await act(async () => {
     await expect(stream.refresh()).rejects.toThrow("Backend unavailable");
