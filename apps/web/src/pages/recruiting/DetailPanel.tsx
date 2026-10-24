@@ -25,7 +25,12 @@ import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
 import { ProfileImage } from "./ProfileImage";
-import { CompanyLogo, EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
+import {
+  CompanyLogo,
+  EducationTimeline,
+  ExperienceTimeline,
+  websiteFavicon,
+} from "./ProfileTimeline";
 import {
   candidateSections,
   initials,
@@ -245,6 +250,11 @@ export function RecruitingDetailPanel({
     roleRevisionId: candidate?.latestSource?.roleRevisionId,
     revision: current.criterionRevision,
   });
+  const companyLogo =
+    organizationLogo(company ?? undefined, assets.company) ?? websiteFavicon(sections.company.host);
+  const companySite =
+    organizationLogo(company ?? undefined, assets.companyLink) ??
+    (sections.company.host ? `https://${sections.company.host}/` : null);
   const email = person.email ?? sections.email;
   const phone = person.phone ?? sections.phone;
   const role =
@@ -341,17 +351,17 @@ export function RecruitingDetailPanel({
               </h2>
               {role ? (
                 <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  {organizationLogo(company ?? undefined, assets.company) ? (
-                    <CompanyLogo name={company!} src={assets.company?.url} />
+                  {company && companyLogo ? (
+                    <CompanyLogo name={company} src={companyLogo} />
                   ) : (
                     <BriefcaseBusiness size={14} aria-hidden className="shrink-0" />
                   )}
                   <span className="min-w-0 break-words">
-                    {organizationLogo(company ?? undefined, assets.companyLink) ? (
+                    {company && companySite ? (
                       <>
                         {person.title ? `${person.title} · ` : ""}
                         <a
-                          href={assets.companyLink!.url}
+                          href={companySite}
                           target="_blank"
                           rel="noreferrer"
                           className="underline underline-offset-2"
@@ -362,6 +372,18 @@ export function RecruitingDetailPanel({
                     ) : (
                       role
                     )}
+                  </span>
+                </p>
+              ) : null}
+              {sections.company.industry || sections.company.size ? (
+                <p className="text-sm text-muted-foreground">
+                  <span className="truncate">
+                    {[
+                      sections.company.industry,
+                      sections.company.size ? t`${sections.company.size} employees` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </span>
                 </p>
               ) : null}
@@ -386,7 +408,11 @@ export function RecruitingDetailPanel({
                 </p>
               ) : null}
             </div>
-            <PersonAvatar key={person.candidateId} name={person.name} src={assets.photo} />
+            <PersonAvatar
+              key={person.candidateId}
+              name={person.name}
+              src={assets.photo ?? sections.photoUrl}
+            />
           </div>
           <details open className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
             <summary className="cursor-pointer font-medium">
