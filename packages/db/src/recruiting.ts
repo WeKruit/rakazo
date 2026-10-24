@@ -4349,6 +4349,70 @@ export async function latestRecruitingDocumentsApprovalId(
   return effect?.id ?? null;
 }
 
+/**
+ * The ten profiles of the latest unapproved calibration round, with their exact saved sources,
+ * so a calibration approval need not copy long source ids by hand. Null when no complete round
+ * of this revision is recorded. prepareRecruitingApproval still verifies every field.
+ */
+export async function latestRecruitingCalibrationProfiles(
+  prisma: Pick<PrismaClient, "recruitingRoleRevision" | "recruitingCalibrationRound"> & {
+    recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findFirst">;
+  },
+  actor: Actor,
+  input: { roleId: string; expectedRoleRevision: number },
+) {
+  const revision = await prisma.recruitingRoleRevision.findFirst({
+    where: {
+      roleId: input.roleId,
+      revision: input.expectedRoleRevision,
+      role: { spaceId: actor.spaceId },
+    },
+    select: { id: true },
+  });
+  if (!revision) return null;
+  const round = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId, approvedAt: null },
+    orderBy: { round: "desc" },
+    select: { candidateKeys: true },
+  });
+  if (!round || round.candidateKeys.length !== 10) return null;
+  const profiles = [];
+  for (const candidateKey of round.candidateKeys) {
+    const occurrence = await prisma.recruitingCandidateOccurrence.findFirst({
+      where: {
+        roleId: input.roleId,
+        candidateKey,
+        linkedinUrl: { not: null },
+        page: { roleRevisionId: revision.id, taskId: null, actionId: null },
+      },
+      orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+      include: { page: { include: { effect: { select: { request: true } } } } },
+    });
+    if (!occurrence?.linkedinUrl || csvImportRequest(occurrence.page.effect.request)) return null;
+    let reference: ReturnType<typeof candidateSourceReference>;
+    try {
+      reference = candidateSourceReference(occurrence.page, occurrence.rowIndex);
+    } catch (error) {
+      if (error instanceof IsolationError) return null;
+      throw error;
+    }
+    const { providerTaskId, roleRevisionId, effectId, rowIndex, artifactRef } = reference;
+    if (!providerTaskId) return null;
+    const evidence = Array.isArray(occurrence.evidenceUrls)
+      ? occurrence.evidenceUrls.find(
+          (url): url is string => typeof url === "string" && url.startsWith("https://"),
+        )
+      : undefined;
+    profiles.push({
+      candidateKey,
+      linkedinUrl: occurrence.linkedinUrl,
+      evidenceUrl: evidence ?? occurrence.linkedinUrl,
+      source: { providerTaskId, roleRevisionId, effectId, rowIndex, artifactRef },
+    });
+  }
+  return profiles;
+}
+
 async function completedRecruitingApproval(
   tx: Tx,
   actor: Actor,
