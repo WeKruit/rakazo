@@ -45,7 +45,11 @@ it("shows the role's playbook stage and next step", async () => {
   await mount({
     ready: true,
     attention: null,
-    playbookStage: { stage: "calibration_10", label: "10 人校准", nextStep: "给这 10 位候选人反馈" },
+    playbookStage: {
+      stage: "calibration_10",
+      label: "10 人校准",
+      nextStep: "给这 10 位候选人反馈",
+    },
     items: [{ key: "campaign", state: "ready" }],
   });
   expect(container!.textContent).toContain("10 人校准");

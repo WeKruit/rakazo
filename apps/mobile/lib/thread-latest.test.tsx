@@ -734,6 +734,7 @@ it("keeps each waiting agent's original question enabled in a mobile group", () 
     threadId: "group-thread",
     cursor: 10,
     olderCursor: null,
+    run: null,
     activeRuns: [
       { id: "main", status: "waiting_input" },
       { id: "sourcer", status: "waiting_input" },

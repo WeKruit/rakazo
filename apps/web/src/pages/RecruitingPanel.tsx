@@ -97,8 +97,8 @@ import type { ShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { RetryNotice } from "./recruiting/RetryNotice";
-import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
+import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -2364,7 +2364,14 @@ function CorrespondenceTabMount({
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
   if (view === "sequence") return <SequenceTab {...props} />;
-  if (view === "interview") return <InterviewTab {...props} threadId={threadId} onReviewSchedulingPlan={onReviewSchedulingPlan} />;
+  if (view === "interview")
+    return (
+      <InterviewTab
+        {...props}
+        threadId={threadId}
+        onReviewSchedulingPlan={onReviewSchedulingPlan}
+      />
+    );
   return <InboxWithReply {...props} onDraftReply={onDraftReply} />;
 }
 
@@ -3600,19 +3607,29 @@ function CrmRecruitingPanel({
       {crmHistory}
     </>
   );
-  const nestedWorkspaceHeading = Boolean(agent && bound.role && ["contacts", "shortlist"].includes(browse.view));
+  const nestedWorkspaceHeading = Boolean(
+    agent && bound.role && ["contacts", "shortlist"].includes(browse.view),
+  );
   return (
-    <div className={nestedWorkspaceHeading ? "hire-standard-view hire-standard-view-native" : "hire-standard-view"}>
-      {!nestedWorkspaceHeading ? <header className="hire-section-header">
-        <h1>
-          {bound.title ??
-            (bound.done
-              ? (page?.selectedRole?.roleLabel ??
-                (read?.key === key && !read.loading ? t`Contacts` : null))
-              : null)}
-        </h1>
-        {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
-      </header> : null}
+    <div
+      className={
+        nestedWorkspaceHeading
+          ? "hire-standard-view hire-standard-view-native"
+          : "hire-standard-view"
+      }
+    >
+      {!nestedWorkspaceHeading ? (
+        <header className="hire-section-header">
+          <h1>
+            {bound.title ??
+              (bound.done
+                ? (page?.selectedRole?.roleLabel ??
+                  (read?.key === key && !read.loading ? t`Contacts` : null))
+                : null)}
+          </h1>
+          {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
+        </header>
+      ) : null}
       {agent && !bound.done ? (
         <TabLoading />
       ) : bound.role && !["sequence", "interview"].includes(browse.view) ? (
@@ -5511,9 +5528,11 @@ function RecruitingWorkspace({
                   : null}
                 <div
                   className={
-                    filteredShortlistWeek ? "hidden" : presentation === "workspace"
-                      ? "hire-results-filters flex flex-wrap gap-2"
-                      : "flex flex-wrap gap-2"
+                    filteredShortlistWeek
+                      ? "hidden"
+                      : presentation === "workspace"
+                        ? "hire-results-filters flex flex-wrap gap-2"
+                        : "flex flex-wrap gap-2"
                   }
                 >
                   <Input

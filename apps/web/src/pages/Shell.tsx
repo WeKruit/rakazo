@@ -136,7 +136,14 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import type { ClipboardEvent, CSSProperties, DragEvent, MutableRefObject, Ref, RefObject } from "react";
+import type {
+  ClipboardEvent,
+  CSSProperties,
+  DragEvent,
+  MutableRefObject,
+  Ref,
+  RefObject,
+} from "react";
 import {
   createRef,
   Fragment,
@@ -171,8 +178,8 @@ import { VoiceChatCard } from "../components/call/VoiceChatCard";
 import { ComputerWorkspace } from "../components/computer/ComputerWorkspace";
 import { lazyOverlay } from "../components/ErrorBoundary";
 import { LiveWork } from "../components/LiveWork";
-import { PaneResizeHandle } from "../components/PaneResizeHandle";
 import { MessageHoverMetadata } from "../components/MessageHoverMetadata";
+import { PaneResizeHandle } from "../components/PaneResizeHandle";
 import {
   LIVE_TOOL_STEP_WINDOW,
   StandaloneToolActivity,
@@ -228,8 +235,8 @@ import { scheduleFocusPrompt } from "../lib/focus-prompt";
 import { localTimezone } from "../lib/local-timezone";
 import { copyableMessageText } from "../lib/message-text";
 import { messageProviderLabel } from "../lib/messaging";
-import { clampWidth, usePaneWidth, useViewportWidth } from "../lib/pane-width";
 import { parseModelOptionKey } from "../lib/model-catalog";
+import { clampWidth, usePaneWidth, useViewportWidth } from "../lib/pane-width";
 import {
   createAttachmentUploads,
   isFileDrag,
@@ -312,7 +319,6 @@ import type {
   CrmBrowseSelection,
   CrmReplyDraftContext,
 } from "./RecruitingPanel";
-import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
@@ -329,13 +335,17 @@ import {
   RecruitingDetailProvider,
   useRecruitingDetailController,
 } from "./recruiting";
-import { readShortlistWeekFilter, writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
+import { CalibrationRoundCard } from "./recruiting/CalibrationRound";
+import {
+  readShortlistWeekFilter,
+  writeShortlistWeekFilter,
+} from "./recruiting/dashboard-drilldown";
 import { HomeDashboard } from "./recruiting/HomeDashboard";
 import { InterviewTab } from "./recruiting/InterviewTab";
-import { SequenceTab } from "./recruiting/SequenceTab";
 import { RetryNotice } from "./recruiting/RetryNotice";
-import { CalibrationRoundCard } from "./recruiting/CalibrationRound";
 import { RoleSetupCard } from "./recruiting/RoleSetup";
+import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
+import { SequenceTab } from "./recruiting/SequenceTab";
 import { TabLoading } from "./recruiting/shared";
 import type { SettingsSection } from "./SettingsOverlay";
 import { SpaceSearchResults } from "./SpaceSearch";
@@ -641,18 +651,23 @@ export function ShellPage() {
     null,
   );
   const [requeuedRunIds, setRequeuedRunIds] = useState<string[]>([]);
-  const observeRunSignal = useCallback((event: { type: string; runId?: string | null; threadId?: string | null }) => {
-    if (event.type === "run.steering.claimed")
-      setSteer((current) =>
-        current && current.threadId === event.threadId && current.state === "queued"
-          ? { ...current, state: "applied" }
-          : current,
-      );
-    if (event.type === "run.requeued" && event.runId) {
-      const runId = event.runId;
-      setRequeuedRunIds((current) => (current.includes(runId) ? current : [...current.slice(-9), runId]));
-    }
-  }, []);
+  const observeRunSignal = useCallback(
+    (event: { type: string; runId?: string | null; threadId?: string | null }) => {
+      if (event.type === "run.steering.claimed")
+        setSteer((current) =>
+          current && current.threadId === event.threadId && current.state === "queued"
+            ? { ...current, state: "applied" }
+            : current,
+        );
+      if (event.type === "run.requeued" && event.runId) {
+        const runId = event.runId;
+        setRequeuedRunIds((current) =>
+          current.includes(runId) ? current : [...current.slice(-9), runId],
+        );
+      }
+    },
+    [],
+  );
   const roleChatId = useId();
   const roleChatTrigger = useRef<HTMLButtonElement>(null);
   const roleChatSection = useRef<HTMLElement>(null);
@@ -897,10 +912,18 @@ export function ShellPage() {
     () => false,
   );
   const viewportWidth = useViewportWidth();
-  const [botsSidebarWidth, setBotsSidebarWidth] = usePaneWidth("rakazo:bots-sidebar-width", showToolActivity ? 316 : 260);
+  const [botsSidebarWidth, setBotsSidebarWidth] = usePaneWidth(
+    "rakazo:bots-sidebar-width",
+    showToolActivity ? 316 : 260,
+  );
   const botsSidebarMaxWidth = Math.max(220, Math.min(480, viewportWidth - 640));
-  const visibleSidebarWidth = botsSidebarCollapsed ? 0 : clampWidth(botsSidebarWidth, 220, botsSidebarMaxWidth);
-  const [roleChatWidth, setRoleChatWidth] = usePaneWidth("rakazo:role-chat-width", clampWidth(viewportWidth * 0.34, 320, 420));
+  const visibleSidebarWidth = botsSidebarCollapsed
+    ? 0
+    : clampWidth(botsSidebarWidth, 220, botsSidebarMaxWidth);
+  const [roleChatWidth, setRoleChatWidth] = usePaneWidth(
+    "rakazo:role-chat-width",
+    clampWidth(viewportWidth * 0.34, 320, 420),
+  );
   const roleChatMaxWidth = Math.max(320, Math.min(720, viewportWidth - visibleSidebarWidth - 320));
   const showToolActivityRef = useRef<boolean | null>(null);
   showToolActivityRef.current = bootstrapMe ? showToolActivity : null;
@@ -2413,7 +2436,12 @@ export function ShellPage() {
         : "conversation";
   const workspaceNewRole = !showToolActivity && panel === "create-group";
   const crmMode = !showToolActivity && !workspaceNewRole && searchParams.has("crmServer");
-  const homeView = !showToolActivity && !workspaceNewRole && !crmMode && recruitingWorkspaceView === "home" && groups.length > 0;
+  const homeView =
+    !showToolActivity &&
+    !workspaceNewRole &&
+    !crmMode &&
+    recruitingWorkspaceView === "home" &&
+    groups.length > 0;
   const crmRevision = Number(searchParams.get("crmRevision"));
   const crmSelection: CrmBrowseSelection | undefined =
     crmMode &&
@@ -2674,7 +2702,10 @@ export function ShellPage() {
       )
         return;
       setSelectedSchedulingPlan((current) =>
-        current && reference && current.threadId === reference.threadId && current.emailId === reference.emailId
+        current &&
+        reference &&
+        current.threadId === reference.threadId &&
+        current.emailId === reference.emailId
           ? current
           : null,
       );
@@ -3461,8 +3492,8 @@ export function ShellPage() {
               ? selectedContact?.contact
               : undefined,
             selectedSchedulingPlan &&
-            selectedSchedulingPlan.scope === currentRecruitingCacheScope.current &&
-            selectedSchedulingPlan.threadId === knownThreadId
+              selectedSchedulingPlan.scope === currentRecruitingCacheScope.current &&
+              selectedSchedulingPlan.threadId === knownThreadId
               ? selectedSchedulingPlan.id
               : undefined,
           );
@@ -3693,13 +3724,17 @@ export function ShellPage() {
           return bot ? [bot.id] : [];
         });
   }
-  async function openCrmRole(selection: CrmBrowseSelection, view: RecruitingWorkspaceView = "results") {
+  async function openCrmRole(
+    selection: CrmBrowseSelection,
+    view: RecruitingWorkspaceView = "results",
+  ) {
     if (!selection.crmRoleId) return;
     const request = ++crmRoleOpenRequest.current;
     const submittedScope = crmComposerScope;
     const submittedUser = botsRefreshUser.current;
     const submittedSpace = bootstrapMe?.spaceId;
-    const stillCurrent = () => request === crmRoleOpenRequest.current &&
+    const stillCurrent = () =>
+      request === crmRoleOpenRequest.current &&
       currentCrmOpenLocation.current === crmOpenLocation &&
       currentCrmComposerScope.current === submittedScope &&
       botsRefreshUser.current === submittedUser &&
@@ -3707,17 +3742,24 @@ export function ShellPage() {
     setOpeningCrmRole({ selection, view });
     try {
       const botIds = crmRoleBotIds();
-      if (botIds.length < GROUP_MEMBER_MIN) throw new Error(t`The recruiting team is not ready yet.`);
+      if (botIds.length < GROUP_MEMBER_MIN)
+        throw new Error(t`The recruiting team is not ready yet.`);
       const group = await rpc.groups.create({
-        name: t`Recruiting`, botIds,
+        name: t`Recruiting`,
+        botIds,
         crmRoleReference: {
-          sourceId: selection.serverId, serverRevision: selection.serverRevision,
-          organizationId: selection.organizationId, crmRoleId: selection.crmRoleId,
+          sourceId: selection.serverId,
+          serverRevision: selection.serverRevision,
+          organizationId: selection.organizationId,
+          crmRoleId: selection.crmRoleId,
         },
       });
       if (!stillCurrent()) return;
-      setGroups((current) => current.some((item) => item.id === group.id)
-        ? current.map((item) => item.id === group.id ? group : item) : [group, ...current]);
+      setGroups((current) =>
+        current.some((item) => item.id === group.id)
+          ? current.map((item) => (item.id === group.id ? group : item))
+          : [group, ...current],
+      );
       setSelectedContact(null);
       setSelectedCorrespondence(null);
       setPanel(null);
@@ -3731,17 +3773,28 @@ export function ShellPage() {
       navigate(`/app/g/${group.id}?${search}`);
       void refreshBots().catch(() => undefined);
     } catch (error) {
-      if (stillCurrent()) setOpeningCrmRole({ selection, view, error: errorText(error, t`Could not open this role.`) });
+      if (stillCurrent())
+        setOpeningCrmRole({
+          selection,
+          view,
+          error: errorText(error, t`Could not open this role.`),
+        });
     } finally {
       if (!stillCurrent() && request === crmRoleOpenRequest.current) setOpeningCrmRole(null);
     }
   }
-  const legacyCrmOpenKey = crmMode && crmSelection?.crmRoleId
-    ? JSON.stringify([userId, bootstrapMe?.spaceId, crmSelection]) : null;
+  const legacyCrmOpenKey =
+    crmMode && crmSelection?.crmRoleId
+      ? JSON.stringify([userId, bootstrapMe?.spaceId, crmSelection])
+      : null;
   const openedLegacyCrmKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!legacyCrmOpenKey) { openedLegacyCrmKey.current = null; return; }
-    if (!initialBotsLoaded || !crmSelection || openedLegacyCrmKey.current === legacyCrmOpenKey) return;
+    if (!legacyCrmOpenKey) {
+      openedLegacyCrmKey.current = null;
+      return;
+    }
+    if (!initialBotsLoaded || !crmSelection || openedLegacyCrmKey.current === legacyCrmOpenKey)
+      return;
     openedLegacyCrmKey.current = legacyCrmOpenKey;
     void openCrmRole(crmSelection, recruitingWorkspaceView);
   }, [legacyCrmOpenKey, initialBotsLoaded]);
@@ -4634,11 +4687,26 @@ export function ShellPage() {
       >
         {!showToolActivity ? (
           <>
-            {desktopBridge() ? <div className="app-drag px-5 pt-4"><WindowChrome /></div> : null}
+            {desktopBridge() ? (
+              <div className="app-drag px-5 pt-4">
+                <WindowChrome />
+              </div>
+            ) : null}
             <RecruitingNavigation
               loading={!initialBotsLoaded}
-              onPrefetchRole={(id) => prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)}
-              crmContext={recruitingCacheScope ? { target: transcriptArtifactTarget, scope: recruitingCacheScope, cache: recruitingReadCache.current, refreshSignal: recruitingRefresh } : undefined}
+              onPrefetchRole={(id) =>
+                prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)
+              }
+              crmContext={
+                recruitingCacheScope
+                  ? {
+                      target: transcriptArtifactTarget,
+                      scope: recruitingCacheScope,
+                      cache: recruitingReadCache.current,
+                      refreshSignal: recruitingRefresh,
+                    }
+                  : undefined
+              }
               crmSelection={effectiveCrmSelection}
               onOpenCrmRole={(selection) => void openCrmRole(selection)}
               groups={groups}
@@ -4651,7 +4719,8 @@ export function ShellPage() {
               onCollapse={() => setBotsSidebarCollapsedPref(true)}
               canOpenDashboard={Boolean(activeSnapshot?.threadId)}
               canCreateRole={
-                Boolean(activeGroup && canCreateRoleFrom(activeGroup.id)) || archivedGroups.some((group) => canCreateRoleFrom(group.id))
+                Boolean(activeGroup && canCreateRoleFrom(activeGroup.id)) ||
+                archivedGroups.some((group) => canCreateRoleFrom(group.id))
               }
               canCreateRoleFrom={canCreateRoleFrom}
               onQueryChange={setQuery}
@@ -4668,7 +4737,8 @@ export function ShellPage() {
               onToggleArchived={() => setArchivedOpen((open) => !open)}
               onRestoreRole={(id) => void restoreGroup(id)}
               onRoleMenu={(id, anchor, position) => {
-                if (groups.find((group) => group.id === id)?.spaceId !== bootstrapMe?.spaceId) return;
+                if (groups.find((group) => group.id === id)?.spaceId !== bootstrapMe?.spaceId)
+                  return;
                 botMenuAnchor.current = anchor;
                 setBotMenu({ kind: "group", id, position });
               }}
@@ -4677,594 +4747,610 @@ export function ShellPage() {
         ) : null}
         {showToolActivity && (
           <>
-        <div className="app-drag flex items-center justify-between px-[18px] pb-3 pt-4">
-          <WindowChrome />
-          <div className="relative flex items-center gap-2.5">
-            <button
-              type="button"
-              aria-label={t`Activity`}
-              aria-pressed={activityMode}
-              title={t`Activity`}
-              data-activity-mode={activityMode ? "on" : "off"}
-              onClick={toggleActivityMode}
-              className={`app-no-drag flex h-7 w-7 items-center justify-center rounded-full ${
-                activityMode
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground/70 hover:text-foreground/75"
-              }`}
-            >
-              <Bell
-                size={15}
-                strokeWidth={1.8}
-                fill={activityMode ? "currentColor" : "none"}
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              type="button"
-              className="app-no-drag hidden h-7 w-7 items-center justify-center rounded-full text-muted-foreground/70 hover:text-foreground/75 md:inline-flex"
-              aria-label={t`Minimize bots`}
-              title={t`Minimize bots`}
-              data-testid="minimize-bots-sidebar"
-              onClick={() => setBotsSidebarCollapsedPref(true)}
-            >
-              <PanelLeftClose size={15} strokeWidth={1.8} aria-hidden="true" />
-            </button>
-            <Popover open={createMenuOpen} onOpenChange={setCreateMenuOpen}>
-              <PopoverTrigger
-                className="app-no-drag text-[21px] text-muted-foreground/70 hover:text-foreground/75"
-                title={t`Create`}
-                data-testid="create-menu-trigger"
-              >
-                +
-              </PopoverTrigger>
-              {/* Unmount with the state change so the panel it opens never coexists with the menu. */}
-              {createMenuOpen ? (
-                <PopoverContent
-                  align="end"
-                  className="app-no-drag w-auto gap-0 overflow-hidden p-0 data-closed:animate-none"
+            <div className="app-drag flex items-center justify-between px-[18px] pb-3 pt-4">
+              <WindowChrome />
+              <div className="relative flex items-center gap-2.5">
+                <button
+                  type="button"
+                  aria-label={t`Activity`}
+                  aria-pressed={activityMode}
+                  title={t`Activity`}
+                  data-activity-mode={activityMode ? "on" : "off"}
+                  onClick={toggleActivityMode}
+                  className={`app-no-drag flex h-7 w-7 items-center justify-center rounded-full ${
+                    activityMode
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground/70 hover:text-foreground/75"
+                  }`}
                 >
-                  <BotCreatePicker
-                    bots={bots}
-                    onCreateBot={() => {
-                      setCreateMenuOpen(false);
-                      setMobileSidebarOpen(false);
-                      setPanel("create");
-                    }}
-                    onOpenBot={(id) => {
-                      setCreateMenuOpen(false);
-                      setMobileSidebarOpen(false);
-                      navigate(`/app/${id}`);
-                    }}
-                    onCreateGroup={() => {
-                      setCreateMenuOpen(false);
-                      setMobileSidebarOpen(false);
-                      setPanel("create-group");
-                    }}
-                    onCreateSpace={() => {
-                      setCreateMenuOpen(false);
-                      setMobileSidebarOpen(false);
-                      setNewSpaceOpen(true);
-                    }}
-                    onShowGroupInfo={() => {
-                      setCreateMenuOpen(false);
-                      setMobileSidebarOpen(false);
-                      setPickerInfoTopic("group");
-                    }}
-                    onShowSpaceInfo={() => {
-                      setCreateMenuOpen(false);
-                      setMobileSidebarOpen(false);
-                      setPickerInfoTopic("space");
-                    }}
+                  <Bell
+                    size={15}
+                    strokeWidth={1.8}
+                    fill={activityMode ? "currentColor" : "none"}
+                    aria-hidden="true"
                   />
-                </PopoverContent>
-              ) : null}
-            </Popover>
-          </div>
-        </div>
-        <InputGroup
-          data-testid="sidebar-search"
-          className="mx-2.5 mb-3 w-auto rounded-xl bg-card dark:bg-input border border-border text-muted-foreground focus-within:border-ring"
-        >
-          <InputGroupAddon>
-            <Search size={16} strokeWidth={1.8} aria-hidden="true" />
-          </InputGroupAddon>
-          <InputGroupInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t`Search`}
-            autoComplete="off"
-            name="sidebar-search"
-          />
-        </InputGroup>
-        <div className="rk-scroll flex flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 pb-2.5">
-          {showSpaceSearch ? (
-            <SpaceSearchResults
-              hits={searchHits}
-              loading={searchLoading}
-              onSelect={(hit) => void jumpToSearchHit(hit)}
-            />
-          ) : (
-            <>
-              {activityMode ? (
-                <ActivityList
-                  onOpenRun={(run) => {
-                    setMobileSidebarOpen(false);
-                    if (run.groupId) navigate(`/app/g/${run.groupId}`);
-                    else navigate(`/app/${run.botId}`);
-                  }}
+                </button>
+                <button
+                  type="button"
+                  className="app-no-drag hidden h-7 w-7 items-center justify-center rounded-full text-muted-foreground/70 hover:text-foreground/75 md:inline-flex"
+                  aria-label={t`Minimize bots`}
+                  title={t`Minimize bots`}
+                  data-testid="minimize-bots-sidebar"
+                  onClick={() => setBotsSidebarCollapsedPref(true)}
+                >
+                  <PanelLeftClose size={15} strokeWidth={1.8} aria-hidden="true" />
+                </button>
+                <Popover open={createMenuOpen} onOpenChange={setCreateMenuOpen}>
+                  <PopoverTrigger
+                    className="app-no-drag text-[21px] text-muted-foreground/70 hover:text-foreground/75"
+                    title={t`Create`}
+                    data-testid="create-menu-trigger"
+                  >
+                    +
+                  </PopoverTrigger>
+                  {/* Unmount with the state change so the panel it opens never coexists with the menu. */}
+                  {createMenuOpen ? (
+                    <PopoverContent
+                      align="end"
+                      className="app-no-drag w-auto gap-0 overflow-hidden p-0 data-closed:animate-none"
+                    >
+                      <BotCreatePicker
+                        bots={bots}
+                        onCreateBot={() => {
+                          setCreateMenuOpen(false);
+                          setMobileSidebarOpen(false);
+                          setPanel("create");
+                        }}
+                        onOpenBot={(id) => {
+                          setCreateMenuOpen(false);
+                          setMobileSidebarOpen(false);
+                          navigate(`/app/${id}`);
+                        }}
+                        onCreateGroup={() => {
+                          setCreateMenuOpen(false);
+                          setMobileSidebarOpen(false);
+                          setPanel("create-group");
+                        }}
+                        onCreateSpace={() => {
+                          setCreateMenuOpen(false);
+                          setMobileSidebarOpen(false);
+                          setNewSpaceOpen(true);
+                        }}
+                        onShowGroupInfo={() => {
+                          setCreateMenuOpen(false);
+                          setMobileSidebarOpen(false);
+                          setPickerInfoTopic("group");
+                        }}
+                        onShowSpaceInfo={() => {
+                          setCreateMenuOpen(false);
+                          setMobileSidebarOpen(false);
+                          setPickerInfoTopic("space");
+                        }}
+                      />
+                    </PopoverContent>
+                  ) : null}
+                </Popover>
+              </div>
+            </div>
+            <InputGroup
+              data-testid="sidebar-search"
+              className="mx-2.5 mb-3 w-auto rounded-xl bg-card dark:bg-input border border-border text-muted-foreground focus-within:border-ring"
+            >
+              <InputGroupAddon>
+                <Search size={16} strokeWidth={1.8} aria-hidden="true" />
+              </InputGroupAddon>
+              <InputGroupInput
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t`Search`}
+                autoComplete="off"
+                name="sidebar-search"
+              />
+            </InputGroup>
+            <div className="rk-scroll flex flex-1 flex-col gap-0.5 overflow-y-auto px-2.5 pb-2.5">
+              {showSpaceSearch ? (
+                <SpaceSearchResults
+                  hits={searchHits}
+                  loading={searchLoading}
+                  onSelect={(hit) => void jumpToSearchHit(hit)}
                 />
-              ) : null}
-              {sidebarGroups.map((group) => {
-                const collapsed = Boolean(group.title) && collapsedSidebarSections.has(group.key);
-                const groupBotIds = group.bots.flatMap((item) =>
-                  item.kind === "bot" ? [item.chat.id] : [],
-                );
-                const nestedRows = nestRosterByParent(group.bots, collapsedRosterParents);
-                const treeActive = nestedRows.some((row) => row.depth > 0 || row.hasChildren);
-                const rosterParent = new Map(
-                  nestedRows.map((row) => [row.item.chat.id, row.parentId] as const),
-                );
-                // Reorder among visible siblings so keyboard and drag moves match the tree.
-                const siblingBotIds = (parentId: string | null) =>
-                  nestedRows.flatMap((row) =>
-                    row.item.kind === "bot" && row.parentId === parentId ? [row.item.chat.id] : [],
-                  );
-                const hasSpaceActions = group.canRenameSpace || group.canDeleteSpace;
-                return (
-                  <div key={group.key} data-sidebar-group={group.key}>
-                    {group.title || hasSpaceActions ? (
-                      <div
-                        className={
-                          group.title && hasSpaceActions
-                            ? "grid pt-3 pb-0.5"
-                            : `flex items-center pt-3 pb-0.5${group.title ? "" : " justify-end"}`
-                        }
-                      >
-                        {group.title ? (
-                          <button
-                            type="button"
-                            className={`flex min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring ${hasSpaceActions ? "col-start-1 row-start-1 w-full pe-8" : "flex-1"}`}
-                            onClick={() => {
-                              if (group.emptySpaceId) {
-                                openSpaceChat(group.emptySpaceId, "/onboarding");
-                                return;
-                              }
-                              toggleSidebarSection(group.key);
-                            }}
-                            onContextMenu={
-                              group.sectionId
-                                ? (event) => {
-                                    event.preventDefault();
-                                    // Prefer section rename over the space menu when both apply;
-                                    // the dedicated space-actions button still opens the space menu.
-                                    const sections =
-                                      group.spaceId === bootstrapMe?.spaceId
-                                        ? botSections
-                                        : (spaces.find((space) => space.id === group.spaceId)
-                                            ?.botSections ?? []);
-                                    const section = sections.find(
-                                      (item) => item.id === group.sectionId,
-                                    );
-                                    if (!section) return;
-                                    sectionMenuAnchor.current = event.currentTarget;
-                                    setSectionMenu({
-                                      section,
-                                      spaceId: group.spaceId,
-                                      position: { x: event.clientX, y: event.clientY },
-                                    });
-                                  }
-                                : hasSpaceActions
-                                  ? (event) => {
-                                      event.preventDefault();
-                                      spaceMenuAnchor.current = event.currentTarget;
-                                      setSpaceMenu({
-                                        id: group.spaceId,
-                                        position: { x: event.clientX, y: event.clientY },
-                                      });
-                                    }
-                                  : undefined
-                            }
-                            aria-expanded={group.emptySpaceId ? undefined : !collapsed}
-                            aria-label={
-                              group.emptySpaceId
-                                ? t`Open ${group.title}`
-                                : collapsed
-                                  ? t`Expand ${group.title}`
-                                  : t`Collapse ${group.title}`
-                            }
-                          >
-                            <span className="flex min-w-0 items-center gap-1.5 truncate">
-                              {group.showLock ? (
-                                <Lock size={11} strokeWidth={2} aria-hidden="true" />
-                              ) : null}
-                              <span className="truncate">{group.title}</span>
-                            </span>
-                            {group.emptySpaceId ? null : (
-                              <ChevronDown
-                                size={14}
-                                strokeWidth={1.8}
-                                className={
-                                  collapsed
-                                    ? "-rotate-90 transition-transform"
-                                    : "transition-transform"
-                                }
-                                aria-hidden="true"
-                              />
-                            )}
-                          </button>
-                        ) : null}
-                        {hasSpaceActions ? (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            className={
-                              group.title
-                                ? "col-start-1 row-start-1 justify-self-end self-center"
-                                : undefined
-                            }
-                            aria-label={t`Actions for ${group.spaceName}`}
-                            onClick={(event) => {
-                              const rect = event.currentTarget.getBoundingClientRect();
-                              spaceMenuAnchor.current = event.currentTarget;
-                              setSpaceMenu({
-                                id: group.spaceId,
-                                position: { x: rect.left, y: rect.bottom },
-                              });
-                            }}
-                          >
-                            <MoreHorizontal size={14} aria-hidden="true" />
-                          </Button>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    {!collapsed &&
-                      nestedRows.map(({ item, depth, hasChildren, parentId }) => {
-                        const parentCollapsed =
-                          hasChildren && collapsedRosterParents.has(item.chat.id);
-                        const selected =
-                          (item.kind === "bot" && !inGroup && active?.id === item.chat.id) ||
-                          (item.kind === "group" && inGroup && activeGroup?.id === item.chat.id);
-                        const compact = botsSidebarDensity === "compact";
-                        const workStatusLabel =
-                          item.kind === "bot" ? rosterWorkStatusLabel(item.chat.status) : null;
-                        const rowError =
-                          item.kind === "bot" &&
-                          (rosterHasUndismissedRunError(
-                            item.chat.runErrorId,
-                            dismissedRunErrorIds,
-                          ) ||
-                            (active?.id === item.chat.id && Boolean(displayedRunError)));
-                        const compactStatusLabel =
-                          compact && item.kind === "bot"
-                            ? rowError
-                              ? t`Error`
-                              : compactRosterStatusLabel(item.chat.status)
-                            : null;
-                        const rosterLine = compact
-                          ? compactStatusLabel
-                          : (workStatusLabel ??
-                            (item.kind === "bot"
-                              ? item.chat.preview ||
-                                (item.chat.status !== "idle" ? item.chat.status : "")
-                              : item.chat.preview ||
-                                item.chat.members.map((member) => member.name).join(", ")));
-                        return (
+              ) : (
+                <>
+                  {activityMode ? (
+                    <ActivityList
+                      onOpenRun={(run) => {
+                        setMobileSidebarOpen(false);
+                        if (run.groupId) navigate(`/app/g/${run.groupId}`);
+                        else navigate(`/app/${run.botId}`);
+                      }}
+                    />
+                  ) : null}
+                  {sidebarGroups.map((group) => {
+                    const collapsed =
+                      Boolean(group.title) && collapsedSidebarSections.has(group.key);
+                    const groupBotIds = group.bots.flatMap((item) =>
+                      item.kind === "bot" ? [item.chat.id] : [],
+                    );
+                    const nestedRows = nestRosterByParent(group.bots, collapsedRosterParents);
+                    const treeActive = nestedRows.some((row) => row.depth > 0 || row.hasChildren);
+                    const rosterParent = new Map(
+                      nestedRows.map((row) => [row.item.chat.id, row.parentId] as const),
+                    );
+                    // Reorder among visible siblings so keyboard and drag moves match the tree.
+                    const siblingBotIds = (parentId: string | null) =>
+                      nestedRows.flatMap((row) =>
+                        row.item.kind === "bot" && row.parentId === parentId
+                          ? [row.item.chat.id]
+                          : [],
+                      );
+                    const hasSpaceActions = group.canRenameSpace || group.canDeleteSpace;
+                    return (
+                      <div key={group.key} data-sidebar-group={group.key}>
+                        {group.title || hasSpaceActions ? (
                           <div
-                            key={`${item.kind}:${item.chat.id}`}
-                            className="group/row relative"
-                            style={{
-                              opacity:
-                                item.kind === "bot" && draggedBotId === item.chat.id ? 0.55 : 1,
-                            }}
+                            className={
+                              group.title && hasSpaceActions
+                                ? "grid pt-3 pb-0.5"
+                                : `flex items-center pt-3 pb-0.5${group.title ? "" : " justify-end"}`
+                            }
                           >
-                            {hasChildren ? (
-                              <span
-                                className="absolute inset-y-0 z-10 flex w-3.5 items-center justify-center"
-                                style={{ insetInlineStart: `${10 + depth * 14}px` }}
-                              >
-                                <button
-                                  type="button"
-                                  aria-expanded={!parentCollapsed}
-                                  aria-label={
-                                    parentCollapsed
-                                      ? t`Expand ${item.chat.name}`
-                                      : t`Collapse ${item.chat.name}`
+                            {group.title ? (
+                              <button
+                                type="button"
+                                className={`flex min-w-0 items-center justify-between gap-2 rounded-lg px-2.5 py-1 text-[11px] font-semibold tracking-wider uppercase text-muted-foreground/60 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring ${hasSpaceActions ? "col-start-1 row-start-1 w-full pe-8" : "flex-1"}`}
+                                onClick={() => {
+                                  if (group.emptySpaceId) {
+                                    openSpaceChat(group.emptySpaceId, "/onboarding");
+                                    return;
                                   }
-                                  className="inline-flex size-3.5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
-                                  onClick={() => toggleRosterParent(item.chat.id)}
-                                >
+                                  toggleSidebarSection(group.key);
+                                }}
+                                onContextMenu={
+                                  group.sectionId
+                                    ? (event) => {
+                                        event.preventDefault();
+                                        // Prefer section rename over the space menu when both apply;
+                                        // the dedicated space-actions button still opens the space menu.
+                                        const sections =
+                                          group.spaceId === bootstrapMe?.spaceId
+                                            ? botSections
+                                            : (spaces.find((space) => space.id === group.spaceId)
+                                                ?.botSections ?? []);
+                                        const section = sections.find(
+                                          (item) => item.id === group.sectionId,
+                                        );
+                                        if (!section) return;
+                                        sectionMenuAnchor.current = event.currentTarget;
+                                        setSectionMenu({
+                                          section,
+                                          spaceId: group.spaceId,
+                                          position: { x: event.clientX, y: event.clientY },
+                                        });
+                                      }
+                                    : hasSpaceActions
+                                      ? (event) => {
+                                          event.preventDefault();
+                                          spaceMenuAnchor.current = event.currentTarget;
+                                          setSpaceMenu({
+                                            id: group.spaceId,
+                                            position: { x: event.clientX, y: event.clientY },
+                                          });
+                                        }
+                                      : undefined
+                                }
+                                aria-expanded={group.emptySpaceId ? undefined : !collapsed}
+                                aria-label={
+                                  group.emptySpaceId
+                                    ? t`Open ${group.title}`
+                                    : collapsed
+                                      ? t`Expand ${group.title}`
+                                      : t`Collapse ${group.title}`
+                                }
+                              >
+                                <span className="flex min-w-0 items-center gap-1.5 truncate">
+                                  {group.showLock ? (
+                                    <Lock size={11} strokeWidth={2} aria-hidden="true" />
+                                  ) : null}
+                                  <span className="truncate">{group.title}</span>
+                                </span>
+                                {group.emptySpaceId ? null : (
                                   <ChevronDown
-                                    size={12}
-                                    strokeWidth={2}
-                                    className={`transition-transform ${
-                                      parentCollapsed ? "-rotate-90" : ""
-                                    }`}
+                                    size={14}
+                                    strokeWidth={1.8}
+                                    className={
+                                      collapsed
+                                        ? "-rotate-90 transition-transform"
+                                        : "transition-transform"
+                                    }
                                     aria-hidden="true"
                                   />
-                                </button>
-                              </span>
-                            ) : null}
-                            <button
-                              type="button"
-                              draggable={item.kind === "bot"}
-                              data-roster-bot-id={item.kind === "bot" ? item.chat.id : undefined}
-                              data-roster-unread={item.chat.unread ? "true" : undefined}
-                              data-roster-error={rowError && compact ? "true" : undefined}
-                              data-roster-depth={
-                                item.kind === "bot" && treeActive ? depth : undefined
-                              }
-                              aria-current={selected ? "page" : undefined}
-                              aria-keyshortcuts={
-                                item.kind === "bot" ? "Alt+ArrowUp Alt+ArrowDown" : undefined
-                              }
-                              onDragStart={(event) => {
-                                if (item.kind !== "bot") return;
-                                setDraggedBotId(item.chat.id);
-                                event.dataTransfer.effectAllowed = "move";
-                                event.dataTransfer.setData("text/plain", item.chat.id);
-                              }}
-                              onDragOver={(event) => {
-                                if (
-                                  item.kind === "bot" &&
-                                  draggedBotId &&
-                                  groupBotIds.includes(draggedBotId) &&
-                                  rosterParent.get(draggedBotId) === parentId
-                                ) {
-                                  event.preventDefault();
-                                  event.dataTransfer.dropEffect = "move";
-                                }
-                              }}
-                              onDrop={(event) => {
-                                if (
-                                  item.kind !== "bot" ||
-                                  !draggedBotId ||
-                                  rosterParent.get(draggedBotId) !== parentId
-                                )
-                                  return;
-                                event.preventDefault();
-                                reorderRosterBot(draggedBotId, item.chat.id, groupBotIds);
-                                setDraggedBotId(null);
-                              }}
-                              onDragEnd={() => setDraggedBotId(null)}
-                              onKeyDown={(event) => {
-                                if (
-                                  item.kind !== "bot" ||
-                                  !event.altKey ||
-                                  (event.key !== "ArrowUp" && event.key !== "ArrowDown")
-                                )
-                                  return;
-                                const siblings = siblingBotIds(parentId);
-                                const index = siblings.indexOf(item.chat.id);
-                                const target = siblings[index + (event.key === "ArrowUp" ? -1 : 1)];
-                                if (!target) return;
-                                event.preventDefault();
-                                reorderRosterBot(item.chat.id, target, groupBotIds);
-                              }}
-                              onMouseEnter={() => prefetchSidebarChat(item)}
-                              onFocus={() => prefetchSidebarChat(item)}
-                              onClick={() => {
-                                openSpaceChat(
-                                  item.chat.spaceId,
-                                  item.kind === "bot"
-                                    ? `/app/${item.chat.id}`
-                                    : `/app/g/${item.chat.id}`,
-                                );
-                              }}
-                              onContextMenu={(event) => {
-                                if (item.chat.spaceId !== bootstrapMe?.spaceId) return;
-                                event.preventDefault();
-                                botMenuAnchor.current = event.currentTarget;
-                                setBotMenu({
-                                  kind: item.kind,
-                                  id: item.chat.id,
-                                  position: { x: event.clientX, y: event.clientY },
-                                });
-                              }}
-                              className={`flex w-full items-center ${
-                                compact
-                                  ? "min-h-11 gap-2 rounded-xl px-2.5 py-1.5"
-                                  : "gap-3 rounded-xl px-2.5 py-[10px]"
-                              } text-start ${
-                                item.kind === "bot" ? "cursor-grab active:cursor-grabbing" : ""
-                              } ${
-                                selected ? "bg-sidebar-accent" : "group-hover/row:bg-sidebar-accent"
-                              }`}
-                              style={
-                                treeActive
-                                  ? { paddingInlineStart: `${24 + depth * 14}px` }
-                                  : undefined
-                              }
-                            >
-                              {item.kind === "bot" ? (
-                                <BotAvatar
-                                  color={item.chat.color}
-                                  identity={item.chat.id}
-                                  size={compact ? 28 : 38}
-                                  status={item.chat.status}
-                                />
-                              ) : (
-                                <GroupAvatar
-                                  members={
-                                    item.chat.id === activeSnapshot?.groupId
-                                      ? (activeSnapshot.members ?? item.chat.members)
-                                      : item.chat.members
-                                  }
-                                  size={compact ? 28 : 38}
-                                />
-                              )}
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center justify-between gap-1.5">
-                                  <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
-                                    <span
-                                      dir="auto"
-                                      data-roster-bot-name={item.kind === "bot" ? "" : undefined}
-                                      className={`min-w-0 truncate text-[14px] text-foreground ${
-                                        item.chat.unread ? "font-semibold" : "font-medium"
-                                      }`}
-                                    >
-                                      {item.chat.name}
-                                    </span>
-                                    {item.chat.unread ? (
-                                      <span className="sr-only">
-                                        <Trans> (unread)</Trans>
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                  <div className="flex shrink-0 items-center gap-1.5">
-                                    {!compact ? (
-                                      <span className="text-[11.5px] text-muted-foreground/60 tabular-nums">
-                                        {formatRosterTime(item.chat.updatedAt)}
-                                      </span>
-                                    ) : null}
-                                    {item.chat.unread ? (
-                                      <span
-                                        aria-hidden="true"
-                                        className="inline-block h-2 w-2 rounded-full bg-foreground"
-                                      />
-                                    ) : null}
-                                  </div>
-                                </div>
-                                {!compact && item.kind === "bot" && item.chat.title ? (
-                                  <div className="mt-1 flex">
-                                    <span className="max-w-full truncate rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
-                                      {item.chat.title}
-                                    </span>
-                                  </div>
-                                ) : null}
-                                {compact ? (
-                                  compactStatusLabel ? (
-                                    <div
-                                      dir="auto"
-                                      data-roster-status={
-                                        rowError
-                                          ? "error"
-                                          : item.kind === "bot"
-                                            ? item.chat.status
-                                            : undefined
-                                      }
-                                      className={`mt-0.5 flex items-center gap-1 text-[11.5px] ${
-                                        rowError
-                                          ? "font-medium text-destructive"
-                                          : workStatusLabel
-                                            ? "font-semibold text-status-working"
-                                            : "font-medium text-foreground/75"
-                                      }`}
-                                    >
-                                      {rowError ? (
-                                        <CircleAlert size={12} aria-hidden="true" />
-                                      ) : null}
-                                      <span>{compactStatusLabel}</span>
-                                    </div>
-                                  ) : null
-                                ) : (
-                                  <div
-                                    dir="auto"
-                                    data-roster-preview={!workStatusLabel ? "true" : undefined}
-                                    className={`mt-1 line-clamp-2 text-[12.5px] break-words whitespace-normal ${
-                                      workStatusLabel
-                                        ? "font-semibold text-status-working"
-                                        : item.chat.unread
-                                          ? "font-medium text-foreground/75"
-                                          : "text-muted-foreground/60"
-                                    }`}
-                                  >
-                                    {rosterLine}
-                                  </div>
                                 )}
-                              </div>
-                            </button>
+                              </button>
+                            ) : null}
+                            {hasSpaceActions ? (
+                              <Button
+                                variant="ghost"
+                                size="icon-sm"
+                                className={
+                                  group.title
+                                    ? "col-start-1 row-start-1 justify-self-end self-center"
+                                    : undefined
+                                }
+                                aria-label={t`Actions for ${group.spaceName}`}
+                                onClick={(event) => {
+                                  const rect = event.currentTarget.getBoundingClientRect();
+                                  spaceMenuAnchor.current = event.currentTarget;
+                                  setSpaceMenu({
+                                    id: group.spaceId,
+                                    position: { x: rect.left, y: rect.bottom },
+                                  });
+                                }}
+                              >
+                                <MoreHorizontal size={14} aria-hidden="true" />
+                              </Button>
+                            ) : null}
                           </div>
-                        );
-                      })}
-                  </div>
-                );
-              })}
-            </>
-          )}
-          {archivedBots.length + archivedGroups.length > 0 && !showSpaceSearch ? (
-            <div className="mt-2 border-t border-border pt-2">
-              <button
-                type="button"
-                aria-expanded={archivedOpen}
-                onClick={() => setArchivedOpen((open) => !open)}
-                className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[13.5px] text-muted-foreground hover:bg-sidebar-accent"
-              >
-                <span>
-                  <Trans>Archived</Trans>
-                </span>
-                <span>{archivedBots.length + archivedGroups.length}</span>
-              </button>
-              {archivedOpen ? (
-                <>
-                  {archivedBots.map((bot) => (
-                    <div key={bot.id} className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                      <BotAvatar
-                        color={bot.color}
-                        identity={bot.id}
-                        size={28}
-                        status={bot.status}
-                      />
-                      <span
-                        className="min-w-0 flex-1 truncate text-[14px] text-foreground/75"
-                        dir="auto"
-                      >
-                        {bot.name}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() =>
-                          void rpc.bots.restore({ botId: bot.id }).then(() => refreshBots(true))
-                        }
-                      >
-                        <Trans>Restore</Trans>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="text-destructive hover:text-destructive"
-                        aria-label={t`Delete ${bot.name}`}
-                        onClick={() => setDeleteTarget(bot)}
-                      >
-                        <Trans>Delete</Trans>
-                      </Button>
-                    </div>
-                  ))}
-                  {archivedGroups.map((group) => (
-                    <div key={group.id} className="flex items-center gap-2 rounded-lg px-2.5 py-2">
-                      <GroupAvatar members={group.members} size={28} />
-                      <span
-                        className="min-w-0 flex-1 truncate text-[14px] text-foreground/75"
-                        dir="auto"
-                      >
-                        {group.name}
-                      </span>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        onClick={() =>
-                          void restoreGroup(group.id)
-                        }
-                      >
-                        <Trans>Restore</Trans>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        className="text-destructive hover:text-destructive"
-                        aria-label={t`Delete ${group.name}`}
-                        onClick={() => setDeleteGroupTarget(group)}
-                      >
-                        <Trans>Delete</Trans>
-                      </Button>
-                    </div>
-                  ))}
+                        ) : null}
+                        {!collapsed &&
+                          nestedRows.map(({ item, depth, hasChildren, parentId }) => {
+                            const parentCollapsed =
+                              hasChildren && collapsedRosterParents.has(item.chat.id);
+                            const selected =
+                              (item.kind === "bot" && !inGroup && active?.id === item.chat.id) ||
+                              (item.kind === "group" &&
+                                inGroup &&
+                                activeGroup?.id === item.chat.id);
+                            const compact = botsSidebarDensity === "compact";
+                            const workStatusLabel =
+                              item.kind === "bot" ? rosterWorkStatusLabel(item.chat.status) : null;
+                            const rowError =
+                              item.kind === "bot" &&
+                              (rosterHasUndismissedRunError(
+                                item.chat.runErrorId,
+                                dismissedRunErrorIds,
+                              ) ||
+                                (active?.id === item.chat.id && Boolean(displayedRunError)));
+                            const compactStatusLabel =
+                              compact && item.kind === "bot"
+                                ? rowError
+                                  ? t`Error`
+                                  : compactRosterStatusLabel(item.chat.status)
+                                : null;
+                            const rosterLine = compact
+                              ? compactStatusLabel
+                              : (workStatusLabel ??
+                                (item.kind === "bot"
+                                  ? item.chat.preview ||
+                                    (item.chat.status !== "idle" ? item.chat.status : "")
+                                  : item.chat.preview ||
+                                    item.chat.members.map((member) => member.name).join(", ")));
+                            return (
+                              <div
+                                key={`${item.kind}:${item.chat.id}`}
+                                className="group/row relative"
+                                style={{
+                                  opacity:
+                                    item.kind === "bot" && draggedBotId === item.chat.id ? 0.55 : 1,
+                                }}
+                              >
+                                {hasChildren ? (
+                                  <span
+                                    className="absolute inset-y-0 z-10 flex w-3.5 items-center justify-center"
+                                    style={{ insetInlineStart: `${10 + depth * 14}px` }}
+                                  >
+                                    <button
+                                      type="button"
+                                      aria-expanded={!parentCollapsed}
+                                      aria-label={
+                                        parentCollapsed
+                                          ? t`Expand ${item.chat.name}`
+                                          : t`Collapse ${item.chat.name}`
+                                      }
+                                      className="inline-flex size-3.5 items-center justify-center rounded-sm text-muted-foreground hover:text-foreground"
+                                      onClick={() => toggleRosterParent(item.chat.id)}
+                                    >
+                                      <ChevronDown
+                                        size={12}
+                                        strokeWidth={2}
+                                        className={`transition-transform ${
+                                          parentCollapsed ? "-rotate-90" : ""
+                                        }`}
+                                        aria-hidden="true"
+                                      />
+                                    </button>
+                                  </span>
+                                ) : null}
+                                <button
+                                  type="button"
+                                  draggable={item.kind === "bot"}
+                                  data-roster-bot-id={
+                                    item.kind === "bot" ? item.chat.id : undefined
+                                  }
+                                  data-roster-unread={item.chat.unread ? "true" : undefined}
+                                  data-roster-error={rowError && compact ? "true" : undefined}
+                                  data-roster-depth={
+                                    item.kind === "bot" && treeActive ? depth : undefined
+                                  }
+                                  aria-current={selected ? "page" : undefined}
+                                  aria-keyshortcuts={
+                                    item.kind === "bot" ? "Alt+ArrowUp Alt+ArrowDown" : undefined
+                                  }
+                                  onDragStart={(event) => {
+                                    if (item.kind !== "bot") return;
+                                    setDraggedBotId(item.chat.id);
+                                    event.dataTransfer.effectAllowed = "move";
+                                    event.dataTransfer.setData("text/plain", item.chat.id);
+                                  }}
+                                  onDragOver={(event) => {
+                                    if (
+                                      item.kind === "bot" &&
+                                      draggedBotId &&
+                                      groupBotIds.includes(draggedBotId) &&
+                                      rosterParent.get(draggedBotId) === parentId
+                                    ) {
+                                      event.preventDefault();
+                                      event.dataTransfer.dropEffect = "move";
+                                    }
+                                  }}
+                                  onDrop={(event) => {
+                                    if (
+                                      item.kind !== "bot" ||
+                                      !draggedBotId ||
+                                      rosterParent.get(draggedBotId) !== parentId
+                                    )
+                                      return;
+                                    event.preventDefault();
+                                    reorderRosterBot(draggedBotId, item.chat.id, groupBotIds);
+                                    setDraggedBotId(null);
+                                  }}
+                                  onDragEnd={() => setDraggedBotId(null)}
+                                  onKeyDown={(event) => {
+                                    if (
+                                      item.kind !== "bot" ||
+                                      !event.altKey ||
+                                      (event.key !== "ArrowUp" && event.key !== "ArrowDown")
+                                    )
+                                      return;
+                                    const siblings = siblingBotIds(parentId);
+                                    const index = siblings.indexOf(item.chat.id);
+                                    const target =
+                                      siblings[index + (event.key === "ArrowUp" ? -1 : 1)];
+                                    if (!target) return;
+                                    event.preventDefault();
+                                    reorderRosterBot(item.chat.id, target, groupBotIds);
+                                  }}
+                                  onMouseEnter={() => prefetchSidebarChat(item)}
+                                  onFocus={() => prefetchSidebarChat(item)}
+                                  onClick={() => {
+                                    openSpaceChat(
+                                      item.chat.spaceId,
+                                      item.kind === "bot"
+                                        ? `/app/${item.chat.id}`
+                                        : `/app/g/${item.chat.id}`,
+                                    );
+                                  }}
+                                  onContextMenu={(event) => {
+                                    if (item.chat.spaceId !== bootstrapMe?.spaceId) return;
+                                    event.preventDefault();
+                                    botMenuAnchor.current = event.currentTarget;
+                                    setBotMenu({
+                                      kind: item.kind,
+                                      id: item.chat.id,
+                                      position: { x: event.clientX, y: event.clientY },
+                                    });
+                                  }}
+                                  className={`flex w-full items-center ${
+                                    compact
+                                      ? "min-h-11 gap-2 rounded-xl px-2.5 py-1.5"
+                                      : "gap-3 rounded-xl px-2.5 py-[10px]"
+                                  } text-start ${
+                                    item.kind === "bot" ? "cursor-grab active:cursor-grabbing" : ""
+                                  } ${
+                                    selected
+                                      ? "bg-sidebar-accent"
+                                      : "group-hover/row:bg-sidebar-accent"
+                                  }`}
+                                  style={
+                                    treeActive
+                                      ? { paddingInlineStart: `${24 + depth * 14}px` }
+                                      : undefined
+                                  }
+                                >
+                                  {item.kind === "bot" ? (
+                                    <BotAvatar
+                                      color={item.chat.color}
+                                      identity={item.chat.id}
+                                      size={compact ? 28 : 38}
+                                      status={item.chat.status}
+                                    />
+                                  ) : (
+                                    <GroupAvatar
+                                      members={
+                                        item.chat.id === activeSnapshot?.groupId
+                                          ? (activeSnapshot.members ?? item.chat.members)
+                                          : item.chat.members
+                                      }
+                                      size={compact ? 28 : 38}
+                                    />
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center justify-between gap-1.5">
+                                      <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
+                                        <span
+                                          dir="auto"
+                                          data-roster-bot-name={
+                                            item.kind === "bot" ? "" : undefined
+                                          }
+                                          className={`min-w-0 truncate text-[14px] text-foreground ${
+                                            item.chat.unread ? "font-semibold" : "font-medium"
+                                          }`}
+                                        >
+                                          {item.chat.name}
+                                        </span>
+                                        {item.chat.unread ? (
+                                          <span className="sr-only">
+                                            <Trans> (unread)</Trans>
+                                          </span>
+                                        ) : null}
+                                      </div>
+                                      <div className="flex shrink-0 items-center gap-1.5">
+                                        {!compact ? (
+                                          <span className="text-[11.5px] text-muted-foreground/60 tabular-nums">
+                                            {formatRosterTime(item.chat.updatedAt)}
+                                          </span>
+                                        ) : null}
+                                        {item.chat.unread ? (
+                                          <span
+                                            aria-hidden="true"
+                                            className="inline-block h-2 w-2 rounded-full bg-foreground"
+                                          />
+                                        ) : null}
+                                      </div>
+                                    </div>
+                                    {!compact && item.kind === "bot" && item.chat.title ? (
+                                      <div className="mt-1 flex">
+                                        <span className="max-w-full truncate rounded-md border border-border bg-muted px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
+                                          {item.chat.title}
+                                        </span>
+                                      </div>
+                                    ) : null}
+                                    {compact ? (
+                                      compactStatusLabel ? (
+                                        <div
+                                          dir="auto"
+                                          data-roster-status={
+                                            rowError
+                                              ? "error"
+                                              : item.kind === "bot"
+                                                ? item.chat.status
+                                                : undefined
+                                          }
+                                          className={`mt-0.5 flex items-center gap-1 text-[11.5px] ${
+                                            rowError
+                                              ? "font-medium text-destructive"
+                                              : workStatusLabel
+                                                ? "font-semibold text-status-working"
+                                                : "font-medium text-foreground/75"
+                                          }`}
+                                        >
+                                          {rowError ? (
+                                            <CircleAlert size={12} aria-hidden="true" />
+                                          ) : null}
+                                          <span>{compactStatusLabel}</span>
+                                        </div>
+                                      ) : null
+                                    ) : (
+                                      <div
+                                        dir="auto"
+                                        data-roster-preview={!workStatusLabel ? "true" : undefined}
+                                        className={`mt-1 line-clamp-2 text-[12.5px] break-words whitespace-normal ${
+                                          workStatusLabel
+                                            ? "font-semibold text-status-working"
+                                            : item.chat.unread
+                                              ? "font-medium text-foreground/75"
+                                              : "text-muted-foreground/60"
+                                        }`}
+                                      >
+                                        {rosterLine}
+                                      </div>
+                                    )}
+                                  </div>
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    );
+                  })}
                 </>
+              )}
+              {archivedBots.length + archivedGroups.length > 0 && !showSpaceSearch ? (
+                <div className="mt-2 border-t border-border pt-2">
+                  <button
+                    type="button"
+                    aria-expanded={archivedOpen}
+                    onClick={() => setArchivedOpen((open) => !open)}
+                    className="flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[13.5px] text-muted-foreground hover:bg-sidebar-accent"
+                  >
+                    <span>
+                      <Trans>Archived</Trans>
+                    </span>
+                    <span>{archivedBots.length + archivedGroups.length}</span>
+                  </button>
+                  {archivedOpen ? (
+                    <>
+                      {archivedBots.map((bot) => (
+                        <div
+                          key={bot.id}
+                          className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+                        >
+                          <BotAvatar
+                            color={bot.color}
+                            identity={bot.id}
+                            size={28}
+                            status={bot.status}
+                          />
+                          <span
+                            className="min-w-0 flex-1 truncate text-[14px] text-foreground/75"
+                            dir="auto"
+                          >
+                            {bot.name}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() =>
+                              void rpc.bots.restore({ botId: bot.id }).then(() => refreshBots(true))
+                            }
+                          >
+                            <Trans>Restore</Trans>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="text-destructive hover:text-destructive"
+                            aria-label={t`Delete ${bot.name}`}
+                            onClick={() => setDeleteTarget(bot)}
+                          >
+                            <Trans>Delete</Trans>
+                          </Button>
+                        </div>
+                      ))}
+                      {archivedGroups.map((group) => (
+                        <div
+                          key={group.id}
+                          className="flex items-center gap-2 rounded-lg px-2.5 py-2"
+                        >
+                          <GroupAvatar members={group.members} size={28} />
+                          <span
+                            className="min-w-0 flex-1 truncate text-[14px] text-foreground/75"
+                            dir="auto"
+                          >
+                            {group.name}
+                          </span>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            onClick={() => void restoreGroup(group.id)}
+                          >
+                            <Trans>Restore</Trans>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="xs"
+                            className="text-destructive hover:text-destructive"
+                            aria-label={t`Delete ${group.name}`}
+                            onClick={() => setDeleteGroupTarget(group)}
+                          >
+                            <Trans>Delete</Trans>
+                          </Button>
+                        </div>
+                      ))}
+                    </>
+                  ) : null}
+                </div>
               ) : null}
             </div>
-          ) : null}
-        </div>
           </>
         )}
         <button
@@ -5361,7 +5447,18 @@ export function ShellPage() {
             </PopoverContent>
           ) : null}
         </Popover>
-        {!botsSidebarCollapsed ? <PaneResizeHandle label={t`Resize navigation`} edge="end" className="md:block" width={visibleSidebarWidth} min={220} max={botsSidebarMaxWidth} onResize={setBotsSidebarWidth} onReset={() => setBotsSidebarWidth(showToolActivity ? 316 : 260)} /> : null}
+        {!botsSidebarCollapsed ? (
+          <PaneResizeHandle
+            label={t`Resize navigation`}
+            edge="end"
+            className="md:block"
+            width={visibleSidebarWidth}
+            min={220}
+            max={botsSidebarMaxWidth}
+            onResize={setBotsSidebarWidth}
+            onReset={() => setBotsSidebarWidth(showToolActivity ? 316 : 260)}
+          />
+        ) : null}
       </aside>
 
       {/* The full-screen computer covers the sidebar, so its edge must not catch clicks there. */}
@@ -5416,17 +5513,55 @@ export function ShellPage() {
         />
       )}
 
-      {homeView ? <HomeDashboard userName={session.data?.user.name} groups={groups} readCache={recruitingReadCache.current} readCacheScope={userId && bootstrapMe?.spaceId ? JSON.stringify([userId, bootstrapMe.spaceId]) : undefined} refreshSignal={recruitingRefresh}
-        onOpenRole={(id, view = "results", filter) => navigate(`/app/g/${id}?${writeShortlistWeekFilter(new URLSearchParams({ view }), filter)}`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
+      {homeView ? (
+        <HomeDashboard
+          userName={session.data?.user.name}
+          groups={groups}
+          readCache={recruitingReadCache.current}
+          readCacheScope={
+            userId && bootstrapMe?.spaceId
+              ? JSON.stringify([userId, bootstrapMe.spaceId])
+              : undefined
+          }
+          refreshSignal={recruitingRefresh}
+          onOpenRole={(id, view = "results", filter) =>
+            navigate(
+              `/app/g/${id}?${writeShortlistWeekFilter(new URLSearchParams({ view }), filter)}`,
+            )
+          }
+          navigationCollapsed={botsSidebarCollapsed}
+          onOpenNavigation={() => {
+            setBotsSidebarCollapsedPref(false);
+            setMobileSidebarOpen(true);
+          }}
+        />
+      ) : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
       <main
         aria-hidden={mobileSidebarOpen || undefined}
         inert={mobileSidebarOpen}
-        style={roleChatWorkspace ? { "--hire-role-chat-width": `${clampWidth(roleChatWidth, 320, roleChatMaxWidth)}px` } as CSSProperties : undefined}
-        className={cn("isolate flex min-w-0 flex-1 flex-col bg-background", homeView && "hidden", roleChatWorkspace && "hire-role-chat-workspace", roleChatWorkspace && roleChatOpen && "hire-role-chat-open")}
+        style={
+          roleChatWorkspace
+            ? ({
+                "--hire-role-chat-width": `${clampWidth(roleChatWidth, 320, roleChatMaxWidth)}px`,
+              } as CSSProperties)
+            : undefined
+        }
+        className={cn(
+          "isolate flex min-w-0 flex-1 flex-col bg-background",
+          homeView && "hidden",
+          roleChatWorkspace && "hire-role-chat-workspace",
+          roleChatWorkspace && roleChatOpen && "hire-role-chat-open",
+        )}
       >
         {workspaceFull ? (
-          <div className={botsSidebarCollapsed ? "flex items-center px-4 pt-3" : "flex items-center px-4 pt-3 md:hidden"}>
+          <div
+            className={
+              botsSidebarCollapsed
+                ? "flex items-center px-4 pt-3"
+                : "flex items-center px-4 pt-3 md:hidden"
+            }
+          >
             <Button
               variant="ghost"
               size="icon-sm"
@@ -5441,7 +5576,10 @@ export function ShellPage() {
           </div>
         ) : null}
         {archivedRouteGroup ? (
-          <div role="status" className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+          <div
+            role="status"
+            className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center"
+          >
             <p className="text-sm text-muted-foreground">
               <Trans>{archivedRouteGroup.name} is archived.</Trans>
             </p>
@@ -5449,7 +5587,10 @@ export function ShellPage() {
               <Trans>Restore</Trans>
             </Button>
           </div>
-        ) : workspaceFull && !workspaceNewRole && !activeSnapshot && !(workspaceCandidates && knownThreadId) ? (
+        ) : workspaceFull &&
+          !workspaceNewRole &&
+          !activeSnapshot &&
+          !(workspaceCandidates && knownThreadId) ? (
           <MessageSkeleton label={t`Loading…`} />
         ) : null}
         {roleChatWorkspace && (inGroup ? groupId : active?.id) ? (
@@ -5460,38 +5601,123 @@ export function ShellPage() {
             readCacheScope={recruitingCacheScope}
           />
         ) : null}
-        {openingCrmRole ? <div className="px-6 py-3">
-          {openingCrmRole.error ? <RetryNotice onRetry={() => void openCrmRole(openingCrmRole.selection, openingCrmRole.view)}>{openingCrmRole.error}</RetryNotice> : <p role="status"><Trans>Opening role…</Trans></p>}
-        </div> : null}
+        {openingCrmRole ? (
+          <div className="px-6 py-3">
+            {openingCrmRole.error ? (
+              <RetryNotice
+                onRetry={() => void openCrmRole(openingCrmRole.selection, openingCrmRole.view)}
+              >
+                {openingCrmRole.error}
+              </RetryNotice>
+            ) : (
+              <p role="status">
+                <Trans>Opening role…</Trans>
+              </p>
+            )}
+          </div>
+        ) : null}
         {workspaceNewRole ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             {roleCreationForm}
           </div>
         ) : null}
-        {boundRoleView && currentBindingRead?.failed ? <div className="px-6"><RetryNotice onRetry={() => setRecruitingRefresh(value => value + 1)}>
-          <Trans>Could not load this role’s candidate records.</Trans>
-        </RetryNotice></div> : boundRoleCrmMode && !effectiveCrmSelection ? <div className="p-6"><TabLoading /></div> : null}
-        {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
-          threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
-          readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
-          shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined}
-          onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
-          onReviewSchedulingPlan={reviewSchedulingPlan} roleConversation={!emptyCrmChat} correspondence={nativeCorrespondence} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
-          crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
-            onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
-            onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
-          }}
-        /> : <p role="alert"><Trans>Choose the role again.</Trans></p>}</div> : null}
+        {boundRoleView && currentBindingRead?.failed ? (
+          <div className="px-6">
+            <RetryNotice onRetry={() => setRecruitingRefresh((value) => value + 1)}>
+              <Trans>Could not load this role’s candidate records.</Trans>
+            </RetryNotice>
+          </div>
+        ) : boundRoleCrmMode && !effectiveCrmSelection ? (
+          <div className="p-6">
+            <TabLoading />
+          </div>
+        ) : null}
+        {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? (
+          <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+            {effectiveCrmSelection ? (
+              <RecruitingPanel
+                threadId={activeSnapshot.threadId}
+                botId={inGroup ? undefined : active?.id}
+                groupId={inGroup ? groupId : undefined}
+                readCache={recruitingReadCache.current}
+                readCacheScope={recruitingCacheScope}
+                refreshSignal={recruitingRefresh}
+                onClose={() => {}}
+                shortlistWeekFilter={
+                  recruitingWorkspaceView === "contacts"
+                    ? readShortlistWeekFilter(searchParams)
+                    : undefined
+                }
+                onClearShortlistWeekFilter={() =>
+                  setSearchParams((current) => writeShortlistWeekFilter(current))
+                }
+                onReviewSchedulingPlan={reviewSchedulingPlan}
+                roleConversation={!emptyCrmChat}
+                correspondence={nativeCorrespondence}
+                onBrowseCandidates={() => openRecruitingView("results")}
+                onDiscussCandidate={discussCandidate}
+                onCandidateFeedback={feedbackCandidate}
+                candidateFeedbackRecipients={candidateFeedbackRecipients}
+                crmBrowse={{
+                  selection: effectiveCrmSelection,
+                  view: recruitingWorkspaceView,
+                  candidateId: searchParams.get("crmCandidate") ?? undefined,
+                  onSelectCandidate: (id, view = "inbox") =>
+                    setSearchParams((current) => {
+                      const next = new URLSearchParams(current);
+                      next.set("crmCandidate", id);
+                      next.set("view", view);
+                      return next;
+                    }),
+                  onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
+                }}
+              />
+            ) : (
+              <p role="alert">
+                <Trans>Choose the role again.</Trans>
+              </p>
+            )}
+          </div>
+        ) : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             {currentBindingRead?.workspace && recruitingWorkspaceView !== "inbox" ? (
               <div className="recruiting-workspace-content">
-                {recruitingWorkspaceView === "sequence" ? <>
-                  <SequenceTab roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />
-                  <details className="mt-6"><summary><Trans>Outreach drafts</Trans></summary>{nativeCorrespondence}</details>
-                </> : <InterviewTab onReviewSchedulingPlan={reviewSchedulingPlan} threadId={knownThreadId} roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />}
+                {recruitingWorkspaceView === "sequence" ? (
+                  <>
+                    <SequenceTab
+                      roleId={currentBindingRead.workspace.role.id}
+                      spaceId={currentBindingRead.workspace.role.spaceId}
+                      conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
+                      crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null}
+                      refreshSignal={recruitingRefresh}
+                      readCache={recruitingReadCache.current}
+                      readCacheScope={recruitingCacheScope}
+                    />
+                    <details className="mt-6">
+                      <summary>
+                        <Trans>Outreach drafts</Trans>
+                      </summary>
+                      {nativeCorrespondence}
+                    </details>
+                  </>
+                ) : (
+                  <InterviewTab
+                    onReviewSchedulingPlan={reviewSchedulingPlan}
+                    threadId={knownThreadId}
+                    roleId={currentBindingRead.workspace.role.id}
+                    spaceId={currentBindingRead.workspace.role.spaceId}
+                    conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
+                    crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null}
+                    refreshSignal={recruitingRefresh}
+                    readCache={recruitingReadCache.current}
+                    readCacheScope={recruitingCacheScope}
+                  />
+                )}
               </div>
-            ) : nativeCorrespondence}
+            ) : (
+              nativeCorrespondence
+            )}
           </div>
         ) : null}
         {workspaceCandidates && knownThreadId ? (
@@ -5509,9 +5735,21 @@ export function ShellPage() {
               <RecruitingPanel
                 key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
                 presentation="workspace"
-                view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "workflow" ? "results" : "contacts"}
-                shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined}
-                onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
+                view={
+                  recruitingWorkspaceView === "shortlist"
+                    ? "shortlist"
+                    : recruitingWorkspaceView === "workflow"
+                      ? "results"
+                      : "contacts"
+                }
+                shortlistWeekFilter={
+                  recruitingWorkspaceView === "contacts"
+                    ? readShortlistWeekFilter(searchParams)
+                    : undefined
+                }
+                onClearShortlistWeekFilter={() =>
+                  setSearchParams((current) => writeShortlistWeekFilter(current))
+                }
                 threadId={knownThreadId}
                 botId={inGroup ? undefined : active?.id}
                 groupId={inGroup ? groupId : undefined}
@@ -5525,381 +5763,539 @@ export function ShellPage() {
                 onDiscussCandidate={discussCandidate}
                 onCandidateFeedback={feedbackCandidate}
                 candidateFeedbackRecipients={candidateFeedbackRecipients}
-                onRevealMessage={(target) => navigate({
-                  pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
-                  search: `?${new URLSearchParams({ view: "conversation", m: target.messageId })}`,
-                })}
+                onRevealMessage={(target) =>
+                  navigate({
+                    pathname: target.groupId ? `/app/g/${target.groupId}` : `/app/${target.botId}`,
+                    search: `?${new URLSearchParams({ view: "conversation", m: target.messageId })}`,
+                  })
+                }
               />
               <div className="flex justify-end py-4">
-                <Button variant="outline" onClick={() => openRoleChat()}><Trans>Refine in chat</Trans></Button>
+                <Button variant="outline" onClick={() => openRoleChat()}>
+                  <Trans>Refine in chat</Trans>
+                </Button>
               </div>
             </div>
           </div>
         ) : null}
-        {roleChatWorkspace && !roleChatOpen ? <Button ref={roleChatTrigger} className="hire-role-chat-trigger absolute bottom-4 end-4 z-20" aria-label={t`Open role chat`} aria-controls={roleChatId} aria-expanded={false} onClick={() => openRoleChat()}><Sparkles size={17} aria-hidden /><Trans>Chat with WeKruit</Trans></Button> : null}
+        {roleChatWorkspace && !roleChatOpen ? (
+          <Button
+            ref={roleChatTrigger}
+            className="hire-role-chat-trigger absolute bottom-4 end-4 z-20"
+            aria-label={t`Open role chat`}
+            aria-controls={roleChatId}
+            aria-expanded={false}
+            onClick={() => openRoleChat()}
+          >
+            <Sparkles size={17} aria-hidden />
+            <Trans>Chat with WeKruit</Trans>
+          </Button>
+        ) : null}
         <div className={workspaceBrief ? "hire-brief-view rk-scroll" : "contents"}>
           {workspaceBrief ? (
             <div className="hire-brief-top">
               <div>
-                <h1>{recruitingWorkspaceView === "brief" ? <Trans>Job Brief</Trans> : <Trans>Client feedback</Trans>}</h1>
-                <p className="hire-brief-role" dir="auto">{inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</p>
+                <h1>
+                  {recruitingWorkspaceView === "brief" ? (
+                    <Trans>Job Brief</Trans>
+                  ) : (
+                    <Trans>Client feedback</Trans>
+                  )}
+                </h1>
+                <p className="hire-brief-role" dir="auto">
+                  {inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
+                </p>
               </div>
-              <Button variant="outline" className="hire-outline-button" onClick={() => openRecruitingView("results")}><Trans>Back to results</Trans></Button>
+              <Button
+                variant="outline"
+                className="hire-outline-button"
+                onClick={() => openRecruitingView("results")}
+              >
+                <Trans>Back to results</Trans>
+              </Button>
             </div>
           ) : null}
           <div className={workspaceBrief ? "hire-brief-grid" : "contents"}>
-        <LinkFaviconsContext.Provider value={workspaceFull && !(roleChatWorkspace && roleChatOpen) ? null : linkFavicons}>
-        <section ref={roleChatSection} id={roleChatId} hidden={roleChatHidden} inert={roleChatHidden} aria-label={t`Role conversation`} className={roleChatWorkspace ? "hire-role-chat" : workspaceFull ? "hidden" : workspaceBrief ? "hire-chat-panel" : "flex min-h-0 flex-1 flex-col"}>
-        {roleChatWorkspace && roleChatOpen ? <PaneResizeHandle label={t`Resize chat`} edge="start" className="min-[941px]:block" width={clampWidth(roleChatWidth, 320, roleChatMaxWidth)} min={320} max={roleChatMaxWidth} onResize={setRoleChatWidth} onReset={() => setRoleChatWidth(clampWidth(viewportWidth * 0.34, 320, 420))} /> : null}
-        {/* Inside main so the composer and its menus stay above it. */}
-        {!mobileSidebarOpen ? (
-          <div
-            data-testid="mobile-sidebar-swipe-edge"
-            aria-hidden="true"
-            className="absolute bottom-20 start-0 top-16 z-20 w-8 touch-none md:hidden"
-          />
-        ) : null}
-        <div className={workspaceBrief ? "app-drag hire-panel-heading justify-between" : "app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]"}>
-          <div className="flex min-w-0 items-center gap-2">
-            {/* Collapsed bots sidebar: this header is the leading edge for window chrome. */}
-            {botsSidebarCollapsed && desktopBridge() ? <WindowChrome /> : null}
-            <button
-              type="button"
-              aria-label={t`Open navigation`}
-              onClick={() => setMobileSidebarOpen(true)}
-              className="app-no-drag grid h-8 w-8 shrink-0 place-items-center rounded-lg text-foreground/75 hover:bg-accent md:hidden"
+            <LinkFaviconsContext.Provider
+              value={workspaceFull && !(roleChatWorkspace && roleChatOpen) ? null : linkFavicons}
             >
-              <Menu size={19} strokeWidth={1.7} />
-            </button>
-            {botsSidebarCollapsed ? (
-              <button
-                type="button"
-                data-testid="restore-bots-sidebar"
-                aria-label={showToolActivity ? t`Show bots` : t`Show navigation`}
-                title={showToolActivity ? t`Show bots` : t`Show navigation`}
-                onClick={() => setBotsSidebarCollapsedPref(false)}
-                className="app-no-drag hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-foreground/75 hover:bg-accent md:grid"
+              <section
+                ref={roleChatSection}
+                id={roleChatId}
+                hidden={roleChatHidden}
+                inert={roleChatHidden}
+                aria-label={t`Role conversation`}
+                className={
+                  roleChatWorkspace
+                    ? "hire-role-chat"
+                    : workspaceFull
+                      ? "hidden"
+                      : workspaceBrief
+                        ? "hire-chat-panel"
+                        : "flex min-h-0 flex-1 flex-col"
+                }
               >
-                <PanelLeftOpen size={19} strokeWidth={1.7} aria-hidden="true" />
-              </button>
-            ) : null}
-            {showToolActivity ? (
-              <button
-                type="button"
-                data-testid="bot-settings-trigger"
-                onClick={() => setPanel(inGroup ? "group-settings" : "settings")}
-                className="app-no-drag flex min-w-0 items-center gap-3"
-              >
-                {inGroup ? (
-                  <GroupAvatar
-                    members={activeSnapshot?.members ?? activeGroup?.members ?? []}
-                    size={26}
-                  />
-                ) : active ? (
-                  <BotAvatar
-                    color={active.color}
-                    identity={active.id}
-                    size={26}
-                    status={active.status}
+                {roleChatWorkspace && roleChatOpen ? (
+                  <PaneResizeHandle
+                    label={t`Resize chat`}
+                    edge="start"
+                    className="min-[941px]:block"
+                    width={clampWidth(roleChatWidth, 320, roleChatMaxWidth)}
+                    min={320}
+                    max={roleChatMaxWidth}
+                    onResize={setRoleChatWidth}
+                    onReset={() => setRoleChatWidth(clampWidth(viewportWidth * 0.34, 320, 420))}
                   />
                 ) : null}
-                <span className="min-w-0">
-                  <span className="block truncate text-[16px] font-medium text-foreground" dir="auto">
-                    {inGroup
-                      ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Group`)
-                      : (active?.name ?? t`Select a bot`)}
-                  </span>
-                </span>
-              </button>
-            ) : roleChatWorkspace ? (
-              <div className="hire-assistant-identity"><Sparkles size={18} aria-hidden /><div><strong>WeKruit</strong><span>{emptyCrmChat ? t`Role conversation` : inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</span></div></div>
-            ) : workspaceBrief ? (
-              <div className="hire-assistant-identity"><Sparkles size={18} aria-hidden /><div><strong>WeKruit</strong><span>{recruitingWorkspaceView === "brief" ? <Trans>Recruiting assistant</Trans> : <Trans>Search refinement</Trans>}</span></div></div>
-            ) : (
-              <h1 className="recruiting-heading min-w-0 truncate text-[27px] leading-none text-foreground" dir="auto">
-                {inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Role conversation`) : t`Conversation`}
-              </h1>
-            )}
-          </div>
-          <div className="flex items-center gap-1">
-            {roleChatWorkspace ? <Button variant="ghost" size="icon-sm" aria-label={t`Collapse role chat`} onClick={() => { setRoleChatOpen(false); requestAnimationFrame(() => roleChatTrigger.current?.focus()); }}><X size={18} aria-hidden /></Button> : null}
-            {activeSnapshot?.threadId && !emptyCrmChat ? (
-              <button
-                type="button"
-                aria-label={t`Export conversation`}
-                title={t`Export conversation`}
-                disabled={exportingConversation}
-                aria-busy={exportingConversation}
-                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent disabled:opacity-50"
-                onClick={async () => {
-                  const target = inGroup ? { groupId: groupId! } : { botId: active!.id };
-                  const title = inGroup
-                    ? (activeGroup?.name ?? activeSnapshot.groupName ?? t`Group`)
-                    : active!.name;
-                  setExportingConversation(true);
-                  try {
-                    const { downloadConversation } = await import("../lib/conversation-export");
-                    await downloadConversation({
-                      target,
-                      isCurrent: () =>
-                        Boolean(
-                          userId &&
-                            bootstrapMe?.spaceId &&
-                            discussionScope.current.active &&
-                            userId === botsRefreshUser.current.id &&
-                            (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId,
-                        ),
-                      title,
-                      userName,
-                      locale: i18n.locale,
-                      agentName: (botId) => showToolActivity
-                        ? (resolveTranscriptBot(botId ?? "")?.name ?? t`Agent`)
-                        : "WeKruit",
-                    });
-                  } catch (error) {
-                    setSendError(errorText(error, t`Could not export conversation`));
-                  } finally {
-                    setExportingConversation(false);
+                {/* Inside main so the composer and its menus stay above it. */}
+                {!mobileSidebarOpen ? (
+                  <div
+                    data-testid="mobile-sidebar-swipe-edge"
+                    aria-hidden="true"
+                    className="absolute bottom-20 start-0 top-16 z-20 w-8 touch-none md:hidden"
+                  />
+                ) : null}
+                <div
+                  className={
+                    workspaceBrief
+                      ? "app-drag hire-panel-heading justify-between"
+                      : "app-drag flex items-center justify-between border-b border-sidebar-border px-3 py-[17px] md:px-[22px]"
                   }
-                }}
-              >
-                <Download size={18} strokeWidth={1.6} className="text-foreground/75" aria-hidden />
-              </button>
-            ) : null}
-            {activeSnapshot?.threadId && !workspaceBrief && !roleChatWorkspace ? (
-              <button
-                type="button"
-                aria-label={t`Recruiting`}
-                title={t`Recruiting`}
-                onClick={() => setPanel(panel === "recruiting" ? null : "recruiting")}
-                aria-pressed={panel === "recruiting"}
-                data-active={panel === "recruiting" ? "" : undefined}
-                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent data-active:bg-accent"
-              >
-                <BriefcaseBusiness
-                  size={18}
-                  strokeWidth={1.6}
-                  className="text-foreground/75"
-                  aria-hidden
-                />
-              </button>
-            ) : null}
-            {showToolActivity && !inGroup && active ? (
-              <button
-                type="button"
-                title={t`Agent computer`}
-                onClick={() => {
-                  const next = panel === "computer" ? null : "computer";
-                  setPanel(next);
-                  if (next === "computer" && active) {
-                    // Refresh run/computer so Take control isn't stuck on a stale busyBotName.
-                    void refreshThread(active.id).catch(() => undefined);
-                  }
-                }}
-                data-active={panel === "computer" ? "" : undefined}
-                className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent data-active:bg-accent"
-              >
-                <Monitor size={18} strokeWidth={1.6} className="text-foreground/75" />
-              </button>
-            ) : null}
-          </div>
-        </div>
-        {!active && !activeGroup && initialBotsLoaded ? (
-          <div className="grid flex-1 place-items-center">
-            <Button
-              onClick={() => (showToolActivity ? setPanel("create") : navigate("/onboarding"))}
-            >
-              <Plus size={16} aria-hidden="true" />
-              {showToolActivity ? <Trans>Create new Bot</Trans> : <Trans>Start recruiting</Trans>}
-            </Button>
-          </div>
-        ) : !activeSnapshot ? (
-          <MessageSkeleton label={t`Loading…`} />
-        ) : (
-          <Transcript
-            key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
-            narrow={roleChatWorkspace || !showToolActivity}
-            visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
-            scrollRef={messageScroll}
-            scrollRequest={scrollRequest}
-            onScrollRequestHandled={clearScrollRequest}
-            artifactTarget={transcriptArtifactTarget}
-            messages={emptyCrmChat ? [] : transcriptMessages}
-            showToolActivity={showToolActivity}
-            olderCursor={emptyCrmChat ? null : activeSnapshot?.olderCursor ?? null}
-            loadingOlder={loadingOlder}
-            answerableAskMessageIds={emptyCrmChat ? [] : answerableAskIds}
-            running={!emptyCrmChat && transcriptRunning}
-            tailPhase={emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })}
-            workingBots={emptyCrmChat ? [] : workingBots}
-            workRuns={emptyCrmChat ? [] : workingRuns}
-            onLoadOlder={loadOlder}
-            onOpenBot={openBot}
-            onAnswer={answerMessage}
-            onReply={(message) => {
-              setReplyTarget(message);
-              setReplyQuote(null);
-            }}
-            onQuote={(message, quote) => {
-              setReplyTarget(message);
-              setReplyQuote(quote);
-            }}
-            onReact={reactToMessage}
-            onJumpToMessage={jumpToReplyMessage}
-            onOpenPeerMessages={(peer) => {
-              setPeerConversation(peer);
-            }}
-            memberName={resolveTranscriptMemberName}
-            peerBot={resolveTranscriptBot}
-            onRefresh={refreshActiveThread}
-            onBotChanged={refreshBots}
-            onAddRoutine={addSkillRoutine}
-            voiceReady={Boolean(voiceStatus?.ready)}
-            speakingMessageId={speakingMessageId}
-            onSpeak={speakMessage}
-            onOpenComputer={onOpenComputer}
-          />
-        )}
-        {showToolActivity && inGroup && composerRunning ? (
-          <div className="flex flex-wrap gap-1 px-6 pb-2">
-            {currentRuns
-              .filter((run) => isActive(run.status))
-              .map((run) => {
-                const name = resolveTranscriptBot(run.botId)?.name ?? t`Agent`;
-                return (
-                  <Button
-                    key={run.id}
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    aria-label={t`Stop ${name}`}
-                    disabled={sending}
-                    onClick={() => void stopRun(run.id)}
+                >
+                  <div className="flex min-w-0 items-center gap-2">
+                    {/* Collapsed bots sidebar: this header is the leading edge for window chrome. */}
+                    {botsSidebarCollapsed && desktopBridge() ? <WindowChrome /> : null}
+                    <button
+                      type="button"
+                      aria-label={t`Open navigation`}
+                      onClick={() => setMobileSidebarOpen(true)}
+                      className="app-no-drag grid h-8 w-8 shrink-0 place-items-center rounded-lg text-foreground/75 hover:bg-accent md:hidden"
+                    >
+                      <Menu size={19} strokeWidth={1.7} />
+                    </button>
+                    {botsSidebarCollapsed ? (
+                      <button
+                        type="button"
+                        data-testid="restore-bots-sidebar"
+                        aria-label={showToolActivity ? t`Show bots` : t`Show navigation`}
+                        title={showToolActivity ? t`Show bots` : t`Show navigation`}
+                        onClick={() => setBotsSidebarCollapsedPref(false)}
+                        className="app-no-drag hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-foreground/75 hover:bg-accent md:grid"
+                      >
+                        <PanelLeftOpen size={19} strokeWidth={1.7} aria-hidden="true" />
+                      </button>
+                    ) : null}
+                    {showToolActivity ? (
+                      <button
+                        type="button"
+                        data-testid="bot-settings-trigger"
+                        onClick={() => setPanel(inGroup ? "group-settings" : "settings")}
+                        className="app-no-drag flex min-w-0 items-center gap-3"
+                      >
+                        {inGroup ? (
+                          <GroupAvatar
+                            members={activeSnapshot?.members ?? activeGroup?.members ?? []}
+                            size={26}
+                          />
+                        ) : active ? (
+                          <BotAvatar
+                            color={active.color}
+                            identity={active.id}
+                            size={26}
+                            status={active.status}
+                          />
+                        ) : null}
+                        <span className="min-w-0">
+                          <span
+                            className="block truncate text-[16px] font-medium text-foreground"
+                            dir="auto"
+                          >
+                            {inGroup
+                              ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Group`)
+                              : (active?.name ?? t`Select a bot`)}
+                          </span>
+                        </span>
+                      </button>
+                    ) : roleChatWorkspace ? (
+                      <div className="hire-assistant-identity">
+                        <Sparkles size={18} aria-hidden />
+                        <div>
+                          <strong>WeKruit</strong>
+                          <span>
+                            {emptyCrmChat
+                              ? t`Role conversation`
+                              : inGroup
+                                ? (activeGroup?.name ?? activeSnapshot?.groupName)
+                                : active?.name}
+                          </span>
+                        </div>
+                      </div>
+                    ) : workspaceBrief ? (
+                      <div className="hire-assistant-identity">
+                        <Sparkles size={18} aria-hidden />
+                        <div>
+                          <strong>WeKruit</strong>
+                          <span>
+                            {recruitingWorkspaceView === "brief" ? (
+                              <Trans>Recruiting assistant</Trans>
+                            ) : (
+                              <Trans>Search refinement</Trans>
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <h1
+                        className="recruiting-heading min-w-0 truncate text-[27px] leading-none text-foreground"
+                        dir="auto"
+                      >
+                        {inGroup
+                          ? (activeGroup?.name ?? activeSnapshot?.groupName ?? t`Role conversation`)
+                          : t`Conversation`}
+                      </h1>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    {roleChatWorkspace ? (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t`Collapse role chat`}
+                        onClick={() => {
+                          setRoleChatOpen(false);
+                          requestAnimationFrame(() => roleChatTrigger.current?.focus());
+                        }}
+                      >
+                        <X size={18} aria-hidden />
+                      </Button>
+                    ) : null}
+                    {activeSnapshot?.threadId && !emptyCrmChat ? (
+                      <button
+                        type="button"
+                        aria-label={t`Export conversation`}
+                        title={t`Export conversation`}
+                        disabled={exportingConversation}
+                        aria-busy={exportingConversation}
+                        className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent disabled:opacity-50"
+                        onClick={async () => {
+                          const target = inGroup ? { groupId: groupId! } : { botId: active!.id };
+                          const title = inGroup
+                            ? (activeGroup?.name ?? activeSnapshot.groupName ?? t`Group`)
+                            : active!.name;
+                          setExportingConversation(true);
+                          try {
+                            const { downloadConversation } = await import(
+                              "../lib/conversation-export"
+                            );
+                            await downloadConversation({
+                              target,
+                              isCurrent: () =>
+                                Boolean(
+                                  userId &&
+                                    bootstrapMe?.spaceId &&
+                                    discussionScope.current.active &&
+                                    userId === botsRefreshUser.current.id &&
+                                    (selectedSpaceId() ?? bootstrapMe.spaceId) ===
+                                      bootstrapMe.spaceId,
+                                ),
+                              title,
+                              userName,
+                              locale: i18n.locale,
+                              agentName: (botId) =>
+                                showToolActivity
+                                  ? (resolveTranscriptBot(botId ?? "")?.name ?? t`Agent`)
+                                  : "WeKruit",
+                            });
+                          } catch (error) {
+                            setSendError(errorText(error, t`Could not export conversation`));
+                          } finally {
+                            setExportingConversation(false);
+                          }
+                        }}
+                      >
+                        <Download
+                          size={18}
+                          strokeWidth={1.6}
+                          className="text-foreground/75"
+                          aria-hidden
+                        />
+                      </button>
+                    ) : null}
+                    {activeSnapshot?.threadId && !workspaceBrief && !roleChatWorkspace ? (
+                      <button
+                        type="button"
+                        aria-label={t`Recruiting`}
+                        title={t`Recruiting`}
+                        onClick={() => setPanel(panel === "recruiting" ? null : "recruiting")}
+                        aria-pressed={panel === "recruiting"}
+                        data-active={panel === "recruiting" ? "" : undefined}
+                        className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent data-active:bg-accent"
+                      >
+                        <BriefcaseBusiness
+                          size={18}
+                          strokeWidth={1.6}
+                          className="text-foreground/75"
+                          aria-hidden
+                        />
+                      </button>
+                    ) : null}
+                    {showToolActivity && !inGroup && active ? (
+                      <button
+                        type="button"
+                        title={t`Agent computer`}
+                        onClick={() => {
+                          const next = panel === "computer" ? null : "computer";
+                          setPanel(next);
+                          if (next === "computer" && active) {
+                            // Refresh run/computer so Take control isn't stuck on a stale busyBotName.
+                            void refreshThread(active.id).catch(() => undefined);
+                          }
+                        }}
+                        data-active={panel === "computer" ? "" : undefined}
+                        className="app-no-drag grid h-[30px] w-[34px] place-items-center rounded-[9px] hover:bg-accent data-active:bg-accent"
+                      >
+                        <Monitor size={18} strokeWidth={1.6} className="text-foreground/75" />
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                {!active && !activeGroup && initialBotsLoaded ? (
+                  <div className="grid flex-1 place-items-center">
+                    <Button
+                      onClick={() =>
+                        showToolActivity ? setPanel("create") : navigate("/onboarding")
+                      }
+                    >
+                      <Plus size={16} aria-hidden="true" />
+                      {showToolActivity ? (
+                        <Trans>Create new Bot</Trans>
+                      ) : (
+                        <Trans>Start recruiting</Trans>
+                      )}
+                    </Button>
+                  </div>
+                ) : !activeSnapshot ? (
+                  <MessageSkeleton label={t`Loading…`} />
+                ) : (
+                  <Transcript
+                    key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
+                    narrow={roleChatWorkspace || !showToolActivity}
+                    visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
+                    scrollRef={messageScroll}
+                    scrollRequest={scrollRequest}
+                    onScrollRequestHandled={clearScrollRequest}
+                    artifactTarget={transcriptArtifactTarget}
+                    messages={emptyCrmChat ? [] : transcriptMessages}
+                    showToolActivity={showToolActivity}
+                    olderCursor={emptyCrmChat ? null : (activeSnapshot?.olderCursor ?? null)}
+                    loadingOlder={loadingOlder}
+                    answerableAskMessageIds={emptyCrmChat ? [] : answerableAskIds}
+                    running={!emptyCrmChat && transcriptRunning}
+                    tailPhase={
+                      emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })
+                    }
+                    workingBots={emptyCrmChat ? [] : workingBots}
+                    workRuns={emptyCrmChat ? [] : workingRuns}
+                    onLoadOlder={loadOlder}
+                    onOpenBot={openBot}
+                    onAnswer={answerMessage}
+                    onReply={(message) => {
+                      setReplyTarget(message);
+                      setReplyQuote(null);
+                    }}
+                    onQuote={(message, quote) => {
+                      setReplyTarget(message);
+                      setReplyQuote(quote);
+                    }}
+                    onReact={reactToMessage}
+                    onJumpToMessage={jumpToReplyMessage}
+                    onOpenPeerMessages={(peer) => {
+                      setPeerConversation(peer);
+                    }}
+                    memberName={resolveTranscriptMemberName}
+                    peerBot={resolveTranscriptBot}
+                    onRefresh={refreshActiveThread}
+                    onBotChanged={refreshBots}
+                    onAddRoutine={addSkillRoutine}
+                    voiceReady={Boolean(voiceStatus?.ready)}
+                    speakingMessageId={speakingMessageId}
+                    onSpeak={speakMessage}
+                    onOpenComputer={onOpenComputer}
+                  />
+                )}
+                {showToolActivity && inGroup && composerRunning ? (
+                  <div className="flex flex-wrap gap-1 px-6 pb-2">
+                    {currentRuns
+                      .filter((run) => isActive(run.status))
+                      .map((run) => {
+                        const name = resolveTranscriptBot(run.botId)?.name ?? t`Agent`;
+                        return (
+                          <Button
+                            key={run.id}
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            aria-label={t`Stop ${name}`}
+                            disabled={sending}
+                            onClick={() => void stopRun(run.id)}
+                          >
+                            <Trans>Stop {name}</Trans>
+                          </Button>
+                        );
+                      })}
+                  </div>
+                ) : null}
+                {resuming || shownSteer ? (
+                  <div
+                    role="status"
+                    className="px-6 pb-2 text-center text-[13px] text-muted-foreground"
                   >
-                    <Trans>Stop {name}</Trans>
-                  </Button>
-                );
-              })}
-          </div>
-        ) : null}
-        {resuming || shownSteer ? (
-          <div role="status" className="px-6 pb-2 text-center text-[13px] text-muted-foreground">
-            {resuming ? (
-              <Trans>Interrupted, resuming…</Trans>
-            ) : shownSteer === "applied" ? (
-              <Trans>Interjection applied</Trans>
-            ) : (
-              <Trans>Interjection queued</Trans>
-            )}
-          </div>
-        ) : null}
-        {recordingSkill ? (
-          <div className="px-6 pb-2 text-center text-[13px] text-destructive">
-            <Trans>Teaching in progress. Stop teaching before sending a new message.</Trans>
-          </div>
-        ) : null}
-        {active || activeGroup ? (
-          <Composer
-            key={`${userId}:${bootstrapMe?.spaceId}:${composerDraftKey}:${showToolActivity ? "developer" : "recruiting"}`}
-            ref={composerRef}
-            draftKey={composerDraftKey}
-            contextKey={selectedCorrespondence?.scope === correspondenceScope ? JSON.stringify([userId, bootstrapMe?.spaceId, selectedCorrespondence.reference.threadId, selectedCorrespondence.reference.roleId, selectedCorrespondence.reference.sourceId, selectedCorrespondence.reference.providerMessageId, selectedCorrespondence.reference.emailId]) : undefined}
-            enterToSend={enterToSend}
-            compact={!showToolActivity}
-            activeName={emptyCrmChat ? t`Role conversation` : inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
-            running={!emptyCrmChat && composerRunning}
-            disabled={Boolean(recordingSkill) || Boolean(openingCrmRole && !openingCrmRole.error) || (emptyCrmChat && !crmSelection?.crmRoleId)}
-            pendingAttachments={emptyCrmChat ? attachmentsForThread(pendingAttachments, composerDraftKey) : activePendingAttachments}
-            attachmentNotice={attachmentNotice}
-            sendError={sendError}
-            runError={emptyCrmChat ? null : displayedRunError}
-            runErrorId={emptyCrmChat ? null : displayedRunErrorId}
-            onRunErrorPresented={handleRunErrorPresented}
-            onDismissError={dismissComposerError}
-            sending={sending}
-            fileInputRef={fileInputRef}
-            onAttachmentPick={emptyCrmChat ? files => onAttachmentPick(files, composerDraftKey) : onAttachmentPick}
-            onRemoveAttachment={removeAttachment}
-            onSend={sendFromComposer}
-            onStop={stopRun}
-            onVoice={
-              !emptyCrmChat && !inGroup && active
-                ? () => {
-                    if (!userId || !bootstrapMe?.spaceId) return;
-                    if (!voiceStatus?.ready) {
-                      openSettings("voice");
-                      return;
+                    {resuming ? (
+                      <Trans>Interrupted, resuming…</Trans>
+                    ) : shownSteer === "applied" ? (
+                      <Trans>Interjection applied</Trans>
+                    ) : (
+                      <Trans>Interjection queued</Trans>
+                    )}
+                  </div>
+                ) : null}
+                {recordingSkill ? (
+                  <div className="px-6 pb-2 text-center text-[13px] text-destructive">
+                    <Trans>Teaching in progress. Stop teaching before sending a new message.</Trans>
+                  </div>
+                ) : null}
+                {active || activeGroup ? (
+                  <Composer
+                    key={`${userId}:${bootstrapMe?.spaceId}:${composerDraftKey}:${showToolActivity ? "developer" : "recruiting"}`}
+                    ref={composerRef}
+                    draftKey={composerDraftKey}
+                    contextKey={
+                      selectedCorrespondence?.scope === correspondenceScope
+                        ? JSON.stringify([
+                            userId,
+                            bootstrapMe?.spaceId,
+                            selectedCorrespondence.reference.threadId,
+                            selectedCorrespondence.reference.roleId,
+                            selectedCorrespondence.reference.sourceId,
+                            selectedCorrespondence.reference.providerMessageId,
+                            selectedCorrespondence.reference.emailId,
+                          ])
+                        : undefined
                     }
-                    startCall({
-                      userId,
-                      spaceId: bootstrapMe.spaceId,
-                      botId: active.id,
-                      botName: active.name,
-                      botColor: active.color,
-                      transcribe: voiceStatus ? Boolean(voiceStatus.transcribe) : undefined,
-                    });
-                  }
-                : undefined
-            }
-            artifactTarget={transcriptArtifactTarget}
-            replyTarget={emptyCrmChat ? null : activeReplyTarget}
-            replyQuote={emptyCrmChat ? null : activeReplyQuote}
-            replyTargetName={emptyCrmChat ? undefined : replyTargetName}
-            onClearReply={clearReply}
-            mentionTargets={showToolActivity ? composerMentionTargets : []}
-            agentSkills={showToolActivity ? agentSkills : []}
-            onSlashOpen={showToolActivity ? refreshAgentSkills : undefined}
-            onSlashAction={
-              showToolActivity
-                ? (action) => {
-                    if (action === "chat-settings") {
-                      setPanel(inGroup ? "group-settings" : "settings");
-                      return;
+                    enterToSend={enterToSend}
+                    compact={!showToolActivity}
+                    activeName={
+                      emptyCrmChat
+                        ? t`Role conversation`
+                        : inGroup
+                          ? (activeGroup?.name ?? activeSnapshot?.groupName)
+                          : active?.name
                     }
-                    if (action === "settings-general") {
-                      openSettings("general");
-                      return;
+                    running={!emptyCrmChat && composerRunning}
+                    disabled={
+                      Boolean(recordingSkill) ||
+                      Boolean(openingCrmRole && !openingCrmRole.error) ||
+                      (emptyCrmChat && !crmSelection?.crmRoleId)
                     }
-                    if (action === "settings-usage") {
-                      openSettings("usage");
+                    pendingAttachments={
+                      emptyCrmChat
+                        ? attachmentsForThread(pendingAttachments, composerDraftKey)
+                        : activePendingAttachments
                     }
-                  }
-                : undefined
-            }
-          />
-        ) : !initialBotsLoaded ? (
-          <div
-            aria-hidden="true"
-            className="mx-6 mb-6 h-[54px] rounded-3xl border border-border bg-background"
-          />
-        ) : null}
-        </section>
-        </LinkFaviconsContext.Provider>
-          {workspaceBrief && activeSnapshot?.threadId ? (
-            <aside aria-label={t`Saved role summary`}>
-              {recruitingWorkspaceView === "feedback" ? (
-                <CalibrationRoundCard
-                  conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
-                  refreshSignal={recruitingRefresh}
+                    attachmentNotice={attachmentNotice}
+                    sendError={sendError}
+                    runError={emptyCrmChat ? null : displayedRunError}
+                    runErrorId={emptyCrmChat ? null : displayedRunErrorId}
+                    onRunErrorPresented={handleRunErrorPresented}
+                    onDismissError={dismissComposerError}
+                    sending={sending}
+                    fileInputRef={fileInputRef}
+                    onAttachmentPick={
+                      emptyCrmChat
+                        ? (files) => onAttachmentPick(files, composerDraftKey)
+                        : onAttachmentPick
+                    }
+                    onRemoveAttachment={removeAttachment}
+                    onSend={sendFromComposer}
+                    onStop={stopRun}
+                    onVoice={
+                      !emptyCrmChat && !inGroup && active
+                        ? () => {
+                            if (!userId || !bootstrapMe?.spaceId) return;
+                            if (!voiceStatus?.ready) {
+                              openSettings("voice");
+                              return;
+                            }
+                            startCall({
+                              userId,
+                              spaceId: bootstrapMe.spaceId,
+                              botId: active.id,
+                              botName: active.name,
+                              botColor: active.color,
+                              transcribe: voiceStatus ? Boolean(voiceStatus.transcribe) : undefined,
+                            });
+                          }
+                        : undefined
+                    }
+                    artifactTarget={transcriptArtifactTarget}
+                    replyTarget={emptyCrmChat ? null : activeReplyTarget}
+                    replyQuote={emptyCrmChat ? null : activeReplyQuote}
+                    replyTargetName={emptyCrmChat ? undefined : replyTargetName}
+                    onClearReply={clearReply}
+                    mentionTargets={showToolActivity ? composerMentionTargets : []}
+                    agentSkills={showToolActivity ? agentSkills : []}
+                    onSlashOpen={showToolActivity ? refreshAgentSkills : undefined}
+                    onSlashAction={
+                      showToolActivity
+                        ? (action) => {
+                            if (action === "chat-settings") {
+                              setPanel(inGroup ? "group-settings" : "settings");
+                              return;
+                            }
+                            if (action === "settings-general") {
+                              openSettings("general");
+                              return;
+                            }
+                            if (action === "settings-usage") {
+                              openSettings("usage");
+                            }
+                          }
+                        : undefined
+                    }
+                  />
+                ) : !initialBotsLoaded ? (
+                  <div
+                    aria-hidden="true"
+                    className="mx-6 mb-6 h-[54px] rounded-3xl border border-border bg-background"
+                  />
+                ) : null}
+              </section>
+            </LinkFaviconsContext.Provider>
+            {workspaceBrief && activeSnapshot?.threadId ? (
+              <aside aria-label={t`Saved role summary`}>
+                {recruitingWorkspaceView === "feedback" ? (
+                  <CalibrationRoundCard
+                    conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
+                    refreshSignal={recruitingRefresh}
+                    readCache={recruitingReadCache.current}
+                    readCacheScope={recruitingCacheScope}
+                    onSend={sendRoleText}
+                  />
+                ) : null}
+                <RecruitingPanel
+                  key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
+                  presentation="workspace"
+                  summary={recruitingWorkspaceView === "brief" ? "brief" : "feedback"}
                   readCache={recruitingReadCache.current}
                   readCacheScope={recruitingCacheScope}
-                  onSend={sendRoleText}
+                  threadId={activeSnapshot.threadId}
+                  botId={inGroup ? undefined : active?.id}
+                  refreshSignal={recruitingRefresh}
+                  showDiagnostics={false}
+                  onClose={() => openRecruitingView("conversation")}
                 />
-              ) : null}
-              <RecruitingPanel
-                key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
-                presentation="workspace"
-                summary={recruitingWorkspaceView === "brief" ? "brief" : "feedback"}
-                readCache={recruitingReadCache.current}
-                readCacheScope={recruitingCacheScope}
-                threadId={activeSnapshot.threadId}
-                botId={inGroup ? undefined : active?.id}
-                refreshSignal={recruitingRefresh}
-                showDiagnostics={false}
-                onClose={() => openRecruitingView("conversation")}
-              />
-            </aside>
-          ) : null}
+              </aside>
+            ) : null}
           </div>
         </div>
       </main>
@@ -5912,7 +6308,13 @@ export function ShellPage() {
 
       <ResizableSidePanel
         botsSidebarWidth={visibleSidebarWidth}
-        open={Boolean(recruitingDetail.current || (!workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create")))}
+        open={Boolean(
+          recruitingDetail.current ||
+            (!workspaceFull &&
+              !(workspaceBrief && panel === "recruiting") &&
+              panel &&
+              (active || activeGroup || panel === "create")),
+        )}
         panel={recruitingDetail.current ? "recruiting-detail" : (panel ?? "closed")}
       >
         {recruitingDetail.current && activeSnapshot?.threadId ? (
@@ -5925,12 +6327,20 @@ export function ShellPage() {
                     void draftCrmReply({
                       ...context,
                       threadId: activeSnapshot.threadId,
-                      email: { sender: email.sender, recipients: email.recipients, subject: email.subject, date: email.date },
+                      email: {
+                        sender: email.sender,
+                        recipients: email.recipients,
+                        subject: email.subject,
+                        date: email.date,
+                      },
                     })
                 : undefined
             }
           />
-        ) : !workspaceFull && !(workspaceBrief && panel === "recruiting") && panel && (active || activeGroup || panel === "create") ? (
+        ) : !workspaceFull &&
+          !(workspaceBrief && panel === "recruiting") &&
+          panel &&
+          (active || activeGroup || panel === "create") ? (
           <div className="rk-scroll h-full w-full overflow-y-auto px-5 py-[17px]">
             {panel !== "routine" &&
             panel !== "create" &&
@@ -6450,7 +6860,9 @@ export function ShellPage() {
               const request = contextBot
                 ? rpc.bots.archive({ botId: contextBot.id })
                 : rpc.groups.archive({ groupId: contextGroup!.id });
-              void request.then(() => refreshBots(true)).catch((error) => setSendError(errorText(error, t`Could not continue`)));
+              void request
+                .then(() => refreshBots(true))
+                .catch((error) => setSendError(errorText(error, t`Could not continue`)));
             }}
             onDelete={() => {
               if (contextBot) setDeleteTarget(contextBot);
@@ -6738,10 +7150,19 @@ export function ShellPage() {
 
         {pluginsOpen ? (
           <PluginsOverlay
-            key={JSON.stringify([userId, bootstrapMe?.spaceId, panelTarget, activeSnapshot?.threadId, connectionMemberIds])}
+            key={JSON.stringify([
+              userId,
+              bootstrapMe?.spaceId,
+              panelTarget,
+              activeSnapshot?.threadId,
+              connectionMemberIds,
+            ])}
             activeBotId={workspaceNewRole ? undefined : activeBotId.current}
             coordinatorBotId={connectionMemberIds[0]}
-            recruitingBotIds={{outreach: recruitingConnectionBot("outreach"), scheduling: recruitingConnectionBot("scheduling")}}
+            recruitingBotIds={{
+              outreach: recruitingConnectionBot("outreach"),
+              scheduling: recruitingConnectionBot("scheduling"),
+            }}
             memberBotIds={inGroup || workspaceNewRole ? connectionMemberIds : undefined}
             developerView={showToolActivity}
             onClose={() => setPluginsOpen(false)}

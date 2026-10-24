@@ -639,15 +639,13 @@ export const appContract = {
     crmData: oc
       .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
       .output(RecruitingCrmDataOutputSchema),
-    schedulingPlans: oc
-      .input(z.object({ threadId: Id }))
-      .output(
-        z.object({
-          plans: z.array(RecruitingSchedulingPlanSchema),
-          slots: z.array(RecruitingSchedulingSlotSchema.safeExtend({ observedAt: IsoDate })),
-          partial: z.boolean(),
-        }),
-      ),
+    schedulingPlans: oc.input(z.object({ threadId: Id })).output(
+      z.object({
+        plans: z.array(RecruitingSchedulingPlanSchema),
+        slots: z.array(RecruitingSchedulingSlotSchema.safeExtend({ observedAt: IsoDate })),
+        partial: z.boolean(),
+      }),
+    ),
     saveSchedulingPlan: oc
       .input(RecruitingSchedulingPlanInputSchema)
       .output(RecruitingSchedulingPlanSchema),
