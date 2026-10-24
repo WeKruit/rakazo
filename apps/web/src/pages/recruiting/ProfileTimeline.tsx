@@ -34,15 +34,34 @@ function logoInitials(name: string) {
   return letters.slice(0, 2).join("").toUpperCase();
 }
 
-/** An explicitly supplied company/school image, otherwise initials. */
-export function CompanyLogo({ name, src }: { name: string; src?: string | null }) {
+/** A supplied company/school image, or the favicon of its own supplied website; otherwise initials. */
+export function CompanyLogo({
+  name,
+  src,
+  small = false,
+}: {
+  name: string;
+  src?: string | null;
+  small?: boolean;
+}) {
   return (
     <ProfileImage
       src={src}
       fallback={logoInitials(name)}
-      className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-xs font-medium text-muted-foreground"
+      className={`flex shrink-0 items-center justify-center overflow-hidden bg-muted font-medium text-muted-foreground ${
+        small ? "size-4 rounded-sm text-[8px]" : "size-10 rounded-md text-xs"
+      }`}
     />
   );
+}
+
+/** The organization's own site, from a website the entry itself supplied. */
+function websiteUrl(host: string | undefined) {
+  return host ? `https://${host}/` : null;
+}
+
+export function websiteFavicon(host: string | undefined | null) {
+  return host ? `https://${host}/favicon.ico` : null;
 }
 
 function useDuration() {
@@ -103,7 +122,9 @@ function Row({
         ? (entry.secondary ?? entry.primary)
         : entry.primary;
   const href =
-    profileImageUrl(entry.organizationUrl) ?? organizationLogo(logoName ?? undefined, link ?? null);
+    profileImageUrl(entry.organizationUrl) ??
+    websiteUrl(entry.website) ??
+    organizationLogo(logoName ?? undefined, link ?? null);
   const organization = (name: string) =>
     href ? (
       <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
@@ -118,7 +139,11 @@ function Row({
       {logoName ? (
         <CompanyLogo
           name={logoName}
-          src={profileImageUrl(entry.logoUrl) ?? organizationLogo(logoName, asset ?? null)}
+          src={
+            profileImageUrl(entry.logoUrl) ??
+            organizationLogo(logoName, asset ?? null) ??
+            websiteFavicon(entry.website)
+          }
         />
       ) : (
         <span aria-hidden className="size-10 shrink-0" />

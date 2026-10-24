@@ -44,6 +44,27 @@ describe("requirementRows", () => {
 });
 
 describe("candidateSections", () => {
+  it("reads the photo and current company facts out of research findings", () => {
+    const field = (label: string, value: string) => ({ label, value, sourceUrls: [] });
+    const sections = candidateSections([
+      field("Profile image url", "https://img.example/p.jpg"),
+      field("Current company url", "www.acme.example"),
+      field("Current company industry", "Robotics"),
+      field("Current company size", "1,001-5,000"),
+      field("Other", "kept"),
+    ]);
+    expect(sections.photoUrl).toBe("https://img.example/p.jpg");
+    expect(sections.company).toEqual({
+      host: "www.acme.example",
+      industry: "Robotics",
+      size: "1,001-5,000",
+    });
+    expect(sections.findings.map((item) => item.label)).toEqual(["Other"]);
+    expect(
+      candidateSections([field("Profile image url", "http://img.example/p.jpg")]).photoUrl,
+    ).toBeNull();
+  });
+
   it("moves assessment, scope and resume link out of research findings", () => {
     const sections = candidateSections([
       { label: "Ranking scope", value: "Rank within the first ten", sourceUrls: [] },

@@ -10,12 +10,28 @@ import {
 import { isMatchScoreKey, matchScore100, matchScoreScale } from "./match-score.js";
 import { recruitingCalibrationIdentity } from "./recruiting-playbook.js";
 
+/**
+ * Flat profile columns the recruiter's profile view renders. They stay outside the frozen
+ * identity contract, so older rows without them remain valid.
+ */
+export const RECRUITING_CANDIDATE_PROFILE_COLUMNS = [
+  "Also return these profile columns from the person's public profile, with null for anything not found:",
+  '- experience: list[str], one entry per position, newest first, formatted "Title | Company | company website URL | Start – End | Location" (use "Present" for a current role; keep the dates as precise as the source).',
+  '- education: list[str], one entry per degree, formatted "School | Degree, field of study | school website URL | Start – End".',
+  "- profile_image_url: url of the person's own profile photo.",
+  "- current_company_url: url of the current employer's own website.",
+  "- current_company_industry: str, the current employer's industry.",
+  '- current_company_size: str, the current employer\'s published employee range, such as "1,001-5,000".',
+  "Leave an unknown part of an entry empty rather than guessing it.",
+].join("\n");
+
 export const RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS = [
   `Canonical candidate output schema: ${RECRUITING_CANDIDATE_OUTPUT_SCHEMA}`,
   JSON.stringify(RECRUITING_CANDIDATE_OUTPUT_JSON_SCHEMA),
   "Return one person per row with these exact column names. Keep additional requested role signals in additional columns. Native sourced cells may retain {value, source_id} and _sources metadata.",
   "Use null for unknown fields, including unknown evidence_urls; an empty evidence_urls array means no evidence links were supplied. Do not invent identities, resumes or emails. Do not collect phone numbers. linkedin_url must identify the person's HTTPS LinkedIn /in/ profile. evidence_urls and resume_url must be actual supplied HTTP(S) links.",
   "match_score is a number from 0 to 100 (100 = strongest fit). Never use a 0–10 or 0–1 scale.",
+  RECRUITING_CANDIDATE_PROFILE_COLUMNS,
   "All returned rows are provider_report observations. Provider labels do not establish qualification; preserve source links for subsequent evidence assessment.",
 ].join("\n");
 

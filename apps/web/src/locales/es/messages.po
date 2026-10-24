@@ -93,6 +93,11 @@ msgstr "Conexión {0}"
 msgid "{0} default"
 msgstr ""
 
+#. placeholder {0}: sections.company.size
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{0} employees"
+msgstr ""
+
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} handling"

@@ -45,6 +45,20 @@ const EDUCATION = /educat|school|degree|universit|college/i;
 // A concern mentioning skills is research text, not a declared list of skills.
 const SKILLS =
   /^(?:(?:technical|core|key|top|primary|professional)\s+)?skills?(?:\s+(?:list|summary))?$/i;
+const PHOTO = /^(?:profile (?:image|photo|picture)|photo|avatar)(?: url)?$/i;
+const COMPANY_URL = /^current company (?:url|website)$/i;
+const COMPANY_INDUSTRY = /^current company industry$/i;
+const COMPANY_SIZE = /^current company (?:size|employees|headcount)$/i;
+
+/** An https link with no credentials, as written; anything else is not used as an image or site. */
+function httpsUrl(value: string | null | undefined) {
+  try {
+    const url = new URL(value?.trim() ?? "");
+    return url.protocol === "https:" && !url.username && !url.password ? url : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Autumn's report fields sorted into the sections a recruiter reads, as returned and never
@@ -87,7 +101,15 @@ export function candidateSections(
   const emails = contact(EMAIL);
   const phones = contact(PHONE);
   const contactStatus = contact(CONTACT_STATUS);
+  const photo = contact(PHOTO);
+  const companyUrl = contact(COMPANY_URL);
+  const companyIndustry = contact(COMPANY_INDUSTRY);
+  const companySize = contact(COMPANY_SIZE);
   const placed = new Set<Field>([
+    ...photo,
+    ...companyUrl,
+    ...companyIndustry,
+    ...companySize,
     ...criteria,
     ...assessment,
     ...(scope ? [scope] : []),
@@ -209,6 +231,18 @@ export function candidateSections(
     email: emails[0]?.value?.trim() ?? null,
     phone: phones[0]?.value?.trim() ?? null,
     contactStatus: contactStatus[0]?.value?.trim() ?? null,
+    photoUrl: photo.map((field) => httpsUrl(field.value)?.href).find(Boolean) ?? null,
+    company: {
+      host:
+        companyUrl
+          .map((field) =>
+            httpsUrl(/^www\./i.test(field.value ?? "") ? `https://${field.value}` : field.value),
+          )
+          .find((url) => url && !/(^|\.)linkedin\.com$/.test(url.hostname))
+          ?.hostname.toLowerCase() ?? null,
+      industry: companyIndustry[0]?.value?.trim() || null,
+      size: companySize[0]?.value?.trim() || null,
+    },
     findings: all.filter((field) => !placed.has(field) && field !== summary),
   };
 }
