@@ -44,6 +44,14 @@ describe("parseTimeline", () => {
     });
   });
 
+  it("keeps research notes as words instead of a dated entry", () => {
+    const value =
+      "Partial, undated (search-index snippet, checked 2026-10-24): headline 'Ops lead'. Current role per saved profile: Manager at Acme.";
+    expect(parseTimeline(value, "experience", NOW).every((entry) => !entry.structured)).toBe(true);
+    const [school] = parseTimeline("Rutgers University (checked 2026-10-24)", "education", NOW);
+    expect(school?.structured).toBe(false);
+  });
+
   it("never treats a LinkedIn page or a bare name as a website", () => {
     const [entry] = parseTimeline(
       "Node.js Developer | Gamma | https://www.linkedin.com/company/gamma | 2020 – 2021",

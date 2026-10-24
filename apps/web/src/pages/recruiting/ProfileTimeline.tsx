@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { recruitingCandidateSourceText } from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { ProfileImage } from "./ProfileImage";
+import { CompanyLogo, OrgBadge, websiteFavicon } from "./OrgBadge";
 import type { ProfileAssets } from "./profileAssets";
 import { organizationLogo, profileImageUrl } from "./profileAssets";
 import type { TimelineEntry, TimelineKind } from "./profileTimeline";
@@ -21,47 +21,9 @@ type TimelineField = {
 };
 type SourcesRenderer = (props: { urls: readonly string[] }) => ReactNode;
 
-function logoInitials(name: string) {
-  const letters = [...name].filter((char) => /\p{L}|\p{N}/u.test(char));
-  const words = name.split(/\s+/).filter((word) => /\p{L}|\p{N}/u.test(word));
-  if (words.length > 1) {
-    return words
-      .slice(0, 2)
-      .map((word) => [...word][0] ?? "")
-      .join("")
-      .toUpperCase();
-  }
-  return letters.slice(0, 2).join("").toUpperCase();
-}
-
-/** A supplied company/school image, or the favicon of its own supplied website; otherwise initials. */
-export function CompanyLogo({
-  name,
-  src,
-  small = false,
-}: {
-  name: string;
-  src?: string | null;
-  small?: boolean;
-}) {
-  return (
-    <ProfileImage
-      src={src}
-      fallback={logoInitials(name)}
-      className={`flex shrink-0 items-center justify-center overflow-hidden bg-muted font-medium text-muted-foreground ${
-        small ? "size-4 rounded-sm text-[8px]" : "size-10 rounded-md text-xs"
-      }`}
-    />
-  );
-}
-
 /** The organization's own site, from a website the entry itself supplied. */
 function websiteUrl(host: string | undefined) {
   return host ? `https://${host}/` : null;
-}
-
-export function websiteFavicon(host: string | undefined | null) {
-  return host ? `https://${host}/favicon.ico` : null;
 }
 
 function useDuration() {
@@ -125,14 +87,16 @@ function Row({
     profileImageUrl(entry.organizationUrl) ??
     websiteUrl(entry.website) ??
     organizationLogo(logoName ?? undefined, link ?? null);
-  const organization = (name: string) =>
-    href ? (
-      <a href={href} target="_blank" rel="noreferrer" className="underline underline-offset-2">
-        {name}
+  const organization = (name: string) => {
+    const badge = <OrgBadge name={name} host={entry.website} logo={false} />;
+    return href ? (
+      <a href={href} target="_blank" rel="noreferrer">
+        {badge}
       </a>
     ) : (
-      name
+      badge
     );
+  };
   const dateLabel = entry.current ? `${entry.startLabel} – ${t`Present`}` : entry.dateLabel;
   return (
     <li className="flex gap-3">

@@ -49,6 +49,41 @@ const PHOTO = /^(?:profile (?:image|photo|picture)|photo|avatar)(?: url)?$/i;
 const COMPANY_URL = /^current company (?:url|website)$/i;
 const COMPANY_INDUSTRY = /^current company industry$/i;
 const COMPANY_SIZE = /^current company (?:size|employees|headcount)$/i;
+const HEADLINE = /^headline$/i;
+const HIGHLIGHTS = /^highlights$/i;
+const KEY_WORKS = /^key works$/i;
+const CONCERNS = /^concerns$/i;
+const CRITERIA_BRIEF = /^criteria brief$/i;
+
+/** One entry per line of a returned list column, trimmed, empty lines dropped. */
+function lines(fields: readonly Field[]) {
+  return fields.flatMap((field) =>
+    (field.value ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+}
+
+/** A criterion column name or display label reduced to the letters both share. */
+function criterionKey(name: string) {
+  return name
+    .trim()
+    .replace(/^(?:rule_[a-z]+\d+|round\d+)_/i, "")
+    .replace(/^rule_/i, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** The lead clause of a provider fact ("Logistics (LinkedIn label). Blurb…" → "Logistics"). */
+export function shortFact(value: string | null | undefined) {
+  const lead = value
+    ?.split(/\s*[(（;；]|\.\s/)[0]
+    ?.trim()
+    .replace(/[.,，。]$/, "");
+  if (!lead) return null;
+  return lead.length > 40 ? `${lead.slice(0, 39)}…` : lead;
+}
 
 /** An https link with no credentials, as written; anything else is not used as an image or site. */
 function httpsUrl(value: string | null | undefined) {
@@ -105,7 +140,25 @@ export function candidateSections(
   const companyUrl = contact(COMPANY_URL);
   const companyIndustry = contact(COMPANY_INDUSTRY);
   const companySize = contact(COMPANY_SIZE);
+  const headline = contact(HEADLINE);
+  const highlights = contact(HIGHLIGHTS);
+  const keyWorks = contact(KEY_WORKS);
+  const concerns = contact(CONCERNS);
+  const criteriaBrief = contact(CRITERIA_BRIEF);
+  const briefs = new Map(
+    lines(criteriaBrief).flatMap((line) => {
+      const [key, name, verdict] = line.split("|").map((part) => part.trim());
+      return key && (name || verdict)
+        ? [[criterionKey(key), { name: name || null, verdict: verdict || null }] as const]
+        : [];
+    }),
+  );
   const placed = new Set<Field>([
+    ...headline,
+    ...highlights,
+    ...keyWorks,
+    ...concerns,
+    ...criteriaBrief,
     ...photo,
     ...companyUrl,
     ...companyIndustry,
@@ -123,7 +176,7 @@ export function candidateSections(
     ...all.filter((field) => field.structuredValue === undefined && FIT_LABELS.has(field.label)),
   ]);
   const criterionRows = criteria.map((field, index) => ({
-    ...criterionRow(field, criterionContext),
+    ...criterionRow(field, criterionContext, briefs.get(criterionKey(field.label))),
     key: `criterion:${index}:${field.label}`,
   }));
   const assessmentRows = assessed.map((item, index) =>
@@ -209,6 +262,22 @@ export function candidateSections(
     criteria,
     requirements,
     skillEvidence,
+    quick: {
+      headline: headline[0]?.value?.trim() || null,
+      highlights: lines(highlights),
+      keyWorks: lines(keyWorks)
+        .map((line) => {
+          const [title = "", ...rest] = line.split("|").map((part) => part.trim());
+          const url = rest.find((part) => httpsUrl(part))?.trim() ?? null;
+          return {
+            title,
+            detail: rest.filter((part) => part && part !== url).join(" · ") || null,
+            url,
+          };
+        })
+        .filter((work) => work.title),
+      concerns: lines(concerns),
+    },
     requirementSources: [
       ...new Set(
         assessment.flatMap((field, index) => [...assessed[index]!.sourceUrls, ...field.sourceUrls]),
@@ -268,6 +337,8 @@ export type RequirementRow = {
   /** Original source reference kept separately from the readable definition. */
   criterionId?: string;
   status: RequirementStatus;
+  /** Autumn's own short name and verdict for this criterion, when it returned them. */
+  brief?: { name: string | null; verdict: string | null };
   text: string;
   sourceUrls: readonly string[];
 };
@@ -308,10 +379,15 @@ function criterionName(reference: string, context?: ProfileCriterionContext) {
   return /^R\d+$/i.test(reference) ? { label: null, criterionId: reference } : { label: reference };
 }
 
-function criterionRow(field: Field, context?: ProfileCriterionContext): RequirementRow {
+function criterionRow(
+  field: Field,
+  context?: ProfileCriterionContext,
+  brief?: { name: string | null; verdict: string | null },
+): RequirementRow {
   return {
     key: `criterion:${field.label}`,
     ...criterionName(field.label, context),
+    ...(brief ? { brief } : {}),
     status:
       field.providerStatus === "match"
         ? "match"

@@ -4,7 +4,7 @@ import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { PersonAvatar } from "./DetailPanel";
-import { CompanyLogo } from "./ProfileTimeline";
+import { CompanyLogo } from "./OrgBadge";
 import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections } from "./profile";
 import {

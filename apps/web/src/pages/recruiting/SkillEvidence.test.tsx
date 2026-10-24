@@ -40,6 +40,12 @@ async function mount(node: ReactNode) {
 }
 const button = (view: HTMLElement, text: string) =>
   [...view.querySelectorAll("button")].find((item) => item.textContent === text)!;
+const NO_QUICK = { headline: null, highlights: [], keyWorks: [], concerns: [] };
+/** Opens every assessment row so its full evidence is in the DOM. */
+async function expandRows(view: HTMLElement) {
+  for (const row of view.querySelectorAll<HTMLButtonElement>("li > button:not([disabled])"))
+    await act(async () => row.click());
+}
 const context = (view: HTMLElement) => view.querySelector('section[aria-label="Skill evidence"]')!;
 const profile = candidateSections([
   { label: "Skills", value: "Go, Rust, Kotlin", sourceUrls: ["https://example.test/profile"] },
@@ -160,18 +166,26 @@ it("leads with the supplied criterion name, preserves all assessment states, and
       score={null}
       rank={null}
       summary={null}
-      scope={null}
+      quick={NO_QUICK}
       rows={sections.requirements}
       sourceUrls={[]}
       keywords={["C++"]}
     />,
   );
+  await expandRows(view);
   const rows = [...view.querySelectorAll("li")];
-  expect(rows[0]?.textContent).toBe("GoMatchGo services\n\nConcern: scale unverified.");
-  expect(rows[1]?.textContent).toContain("RustUnknownNo evidence provided.");
-  expect(rows[2]?.textContent).toContain("KotlinGapNo Kotlin experience.");
+  // The status is the row icon's accessible name; the evidence opens under the criterion.
+  expect(rows.map((row) => row.querySelector("svg")?.getAttribute("aria-label"))).toEqual([
+    "Match",
+    "Unknown",
+    "Gap",
+    "Partial match",
+  ]);
+  expect(rows[0]?.textContent).toBe("GoGo services\n\nConcern: scale unverified.");
+  expect(rows[1]?.textContent).toContain("RustNo evidence provided.");
+  expect(rows[2]?.textContent).toContain("KotlinNo Kotlin experience.");
   expect(rows[3]?.textContent).toContain(
-    "Criterion name unavailableR1Partial matchC++ experience in a lab.",
+    "Criterion name unavailableR1C++ experience in a lab.",
   );
   expect([...view.querySelectorAll("mark")].map((item) => item.textContent)).toEqual([
     "Go",
@@ -212,16 +226,18 @@ it("shows the exact technical definition ahead of its reference in assessment an
         score={null}
         rank={null}
         summary={null}
-        scope={null}
+        quick={NO_QUICK}
         rows={sections.requirements}
         sourceUrls={[]}
       />
       <SkillEvidence skills={sections.skills} evidence={sections.skillEvidence} />
     </>,
   );
+  // Only the assessment card's rows; the skill list below has its own buttons.
+  await expandRows(view.firstElementChild as HTMLElement);
   const row = view.querySelector("li")!;
   expect(row.textContent).toBe(
-    "C++ production systemsR4Partial matchPrototype only. Counterevidence: no production ownership stated.",
+    "C++ production systemsR4Prototype only. Counterevidence: no production ownership stated.",
   );
   expect(row.querySelector(".font-medium")?.textContent).toBe("C++ production systems");
   await act(async () => button(view, "C++").click());

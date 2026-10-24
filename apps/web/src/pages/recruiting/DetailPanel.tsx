@@ -24,17 +24,14 @@ import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
+import { CompanyLogo, OrgBadge, websiteFavicon } from "./OrgBadge";
 import { ProfileImage } from "./ProfileImage";
-import {
-  CompanyLogo,
-  EducationTimeline,
-  ExperienceTimeline,
-  websiteFavicon,
-} from "./ProfileTimeline";
+import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
   initials,
   linkedinHandle,
+  shortFact,
   sourceLabel,
   storedProfileFields,
 } from "./profile";
@@ -257,6 +254,9 @@ export function RecruitingDetailPanel({
     (sections.company.host ? `https://${sections.company.host}/` : null);
   const email = person.email ?? sections.email;
   const phone = person.phone ?? sections.phone;
+  const sizeFact = shortFact(sections.company.size);
+  const companySize =
+    sizeFact && !/employee|员工|人/i.test(sizeFact) ? t`${sizeFact} employees` : sizeFact;
   const role =
     person.title && company ? t`${person.title} at ${company}` : (person.title ?? company);
   const resumeUrl = candidate?.resumeUrl ?? sections.resumeUrl;
@@ -375,16 +375,23 @@ export function RecruitingDetailPanel({
                   </span>
                 </p>
               ) : null}
-              {sections.company.industry || sections.company.size ? (
-                <p className="text-sm text-muted-foreground">
-                  <span className="truncate">
-                    {[
-                      sections.company.industry,
-                      sections.company.size ? t`${sections.company.size} employees` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
+              {company &&
+              (sections.company.industry || sections.company.size || sections.company.host) ? (
+                <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                  <OrgBadge
+                    name={company}
+                    src={companyLogo}
+                    host={sections.company.host}
+                    logo={false}
+                    facts={[sections.company.industry, sections.company.size]}
+                  />
+                  {[shortFact(sections.company.industry), companySize]
+                    .filter(Boolean)
+                    .map((fact) => (
+                      <span key={fact} className="shrink-0 truncate">
+                        · {fact}
+                      </span>
+                    ))}
                 </p>
               ) : null}
               {person.location || handle ? (
@@ -572,7 +579,7 @@ export function RecruitingDetailPanel({
                     score={fitBadge || null}
                     rank={sections.fit?.rank ?? null}
                     summary={sections.summary}
-                    scope={sections.scope}
+                    quick={sections.quick}
                     rows={sections.requirements}
                     sourceUrls={sections.requirementSources}
                     keywords={sections.skills}

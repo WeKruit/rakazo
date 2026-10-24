@@ -4,7 +4,7 @@ import {
   AskUserInputJsonSchema,
   BotSecretName,
   botSecretDestinationSchema,
-  RecruitingApprovalToolInputSchema,
+  RecruitingApprovalToolCallSchema,
   RecruitingAssessmentToolInputSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingCrmImportInputSchema,
@@ -612,8 +612,8 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_request_approval",
     description:
-      'Request one-time human confirmation of the exact current package: saved role requirements, role documents or the ten-profile calibration and rule changes. For requirements use stage:"brief", roleId and expectedRoleRevision only; the server displays the saved requirements and records confirmation after the original native card is approved. Generic ask_user answers never confirm requirements. Use the current role revision, the completed document approval effect, and ten exact saved candidate sources (effectId, rowIndex, artifactRef, roleRevisionId, providerTaskId), with their observed LinkedIn and evidence URLs. Save and confirm qualification changes in the role first; documents and calibration approval record the review and do not edit the role. Never self-approve.',
-    inputSchema: z.toJSONSchema(RecruitingApprovalToolInputSchema, { io: "input" }),
+      'Request one-time human confirmation of the exact current package: saved role requirements, role documents or the ten-profile calibration and rule changes. For requirements use stage:"brief", roleId and expectedRoleRevision only; the server displays the saved requirements and records confirmation after the original native card is approved. Generic ask_user answers never confirm requirements. Use the current role revision, the completed document approval effect (omit documentsApprovalEffectId and the server uses the approved documents of this revision), and ten exact saved candidate sources (effectId, rowIndex, artifactRef, roleRevisionId, providerTaskId), with their observed LinkedIn and evidence URLs. Save and confirm qualification changes in the role first; documents and calibration approval record the review and do not edit the role. Never self-approve.',
+    inputSchema: z.toJSONSchema(RecruitingApprovalToolCallSchema, { io: "input" }),
   },
   {
     name: "recruiting_reminders",
