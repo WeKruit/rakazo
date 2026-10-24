@@ -124,6 +124,8 @@ describe.skipIf(!enabled)("persisted Pi usage accounting", () => {
         provider: model.model.provider,
         modelId: model.model.id,
         baseUrl: model.baseUrl,
+        contextWindow: 160_000,
+        maxTokens: 4096,
         cacheCapabilities: {
           scope: "connection",
           retentionMode: "short",
