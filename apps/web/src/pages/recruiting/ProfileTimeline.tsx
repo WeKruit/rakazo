@@ -21,21 +21,31 @@ function logoInitials(name: string) {
 }
 
 /** Initials on a muted tile; a favicon from the field's own source host replaces them when it loads. */
-export function CompanyLogo({ name, host }: { name: string; host?: string | null }) {
-  const [failed, setFailed] = useState(false);
+export function CompanyLogo({
+  name,
+  host,
+  small = false,
+}: {
+  name: string;
+  host?: string | null;
+  small?: boolean;
+}) {
+  const [failed, setFailed] = useState<string | null>(null);
   return (
     <span
       aria-hidden
-      className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted text-xs font-medium text-muted-foreground"
+      className={`flex shrink-0 items-center justify-center overflow-hidden bg-muted font-medium text-muted-foreground ${
+        small ? "size-4 rounded-sm text-[8px]" : "size-10 rounded-md text-xs"
+      }`}
     >
-      {host && !failed ? (
+      {host && failed !== host ? (
         <img
           src={`https://${host}/favicon.ico`}
           alt=""
           className="size-full object-contain"
           referrerPolicy="no-referrer"
           loading="lazy"
-          onError={() => setFailed(true)}
+          onError={() => setFailed(host)}
         />
       ) : (
         logoInitials(name)
@@ -97,7 +107,9 @@ function Row({
     <li className="flex gap-3">
       <CompanyLogo
         name={logoName}
-        host={kind === "experience" ? companyHost(entry.secondary, sourceUrls) : null}
+        host={
+          entry.website ?? (kind === "experience" ? companyHost(entry.secondary, sourceUrls) : null)
+        }
       />
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">

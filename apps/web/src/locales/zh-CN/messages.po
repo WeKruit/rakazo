@@ -91,6 +91,11 @@ msgstr "{0} 连接"
 msgid "{0} default"
 msgstr ""
 
+#. placeholder {0}: sections.company.size
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{0} employees"
+msgstr "{0} 名员工"
+
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} handling"
@@ -688,6 +693,14 @@ msgstr "审批边界"
 #: src/pages/shell/message-cards.tsx
 msgid "Approve"
 msgstr "批准"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr "确认候选人校准"
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr "确认招聘材料"
 
 #: src/pages/shell/message-cards.tsx
 msgid "Approve this server to let your agent use its tools."
@@ -1622,6 +1635,10 @@ msgstr "确认密码"
 #: src/components/AskCard.tsx
 msgid "Confirm reply"
 msgstr "确认回复"
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr "确认岗位要求"
 
 #: src/components/AskCard.tsx
 msgid "Confirm sending email"
@@ -7719,15 +7736,3 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "你的任务"
-
-#: src/components/AskCard.tsx
-msgid "Confirm requirements"
-msgstr "确认岗位要求"
-
-#: src/components/AskCard.tsx
-msgid "Approve documents"
-msgstr "确认招聘材料"
-
-#: src/components/AskCard.tsx
-msgid "Approve calibration"
-msgstr "确认候选人校准"

@@ -22,7 +22,7 @@ import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
-import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
+import { CompanyLogo, EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
   initials,
@@ -35,15 +35,35 @@ import { reminderCandidateKeys, TasksTab } from "./TasksTab";
 
 const SKILLS_SHOWN = 12;
 
-export function PersonAvatar({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
+export function PersonAvatar({
+  name,
+  size = "md",
+  src,
+}: {
+  name: string;
+  size?: "sm" | "md";
+  src?: string | null;
+}) {
+  const [failed, setFailed] = useState<string | null>(null);
   return (
     <span
       aria-hidden
-      className={`grid shrink-0 place-items-center rounded-full bg-muted font-medium text-muted-foreground ${
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-muted font-medium text-muted-foreground ${
         size === "sm" ? "size-8 text-[11px]" : "size-12 text-sm"
       }`}
     >
-      {initials(name)}
+      {src && failed !== src ? (
+        <img
+          src={src}
+          alt=""
+          className="size-full object-cover"
+          referrerPolicy="no-referrer"
+          loading="lazy"
+          onError={() => setFailed(src)}
+        />
+      ) : (
+        initials(name)
+      )}
     </span>
   );
 }
@@ -230,6 +250,21 @@ export function RecruitingDetailPanel({
                   <span className="truncate">{role}</span>
                 </p>
               ) : null}
+              {sections.company.industry || sections.company.size ? (
+                <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                  {company ? (
+                    <CompanyLogo name={company} host={sections.company.host} small />
+                  ) : null}
+                  <span className="truncate">
+                    {[
+                      sections.company.industry,
+                      sections.company.size ? t`${sections.company.size} employees` : null,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
+                </p>
+              ) : null}
               {person.location || handle ? (
                 <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                   {person.location ? (
@@ -251,7 +286,7 @@ export function RecruitingDetailPanel({
                 </p>
               ) : null}
             </div>
-            <PersonAvatar name={person.name} />
+            <PersonAvatar name={person.name} src={sections.photoUrl} />
           </div>
           <details open className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
             <summary className="cursor-pointer font-medium">
