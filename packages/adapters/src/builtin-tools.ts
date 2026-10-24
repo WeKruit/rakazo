@@ -12,6 +12,7 @@ import {
   RecruitingFeedbackInputSchema,
   RecruitingNotesToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingProfilesToolInputSchema,
   RecruitingRemindersToolInputSchema,
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
@@ -626,6 +627,12 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       'Internal candidate notes for the signed-in recruiter (no approval, nothing is sent). operation list {candidateKeys (1-10), roleId?} returns {items} newest first; create {candidateKey, body (<= 8000 chars), roleId?}; update {id, body}; delete {id}. candidateKey is "autumn:<key>" or "crm:<id>", the same keys roleCandidates items and reminders use. Use for "note that X prefers remote" or to read what the recruiter wrote about a person.',
     inputSchema: z.toJSONSchema(RecruitingNotesToolInputSchema, { io: "input" }),
+  },
+  {
+    name: "recruiting_profiles",
+    description:
+      "Saved full profiles (dated work history, education, photo, company websites and logos) for candidates in the pool, owner-scoped and reused as a cache. operation list {candidateKeys (1-50)} says who already has one and when it was fetched; reuse it instead of paying for another lookup. To add one: fetch the person's full record by their LinkedIn URL with the connected profile-data connector, then call save {candidateKey} in the same run. The server reads that lookup's own retained result, matches it to this person by LinkedIn URL and stores it; never pass profile facts yourself. Internal record keeping: no approval, nothing is sent. Profile facts are attributed provider data, not an assessment.",
+    inputSchema: z.toJSONSchema(RecruitingProfilesToolInputSchema, { io: "input" }),
   },
   {
     name: "recruiting_feedback",

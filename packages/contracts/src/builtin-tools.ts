@@ -40,6 +40,7 @@ export const BUILTIN_TOOL_NAMES = [
   "recruiting_feedback",
   "recruiting_reminders",
   "recruiting_notes",
+  "recruiting_profiles",
   "web_search",
   "web_fetch",
   "cloud_agent_launch",

@@ -6,7 +6,7 @@ import { useState } from "react";
 import { PersonAvatar } from "./DetailPanel";
 import { CompanyLogo } from "./OrgBadge";
 import type { ProfileCriterionRevision } from "./profile";
-import { candidateSections } from "./profile";
+import { candidateSections, withSavedProfile } from "./profile";
 import {
   organizationLogo,
   profileAssets,
@@ -27,7 +27,10 @@ export type CandidateDirectoryProps = {
 };
 
 function directoryProfile(row: RoleCandidate, revision?: ProfileCriterionRevision) {
-  const fields = row.autumn?.latestSource?.report?.fields ?? [];
+  const fields = withSavedProfile(
+    row.autumn?.savedProfile,
+    row.autumn?.latestSource?.report?.fields ?? [],
+  );
   const company = row.crm?.company ?? row.autumn?.company ?? null;
   const assets = profileAssets(fields, company);
   const sections = candidateSections(profileContentFields(fields), {

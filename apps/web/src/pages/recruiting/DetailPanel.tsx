@@ -34,6 +34,7 @@ import {
   shortFact,
   sourceLabel,
   storedProfileFields,
+  withSavedProfile,
 } from "./profile";
 import { organizationLogo, profileAssets, profileContentFields } from "./profileAssets";
 import { RetryNotice } from "./RetryNotice";
@@ -237,10 +238,10 @@ export function RecruitingDetailPanel({
   ];
   const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
-  const fields = [
+  const fields = withSavedProfile(candidate?.savedProfile, [
     ...(candidate?.latestSource?.report?.fields ?? []),
     ...storedProfileFields(person.profile),
-  ];
+  ]);
   const company = person.company ?? candidate?.company;
   const assets = profileAssets(fields, company);
   const sections = candidateSections(profileContentFields(fields), {
