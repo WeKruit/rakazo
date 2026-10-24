@@ -2,6 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Badge, Button } from "@rakazo/ui-web";
 import { ChevronDown, CircleCheck, CircleHelp, CircleX, Scale } from "lucide-react";
 import { useState } from "react";
+import { OrgBadge } from "./OrgBadge";
 import type { RequirementRow, RequirementStatus } from "./profile";
 import { sourceLabel } from "./profile";
 
@@ -17,7 +18,21 @@ export type QuickOutput = {
   highlights: readonly string[];
   keyWorks: readonly { title: string; detail: string | null; url: string | null }[];
   concerns: readonly string[];
+  entities: readonly {
+    name: string;
+    kind: string | null;
+    host: string | null;
+    description: string | null;
+  }[];
 };
+
+/** The longest returned organization whose name the tag mentions. */
+function entityIn(tag: string, entities: QuickOutput["entities"]) {
+  const text = tag.toLowerCase();
+  return entities
+    .filter((entity) => text.includes(entity.name.toLowerCase()))
+    .sort((a, b) => b.name.length - a.name.length)[0];
+}
 
 /**
  * Autumn's own assessment of one candidate: its short headline, tags and per-criterion verdicts
@@ -88,11 +103,26 @@ export function AssessmentCard({
       {quick.headline ? <p className="text-base font-medium">{quick.headline}</p> : null}
       {quick.highlights.length ? (
         <ul className="flex flex-wrap gap-1.5">
-          {quick.highlights.map((tag) => (
-            <li key={tag}>
-              <Badge variant="secondary">{tag}</Badge>
-            </li>
-          ))}
+          {quick.highlights.map((tag) => {
+            const entity = entityIn(tag, quick.entities);
+            return (
+              <li key={tag}>
+                <Badge variant="secondary">
+                  {entity ? (
+                    <OrgBadge
+                      name={entity.name}
+                      label={tag}
+                      host={entity.host}
+                      kind={entity.kind}
+                      description={entity.description}
+                    />
+                  ) : (
+                    tag
+                  )}
+                </Badge>
+              </li>
+            );
+          })}
         </ul>
       ) : null}
       {quick.keyWorks.length ? (

@@ -54,6 +54,7 @@ export function CompanyLogo({
  */
 export function OrgBadge({
   name,
+  label,
   host,
   kind,
   description,
@@ -61,6 +62,8 @@ export function OrgBadge({
   logo = true,
 }: {
   name: string;
+  /** Text shown in place of the name, such as a tag that mentions it. */
+  label?: string;
   host?: string | null;
   /** What it is, such as company, school or lab. */
   kind?: string | null;
@@ -80,7 +83,7 @@ export function OrgBadge({
         className="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-foreground underline decoration-dotted decoration-muted-foreground/60 underline-offset-2"
       >
         {logo ? <CompanyLogo name={name} host={host} small /> : null}
-        <span className="truncate">{name}</span>
+        <span className="truncate">{label ?? name}</span>
       </TooltipTrigger>
       <TooltipContent className="flex-col items-start gap-0.5">
         <span className="font-medium">{name}</span>
