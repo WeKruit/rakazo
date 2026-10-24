@@ -83,7 +83,12 @@ describe("agent CRM candidate and correspondence scope", () => {
   ])("rejects mismatched query before membership dispatch: %j", async (args) => {
     const read = vi.fn();
     await expect(
-      agentCrmScopedArgs({ p_candidate: candidate, ...args }, target, read),
+      agentCrmScopedArgs(
+        "list_crm_candidate_messages",
+        { p_candidate: candidate, ...args },
+        target,
+        read,
+      ),
     ).rejects.toThrow();
     expect(read).not.toHaveBeenCalled();
   });
