@@ -1,58 +1,12 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { CompanyLogo, OrgBadge } from "./OrgBadge";
 import type { TimelineEntry, TimelineKind } from "./profileTimeline";
 import { companyHost, parseTimeline, timelineStats } from "./profileTimeline";
 
 type TimelineField = { label: string; value: string | null; sourceUrls: readonly string[] };
 type SourcesRenderer = (props: { urls: readonly string[] }) => ReactNode;
-
-function logoInitials(name: string) {
-  const letters = [...name].filter((char) => /\p{L}|\p{N}/u.test(char));
-  const words = name.split(/\s+/).filter((word) => /\p{L}|\p{N}/u.test(word));
-  if (words.length > 1) {
-    return words
-      .slice(0, 2)
-      .map((word) => [...word][0] ?? "")
-      .join("")
-      .toUpperCase();
-  }
-  return letters.slice(0, 2).join("").toUpperCase();
-}
-
-/** Initials on a muted tile; a favicon from the field's own source host replaces them when it loads. */
-export function CompanyLogo({
-  name,
-  host,
-  small = false,
-}: {
-  name: string;
-  host?: string | null;
-  small?: boolean;
-}) {
-  const [failed, setFailed] = useState<string | null>(null);
-  return (
-    <span
-      aria-hidden
-      className={`flex shrink-0 items-center justify-center overflow-hidden bg-muted font-medium text-muted-foreground ${
-        small ? "size-4 rounded-sm text-[8px]" : "size-10 rounded-md text-xs"
-      }`}
-    >
-      {host && failed !== host ? (
-        <img
-          src={`https://${host}/favicon.ico`}
-          alt=""
-          className="size-full object-contain"
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          onError={() => setFailed(host)}
-        />
-      ) : (
-        logoInitials(name)
-      )}
-    </span>
-  );
-}
 
 function useDuration() {
   const { t } = useLingui();
@@ -102,20 +56,24 @@ function Row({
     return <li className="whitespace-pre-wrap text-sm">{entry.text}</li>;
   }
   const logoName = kind === "experience" ? (entry.secondary ?? entry.primary) : entry.primary;
+  const host =
+    entry.website ?? (kind === "experience" ? companyHost(entry.secondary, sourceUrls) : null);
+  const org = (name: string) => <OrgBadge name={name} host={host} logo={false} />;
   const dateLabel = entry.current ? `${entry.startLabel} – ${t`Present`}` : entry.dateLabel;
   return (
     <li className="flex gap-3">
-      <CompanyLogo
-        name={logoName}
-        host={
-          entry.website ?? (kind === "experience" ? companyHost(entry.secondary, sourceUrls) : null)
-        }
-      />
+      <CompanyLogo name={logoName} host={host} />
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-sm font-semibold">{entry.primary}</p>
-            {entry.secondary ? <p className="text-sm">{entry.secondary}</p> : null}
+            <p className="text-sm font-semibold">
+              {kind === "education" ? org(entry.primary) : entry.primary}
+            </p>
+            {entry.secondary ? (
+              <p className="text-sm">
+                {kind === "experience" ? org(entry.secondary) : entry.secondary}
+              </p>
+            ) : null}
           </div>
           {dateLabel ? (
             <div className="shrink-0 text-right text-xs text-muted-foreground">

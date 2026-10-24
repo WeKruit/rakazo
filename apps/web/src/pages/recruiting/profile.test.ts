@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { candidateSections, requirementRows } from "./profile";
+import { candidateSections, requirementRows, shortFact } from "./profile";
 
 const ASSESSMENT =
   "R1: Fact - PhD EE Stanford and MS/PhD-level background. R2: Gap - no explicit named sim stack hands-on evidence. R3: Partial - large-scale simulation mentioned. R4: hands-on robotics; [Sources read 2026-10-20: LINKEDIN, https://example.test/a, https://example.test/b/]";
@@ -84,5 +84,18 @@ describe("candidateSections", () => {
       ["R4", "unknown"],
     ]);
     expect(sections.findings.map((field) => field.label)).toEqual(["Hometown"]);
+  });
+});
+
+describe("shortFact", () => {
+  it("keeps the lead clause of a provider note", () => {
+    expect(shortFact("Transportation, Logistics (provider label). Long blurb.")).toBe(
+      "Transportation, Logistics",
+    );
+    expect(shortFact("812 employees (provider-reported count, checked 2026-10-24)")).toBe(
+      "812 employees",
+    );
+    expect(shortFact("1,001-5,000")).toBe("1,001-5,000");
+    expect(shortFact("  ")).toBeNull();
   });
 });

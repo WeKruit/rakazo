@@ -13,14 +13,21 @@ import { recruitingCalibrationIdentity } from "./recruiting-playbook.js";
  * identity contract, so older rows without them remain valid.
  */
 export const RECRUITING_CANDIDATE_PROFILE_COLUMNS = [
-  "Also return these profile columns from the person's public profile, with null for anything not found:",
+  "Also return these profile columns with exactly these names, null when nothing is found:",
   '- experience: list[str], one entry per position, newest first, formatted "Title | Company | company website URL | Start – End | Location" (use "Present" for a current role; keep the dates as precise as the source).',
   '- education: list[str], one entry per degree, formatted "School | Degree, field of study | school website URL | Start – End".',
   "- profile_image_url: url of the person's own profile photo.",
   "- current_company_url: url of the current employer's own website.",
-  "- current_company_industry: str, the current employer's industry.",
-  '- current_company_size: str, the current employer\'s published employee range, such as "1,001-5,000".',
-  "Leave an unknown part of an entry empty rather than guessing it.",
+  '- current_company_industry: str, a short industry label such as "Logistics".',
+  '- current_company_size: str, the employee count or range only, such as "1,001-5,000".',
+  "Write the following in Simplified Chinese except proper names (people, schools, companies, papers, venues stay as written):",
+  "- headline: str, one line of at most 30 characters on who the person is for this role.",
+  "- highlights: list[str], 3 to 6 tags of at most 12 characters each (school, location, first-author record, awards, notable employers).",
+  '- key_works: list[str], up to 4, each "Title | Venue Year or kind | role such as 一作 | URL".',
+  "- concerns: list[str], up to 3 open questions or gaps from your own assessment, at most 20 characters each.",
+  '- criteria_brief: list[str], one per assessed criterion, "criterion column name exactly as returned | short name of at most 8 characters | verdict of at most 20 characters".',
+  '- entities: list[str], every organization named in highlights, experience, education or key_works, "Name as written in those fields | company/school/lab/award/venue | official website URL | one-line description of at most 20 characters".',
+  "Each cell holds only its value: put sources in source_id, not check dates, caveats or provenance notes inside the value. Leave an unknown part of an entry empty rather than guessing it or replacing the entry with prose. These columns summarize the assessment; keep full reasoning in its usual cells.",
 ].join("\n");
 
 export const RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS = [

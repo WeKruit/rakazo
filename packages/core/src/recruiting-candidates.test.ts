@@ -321,6 +321,12 @@ describe("canonical recruiting candidate output", () => {
       "current_company_url",
       "current_company_industry",
       "current_company_size",
+      "headline",
+      "highlights",
+      "key_works",
+      "concerns",
+      "criteria_brief",
+      "entities",
     ])
       expect(RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS).toContain(column);
   });
