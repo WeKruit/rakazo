@@ -1540,8 +1540,10 @@ export type ListRecruitingCandidateSourcesInput = z.infer<
   typeof ListRecruitingCandidateSourcesInput
 >;
 export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
-  ListRecruitingCandidatesInput.pick({ query: true, cursor: true, limit: true }).extend({
+  // The web list pages up to 200 rows; an agent reads bounded pages of at most 100.
+  ListRecruitingCandidatesInput.pick({ query: true, cursor: true }).extend({
     operation: z.literal("list"),
+    limit: z.number().int().min(1).max(100).optional(),
   }),
   ListRecruitingCandidateSourcesInput.omit({ roleId: true }).extend({
     operation: z.literal("sources"),

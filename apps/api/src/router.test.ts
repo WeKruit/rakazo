@@ -266,7 +266,7 @@ describe("account preferences", () => {
       archivedAt: null,
       createdAt: new Date("2026-01-01T00:00:00Z"),
       updatedAt: new Date("2026-01-01T00:00:00Z"),
-      thread: { id: "group-thread", unread: false, messages: [] },
+      thread: { id: "group-thread", unread: false, messages: [], runs: [] },
       members: ["bot-1", "bot-2"].map((id) => ({ bot: { id, name: id, color: "blue", runs: [] } })),
     };
     const groupTarget = vi.fn().mockResolvedValue(group);
