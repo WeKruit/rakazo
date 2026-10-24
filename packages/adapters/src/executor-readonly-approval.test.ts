@@ -3040,6 +3040,96 @@ describe("native recruiting package approval", () => {
     });
     expect(missing.effects).toHaveLength(0);
   });
+  it("fills in the recorded calibration round when a request omits the profiles", async () => {
+    const f = approvalFixture();
+    const keys = Array.from({ length: 10 }, (_, index) => `linkedin:example-${index}`);
+    Object.assign(f.prisma, {
+      recruitingRoleRevision: { findFirst: vi.fn(async () => ({ id: "role-revision" })) },
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => ({ candidateKeys: keys })) },
+      recruitingCandidateOccurrence: {
+        findFirst: vi.fn(async ({ where }: { where: { candidateKey: string } }) => {
+          const index = keys.indexOf(where.candidateKey);
+          return {
+            rowIndex: index,
+            linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
+            evidenceUrls: [`https://example.test/evidence/${index}`],
+            page: {
+              effectId: "raw-read",
+              roleRevisionId: "role-revision",
+              taskId: null,
+              actionId: null,
+              artifactId: "raw-artifact",
+              artifactHash: "a".repeat(64),
+              requestCursor: null,
+              outputId: null,
+              observedAt: new Date("2026-10-24T00:00:00Z"),
+              effect: {
+                request: [
+                  "__rakazoCatalogTool",
+                  "direct",
+                  {
+                    route: {
+                      connectorId: "mcp",
+                      resourceId: "research-server",
+                      resourceRevision: 1,
+                      toolName: "get_rows",
+                    },
+                    args: { task_id: "provider-task" },
+                  },
+                ],
+              },
+            },
+          };
+        }),
+      },
+    });
+    Object.assign(f.prisma.externalEffect, {
+      findFirst: vi.fn(async () => ({ id: "g1-approved" })),
+    });
+    recruitingApproval.prepare.mockResolvedValue({
+      files: [file],
+      roleTitle: "Verified role",
+      profiles: keys.map((_, index) => ({
+        name: `Verified person ${index}`,
+        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
+        evidenceUrl: `https://example.test/evidence/${index}`,
+      })),
+    });
+    const request = { stage: "calibration", roleId: "role-example", expectedRoleRevision: 2 };
+    f.setCalls([{ args: request, executionId: "native-g2-round" }]);
+    await f.run();
+    const stored = f.effects[0]!.request as { profiles: unknown[]; ruleChanges: unknown[] };
+    expect(stored.ruleChanges).toEqual([]);
+    expect(stored.profiles).toHaveLength(10);
+    expect(stored.profiles[3]).toEqual({
+      candidateKey: "linkedin:example-3",
+      linkedinUrl: "https://www.linkedin.com/in/example-3",
+      evidenceUrl: "https://example.test/evidence/3",
+      source: {
+        providerTaskId: "provider-task",
+        roleRevisionId: "role-revision",
+        effectId: "raw-read",
+        rowIndex: 3,
+        artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
+      },
+    });
+
+    const none = approvalFixture();
+    Object.assign(none.prisma, {
+      recruitingRoleRevision: { findFirst: vi.fn(async () => ({ id: "role-revision" })) },
+      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+    });
+    Object.assign(none.prisma.externalEffect, {
+      findFirst: vi.fn(async () => ({ id: "g1-approved" })),
+    });
+    none.setCalls([{ args: request, executionId: "native-g2-no-round" }]);
+    await none.run();
+    expect(none.results.at(-1)).toEqual({
+      error:
+        "No calibration round of ten people is recorded for this role revision. Record the round first.",
+    });
+    expect(none.effects).toHaveLength(0);
+  });
   it("replays an exact stored assessment approval while refusing to create another legacy request", async () => {
     const f = approvalFixture();
     const request = {

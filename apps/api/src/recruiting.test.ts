@@ -37,6 +37,7 @@ vi.mock("@rakazo/db", async (importOriginal) => {
     bindRecruitingRole: vi.fn(),
     getRecruitingWorkspace: vi.fn(),
     getRecruitingWorkspaceRoleId: vi.fn(),
+    getRecruitingWorkspaceCrmTarget: vi.fn(),
     listRecruitingCandidateLinkedinUrls: vi.fn(),
     listSyncedRecruitingCrmRoleContacts: vi.fn(),
     getRecruitingCrmTarget: vi.fn(),
@@ -148,6 +149,73 @@ describe("saved recruiting correspondence", () => {
     vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({ role: { id: "role" } } as never);
     return { client, prisma: client as unknown as PrismaClient, retained };
   }
+  it.each([
+    [true, true],
+    [false, false],
+    [1, true],
+    [0, false],
+    [null, null],
+    [7, null],
+    [undefined, undefined],
+  ])(
+    "preserves observed unread metadata without guessing unsupported flags: %s",
+    async (flag, unread) => {
+      const observed = {
+        ...email,
+        ...(flag !== undefined ? { is_unread: flag } : {}),
+        step: "Follow-up 2",
+        lead_id: "90000000-0000-4000-8000-000000000009",
+      };
+      const f = fixture({
+        result: { structuredContent: { items: [observed], next_starting_after: null } },
+      });
+      const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+      expect(output.emails).toHaveLength(1);
+      expect(output.emails[0]).toMatchObject({
+        leadId: observed.lead_id,
+        step: observed.step,
+        observedAt: f.retained.updatedAt.toISOString(),
+        url: null,
+      });
+      if (unread === undefined) expect(output.emails[0]).not.toHaveProperty("unread");
+      else expect(output.emails[0]).toHaveProperty("unread", unread);
+    },
+  );
+  it("keeps absent provider metadata unknown instead of inferring it from message direction", async () => {
+    const f = fixture();
+    const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+    expect(output.emails[0]).not.toHaveProperty("unread");
+    expect(output.emails[0]).not.toHaveProperty("leadId");
+    expect(output.emails[0]).not.toHaveProperty("step");
+    expect(output.emails[0]?.observedAt).toBe(f.retained.updatedAt.toISOString());
+  });
+  it.each(["disabled", "revoked", "epoch"])(
+    "does not expose observed metadata after source %s",
+    async (state) => {
+      const f = fixture({
+        enabled: state !== "disabled",
+        permission: state !== "revoked",
+        result: {
+          structuredContent: {
+            items: [
+              {
+                ...email,
+                is_unread: true,
+                step: "private step",
+                lead_id: "90000000-0000-4000-8000-000000000009",
+              },
+            ],
+          },
+        },
+      });
+      if (state === "epoch")
+        (f.retained.request[2] as { route: { resourceRevision: number } }).route.resourceRevision =
+          99;
+      const output = await api.getRecruitingCorrespondence(f.prisma, actor, target, "inbox");
+      expect(output.emails).toEqual([]);
+      expect(JSON.stringify(output)).not.toContain("private step");
+    },
+  );
   const crmIdentity = { endpoint: "https://crm.example.test/mcp", connected: true };
   const crmCandidate = "9dbe8bb7-8fbc-4f73-9fef-5deae2b32dc7";
   it.each(["sent_recorded", "scheduled", "unknown"] as const)(
@@ -182,7 +250,14 @@ describe("saved recruiting correspondence", () => {
       });
       const membership = vi.fn(async () => [actor]);
       Object.assign(f.client, { $queryRaw: membership });
-      const anchor = { ...email, ue_type: 2, thread_id: "provider-thread" };
+      const anchor = {
+        ...email,
+        ue_type: 2,
+        thread_id: "provider-thread",
+        is_unread: 1,
+        lead_id: "90000000-0000-4000-8000-000000000009",
+        step: "Initial",
+      };
       const outbound = {
         ...anchor,
         id: "d1495a46-b3f5-4afe-8e0f-8886bedb6933",
@@ -270,7 +345,14 @@ describe("saved recruiting correspondence", () => {
       );
       expect(output.emails).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ providerMessageId: anchor.id, body: anchor.body.text }),
+          expect.objectContaining({
+            providerMessageId: anchor.id,
+            body: anchor.body.text,
+            unread: true,
+            leadId: anchor.lead_id,
+            step: "Initial",
+            observedAt: read.updatedAt.toISOString(),
+          }),
         ]),
       );
       expect(output.emails.some((row) => row.providerMessageId === outbound.id)).toBe(
@@ -647,7 +729,11 @@ describe("saved recruiting correspondence", () => {
     expect(state.client.thread.findFirst.mock.calls[0]![0].where).toMatchObject({
       activeRecruitingRole: { crmBindingEffectId: "binding" },
     });
-    expect(JSON.stringify(result)).not.toMatch(/original-thread|original-campaign|linkedin:/);
+    expect(result.emails[0]).toMatchObject({
+      providerThreadId: "original-thread",
+      campaignId: "original-campaign",
+    });
+    expect(JSON.stringify(result)).not.toContain("linkedin:");
   });
   it("rejects a CRM display if the role or binding changes before the final ownership fence", async () => {
     const state = crmFixture();
@@ -1039,7 +1125,11 @@ describe("saved recruiting correspondence", () => {
       partial: false,
       emails: [{ sender: row.from_address_email, subject: row.subject, body: row.body.text }],
     });
-    expect(JSON.stringify(result)).not.toContain(row.thread_id);
+    expect(result.emails[0]).toMatchObject({
+      providerThreadId: row.thread_id,
+      campaignId: row.campaign_id,
+      eaccount: row.eaccount,
+    });
   });
   it.each([
     ["list_emails", null],
@@ -2259,7 +2349,8 @@ describe("saved recruiting correspondence", () => {
               ],
             },
           },
-        ]);
+        ])
+        .mockResolvedValueOnce([]);
       const result = await api.getRecruitingCorrespondence(prisma, actor, target, "interview");
       expect(result).toMatchObject({
         status: "empty",
@@ -2270,24 +2361,241 @@ describe("saved recruiting correspondence", () => {
       });
     },
   );
+  function calBookingProof() {
+    return {
+      status: "completed",
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "calendar",
+            resourceRevision: 2,
+            toolName: "create_booking",
+          },
+          args: { start: "2026-10-23T13:00:00Z", attendee: { email: "person@example.test" } },
+        },
+      ],
+      result: { structuredContent: { status: "success", data: { uid: "booking-one" } } },
+      run: {
+        userId: actor.userId,
+        spaceId: actor.spaceId,
+        threadId: target.threadId,
+        botId: "main",
+        initialRecruitingRoleRevision: { roleId: "role" },
+      },
+    };
+  }
+  it.each([
+    "missing",
+    "other-role",
+    "legacy-run",
+    "other-user",
+    "other-space",
+    "other-thread",
+    "other-server",
+    "old-epoch",
+    "failed",
+    "error-result",
+    "other-uid",
+  ])("withholds calendar PII without exact role provenance: %s", async (reason) => {
+    const proof = calBookingProof();
+    if (reason === "other-role") proof.run.initialRecruitingRoleRevision.roleId = "other-role";
+    if (reason === "legacy-run") proof.run.initialRecruitingRoleRevision = null as never;
+    if (reason === "other-user") proof.run.userId = "other-user";
+    if (reason === "other-space") proof.run.spaceId = "other-space";
+    if (reason === "other-thread") proof.run.threadId = "other-thread";
+    const request = proof.request[2] as { route: { resourceId: string; resourceRevision: number } };
+    if (reason === "other-server") request.route.resourceId = "other-calendar";
+    if (reason === "old-epoch") request.route.resourceRevision = 1;
+    if (reason === "failed") proof.status = "failed";
+    if (reason === "error-result") Object.assign(proof.result, { isError: true });
+    if (reason === "other-uid") proof.result.structuredContent.data.uid = "another-booking";
+    const result = await calObservation(
+      "get_bookings",
+      {},
+      {
+        status: "success",
+        pagination: { hasNextPage: false, hasPreviousPage: false },
+        data: [
+          {
+            uid: "booking-one",
+            title: "Private other-role meeting",
+            start: "2026-10-23T13:00:00Z",
+            end: "2026-10-23T13:30:00Z",
+            attendees: [{ email: "person@example.test" }],
+          },
+        ],
+      },
+      undefined,
+      reason === "missing" ? [] : [proof],
+    );
+    // The same candidate can appear in two roles: attendee identity is not booking ownership.
+    expect(result).toMatchObject({ status: "unsupported", partial: true, events: [] });
+    expect(JSON.stringify(result)).not.toContain("Private other-role meeting");
+    expect(JSON.stringify(result)).not.toContain("person@example.test");
+  });
+  function rescheduleProof(from = "booking-one", to = "booking-two") {
+    const proof = calBookingProof();
+    const call = proof.request[2] as { route: { toolName: string }; args: Record<string, unknown> };
+    call.route.toolName = "reschedule_booking";
+    call.args = { bookingUid: from, start: "2026-10-24T13:00:00Z", lengthInMinutes: 30 };
+    proof.result.structuredContent.data = { uid: to, rescheduledFromUid: from } as never;
+    return proof;
+  }
+  const rescheduledRead = (uid = "booking-two", status = "accepted") => ({
+    status: "success",
+    data: {
+      uid,
+      status,
+      title: "Rescheduled interview",
+      start: "2026-10-24T13:00:00Z",
+      end: "2026-10-24T13:30:00Z",
+      attendees: [{ email: "person@example.test" }],
+    },
+  });
+  it("follows actual successful replacement UID receipts across a newest-first chain", async () => {
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-three" },
+      rescheduledRead("booking-three"),
+      undefined,
+      [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
+    );
+    expect(result.events).toEqual([
+      expect.objectContaining({ id: "calendar:booking:booking-three", status: "accepted" }),
+    ]);
+  });
+  it("marks only verified replaced bookings as superseded across a multi-hop chain", async () => {
+    const result = await calObservation(
+      "get_bookings",
+      {},
+      {
+        status: "success",
+        pagination: { hasNextPage: false, hasPreviousPage: false },
+        data: ["booking-one", "booking-two", "booking-three"].map(
+          (uid) => rescheduledRead(uid).data,
+        ),
+      },
+      undefined,
+      [rescheduleProof("booking-two", "booking-three"), rescheduleProof(), calBookingProof()],
+    );
+    expect(result.events.map(({ id, status }) => ({ id, status }))).toEqual([
+      { id: "calendar:booking:booking-one", status: "superseded" },
+      { id: "calendar:booking:booking-two", status: "superseded" },
+      { id: "calendar:booking:booking-three", status: "accepted" },
+    ]);
+  });
+  it("does not retire an owned original from an uncertain replacement receipt", async () => {
+    const proof = rescheduleProof();
+    proof.status = "uncertain";
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-one" },
+      rescheduledRead("booking-one"),
+      undefined,
+      [proof, calBookingProof()],
+    );
+    expect(result.events).toEqual([
+      expect.objectContaining({ id: "calendar:booking:booking-one", status: "accepted" }),
+    ]);
+  });
+  it.each([
+    "foreign-original",
+    "wrong-role",
+    "wrong-source",
+    "old-revision",
+    "failed",
+    "uncertain",
+    "uncertain-result",
+    "error",
+    "wrong-echo",
+    "missing-echo",
+  ])("does not infer replacement booking ownership from %s", async (reason) => {
+    const proof = rescheduleProof();
+    const call = proof.request[2] as {
+      route: { resourceId: string; resourceRevision: number };
+      args: Record<string, unknown>;
+    };
+    if (reason === "foreign-original") call.args.bookingUid = "foreign";
+    if (reason === "wrong-role") proof.run.initialRecruitingRoleRevision.roleId = "other";
+    if (reason === "wrong-source") call.route.resourceId = "other";
+    if (reason === "old-revision") call.route.resourceRevision++;
+    if (reason === "failed" || reason === "uncertain") proof.status = reason;
+    if (reason === "error") Object.assign(proof.result, { error: "provider error" });
+    if (reason === "uncertain-result") Object.assign(proof.result, { uncertain: true });
+    if (reason === "wrong-echo")
+      Object.assign(proof.result.structuredContent.data, { rescheduledFromUid: "foreign" });
+    if (reason === "missing-echo")
+      delete (proof.result.structuredContent.data as Record<string, unknown>).rescheduledFromUid;
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-two" },
+      rescheduledRead(),
+      undefined,
+      [proof, calBookingProof()],
+    );
+    expect(result.events).toEqual([]);
+    expect(result.partial).toBe(true);
+  });
+  it.each(["grant", "revision", "role"] as const)(
+    "rechecks current %s before returning replacement event details",
+    async (change) => {
+      await expect(
+        calObservation(
+          "get_booking",
+          { bookingUid: "booking-two" },
+          rescheduledRead(),
+          undefined,
+          [rescheduleProof(), calBookingProof()],
+          change,
+        ),
+      ).rejects.toThrow();
+    },
+  );
+  it("projects a cancelled readback only for the actually owned replacement booking", async () => {
+    const result = await calObservation(
+      "get_booking",
+      { bookingUid: "booking-two" },
+      rescheduledRead("booking-two", "cancelled"),
+      undefined,
+      [rescheduleProof(), calBookingProof()],
+    );
+    expect(result.events).toEqual([
+      expect.objectContaining({ id: "calendar:booking:booking-two", status: "cancelled" }),
+    ]);
+  });
   async function calObservation(
     tool: string,
     args: Record<string, unknown>,
     body: unknown,
     previous?: { args: Record<string, unknown>; body: unknown },
+    proofs: unknown[] = [],
+    lateChange?: "grant" | "revision" | "role",
   ) {
     const { client, prisma, retained } = fixture();
-    client.mcpServer.findMany.mockResolvedValueOnce([
-      {
-        id: "calendar",
-        name: "Cal.com",
-        endpoint: "https://mcp.cal.com/mcp",
-        secretId: "encrypted-reference",
-        revision: 2,
-        enabled: true,
-        assignments: [{ botId: "main", allowAllTools: false, allowedTools: [tool] }],
-      },
-    ]);
+    const calendarSource = {
+      id: "calendar",
+      name: "Cal.com",
+      endpoint: "https://mcp.cal.com/mcp",
+      secretId: "encrypted-reference",
+      revision: 2,
+      enabled: true,
+      assignments: [{ botId: "main", allowAllTools: false, allowedTools: [tool] }],
+    };
+    client.mcpServer.findMany.mockResolvedValue([calendarSource]);
+    if (lateChange) {
+      const after = structuredClone(calendarSource);
+      if (lateChange === "grant") after.assignments = [];
+      if (lateChange === "revision") after.revision++;
+      client.mcpServer.findMany.mockResolvedValueOnce([calendarSource]).mockResolvedValue([after]);
+      if (lateChange === "role")
+        vi.mocked(db.getRecruitingWorkspace)
+          .mockResolvedValueOnce({ role: { id: "role" } } as never)
+          .mockResolvedValueOnce({ role: { id: "other-role" } } as never);
+    }
+
     const request = (args: Record<string, unknown>) => [
       "__rakazoCatalogTool",
       "direct",
@@ -2315,8 +2623,23 @@ describe("saved recruiting correspondence", () => {
     client.externalEffect.findMany
       .mockReset()
       .mockResolvedValueOnce(retainedRows)
-      .mockResolvedValueOnce(resultRows);
-    return api.getRecruitingCorrespondence(prisma, actor, target, "interview");
+      .mockResolvedValueOnce(resultRows)
+      .mockResolvedValueOnce(proofs);
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "interview");
+    if (tool !== "get_availability") {
+      expect(client.externalEffect.findMany.mock.calls[2]?.[0]).toMatchObject({
+        where: {
+          status: "completed",
+          run: {
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+            threadId: target.threadId,
+            initialRecruitingRoleRevision: { roleId: "role" },
+          },
+        },
+      });
+    }
+    return result;
   }
   it("replaces an earlier availability window with the latest empty observation for that event type", async () => {
     const result = await calObservation(
@@ -2423,7 +2746,7 @@ describe("saved recruiting correspondence", () => {
     expect(result.partial).toBe(true);
     expect(result.events).toHaveLength(1);
   });
-  it("projects a native Cal booking without inventing its role association", async () => {
+  it("projects a native Cal booking only with its completed current-role creation", async () => {
     const result = await calObservation(
       "get_booking",
       { bookingUid: "booking-one" },
@@ -2440,6 +2763,8 @@ describe("saved recruiting correspondence", () => {
           privateNotes: "never displayed",
         },
       },
+      undefined,
+      [calBookingProof()],
     );
     expect(result).toMatchObject({
       status: "ready",
@@ -2458,6 +2783,33 @@ describe("saved recruiting correspondence", () => {
       ],
     });
     expect(JSON.stringify(result)).not.toContain("never displayed");
+  });
+  it("retains only the proven booking from an account-wide calendar page", async () => {
+    const booking = {
+      uid: "booking-one",
+      title: "Role interview",
+      start: "2026-10-23T13:00:00Z",
+      end: "2026-10-23T13:30:00Z",
+      attendees: [{ email: "person@example.test" }],
+    };
+    const result = await calObservation(
+      "get_bookings",
+      {},
+      {
+        status: "success",
+        pagination: { hasNextPage: false, hasPreviousPage: false },
+        data: [booking, { ...booking, uid: "personal-booking", title: "Private personal meeting" }],
+      },
+      undefined,
+      [calBookingProof()],
+    );
+    expect(result).toMatchObject({
+      status: "ready",
+      partial: true,
+      events: [{ title: "Role interview" }],
+    });
+    expect(result.events).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain("Private personal meeting");
   });
   it("does not claim a complete Cal booking page when earlier pages were skipped", async () => {
     const result = await calObservation(
@@ -4263,6 +4615,175 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it.each([
+    "ready",
+    "multiple",
+    "selected",
+    "selected-page",
+    "wrong-selected",
+    "deferred-mapping",
+    "revoked",
+    "no-provider",
+    "wrong-provider-id",
+    "deferred-membership",
+    "deferred-source",
+    "deferred-session",
+    "deferred-target",
+    "deferred-provider",
+  ])("reads imported campaign without creating a receipt: %s", async (mode) => {
+    const f = browserFixture();
+    const selected = {
+      mcpServerId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+      crmClientId: clientId,
+      clientLabel: "Actual client",
+      roleLabel: "Actual role",
+    };
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue({
+      role: { id: "native-role" },
+      crmTarget: { ...selected, bindingEffectId: null },
+    } as never);
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue(selected);
+    const campaignId = "50000000-0000-4000-8000-000000000005";
+    f.results.get_crm_role = {
+      organization_id: org,
+      role_spec_id: roleId,
+      campaigns: [
+        { id: campaignId, name: "Existing", status: 1, synced_at: "2026-10-23T00:00:00Z" },
+      ],
+      pagination: "offset",
+      offset: mode === "selected-page" ? 25 : 0,
+      next_offset: mode === "multiple" ? 1 : null,
+    };
+    const selection =
+      mode === "selected" ||
+      mode === "selected-page" ||
+      mode === "wrong-selected" ||
+      mode === "deferred-mapping"
+        ? {
+            campaignId: mode === "wrong-selected" ? "not-in-role" : campaignId,
+            campaignOffset: mode === "selected-page" ? 25 : 0,
+          }
+        : {};
+    if (mode === "selected") {
+      (f.results.get_crm_role as { campaigns: unknown[] }).campaigns.push({
+        id: "another-role-campaign",
+        name: "Second",
+        status: 0,
+        synced_at: "2026-10-23T00:00:00Z",
+      });
+    }
+    if (mode === "revoked") f.results.list_crm_memberships = [];
+    let authorized = true;
+    let providerAuthorized = true;
+    let started!: () => void;
+    let release!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const providerRelease = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const originalAssignment = f.mockPrisma.botMcpServer.findFirst;
+    f.mockPrisma.botMcpServer.findFirst = vi.fn(async (args: any) =>
+      args.where?.server?.endpoint === "https://mcp.instantly.ai/mcp"
+        ? mode === "no-provider" || !providerAuthorized
+          ? null
+          : {
+              botId: "coordinator",
+              allowAllTools: false,
+              allowedTools: ["get_email", "list_emails"],
+              server: { id: "instantly", revision: 4 },
+            }
+        : originalAssignment(),
+    ) as never;
+    const crmExecute = f.execute.getMockImplementation()!;
+    f.execute.mockImplementation(async function* (call, context) {
+      if (call.route?.resourceId === "instantly") {
+        if (mode.startsWith("deferred-")) {
+          started();
+          await providerRelease;
+        }
+        yield {
+          type: "result",
+          data: {
+            structuredContent: {
+              result:
+                call.route.toolName === "native_instantly_get_campaign"
+                  ? {
+                      id: mode === "wrong-provider-id" ? "other" : campaignId,
+                      name: "Existing",
+                      status: 1,
+                    }
+                  : { items: [] },
+            },
+          },
+        };
+      } else yield* crmExecute(call, context);
+    });
+    if (mode.startsWith("deferred-")) {
+      const pending = api.getRecruitingRoleCampaign(
+        { ...f.deps, stillAuthorized: async () => authorized },
+        actor,
+        target,
+        selection,
+      );
+      await providerStarted;
+      if (mode === "deferred-membership") f.results.list_crm_memberships = [];
+      if (mode === "deferred-source") f.server.revision++;
+      if (mode === "deferred-session") authorized = false;
+      if (mode === "deferred-target")
+        f.reauthorize.mockResolvedValue({ ...target, threadId: "another-thread" });
+      if (mode === "deferred-provider") providerAuthorized = false;
+      if (mode === "deferred-mapping")
+        (f.results.get_crm_role as { campaigns: unknown[] }).campaigns = [];
+      const rejected = expect(pending).rejects.toThrow();
+      release();
+      await rejected;
+    } else if (mode === "multiple") {
+      expect(await api.getRecruitingRoleCampaign(f.deps, actor, target)).toMatchObject({
+        status: "unavailable",
+        selectionRequired: true,
+        campaign: null,
+        leads: [],
+      });
+      expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
+        false,
+      );
+      Object.assign(f.mockPrisma, { run: { findFirst: vi.fn(async () => null) } });
+      const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+      expect(setup.items).toContainEqual({
+        key: "campaign",
+        state: "unavailable",
+        label: "Select an existing campaign in Sequence",
+      });
+      expect(
+        setup.items
+          .filter((item) => item.key === "campaign" || item.key === "sender")
+          .every((item) => !item.action),
+      ).toBe(true);
+      expect(JSON.stringify(setup)).not.toContain("not connected");
+    } else if (mode === "wrong-selected" || mode === "revoked") {
+      await expect(
+        api.getRecruitingRoleCampaign(f.deps, actor, target, selection),
+      ).rejects.toThrow();
+      expect(f.execute.mock.calls.some(([call]) => call.route?.resourceId === "instantly")).toBe(
+        false,
+      );
+    } else {
+      const output = await api.getRecruitingRoleCampaign(f.deps, actor, target, selection);
+      expect(output.status).toBe(
+        ["ready", "selected", "selected-page"].includes(mode) ? "ready" : "unavailable",
+      );
+      expect(output.campaign?.id).toBe(campaignId);
+      expect(output.campaign?.eaccount).toBeNull();
+      expect(
+        f.execute.mock.calls.every(([call]) => !/create|send|ensure/.test(call.route!.toolName)),
+      ).toBe(true);
+    }
+  });
   it("reads owner-scoped projected role contacts without requesting live candidate pages", async () => {
     const f = browserFixture();
     const stored = {
@@ -4314,21 +4835,22 @@ describe("live CRM browser reads", () => {
 
   it("does not substitute live candidates when the projection has not been synced", async () => {
     const f = browserFixture();
-    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue([]);
-    const result = await api.getRecruitingCrmData(
-      f.deps,
-      actor,
-      target,
-      {
-        operation: "candidates",
-        serverId: "crm",
-        serverRevision: 3,
-        organizationId: org,
-        crmRoleId: roleId,
-      },
-      { source: "projection" },
-    );
-    expect(result).toMatchObject({ scope: "stored_role", items: [], total: 0 });
+    vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue(null);
+    await expect(
+      api.getRecruitingCrmData(
+        f.deps,
+        actor,
+        target,
+        {
+          operation: "candidates",
+          serverId: "crm",
+          serverRevision: 3,
+          organizationId: org,
+          crmRoleId: roleId,
+        },
+        { source: "projection" },
+      ),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
     expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).not.toContain(
       "list_crm_candidates",
     );
@@ -4558,6 +5080,13 @@ describe("live CRM browser reads", () => {
   );
   it("adds exact-role native correspondence to original CRM mail without another provider read", async () => {
     const f = browserFixture();
+    roleMail(f);
+    f.results.list_crm_role_correspondence = {
+      ...(f.results.list_crm_role_correspondence as object),
+      candidate_id: candidateId,
+      next_offset: null,
+      messages: (f.results.list_crm_candidate_correspondence as { messages: unknown[] }).messages,
+    };
     const mailServer = {
       ...actor,
       id: "mail",
@@ -4665,8 +5194,7 @@ describe("live CRM browser reads", () => {
       });
       expect(f.execute.mock.calls.map(([call]) => call.route?.toolName)).toEqual([
         "list_crm_memberships",
-        "list_crm_candidate_messages",
-        "list_crm_candidate_correspondence",
+        "list_crm_role_correspondence",
       ]);
       let afterCapture = false;
       vi.mocked(db.readRecruitingNativeCorrespondence).mockImplementation(async () => {
@@ -4909,6 +5437,7 @@ describe("live CRM browser reads", () => {
   function roleMail(f: ReturnType<typeof browserFixture>) {
     f.assignment.allowedTools.push("list_crm_role_correspondence");
     f.results.list_crm_role_correspondence = {
+      version: 2,
       organization_id: org,
       role_id: roleId,
       pagination: "offset",
@@ -4931,6 +5460,305 @@ describe("live CRM browser reads", () => {
       ],
     };
   }
+  function inboxBridgeFixture() {
+    const f = browserFixture();
+    roleMail(f);
+    (f.results.list_crm_role_correspondence as { next_offset: number | null }).next_offset = null;
+    const workspace = { role: { id: "local-role" } };
+    vi.mocked(db.getRecruitingWorkspace).mockResolvedValue(workspace as never);
+    vi.mocked(db.readRecruitingNativeCorrespondence).mockResolvedValue(null);
+    const attached = {
+      mcpServerId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+      clientId,
+      clientLabel: "Actual client",
+      roleLabel: "Actual role",
+    };
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockReset().mockResolvedValue(attached);
+    const prisma = {
+      ...f.mockPrisma,
+      externalEffect: { findMany: vi.fn(async () => []) },
+    } as unknown as PrismaClient;
+    return {
+      ...f,
+      attached,
+      read: (page = {}) =>
+        api.getRecruitingCorrespondence(
+          prisma,
+          actor,
+          target,
+          "inbox",
+          { endpoint: f.server.endpoint, connected: true },
+          undefined,
+          page,
+          { ...f.deps },
+        ),
+    };
+  }
+  it("bridges exact attached CRM history into the canonical Inbox without fabricating receipts", async () => {
+    const f = inboxBridgeFixture();
+    const result = await f.read();
+    expect(result).toMatchObject({
+      status: "ready",
+      connections: [{ name: "CRM", status: "configured" }],
+      emails: [
+        {
+          sourceId: "crm",
+          providerMessageId: "role-mail",
+          providerThreadId: "thread-1",
+          campaignId: null,
+          savedRead: null,
+          body: "Stored full reply",
+          crm: {
+            organizationId: org,
+            crmRoleId: roleId,
+            candidateId,
+            threadId: "thread-1",
+            campaignId: null,
+          },
+        },
+      ],
+    });
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toMatchObject({ p_org: org, p_role: roleId });
+  });
+  it("preserves exact CRM campaign and mailbox metadata without deriving it from participants", async () => {
+    const f = inboxBridgeFixture();
+    const page = f.results.list_crm_role_correspondence as { messages: Record<string, unknown>[] };
+    Object.assign(page.messages[0]!, {
+      campaign_id: "campaign-original",
+      eaccount: "mailbox-original@example.test",
+    });
+    const result = await f.read();
+    expect(result.emails[0]).toMatchObject({
+      sourceId: "crm",
+      providerThreadId: "thread-1",
+      campaignId: "campaign-original",
+      eaccount: "mailbox-original@example.test",
+      crm: {
+        organizationId: org,
+        crmRoleId: roleId,
+        campaignId: "campaign-original",
+        eaccount: "mailbox-original@example.test",
+      },
+    });
+    delete page.messages[0]!.eaccount;
+    expect((await f.read()).emails[0]).not.toHaveProperty("eaccount");
+  });
+  it("does not guess a CRM role for an unbound legacy workspace", async () => {
+    const f = inboxBridgeFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue(null);
+    expect((await f.read()).emails).toEqual([]);
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("propagates CRM mail read failure rather than returning a successful empty Inbox", async () => {
+    const f = inboxBridgeFixture();
+    f.execute.mockImplementation(async function* (call) {
+      if (call.route!.toolName === "list_crm_role_correspondence")
+        yield {
+          type: "error" as const,
+          message: "Role has too many candidates for one correspondence read.",
+        };
+      else
+        yield {
+          type: "result" as const,
+          data: { structuredContent: { data: f.results[call.route!.toolName] } },
+        };
+    });
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rejects lost organization access and wrong-role CRM results", async () => {
+    const f = inboxBridgeFixture();
+    f.results.list_crm_memberships = [];
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    const other = inboxBridgeFixture();
+    (other.results.list_crm_role_correspondence as { role_id: string }).role_id = clientId;
+    await expect(other.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("does not mix history after attachment changes during the read", async () => {
+    const f = inboxBridgeFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget)
+      .mockResolvedValueOnce(f.attached)
+      .mockResolvedValue({ ...f.attached, crmRoleId: clientId });
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
+  it("rejects denied CRM role mail before calling the provider", async () => {
+    const f = inboxBridgeFixture();
+    f.assignment.allowedTools = f.assignment.allowedTools.filter(
+      (tool) => tool !== "list_crm_role_correspondence",
+    );
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("retains stored mailbox identity without inferring it from recipients", async () => {
+    const f = inboxBridgeFixture();
+    const message = (
+      f.results.list_crm_role_correspondence as { messages: Record<string, unknown>[] }
+    ).messages[0]!;
+    message.eaccount = "stored-mailbox@example.test";
+    expect((await f.read()).emails[0]?.crm?.eaccount).toBe("stored-mailbox@example.test");
+    delete message.eaccount;
+    expect((await f.read()).emails[0]?.crm).not.toHaveProperty("eaccount");
+  });
+  it("pages a role with more than 200 stored messages without skipping or truncating", async () => {
+    const f = inboxBridgeFixture();
+    const template = (
+      f.results.list_crm_role_correspondence as { messages: Record<string, unknown>[] }
+    ).messages[0]!;
+    const messages = Array.from({ length: 205 }, (_, index) => ({
+      ...template,
+      id: `mail-${String(300 - index).padStart(3, "0")}`,
+      candidate_id: index % 2 ? roleId : candidateId,
+    }));
+    f.execute.mockImplementation(async function* (call) {
+      const name = call.route!.toolName;
+      const args = call.args as { p_offset: number; p_limit: number };
+      const end = args.p_offset + args.p_limit;
+      yield {
+        type: "result" as const,
+        data: {
+          structuredContent: {
+            data:
+              name === "list_crm_role_correspondence"
+                ? {
+                    version: 2,
+                    organization_id: org,
+                    role_id: roleId,
+                    pagination: "offset",
+                    messages: messages.slice(args.p_offset, end),
+                    next_offset: end < messages.length ? end : null,
+                  }
+                : f.results[name],
+          },
+        },
+      };
+    });
+    const first = await f.read({ cursor: "200", limit: 3 });
+    expect(first.emails.map((email) => email.providerMessageId)).toEqual([
+      "mail-100",
+      "mail-099",
+      "mail-098",
+    ]);
+    expect(first.nextCursor).toBe("203");
+    const last = await f.read({ cursor: first.nextCursor!, limit: 3 });
+    expect(last.emails.map((email) => email.providerMessageId)).toEqual(["mail-097", "mail-096"]);
+    expect(last.nextCursor).toBeNull();
+  });
+  it("fails closed when multiple attachments cannot resolve to one exact CRM target", async () => {
+    const f = inboxBridgeFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockRejectedValue(new IsolationError());
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("rejects invalid page continuation rather than silently skipping history", async () => {
+    const f = inboxBridgeFixture();
+    (f.results.list_crm_role_correspondence as { next_offset: number | null }).next_offset = 20;
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rechecks the actor before reading attached history", async () => {
+    const f = inboxBridgeFixture();
+    f.deps.reauthorize.mockResolvedValue({ ...target, threadId: "other-thread" });
+    await expect(f.read()).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("rejects repeated mail across source pages instead of skipping it silently", async () => {
+    const f = inboxBridgeFixture();
+    f.execute.mockImplementation(async function* (call) {
+      const name = call.route!.toolName;
+      const data =
+        name === "list_crm_role_correspondence"
+          ? {
+              ...(f.results[name] as object),
+              next_offset: (call.args as { p_offset: number }).p_offset + 1,
+            }
+          : f.results[name];
+      yield { type: "result" as const, data: { structuredContent: { data } } };
+    });
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rejects legacy role mail semantics until the source protocol migration is deployed", async () => {
+    const f = inboxBridgeFixture();
+    delete (f.results.list_crm_role_correspondence as { version?: number }).version;
+    await expect(f.read()).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("reads shared candidate history only through the exact role-scoped source", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    const page = f.results.list_crm_role_correspondence as {
+      candidate_id?: string;
+      next_offset: number | null;
+    };
+    page.candidate_id = candidateId;
+    page.next_offset = 1;
+    const result = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "mail",
+      ...pinned,
+      candidateId,
+      crmRoleId: roleId,
+      limit: 1,
+    });
+    expect(result).toMatchObject({
+      items: [{ providerMessageId: "role-mail" }],
+      outboxScope: "unavailable_for_role",
+      outbox: [],
+      nextCursor: { p_org: org, p_role: roleId, p_candidate: candidateId, offset: 1 },
+    });
+    expect(f.execute.mock.calls.map(([call]) => call.route!.toolName)).toEqual([
+      "list_crm_memberships",
+      "list_crm_role_correspondence",
+    ]);
+    expect(f.execute.mock.calls.at(-1)?.[0].args).toEqual({
+      p_org: org,
+      p_role: roleId,
+      p_candidate: candidateId,
+      p_offset: 0,
+      p_limit: 1,
+    });
+  });
+  it.each(["role", "candidate", "missing-echo", "foreign-row"])(
+    "rejects mismatched scoped candidate mail %s",
+    async (boundary) => {
+      const f = browserFixture();
+      roleMail(f);
+      const page = f.results.list_crm_role_correspondence as {
+        candidate_id?: string;
+        role_id: string;
+        messages: { candidate_id: string }[];
+      };
+      page.candidate_id = candidateId;
+      if (boundary === "role") page.role_id = clientId;
+      if (boundary === "candidate") page.candidate_id = roleId;
+      if (boundary === "missing-echo") delete page.candidate_id;
+      if (boundary === "foreign-row") page.messages[0]!.candidate_id = roleId;
+      await expect(
+        api.getRecruitingCrmData(f.deps, actor, target, {
+          operation: "mail",
+          ...pinned,
+          candidateId,
+          crmRoleId: roleId,
+        }),
+      ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+    },
+  );
+  it("rejects candidate mail cursors belonging to another role", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "mail",
+        ...pinned,
+        candidateId,
+        crmRoleId: roleId,
+        cursor: { p_org: org, p_role: clientId, p_candidate: candidateId, offset: 1 },
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(
+      f.execute.mock.calls.some(
+        ([call]) => call.route!.toolName === "list_crm_role_correspondence",
+      ),
+    ).toBe(false);
+  });
   it("reads every stored email for the exact CRM role in one scoped read", async () => {
     const f = browserFixture();
     roleMail(f);
@@ -4959,16 +5787,12 @@ describe("live CRM browser reads", () => {
       p_offset: 0,
     });
   });
-  it("reports role-wide mail as unsupported when the tool is not assigned or not on the CRM", async () => {
+  it("distinguishes denied role mail from a missing required source tool without returning empty success", async () => {
     const unassigned = browserFixture();
-    expect(
-      await api.getRecruitingCrmData(unassigned.deps, actor, target, roleMailInput),
-    ).toMatchObject({ operation: "roleMail", supported: false, items: [] });
-    expect(
-      unassigned.execute.mock.calls.some(
-        ([call]) => call.route?.toolName === "list_crm_role_correspondence",
-      ),
-    ).toBe(false);
+    await expect(
+      api.getRecruitingCrmData(unassigned.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(unassigned.execute).not.toHaveBeenCalled();
 
     const missing = browserFixture();
     missing.assignment.allowAllTools = true;
@@ -4984,9 +5808,40 @@ describe("live CRM browser reads", () => {
           data: { structuredContent: { data: missing.results[call.route!.toolName] } },
         };
     });
-    expect(
-      await api.getRecruitingCrmData(missing.deps, actor, target, roleMailInput),
-    ).toMatchObject({ supported: false });
+    await expect(
+      api.getRecruitingCrmData(missing.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("rejects a missing required mail tool reported as an MCP error result", async () => {
+    const f = browserFixture();
+    roleMail(f);
+    f.execute.mockImplementation(async function* (call) {
+      yield {
+        type: "result" as const,
+        data:
+          call.route!.toolName === "list_crm_role_correspondence"
+            ? {
+                isError: true,
+                content: [{ type: "text", text: "Unknown tool list_crm_role_correspondence" }],
+              }
+            : { structuredContent: { data: f.results[call.route!.toolName] } },
+      };
+    });
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, roleMailInput),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+  it("checks required role mail assignment before any candidate-mail provider read", async () => {
+    const f = browserFixture();
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "mail",
+        ...pinned,
+        candidateId,
+        crmRoleId: roleId,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
   });
   it("fails a role-wide mail read the CRM rejects for another reason or another scope", async () => {
     const f = browserFixture();
@@ -5505,7 +6360,34 @@ describe("role campaign read", () => {
                 source: "local_native_instantly_rest",
                 result:
                   call.route?.toolName === "native_instantly_get_campaign"
-                    ? { id: CAMPAIGN, name: "Staff [role]", status: 1, stop_on_reply: false }
+                    ? {
+                        id: CAMPAIGN,
+                        name: "Staff [role]",
+                        status: 1,
+                        stop_on_reply: false,
+                        campaign_schedule: {
+                          schedules: [
+                            {
+                              name: "Morning",
+                              timing: { from: "09:00", to: "11:00" },
+                              timezone: "UTC",
+                              days: { "1": true },
+                            },
+                          ],
+                        },
+                        sequences: [
+                          {
+                            steps: [
+                              {
+                                type: "email",
+                                delay: 2,
+                                delay_unit: "days",
+                                variants: [{ subject: "Hello", body: "Observed content" }],
+                              },
+                            ],
+                          },
+                        ],
+                      }
                     : {
                         items: [
                           {
@@ -5552,6 +6434,7 @@ describe("role campaign read", () => {
     ]);
     expect(output).toEqual({
       status: "ready",
+      leadsComplete: true,
       serverId: "instantly",
       campaign: {
         id: CAMPAIGN,
@@ -5559,6 +6442,23 @@ describe("role campaign read", () => {
         eaccount: "team@example.test",
         status: 1,
         stopOnReply: false,
+        observedDetails: {
+          schedules: [
+            { name: "Morning", from: "09:00", to: "11:00", timezone: "UTC", days: { "1": true } },
+          ],
+          sequences: [
+            {
+              steps: [
+                {
+                  type: "email",
+                  delay: 2,
+                  delayUnit: "days",
+                  variants: [{ subject: "Hello", body: "Observed content" }],
+                },
+              ],
+            },
+          ],
+        },
       },
       leads: [
         { candidateKey: "ada-key", email: "Ada@Example.test", status: -1, interestStatus: 1 },
@@ -5566,6 +6466,79 @@ describe("role campaign read", () => {
       ],
     });
   });
+
+  it("rejects a selector outside the native role binding before reading the provider", async () => {
+    const f = fixture({
+      spaceId: actor.spaceId,
+      status: "completed",
+      result: {
+        campaignId: CAMPAIGN,
+        campaignName: "Existing",
+        leads: {},
+      },
+    });
+    await expect(
+      api.getRecruitingRoleCampaign(f.deps, actor, target, { campaignId: "other" }),
+    ).rejects.toThrow();
+    expect(f.calls).toEqual([]);
+  });
+
+  it.each(["failed", "malformed", "full-page", "cursor", "empty"])(
+    "keeps campaign identity but reports honest %s lead coverage",
+    async (kind) => {
+      const f = fixture({
+        spaceId: actor.spaceId,
+        status: "completed",
+        result: {
+          campaignId: CAMPAIGN,
+          campaignName: "Example",
+          eaccount: "team@example.test",
+          leads: {},
+        },
+      });
+      const execute = f.deps.connectors.execute;
+      f.deps.connectors.execute = async function* (call: ConnectorCall) {
+        if (call.route?.toolName !== "native_instantly_list_leads") {
+          yield* execute(call);
+          return;
+        }
+        if (kind === "failed") {
+          yield { type: "error" as const, message: "Synthetic read failure" };
+          return;
+        }
+        const items =
+          kind === "malformed"
+            ? [{ id: "bad" }]
+            : kind === "full-page"
+              ? Array.from({ length: 100 }, (_, i) => ({ email: `person-${i}@example.test` }))
+              : [];
+        yield {
+          type: "result" as const,
+          data: {
+            structuredContent: {
+              source: "local_native_instantly_rest",
+              result: { items, ...(kind === "cursor" ? { next_starting_after: "next-page" } : {}) },
+            },
+          },
+        };
+      };
+      const output = await api.getRecruitingRoleCampaign(f.deps, actor, target);
+      expect(output.status).toBe("ready");
+      expect(output.campaign?.id).toBe(CAMPAIGN);
+      expect(output.leadsComplete).toBe(kind === "empty");
+      if (kind !== "empty") {
+        const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
+        expect(setup.items.find((item) => item.key === "leads")).toEqual({
+          key: "leads",
+          state: "unavailable",
+          label: "Recipient count unavailable",
+        });
+        expect(setup.items.find((item) => item.key === "campaign")?.detail).not.toHaveProperty(
+          "leadCount",
+        );
+      }
+    },
+  );
 
   it("reports no campaign without a binding in the actor's space", async () => {
     for (const effect of [null, { spaceId: "other", status: "completed", result: {} }]) {
@@ -5934,6 +6907,7 @@ describe("role candidates (Autumn + CRM merged list)", () => {
       ),
     );
     expect(page.counts).toEqual({ shortlisted: 1, replied: 2, bounced: 1 });
+    expect(page.crmCountsComplete).toBe(false);
     expect(page.crmStatus).toBe("ok");
   });
 

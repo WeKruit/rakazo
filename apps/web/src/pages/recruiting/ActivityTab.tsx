@@ -5,6 +5,7 @@ import {
   AlertCircle,
   CalendarClock,
   Clock,
+  Eye,
   Flag,
   Mail,
   MailCheck,
@@ -13,6 +14,7 @@ import {
   Star,
 } from "lucide-react";
 import { useState } from "react";
+import { rpc } from "../../lib/rpc";
 import type { ActivityItem } from "./activity";
 import { buildActivity, relativeTime } from "./activity";
 import type { RecruitingDetailPerson } from "./detail";
@@ -26,11 +28,13 @@ import {
   TabLoading,
   TabNotice,
   useCrmData,
+  useKeyedRead,
   useRoleCrm,
   useSavedCorrespondence,
 } from "./shared";
 
 const ICONS: Record<ActivityItem["kind"], LucideIcon> = {
+  viewed: Eye,
   sent: Send,
   received: Reply,
   email: Mail,
@@ -83,19 +87,64 @@ export function ActivityTab({
   const campaign = useRoleCampaign(scope);
   const instantly = useInstantlyStatus();
 
+  const profileKeys = [
+    ...(candidateKey ? [`autumn:${candidateKey}`] : []),
+    ...(hasCrm ? [`crm:${person.candidateId}`] : []),
+  ];
+  const profileViews = useKeyedRead(
+    profileKeys.length
+      ? JSON.stringify([props.spaceId, props.roleId, profileKeys, scope.refreshSignal])
+      : null,
+    async () => {
+      const results = await Promise.allSettled(
+        profileKeys.map((candidateKey) =>
+          rpc.recruiting.profileActivity.list({ roleId: props.roleId, candidateKey }),
+        ),
+      );
+      const pages = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+      if (!pages.length) throw new Error("Profile activity unavailable");
+      return {
+        items: [
+          ...new Map(pages.flatMap((page) => page.items).map((item) => [item.id, item])).values(),
+        ],
+        hasMore: pages.some((page) => page.hasMore),
+        partial: pages.length !== results.length,
+      };
+    },
+  );
   const roleKey = ready ? crmRoleKey(ready) : null;
+  const personDetails = details.data?.candidateId === person.candidateId ? details.data : undefined;
   const items = buildActivity({
     email: person.email,
     mail: mail.data?.candidateId === person.candidateId ? mail.data : undefined,
-    details: details.data?.candidateId === person.candidateId ? details.data : undefined,
+    details: personDetails,
     roleKey,
     crmRoleId: ready?.crmRoleId,
     saved: saved.data?.emails,
+    views: profileViews.data?.items,
   });
-  const reads = [mail, details, saved, campaign];
+  const reads = [mail, details, saved, campaign, profileViews];
   const crmFailed = hasCrm && roleCrm.status === "failed";
   const loading = (hasCrm && roleCrm.status === "loading") || reads.some((read) => read.loading);
-  const failed = crmFailed || reads.some((read) => read.failed);
+  const failed =
+    crmFailed ||
+    reads.some((read) => read.failed) ||
+    saved.data?.status === "failed" ||
+    profileViews.data?.partial;
+  const unavailable =
+    (hasCrm && (roleCrm.status === "unbound" || roleCrm.status === "unavailable")) ||
+    saved.data?.status === "unsupported" ||
+    saved.data?.status === "not_checked" ||
+    saved.data?.connectionChanged;
+  const partial = Boolean(
+    profileViews.data?.partial ||
+      mail.data?.nextCursor ||
+      saved.data?.partial ||
+      saved.data?.nextCursor ||
+      profileViews.data?.hasMore,
+  );
 
   const email = person.email?.toLowerCase();
   const lead = campaign.data?.leads.find(
@@ -103,7 +152,7 @@ export function ActivityTab({
       (candidateKey && entry.candidateKey === candidateKey) ||
       (email && entry.email.toLowerCase() === email),
   );
-  const interest = details.data?.roleInterests.find(
+  const interest = personDetails?.roleInterests.find(
     (entry) => entry.roleKey === roleKey && entry.interest !== "unknown",
   );
   const status = [
@@ -127,12 +176,12 @@ export function ActivityTab({
   };
   const sentence = (item: ActivityItem) => {
     switch (item.kind) {
+      case "viewed":
+        return t`Profile viewed`;
       case "sent":
         return t`Email sent`;
-      case "received": {
-        const name = person.name;
-        return t`${name} replied`;
-      }
+      case "received":
+        return t`Email received`;
       case "email":
         return t`Email recorded`;
       case "scheduled":
@@ -148,13 +197,7 @@ export function ActivityTab({
       case "highSignal":
         return t`Marked high signal`;
       case "review":
-        return item.result === "approved"
-          ? t`Approved in internal review`
-          : item.result === "rejected"
-            ? t`Rejected in internal review`
-            : item.result === "pooled"
-              ? t`Pooled in internal review`
-              : t`Review note`;
+        return t`Review updated`;
     }
   };
   const detail = (item: ActivityItem) =>
@@ -165,6 +208,15 @@ export function ActivityTab({
         : item.kind === "review"
           ? item.notes
           : null;
+
+  const sourceLabel: Record<ActivityItem["source"], string> = {
+    profile: t`Profile`,
+    correspondence: t`Saved correspondence`,
+    mailbox: t`Saved mailbox`,
+    outbox: t`Outbox`,
+    status: t`Role status`,
+    review: t`Internal review`,
+  };
 
   return (
     <section aria-label={t`Activity`} className="space-y-4 text-sm">
@@ -199,7 +251,7 @@ export function ActivityTab({
                   <Icon size={15} />
                 </span>
                 <div className="min-w-0 flex-1 rounded-lg border px-3 py-2">
-                  <p className="flex items-start justify-between gap-2">
+                  <p className="flex flex-wrap items-start justify-between gap-x-2 gap-y-1">
                     <span className="font-medium">{sentence(item)}</span>
                     {item.at ? (
                       <time
@@ -209,8 +261,27 @@ export function ActivityTab({
                       >
                         {relativeTime(item.at, locale)}
                       </time>
-                    ) : null}
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        <Trans>Time not recorded</Trans>
+                      </span>
+                    )}
                   </p>
+                  <p className="mt-1 break-words text-xs text-muted-foreground">
+                    {item.actor || <Trans>Actor not recorded</Trans>} · {sourceLabel[item.source]}
+                    {item.context ? <span className="block">{item.context}</span> : null}
+                  </p>
+                  {item.kind === "review" && item.result ? (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {item.result === "approved" ? (
+                        <Trans>Current result: approved</Trans>
+                      ) : item.result === "rejected" ? (
+                        <Trans>Current result: rejected</Trans>
+                      ) : (
+                        <Trans>Current result: pooled</Trans>
+                      )}
+                    </p>
+                  ) : null}
                   {text ? (
                     <p className="mt-0.5 line-clamp-2 break-words whitespace-pre-wrap text-muted-foreground">
                       {text}
@@ -225,9 +296,23 @@ export function ActivityTab({
       {loading ? <TabLoading /> : null}
       {!loading && !failed && !items.length ? (
         <TabNotice>
-          <Trans>No activity yet.</Trans>
+          {unavailable ? (
+            <Trans>Activity history is unavailable from some sources.</Trans>
+          ) : (
+            <Trans>No activity recorded in the available sources.</Trans>
+          )}
         </TabNotice>
       ) : null}
+      {!loading && (items.length > 0 || partial) && (unavailable || partial) ? (
+        <p className="text-xs text-muted-foreground">
+          <Trans>Showing available activity; more history may exist.</Trans>
+        </p>
+      ) : null}
+      <p className="text-xs text-muted-foreground">
+        <Trans>
+          Email opens are not recorded. Profile views appear only after recording starts.
+        </Trans>
+      </p>
     </section>
   );
 }

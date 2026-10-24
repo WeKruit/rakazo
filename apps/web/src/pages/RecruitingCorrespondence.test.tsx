@@ -9,9 +9,13 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const preview = vi.hoisted(() => vi.fn());
 const fetchArtifactBytes = vi.hoisted(() => vi.fn());
 const readCorrespondence = vi.hoisted(() => vi.fn());
+const getWorkspace = vi.hoisted(() => vi.fn());
+const crmData = vi.hoisted(() => vi.fn());
+const openDetail = vi.hoisted(() => vi.fn());
+vi.mock("./recruiting/detail", () => ({ useRecruitingDetail: () => ({ open: openDetail }) }));
 vi.mock("../lib/artifact-open", () => ({ fetchArtifactBytes }));
 vi.mock("../lib/rpc", () => ({
-  rpc: { recruiting: { correspondence: readCorrespondence } },
+  rpc: { recruiting: { correspondence: readCorrespondence, getWorkspace, crmData } },
 }));
 vi.mock("../components/ArtifactFileCard", () => ({
   ArtifactFileCard: (props: { artifactId: string; name: string }) => {
@@ -32,6 +36,7 @@ import { RecruitingCorrespondence } from "./RecruitingCorrespondence";
 let cleanup: (() => Promise<void>) | undefined;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  getWorkspace.mockResolvedValue(null);
   readCorrespondence.mockResolvedValue({
     status: "not_checked",
     checkedAt: null,
@@ -159,6 +164,15 @@ it.each(["inbox", "interview"] as const)(
 
 it("renders only retained email fields, supports selection and never treats assistant narration as mail", async () => {
   const selection = vi.fn();
+  const crm = {
+    serverRevision: 2,
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    crmRoleId: "22222222-2222-4222-8222-222222222222",
+    candidateId: "33333333-3333-4333-8333-333333333333",
+    threadId: "original-crm-thread",
+    direction: "received" as const,
+    eaccount: "recruiter@example.test",
+  };
   readCorrespondence.mockResolvedValue({
     roleId: "role-1",
     status: "ready",
@@ -171,6 +185,7 @@ it("renders only retained email fields, supports selection and never treats assi
         sourceId: "mailbox-1",
         providerMessageId: "provider-message-1",
         savedRead: null,
+        crm,
         sender: "one@example.test",
         recipients: ["team@example.test"],
         subject: "Interview question",
@@ -203,12 +218,16 @@ it("renders only retained email fields, supports selection and never treats assi
       roleId: "role-1",
       emailId: "email-1",
       sourceName: "Selected mailbox",
+      crm,
     }),
   );
   expect(view.container.textContent).toContain("Can we speak Thursday?");
   expect(view.container.querySelector("script")).toBeNull();
   expect(view.container.textContent).toContain("More results may be available");
-  await view.click("Another reply");
+  const rails = view.container.querySelectorAll<HTMLButtonElement>(
+    'section[aria-label="Candidate conversations"] button',
+  );
+  await act(async () => rails[1]!.click());
   expect(selection).toHaveBeenLastCalledWith(
     expect.objectContaining({ emailId: "email-2", sourceName: "Other mailbox", snippet: true }),
   );
@@ -677,4 +696,260 @@ it("shows adjacent half-hour slots as one range per day with the time zone once"
   expect(section.querySelectorAll("time")).toHaveLength(2);
   expect(section.textContent?.match(/UTC/g)).toHaveLength(1);
   expect(view.container.querySelectorAll("article")).toHaveLength(0);
+});
+
+it("keeps canonical mailbox, campaign and recorded thread selections exact in the shared conversation", async () => {
+  const selection = vi.fn();
+  const crm = {
+    serverRevision: 1,
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    crmRoleId: "22222222-2222-4222-8222-222222222222",
+    candidateId: "33333333-3333-4333-8333-333333333333",
+    threadId: "recorded-thread",
+    direction: "received" as const,
+  };
+  getWorkspace.mockResolvedValue({
+    role: { id: "role-1", spaceId: "space" },
+    crmTarget: { target: { mcpServerId: "source", ...crm } },
+  });
+  crmData.mockResolvedValue({
+    operation: "candidates",
+    source: { serverId: "source", serverRevision: 1, organizationId: crm.organizationId },
+    items: [{ candidateId: crm.candidateId, name: "Verified person" }],
+    total: 1,
+    nextOffset: null,
+  });
+  const email = (id: string, changes: Record<string, unknown> = {}) => ({
+    id,
+    crm,
+    sourceId: "source",
+    sourceName: "Connected mail",
+    providerMessageId: `provider-${id}`,
+    savedRead: null,
+    sender: "person@example.test",
+    recipients: ["recruiter@example.test"],
+    subject: "Same subject",
+    body: `Body ${id}`,
+    snippet: false,
+    date: "2026-10-22T00:00:00Z",
+    url: null,
+    eaccount: "first@example.test",
+    campaignId: "campaign-one",
+    providerThreadId: "recorded-thread",
+    ...changes,
+  });
+  readCorrespondence.mockResolvedValue({
+    roleId: "role-1",
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    events: [],
+    partial: false,
+    emails: [
+      email("first"),
+      email("second"),
+      email("other-mailbox", { eaccount: "other@example.test" }),
+      email("other-campaign", { campaignId: "campaign-two" }),
+      email("unknown-thread-one", { providerThreadId: null }),
+      email("unknown-thread-two", { providerThreadId: null }),
+      email("unknown-mailbox-one", { eaccount: null }),
+      email("unknown-mailbox-two", { eaccount: null }),
+    ],
+  });
+  const view = await mount({ view: "inbox", threadId: "role-thread", onEmailSelection: selection });
+  const conversation = () => view.container.querySelector('[data-testid="email-conversation"]')!;
+  expect(conversation()).not.toBeNull();
+  expect(view.container.querySelector('[aria-label="Verified person"]')).not.toBeNull();
+  await view.click("Profile");
+  expect(openDetail).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      view: "contact",
+      person: expect.objectContaining({ candidateId: crm.candidateId, name: "Verified person" }),
+      role: { roleId: "role-1", spaceId: "space", conversation: { groupId: "role-group" } },
+    }),
+  );
+  expect(conversation().textContent).toContain("Body first");
+  expect(conversation().textContent).toContain("Body second");
+  expect(conversation().textContent).not.toContain("Body other-mailbox");
+  expect(conversation().textContent).not.toContain("Body other-campaign");
+  expect(conversation().textContent).not.toContain("Body unknown-thread");
+  const details = conversation().querySelector("details")!;
+  await act(async () => {
+    details.open = true;
+    details.dispatchEvent(new Event("toggle"));
+  });
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      emailId: "second",
+      providerThreadId: "recorded-thread",
+      campaignId: "campaign-one",
+      eaccount: "first@example.test",
+    }),
+  );
+  await view.click("Draft reply");
+  expect(view.conversation).toHaveBeenLastCalledWith(expect.stringContaining("Do not send"));
+  const choose = async (label: string, index: number) => {
+    const select = view.container.querySelector<HTMLSelectElement>(
+      `select[aria-label="${label}"]`,
+    )!;
+    await act(async () => {
+      select.value = select.options[index]!.value;
+      select.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+  };
+  await choose("Conversation", 1);
+  expect(conversation().textContent).toContain("Body unknown-thread-one");
+  expect(conversation().textContent).not.toContain("Body unknown-thread-two");
+  await choose("Campaign", 1);
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({ emailId: "other-campaign", campaignId: "campaign-two" }),
+  );
+  await choose("Source", 1);
+  expect(selection).toHaveBeenLastCalledWith(
+    expect.objectContaining({ emailId: "other-mailbox", eaccount: "other@example.test" }),
+  );
+  expect(conversation().textContent).not.toContain("Body second");
+  await choose("Source", 2);
+  expect(conversation().textContent).toContain("Body unknown-mailbox-one");
+  expect(conversation().textContent).not.toContain("Body unknown-mailbox-two");
+  await choose("Conversation", 1);
+  expect(conversation().textContent).toContain("Body unknown-mailbox-two");
+  expect(conversation().textContent).not.toContain("Body unknown-mailbox-one");
+});
+
+it.each(["source", "revision", "organization", "role"])(
+  "does not join a candidate from mismatched %s provenance",
+  async (mismatch) => {
+    const target = {
+      mcpServerId: "source",
+      serverRevision: 1,
+      organizationId: "11111111-1111-4111-8111-111111111111",
+      crmRoleId: "22222222-2222-4222-8222-222222222222",
+    };
+    const candidateId = "33333333-3333-4333-8333-333333333333";
+    getWorkspace.mockResolvedValue({
+      role: { id: "role-1", spaceId: "space" },
+      crmTarget: { target },
+    });
+    crmData.mockResolvedValue({
+      operation: "candidates",
+      source: {
+        serverId: target.mcpServerId,
+        serverRevision: 1,
+        organizationId: target.organizationId,
+      },
+      items: [{ candidateId, name: "Verified directory person" }],
+      total: 1,
+      nextOffset: null,
+    });
+    readCorrespondence.mockResolvedValue({
+      roleId: "role-1",
+      status: "ready",
+      checkedAt: null,
+      connections: [],
+      events: [],
+      partial: false,
+      emails: [
+        {
+          id: "mail",
+          sourceId: mismatch === "source" ? "other" : "source",
+          sourceName: "CRM",
+          providerMessageId: "original",
+          savedRead: null,
+          sender: "Do not infer <person@example.test>",
+          recipients: [],
+          subject: "Actual mail",
+          body: "Original body",
+          snippet: false,
+          date: null,
+          url: null,
+          crm: {
+            serverRevision: mismatch === "revision" ? 2 : 1,
+            organizationId:
+              mismatch === "organization"
+                ? "44444444-4444-4444-8444-444444444444"
+                : target.organizationId,
+            crmRoleId:
+              mismatch === "role" ? "55555555-5555-4555-8555-555555555555" : target.crmRoleId,
+            candidateId,
+            threadId: null,
+            direction: "received",
+          },
+        },
+      ],
+    });
+    const view = await mount({ view: "inbox", threadId: "role-thread" });
+    const conversation = view.container.querySelector('[data-testid="email-conversation"]')!;
+    expect(conversation.textContent).toContain("Original body");
+    expect(conversation.textContent).not.toContain("Verified directory person");
+    expect(
+      [...conversation.querySelectorAll("button")].some(
+        (button) => button.textContent === "Profile",
+      ),
+    ).toBe(false);
+    expect(
+      view.container.querySelector('[aria-label="Candidate details unavailable"]'),
+    ).not.toBeNull();
+    expect(openDetail).not.toHaveBeenCalled();
+  },
+);
+
+it("filters only observed unread mail without treating unknown status as read or modifying messages", async () => {
+  const selected = vi.fn();
+  const emails = [true, false, null, undefined].map((unread, index) => ({
+    id: `observed-${index}`,
+    sourceName: "Mailbox",
+    sourceId: "source",
+    providerMessageId: `provider-${index}`,
+    savedRead: null,
+    sender: "candidate@example.test",
+    recipients: ["owner@example.test"],
+    subject: `Observed ${index}`,
+    body: `Body ${index}`,
+    snippet: false,
+    date: "2026-10-23T12:00:00Z",
+    url: null,
+    unread,
+    ...(index === 0
+      ? {
+          leadId: "11111111-1111-4111-8111-111111111111",
+          step: "2",
+          observedAt: "2026-10-23T13:00:00Z",
+        }
+      : {}),
+  }));
+  readCorrespondence.mockResolvedValue({
+    roleId: "role",
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    emails,
+    events: [],
+    partial: true,
+  });
+  const view = await mount({ view: "inbox", threadId: "thread", onEmailSelection: selected });
+  expect(view.container.textContent).toContain(
+    "Loaded observations: 4 emails · 1 unread · 2 read status unknown",
+  );
+  expect(view.container.textContent).toContain("Observed unread");
+  expect(view.container.textContent).not.toContain("11111111-1111-4111-8111-111111111111");
+  await view.click("Unread");
+  expect(view.container.querySelectorAll('[aria-label="Candidate conversations"] li')).toHaveLength(
+    1,
+  );
+  expect(view.container.textContent).not.toContain("Observed 1");
+  expect(selected).toHaveBeenLastCalledWith(
+    expect.objectContaining({ emailId: "observed-0", providerMessageId: "provider-0" }),
+  );
+  await view.click("All");
+  const rows = view.container.querySelectorAll<HTMLButtonElement>(
+    '[aria-label="Candidate conversations"] li button',
+  );
+  await act(async () => rows[2]!.click());
+  expect(view.container.querySelector('[aria-label="Observed email metadata"]')?.textContent).toBe(
+    "Read status unknown",
+  );
+  expect(readCorrespondence).toHaveBeenCalledTimes(1);
+  expect(view.conversation).not.toHaveBeenCalled();
+  expect(view.container.querySelector('a[href*="instantly"]')).toBeNull();
 });

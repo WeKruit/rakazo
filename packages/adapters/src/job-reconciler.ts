@@ -7,6 +7,7 @@ import { getLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
+import { sweepIdleRecruitingRoles } from "./recruiting-idle-sweep.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
 import { isLoopGuardStopText } from "./tool-loop.js";
@@ -16,6 +17,7 @@ const DEFAULT_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
 const ROUTINE_LOOKAHEAD_MS = 60_000;
 const CONTROL_LOOKAHEAD_MS = 60_000;
+const IDLE_SWEEP_INTERVAL_MS = 5 * 60_000;
 // Two keys give Rakazo's lock a namespace without relying on a hash that might collide
 // with an application using the one-key advisory-lock API.
 const RECONCILIATION_LOCK_NAMESPACE = 1_380_019_075;
@@ -120,6 +122,7 @@ export function createJobReconciler(
   let routineCursor: Cursor | undefined;
   let controlCursor: ControlCursor | undefined;
   let controlScanDeadline: Date | undefined;
+  let idleSweptAt = 0;
 
   const reconcileOnce = async () => {
     if (reconciling) return reconciling;
@@ -146,6 +149,20 @@ export function createJobReconciler(
         });
       } catch (error) {
         getLogger().error("recruiting question reconciliation", error);
+      }
+      if (deps.events && now.getTime() - idleSweptAt >= IDLE_SWEEP_INTERVAL_MS) {
+        idleSweptAt = now.getTime();
+        try {
+          await sweepIdleRecruitingRoles({
+            prisma: deps.prisma,
+            jobs: deps.jobs,
+            events: deps.events,
+            now,
+            batchSize,
+          });
+        } catch (error) {
+          getLogger().error("recruiting idle sweep", error);
+        }
       }
       try {
         stuckCursor = await reconcileStuckWork({

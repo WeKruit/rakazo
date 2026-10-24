@@ -142,3 +142,17 @@ test("profile notes save and tasks render at desktop and phone widths", async ({
     await noHorizontalScroll(page);
   }
 });
+
+test("a linked CRM role has one canonical Inbox with connected history and reply drafting", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await page.goto(`${fixture}?view=inbox`);
+  await expect(page.getByRole("heading", { name: "Inbox", exact: true })).toHaveCount(1);
+  await expect(page.getByText("free Tuesday or Wednesday").first()).toBeVisible();
+  await expect(page.getByLabel("Service connections")).toContainText("Configured");
+  await expect(page.getByText("Earlier history", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Draft reply", exact: true })).toBeVisible();
+  await captureScreenshot(page, testInfo, "canonical-crm-inbox");
+  await noHorizontalScroll(page);
+});

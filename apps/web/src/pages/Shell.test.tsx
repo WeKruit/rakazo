@@ -71,6 +71,7 @@ const shellApi = vi.hoisted(() => ({
   reorderBots: vi.fn(),
   dropStreams: new Set<(reason: Error) => void>(),
   recruiting: {
+    profileActivity: { recordView: vi.fn() },
     crmData: vi.fn(),
     correspondence: vi.fn(),
     getWorkspace: vi.fn(),
@@ -530,6 +531,7 @@ async function renderFeedbackShell(
     if (options.workspaceFailure) throw new Error("Workspace unavailable");
     return recruitingWorkspace;
   });
+  shellApi.recruiting.profileActivity.recordView.mockResolvedValue({ ok: true });
   shellApi.recruiting.listAssessments.mockResolvedValue([]);
   shellApi.recruiting.listFeedback.mockResolvedValue({ feedback: [], nextCursor: null });
   shellApi.recruiting.correspondence.mockResolvedValue({
@@ -815,12 +817,21 @@ it("unifies an exact canonical CRM role with its native conversation while keepi
     "Recruiting crew",
     "Existing role · Example client",
   ]);
+  shellApi.createGroup.mockImplementation(async (input) => {
+    const group = {
+      ...view.group,
+      id: input.crmRoleReference.crmRoleId === "crm-role" ? "group-1" : "group-other",
+      crmRoleReference: input.crmRoleReference,
+    };
+    if (group.id !== "group-1") view.bootstrap.groups.push(group);
+    return group;
+  });
   await act(async () => rows[0]!.click());
-  expect(view.getPath()).toBe("/app/g/group-1?view=contacts");
+  expect(view.getPath()).toBe("/app/g/group-1?view=results");
   await act(async () => rows[1]!.click());
-  expect(view.getPath()).toContain("crmRole=different-role");
+  expect(view.getPath()).toBe("/app/g/group-other?view=results");
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBeNull();
-  expect(shellApi.createGroup).not.toHaveBeenCalled();
+  expect(shellApi.createGroup).toHaveBeenCalledTimes(2);
   expect(shellApi.followUp).not.toHaveBeenCalled();
 });
 
@@ -837,8 +848,21 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
       roleLabel: "Existing role",
       summary: null,
     },
-    items: [],
-    total: 610,
+    items: [
+      {
+        candidateId: "crm-only",
+        name: "CRM-only person",
+        email: "crm-only@example.test",
+        title: "Engineer",
+        location: null,
+        linkedinUrl: null,
+        phone: null,
+        stage: "Contacted",
+        contactStatus: "available",
+        outreachStatus: "replied",
+      },
+    ],
+    total: 1,
     offset: input.offset ?? 0,
     nextOffset: null,
   }));
@@ -848,8 +872,8 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
     initialPath: "/app/g/group-1?view=contacts",
     crmTarget: boundCrmTarget,
   });
-  // One list: the role's search result plus its 610 CRM contacts, no source toggle.
-  expect(document.body.textContent).toContain("611 candidates");
+  // One list: the role's search result plus its distinct CRM contact, no source toggle.
+  expect(document.body.textContent).toContain("2 candidates");
   expect(document.body.textContent).not.toContain("Current search");
   expect(container?.textContent).toContain(view.candidate.name);
   expect(shellApi.recruiting.crmData).toHaveBeenCalledWith(
@@ -874,123 +898,47 @@ it("maps the current role Contacts to its bound CRM while preserving search resu
   expect(shellApi.createGroup).not.toHaveBeenCalled();
 });
 
-it("opens an editable CRM reply draft without sending or crossing a changed candidate scope", async () => {
-  const source = {
-    serverId: "crm-source",
-    serverRevision: 2,
-    organizationId: "org-1",
-    name: "CRM",
-  };
-  shellApi.recruiting.crmData.mockImplementation(async (input) =>
-    input.operation === "mail"
-      ? {
-          operation: "mail",
-          source,
-          checkedAt: "2026-10-22T00:00:00Z",
-          scope: "stored_candidate_correspondence",
-          candidateId: input.candidateId,
-          outbox: [],
-          nativeCorrespondence: [],
-          items: [
-            {
-              id: "stored-mail-only",
-              providerMessageId: "stored-mail-only",
-              threadId: "stored-thread-only",
-              direction: "received",
-              sender: "avery@example.test",
-              recipients: ["recruiter@example.test"],
-              subject: "Interview availability",
-              body: "Tuesday works.",
-              date: "2026-10-22T00:00:00Z",
-              partial: false,
-            },
-          ],
-          nextCursor: null,
-        }
-      : input.operation === "roleMail"
-        ? {
-            operation: "roleMail",
-            source,
-            checkedAt: "2026-10-22T00:00:00Z",
-            scope: "stored_role_correspondence",
-            crmRoleId: "crm-role",
-            supported: false,
-            items: [],
-            offset: 0,
-            nextOffset: null,
-          }
-        : {
-            operation: "candidates",
-            source,
-            checkedAt: "2026-10-22T00:00:00Z",
-            scope: "legacy_role_labels",
-            selectedRole: {
-              crmRoleId: "crm-role",
-              clientId: "client-1",
-              clientLabel: "Example client",
-              roleLabel: "Existing role",
-              summary: null,
-            },
-            items: [
-              {
-                candidateId: "crm-person",
-                name: "Synthetic Avery",
-                email: "avery@example.test",
-                phone: null,
-                linkedinUrl: null,
-                title: "Engineer",
-                location: null,
-                stage: null,
-                contactStatus: "replied",
-                outreachStatus: "replied",
-              },
-            ],
-            total: 1,
-            offset: 0,
-            nextOffset: null,
-          },
-  );
-  // The Inbox tab selects the person itself; the URL carries no candidate.
-  const path = "/app/g/group-1?view=inbox";
+it("drafts from the canonical Inbox without sending or replacing an existing composer draft", async () => {
   const view = await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,
     openFeedback: false,
-    initialPath: path,
     crmTarget: boundCrmTarget,
   });
-  const card = document.body.querySelector('[data-message-id="pending-main"]');
+  shellApi.recruiting.correspondence.mockResolvedValue({
+    roleId: "internal-role",
+    status: "ready",
+    checkedAt: null,
+    connections: [],
+    events: [],
+    contacts: [],
+    partial: false,
+    emails: [
+      {
+        id: "crm-email",
+        sourceId: "crm-source",
+        sourceName: "CRM",
+        providerMessageId: "mail-1",
+        savedRead: null,
+        sender: "person@example.test",
+        recipients: [],
+        subject: "Available Thursday",
+        body: "Thursday works",
+        snippet: false,
+        date: "2026-10-22T00:00:00Z",
+        url: null,
+      },
+    ],
+  });
+  await view.navigate("/app/g/group-1?view=inbox");
+  await view.openRoleChat();
   const draft = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
   type(draft, "Keep my separate draft");
-  pickAttachment();
-  const workspace = await shellApi.recruiting.getWorkspace({ threadId: view.thread.threadId });
-  let finish!: (value: typeof workspace) => void;
-  shellApi.recruiting.getWorkspace.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  await view.click("Draft reply");
-  await view.navigate("/app/g/group-1?view=inbox&crmCandidate=another-person");
-  await act(async () => finish(workspace));
-  expect(draft.value).toBe("Keep my separate draft");
-  await view.navigate(path);
   await view.click("Draft reply");
   expect(draft.value).toContain("Keep my separate draft");
-  expect(draft.value).toContain("Synthetic Avery");
-  expect(draft.value).toContain("avery@example.test");
-  expect(draft.value).toContain("Interview availability");
-  expect(draft.value).toContain("2026-10-22T00:00:00Z");
-  expect(draft.value).toContain("do not send");
-  for (const id of ["stored-mail-only", "stored-thread-only", "crm-person", "crm-source"])
-    expect(draft.value).not.toContain(id);
-  expect(draft.closest<HTMLElement>('section[aria-label="Role conversation"]')?.hidden).toBe(false);
-  expect(document.body.textContent).toContain("notes.txt");
-  expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
-  expect(view.getPath()).toBe(path);
+  expect(draft.value).toContain("Do not send");
   expect(shellApi.send).not.toHaveBeenCalled();
   expect(shellApi.followUp).not.toHaveBeenCalled();
-  expect(shellApi.answer).not.toHaveBeenCalled();
-  expect(shellApi.createArtifact).not.toHaveBeenCalled();
+  expect(container?.textContent).not.toContain("Earlier history");
 });
 
 it.each(["inbox", "feedback", "sequence"])(
@@ -1019,19 +967,8 @@ it.each(["inbox", "feedback", "sequence"])(
       initialPath: `/app/g/group-1?view=${section}`,
       crmTarget: boundCrmTarget,
     });
-    // Inbox and Sequence show the bound role's CRM history in the role workbench tab.
-    const tabLabel = { inbox: "Inbox", sequence: "Sequence" }[section];
-    const crmHistoryShown = () =>
-      tabLabel
-        ? Boolean(container?.querySelector(`section[aria-label="${tabLabel}"]`)) &&
-          shellApi.recruiting.crmData.mock.calls.some(
-            ([input]) =>
-              input.operation === "candidates" &&
-              input.groupId === "group-1" &&
-              input.crmRoleId === "crm-role",
-          )
-        : Boolean(container?.textContent?.includes("Earlier history"));
-    expect(crmHistoryShown()).toBe(true);
+    expect(container?.textContent).not.toContain("Earlier history");
+    if (section === "inbox") expect(shellApi.recruiting.correspondence).toHaveBeenCalled();
     // The role's own view and its CRM history share one page; there is no source toggle.
     expect(container?.textContent).not.toContain("Current search");
     expect(view.getPath()).toContain(`/app/g/group-1?view=${section}`);
@@ -1148,8 +1085,21 @@ it("refreshes a failed current-role CRM connection before reading its history", 
       roleLabel: "Existing role",
       summary: null,
     },
-    items: [],
-    total: 610,
+    items: [
+      {
+        candidateId: "crm-only",
+        name: "CRM-only person",
+        email: "crm-only@example.test",
+        title: "Engineer",
+        location: null,
+        linkedinUrl: null,
+        phone: null,
+        stage: "Contacted",
+        contactStatus: "available",
+        outreachStatus: "replied",
+      },
+    ],
+    total: 1,
     offset: 0,
     nextOffset: null,
   });
@@ -1158,7 +1108,7 @@ it("refreshes a failed current-role CRM connection before reading its history", 
   expect(shellApi.recruiting.getWorkspace.mock.calls.length).toBeGreaterThan(priorReads);
   expect(container?.textContent).not.toContain("Could not load this role’s candidate records.");
   expect(container?.querySelector('section[aria-label="Contacts"]')?.textContent).toMatch(
-    /61\d candidates/,
+    /2 candidates/,
   );
   expect(shellApi.recruiting.crmData).toHaveBeenCalledWith(
     expect.objectContaining({
@@ -1502,8 +1452,8 @@ it("keeps the role list through a thread resync and drops a response for a previ
   expect(navigation()).not.toContain("Existing role · Client");
 });
 
-it.each(["retry", "role-change", "space", "attachment-space"])(
-  "uses one role list and an empty CRM chat without duplicating or misrouting its first message after %s",
+it.each(["retry", "role-change", "space", "success"])(
+  "opens an exact CRM workspace without sending messages across the %s boundary",
   async (boundary) => {
     const source = { serverId: "crm-source", serverRevision: 2, name: "CRM" };
     shellApi.recruiting.crmData.mockImplementation(async (input) => {
@@ -1562,77 +1512,50 @@ it.each(["retry", "role-change", "space", "attachment-space"])(
     expect(
       [...document.querySelectorAll("button")].some((button) => button.textContent === "CRM roles"),
     ).toBe(false);
-    await view.click("Existing role · Example client");
-    expect(view.getPath()).toContain("crmRole=crm-role");
-    expect(document.body.textContent).toContain("Earlier history");
-    expect(shellApi.createGroup).not.toHaveBeenCalled();
-    expect(shellApi.followUp).not.toHaveBeenCalled();
-    await view.openRoleChat();
-    expect(document.body.querySelector('[data-message-id="pending-main"]')).toBeNull();
-    const composer = document.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
-    expect(composer.closest("[hidden]")).toBeNull();
-    type(composer, "Read the saved contacts for this role.");
-    if (boundary === "attachment-space") {
-      pickAttachment();
-      expect(document.body.textContent).toContain("notes.txt");
-      view.bootstrap.me.spaceId = "other-space";
-      await view.render();
-      expect(document.body.textContent).not.toContain("notes.txt");
-      view.bootstrap.me.spaceId = "space-1";
-      await view.render();
-      expect(document.body.textContent).toContain("notes.txt");
-      expect(shellApi.createGroup).not.toHaveBeenCalled();
-      expect(shellApi.followUp).not.toHaveBeenCalled();
-      return;
-    }
     let completeCreation!: () => void;
     shellApi.createGroup.mockImplementation(async (input) => {
+      if (boundary === "role-change" || boundary === "space")
+        await new Promise<void>((resolve) => {
+          completeCreation = resolve;
+        });
       const group = {
         ...view.group,
         id: "group-new",
         threadId: "thread-new",
         crmRoleReference: input.crmRoleReference,
       };
-      if (boundary !== "retry")
-        await new Promise<void>((resolve) => {
-          completeCreation = resolve;
-        });
-      else view.bootstrap.groups.push(group);
+      view.bootstrap.groups.push(group);
       return group;
     });
     if (boundary === "retry")
-      shellApi.followUp
-        .mockRejectedValueOnce(new Error("Unknown follow-up response"))
-        .mockResolvedValueOnce({ ok: true });
-    await view.click("Send");
-    if (boundary !== "retry") {
+      shellApi.createGroup.mockRejectedValueOnce(new Error("Role binding is ambiguous"));
+    await view.click("Existing role · Example client");
+    if (boundary === "role-change" || boundary === "space") {
       if (boundary === "role-change") await view.navigate("/app/g/group-1?view=contacts");
       else localStorage.setItem("rakazo:space-id", "other-space");
       await act(async () => completeCreation());
-      expect(shellApi.followUp).not.toHaveBeenCalled();
-      expect(shellApi.send).not.toHaveBeenCalled();
       expect(view.getPath()).not.toContain("group-new");
-      return;
+    } else {
+      if (boundary === "retry") {
+        expect(document.body.textContent).toContain("Role binding is ambiguous");
+        expect(view.getPath()).not.toContain("group-new");
+        await view.click("Retry");
+      }
+      expect(view.getPath()).toBe("/app/g/group-new?view=results");
+      expect(document.body.textContent).not.toContain("Earlier history");
+      expect(shellApi.createGroup).toHaveBeenLastCalledWith({
+        name: "Recruiting",
+        botIds: ["bot-1", "bot-2"],
+        crmRoleReference: {
+          sourceId: "crm-source",
+          serverRevision: 2,
+          organizationId: "org-1",
+          crmRoleId: "crm-role",
+        },
+      });
     }
-    expect(shellApi.createGroup).toHaveBeenCalledOnce();
+    expect(shellApi.followUp).not.toHaveBeenCalled();
     expect(shellApi.send).not.toHaveBeenCalled();
-    expect(composer.value).toBe("Read the saved contacts for this role.");
-    const first = shellApi.followUp.mock.calls[0]![0];
-    expect(first).toMatchObject({
-      groupId: "group-new",
-      text: composer.value,
-      mentions: ["bot-1"],
-      crmRoleReference: {
-        sourceId: "crm-source",
-        serverRevision: 2,
-        organizationId: "org-1",
-        crmRoleId: "crm-role",
-      },
-    });
-    await view.click("Send");
-    expect(shellApi.createGroup).toHaveBeenCalledOnce();
-    expect(shellApi.followUp.mock.calls[1]![0]).toEqual(first);
-    expect(view.getPath()).toBe("/app/g/group-new?view=contacts");
   },
 );
 
@@ -2801,7 +2724,7 @@ it("keeps the same role chat widget, draft and native card across workspace menu
       mentions: undefined,
     }),
   );
-  expect(container?.querySelector(".hire-standard-view h1")?.textContent).toBe("Interview");
+  expect(container?.querySelector('section[aria-label="Interview"]')).not.toBeNull();
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   await view.click("Collapse role chat");
   expect(chat.hidden).toBe(true);
@@ -3211,9 +3134,9 @@ it("uses the narrow role column without the desktop metadata gutter and preserve
   type(composer, "Keep this unsent role note.");
   await view.navigate("/app/g/group-1?view=conversation");
   expect(container!.querySelector('[data-message-id="saved-role-reply"]')).toBe(message);
-  expect(frame.className).toContain("8rem");
+  expect(frame.className).not.toContain("8rem");
   expect(message.querySelector('[data-testid="message-hover-rail"]')?.className).toContain(
-    "start-full",
+    "static",
   );
   expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
   expect(composer.value).toBe("Keep this unsent role note.");
@@ -5582,6 +5505,7 @@ describe("chat open latency with 300 ms reads", () => {
       initialPath: "/app/bot-1?view=results",
     });
     for (const read of Object.values(shellApi.recruiting)) {
+      if (!vi.isMockFunction(read)) continue;
       const load = read.getMockImplementation();
       if (load) read.mockImplementation((...args: unknown[]) => delayed(() => load(...args)));
     }

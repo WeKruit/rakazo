@@ -323,7 +323,7 @@ export type EditRecruitingCriteriaInput = z.infer<typeof EditRecruitingCriteriaI
 
 const RoleDefinition = {
   brief: RecruitingBriefDraftSchema.nullable().optional(),
-  sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
+  sourceRefs: z.array(RecruitingSourceRefSchema).readonly(),
   criteria: z.array(RecruitingCriterionSchema).superRefine(validateRoleCriteria).readonly(),
   preferences: z.array(Text).readonly(),
   definitionQuestions: Questions,
@@ -406,15 +406,18 @@ export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
 ]);
 export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
 /**
- * What the agent sends. A calibration request may omit the documents approval: the server fills
- * in this role revision's approved documents before the request is saved, so the stored request
- * always matches RecruitingApprovalToolInputSchema.
+ * What the agent sends. A calibration request may omit the documents approval, the profiles and
+ * the rule changes: the server fills in this revision's approved documents and the recorded
+ * calibration round before the request is saved, so the stored request always matches
+ * RecruitingApprovalToolInputSchema.
  */
 export const RecruitingApprovalToolCallSchema = z.discriminatedUnion("stage", [
   RecruitingApprovalToolInputSchema.options[0],
   RecruitingApprovalToolInputSchema.options[1],
   RecruitingApprovalToolInputSchema.options[2].extend({
     documentsApprovalEffectId: RecruitingId.optional(),
+    profiles: RecruitingApprovalToolInputSchema.options[2].shape.profiles.optional(),
+    ruleChanges: RecruitingCalibrationApproval.ruleChanges.default([]),
   }),
 ]);
 
@@ -832,6 +835,7 @@ export const CreateRecruitingRoleInput = z.strictObject({
   expectedRevision: z.literal(0),
   title: Text,
   ...RoleDefinition,
+  sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
 });
 export type CreateRecruitingRoleInput = z.infer<typeof CreateRecruitingRoleInput>;
 
@@ -840,6 +844,7 @@ export const ReviseRecruitingRoleInput = z.strictObject({
   expectedRevision: Revision,
   title: Text,
   ...RoleDefinition,
+  sourceRefs: z.array(RecruitingSourceRefSchema).min(1).readonly(),
 });
 export type ReviseRecruitingRoleInput = z.infer<typeof ReviseRecruitingRoleInput>;
 
@@ -1248,6 +1253,62 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   sort: z.enum(["name", "recent", "rank", "tier", "score"]).optional(),
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
+// These are transport/provenance fields, not provider observations about the person.
+const reportMetadata = new Set([
+  "id",
+  "taskid",
+  "taskids",
+  "providertaskid",
+  "artifactid",
+  "artifactids",
+  "artifactref",
+  "actionid",
+  "effectid",
+  "runid",
+  "threadid",
+  "roleid",
+  "rolerevisionid",
+  "sourceid",
+  "shardid",
+  "shardids",
+  "outputid",
+  "receiptid",
+  "request",
+  "response",
+  "route",
+  "routing",
+  "cursor",
+  "nextcursor",
+  "requestcursor",
+  "providerresult",
+  "observation",
+  "metadata",
+  "traceid",
+  "storagekey",
+  "sha256",
+  "hash",
+  "toolname",
+  "connectorid",
+  "resourceid",
+  "resourcerevision",
+  "cataloggroup",
+  "clientnonce",
+]);
+
+/** The same business/provenance boundary governs report display and retained row equivalence. */
+export function isRecruitingCandidateReportField(key: string): boolean {
+  return !key.startsWith("_") && !reportMetadata.has(key.replace(/[_-]/g, "").toLowerCase());
+}
+
+/** Recruiter-visible source text excludes operational IDs; immutable artifacts remain lossless. */
+export function recruitingCandidateSourceText(value: unknown): string | undefined {
+  return JSON.stringify(
+    value,
+    (key, nested) => (!key || isRecruitingCandidateReportField(key) ? nested : undefined),
+    2,
+  );
+}
+
 /** Recruiter-readable projection of one exact retained provider row, never qualification. */
 export const RecruitingCandidateReportSchema = z.strictObject({
   fields: z.array(
@@ -1255,6 +1316,10 @@ export const RecruitingCandidateReportSchema = z.strictObject({
       .strictObject({
         label: Text,
         value: z.string().nullable(),
+        // Retained provider observations, not locally inferred profile facts.
+        structuredValue: z.json().optional(),
+        sourceIds: z.array(z.string()).optional(),
+        sourceUrlsById: z.record(z.string(), z.array(z.httpUrl())).optional(),
         providerStatus: z.enum(["match", "miss", "unclear"]).optional(),
         evidence: z.string().optional(),
         reasoning: z.string().optional(),
@@ -1339,7 +1404,7 @@ export type RecruitingCandidate = z.infer<typeof RecruitingCandidateSchema>;
 export const ListRecruitingCandidatesOutput = z.strictObject({
   sortAvailability: z.strictObject({ rank: z.boolean(), tier: z.boolean(), score: z.boolean() }),
   crmTarget: z
-    .strictObject({ bindingEffectId: RecruitingId, target: RecruitingCrmTargetSchema })
+    .strictObject({ bindingEffectId: RecruitingId.nullable(), target: RecruitingCrmTargetSchema })
     .nullable(),
   roleId: RecruitingId,
   roleRevisionId: RecruitingId,
@@ -1435,6 +1500,8 @@ export const RecruitingRoleCandidatesOutputSchema = z.strictObject({
     })
     .catchall(z.number().int().nonnegative()),
   crmStatus: z.enum(["ok", "not_bound", "unavailable"]),
+  /** Readability is not completeness: absent/false means CRM counts are observed partial data. */
+  crmCountsComplete: z.boolean().optional(),
 });
 export type RecruitingRoleCandidatesOutput = z.infer<typeof RecruitingRoleCandidatesOutputSchema>;
 
@@ -1481,6 +1548,10 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
   z.strictObject({ operation: z.literal("round") }),
+  z.strictObject({
+    operation: z.literal("replies"),
+    limit: z.number().int().min(1).max(100).optional(),
+  }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
@@ -1524,15 +1595,32 @@ export type RecruitingOutreachSequence = z.infer<typeof RecruitingOutreachSequen
 
 /** Read-only presentation of retained provider receipts; never a send or booking command. */
 const CorrespondenceOriginFields = {
+  /** Provider identity evidence only; never inferred from subject or participants. */
+  providerThreadId: z.string().nullable().optional(),
+  campaignId: z.string().nullable().optional(),
+  eaccount: z.string().nullable().optional(),
   sourceId: Id.max(200),
   providerMessageId: Id.max(1600),
   savedRead: z
     .strictObject({ messageId: Id.max(200), linkedRunId: Id.max(200), effectId: Id.max(200) })
     .nullable(),
 };
+const CorrespondenceCrmContext = z
+  .strictObject({
+    serverRevision: Revision,
+    organizationId: z.uuid(),
+    crmRoleId: z.uuid(),
+    candidateId: z.uuid(),
+    threadId: z.string().nullable(),
+    campaignId: z.string().nullable().optional(),
+    direction: z.enum(["sent", "received", "manual"]).nullable(),
+    eaccount: z.string().nullable().optional(),
+  })
+  .optional();
 export const RecruitingCorrespondenceReferenceSchema = z
   .strictObject({
     ...CorrespondenceOriginFields,
+    crm: CorrespondenceCrmContext,
     threadId: Id.max(200),
     roleId: RecruitingId.max(200),
     emailId: Id.max(1600),
@@ -1554,12 +1642,16 @@ const ChatContextText = z.string().trim().min(1).max(200);
 /** Bounded workbench selection a role chat turn carries; never evidence or authorization. */
 export const RecruitingChatContextSchema = z
   .strictObject({
+    schedulingPlanId: Id.max(200).optional(),
     roleTitle: ChatContextText.optional(),
     contact: z
       .strictObject({ name: ChatContextText, reference: ChatContextText.optional() })
       .optional(),
   })
-  .refine((value) => value.roleTitle || value.contact, "Chat context is empty");
+  .refine(
+    (value) => value.roleTitle || value.contact || value.schedulingPlanId,
+    "Chat context is empty",
+  );
 export type RecruitingChatContext = z.infer<typeof RecruitingChatContextSchema>;
 
 /** Opaque token for offset-paged reads; callers pass back the previous page's `nextCursor` unchanged. */
@@ -1577,7 +1669,56 @@ export const RecruitingCorrespondenceInputPage = {
  * provider's integers: campaign 0 draft, 1 active, 2 paused, 3 completed; lead 1 active, 2 paused,
  * 3 completed, -1 bounced, -2 unsubscribed.
  */
+/** Observed provider fields only; null entries/fields denote unavailable or malformed data. */
+export const RecruitingCampaignDetailsSchema = z.strictObject({
+  schedules: z
+    .array(
+      z
+        .strictObject({
+          name: z.string().nullable(),
+          from: z.string().nullable(),
+          to: z.string().nullable(),
+          timezone: z.string().nullable(),
+          days: z.record(z.string(), z.boolean()).nullable(),
+        })
+        .nullable(),
+    )
+    .nullable(),
+  sequences: z
+    .array(
+      z
+        .strictObject({
+          steps: z
+            .array(
+              z
+                .strictObject({
+                  type: z.string().nullable(),
+                  delay: z.number().nonnegative().nullable(),
+                  delayUnit: z.string().nullable(),
+                  variants: z
+                    .array(
+                      z
+                        .strictObject({
+                          subject: z.string().nullable(),
+                          body: z.string().nullable(),
+                        })
+                        .nullable(),
+                    )
+                    .nullable(),
+                })
+                .nullable(),
+            )
+            .nullable(),
+        })
+        .nullable(),
+    )
+    .nullable(),
+});
+export type RecruitingCampaignDetails = z.infer<typeof RecruitingCampaignDetailsSchema>;
+
 export const RecruitingRoleCampaignSchema = z.strictObject({
+  /** Multiple exact role mappings require an explicit selection from roleCampaigns. */
+  selectionRequired: z.boolean().optional(),
   status: z.enum(["none", "unavailable", "ready"]),
   /** The assigned Instantly connection; null when none is assigned to this conversation. */
   serverId: z.string().nullable(),
@@ -1588,8 +1729,11 @@ export const RecruitingRoleCampaignSchema = z.strictObject({
       eaccount: z.string().nullable(),
       status: z.number().int().nullable(),
       stopOnReply: z.boolean().nullable(),
+      observedDetails: RecruitingCampaignDetailsSchema.optional(),
     })
     .nullable(),
+  /** Whether the lead page proves a complete, valid list; absent means unknown. */
+  leadsComplete: z.boolean().optional(),
   leads: z.array(
     z.strictObject({
       candidateKey: z.string().nullable(),
@@ -1653,6 +1797,20 @@ export const RecruitingRoleSetupSchema = z.strictObject({
 export type RecruitingRoleSetup = z.infer<typeof RecruitingRoleSetupSchema>;
 
 export const RecruitingCorrespondenceSchema = z.strictObject({
+  /** Actual reply failures/uncertainty, not a confirmation-to-booking association. */
+  operations: z
+    .array(
+      z.strictObject({
+        id: Id,
+        kind: z.literal("reply"),
+        outcome: z.enum(["failed", "uncertain"]),
+        checkedAt: IsoDate,
+        sourceName: z.string(),
+        sourceId: Id,
+        providerMessageId: Id,
+      }),
+    )
+    .optional(),
   roleId: RecruitingId.nullable(),
   status: z.enum(["not_checked", "ready", "empty", "unsupported", "failed"]),
   checkedAt: IsoDate.nullable(),
@@ -1671,6 +1829,13 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
       id: Id,
       sourceName: z.string(),
       ...CorrespondenceOriginFields,
+      /** Optional provider observations, never application viewed-by state or current totals. */
+      unread: z.boolean().nullable().optional(),
+      leadId: z.uuid().nullable().optional(),
+      /** Provider-supplied step text; not an inferred stable step ID. */
+      step: z.string().nullable().optional(),
+      observedAt: IsoDate.optional(),
+      crm: CorrespondenceCrmContext,
       sender: z.string().nullable(),
       recipients: z.array(z.string()),
       subject: z.string(),
@@ -1756,6 +1921,13 @@ const CrmBrowseCursor = z.strictObject({
     .min(0)
     .max(Number.MAX_SAFE_INTEGER - 51),
 });
+const CrmRoleMailCursor = z.strictObject({
+  p_org: z.uuid(),
+  p_role: z.uuid(),
+  p_candidate: z.uuid(),
+  offset: z.number().int().min(0).max(1_000_000),
+});
+const CrmMailCursor = z.union([CrmBrowseCursor, CrmRoleMailCursor]);
 const CrmBrowseWorkflow = z.enum([
   "waiting_resume",
   "resume_ready",
@@ -1818,6 +1990,8 @@ const CrmBrowseOutbox = z.array(
   }),
 );
 const CrmMailItem = z.strictObject({
+  campaignId: z.string().nullable().optional(),
+  eaccount: z.string().nullable().optional(),
   id: Id,
   providerMessageId: Id,
   threadId: z.string().nullable(),
@@ -1894,7 +2068,7 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     ...crmBrowsePage,
     candidateId: z.uuid(),
     crmRoleId: z.uuid().optional(),
-    cursor: CrmBrowseCursor.optional(),
+    cursor: CrmMailCursor.optional(),
   }),
   z.object({
     operation: z.literal("roleMail"),
@@ -2017,11 +2191,12 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
     checkedAt: IsoDate,
     scope: z.literal("stored_candidate_correspondence"),
+    outboxScope: z.literal("unavailable_for_role").optional(),
     outbox: CrmBrowseOutbox,
     candidateId: z.uuid(),
     nativeCorrespondence: z.array(RecruitingNativeCorrespondenceSchema),
     items: z.array(CrmMailItem),
-    nextCursor: CrmBrowseCursor.nullable(),
+    nextCursor: CrmMailCursor.nullable(),
   }),
   z.strictObject({
     operation: z.literal("roleMail"),
@@ -2118,10 +2293,14 @@ const CrmStoredEmail = z.object({
   body_text: z.string().nullable(),
 });
 export const RecruitingCrmRoleMailReadSchema = z.object({
+  version: z.literal(2),
+  candidate_id: z.uuid().nullable().optional(),
   organization_id: z.uuid(),
   role_id: z.uuid(),
   pagination: z.literal("offset"),
-  messages: z.array(CrmStoredEmail.extend({ candidate_id: z.uuid() })),
+  messages: z.array(
+    CrmStoredEmail.extend({ candidate_id: z.uuid(), eaccount: z.string().nullable().optional() }),
+  ),
   next_offset: z.number().int().nonnegative().nullable(),
 });
 export const RecruitingCrmMailReadSchema = z.object({
@@ -2212,6 +2391,27 @@ const ReminderCandidateKey = Text.max(300).regex(
   /^(autumn|crm):\S+$/,
   'Use "autumn:<key>" or "crm:<id>"',
 );
+/** Actual profile opens, retained in the existing native event history. */
+export const RecruitingProfileActivityInput = z.strictObject({
+  roleId: RecruitingId,
+  candidateKey: ReminderCandidateKey,
+});
+export const RecordRecruitingProfileViewInput = RecruitingProfileActivityInput.extend({
+  viewId: z.uuid(),
+});
+export const RecruitingProfileViewSchema = z.strictObject({
+  roleTitle: z.string(),
+  id: Id,
+  at: IsoDate,
+  actorName: z.string().nullable(),
+});
+export const RecruitingProfileActivityOutput = z.strictObject({
+  items: z.array(RecruitingProfileViewSchema),
+  hasMore: z.boolean(),
+});
+export type RecruitingProfileView = z.infer<typeof RecruitingProfileViewSchema>;
+export type RecruitingProfileActivityInput = z.infer<typeof RecruitingProfileActivityInput>;
+export type RecordRecruitingProfileViewInput = z.infer<typeof RecordRecruitingProfileViewInput>;
 const ReminderTitle = Text.max(200);
 const ReminderNote = z.string().max(4000);
 export const RecruitingReminderSchema = z.strictObject({

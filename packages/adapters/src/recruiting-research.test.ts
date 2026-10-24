@@ -924,6 +924,18 @@ describe("retained candidate report projection", () => {
             "https://example.test/project\njavascript:alert(1)\nhttps://user:pass@example.test/private",
           sourceUrls: ["https://example.test/project"],
         },
+        {
+          label: "Arbitrary",
+          value: null,
+          structuredValue: { nested: { value: "not report text" } },
+          sourceIds: [],
+          sourceUrls: [],
+          sourceUrlsById: {
+            profile: ["https://example.test/profile"],
+            missing: [],
+            unused: ["https://example.test/unused"],
+          },
+        },
       ],
       sourceUrls: ["https://example.test/profile", "https://example.test/project"],
     });
@@ -988,11 +1000,20 @@ describe("retained candidate report projection", () => {
           evidence: "A repository link was supplied",
           sourceUrls: [],
         },
+        {
+          label: "Arbitrary",
+          value: null,
+          structuredValue: { nested: true, reasoning: "Not a scalar report cell" },
+          reasoning: "Not a scalar report cell",
+          sourceIds: [],
+          sourceUrls: [],
+          sourceUrlsById: {},
+        },
       ],
       sourceUrls: [],
     });
   });
-  it.each([null, "malformed", [], { arbitrary: { nested: true } }])(
+  it.each([null, "malformed", [], { arbitrary: undefined }])(
     "does not invent an empty report for %j",
     (row) => {
       expect(() => projectRecruitingCandidateReport(row)).toThrow();

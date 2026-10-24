@@ -1,9 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingRoleCampaign } from "@rakazo/contracts";
 import { Badge, Button } from "@rakazo/ui-web";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
+import { CampaignObservedDetails } from "./CampaignObservedDetails";
 import { useRecruitingDetail } from "./detail";
+import { SequenceOverview } from "./SequenceOverview";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -23,16 +25,6 @@ import {
 
 // The CRM mirrors the provider's integer campaign status without defining its meaning; show it as stored.
 const campaignStatus = (status: number | null) => (status === null ? "—" : String(status));
-
-function useOutboxStatus() {
-  const { t } = useLingui();
-  return {
-    pending: t`Queued`,
-    processing: t`Sending`,
-    sent: t`Sent`,
-    failed: t`Failed`,
-  } as const;
-}
 
 /** Campaign names may carry an internal "[role <id>]" tag; it is not for people. */
 export const campaignName = (name: string) =>
@@ -64,16 +56,20 @@ type CampaignScope = Pick<
 >;
 
 /** The role's bound Instantly campaign, read live through the conversation's connection. */
-export function useRoleCampaign({ conversation, refreshSignal, ...cache }: CampaignScope) {
+export function useRoleCampaign(
+  { conversation, refreshSignal, ...cache }: CampaignScope,
+  selection?: { campaignId: string; campaignOffset: number },
+  selectionScope?: string,
+) {
   const target = conversation
     ? "groupId" in conversation
       ? { groupId: conversation.groupId }
       : { botId: conversation.botId }
     : null;
   return useKeyedRead<RecruitingRoleCampaign>(
-    target ? JSON.stringify([target, refreshSignal]) : null,
-    async () => rpc.recruiting.roleCampaign(target!),
-    target ? tabCacheSlot(cache, ["roleCampaign", target]) : {},
+    target ? JSON.stringify([target, selectionScope, selection, refreshSignal]) : null,
+    async () => rpc.recruiting.roleCampaign({ ...target!, ...selection }),
+    target ? tabCacheSlot(cache, ["roleCampaign", target, selectionScope, selection]) : {},
   );
 }
 
@@ -119,20 +115,12 @@ export function RoleCampaignCard(props: CampaignScope) {
   );
 }
 
-/** Stored outreach state for the role: campaigns, per-candidate status and queued/sent messages. */
+/** Stored outreach state for the role: campaigns and per-candidate status. */
 export function SequenceTab(props: RecruitingTabProps) {
   const { t } = useLingui();
   const detail = useRecruitingDetail();
   const crm = useRoleCrm(props);
-  const roleCampaign = useRoleCampaign(props);
   const instantly = useInstantlyStatus();
-  const leadStatus = new Map(
-    (roleCampaign.data?.leads ?? []).map((lead) => [
-      lead.email.toLowerCase(),
-      statusLabel(instantly.lead, lead.status),
-    ]),
-  );
-  const outboxStatus = useOutboxStatus();
   const [candidateId, setCandidateId] = useState<string>();
   const ready = crm.status === "ready" ? crm.target : null;
   const campaigns = useCrmPages(
@@ -140,6 +128,24 @@ export function SequenceTab(props: RecruitingTabProps) {
     "roleCampaigns",
     ready ? { crmRoleId: ready.crmRoleId } : null,
     props,
+  );
+  const campaignScope = JSON.stringify([props.spaceId, props.roleId, props.conversation, ready]);
+  const [chosenCampaign, setChosenCampaign] = useState<{
+    scope: string;
+    campaignId: string;
+    campaignOffset: number;
+  }>();
+  useEffect(() => setChosenCampaign(undefined), [campaignScope]);
+  const selection =
+    chosenCampaign?.scope === campaignScope
+      ? { campaignId: chosenCampaign.campaignId, campaignOffset: chosenCampaign.campaignOffset }
+      : undefined;
+  const roleCampaign = useRoleCampaign(props, selection, campaignScope);
+  const leadStatus = new Map(
+    (roleCampaign.data?.leads ?? []).map((lead) => [
+      lead.email.toLowerCase(),
+      statusLabel(instantly.lead, lead.status),
+    ]),
   );
   const people = useCrmPages(
     crm,
@@ -160,10 +166,74 @@ export function SequenceTab(props: RecruitingTabProps) {
     loadedCounts.set(person.outreachStatus, (loadedCounts.get(person.outreachStatus) ?? 0) + 1);
   const counts = totals.data?.counts ?? loadedCounts;
   const selected = people.data?.items.find((person) => person.candidateId === candidateId);
+  const roleLeadCampaigns =
+    ready && details.data && details.data.candidateId === candidateId
+      ? details.data.campaignAssociations.leadCampaigns.filter(
+          ({ campaign }) =>
+            campaign?.crmRoleId === ready.crmRoleId && campaign.clientId === ready.crmClientId,
+        )
+      : [];
+
   return (
     <section aria-label={t`Sequence`}>
       <TabHeader title={<Trans>Sequence</Trans>} />
       <CrmGate crm={crm} />
+      {campaigns.data?.items.length ? (
+        <label className="mb-4 block text-sm">
+          <span className="mb-1 block">
+            <Trans>Campaign</Trans>
+          </span>
+          <select
+            aria-label={t`Campaign`}
+            className="w-full rounded-md border bg-background p-2"
+            value={selection?.campaignId ?? roleCampaign.data?.campaign?.id ?? ""}
+            onChange={(event) => {
+              const campaignId = event.target.value;
+              const campaignOffset = campaigns.itemOffsets.get(campaignId);
+              setChosenCampaign(
+                campaignId && campaignOffset !== undefined
+                  ? { scope: campaignScope, campaignId, campaignOffset }
+                  : undefined,
+              );
+            }}
+          >
+            <option value="">
+              <Trans>Select a campaign</Trans>
+            </option>
+            {campaigns.data.items.map((campaign) => (
+              <option
+                key={campaign.id}
+                value={campaign.id}
+                disabled={!campaigns.itemOffsets.has(campaign.id)}
+              >
+                {campaignName(campaign.name)}
+              </option>
+            ))}
+          </select>
+        </label>
+      ) : null}
+      {roleCampaign.data?.selectionRequired ? (
+        <TabNotice>
+          <Trans>Select a campaign</Trans>
+        </TabNotice>
+      ) : null}
+      <SequenceOverview
+        campaign={roleCampaign.data}
+        replied={
+          !totals.failed && totals.data?.complete ? (totals.data.counts.get("replied") ?? 0) : null
+        }
+        // Candidate-wide outbox records have no role provenance.
+        sendDates={null}
+      />
+      {roleCampaign.data?.status === "ready" && roleCampaign.data.campaign ? (
+        <CampaignObservedDetails details={roleCampaign.data.campaign.observedDetails} />
+      ) : null}
+      {roleCampaign.failed ||
+      (roleCampaign.data?.status === "unavailable" && !roleCampaign.data.selectionRequired) ? (
+        <TabNotice alert>
+          <Trans>Could not read this campaign.</Trans>
+        </TabNotice>
+      ) : null}
       {campaigns.loading || people.loading ? <TabLoading /> : null}
       {campaigns.failed || people.failed ? (
         <TabNotice alert>
@@ -285,9 +355,9 @@ export function SequenceTab(props: RecruitingTabProps) {
                     <Trans>Could not load candidate records. Try refreshing.</Trans>
                   </TabNotice>
                 ) : null}
-                {details.data?.campaignAssociations.leadCampaigns.length ? (
+                {roleLeadCampaigns.length ? (
                   <ul className="flex flex-wrap gap-2 text-xs">
-                    {details.data.campaignAssociations.leadCampaigns.map((lead) => (
+                    {roleLeadCampaigns.map((lead) => (
                       <li key={lead.leadId}>
                         <Badge variant="secondary">
                           {lead.campaign?.name ?? t`Campaign not synced`}
@@ -297,32 +367,11 @@ export function SequenceTab(props: RecruitingTabProps) {
                     ))}
                   </ul>
                 ) : null}
-                {details.data && !details.data.outbox.length ? (
+                {details.data ? (
                   <TabNotice>
-                    <Trans>No stored messages for this candidate.</Trans>
+                    <Trans>Recruiter messages are unavailable for this role.</Trans>
                   </TabNotice>
                 ) : null}
-                {details.data?.outbox.map((entry) => (
-                  <article key={entry.id} className="rounded-lg border border-border p-3 text-sm">
-                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                      <Badge variant={entry.status === "failed" ? "destructive" : "outline"}>
-                        {outboxStatus[entry.status]}
-                      </Badge>
-                      <time
-                        className="text-xs text-muted-foreground"
-                        dateTime={entry.sentAt ?? entry.createdAt}
-                      >
-                        {formatDate(entry.sentAt ?? entry.createdAt)}
-                      </time>
-                    </div>
-                    <p className="whitespace-pre-wrap break-words">
-                      {entry.polishedBody ?? entry.body}
-                    </p>
-                    {entry.error ? (
-                      <p className="mt-2 text-xs text-destructive">{entry.error}</p>
-                    ) : null}
-                  </article>
-                ))}
               </section>
             ) : null}
           </div>

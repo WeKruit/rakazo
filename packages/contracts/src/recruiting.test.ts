@@ -3,6 +3,45 @@ import { z } from "zod";
 import * as contracts from "./index.js";
 
 const now = "2026-01-01T00:00:00.000Z";
+it("keeps observed mail metadata optional and validates its known types", () => {
+  const schema = contracts.RecruitingCorrespondenceSchema.shape.emails.element;
+  const base = {
+    id: "email",
+    sourceName: "Source",
+    sourceId: "source",
+    providerMessageId: "provider-message",
+    savedRead: null,
+    sender: null,
+    recipients: [],
+    subject: "Subject",
+    body: "Body",
+    snippet: false,
+    date: now,
+    url: null,
+  };
+  expect(schema.parse(base)).not.toHaveProperty("unread");
+  const observed = {
+    ...base,
+    unread: false,
+    leadId: "90000000-0000-4000-8000-000000000009",
+    step: "Follow-up",
+    observedAt: now,
+  };
+  expect(schema.parse(observed)).toEqual(observed);
+  expect(schema.parse({ ...base, unread: null, leadId: null, step: null })).toMatchObject({
+    unread: null,
+    leadId: null,
+    step: null,
+  });
+  for (const invalid of [
+    { unread: 1 },
+    { leadId: "guessed-lead" },
+    { step: 2 },
+    { observedAt: "yesterday" },
+  ])
+    expect(schema.safeParse({ ...base, ...invalid }).success).toBe(false);
+});
+
 it("keeps CRM role UI locators closed and separate from business binding receipts", () => {
   const reference = {
     sourceId: "source",

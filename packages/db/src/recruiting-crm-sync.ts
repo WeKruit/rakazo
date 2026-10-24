@@ -345,8 +345,14 @@ export async function listSyncedRecruitingCrmRoleContacts(
   actor: Actor,
   scope: CrmSyncScope,
   crmRoleId: string,
-): Promise<Extract<RecruitingCrmDataOutput, { operation: "candidates" }>["items"]> {
+): Promise<Extract<RecruitingCrmDataOutput, { operation: "candidates" }>["items"] | null> {
   const owner = owned(actor, scope);
+  // No synced role is unknown coverage, not a verified empty candidate list.
+  const role = await prisma.recruitingCrmRole.findFirst({
+    where: { ...owner, crmRoleId, archivedAt: null },
+    select: { id: true },
+  });
+  if (!role) return null;
   const links = await prisma.recruitingCrmRoleContact.findMany({
     where: {
       archivedAt: null,

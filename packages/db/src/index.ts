@@ -23,6 +23,7 @@ export * from "./recruiting-bootstrap.js";
 export * from "./recruiting-candidate-notes.js";
 export * from "./recruiting-crm-sync.js";
 export * from "./recruiting-reminders.js";
+export * from "./recruiting-scheduling.js";
 export * from "./repos.js";
 export * from "./scope.js";
 export * from "./sessions.js";

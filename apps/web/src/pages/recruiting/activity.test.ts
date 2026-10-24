@@ -99,11 +99,11 @@ it("merges stored mail, outbox, status and review newest first without duplicate
     ["status", "2026-10-22T09:00:00Z"],
     ["received", "2026-10-21T10:00:00Z"],
     ["sent", "2026-10-20T10:00:00Z"],
-    ["failed", "2026-10-19T10:00:00Z"],
     ["review", "2026-10-18T10:00:00Z"],
+    ["failed", null],
   ]);
   expect(items[1]).toMatchObject({ subject: "Re: Staff" });
-  expect(items[4]).toMatchObject({ notes: "Strong", result: "approved" });
+  expect(items[3]).toMatchObject({ notes: "Strong", result: "approved" });
 });
 
 it("keeps undated records last and returns nothing without records", () => {
@@ -126,4 +126,110 @@ it("formats relative time in the given locale", () => {
   expect(relativeTime("2026-10-23T11:59:30Z", "en", now)).toBe("now");
   expect(relativeTime("2026-10-24T12:00:00Z", "en", now)).toBe("tomorrow");
   expect(relativeTime("2026-10-21T12:00:00Z", "zh-CN", now)).toBe("前天");
+});
+
+it("matches complete email addresses and preserves the actual sender as actor", () => {
+  const saved = [
+    {
+      id: "wrong",
+      providerMessageId: "wrong",
+      sender: "notada@example.test",
+      recipients: [],
+      subject: "Wrong person",
+      date: null,
+    },
+    {
+      id: "domain",
+      providerMessageId: "domain",
+      sender: "ada@example.test.evil",
+      recipients: [],
+      subject: "Wrong domain",
+      date: null,
+    },
+    {
+      id: "real",
+      providerMessageId: "real",
+      sender: "Ada <ADA@example.test>",
+      recipients: [],
+      subject: "Initial inbound",
+      date: "2026-10-23T10:00:00Z",
+    },
+  ];
+  expect(buildActivity({ email: "ada@example.test", saved: saved as never })).toEqual([
+    expect.objectContaining({
+      id: "saved:real",
+      kind: "received",
+      actor: "Ada <ADA@example.test>",
+      source: "mailbox",
+    }),
+  ]);
+});
+it("never invents sent/failure times or actors from an outbox creation time", () => {
+  const items = buildActivity({
+    details: {
+      outbox: [
+        { id: "sent", status: "sent", body: "", createdAt: "2026-10-01T00:00:00Z", sentAt: null },
+        { id: "failed", status: "failed", body: "", createdAt: "2026-10-01T00:00:00Z" },
+      ],
+    } as never,
+  });
+  expect(items).toHaveLength(2);
+  expect(items.every((item) => item.at === null && item.actor === null)).toBe(true);
+});
+it("requires the exact role for status and review activity", () => {
+  const details = {
+    outbox: [],
+    roleTracking: [
+      {
+        roleKey: "Another role",
+        workflowStatus: "scheduled",
+        statusChangedAt: "2026-10-23T00:00:00Z",
+      },
+    ],
+    review: {
+      id: "review",
+      crmRoleId: "other",
+      result: "approved",
+      updatedAt: "2026-10-23T00:00:00Z",
+    },
+  };
+  expect(buildActivity({ details: details as never })).toEqual([]);
+  expect(
+    buildActivity({ details: details as never, roleKey: "Selected role", crmRoleId: "selected" }),
+  ).toEqual([]);
+});
+it("merges actual profile views and keeps unknown/invalid dates undated", () => {
+  const items = buildActivity({
+    views: [
+      {
+        id: "view",
+        at: "2026-10-23T12:00:00Z",
+        actorName: "Recruiter",
+        roleTitle: "Synthetic role",
+      },
+    ],
+    mail: { items: [email("bad-date", { date: "not-a-date", direction: "received" })] } as never,
+  });
+  expect(items[0]).toMatchObject({ kind: "viewed", actor: "Recruiter", source: "profile" });
+  expect(items[1]?.at).toBeNull();
+});
+
+it("does not attribute scheduling to the future message sender/date", () => {
+  const items = buildActivity({
+    mail: {
+      nativeCorrespondence: [
+        {
+          id: "scheduled",
+          status: "scheduled",
+          email: {
+            providerMessageId: "future",
+            subject: "Scheduled",
+            sender: "sender@example.test",
+            date: "2026-10-24T12:00:00Z",
+          },
+        },
+      ],
+    } as never,
+  });
+  expect(items[0]).toMatchObject({ kind: "scheduled", actor: null, at: null });
 });

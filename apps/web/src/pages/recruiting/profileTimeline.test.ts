@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { companyHost, parseTimeline, timelineStats } from "./profileTimeline";
+import { parseTimeline, timelineStats } from "./profileTimeline";
 
 const NOW = new Date(Date.UTC(2026, 9, 23));
 
 describe("parseTimeline", () => {
+  it("preserves stored CRM role and employer hierarchy separated by middle dots", () => {
+    expect(
+      parseTimeline("Engineer · Example Labs · 2020 – 2022", "experience", NOW)[0],
+    ).toMatchObject({
+      primary: "Engineer",
+      secondary: "Example Labs",
+      months: 24,
+    });
+  });
+
   it("reads the requested pipe format with the organization's own website", () => {
     const [job, earlier] = parseTimeline(
       "Staff Engineer | Acme Inc. | https://www.acme.example | Jan 2022 – Present | St. Louis, MO\nEngineer | Beta | | 2019 – 2021 |",
@@ -149,17 +159,5 @@ describe("timelineStats", () => {
 
   it("is null when no dates parse", () => {
     expect(timelineStats(parseTimeline("Engineer at Acme", "experience", NOW))).toBeNull();
-  });
-});
-
-describe("companyHost", () => {
-  it("accepts only a plausible non-LinkedIn https host", () => {
-    const urls = [
-      "https://www.linkedin.com/in/x",
-      "http://nvidia.com",
-      "https://research.nvidia.com/p",
-    ];
-    expect(companyHost("NVIDIA", urls)).toBe("research.nvidia.com");
-    expect(companyHost("Acme", urls)).toBeNull();
   });
 });

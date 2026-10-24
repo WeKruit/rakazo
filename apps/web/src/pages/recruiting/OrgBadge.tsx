@@ -1,5 +1,5 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@rakazo/ui-web";
-import { useState } from "react";
+import { ProfileImage } from "./ProfileImage";
 
 function logoInitials(name: string) {
   const letters = [...name].filter((char) => /\p{L}|\p{N}/u.test(char));
@@ -14,37 +14,31 @@ function logoInitials(name: string) {
   return letters.slice(0, 2).join("").toUpperCase();
 }
 
-/** Initials on a muted tile; a favicon from the field's own source host replaces them when it loads. */
+/** The favicon of an organization's own website, when one was supplied for it. */
+export function websiteFavicon(host: string | undefined | null) {
+  return host ? `https://${host}/favicon.ico` : null;
+}
+
+/** A supplied company/school image, or the favicon of its own supplied website; otherwise initials. */
 export function CompanyLogo({
   name,
+  src,
   host,
   small = false,
 }: {
   name: string;
+  src?: string | null;
   host?: string | null;
   small?: boolean;
 }) {
-  const [failed, setFailed] = useState<string | null>(null);
   return (
-    <span
-      aria-hidden
+    <ProfileImage
+      src={src ?? websiteFavicon(host)}
+      fallback={logoInitials(name)}
       className={`flex shrink-0 items-center justify-center overflow-hidden bg-muted font-medium text-muted-foreground ${
         small ? "size-4 rounded-sm text-[8px]" : "size-10 rounded-md text-xs"
       }`}
-    >
-      {host && failed !== host ? (
-        <img
-          src={`https://${host}/favicon.ico`}
-          alt=""
-          className="size-full object-contain"
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          onError={() => setFailed(host)}
-        />
-      ) : (
-        logoInitials(name)
-      )}
-    </span>
+    />
   );
 }
 
@@ -55,6 +49,7 @@ export function CompanyLogo({
 export function OrgBadge({
   name,
   label,
+  src,
   host,
   kind,
   description,
@@ -64,6 +59,8 @@ export function OrgBadge({
   name: string;
   /** Text shown in place of the name, such as a tag that mentions it. */
   label?: string;
+  /** A supplied logo image, preferred over the website's favicon. */
+  src?: string | null;
   host?: string | null;
   /** What it is, such as company, school or lab. */
   kind?: string | null;
@@ -82,7 +79,7 @@ export function OrgBadge({
         render={<span />}
         className="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-foreground underline decoration-dotted decoration-muted-foreground/60 underline-offset-2"
       >
-        {logo ? <CompanyLogo name={name} host={host} small /> : null}
+        {logo ? <CompanyLogo name={name} src={src} host={host} small /> : null}
         <span className="truncate">{label ?? name}</span>
       </TooltipTrigger>
       <TooltipContent className="flex-col items-start gap-0.5">
