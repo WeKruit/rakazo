@@ -323,7 +323,9 @@ it("shows an error instead of falling back when the role-wide mail read fails", 
   );
   const view = await mount(<InboxTab {...props} />);
   await settle();
-  expect(view.querySelector('[role="alert"]')?.textContent).toContain("Could not load candidate records");
+  expect(view.querySelector('[role="alert"]')?.textContent).toContain(
+    "Could not load candidate records",
+  );
   expect(crmData.mock.calls.some(([input]) => input.operation === "mail")).toBe(false);
 });
 

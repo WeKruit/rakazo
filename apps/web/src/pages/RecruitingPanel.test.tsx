@@ -3288,9 +3288,9 @@ it("shows only the selected candidate's verified CRM receipt and never infers su
   );
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
   await view.click("unverified-person");
-  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent).not.toContain(
-    "Synced",
-  );
+  expect(
+    view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent,
+  ).not.toContain("Synced");
   expect(
     [...view.container.querySelectorAll("summary")].some(
       (item) => item.textContent === "CRM receipt",

@@ -102,9 +102,7 @@ export function RoleCampaignCard(props: CampaignScope) {
       ) : null}
       {campaign.stopOnReply === false ? (
         <p role="alert" className="mt-2 text-xs text-destructive">
-          <Trans>
-            Stop on reply is off, so follow-ups keep going after a candidate replies.
-          </Trans>
+          <Trans>Stop on reply is off, so follow-ups keep going after a candidate replies.</Trans>
         </p>
       ) : null}
       {leads.length ? (

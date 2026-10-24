@@ -1319,7 +1319,9 @@ it.each(["bot", "group"] as const)(
       initialPath: kind === "group" ? "/app/g/group-1?view=results" : "/app/bot-1?view=results",
     });
     const banner =
-      kind === "group" ? "Could not load this role’s candidate records." : "Could not load recruiting";
+      kind === "group"
+        ? "Could not load this role’s candidate records."
+        : "Could not load recruiting";
     expect(container?.textContent).toContain(view.candidate.name);
     const workspace = shellApi.recruiting.getWorkspace.getMockImplementation()!;
     // A refusal that is not retried leaves the failure on screen until a later read.
@@ -1919,7 +1921,9 @@ it.each(["bot", "group"] as const)(
       initialPath: kind === "group" ? "/app/g/group-1?view=results" : "/app/bot-1?view=results",
     });
     expect(container?.textContent).toContain(
-      kind === "group" ? "Could not load this role’s candidate records." : "Could not load recruiting",
+      kind === "group"
+        ? "Could not load this role’s candidate records."
+        : "Could not load recruiting",
     );
     // A failed CRM binding keeps the role's own results visible beside its retry.
     if (kind === "bot") expect(container?.textContent).not.toContain(view.candidate.name);
@@ -5468,7 +5472,10 @@ it("marks a role that waits on the recruiter in the sidebar", async () => {
 
 it("tells a confirmation apart from a question in the sidebar", async () => {
   setToolActivityPreference("off");
-  await renderFeedbackShell("group", undefined, { openFeedback: false, groupAttention: "approval" });
+  await renderFeedbackShell("group", undefined, {
+    openFeedback: false,
+    groupAttention: "approval",
+  });
   const nav = container!.querySelector('[data-testid="recruiting-navigation"]')!;
   expect(nav.textContent).toContain("Needs confirmation");
   expect(nav.textContent).not.toContain("Needs input");

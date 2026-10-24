@@ -1,8 +1,8 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
-import { useRecruitingDetail } from "./detail";
 import { AvailabilityRanges } from "./AvailabilityRanges";
+import { useRecruitingDetail } from "./detail";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,

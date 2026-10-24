@@ -1070,8 +1070,8 @@ export function ModelSettingsOverlay({
       {selected?.auth === "oauth" && !subscriptionSignIn ? (
         <p className="mt-5 text-sm leading-[1.5] text-muted-foreground first:mt-0">
           <Trans>
-            This subscription sign-in is not available in WeKruit Headhunter yet. Use a deployment credential or
-            choose another provider.
+            This subscription sign-in is not available in WeKruit Headhunter yet. Use a deployment
+            credential or choose another provider.
           </Trans>
         </p>
       ) : null}

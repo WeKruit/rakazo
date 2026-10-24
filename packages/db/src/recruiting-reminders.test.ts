@@ -112,8 +112,16 @@ describe("recruiting reminders (db)", () => {
     const { prisma } = fake();
     const due = "2026-11-01T00:00:00.000Z";
     for (const candidateKey of ["autumn:a", "crm:1", "crm:2"])
-      await createRecruitingReminder(prisma, alice, { title: candidateKey, dueAt: due, candidateKey });
-    await createRecruitingReminder(prisma, bob, { title: "bob", dueAt: due, candidateKey: "crm:1" });
+      await createRecruitingReminder(prisma, alice, {
+        title: candidateKey,
+        dueAt: due,
+        candidateKey,
+      });
+    await createRecruitingReminder(prisma, bob, {
+      title: "bob",
+      dueAt: due,
+      candidateKey: "crm:1",
+    });
     const both = await listRecruitingReminders(
       prisma,
       alice,
