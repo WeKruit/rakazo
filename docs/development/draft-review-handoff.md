@@ -1,6 +1,6 @@
 # Unified workspace draft review and original handoff reconciliation
 
-This is the canonical review entry point for the proposed Draft PR. Development tests are not live acceptance. No remote branch or PR has been published at this checkpoint: repository hook metadata returned HTTP 403, so external deployment side effects remain unknown. Draft status and `[skip ci]` do not suppress GitHub Apps. No merge, deployment, grant, actual sync, mail send or booking is authorized by this document.
+This is the canonical review entry point for the proposed Draft PR. Development tests are not live acceptance. Publication update (2026-10-24): the user authorized this feature-branch push and Draft PR, accepting possible automatic preview deployment. Repository hook metadata returned HTTP 403; external deployment behavior remains unverified. Draft status and `[skip ci]` do not suppress GitHub Apps. No merge, deployment, grant, actual sync, mail send or booking is authorized by this document.
 
 ## Revisions and scope
 
@@ -43,7 +43,7 @@ Tests use synthetic intercepted providers and native local PostgreSQL, never pro
 | Chat `11bc1072` | Shell, RecruitingPanel, RecruitingCorrespondence, recruiting-chat-context; web TypeScript/build; recruiting-chat browser spec | 475 checks, 8 browser routes passed; twelve captures |
 | Earlier unified backend/profile | Four targeted native PG suites in functional delivery | 44 passed, including six profile cases; this is not the full DB suite |
 
-Known limits: two baseline adapter schema failures, broader twelve DB baseline failures, legacy signup browser failure, existing build chunk warning and untranslated catalog entries remain recorded. Transient browser/server termination and initial test failures are disclosed in their increment notes. No CI success is claimed. Parent visually inspected targeted five-page, scheduling and structured-profile states; latest chat parent pixel review remains pending. No current CI screenshot URL exists while publication is blocked; repo browser specs reproduce the synthetic routes.
+Known limits: two baseline adapter schema failures, broader twelve DB baseline failures, legacy signup browser failure, existing build chunk warning and untranslated catalog entries remain recorded. Transient browser/server termination and initial test failures are disclosed in their increment notes. No CI success is claimed. Parent visually inspected targeted five-page, scheduling and structured-profile states; latest chat parent pixel review remains pending. No current CI screenshot URL exists at publication preparation; repo browser specs reproduce the synthetic routes.
 
 ## Ordered deployment prerequisites — instructions only
 
@@ -89,11 +89,11 @@ Next Autumn work: verify actual supported serializer/read protocol; agree observ
 - Confirm source release/SQL/MCP/permission prerequisites, then execute only separately authorized owner acceptance. Record exact deployed/readback evidence without public PII or secrets.
 - Reconcile Autumn source/asset findings and the separate CI/CD drain decision into their owners' progress. Do not mix the CI/CD patch into this product PR merely to close a checklist.
 
-## Publication audit and blocked action
+## Publication audit and bounded authorization
 
-Audited repository workflows at current main: production SSH and mobile OTA require main push; server-image publishing is main/tag/manual, with PR jobs build-only; workflow_run publishes test reports. This product branch does not alter workflows. External repository hooks/installed app behavior cannot be excluded: metadata read returned **HTTP 403 Resource not accessible by integration**. No denied read retry, settings change or publication occurred.
+Audited repository workflows at current main: production SSH and mobile OTA require main push; server-image publishing is main/tag/manual, with PR jobs build-only; workflow_run publishes test reports. This product branch does not alter workflows. External repository hooks/installed app behavior cannot be excluded: metadata read returned **HTTP 403 Resource not accessible by integration**. No denied read retry or settings change occurred.
 
-Pending action is publishing `codex/unified-workspace-draft-review` and creating a Draft PR. A maintainer must verify that this branch/PR cannot trigger forbidden deployment, or explicitly authorize the applicable automatic side effect with its scope. Draft authorization alone is not deployment authorization. No main push, merge or source push is proposed. Until this gate is resolved, this is a prepared local review branch, not an existing GitHub PR.
+The user explicitly authorized publishing `codex/unified-workspace-draft-review` and creating a Draft PR on 2026-10-24, accepting possible automatic preview deployment. This supersedes the earlier publication hold only for this product branch/PR. No main push, merge, source push, manual deployment, production migration, actual CRM sync, external email or permission expansion is authorized. Check actual PR/check/deployment metadata after publication; do not assume a Draft prevents deployment.
 
 ## Latest root-cause evidence and mail loop status
 
