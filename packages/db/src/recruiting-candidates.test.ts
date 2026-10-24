@@ -1121,7 +1121,6 @@ function observationFixture(rows: readonly unknown[] | undefined) {
     ]),
   );
   const tx = {
-    recruitingSavedProfile: { findMany: vi.fn(async () => []) },
     ...f.tx,
     recruitingCrmWorkspaceAttachment: {
       findUnique: vi.fn(async () => null),
@@ -1404,7 +1403,6 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
   ];
   const runs = new Map([["run", f.run]]);
   const tx = {
-    recruitingSavedProfile: { findMany: vi.fn(async () => []) },
     ...f.tx,
     $queryRaw: vi.fn(async () => [{ id: "thread" }]),
     recruitingCandidate: {
@@ -2564,7 +2562,6 @@ async function replyFixture() {
     crmContextReadEffectId: string;
   }> = [];
   const tx = {
-    recruitingSavedProfile: { findMany: vi.fn(async () => []) },
     ...f.tx,
     recruitingReply: {
       findUnique: vi.fn(async ({ where }) => {
@@ -4754,7 +4751,6 @@ function nativeCandidateFixture() {
     clientNonce: "recruiting-observation:read",
   };
   const tx = {
-    recruitingSavedProfile: { findMany: vi.fn(async () => []) },
     ...f.tx,
     $queryRaw: vi.fn(
       async (query: unknown): Promise<unknown[]> =>
@@ -5710,7 +5706,6 @@ describe("native candidate source provenance", () => {
         );
       const findMany = vi.fn(async () => [page, { ...f.page, effect: f.read }]);
       const tx = {
-        recruitingSavedProfile: { findMany: vi.fn(async () => []) },
         ...f.tx,
         recruitingCandidatePage: { ...f.tx.recruitingCandidatePage, findMany },
       };
@@ -5758,7 +5753,6 @@ describe("native candidate source provenance", () => {
       },
     ]);
     const tx = {
-      recruitingSavedProfile: { findMany: vi.fn(async () => []) },
       ...f.tx,
       $queryRaw: queryRaw,
       recruitingResearchTask: { findMany: vi.fn(async () => []) },
@@ -5868,7 +5862,6 @@ describe("native candidate source provenance", () => {
       return (pages.find((page) => page.artifactId === where.id)?.artifact ?? null) as never;
     });
     const tx = {
-      recruitingSavedProfile: { findMany: vi.fn(async () => []) },
       ...f.tx,
       recruitingResearchTask: { findMany: vi.fn(async () => []) },
       recruitingCandidatePage: { findMany: vi.fn(async () => pages) },
@@ -5905,7 +5898,6 @@ describe("native candidate source provenance", () => {
   it("lists native saved research history without creating domain tasks", async () => {
     const f = await nativeSourceFixture();
     const tx = {
-      recruitingSavedProfile: { findMany: vi.fn(async () => []) },
       ...f.tx,
       recruitingResearchTask: { findMany: vi.fn(async () => []) },
       recruitingCandidatePage: {
@@ -6184,7 +6176,6 @@ describe("native candidate source provenance", () => {
       );
       const findMany = vi.fn(async () => [{ ...f.page, effect: f.read }]);
       const tx = {
-        recruitingSavedProfile: { findMany: vi.fn(async () => []) },
         ...f.tx,
         recruitingCandidatePage: { ...f.tx.recruitingCandidatePage, findMany },
       };
