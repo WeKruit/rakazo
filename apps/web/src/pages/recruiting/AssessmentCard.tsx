@@ -1,6 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Badge } from "@rakazo/ui-web";
-import { CircleCheck, CircleHelp, CircleX, Scale } from "lucide-react";
+import { Badge, Button } from "@rakazo/ui-web";
+import { ChevronDown, CircleCheck, CircleHelp, CircleX, Scale } from "lucide-react";
+import { useState } from "react";
 import type { RequirementRow, RequirementStatus } from "./profile";
 import { sourceLabel } from "./profile";
 
@@ -11,26 +12,36 @@ const ICONS: Record<RequirementStatus, { Icon: typeof CircleCheck; className: st
   unknown: { Icon: CircleHelp, className: "text-muted-foreground" },
 };
 
+export type QuickOutput = {
+  headline: string | null;
+  highlights: readonly string[];
+  keyWorks: readonly { title: string; detail: string | null; url: string | null }[];
+  concerns: readonly string[];
+};
+
 /**
- * Autumn's own assessment of one candidate, one row per requirement with its evidence as
- * returned. Display only: nothing here re-ranks or re-judges the candidate.
+ * Autumn's own assessment of one candidate: its short headline, tags and per-criterion verdicts
+ * first, with each criterion's full evidence and the full summary one click away. Display only:
+ * nothing here re-ranks or re-judges the candidate.
  */
 export function AssessmentCard({
   score,
   rank,
   summary,
-  scope,
+  quick,
   rows,
   sourceUrls,
 }: {
   score: string | null;
   rank: { label: string; value: string } | null;
   summary: string | null;
-  scope: string | null;
+  quick: QuickOutput;
   rows: readonly RequirementRow[];
   sourceUrls: readonly string[];
 }) {
   const { t } = useLingui();
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const statusLabel: Record<RequirementStatus, string | null> = {
     match: t`Match`,
     gap: t`Gap`,
@@ -40,6 +51,12 @@ export function AssessmentCard({
   const counts = (["match", "partial", "gap"] as const)
     .map((status) => ({ status, count: rows.filter((row) => row.status === status).length }))
     .filter((item) => item.count);
+  const toggle = (key: string) =>
+    setOpen((current) => {
+      const next = new Set(current);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
   return (
     <div className="space-y-3 rounded-lg border bg-card p-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -68,30 +85,128 @@ export function AssessmentCard({
           </span>
         ) : null}
       </div>
-      {summary ? <p className="whitespace-pre-wrap">{summary}</p> : null}
-      {scope ? <p className="text-xs text-muted-foreground">{scope}</p> : null}
+      {quick.headline ? <p className="text-base font-medium">{quick.headline}</p> : null}
+      {quick.highlights.length ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {quick.highlights.map((tag) => (
+            <li key={tag}>
+              <Badge variant="secondary">{tag}</Badge>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {quick.keyWorks.length ? (
+        <div className="space-y-1">
+          <p className="text-xs text-muted-foreground">
+            <Trans>Key work</Trans>
+          </p>
+          <ul className="flex flex-wrap gap-1.5">
+            {quick.keyWorks.map((work) => {
+              const body = (
+                <>
+                  {work.title}
+                  {work.detail ? (
+                    <span className="font-normal text-muted-foreground">{work.detail}</span>
+                  ) : null}
+                </>
+              );
+              return (
+                <li key={work.title}>
+                  {work.url ? (
+                    <Badge
+                      variant="outline"
+                      render={<a href={work.url} target="_blank" rel="noreferrer" />}
+                    >
+                      {body}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline">{body}</Badge>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+      {quick.concerns.length ? (
+        <div className="space-y-0.5 rounded-md bg-muted px-3 py-2">
+          <p className="text-xs font-medium text-warning">
+            <Trans>Worth checking</Trans>
+          </p>
+          <ul className="list-inside list-disc">
+            {quick.concerns.map((concern) => (
+              <li key={concern}>{concern}</li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {rows.length ? (
-        <ul className="space-y-3">
+        <ul className="divide-y border-y">
           {rows.map((row) => {
             const { Icon, className } = ICONS[row.status];
             const label = statusLabel[row.status];
+            const name = row.brief?.name ?? row.label;
+            const verdict = row.brief?.verdict ?? null;
+            const expanded = open.has(row.key);
+            const hasDetail = Boolean(row.text || row.sourceUrls.length);
             return (
-              <li key={row.key} className="flex gap-2">
-                <Icon size={16} aria-hidden className={`mt-0.5 shrink-0 ${className}`} />
-                <div className="min-w-0 space-y-0.5">
-                  <p className="flex flex-wrap items-baseline gap-x-2">
-                    {label ? <span className="font-medium">{label}</span> : null}
-                    {row.label ? (
-                      <span className="text-xs text-muted-foreground">{row.label}</span>
+              <li key={row.key}>
+                <button
+                  type="button"
+                  className="flex min-h-9 w-full items-center gap-2 py-1.5 text-start disabled:cursor-default"
+                  aria-expanded={hasDetail ? expanded : undefined}
+                  disabled={!hasDetail}
+                  onClick={() => toggle(row.key)}
+                >
+                  <Icon
+                    size={16}
+                    aria-label={label ?? undefined}
+                    className={`shrink-0 ${className}`}
+                  />
+                  {name ? <span className="shrink-0 font-medium">{name}</span> : null}
+                  <span
+                    className={`min-w-0 flex-1 text-muted-foreground ${expanded ? "" : "truncate"}`}
+                  >
+                    {verdict ?? (expanded ? null : row.text)}
+                  </span>
+                  {hasDetail ? (
+                    <ChevronDown
+                      size={14}
+                      aria-hidden
+                      className={`shrink-0 text-muted-foreground transition-transform ${expanded ? "rotate-180" : ""}`}
+                    />
+                  ) : null}
+                </button>
+                {expanded ? (
+                  <div className="space-y-0.5 pb-2 ps-6">
+                    {row.text ? (
+                      <p className="whitespace-pre-wrap text-muted-foreground">{row.text}</p>
                     ) : null}
-                  </p>
-                  {row.text ? <p className="whitespace-pre-wrap">{row.text}</p> : null}
-                  <SourceLinks urls={row.sourceUrls} />
-                </div>
+                    <SourceLinks urls={row.sourceUrls} />
+                  </div>
+                ) : null}
               </li>
             );
           })}
         </ul>
+      ) : null}
+      {summary ? (
+        quick.headline && !summaryOpen ? (
+          <Button size="sm" variant="ghost" onClick={() => setSummaryOpen(true)}>
+            <Trans>Full assessment</Trans>
+          </Button>
+        ) : (
+          <div className="space-y-1">
+            <p
+              className={`whitespace-pre-wrap text-muted-foreground ${summaryOpen ? "" : "line-clamp-3"}`}
+            >
+              {summary}
+            </p>
+            <Button size="sm" variant="ghost" onClick={() => setSummaryOpen((value) => !value)}>
+              {summaryOpen ? <Trans>Show less</Trans> : <Trans>Show more</Trans>}
+            </Button>
+          </div>
+        )
       ) : null}
       {sourceUrls.length ? (
         <p className="flex flex-wrap items-center gap-x-2 border-t pt-2 text-xs text-muted-foreground">

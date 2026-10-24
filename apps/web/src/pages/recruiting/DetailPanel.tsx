@@ -441,7 +441,7 @@ export function RecruitingDetailPanel({
                     score={fitBadge || null}
                     rank={sections.fit?.rank ?? null}
                     summary={sections.summary}
-                    scope={sections.scope}
+                    quick={sections.quick}
                     rows={sections.requirements}
                     sourceUrls={sections.requirementSources}
                   />
