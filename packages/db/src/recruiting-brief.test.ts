@@ -104,6 +104,7 @@ function fixture(crmBindingEffectId: string | null = null) {
     };
   const tx = {
     $queryRaw: vi.fn(async () => []),
+    recruitingCrmWorkspaceAttachment: { findUnique: vi.fn(async () => null) },
     thread: {
       findFirst: vi.fn(async (_args: { where: { id: string } }) => thread),
       update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 1 })),
@@ -156,10 +157,93 @@ function fixture(crmBindingEffectId: string | null = null) {
       }),
     },
   };
+  if (crmBindingEffectId) {
+    Object.assign(tx, verifiedCrmBinding(crmBindingEffectId));
+    // Autonomous record keeping: no approval card or answer exists for the binding.
+    Object.assign(tx.message, { findFirst: vi.fn(async () => null) });
+    Object.assign(tx.event, { findFirst: vi.fn(async () => null) });
+  }
   const prisma = {
     $transaction: vi.fn(async (callback) => callback(tx)),
   } as unknown as PrismaClient;
   return { prisma, tx, thread, revisions, humanMessages };
+}
+
+/** A completed, autonomously recorded CRM binding that the workspace read verifies. */
+function verifiedCrmBinding(bindingEffectId: string) {
+  const target = {
+    mcpServerId: "crm-server",
+    serverRevision: 2,
+    organizationId: "10000000-0000-4000-8000-000000000001",
+    crmRoleId: "20000000-0000-4000-8000-000000000002",
+    crmClientId: "30000000-0000-4000-8000-000000000003",
+    clientLabel: "Client",
+    roleLabel: "Engineer",
+  };
+  const run = {
+    id: "run",
+    spaceId: actor.spaceId,
+    userId: actor.userId,
+    threadId: "thread",
+    botId: "bot",
+    bot: { spaceId: actor.spaceId, userId: actor.userId },
+  };
+  const effects = new Map<string, Record<string, unknown>>([
+    [
+      bindingEffectId,
+      {
+        id: bindingEffectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_crm_target",
+        status: "completed",
+        request: {
+          operation: "bind",
+          roleId: "role",
+          expectedRoleRevision: 1,
+          expectedBindingEffectId: null,
+          crmRoleReadEffectId: "crm-read",
+        },
+        result: { status: "connected", roleId: "role", bindingEffectId, target },
+      },
+    ],
+    [
+      "crm-read",
+      {
+        id: "crm-read",
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "mcp__crm__get_crm_role",
+        status: "completed",
+        request: boundDirectApprovalRequest(
+          {
+            connectorId: "mcp",
+            resourceId: target.mcpServerId,
+            resourceRevision: target.serverRevision,
+            toolName: "get_crm_role",
+          },
+          { p_org: target.organizationId, p_role: target.crmRoleId },
+          "__rakazoCatalogTool",
+        ),
+        result: {
+          structuredContent: {
+            data: {
+              role_spec_id: target.crmRoleId,
+              client_id: target.crmClientId,
+              client_label: target.clientLabel,
+              role_label: target.roleLabel,
+            },
+          },
+        },
+      },
+    ],
+  ]);
+  return {
+    run: { findFirst: vi.fn(async () => run) },
+    externalEffect: {
+      findFirst: vi.fn(async ({ where }: { where: { id: string } }) => effects.get(where.id)),
+    },
+  };
 }
 
 function criteriaFixture(crmBindingEffectId: string | null = null) {
