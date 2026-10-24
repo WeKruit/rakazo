@@ -1533,6 +1533,10 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
   z.strictObject({ operation: z.literal("round") }),
+  z.strictObject({
+    operation: z.literal("replies"),
+    limit: z.number().int().min(1).max(100).optional(),
+  }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 
