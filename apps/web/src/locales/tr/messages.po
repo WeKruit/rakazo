@@ -91,6 +91,11 @@ msgstr "{0} bağlantısı"
 msgid "{0} default"
 msgstr ""
 
+#. placeholder {0}: sections.company.size
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{0} employees"
+msgstr ""
+
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} handling"
@@ -688,6 +693,14 @@ msgstr "Onay sınırları"
 #: src/pages/shell/message-cards.tsx
 msgid "Approve"
 msgstr "Onayla"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr ""
 
 #: src/pages/shell/message-cards.tsx
 msgid "Approve this server to let your agent use its tools."
@@ -1621,6 +1634,10 @@ msgstr "Parolayı doğrulayın"
 
 #: src/components/AskCard.tsx
 msgid "Confirm reply"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
 msgstr ""
 
 #: src/components/AskCard.tsx
@@ -7718,16 +7735,4 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
-msgstr ""
-
-#: src/components/AskCard.tsx
-msgid "Confirm requirements"
-msgstr ""
-
-#: src/components/AskCard.tsx
-msgid "Approve documents"
-msgstr ""
-
-#: src/components/AskCard.tsx
-msgid "Approve calibration"
 msgstr ""

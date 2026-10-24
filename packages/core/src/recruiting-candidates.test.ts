@@ -312,4 +312,16 @@ describe("canonical recruiting candidate output", () => {
     expect(RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS).toContain("null");
     expect(RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS).toContain("provider_report");
   });
+
+  it("asks for the profile columns the profile view renders", () => {
+    for (const column of [
+      "experience: list[str]",
+      "education: list[str]",
+      "profile_image_url",
+      "current_company_url",
+      "current_company_industry",
+      "current_company_size",
+    ])
+      expect(RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS).toContain(column);
+  });
 });
