@@ -116,9 +116,16 @@ PR 阶段（本 Draft PR 打开后会触发）：
 4. 负责人创建隔离 staging 资源后，手动触发 `staging.yml`，确认容器能启动（同时验证上面的 `infra.modal` 导入问题）、`/ready` 通过、业务路由被拒绝、收据上传。
 5. 生产发布继续暂停，直到排空/维护方案被选定并实现。
 
+## 已定的默认做法（2026-10-24，用户要求不等确认）
+
+- 移动端 OTA 和服务端镜像发布：保留新变量开关，默认关闭。main 以前几乎从不跑 CI（合并带 `[skip ci]`），合并后若不加开关，第一次 main CI 就可能对外发布。要恢复发布时由负责人设置变量。
+- 旧 SSH Compose 部署任务：保留在文件里，但保持停用（生产发布暂停未解除）。
+- `infra/modal/app.py`：先把 `ROOT`（本地为仓库根目录，容器内为 `/app`）加入 `sys.path` 再导入 `release_config`。已用 Modal 1.6.2 在只有 `infra/modal` 在路径上的条件下模拟导入成功。仍需在 staging 上实际启动一次。
+
 ## 已知失败与阻塞
 
-- 全仓 `biome check .` 在 main 上本来就失败（与本 PR 无关）；`ci.yml` 的 Lint 任务会因此红，需要另外修。
+- 本 PR 顺手修了：updater 测试的严格类型、Web E2E 无法加载（spec 引入了带 Lingui 宏的模块）、usage-accounting 测试的上下文窗口过小、全仓 Biome 格式。
+- **main 上原有的测试失败（不是本 PR 引入，已在 `origin/main` 上复现）**：`pnpm test` 有 60 个失败，集中在 `packages/db/src/recruiting-brief.test.ts`（28）、`packages/testkit/src/pi-offline.test.ts`（6）、`history-context.test.ts`（4）、i18n 目录、`apps/api` router/memory-revisions、adapters 工具 schema 等；Postgres 集成测试有 7 个套件失败（history-retrieval、history-short-product、history-followup-product、history-product-loop、authorization、executor-lifecycle、memory commit），多为模型 fixture 与当前提示/工具不一致。原因是 main 的合并普遍带 `[skip ci]`，测试漂移没人发现。需要单独修。
 - 原包审计 `GET /repos/WeKruit/rakazo/hooks` 与 `/actions/permissions` 返回 403，外部触发器（如 Vercel）未能核实。
 - 生产排空机制未实现、未选定方案；零停机方案待用户确认。
 
