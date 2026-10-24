@@ -54,6 +54,7 @@ import {
   isAttachmentImageMimeType,
   MessageBlock as MessageBlockSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  RecruitingApprovalToolCallSchema,
   RecruitingApprovalToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
@@ -165,6 +166,7 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
+  latestRecruitingDocumentsApprovalId,
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
@@ -5425,6 +5427,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             approvedEffectReplays.take(nextApprovedTool);
           }
           if (name === "recruiting_request_approval") {
+            if (nextApprovedTool !== name) {
+              const call = RecruitingApprovalToolCallSchema.safeParse(args);
+              if (!call.success) return { error: sanitizeConnectorError(call.error, runSecrets) };
+              if (call.data.stage === "calibration" && !call.data.documentsApprovalEffectId) {
+                // The approved documents receipt is not visible to every bot; the server owns it.
+                const documentsApprovalEffectId = await latestRecruitingDocumentsApprovalId(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+                  call.data,
+                );
+                if (!documentsApprovalEffectId)
+                  return {
+                    error:
+                      "This role revision has no approved documents yet. Request the documents approval first.",
+                  };
+                args = { ...call.data, documentsApprovalEffectId };
+              }
+            }
             const parsed = (
               nextApprovedTool === name
                 ? RetainedRecruitingApprovalRequestSchema

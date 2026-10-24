@@ -93,11 +93,6 @@ msgstr "{0} connection"
 msgid "{0} default"
 msgstr "{0} default"
 
-#. placeholder {0}: sections.company.size
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "{0} employees"
-msgstr "{0} employees"
-
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} handling"
@@ -240,6 +235,10 @@ msgstr "{seats, plural, one {# seat} other {# seats}}"
 #: src/components/ArtifactFileCard.tsx
 msgid "{size} B"
 msgstr "{size} B"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{sizeFact} employees"
+msgstr "{sizeFact} employees"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{stepCount, plural, one {Done · # tool} other {Done · # tools}}"
@@ -2951,15 +2950,12 @@ msgstr "Deny"
 msgid "Deployment default"
 msgstr "Deployment default"
 
-#: src/pages/Shell.tsx
-msgid "Describe the role and clarify what matters in the conversation."
-msgstr "Describe the role and clarify what matters in the conversation."
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Describe what this bot does"
 msgstr "Describe what this bot does"
 
 #: src/pages/Board.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Description"
 msgstr "Description"
@@ -3587,6 +3583,10 @@ msgstr "From {0}"
 msgid "From this role’s saved requirements"
 msgstr "From this role’s saved requirements"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Full assessment"
+msgstr "Full assessment"
+
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "Fullscreen"
@@ -4046,6 +4046,10 @@ msgstr "Keep memories"
 msgid "key"
 msgstr "key"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Key work"
+msgstr "Key work"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Knowledge"
 msgstr "Knowledge"
@@ -4090,14 +4094,6 @@ msgstr "Launched {app}"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "Leave"
-
-#: src/pages/Shell.tsx
-msgid "Let’s define the search."
-msgstr "Let’s define the search."
-
-#: src/pages/Shell.tsx
-msgid "Let’s sharpen the search."
-msgstr "Let’s sharpen the search."
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Light"
@@ -6824,6 +6820,7 @@ msgstr "Saved research results"
 msgid "Saved results"
 msgstr "Saved results"
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Saved role summary"
 msgstr "Saved role summary"
@@ -7293,11 +7290,16 @@ msgstr "Show bots"
 msgid "Show computer"
 msgstr "Show computer"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Show less"
+msgstr "Show less"
+
 #: src/pages/Artifacts.tsx
 msgid "Show list"
 msgstr "Show list"
 
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Show more"
 msgstr "Show more"
@@ -7454,6 +7456,8 @@ msgid "Source context"
 msgstr "Source context"
 
 #: src/components/ArtifactFileCard.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Source text"
 msgstr "Source text"
 
@@ -7757,10 +7761,6 @@ msgstr "Teams message"
 #: src/pages/RoutineEditor.tsx
 msgid "Teams not enabled"
 msgstr "Teams not enabled"
-
-#: src/pages/Shell.tsx
-msgid "Tell WeKruit what to change for a person, a few candidates, or the whole search."
-msgstr "Tell WeKruit what to change for a person, a few candidates, or the whole search."
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Temporarily unavailable"
@@ -8484,6 +8484,10 @@ msgstr "Working on it"
 #: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "Working…"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Worth checking"
+msgstr "Worth checking"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProfileCriterionRevision } from "./profile";
-import { candidateSections, requirementRows } from "./profile";
+import { candidateSections, requirementRows, shortFact } from "./profile";
 
 const ASSESSMENT =
   "R1: Fact - PhD EE Stanford and MS/PhD-level background. R2: Gap - no explicit named sim stack hands-on evidence. R3: Partial - large-scale simulation mentioned. R4: hands-on robotics; [Sources read 2026-10-20: LINKEDIN, https://example.test/a, https://example.test/b/]";
@@ -276,4 +276,84 @@ it("does not turn one child of a composite definition into its criterion name", 
       revision: composite,
     }).rows[0],
   ).toMatchObject({ label: null, criterionId: "R4", status: "unknown" });
+});
+
+describe("candidateSections quick output", () => {
+  it("reads the short headline, tags, works, concerns and criterion verdicts", () => {
+    const field = (label: string, value: string) => ({ label, value, sourceUrls: [] });
+    const sections = candidateSections([
+      field("Headline", "斯坦福博士，移动操作一作"),
+      field("Highlights", "斯坦福 CS 博士\n湾区\n"),
+      field("Key works", "BRS | CoRL 2025 | 一作 | https://example.test/brs\nMoMaGen | ICLR 2026"),
+      field("Concerns", "未提仿真栈"),
+      field(
+        "Entities",
+        "Stanford University | school | https://www.stanford.edu | 湾区研究型大学\nNVIDIA | company | linkedin.com/company/nvidia |",
+      ),
+      field(
+        "Criteria brief",
+        "rule_bay_area_based | 常驻湾区 | 人在湾区\nrule_sim_stack | 仿真栈 |",
+      ),
+      {
+        label: "Bay area based",
+        value: "match",
+        providerStatus: "match" as const,
+        reasoning: "Stanford is in the Bay Area.",
+        sourceUrls: [],
+      },
+      {
+        label: "Sim stack",
+        value: "unclear",
+        providerStatus: "unclear" as const,
+        sourceUrls: [],
+      },
+      field("Hometown", "Somewhere"),
+    ]);
+    expect(sections.quick).toEqual({
+      headline: "斯坦福博士，移动操作一作",
+      highlights: ["斯坦福 CS 博士", "湾区"],
+      keyWorks: [
+        { title: "BRS", detail: "CoRL 2025 · 一作", url: "https://example.test/brs" },
+        { title: "MoMaGen", detail: "ICLR 2026", url: null },
+      ],
+      concerns: ["未提仿真栈"],
+      entities: [
+        {
+          name: "Stanford University",
+          kind: "school",
+          host: "www.stanford.edu",
+          description: "湾区研究型大学",
+        },
+        { name: "NVIDIA", kind: "company", host: null, description: null },
+      ],
+    });
+    expect(sections.requirements.map((row) => [row.label, row.brief, row.text])).toEqual([
+      ["Bay area based", { name: "常驻湾区", verdict: "人在湾区" }, "Stanford is in the Bay Area."],
+      ["Sim stack", { name: "仿真栈", verdict: null }, ""],
+    ]);
+    expect(sections.findings.map((item) => item.label)).toEqual(["Hometown"]);
+  });
+
+  it("leaves the short output empty for older candidates", () => {
+    expect(candidateSections([]).quick).toEqual({
+      headline: null,
+      highlights: [],
+      keyWorks: [],
+      concerns: [],
+      entities: [],
+    });
+  });
+});
+
+describe("shortFact", () => {
+  it("keeps the lead clause of a provider note", () => {
+    expect(shortFact("Transportation, Logistics (provider label). Long blurb.")).toBe(
+      "Transportation, Logistics",
+    );
+    expect(shortFact("812 employees (provider-reported count, checked 2026-10-24)")).toBe(
+      "812 employees",
+    );
+    expect(shortFact("1,001-5,000")).toBe("1,001-5,000");
+    expect(shortFact("  ")).toBeNull();
+  });
 });

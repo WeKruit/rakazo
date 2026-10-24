@@ -1,7 +1,7 @@
 import {
   DisabledBuiltinToolsSchema,
   disabledBuiltinToolSet,
-  RecruitingApprovalToolInputSchema,
+  RecruitingApprovalToolCallSchema,
   RecruitingCandidatesToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
@@ -49,14 +49,14 @@ describe("native recruiting approval tool", () => {
 
     expect(tool).toBeDefined();
     expect(tool?.inputSchema).toEqual(
-      z.toJSONSchema(RecruitingApprovalToolInputSchema, { io: "input" }),
+      z.toJSONSchema(RecruitingApprovalToolCallSchema, { io: "input" }),
     );
     expect(tool?.readOnly).not.toBe(true);
     expect(tool?.description).toMatch(/one-time human confirmation/i);
     expect(tool?.description).toMatch(/exact current package/i);
     expect(tool?.description).toMatch(/never self-approve/i);
     expect(
-      RecruitingApprovalToolInputSchema.parse({
+      RecruitingApprovalToolCallSchema.parse({
         stage: "brief",
         roleId: "role",
         expectedRoleRevision: 3,
