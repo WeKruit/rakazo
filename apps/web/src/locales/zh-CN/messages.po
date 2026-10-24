@@ -93,11 +93,6 @@ msgstr "{0} 连接"
 msgid "{0} default"
 msgstr ""
 
-#. placeholder {0}: sections.company.size
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "{0} employees"
-msgstr "{0} 名员工"
-
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} handling"
@@ -240,6 +235,10 @@ msgstr ""
 #: src/components/ArtifactFileCard.tsx
 msgid "{size} B"
 msgstr "{size} B"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{sizeFact} employees"
+msgstr "{sizeFact} 名员工"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{stepCount, plural, one {Done · # tool} other {Done · # tools}}"
@@ -2951,15 +2950,12 @@ msgstr "拒绝"
 msgid "Deployment default"
 msgstr "部署默认"
 
-#: src/pages/Shell.tsx
-msgid "Describe the role and clarify what matters in the conversation."
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Describe what this bot does"
 msgstr "描述这个 Bot 做什么"
 
 #: src/pages/Board.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Description"
 msgstr "描述"
@@ -3443,7 +3439,7 @@ msgstr "极高"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Extra high"
-msgstr ""
+msgstr "极高"
 
 #: src/components/CloudAgentCard.tsx
 msgid "failed"
@@ -3586,6 +3582,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "From this role’s saved requirements"
 msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Full assessment"
+msgstr "查看完整评估"
 
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
@@ -3747,7 +3747,7 @@ msgstr "高"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "High"
-msgstr ""
+msgstr "高"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "High probability"
@@ -4046,6 +4046,10 @@ msgstr "保留记忆"
 msgid "key"
 msgstr "密钥"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Key work"
+msgstr "代表作"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Knowledge"
 msgstr "知识"
@@ -4090,14 +4094,6 @@ msgstr ""
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "退出"
-
-#: src/pages/Shell.tsx
-msgid "Let’s define the search."
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Let’s sharpen the search."
-msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Light"
@@ -4291,7 +4287,7 @@ msgstr "低"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Low"
-msgstr ""
+msgstr "低"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
@@ -4381,7 +4377,7 @@ msgstr "最大"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Max"
-msgstr ""
+msgstr "最大"
 
 #: src/pages/Artifacts.tsx
 msgid "Maximize"
@@ -4417,7 +4413,7 @@ msgstr "中"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Medium"
-msgstr ""
+msgstr "中"
 
 #: src/pages/GroupPanel.tsx
 msgid "Members ({GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})"
@@ -4517,7 +4513,7 @@ msgstr "最低"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Minimal"
-msgstr ""
+msgstr "最低"
 
 #: src/pages/WindowChrome.tsx
 msgid "Minimize"
@@ -6824,6 +6820,7 @@ msgstr ""
 msgid "Saved results"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Saved role summary"
 msgstr ""
@@ -7293,11 +7290,16 @@ msgstr ""
 msgid "Show computer"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Show less"
+msgstr "收起"
+
 #: src/pages/Artifacts.tsx
 msgid "Show list"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Show more"
 msgstr "显示更多"
@@ -7454,6 +7456,8 @@ msgid "Source context"
 msgstr "来源上下文"
 
 #: src/components/ArtifactFileCard.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Source text"
 msgstr ""
 
@@ -7756,10 +7760,6 @@ msgstr "Teams 消息"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Teams not enabled"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Tell WeKruit what to change for a person, a few candidates, or the whole search."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -8484,6 +8484,10 @@ msgstr "正在处理"
 #: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "处理中…"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Worth checking"
+msgstr "需要留意"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"

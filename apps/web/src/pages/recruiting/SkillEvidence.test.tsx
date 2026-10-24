@@ -40,7 +40,7 @@ async function mount(node: ReactNode) {
 }
 const button = (view: HTMLElement, text: string) =>
   [...view.querySelectorAll("button")].find((item) => item.textContent === text)!;
-const NO_QUICK = { headline: null, highlights: [], keyWorks: [], concerns: [] };
+const NO_QUICK = { headline: null, highlights: [], keyWorks: [], concerns: [], entities: [] };
 /** Opens every assessment row so its full evidence is in the DOM. */
 async function expandRows(view: HTMLElement) {
   for (const row of view.querySelectorAll<HTMLButtonElement>("li > button:not([disabled])"))

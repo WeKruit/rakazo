@@ -287,6 +287,10 @@ describe("candidateSections quick output", () => {
       field("Key works", "BRS | CoRL 2025 | 一作 | https://example.test/brs\nMoMaGen | ICLR 2026"),
       field("Concerns", "未提仿真栈"),
       field(
+        "Entities",
+        "Stanford University | school | https://www.stanford.edu | 湾区研究型大学\nNVIDIA | company | linkedin.com/company/nvidia |",
+      ),
+      field(
         "Criteria brief",
         "rule_bay_area_based | 常驻湾区 | 人在湾区\nrule_sim_stack | 仿真栈 |",
       ),
@@ -313,6 +317,15 @@ describe("candidateSections quick output", () => {
         { title: "MoMaGen", detail: "ICLR 2026", url: null },
       ],
       concerns: ["未提仿真栈"],
+      entities: [
+        {
+          name: "Stanford University",
+          kind: "school",
+          host: "www.stanford.edu",
+          description: "湾区研究型大学",
+        },
+        { name: "NVIDIA", kind: "company", host: null, description: null },
+      ],
     });
     expect(sections.requirements.map((row) => [row.label, row.brief, row.text])).toEqual([
       ["Bay area based", { name: "常驻湾区", verdict: "人在湾区" }, "Stanford is in the Bay Area."],
@@ -327,6 +340,7 @@ describe("candidateSections quick output", () => {
       highlights: [],
       keyWorks: [],
       concerns: [],
+      entities: [],
     });
   });
 });
