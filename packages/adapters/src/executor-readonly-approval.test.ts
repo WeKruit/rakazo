@@ -2986,6 +2986,60 @@ describe("native recruiting package approval", () => {
     );
     expect(f.effects[0]!.request).toEqual(request);
   });
+  it("fills in the approved documents when a calibration request omits them", async () => {
+    const f = approvalFixture();
+    const profiles = Array.from({ length: 10 }, (_, index) => ({
+      candidateKey: `linkedin:example-${index}`,
+      linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
+      evidenceUrl: `https://example.test/evidence/${index}`,
+      source: {
+        effectId: "raw-read",
+        rowIndex: index,
+        roleRevisionId: "role-revision",
+        providerTaskId: "provider-task",
+        artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
+      },
+    }));
+    const request = {
+      stage: "calibration",
+      roleId: "role-example",
+      expectedRoleRevision: 2,
+      profiles,
+      ruleChanges: [],
+    };
+    const findFirst = vi.fn(async () => ({ id: "g1-approved" }));
+    Object.assign(f.prisma.externalEffect, { findFirst });
+    recruitingApproval.prepare.mockResolvedValue({
+      files: [file],
+      roleTitle: "Verified role",
+      profiles: profiles.map((profile, index) => ({
+        name: `Verified person ${index}`,
+        linkedinUrl: profile.linkedinUrl,
+        evidenceUrl: profile.evidenceUrl,
+      })),
+    });
+    f.setCalls([{ args: request, executionId: "native-g2-lookup" }]);
+    await f.run();
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          kind: "recruiting_request_approval",
+          status: "completed",
+        }),
+      }),
+    );
+    expect(f.effects[0]!.request).toEqual({ ...request, documentsApprovalEffectId: "g1-approved" });
+
+    const missing = approvalFixture();
+    Object.assign(missing.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
+    missing.setCalls([{ args: request, executionId: "native-g2-missing" }]);
+    await missing.run();
+    expect(missing.results.at(-1)).toEqual({
+      error:
+        "This role revision has no approved documents yet. Request the documents approval first.",
+    });
+    expect(missing.effects).toHaveLength(0);
+  });
   it("replays an exact stored assessment approval while refusing to create another legacy request", async () => {
     const f = approvalFixture();
     const request = {
