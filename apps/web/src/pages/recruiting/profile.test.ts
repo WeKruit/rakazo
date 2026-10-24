@@ -85,4 +85,55 @@ describe("candidateSections", () => {
     ]);
     expect(sections.findings.map((field) => field.label)).toEqual(["Hometown"]);
   });
+
+  it("reads the short headline, tags, works, concerns and criterion verdicts", () => {
+    const field = (label: string, value: string) => ({ label, value, sourceUrls: [] });
+    const sections = candidateSections([
+      field("Headline", "斯坦福博士，移动操作一作"),
+      field("Highlights", "斯坦福 CS 博士\n湾区\n"),
+      field("Key works", "BRS | CoRL 2025 | 一作 | https://example.test/brs\nMoMaGen | ICLR 2026"),
+      field("Concerns", "未提仿真栈"),
+      field(
+        "Criteria brief",
+        "rule_bay_area_based | 常驻湾区 | 人在湾区\nrule_sim_stack | 仿真栈 |",
+      ),
+      {
+        label: "Bay area based",
+        value: "match",
+        providerStatus: "match" as const,
+        reasoning: "Stanford is in the Bay Area.",
+        sourceUrls: [],
+      },
+      {
+        label: "Sim stack",
+        value: "unclear",
+        providerStatus: "unclear" as const,
+        sourceUrls: [],
+      },
+      field("Hometown", "Somewhere"),
+    ]);
+    expect(sections.quick).toEqual({
+      headline: "斯坦福博士，移动操作一作",
+      highlights: ["斯坦福 CS 博士", "湾区"],
+      keyWorks: [
+        { title: "BRS", detail: "CoRL 2025 · 一作", url: "https://example.test/brs" },
+        { title: "MoMaGen", detail: "ICLR 2026", url: null },
+      ],
+      concerns: ["未提仿真栈"],
+    });
+    expect(sections.requirements.map((row) => [row.label, row.brief, row.text])).toEqual([
+      ["Bay area based", { name: "常驻湾区", verdict: "人在湾区" }, "Stanford is in the Bay Area."],
+      ["Sim stack", { name: "仿真栈", verdict: null }, ""],
+    ]);
+    expect(sections.findings.map((item) => item.label)).toEqual(["Hometown"]);
+  });
+
+  it("leaves the short output empty for older candidates", () => {
+    expect(candidateSections([]).quick).toEqual({
+      headline: null,
+      highlights: [],
+      keyWorks: [],
+      concerns: [],
+    });
+  });
 });
