@@ -321,6 +321,7 @@ it("shows exact candidate native correspondence with CRM history without treatin
           candidateId: input.candidateId,
           outbox: [],
           nativeCorrespondence: native,
+          outboxScope: "unavailable_for_role",
           items: [
             {
               id: "instantly-source:read",
@@ -367,6 +368,8 @@ it("shows exact candidate native correspondence with CRM history without treatin
     groupId: "group-1",
     crmBrowse: browse,
   });
+  expect(view.container.textContent).toContain("Recruiter messages are unavailable for this role.");
+  expect(view.container.textContent).not.toContain("No recruiter messages were found.");
   expect(view.container.textContent).toContain("read full body");
   expect(view.container.textContent).toContain("Instantly account");
   expect(view.container.textContent).toContain("Send outcome unknown");
@@ -1775,7 +1778,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
       // One unified table: contact details live in the person's panel, not in table cells.
       expect(
         [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
-      ).toEqual(["Name", "Current role", "Location", "Activity", "Fit", "Actions"]);
+      ).toEqual(["Name", "Current role", "Location", "Status", "Fit", "Actions"]);
       expect(api.correspondence).toHaveBeenCalledExactlyOnceWith({
         groupId: "group-1",
         view: "contacts",
@@ -3288,9 +3291,9 @@ it("shows only the selected candidate's verified CRM receipt and never infers su
   );
   expect(view.container.textContent).not.toContain(synced.crm.receipt!.candidate_id);
   await view.click("unverified-person");
-  expect(view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent).not.toContain(
-    "Synced",
-  );
+  expect(
+    view.container.querySelector('[aria-label="Candidate pipeline"]')?.textContent,
+  ).not.toContain("Synced");
   expect(
     [...view.container.querySelectorAll("summary")].some(
       (item) => item.textContent === "CRM receipt",
@@ -4289,9 +4292,14 @@ it("shows saved source rounds with their exact original revision and Artifact", 
     artifactId: f.reference.artifactId,
     includeDiagnostics: true,
   });
-  expect(
-    view.container.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`),
-  ).not.toBeNull();
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(
+      view.container.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`),
+    ).not.toBeNull();
+  });
 });
 
 it("shows a native candidate source Artifact without an empty custom-action heading", async () => {
@@ -4331,7 +4339,12 @@ it("shows a native candidate source Artifact without an empty custom-action head
     artifactId: f.reference.artifactId,
     includeDiagnostics: true,
   });
-  expect(sources.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`)).not.toBeNull();
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(sources.querySelector(`[data-artifact-id="${f.reference.artifactId}"]`)).not.toBeNull();
+  });
 });
 
 it("persists shortlist with the candidate revision and leaves conflicts visibly unsaved", async () => {
@@ -7643,11 +7656,17 @@ it("reads the native five views and lazily resolves memory history and Artifact 
     artifactId: "artifact-request",
     includeDiagnostics: true,
   });
-  expect(
-    view.container
-      .querySelector('[data-artifact-id="artifact-request"]')
-      ?.getAttribute("data-bot-id"),
-  ).toBe("source-bot");
+  // Artifact bytes are verified by asynchronous WebCrypto before the preview mounts.
+  await vi.waitFor(async () => {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(
+      view.container
+        .querySelector('[data-artifact-id="artifact-request"]')
+        ?.getAttribute("data-bot-id"),
+    ).toBe("source-bot");
+  });
   expect(view.container.textContent).toContain("request.json");
   for (const method of [api.createRole, api.bindRole, api.reviseRole, api.update, api.search])
     expect(method).not.toHaveBeenCalled();
@@ -7807,7 +7826,11 @@ it("drops cached Artifact metadata when its exact reference changes", async () =
   const view = await mounted();
   await view.click("Activity");
   await view.expand("Request");
-  expect(view.container.textContent).toContain("request.json");
+  // The native SHA-256 verification completes after the metadata RPC and toggle's act scope.
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(view.container.textContent).toContain("request.json");
+  });
   const research = await api.listResearch.mock.results[0]!.value;
   api.listResearch.mockResolvedValue({
     ...research,
@@ -7831,9 +7854,12 @@ it("drops cached Artifact metadata when its exact reference changes", async () =
     artifactId: "request-2",
     includeDiagnostics: true,
   });
-  expect(
-    view.container.querySelector('[data-artifact-id="request-2"]')?.getAttribute("data-group-id"),
-  ).toBe("source-group");
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(
+      view.container.querySelector('[data-artifact-id="request-2"]')?.getAttribute("data-group-id"),
+    ).toBe("source-group");
+  });
 });
 it("states which memory scopes a group actually queries", async () => {
   api.list.mockResolvedValue([]);
@@ -8656,7 +8682,7 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
     "Name",
     "Current role",
     "Location",
-    "Activity",
+    "Status",
     "Fit",
     "Actions",
   ]);
@@ -8821,7 +8847,7 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
   api.getWorkspace.mockResolvedValue({ role, revision, crmTarget });
   api.crmData.mockClear();
   // Contacts is the role's unified candidate list, so only the mail views mount a role tab.
-  for (const tab of ["sequence", "inbox", "interview"] as const) {
+  for (const tab of ["sequence", "interview"] as const) {
     await view.render("thread-1", 1, false, undefined, {
       groupId: "group-1",
       crmBrowse: { ...browse, view: tab },
@@ -8830,6 +8856,7 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
     const roleTab = view.container.querySelector("[data-role-tab]");
     expect(roleTab?.getAttribute("data-role-tab")).toBe(tab);
     expect(JSON.parse(roleTab!.textContent!)).toEqual({
+      ...(tab === "interview" ? { threadId: "thread-1" } : {}),
       roleId: role.id,
       spaceId: role.spaceId,
       conversation: { groupId: "group-1" },
@@ -8918,3 +8945,42 @@ it("shows Autumn's criterion states, evidence, source round and saved decision f
   expect(rows[2]!.textContent).not.toContain("Search update");
   expect(api.correspondence).not.toHaveBeenCalled();
 });
+
+it.each(["contacts", "shortlist"] as const)(
+  "uses one native heading for bound CRM %s",
+  async (tab) => {
+    api.getWorkspace.mockResolvedValue({
+      role,
+      revision,
+      crmTarget: { bindingEffectId: "binding", target: crmTarget },
+    });
+    api.crmData.mockResolvedValue({
+      operation: "candidates",
+      items: [],
+      total: 0,
+      nextOffset: null,
+      scope: "role",
+      selectedRole: null,
+    });
+    const view = await mounted("thread-1", undefined, false, undefined, {
+      groupId: "group-1",
+      roleConversation: true,
+      crmBrowse: {
+        selection: {
+          serverId: crmTarget.mcpServerId,
+          serverRevision: crmTarget.serverRevision,
+          organizationId: crmTarget.organizationId,
+          crmRoleId: crmTarget.crmRoleId,
+        },
+        view: tab,
+        onSelectCandidate: vi.fn(),
+      },
+    });
+    expect(view.container.querySelectorAll("h1")).toHaveLength(1);
+    expect(view.container.querySelector("h1")?.textContent).toBe(
+      tab === "contacts" ? "Contacts" : "Shortlist",
+    );
+    expect(view.container.textContent).toContain(role.title);
+    expect(view.container.querySelector(".hire-standard-view > .hire-section-header")).toBeNull();
+  },
+);

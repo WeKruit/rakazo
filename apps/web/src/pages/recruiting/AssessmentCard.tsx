@@ -1,6 +1,7 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Badge } from "@rakazo/ui-web";
 import { CircleCheck, CircleHelp, CircleX, Scale } from "lucide-react";
+import { HighlightText } from "./evidence";
 import type { RequirementRow, RequirementStatus } from "./profile";
 import { sourceLabel } from "./profile";
 
@@ -22,6 +23,7 @@ export function AssessmentCard({
   scope,
   rows,
   sourceUrls,
+  keywords = [],
 }: {
   score: string | null;
   rank: { label: string; value: string } | null;
@@ -29,15 +31,16 @@ export function AssessmentCard({
   scope: string | null;
   rows: readonly RequirementRow[];
   sourceUrls: readonly string[];
+  keywords?: readonly string[];
 }) {
   const { t } = useLingui();
-  const statusLabel: Record<RequirementStatus, string | null> = {
+  const statusLabel: Record<RequirementStatus, string> = {
     match: t`Match`,
     gap: t`Gap`,
     partial: t`Partial match`,
-    unknown: null,
+    unknown: t`Unknown`,
   };
-  const counts = (["match", "partial", "gap"] as const)
+  const counts = (["match", "partial", "gap", "unknown"] as const)
     .map((status) => ({ status, count: rows.filter((row) => row.status === status).length }))
     .filter((item) => item.count);
   return (
@@ -68,7 +71,11 @@ export function AssessmentCard({
           </span>
         ) : null}
       </div>
-      {summary ? <p className="whitespace-pre-wrap">{summary}</p> : null}
+      {summary ? (
+        <p className="break-words whitespace-pre-wrap">
+          <HighlightText text={summary} terms={keywords} />
+        </p>
+      ) : null}
       {scope ? <p className="text-xs text-muted-foreground">{scope}</p> : null}
       {rows.length ? (
         <ul className="space-y-3">
@@ -80,12 +87,30 @@ export function AssessmentCard({
                 <Icon size={16} aria-hidden className={`mt-0.5 shrink-0 ${className}`} />
                 <div className="min-w-0 space-y-0.5">
                   <p className="flex flex-wrap items-baseline gap-x-2">
-                    {label ? <span className="font-medium">{label}</span> : null}
                     {row.label ? (
-                      <span className="text-xs text-muted-foreground">{row.label}</span>
+                      <span className="break-words font-medium">{row.label}</span>
+                    ) : row.criterionId ? (
+                      <span className="font-medium text-muted-foreground">
+                        <Trans>Criterion name unavailable</Trans>
+                      </span>
                     ) : null}
+                    {row.criterionId ? (
+                      <span className="text-xs text-muted-foreground">{row.criterionId}</span>
+                    ) : null}
+                    <span className={`text-xs ${className}`}>{label}</span>
                   </p>
-                  {row.text ? <p className="whitespace-pre-wrap">{row.text}</p> : null}
+                  {row.text ? (
+                    <p className="break-words whitespace-pre-wrap">
+                      <HighlightText
+                        text={row.text}
+                        terms={[...keywords, ...(row.label ? [row.label] : [])]}
+                      />
+                    </p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      <Trans>No evidence provided.</Trans>
+                    </p>
+                  )}
                   <SourceLinks urls={row.sourceUrls} />
                 </div>
               </li>

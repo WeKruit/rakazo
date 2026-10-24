@@ -93,10 +93,12 @@ import { CorrespondenceEmails } from "./RecruitingCorrespondence";
 import type { RecruitingInboxEmail, RecruitingTabProps } from "./recruiting";
 import { InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
 import { ContactsTab } from "./recruiting/ContactsTab";
+import type { ShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
+import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -140,6 +142,9 @@ export type CandidateFeedback = {
 };
 
 type Props = {
+  shortlistWeekFilter?: ShortlistWeekFilter;
+  onClearShortlistWeekFilter?: () => void;
+  onReviewSchedulingPlan?: (handoff: SchedulingPlanHandoff) => void;
   /** The thread is this CRM role's own conversation, so its agent results share the workbench. */
   roleConversation?: boolean;
   /** The role conversation's own Sequence, Inbox or Interview view, shown above its CRM history. */
@@ -2334,6 +2339,8 @@ function RoleAgentSection({ crmBrowse, roleConversation: _, correspondence, ...p
  * conversation's native role bound to CRM; a CRM role without one keeps its stored CRM views.
  */
 function CorrespondenceTabMount({
+  threadId,
+  onReviewSchedulingPlan,
   view,
   role,
   conversation,
@@ -2343,6 +2350,8 @@ function CorrespondenceTabMount({
   fallback,
 }: {
   view: RecruitingWorkspaceView;
+  threadId?: string;
+  onReviewSchedulingPlan?: Props["onReviewSchedulingPlan"];
   role?: Omit<RecruitingTabProps, "conversation" | "refreshSignal">;
   conversation: { groupId: string } | { botId: string };
   refreshSignal: number;
@@ -2355,7 +2364,7 @@ function CorrespondenceTabMount({
   if (!role) return <>{fallback}</>;
   const props = { ...role, conversation, refreshSignal };
   if (view === "sequence") return <SequenceTab {...props} />;
-  if (view === "interview") return <InterviewTab {...props} />;
+  if (view === "interview") return <InterviewTab {...props} threadId={threadId} onReviewSchedulingPlan={onReviewSchedulingPlan} />;
   return <InboxWithReply {...props} onDraftReply={onDraftReply} />;
 }
 
@@ -2404,6 +2413,7 @@ function useBoundRole(
 }
 
 function CrmRecruitingPanel({
+  onReviewSchedulingPlan,
   browse,
   agent,
   threadId,
@@ -2431,10 +2441,7 @@ function CrmRecruitingPanel({
     readCacheScope,
   };
   // The role tabs read their own CRM data; stored CRM views read only when they are shown.
-  const storedCrmReads =
-    !agent ||
-    !["contacts", "sequence", "inbox", "interview"].includes(browse.view) ||
-    (bound.done && !bound.role);
+  const storedCrmReads = !agent || (bound.done && !bound.role);
   const [mailPageSelection, setMailPageSelection] = useState<{
     candidateId: string;
     cursor: Extract<RecruitingCrmDataInput, { operation: "mail" }>["cursor"];
@@ -2810,7 +2817,13 @@ function CrmRecruitingPanel({
       <h3 className="font-semibold">
         <Trans>Recruiter messages</Trans>
       </h3>
-      {outbox.length ? (
+      {contactRead?.data &&
+      "outboxScope" in contactRead.data &&
+      contactRead.data.outboxScope === "unavailable_for_role" ? (
+        <p>
+          <Trans>Recruiter messages are unavailable for this role.</Trans>
+        </p>
+      ) : outbox.length ? (
         outbox.map((message) => (
           <article key={message.id} className="space-y-2 border-t pt-3">
             <p>
@@ -3587,9 +3600,10 @@ function CrmRecruitingPanel({
       {crmHistory}
     </>
   );
+  const nestedWorkspaceHeading = Boolean(agent && bound.role && ["contacts", "shortlist"].includes(browse.view));
   return (
-    <div className="hire-standard-view">
-      <header className="hire-section-header">
+    <div className={nestedWorkspaceHeading ? "hire-standard-view hire-standard-view-native" : "hire-standard-view"}>
+      {!nestedWorkspaceHeading ? <header className="hire-section-header">
         <h1>
           {bound.title ??
             (bound.done
@@ -3598,16 +3612,16 @@ function CrmRecruitingPanel({
               : null)}
         </h1>
         {page?.selectedRole ? <p>{page.selectedRole.clientLabel}</p> : null}
-      </header>
-      {browse.view === "contacts" && agent ? (
-        <>
-          {agent}
-          {bound.done && !bound.role ? crmHistory : null}
-        </>
+      </header> : null}
+      {agent && !bound.done ? (
+        <TabLoading />
+      ) : bound.role && !["sequence", "interview"].includes(browse.view) ? (
+        agent
       ) : ["sequence", "inbox", "interview"].includes(browse.view) ? (
         <>
-          {agent}
           <CorrespondenceTabMount
+            threadId={threadId}
+            onReviewSchedulingPlan={onReviewSchedulingPlan}
             view={browse.view}
             role={boundRole}
             loading={!bound.done}
@@ -3630,6 +3644,14 @@ function CrmRecruitingPanel({
             }
             fallback={agent ? crmHistory : body}
           />
+          {browse.view === "sequence" && agent ? (
+            <details className="mt-6">
+              <summary>
+                <Trans>Outreach drafts</Trans>
+              </summary>
+              {agent}
+            </details>
+          ) : null}
         </>
       ) : (
         body
@@ -3650,6 +3672,8 @@ function NativeRecruitingPanel(props: Props) {
 }
 
 function RecruitingWorkspace({
+  shortlistWeekFilter,
+  onClearShortlistWeekFilter,
   userId,
   threadId,
   botId,
@@ -3717,12 +3741,15 @@ function RecruitingWorkspace({
     detailOpen: candidateDetailOpen,
   } = candidateList;
   const candidateView = contactsView ? "table" : storedCandidateView;
+  const filteredShortlistWeek = Boolean(shortlistWeekFilter);
   const candidateFilters = useMemo(
     () =>
-      presentation === "workspace" && view === "shortlist"
-        ? { ...storedCandidateFilters, shortlisted: true as const }
-        : storedCandidateFilters,
-    [presentation, view, storedCandidateFilters],
+      filteredShortlistWeek
+        ? { shortlisted: true as const, sort: storedCandidateFilters.sort }
+        : presentation === "workspace" && view === "shortlist"
+          ? { ...storedCandidateFilters, shortlisted: true as const }
+          : storedCandidateFilters,
+    [presentation, view, storedCandidateFilters, filteredShortlistWeek],
   );
   // Every returned candidate keeps Autumn's own result fields in the workspace table.
   const candidateTableDetails = presentation === "workspace" && !contactsView;
@@ -4543,6 +4570,7 @@ function RecruitingWorkspace({
     return (
       <section
         className="hire-live-criteria"
+        data-summary={summary}
         aria-label={summary === "brief" ? t`Search Criteria` : t`Client feedback`}
       >
         <div className="hire-panel-heading">
@@ -4556,7 +4584,7 @@ function RecruitingWorkspace({
               {summary === "brief" ? (
                 <Trans>Search Criteria</Trans>
               ) : (
-                <Trans>Client feedback</Trans>
+                <Trans>Saved role summary</Trans>
               )}
             </strong>
             <span>
@@ -4570,7 +4598,7 @@ function RecruitingWorkspace({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label={t`Refresh criteria`}
+            aria-label={summary === "brief" ? t`Refresh criteria` : t`Refresh`}
             disabled={loading}
             onClick={() => setRefresh((value) => value + 1)}
           >
@@ -4587,9 +4615,11 @@ function RecruitingWorkspace({
           </p>
         ) : workspace ? (
           <>
-            <div className="hire-jd-summary">
-              <strong>{workspace.role.title}</strong>
-            </div>
+            {summary === "brief" ? (
+              <div className="hire-jd-summary">
+                <strong>{workspace.role.title}</strong>
+              </div>
+            ) : null}
             {summary === "feedback" ? (
               <FeedbackHistory
                 key={workspace.role.id}
@@ -4603,9 +4633,14 @@ function RecruitingWorkspace({
             ) : null}
             <CriteriaBody className={summary === "feedback" ? "hire-criterion-row" : "contents"}>
               {summary === "feedback" ? (
-                <summary>
-                  <Trans>Search Criteria</Trans>
-                </summary>
+                <>
+                  <summary>
+                    <Trans>Search Criteria</Trans>
+                  </summary>
+                  <div className="hire-criterion-row">
+                    <strong>{workspace.role.title}</strong>
+                  </div>
+                </>
               ) : null}
               {brief?.fields
                 .filter((field) => field.value !== null)
@@ -5476,7 +5511,7 @@ function RecruitingWorkspace({
                   : null}
                 <div
                   className={
-                    presentation === "workspace"
+                    filteredShortlistWeek ? "hidden" : presentation === "workspace"
                       ? "hire-results-filters flex flex-wrap gap-2"
                       : "flex flex-wrap gap-2"
                   }
@@ -5680,8 +5715,11 @@ function RecruitingWorkspace({
                 ) : null}
                 {contactsView ? (
                   <ContactsTab
+                    shortlistWeekFilter={shortlistWeekFilter}
+                    onClearShortlistWeekFilter={onClearShortlistWeekFilter}
                     roleId={workspace.role.id}
                     spaceId={workspace.role.spaceId}
+                    criterionRevision={workspace.revision}
                     conversation={groupId ? { groupId } : botId ? { botId } : undefined}
                     crmTarget={workspace.crmTarget?.target ?? null}
                     refreshSignal={(refreshSignal ?? 0) + refresh}

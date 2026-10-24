@@ -8,6 +8,7 @@ const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
 const roleCampaign = vi.hoisted(() => vi.fn());
+const profileActivity = vi.hoisted(() => ({ list: vi.fn(), recordView: vi.fn() }));
 const reminders = vi.hoisted(() => ({
   list: vi.fn(),
   create: vi.fn(),
@@ -18,7 +19,16 @@ vi.mock("../../lib/read-retry", () => ({
   retryTransientRead: <T,>(read: () => Promise<T>) => read(),
 }));
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign, reminders } },
+  rpc: {
+    recruiting: {
+      listCandidates,
+      crmData,
+      correspondence,
+      roleCampaign,
+      reminders,
+      profileActivity,
+    },
+  },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -100,6 +110,8 @@ let cleanup: (() => Promise<void>) | undefined;
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   listCandidates.mockResolvedValue({ crmTarget: { bindingEffectId: "binding", target } });
+  profileActivity.list.mockResolvedValue({ items: [], hasMore: false });
+  profileActivity.recordView.mockResolvedValue({ id: "view", at: ago(0), actorName: "Recruiter" });
   correspondence.mockResolvedValue(empty);
   roleCampaign.mockResolvedValue({
     status: "ready",
@@ -201,7 +213,7 @@ it("shows the person's stored activity newest first with current status and sequ
   const items = entries(view);
   expect(items[0]).toContain("Status changed to “Needs scheduling”");
   expect(items[0]).toContain("yesterday");
-  expect(items[1]).toContain("Ada replied");
+  expect(items[1]).toContain("Email received");
   expect(items[1]).toContain("Re: Staff role");
   expect(items[1]).toContain("2 days ago");
   expect(items[2]).toContain("Email sent");
@@ -238,7 +250,7 @@ it("shows loading, then a retry that re-reads after a failure", async () => {
   await settle();
   await settle();
   expect(view.querySelector('[role="alert"]')).toBeNull();
-  expect(entries(view).some((text) => text?.includes("Ada replied"))).toBe(true);
+  expect(entries(view).some((text) => text?.includes("Email received"))).toBe(true);
 });
 
 it("says so in one line when nothing is stored", async () => {
@@ -247,7 +259,8 @@ it("says so in one line when nothing is stored", async () => {
   );
   roleCampaign.mockResolvedValue({ status: "none", serverId: null, campaign: null, leads: [] });
   const view = await mount(<ActivityTab {...role} person={{ candidateId: ADA, name: "Ada" }} />);
-  expect(view.textContent).toBe("No activity yet.");
+  expect(view.textContent).toContain("No activity recorded in the available sources.");
+  expect(view.textContent).not.toContain("No activity yet.");
 });
 
 function panelFor(current: RecruitingDetailTarget) {
@@ -418,4 +431,59 @@ it("shows a retry when reminders fail to load and an alert when a change fails",
   expect(view.querySelector('[role="alert"]')?.textContent).toContain(
     "Could not save the reminder.",
   );
+});
+
+it("merges known search and CRM profile histories with actor, time and role context", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "mail" ? mailPage([]) : detailsPage(),
+  );
+  profileActivity.list.mockImplementation(async ({ candidateKey }: { candidateKey: string }) => ({
+    items: [
+      {
+        id: candidateKey,
+        at: ago(1),
+        actorName: candidateKey.startsWith("autumn:") ? "Search recruiter" : "CRM recruiter",
+        roleTitle: "Staff Engineer",
+      },
+    ],
+    hasMore: false,
+  }));
+  const view = await mount(<ActivityTab {...role} person={person} candidateKey="person-key" />);
+  expect(profileActivity.list).toHaveBeenCalledWith({
+    roleId: role.roleId,
+    candidateKey: "autumn:person-key",
+  });
+  expect(profileActivity.list).toHaveBeenCalledWith({
+    roleId: role.roleId,
+    candidateKey: `crm:${ADA}`,
+  });
+  expect(entries(view)).toHaveLength(2);
+  expect(view.textContent).toContain("Search recruiter");
+  expect(view.textContent).toContain("CRM recruiter");
+  expect(view.textContent).toContain("Staff Engineer");
+});
+it("retains loaded profile history when the other known source is unavailable", async () => {
+  crmData.mockImplementation(async (input: { operation: string }) =>
+    input.operation === "mail" ? mailPage([]) : detailsPage(),
+  );
+  profileActivity.list.mockImplementation(async ({ candidateKey }: { candidateKey: string }) => {
+    if (candidateKey.startsWith("crm:")) throw new Error("Unavailable projection");
+    return {
+      items: [{ id: "view", at: ago(1), actorName: "Recruiter", roleTitle: "Staff Engineer" }],
+      hasMore: false,
+    };
+  });
+  const view = await mount(<ActivityTab {...role} person={person} candidateKey="person-key" />);
+  expect(entries(view)).toHaveLength(1);
+  expect(view.textContent).toContain("Profile viewed");
+  expect(view.textContent).toContain("Showing available activity; more history may exist.");
+});
+it("does not call unavailable history an empty activity timeline", async () => {
+  listCandidates.mockResolvedValue({ crmTarget: null });
+  profileActivity.list.mockResolvedValue({ items: [], hasMore: false });
+  correspondence.mockResolvedValue({ ...empty, status: "not_checked" });
+  roleCampaign.mockResolvedValue({ status: "none", serverId: null, campaign: null, leads: [] });
+  const view = await mount(<ActivityTab {...role} person={person} />);
+  expect(view.textContent).toContain("Activity history is unavailable from some sources.");
+  expect(view.textContent).not.toContain("No activity");
 });

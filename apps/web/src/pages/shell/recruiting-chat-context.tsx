@@ -43,12 +43,14 @@ function bounded(value: string | undefined): string | undefined {
 export function recruitingChatContext(
   roleTitle: string | undefined,
   contact: RecruitingChatContact | null | undefined,
+  schedulingPlanId?: string,
 ): RecruitingChatContext | undefined {
   const role = bounded(roleTitle);
   const name = bounded(contact?.name);
   const reference = bounded(contact?.reference);
-  if (!role && !name) return undefined;
+  if (!role && !name && !schedulingPlanId) return undefined;
   return {
+    ...(schedulingPlanId ? { schedulingPlanId } : {}),
     ...(role ? { roleTitle: role } : {}),
     ...(name ? { contact: { name, ...(reference ? { reference } : {}) } } : {}),
   };

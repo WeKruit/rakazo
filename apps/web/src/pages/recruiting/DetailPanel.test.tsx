@@ -9,11 +9,22 @@ const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
 const roleCampaign = vi.hoisted(() => vi.fn());
+const recordView = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
-  rpc: { recruiting: { listCandidates, crmData, correspondence, roleCampaign } },
+  rpc: {
+    recruiting: {
+      listCandidates,
+      crmData,
+      correspondence,
+      roleCampaign,
+      profileActivity: { recordView },
+    },
+  },
 }));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
+  Plural: ({ value, _1, other }: { value: number; _1: string; other: string }) =>
+    (value === 1 ? _1 : other).replace("#", String(value)),
   useLingui: () => ({
     t: (parts: TemplateStringsArray, ...values: unknown[]) =>
       parts.reduce((text, part, index) => text + part + (values[index] ?? ""), ""),
@@ -76,6 +87,7 @@ const setSelectedContact = vi.fn();
 beforeEach(() => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   roleCampaign.mockResolvedValue({ status: "none" });
+  recordView.mockResolvedValue({ recorded: true });
   listCandidates.mockResolvedValue({ crmTarget: { bindingEffectId: "binding", target } });
   correspondence.mockResolvedValue({
     roleId: "role-1",
@@ -314,5 +326,12 @@ it("opens stored company and profile history without inventing education or asse
   expect(panel.textContent).toContain("PostgreSQL");
   expect(panel.textContent).not.toContain("Education");
   expect(panel.textContent).not.toContain("Agent assessment");
-  expect(panel.textContent).not.toContain("unstructured data");
+  expect([...panel.querySelectorAll("li")].map((row) => row.textContent).join(" ")).not.toContain(
+    "unstructured data",
+  );
+  const original = [...panel.querySelectorAll("details")].find(
+    (details) => details.querySelector("summary")?.textContent === "Source text",
+  );
+  expect(original?.open).toBe(false);
+  expect(original?.textContent).toContain("unstructured data");
 });

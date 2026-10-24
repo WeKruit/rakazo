@@ -1519,6 +1519,7 @@ model TicketComment {
 
 
 model RecruitingRole {
+  crmWorkspaceAttachment RecruitingCrmWorkspaceAttachment?
   crmBindingEffectId String? @unique
   crmBindingEffect ExternalEffect? @relation("RecruitingCrmBinding", fields: [crmBindingEffectId], references: [id], onDelete: NoAction)
   id String @id @default(cuid())
@@ -1946,4 +1947,22 @@ model RecruitingCandidateNote {
 
   @@index([spaceId, candidateKey, createdAt])
   @@map("recruiting_candidate_notes")
+}
+
+/// Exact CRM workspace selected through an authenticated read, never an execution/approval receipt.
+model RecruitingCrmWorkspaceAttachment {
+  roleId String @id
+  role RecruitingRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  userId String
+  spaceId String
+  mcpServerId String
+  serverRevision Int
+  organizationId String
+  crmRoleId String
+  sourceMaterial String
+  target Json
+  observedAt DateTime
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmRoleId], map: "recruiting_crm_workspace_exact_key")
+  @@map("recruiting_crm_workspace_attachments")
 }

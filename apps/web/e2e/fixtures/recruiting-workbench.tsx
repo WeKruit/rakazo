@@ -4,6 +4,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { bootstrapI18n, i18n } from "../../src/lib/i18n";
+import { RecruitingCorrespondence } from "../../src/pages/RecruitingCorrespondence";
 import { RecruitingPanel } from "../../src/pages/RecruitingPanel";
 import { ResizableSidePanel } from "../../src/pages/ResizableSidePanel";
 import {
@@ -95,7 +96,7 @@ const judgment = (verdict: (typeof verdicts)[number]) => ({
   evidence: [],
   missing: [],
 });
-const assessments = people.slice(0, 4).map((_person, i) => ({
+const assessments = people.slice(0, 4).map((person, i) => ({
   assessment: {
     roleId: role.id,
     roleRevisionId: revision.id,
@@ -193,7 +194,7 @@ const candidates: RecruitingCandidate[] = people.map((person, i) => ({
       : null,
   crm: null,
 }));
-const mail = people.slice(0, 4).map((_person, i) => ({
+const mail = people.slice(0, 4).map((person, i) => ({
   id: `mail-${i}`,
   providerMessageId: `mail-${i}`,
   threadId: null,
@@ -377,8 +378,17 @@ const rpc: Record<string, (input: Record<string, unknown>) => unknown> = {
     status: empty ? "empty" : "ready",
     checkedAt,
     connectionChanged: false,
-    connections: [],
-    emails: [],
+    connections: [{ name: "CRM", status: "configured" }],
+    emails: page(
+      mail.map((email) => ({
+        ...email,
+        sourceId: source.serverId,
+        sourceName: "CRM",
+        savedRead: null,
+        snippet: email.partial,
+        url: null,
+      })),
+    ),
     events: [],
     contacts: [],
     partial: false,
@@ -465,6 +475,18 @@ function Workbench() {
             groupId="group-0"
             onClose={() => undefined}
             roleConversation
+            correspondence={
+              current === "inbox" ? (
+                <RecruitingCorrespondence
+                  view="inbox"
+                  messages={[]}
+                  artifactTarget={{ groupId: "group-0" }}
+                  threadId="thread-0"
+                  onConversation={() => undefined}
+                  onOpenConnections={() => undefined}
+                />
+              ) : undefined
+            }
             crmBrowse={{
               selection: {
                 serverId: source.serverId,

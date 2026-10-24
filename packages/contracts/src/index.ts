@@ -21,6 +21,7 @@ export * from "./reactions.js";
 export * from "./recruiting.js";
 export * from "./recruiting-crm.js";
 export * from "./recruiting-reply.js";
+export * from "./recruiting-scheduling.js";
 export * from "./rpc.js";
 export * from "./runs.js";
 export * from "./search.js";

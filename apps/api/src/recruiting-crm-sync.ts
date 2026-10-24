@@ -270,10 +270,11 @@ async function syncSlice(
         offset,
       });
       if (page.operation !== "roleMail") throw new ORPCError("SERVICE_UNAVAILABLE");
-      if (!page.supported) {
-        advance();
-        continue;
-      }
+      if (!page.supported)
+        throw new ORPCError("SERVICE_UNAVAILABLE", {
+          message:
+            "Required CRM role correspondence is unavailable. Enable the source capability before retrying this sync phase.",
+        });
       recruiting.addCrmSyncCounts(
         cursor.totals.messages,
         await recruiting.syncRecruitingCrmMessages(
@@ -298,6 +299,9 @@ async function syncSlice(
       if (page.nextOffset !== null && page.items.length) cursor.at.offset = page.nextOffset;
       else advance();
     } catch (error) {
+      // Mail is a required phase. Preserve the current token and offset on any failure;
+      // a retry must read the same page rather than report an incomplete sync as complete.
+      if (step === "mail") throw error;
       const reason = readFailure(error);
       if (reason === null) throw error;
       // A failed read leaves this unit's rows exactly as they were: nothing is archived.

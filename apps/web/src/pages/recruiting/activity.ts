@@ -1,4 +1,8 @@
-import type { RecruitingCorrespondence, RecruitingCrmDataOutput } from "@rakazo/contracts";
+import type {
+  RecruitingCorrespondence,
+  RecruitingCrmDataOutput,
+  RecruitingProfileView,
+} from "@rakazo/contracts";
 
 type MailPage = Extract<RecruitingCrmDataOutput, { operation: "mail" }>;
 type DetailsPage = Extract<RecruitingCrmDataOutput, { operation: "candidateDetails" }>;
@@ -7,7 +11,14 @@ type Workflow = NonNullable<DetailsPage["roleTracking"][number]["workflowStatus"
 type ReviewResult = NonNullable<NonNullable<DetailsPage["review"]>["result"]>;
 
 /** One stored event about a person, newest first in the timeline. `at` is null when undated. */
-export type ActivityItem = { id: string; at: string | null } & (
+export type ActivityItem = {
+  id: string;
+  at: string | null;
+  actor: string | null;
+  context?: string;
+  source: "profile" | "correspondence" | "mailbox" | "outbox" | "status" | "review";
+} & (
+  | { kind: "viewed" }
   | { kind: "sent" | "received" | "email" | "scheduled"; subject: string | null }
   | { kind: "queued" | "failed"; preview: string }
   | { kind: "status"; status: Workflow }
@@ -15,8 +26,14 @@ export type ActivityItem = { id: string; at: string | null } & (
   | { kind: "review"; result: ReviewResult | null; notes: string | null }
 );
 
-const mentions = (value: string | null | undefined, email: string) =>
-  Boolean(value && email && value.toLowerCase().includes(email));
+// Match complete mailbox addresses, never substrings such as ada@example.test.evil.
+const mentions = (value: string | null | undefined, email: string) => {
+  if (!value || !email) return false;
+  const addresses = value.match(/[^\s<>(),;:[\]"@]+@[^\s<>(),;:[\]"@]+/g) ?? [];
+  return addresses.some((address) => address.toLowerCase() === email);
+};
+const date = (value: string | null | undefined) =>
+  value && Number.isFinite(Date.parse(value)) ? value : null;
 
 /**
  * Builds a person's timeline from what is already stored: CRM mail and native receipts, the CRM
@@ -30,6 +47,7 @@ export function buildActivity({
   roleKey,
   crmRoleId,
   saved,
+  views,
 }: {
   email?: string | null;
   mail?: MailPage;
@@ -38,9 +56,17 @@ export function buildActivity({
   roleKey?: string | null;
   crmRoleId?: string | null;
   saved?: readonly SavedEmail[];
+  views?: readonly RecruitingProfileView[];
 }): ActivityItem[] {
   const address = email?.trim().toLowerCase() ?? "";
-  const items: ActivityItem[] = [];
+  const items: ActivityItem[] = (views ?? []).map((view) => ({
+    id: `view:${view.id}`,
+    at: date(view.at),
+    actor: view.actorName,
+    context: view.roleTitle,
+    source: "profile",
+    kind: "viewed",
+  }));
   const messages = new Set<string>();
   const addEmail = (
     providerMessageId: string | null,
@@ -63,7 +89,10 @@ export function buildActivity({
     if (!entry.email) continue;
     addEmail(entry.email.providerMessageId, {
       id: `native:${entry.id}`,
-      at: entry.email.date,
+      // The retained message date/sender do not identify when or who scheduled it.
+      at: entry.status === "scheduled" ? null : date(entry.email.date),
+      actor: entry.status === "scheduled" ? null : entry.email.sender,
+      source: "correspondence",
       subject: entry.email.subject || null,
       kind:
         entry.status === "sent_recorded"
@@ -76,7 +105,9 @@ export function buildActivity({
   for (const item of mail?.items ?? [])
     addEmail(item.providerMessageId, {
       id: `crm:${item.id}`,
-      at: item.date,
+      at: date(item.date),
+      actor: item.sender,
+      source: "correspondence",
       subject: item.subject || null,
       kind:
         item.direction === "sent" ? "sent" : item.direction === "received" ? "received" : "email",
@@ -87,7 +118,9 @@ export function buildActivity({
     if (kind === "email") continue;
     addEmail(item.providerMessageId, {
       id: `saved:${item.id}`,
-      at: item.date,
+      at: date(item.date),
+      actor: item.sender,
+      source: "mailbox",
       subject: item.subject || null,
       kind,
     });
@@ -97,31 +130,39 @@ export function buildActivity({
     if (entry.status === "sent")
       addEmail(entry.providerMessageId, {
         id: `outbox:${entry.id}`,
-        at: entry.sentAt ?? entry.createdAt,
+        at: date(entry.sentAt),
+        actor: null,
+        source: "outbox",
         subject: null,
         kind: "sent",
       });
     else
       items.push({
         id: `outbox:${entry.id}`,
-        at: entry.createdAt,
+        at: entry.status === "failed" ? null : date(entry.createdAt),
+        actor: null,
+        source: "outbox",
         kind: entry.status === "failed" ? "failed" : "queued",
         preview,
       });
   }
   for (const tracking of details?.roleTracking ?? []) {
-    if (roleKey && tracking.roleKey !== roleKey) continue;
+    if (!roleKey || tracking.roleKey !== roleKey) continue;
     if (tracking.workflowStatus && tracking.statusChangedAt)
       items.push({
         id: `status:${tracking.roleKey}`,
-        at: tracking.statusChangedAt,
+        at: date(tracking.statusChangedAt),
+        actor: null,
+        source: "status",
         kind: "status",
         status: tracking.workflowStatus,
       });
     if (tracking.highSignal && tracking.highSignalAt)
       items.push({
         id: `signal:${tracking.roleKey}`,
-        at: tracking.highSignalAt,
+        at: date(tracking.highSignalAt),
+        actor: null,
+        source: "status",
         kind: "highSignal",
       });
   }
@@ -129,11 +170,14 @@ export function buildActivity({
   if (
     review &&
     (review.result || review.notes?.trim()) &&
-    (!crmRoleId || !review.crmRoleId || review.crmRoleId === crmRoleId)
+    crmRoleId &&
+    review.crmRoleId === crmRoleId
   )
     items.push({
       id: `review:${review.id}`,
-      at: review.updatedAt,
+      at: date(review.updatedAt),
+      actor: null,
+      source: "review",
       kind: "review",
       result: review.result,
       notes: review.notes?.trim() || null,

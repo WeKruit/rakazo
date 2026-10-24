@@ -1,8 +1,25 @@
-import type { RecruitingCandidateReport, RecruitingRoleCandidate } from "@rakazo/contracts";
+import type {
+  RecruitingCandidateReport,
+  RecruitingRoleCandidate,
+  RecruitingRoleRevision,
+} from "@rakazo/contracts";
+import { recruitingCandidateSourceText } from "@rakazo/contracts";
+import type { TimelineEntry } from "./profileTimeline";
+import { storedExperienceTimeline, structuredProfileTimeline } from "./profileTimeline";
 import type { RoleCandidateFit } from "./roleCandidates";
 import { roleCandidateFit } from "./roleCandidates";
 
-type Field = RecruitingCandidateReport["fields"][number];
+type Field = RecruitingCandidateReport["fields"][number] & {
+  timelineEntries?: readonly TimelineEntry[];
+  sourceText?: string;
+};
+
+export type ProfileCriterionRevision = Pick<RecruitingRoleRevision, "id" | "criteria">;
+export type ProfileCriterionContext = {
+  /** The revision recorded with this candidate's source, never the current revision by default. */
+  roleRevisionId: string | null | undefined;
+  revision: ProfileCriterionRevision | null | undefined;
+};
 
 const FIT_LABELS = new Set([
   "Match score",
@@ -23,30 +40,50 @@ const EMAIL = /^(?:(?:work|professional|business|personal) )?emails?(?: address(
 const PHONE = /^(?:(?:work|business|mobile) )?(?:phone|mobile)(?: numbers?| phone)?$/i;
 const CONTACT_STATUS =
   /^(?:email (?:status|verification(?: status)?)|contact status|verification status)$/i;
-const EXPERIENCE = /experience|employment|work history|career|tenure/i;
+const EXPERIENCE = /experience|employment|work history|career|tenure|^employer descriptions?$/i;
 const EDUCATION = /educat|school|degree|universit|college/i;
-const SKILLS = /skill/i;
+// A concern mentioning skills is research text, not a declared list of skills.
+const SKILLS =
+  /^(?:(?:technical|core|key|top|primary|professional)\s+)?skills?(?:\s+(?:list|summary))?$/i;
 
 /**
  * Autumn's report fields sorted into the sections a recruiter reads, as returned and never
  * re-judged. Fields that fit no named section stay together as research findings.
  */
-export function candidateSections(fields: readonly Field[] | undefined) {
-  const all = (fields ?? []).filter((field) => field.value?.trim() || field.providerStatus);
-  const take = (test: (field: Field) => boolean) => all.filter(test);
-  const contact = (pattern: RegExp) => take((field) => pattern.test(field.label.trim()));
-  const criteria = take((field) => field.providerStatus !== undefined);
-  const summary = SUMMARY_LABELS.map((label) => all.find((field) => field.label === label)).find(
-    Boolean,
+export function candidateSections(
+  fields: readonly Field[] | undefined,
+  criterionContext?: ProfileCriterionContext,
+) {
+  const all = (fields ?? []).filter(
+    (field) =>
+      field.value?.trim() ||
+      field.evidence?.trim() ||
+      field.reasoning?.trim() ||
+      field.structuredValue !== undefined ||
+      field.providerStatus,
   );
-  const assessment = take((field) => ASSESSMENT.test(field.label.trim()));
-  const assessed = assessment.map((field) => requirementRows(field.value ?? ""));
-  const scope = all.find((field) => SCOPE_LABELS.has(field.label.trim()));
+  const take = (test: (field: Field) => boolean) => all.filter(test);
+  const contact = (pattern: RegExp) =>
+    take((field) => field.structuredValue === undefined && pattern.test(field.label.trim()));
+  const criteria = take((field) => field.providerStatus !== undefined);
+  const summary = SUMMARY_LABELS.map((label) =>
+    all.find((field) => field.structuredValue === undefined && field.label === label),
+  ).find(Boolean);
+  const assessment = take(
+    (field) => field.structuredValue === undefined && ASSESSMENT.test(field.label.trim()),
+  );
+  const assessed = assessment.map((field) => requirementRows(fieldText(field), criterionContext));
+  const scope = all.find(
+    (field) => field.structuredValue === undefined && SCOPE_LABELS.has(field.label.trim()),
+  );
   const resumeUrl = contact(RESUME_URL).find((field) => /^https?:\/\//i.test(field.value ?? ""));
   const resumeFields = contact(/^(?:resume|cv) (?:url|link|status)$/i);
   const experience = take((field) => !field.providerStatus && EXPERIENCE.test(field.label));
   const education = take((field) => !field.providerStatus && EDUCATION.test(field.label));
-  const skillFields = take((field) => !field.providerStatus && SKILLS.test(field.label));
+  const skillFields = take(
+    (field) =>
+      field.structuredValue === undefined && !field.providerStatus && SKILLS.test(field.label),
+  );
   const emails = contact(EMAIL);
   const phones = contact(PHONE);
   const contactStatus = contact(CONTACT_STATUS);
@@ -61,13 +98,95 @@ export function candidateSections(fields: readonly Field[] | undefined) {
     ...emails,
     ...phones,
     ...contactStatus,
-    ...all.filter((field) => FIT_LABELS.has(field.label)),
+    ...all.filter((field) => field.structuredValue === undefined && FIT_LABELS.has(field.label)),
   ]);
+  const criterionRows = criteria.map((field, index) => ({
+    ...criterionRow(field, criterionContext),
+    key: `criterion:${index}:${field.label}`,
+  }));
+  const assessmentRows = assessed.map((item, index) =>
+    item.rows.map((row) => ({
+      ...row,
+      key: `assessment:${index}:${row.key}`,
+    })),
+  );
+  const requirements = [...criterionRows, ...assessmentRows.flat()];
+  const skillEvidence: SkillEvidenceSource[] = [
+    ...criterionRows.map((row) => ({
+      ...row,
+      label: row.label ?? "",
+      kind: "assessment" as const,
+    })),
+    ...assessmentRows.flatMap((rows, index) =>
+      rows.map((row) => ({
+        ...row,
+        label: row.label ?? (row.criterionId ? "" : assessment[index]!.label),
+        sourceUrls: [
+          ...new Set([...assessed[index]!.sourceUrls, ...assessment[index]!.sourceUrls]),
+        ],
+        kind: "assessment" as const,
+      })),
+    ),
+    ...all
+      .filter(
+        (field) =>
+          !criteria.includes(field) &&
+          !assessment.includes(field) &&
+          !FIT_LABELS.has(field.label) &&
+          !SCOPE_LABELS.has(field.label) &&
+          !emails.includes(field) &&
+          !phones.includes(field) &&
+          !contactStatus.includes(field) &&
+          !resumeFields.includes(field),
+      )
+      .flatMap((field, index): SkillEvidenceSource[] => {
+        const kind = experience.includes(field)
+          ? "experience"
+          : education.includes(field)
+            ? "education"
+            : null;
+        const entries =
+          field.timelineEntries ??
+          (kind && field.structuredValue !== undefined
+            ? structuredProfileTimeline(
+                field.structuredValue,
+                kind,
+                new Date(),
+                field.sourceUrlsById,
+              )
+            : []);
+        return [
+          ...entries.map(
+            (entry, entryIndex): SkillEvidenceSource => ({
+              key: `field:${index}:entry:${entryIndex}`,
+              label: [field.label, entry.primary, entry.secondary].filter(Boolean).join(" · "),
+              text: entry.structured
+                ? [entry.primary, entry.secondary, entry.dateLabel, entry.detail, entry.description]
+                    .filter(Boolean)
+                    .join("\n")
+                : entry.text,
+              sourceUrls: [...new Set([...field.sourceUrls, ...(entry.sourceUrls ?? [])])],
+              kind: "profile",
+            }),
+          ),
+          {
+            key: `field:${index}`,
+            label: field.label,
+            text: entries.length
+              ? [field.evidence, field.reasoning].filter(Boolean).join("\n")
+              : fieldText(field),
+            sourceUrls: field.sourceUrls,
+            kind: skillFields.includes(field) ? ("listed" as const) : ("profile" as const),
+          },
+        ].filter((source) => source.text.trim());
+      }),
+  ];
   return {
     fit: roleCandidateFit(all) as RoleCandidateFit | null,
-    summary: summary?.value ?? null,
+    summary: summary ? fieldText(summary) || null : null,
     criteria,
-    requirements: [...criteria.map(criterionRow), ...assessed.flatMap((item) => item.rows)],
+    requirements,
+    skillEvidence,
     requirementSources: [
       ...new Set(
         assessment.flatMap((field, index) => [...assessed[index]!.sourceUrls, ...field.sourceUrls]),
@@ -96,11 +215,24 @@ export function candidateSections(fields: readonly Field[] | undefined) {
 
 export type RequirementStatus = "match" | "gap" | "partial" | "unknown";
 
+/** Saved source context, not evidence of qualification inferred from a skill mention. */
+export type SkillEvidenceSource = {
+  key: string;
+  label: string;
+  criterionId?: string;
+  text: string;
+  sourceUrls: readonly string[];
+  kind: "listed" | "profile" | "assessment";
+  status?: RequirementStatus;
+};
+
 /** One requirement line of Autumn's own assessment, its words kept verbatim. */
 export type RequirementRow = {
   key: string;
-  /** Autumn's requirement reference ("R2") or criterion name, when it gave one. */
+  /** Supplied criterion name or exact matching definition; never an inferred technical name. */
   label: string | null;
+  /** Original source reference kept separately from the readable definition. */
+  criterionId?: string;
   status: RequirementStatus;
   text: string;
   sourceUrls: readonly string[];
@@ -108,7 +240,11 @@ export type RequirementRow = {
 
 const STATUS_WORDS: [RegExp, RequirementStatus][] = [
   [
-    /^(?:partial(?:ly)?(?: (?:met|match|fact))?|potential(?: match)?|unclear|unknown|uncertain|weak|mixed|部分符合|部分|不确定)$/i,
+    /^(?:unclear|unknown|uncertain|unverified|not assessed|no evidence|not enough evidence|未知|不确定|未评估|无证据)$/i,
+    "unknown",
+  ],
+  [
+    /^(?:partial(?:ly)?(?: (?:met|match|fact))?|potential(?: match)?|weak|mixed|部分符合|部分)$/i,
     "partial",
   ],
   [/^(?:fact|match|met|good match|strong|yes|pass|符合|满足|事实)$/i, "match"],
@@ -122,19 +258,45 @@ function statusOf(word: string): RequirementStatus | null {
   return STATUS_WORDS.find(([pattern]) => pattern.test(clean))?.[1] ?? null;
 }
 
-function criterionRow(field: Field): RequirementRow {
+function criterionName(reference: string, context?: ProfileCriterionContext) {
+  const criterion =
+    context?.roleRevisionId && context.revision?.id === context.roleRevisionId
+      ? context.revision.criteria.find((item) => item.id === reference)
+      : undefined;
+  if (criterion) {
+    // A composite has no single name. Keep it unresolved rather than dropping its operators
+    // or promoting one child statement to the whole criterion.
+    return {
+      label: criterion.expression.kind === "atom" ? criterion.expression.statement : null,
+      criterionId: reference,
+    };
+  }
+  return /^R\d+$/i.test(reference) ? { label: null, criterionId: reference } : { label: reference };
+}
+
+function criterionRow(field: Field, context?: ProfileCriterionContext): RequirementRow {
   return {
     key: `criterion:${field.label}`,
-    label: field.label,
+    ...criterionName(field.label, context),
     status:
       field.providerStatus === "match"
         ? "match"
         : field.providerStatus === "miss"
           ? "gap"
-          : "partial",
-    text: field.evidence ?? field.reasoning ?? "",
+          : "unknown",
+    text: fieldText(field, false),
     sourceUrls: field.sourceUrls,
   };
+}
+
+function fieldText(field: Field, includeValue = true) {
+  return [
+    ...new Set(
+      [...(includeValue ? [field.value] : []), field.evidence, field.reasoning].filter(
+        (part): part is string => Boolean(part?.trim()),
+      ),
+    ),
+  ].join("\n\n");
 }
 
 /**
@@ -142,7 +304,10 @@ function criterionRow(field: Field): RequirementRow {
  * requirement, keeping its status word's meaning and its evidence as written. Text it cannot
  * split stays one row with an unknown status. Cited source links are returned once.
  */
-export function requirementRows(value: string): {
+export function requirementRows(
+  value: string,
+  context?: ProfileCriterionContext,
+): {
   rows: RequirementRow[];
   sourceUrls: string[];
 } {
@@ -164,7 +329,7 @@ export function requirementRows(value: string): {
     const parsed = status ? statusOf(status[1]!) : null;
     return {
       key: match?.[1] ?? `row:${index}`,
-      label: match?.[1] ?? null,
+      ...(match ? criterionName(match[1]!, context) : { label: null }),
       status: parsed ?? "unknown",
       text: (parsed ? status![2]! : rest).trim().replace(/[;；]$/, ""),
       sourceUrls: [],
@@ -213,19 +378,24 @@ export function storedProfileFields(
   profile: NonNullable<RecruitingRoleCandidate["crm"]>["profile"],
 ): Field[] {
   if (!profile) return [];
-  const history = Array.isArray(profile.history) ? profile.history : [profile.history];
-  const experience = history.flatMap((entry): string[] => {
-    if (typeof entry === "string") return entry.trim() ? [entry] : [];
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
-    const text = (key: string) => (typeof entry[key] === "string" ? (entry[key] as string) : "");
-    const name = [text("title"), text("company")].filter(Boolean).join(" · ");
-    if (!name) return [];
-    const dates = [text("start"), text("end")].filter(Boolean).join(" – ");
-    return [[name, dates].filter(Boolean).join(" · ")];
-  });
+  const experience = storedExperienceTimeline(profile.history, new Date());
   return [
     ...(experience.length
-      ? [{ label: "Experience", value: experience.join("\n"), sourceUrls: [] }]
+      ? [
+          {
+            label: "Experience",
+            value: experience
+              .map((entry) =>
+                entry.structured
+                  ? [entry.primary, entry.secondary, entry.dateLabel].filter(Boolean).join(" · ")
+                  : entry.text,
+              )
+              .join("\n"),
+            sourceText: recruitingCandidateSourceText(profile.history),
+            timelineEntries: experience,
+            sourceUrls: [],
+          },
+        ]
       : []),
     ...(profile.summary.trim()
       ? [{ label: "Summary", value: profile.summary, sourceUrls: [] }]

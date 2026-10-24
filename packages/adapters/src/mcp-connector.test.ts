@@ -1,7 +1,9 @@
 import { toolRequiresApproval, toolRequiresExplicitApproval } from "@rakazo/core";
+import * as schedulingDb from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
 import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { calendarEvidenceHash } from "./calendar-approval.js";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
 import {
   allowlistDrift,
@@ -15,6 +17,7 @@ import {
 import type { OAuthMaterial } from "./mcp-oauth.js";
 import { type McpOAuthBroker, StoredMcpOAuthProvider } from "./mcp-oauth.js";
 import { InMemoryRealtimeFanout } from "./realtime.js";
+import { schedulingPlanHash } from "./recruiting-scheduling.js";
 import { rememberResolvedContactEmails } from "./recruiting-tools.js";
 import { migrateSecrets } from "./secret-migration.js";
 import { ComposedSecretStore } from "./secret-store-factory.js";
@@ -237,6 +240,8 @@ describe("local native Instantly thread history", () => {
         const body = state.campaigns[decodeURIComponent(campaign[1]!)];
         return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
       }
+      if (new URL(request.url).pathname === `/api/v2/emails/${anchor.id}`)
+        return Response.json(state.callResult.structuredContent);
       expect(new URL(request.url).pathname).toBe("/api/v2/emails");
       state.afterRest();
       return new Response(JSON.stringify(state.page), { status: state.status });
@@ -451,6 +456,10 @@ describe("local native Instantly thread history", () => {
   });
   it("refuses an agent contact lookup with an email not stored for that person", async () => {
     const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
+      "instantlyCampaignScope",
+    ).mockResolvedValue(null);
     const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     const run = { ...f.context, runId: "run-contact-gate" };
     f.state.page = { items: [] };
@@ -854,28 +863,306 @@ describe("local native Instantly thread history", () => {
       }
     },
   );
-  it.each(["thread_id", "organization_id", "eaccount", "id", "shape", "http", "oversize"])(
-    "rejects %s response without inventing an empty successful page",
-    async (kind) => {
+  it.each([
+    "thread_id",
+    "organization_id",
+    "campaign_id",
+    "eaccount",
+    "id",
+    "shape",
+    "http",
+    "oversize",
+  ])("rejects %s response without inventing an empty successful page", async (kind) => {
+    const f = fixture();
+    if (["thread_id", "organization_id", "campaign_id", "eaccount"].includes(kind))
+      f.state.page = {
+        items: [
+          {
+            ...anchor,
+            [kind]:
+              kind === "organization_id"
+                ? anchor.campaign_id
+                : kind === "campaign_id"
+                  ? anchor.organization_id
+                  : "foreign",
+          },
+        ],
+      };
+    if (kind === "id") f.state.callResult.structuredContent.id = anchor.campaign_id;
+    if (kind === "shape") f.state.page = { items: "invalid" };
+    if (kind === "http") f.state.status = 401;
+    if (kind === "oversize") f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
+    try {
+      expect(await f.collect()).toMatchObject([{ type: "error" }]);
+      expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it.each([
+    "current",
+    "ordinary",
+    "legacy-key",
+    "missing-effect",
+    "foreign-owner",
+    "changed-request",
+    "completed-cancel",
+    "uncertain-reschedule",
+    "executing-cancel",
+  ])(
+    "revalidates scheduling confirmation after native anchor/account reads: %s",
+    async (mutation) => {
       const f = fixture();
-      if (["thread_id", "organization_id", "eaccount"].includes(kind))
-        f.state.page = {
-          items: [
-            { ...anchor, [kind]: kind === "organization_id" ? anchor.campaign_id : "foreign" },
-          ],
-        };
-      if (kind === "id") f.state.callResult.structuredContent.id = anchor.campaign_id;
-      if (kind === "shape") f.state.page = { items: "invalid" };
-      if (kind === "http") f.state.status = 401;
-      if (kind === "oversize") f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
+      f.assignment.allowedTools.push("reply_to_email");
+      const replyRoute = { ...route, toolName: "native_instantly_reply_to_email" };
+      const args = {
+        reply_to_uuid: anchor.id,
+        eaccount: anchor.eaccount,
+        subject: "Interview confirmed",
+        body: { text: "Exact approved confirmation" },
+      };
+      const actor = {
+        ...f.context,
+        runId: "run-1",
+        schedulingConfirmationEffectId: "confirmation-1",
+      };
+      const plan = {
+        id: "plan-1",
+        createdAt: "2026-10-23T00:00:00Z",
+        threadId: "thread-1",
+        roleId: "role-1",
+        roleTitle: "Engineer",
+        expectedRoleRevision: 1,
+        originalEmail: {
+          sourceId: route.resourceId,
+          providerMessageId: anchor.id,
+          providerThreadId: anchor.thread_id,
+          campaignId: anchor.campaign_id,
+          eaccount: anchor.eaccount,
+          savedRead: null,
+          threadId: "thread-1",
+          roleId: "role-1",
+          emailId: "original",
+          sourceName: "Mailbox",
+          sender: anchor.from_address_email,
+          subject: "Interview",
+          date: null,
+          snippet: false,
+        },
+        candidate: {
+          candidateKey: "candidate-1",
+          name: "Candidate",
+          email: anchor.from_address_email,
+          timeZone: "America/New_York",
+        },
+        interviewer: { name: "Host", email: anchor.eaccount, timeZone: "Europe/London" },
+        calendar: {
+          sourceId: "cal-1",
+          sourceRevision: 1,
+          eventTypeId: 42,
+          availabilityEffectId: "slots",
+          start: "2026-11-01T05:30:00Z",
+          end: "2026-11-01T06:00:00Z",
+          lengthInMinutes: 30,
+        },
+        mailSourceId: route.resourceId,
+        mailSourceRevision: route.resourceRevision,
+        mailRead: { effectId: "mail-read", linkedRunId: "run-1", messageId: null },
+        bookingEffectId: "booking-1",
+        confirmationEffectId: "confirmation-1",
+        bookingStatus: "completed",
+        confirmationStatus: "pending",
+      } as const;
+      const request = ["__rakazoCatalogTool", "direct", { route: replyRoute, args }];
+      const evidence = {
+        kind: "recruiting_scheduling",
+        version: 1,
+        planId: plan.id,
+        operation: "confirm",
+        requestHash: calendarEvidenceHash(request),
+        planHash: schedulingPlanHash(plan),
+        bookingEffectId: plan.bookingEffectId,
+      };
+      const confirmationEffect = {
+        id: "confirmation-1",
+        runId: actor.runId,
+        spaceId: actor.spaceId,
+        status: "executing",
+        idempotencyKey: mutation === "legacy-key" ? "older-reconciled-key" : "thread-read",
+        request,
+        result: { schedulingApprovalEvidence: evidence },
+        run: { threadId: "thread-1", userId: actor.userId, botId: actor.botId },
+      };
+      if (mutation === "foreign-owner") confirmationEffect.run.userId = "other-owner";
+      if (mutation === "changed-request") evidence.requestHash = "0".repeat(64);
+      const findUnique = vi.fn().mockResolvedValue(confirmationEffect);
+      if (mutation === "missing-effect") findUnique.mockResolvedValue(null);
+      Object.assign(f.prisma, { externalEffect: { findUnique } });
+      const load = vi
+        .spyOn(schedulingDb, "loadVerifiedRecruitingSchedulingPlan")
+        .mockResolvedValue(plan);
+      let nativeReads = 0;
+      let changed = false;
+      const bind = vi
+        .spyOn(schedulingDb, "bindRecruitingSchedulingOperation")
+        .mockImplementation(async () => {
+          expect(nativeReads).toBeGreaterThanOrEqual(2);
+          if (changed)
+            throw new IsolationError("Booking changed while native reply evidence was read");
+          return plan;
+        });
+      vi.spyOn(
+        f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> },
+        "instantlyCampaignScope",
+      ).mockResolvedValue({ campaignIds: [anchor.campaign_id], workspaceKey: "role-1" });
+      f.rest.mockImplementation(async (input, init) => {
+        const request = new Request(input, init);
+        const path = new URL(request.url).pathname;
+        if (request.method === "POST") return Response.json({ id: "sent-confirmation" });
+        nativeReads++;
+        if (path.includes("/accounts/")) {
+          changed = !["current", "legacy-key"].includes(mutation);
+          return Response.json({ email: anchor.eaccount });
+        }
+        return Response.json(anchor);
+      });
       try {
-        expect(await f.collect()).toMatchObject([{ type: "error" }]);
-        expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
+        const events = await f.collect(
+          args,
+          replyRoute,
+          mutation === "ordinary" ? ({ ...f.context, runId: "run-1" } as typeof actor) : actor,
+        );
+        if (mutation === "ordinary") expect(findUnique).not.toHaveBeenCalled();
+        else
+          expect(findUnique).toHaveBeenCalledWith(
+            expect.objectContaining({ where: { id: "confirmation-1" } }),
+          );
+        const rejectedIdentity = [
+          "ordinary",
+          "missing-effect",
+          "foreign-owner",
+          "changed-request",
+        ].includes(mutation);
+        expect(bind).toHaveBeenCalledTimes(rejectedIdentity ? 0 : 1);
+        if (!rejectedIdentity)
+          expect(bind).toHaveBeenCalledWith(
+            f.prisma,
+            expect.objectContaining({ userId: actor.userId, spaceId: actor.spaceId }),
+            {
+              threadId: "thread-1",
+              planId: plan.id,
+              operation: "confirm",
+              effectId: "confirmation-1",
+            },
+          );
+        const posts = f.rest.mock.calls.filter((call) => new Request(...call).method === "POST");
+        expect(posts).toHaveLength(
+          ["current", "ordinary", "legacy-key"].includes(mutation) ? 1 : 0,
+        );
+        expect(events[0]).toMatchObject({
+          type: ["current", "ordinary", "legacy-key"].includes(mutation) ? "result" : "error",
+        });
+      } finally {
+        load.mockRestore();
+        bind.mockRestore();
+        await f.connector.close();
+      }
+    },
+  );
+  it.each(["native_instantly_get_email", "native_instantly_reply_to_email"])(
+    "rejects foreign role campaign before exposing or replying via %s",
+    async (toolName) => {
+      const f = fixture();
+      f.assignment.allowedTools.push("reply_to_email");
+      vi.spyOn(
+        f.connector as unknown as {
+          instantlyCampaignScope: () => Promise<{ campaignIds: string[] }>;
+        },
+        "instantlyCampaignScope",
+      ).mockResolvedValue({ campaignIds: [anchor.organization_id] });
+      try {
+        const args =
+          toolName === "native_instantly_get_email"
+            ? { id: anchor.id }
+            : {
+                reply_to_uuid: anchor.id,
+                eaccount: anchor.eaccount,
+                body: { text: "Synthetic reply" },
+              };
+        expect(await f.collect(args, { ...route, toolName })).toMatchObject([{ type: "error" }]);
+        expect(f.rest).toHaveBeenCalledTimes(1);
+        expect(new Request(...f.rest.mock.calls[0]!).method).toBe("GET");
       } finally {
         await f.connector.close();
       }
     },
   );
+  it.each([
+    "native_instantly_get_email",
+    "native_instantly_list_mailbox_emails",
+    "native_instantly_reply_to_email",
+  ])("fences a role switch across native awaits for %s", async (toolName) => {
+    const f = fixture();
+    f.assignment.allowedTools.push("reply_to_email");
+    f.state.accounts = [anchor.eaccount];
+    const stable = { campaignIds: [anchor.campaign_id], workspaceKey: "role-a" };
+    const scope = vi
+      .spyOn(
+        f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> },
+        "instantlyCampaignScope",
+      )
+      .mockResolvedValueOnce(stable)
+      .mockResolvedValueOnce(stable)
+      .mockResolvedValue({ ...stable, workspaceKey: "role-b" });
+    try {
+      const args =
+        toolName === "native_instantly_get_email"
+          ? { id: anchor.id }
+          : toolName === "native_instantly_list_mailbox_emails"
+            ? { eaccount: anchor.eaccount }
+            : {
+                reply_to_uuid: anchor.id,
+                eaccount: anchor.eaccount,
+                body: { text: "Synthetic reply" },
+              };
+      expect(await f.collect(args, { ...route, toolName })).toMatchObject([{ type: "error" }]);
+      expect(scope).toHaveBeenCalledTimes(3);
+      expect(f.rest.mock.calls.every((call) => new Request(...call).method === "GET")).toBe(true);
+      if (toolName === "native_instantly_reply_to_email")
+        expect(
+          f.rest.mock.calls.some((call) =>
+            new URL(logicalHref(...call)).pathname.endsWith("/emails/reply"),
+          ),
+        ).toBe(false);
+    } finally {
+      await f.connector.close();
+    }
+  });
+  it("filters existing native mailbox reads by exact current campaign", async () => {
+    const f = fixture();
+    vi.spyOn(
+      f.connector as unknown as {
+        instantlyCampaignScope: () => Promise<{ campaignIds: string[] }>;
+      },
+      "instantlyCampaignScope",
+    ).mockResolvedValue({ campaignIds: [anchor.campaign_id] });
+    try {
+      expect(
+        await f.collect(
+          { eaccount: anchor.eaccount },
+          { ...route, toolName: "native_instantly_list_mailbox_emails" },
+        ),
+      ).toMatchObject([{ type: "result" }]);
+      const emailCall = f.rest.mock.calls.find(
+        (call) => new URL(logicalHref(...call)).pathname === "/api/v2/emails",
+      )!;
+      const url = new URL(logicalHref(...emailCall));
+      expect(url.searchParams.get("campaign_id")).toBe(anchor.campaign_id);
+      expect(url.searchParams.get("eaccount")).toBe(anchor.eaccount);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it.each([
     "get_thread_history",
     route.toolName,

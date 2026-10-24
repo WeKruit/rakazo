@@ -15,8 +15,15 @@ export type TimelineEntry = {
   primary: string;
   /** Company, or degree for education. */
   secondary?: string;
+  /** Explicit organization in a structured record; null means it was not supplied. */
+  organization?: string | null;
+  logoUrl?: string | null;
+  organizationUrl?: string | null;
+  sourceUrls?: readonly string[];
   /** Remaining parts, such as a location. */
   detail?: string;
+  /** Supplied body text, kept separate from a role/qualification heading. */
+  description?: string;
   /** Date text as written, for display. */
   dateLabel?: string;
   /** Whether the range runs to the present, and the start as written. */
@@ -64,6 +71,19 @@ function nowIndex(now: Date) {
   return now.getUTCFullYear() * 12 + now.getUTCMonth();
 }
 
+function rangeFields(start: string, end: string, dateLabel: string, now: Date) {
+  const startIndex = dateIndex(start);
+  const current = PRESENT_ONLY.test(end.trim());
+  const endIndex = current ? nowIndex(now) : dateIndex(end);
+  return {
+    dateLabel,
+    ...(current ? { current: true, startLabel: start.trim() } : {}),
+    ...(endIndex >= startIndex && startIndex <= nowIndex(now)
+      ? { startIndex, endIndex, months: endIndex - startIndex }
+      : {}),
+  };
+}
+
 const TRIM = /^[\s,，、:：;；\-–—|·()（）]+|[\s,，、:：;；\-–—|·()（）]+$/g;
 
 function tidy(text: string) {
@@ -88,7 +108,7 @@ function splitParts(text: string): string[] {
       ...splitParts(text.slice(at.index + at[0].length)),
     ];
   return text
-    .split(/\s*[,，、|]\s*|\s+[-–—]\s+|\s*—\s*/)
+    .split(/\s*[,，、|·]\s*|\s+[-–—]\s+|\s*—\s*/)
     .map((part) => part.trim())
     .filter(Boolean);
 }
@@ -106,15 +126,8 @@ function parseSegment(text: string, kind: TimelineKind, now: Date): TimelineEntr
   const range = ranges[0];
   const single = singles[0];
   if (range) {
-    const startIndex = dateIndex(range[1] ?? "");
-    const present = PRESENT_ONLY.test((range[2] ?? "").trim());
-    const endIndex = present ? nowIndex(now) : dateIndex(range[2] ?? "");
     rest = text.replace(range[0], " ");
-    dates.dateLabel = range[0];
-    if (present) Object.assign(dates, { current: true, startLabel: (range[1] ?? "").trim() });
-    if (endIndex >= startIndex && startIndex <= nowIndex(now)) {
-      Object.assign(dates, { startIndex, endIndex, months: endIndex - startIndex });
-    }
+    Object.assign(dates, rangeFields(range[1] ?? "", range[2] ?? "", range[0], now));
   } else if (single) {
     rest = text.replace(single[0], " ");
     dates.dateLabel = single[0];
@@ -166,6 +179,128 @@ export function parseTimeline(
   return splitSegments(value ?? "").map((segment) => parseSegment(segment, kind, now));
 }
 
+/** Existing CRM history objects already identify the role and company. Do not reparse names. */
+export function storedExperienceTimeline(history: unknown, now: Date): TimelineEntry[] {
+  return (Array.isArray(history) ? history : [history]).flatMap((entry): TimelineEntry[] => {
+    if (typeof entry === "string") return parseTimeline(entry, "experience", now);
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const value = entry as Record<string, unknown>;
+    const text = (key: string) => (typeof value[key] === "string" ? value[key].trim() : "");
+    const title = text("title");
+    const company = text("company");
+    if (!title && !company) {
+      const description = [text("description"), text("location")].filter(Boolean).join("\n");
+      return description ? [{ text: description, primary: description, structured: false }] : [];
+    }
+    const start = text("start");
+    const end = text("end");
+    const dateLabel = [start, end].filter(Boolean).join(" – ");
+    // Missing ends remain unknown, never Present. Invalid or partial dates stay supplied text.
+    const range = new RegExp(`^(${DATE})${RANGE_SEP}(${DATE}|${PRESENT})$`, "i").exec(dateLabel);
+    return [
+      {
+        text: JSON.stringify(entry, null, 2),
+        structured: true,
+        primary: title || company,
+        secondary: title && company ? company : undefined,
+        organization: company || null,
+        detail: text("location") || undefined,
+        description: text("description") || undefined,
+        ...(dateLabel ? { dateLabel } : {}),
+        ...(range ? rangeFields(range[1]!, range[2]!, dateLabel, now) : {}),
+      },
+    ];
+  });
+}
+
+/** Proposed interchange fields; these do not establish an upstream provider serializer. */
+export function structuredProfileTimeline(
+  value: unknown,
+  kind: TimelineKind,
+  now: Date,
+  sourceUrlsById: Record<string, readonly string[]> = {},
+): TimelineEntry[] {
+  return (Array.isArray(value) ? value : [value]).flatMap((raw): TimelineEntry[] => {
+    if (typeof raw === "string") return parseTimeline(raw, kind, now);
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const record = raw as Record<string, unknown>;
+    const sourceIds: string[] = [];
+    const unwrap = (cell: unknown): unknown => {
+      if (!cell || typeof cell !== "object" || Array.isArray(cell)) return cell;
+      const sourced = cell as Record<string, unknown>;
+      if (!Object.hasOwn(sourced, "value")) return cell;
+      for (const id of Array.isArray(sourced.source_id) ? sourced.source_id : [sourced.source_id])
+        if (typeof id === "string") sourceIds.push(id);
+      return sourced.value;
+    };
+    const text = (key: string) => {
+      const field = unwrap(record[key]);
+      return typeof field === "string" ? field.trim() : "";
+    };
+    // The legacy CRM history shape is already used by the existing stored-profile contract.
+    const legacy =
+      kind === "experience" &&
+      !Object.hasOwn(record, "company_name") &&
+      (Object.hasOwn(record, "company") ||
+        Object.hasOwn(record, "start") ||
+        Object.hasOwn(record, "end"));
+    const organization = text(
+      kind === "education" ? "school_name" : legacy ? "company" : "company_name",
+    );
+    const title = text(kind === "education" ? "degree" : "title");
+    const description = text("description");
+    if (!organization && !title) return [];
+    const start = text(legacy ? "start" : "start_date");
+    const end = text(legacy ? "end" : "end_date");
+    const currentFlag = unwrap(record.is_current);
+    const current = currentFlag === true && !end;
+    const conflictingCurrent = currentFlag === false && PRESENT_ONLY.test(end);
+    const dateLabel = [start, end || (current ? "Present" : "")].filter(Boolean).join(" – ");
+    const range = new RegExp(`^(${DATE})${RANGE_SEP}(${DATE}|${PRESENT})$`, "i").exec(dateLabel);
+    const detail = kind === "education" ? text("field_of_study") : text("location");
+    const logoUrl = text(kind === "education" ? "school_logo_url" : "company_logo_url");
+    const organizationUrl =
+      text(kind === "education" ? "school_url" : "company_url") ||
+      text(kind === "education" ? "school_linkedin_url" : "company_linkedin_url");
+    const suppliedUrls = unwrap(record.source_urls);
+    for (const id of Array.isArray(record.source_id) ? record.source_id : [record.source_id])
+      if (typeof id === "string") sourceIds.push(id);
+    const validLink = (url: unknown): url is string => {
+      if (typeof url !== "string" || /\s/.test(url)) return false;
+      try {
+        const parsed = new URL(url);
+        return (
+          ["https:", "http:"].includes(parsed.protocol) && !parsed.username && !parsed.password
+        );
+      } catch {
+        return false;
+      }
+    };
+    return [
+      {
+        text: JSON.stringify(raw, null, 2),
+        structured: true,
+        primary: kind === "education" ? organization || title : title || organization,
+        secondary:
+          organization && title ? (kind === "education" ? title : organization) : undefined,
+        organization: organization || null,
+        logoUrl,
+        organizationUrl,
+        description: description || undefined,
+        detail: detail || undefined,
+        sourceUrls: [
+          ...new Set([
+            ...(Array.isArray(suppliedUrls) ? suppliedUrls.filter(validLink) : []),
+            ...sourceIds.flatMap((id) => sourceUrlsById[id] ?? []).filter(validLink),
+          ]),
+        ],
+        ...(dateLabel ? { dateLabel } : {}),
+        ...(range && !conflictingCurrent ? rangeFields(range[1]!, range[2]!, dateLabel, now) : {}),
+      },
+    ];
+  });
+}
+
 /** Tenure figures from parsed positions only; null when no position has a usable range. */
 export function timelineStats(entries: readonly TimelineEntry[]): TimelineStats | null {
   const spans = entries.flatMap((entry) =>
@@ -192,31 +327,4 @@ export function timelineStats(entries: readonly TimelineEntry[]): TimelineStats 
     current: current ? current.end - current.start : null,
     total,
   };
-}
-
-/**
- * A host from the field's own sources that plausibly belongs to the company: a non-LinkedIn
- * https page whose hostname contains the company's first word.
- */
-export function companyHost(company: string | undefined, sourceUrls: readonly string[]) {
-  const word = company
-    ?.toLowerCase()
-    .split(/[\s,.]+/)[0]
-    ?.replace(/[^a-z0-9]/g, "");
-  if (!word || word.length < 3) return null;
-  for (const url of sourceUrls) {
-    try {
-      const { protocol, hostname } = new URL(url);
-      if (
-        protocol === "https:" &&
-        !/(^|\.)linkedin\.com$/.test(hostname) &&
-        hostname.includes(word)
-      ) {
-        return hostname;
-      }
-    } catch {
-      // Not a URL; ignore.
-    }
-  }
-  return null;
 }

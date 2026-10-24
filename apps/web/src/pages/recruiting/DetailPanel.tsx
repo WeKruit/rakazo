@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import { Badge, Button, buttonVariants } from "@rakazo/ui-web";
+import { recruitingCandidateSourceText } from "@rakazo/contracts";
+import { Button, buttonVariants } from "@rakazo/ui-web";
 import {
   ArrowLeft,
   Bookmark,
@@ -18,11 +19,13 @@ import { useRecruitingChatContext } from "../shell/recruiting-chat-context";
 import { ActivityTab } from "./ActivityTab";
 import { AssessmentCard } from "./AssessmentCard";
 import type { RecruitingDetailController, RecruitingDetailView } from "./detail";
+import { HighlightText } from "./evidence";
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
-import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
+import { ProfileImage } from "./ProfileImage";
+import { CompanyLogo, EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
   initials,
@@ -30,27 +33,37 @@ import {
   sourceLabel,
   storedProfileFields,
 } from "./profile";
+import { organizationLogo, profileAssets, profileContentFields } from "./profileAssets";
+import { RetryNotice } from "./RetryNotice";
+import { SkillEvidence } from "./SkillEvidence";
 import { statusText } from "./shared";
 import { reminderCandidateKeys, TasksTab } from "./TasksTab";
+import { useProfileView } from "./useProfileView";
 
-const SKILLS_SHOWN = 12;
-
-export function PersonAvatar({ name, size = "md" }: { name: string; size?: "sm" | "md" }) {
+export function PersonAvatar({
+  name,
+  src,
+  size = "md",
+}: {
+  name: string;
+  src?: string | null;
+  size?: "sm" | "md";
+}) {
   return (
-    <span
-      aria-hidden
-      className={`grid shrink-0 place-items-center rounded-full bg-muted font-medium text-muted-foreground ${
-        size === "sm" ? "size-8 text-[11px]" : "size-12 text-sm"
+    <ProfileImage
+      src={src}
+      photo
+      fallback={initials(name)}
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-muted font-medium text-muted-foreground ${
+        size === "sm" ? "size-8 text-[11px]" : "size-14 text-base"
       }`}
-    >
-      {initials(name)}
-    </span>
+    />
   );
 }
 
 function Section({ id, title, children }: { id: string; title: ReactNode; children: ReactNode }) {
   return (
-    <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-12 border-t py-4">
+    <section id={id} aria-labelledby={`${id}-title`} className="scroll-mt-24 border-t py-4">
       <h3 id={`${id}-title`} className="mb-3 font-semibold">
         {title}
       </h3>
@@ -69,6 +82,90 @@ function Sources({ urls }: { urls: readonly string[] }) {
         </a>
       ))}
     </span>
+  );
+}
+
+/** Keep every navigation label reachable when the detail panel is narrow. */
+function NavigationRow({ children }: { children: ReactNode }) {
+  const { t } = useLingui();
+  const viewport = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
+  const [edges, setEdges] = useState({ overflow: false, start: true, end: true });
+  const measure = () => {
+    const element = viewport.current;
+    if (!element) return;
+    const next = {
+      overflow: element.scrollWidth > element.clientWidth + 1,
+      start: element.scrollLeft <= 1,
+      end: element.scrollLeft + element.clientWidth >= element.scrollWidth - 1,
+    };
+    setEdges((previous) =>
+      previous.overflow === next.overflow &&
+      previous.start === next.start &&
+      previous.end === next.end
+        ? previous
+        : next,
+    );
+  };
+  useEffect(() => {
+    measure();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+    if (viewport.current) observer?.observe(viewport.current);
+    if (content.current) observer?.observe(content.current);
+    window.addEventListener("resize", measure);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, []);
+  const scroll = (direction: -1 | 1) => {
+    const element = viewport.current;
+    if (element) element.scrollLeft += direction * element.clientWidth * 0.75;
+  };
+  return (
+    <div className="flex min-w-0 items-center gap-1" data-testid="profile-navigation-row">
+      {edges.overflow ? (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label={t`Scroll navigation left`}
+          disabled={edges.start}
+          onClick={() => scroll(-1)}
+        >
+          <ChevronLeft size={16} aria-hidden />
+        </Button>
+      ) : null}
+      <div
+        ref={viewport}
+        className="min-w-0 flex-1 overflow-x-auto"
+        onScroll={measure}
+        onFocusCapture={(event) => {
+          const element = viewport.current;
+          if (!element || !(event.target instanceof HTMLElement)) return;
+          const bounds = element.getBoundingClientRect();
+          const target = event.target.getBoundingClientRect();
+          if (target.left < bounds.left) element.scrollLeft += target.left - bounds.left;
+          else if (target.right > bounds.right) element.scrollLeft += target.right - bounds.right;
+        }}
+      >
+        <div ref={content} className="flex w-max gap-1">
+          {children}
+        </div>
+      </div>
+      {edges.overflow ? (
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="shrink-0"
+          aria-label={t`Scroll navigation right`}
+          disabled={edges.end}
+          onClick={() => scroll(1)}
+        >
+          <ChevronRight size={16} aria-hidden />
+        </Button>
+      ) : null}
+    </div>
   );
 }
 
@@ -91,14 +188,22 @@ export function RecruitingDetailPanel({
   const current = controller.current;
   const heading = useRef<HTMLHeadingElement>(null);
   const person = current?.person;
+  const profileView = useProfileView({
+    spaceId: current?.role.spaceId,
+    roleId: current?.role.roleId,
+    candidateKey:
+      reminderCandidateKeys(
+        current?.candidate?.candidateKey,
+        current?.crm !== false && person?.candidateId,
+      )[0] ?? null,
+    visible: current?.view === "contact",
+  });
   const depth = controller.stack.length;
-  const [allSkills, setAllSkills] = useState(false);
   const [shortlisted, setShortlisted] = useState<{ key: string; value: boolean }>();
 
   useEffect(() => {
     if (!person) return;
     chatContext.setSelectedContact({ name: person.name, reference: person.candidateId });
-    setAllSkills(false);
   }, [person?.candidateId, person?.name]);
   const open = Boolean(current);
   useEffect(() => {
@@ -107,7 +212,7 @@ export function RecruitingDetailPanel({
   }, [open]);
   useEffect(() => {
     if (current) heading.current?.focus({ preventScroll: true });
-  }, [depth]);
+  }, [depth, person?.candidateId]);
 
   if (!current || !person) return null;
   const crm = current.crm !== false;
@@ -130,13 +235,18 @@ export function RecruitingDetailPanel({
   ];
   const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
-  const sections = candidateSections([
+  const fields = [
     ...(candidate?.latestSource?.report?.fields ?? []),
     ...storedProfileFields(person.profile),
-  ]);
+  ];
+  const company = person.company ?? candidate?.company;
+  const assets = profileAssets(fields, company);
+  const sections = candidateSections(profileContentFields(fields), {
+    roleRevisionId: candidate?.latestSource?.roleRevisionId,
+    revision: current.criterionRevision,
+  });
   const email = person.email ?? sections.email;
   const phone = person.phone ?? sections.phone;
-  const company = person.company ?? candidate?.company;
   const role =
     person.title && company ? t`${person.title} at ${company}` : (person.title ?? company);
   const resumeUrl = candidate?.resumeUrl ?? sections.resumeUrl;
@@ -214,20 +324,45 @@ export function RecruitingDetailPanel({
       </header>
       <div className="rk-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="space-y-3 px-4 pt-4">
+          {profileView.status === "failed" ? (
+            <RetryNotice onRetry={profileView.retry}>
+              <Trans>Could not record this profile view.</Trans>
+            </RetryNotice>
+          ) : null}
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1 space-y-1">
               <h2
                 ref={heading}
                 tabIndex={-1}
-                className="truncate text-lg font-semibold outline-none"
+                className="break-words text-xl font-semibold leading-tight outline-none"
                 title={person.name}
               >
                 {person.name}
               </h2>
               {role ? (
                 <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  <BriefcaseBusiness size={14} aria-hidden className="shrink-0" />
-                  <span className="truncate">{role}</span>
+                  {organizationLogo(company ?? undefined, assets.company) ? (
+                    <CompanyLogo name={company!} src={assets.company?.url} />
+                  ) : (
+                    <BriefcaseBusiness size={14} aria-hidden className="shrink-0" />
+                  )}
+                  <span className="min-w-0 break-words">
+                    {organizationLogo(company ?? undefined, assets.companyLink) ? (
+                      <>
+                        {person.title ? `${person.title} · ` : ""}
+                        <a
+                          href={assets.companyLink!.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="underline underline-offset-2"
+                        >
+                          {company}
+                        </a>
+                      </>
+                    ) : (
+                      role
+                    )}
+                  </span>
                 </p>
               ) : null}
               {person.location || handle ? (
@@ -251,7 +386,7 @@ export function RecruitingDetailPanel({
                 </p>
               ) : null}
             </div>
-            <PersonAvatar name={person.name} />
+            <PersonAvatar key={person.candidateId} name={person.name} src={assets.photo} />
           </div>
           <details open className="rounded-lg bg-muted/60 px-3 py-2 text-sm">
             <summary className="cursor-pointer font-medium">
@@ -331,23 +466,27 @@ export function RecruitingDetailPanel({
             </div>
           ) : null}
         </div>
-        <nav className="sticky top-0 z-10 flex gap-1 border-b border-sidebar-border bg-background px-3 pt-3 pb-2">
-          {views.length > 1
-            ? views.map(({ view: option, label }) => (
-                <Button
-                  key={option}
-                  size="sm"
-                  variant={option === view ? "secondary" : "ghost"}
-                  aria-pressed={option === view}
-                  onClick={() => controller.open({ ...current, view: option })}
-                >
-                  {label}
-                </Button>
-              ))
-            : null}
+        <nav
+          aria-label={t`Profile navigation`}
+          className="sticky top-0 z-10 flex flex-col gap-1 border-b border-sidebar-border bg-background px-3 pt-3 pb-2"
+        >
+          <NavigationRow>
+            {views.length > 1
+              ? views.map(({ view: option, label }) => (
+                  <Button
+                    key={option}
+                    size="sm"
+                    variant={option === view ? "secondary" : "ghost"}
+                    aria-pressed={option === view}
+                    onClick={() => controller.open({ ...current, view: option })}
+                  >
+                    {label}
+                  </Button>
+                ))
+              : null}
+          </NavigationRow>
           {view === "contact" && anchors.length > 1 ? (
-            <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto">
-              {views.length > 1 ? <span className="mx-1 w-px bg-border" aria-hidden /> : null}
+            <NavigationRow>
               {anchors.map((anchor) => (
                 <Button
                   key={anchor.id}
@@ -362,7 +501,7 @@ export function RecruitingDetailPanel({
                   {anchor.label}
                 </Button>
               ))}
-            </div>
+            </NavigationRow>
           ) : null}
         </nav>
         <div className="px-4 py-3">
@@ -370,6 +509,7 @@ export function RecruitingDetailPanel({
             <ActivityTab
               key={person.candidateId}
               {...current.role}
+              refreshSignal={profileView.status === "recorded" ? 1 : 0}
               person={person}
               crm={crm}
               candidateKey={current.candidate?.candidateKey}
@@ -409,45 +549,42 @@ export function RecruitingDetailPanel({
                     scope={sections.scope}
                     rows={sections.requirements}
                     sourceUrls={sections.requirementSources}
+                    keywords={sections.skills}
                   />
                 </Section>
               ) : null}
               {sections.experience.length ? (
                 <Section id={anchorId("experience")} title={<Trans>Experience</Trans>}>
-                  <ExperienceTimeline fields={sections.experience} Sources={Sources} />
+                  <ExperienceTimeline
+                    fields={sections.experience}
+                    Sources={Sources}
+                    asset={assets.company}
+                    link={assets.companyLink}
+                  />
                 </Section>
               ) : null}
               {sections.education.length ? (
                 <Section id={anchorId("education")} title={<Trans>Education</Trans>}>
-                  <EducationTimeline fields={sections.education} Sources={Sources} />
+                  <EducationTimeline
+                    fields={sections.education}
+                    Sources={Sources}
+                    asset={assets.school}
+                    link={assets.schoolLink}
+                  />
                 </Section>
               ) : null}
               {sections.skills.length ? (
                 <Section id={anchorId("skills")} title={<Trans>Skills</Trans>}>
-                  <ul className="flex flex-wrap gap-1.5">
-                    {(allSkills ? sections.skills : sections.skills.slice(0, SKILLS_SHOWN)).map(
-                      (skill) => (
-                        <li key={skill}>
-                          <Badge variant="secondary">{skill}</Badge>
-                        </li>
-                      ),
-                    )}
-                  </ul>
-                  {!allSkills && sections.skills.length > SKILLS_SHOWN ? (
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      className="mt-2"
-                      onClick={() => setAllSkills(true)}
-                    >
-                      <Trans>Show more</Trans>
-                    </Button>
-                  ) : null}
+                  <SkillEvidence
+                    key={`${current.role.roleId}:${person.candidateId}`}
+                    skills={sections.skills}
+                    evidence={sections.skillEvidence}
+                  />
                 </Section>
               ) : null}
               {anchors.some((anchor) => anchor.id === "findings") ? (
                 <Section id={anchorId("findings")} title={<Trans>Research findings</Trans>}>
-                  <FieldList fields={sections.findings} />
+                  <FieldList fields={sections.findings} keywords={sections.skills} />
                 </Section>
               ) : null}
               {stage.length ? (
@@ -494,15 +631,44 @@ export function RecruitingDetailPanel({
 
 function FieldList({
   fields,
+  keywords,
 }: {
-  fields: readonly { label: string; value: string | null; sourceUrls: readonly string[] }[];
+  fields: readonly {
+    label: string;
+    value: string | null;
+    evidence?: string;
+    reasoning?: string;
+    structuredValue?: unknown;
+    sourceUrls: readonly string[];
+  }[];
+  keywords: readonly string[];
 }) {
   return (
     <dl className="space-y-3">
       {fields.map((field) => (
         <div key={field.label} className="space-y-1">
           <dt className="text-xs text-muted-foreground">{field.label}</dt>
-          <dd className="whitespace-pre-wrap">{field.value ?? "—"}</dd>
+          <dd className="space-y-1 break-words whitespace-pre-wrap">
+            {[
+              ...new Set(
+                [field.value, field.evidence, field.reasoning].filter((text): text is string =>
+                  Boolean(text?.trim()),
+                ),
+              ),
+            ].map((text) => (
+              <p key={text}>
+                <HighlightText text={text} terms={keywords} />
+              </p>
+            ))}
+            {field.structuredValue !== undefined ? (
+              <details className="text-xs text-muted-foreground">
+                <summary className="cursor-pointer">
+                  <Trans>Source text</Trans>
+                </summary>
+                <p className="mt-2">{recruitingCandidateSourceText(field.structuredValue)}</p>
+              </details>
+            ) : null}
+          </dd>
           <Sources urls={field.sourceUrls} />
         </div>
       ))}
