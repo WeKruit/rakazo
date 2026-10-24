@@ -55,12 +55,15 @@ function render(quick: Parameters<typeof AssessmentCard>[0]["quick"]) {
 it("leads with the short output and keeps reasoning and summary one click away", () => {
   const view = render({
     headline: "斯坦福博士，移动操作一作",
-    highlights: ["湾区"],
+    highlights: ["湾区", "NVIDIA GEAR 实习"],
     keyWorks: [{ title: "BRS", detail: "CoRL 2025", url: "https://example.test/brs" }],
     concerns: ["未提仿真栈"],
+    entities: [{ name: "NVIDIA", kind: "company", host: "nvidia.example", description: null }],
   });
   expect(view.textContent).toContain("斯坦福博士，移动操作一作");
   expect(view.textContent).toContain("湾区");
+  expect(view.querySelector('img[src="https://nvidia.example/favicon.ico"]')).not.toBeNull();
+  expect(view.textContent).toContain("NVIDIA GEAR 实习");
   expect(view.querySelector('a[href="https://example.test/brs"]')?.textContent).toBe(
     "BRSCoRL 2025",
   );
@@ -83,7 +86,13 @@ it("leads with the short output and keeps reasoning and summary one click away",
 });
 
 it("shows older candidates' criteria by name with a one-line preview", () => {
-  const view = render({ headline: null, highlights: [], keyWorks: [], concerns: [] });
+  const view = render({
+    headline: null,
+    highlights: [],
+    keyWorks: [],
+    concerns: [],
+    entities: [],
+  });
   expect(view.textContent).toContain("Bay area based");
   expect(view.querySelector(".truncate")?.textContent).toBe(REASONING);
   expect(view.querySelector(".line-clamp-3")?.textContent).toBe(SUMMARY);

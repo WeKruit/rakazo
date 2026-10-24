@@ -35,6 +35,7 @@ const HIGHLIGHTS = /^highlights$/i;
 const KEY_WORKS = /^key works$/i;
 const CONCERNS = /^concerns$/i;
 const CRITERIA_BRIEF = /^criteria brief$/i;
+const ENTITIES = /^entities$/i;
 
 /** One entry per line of a returned list column, trimmed, empty lines dropped. */
 function lines(fields: readonly Field[]) {
@@ -108,6 +109,7 @@ export function candidateSections(fields: readonly Field[] | undefined) {
   const keyWorks = contact(KEY_WORKS);
   const concerns = contact(CONCERNS);
   const criteriaBrief = contact(CRITERIA_BRIEF);
+  const entities = contact(ENTITIES);
   const briefs = new Map(
     lines(criteriaBrief).flatMap((line) => {
       const [key, name, verdict] = line.split("|").map((part) => part.trim());
@@ -122,6 +124,7 @@ export function candidateSections(fields: readonly Field[] | undefined) {
     ...keyWorks,
     ...concerns,
     ...criteriaBrief,
+    ...entities,
     ...photo,
     ...companyUrl,
     ...companyIndustry,
@@ -161,6 +164,20 @@ export function candidateSections(fields: readonly Field[] | undefined) {
         })
         .filter((work) => work.title),
       concerns: lines(concerns),
+      entities: lines(entities).flatMap((line) => {
+        const [name, kind, site, description] = line.split("|").map((part) => part.trim());
+        if (!name) return [];
+        const url = httpsUrl(/^www\./i.test(site ?? "") ? `https://${site}` : site);
+        return [
+          {
+            name,
+            kind: kind || null,
+            host:
+              url && !/(^|\.)linkedin\.com$/.test(url.hostname) ? url.hostname.toLowerCase() : null,
+            description: description || null,
+          },
+        ];
+      }),
     },
     requirementSources: [
       ...new Set(
