@@ -4003,6 +4003,29 @@ async function approvalAnswerProof(
   return { run, proof };
 }
 
+/** This role revision's latest approved documents package, for a calibration request that omits it. */
+export async function latestRecruitingDocumentsApprovalId(
+  prisma: Pick<PrismaClient, "externalEffect">,
+  actor: Actor,
+  input: { roleId: string; expectedRoleRevision: number },
+): Promise<string | null> {
+  const effect = await prisma.externalEffect.findFirst({
+    where: {
+      spaceId: actor.spaceId,
+      kind: "recruiting_request_approval",
+      status: "completed",
+      AND: [
+        { request: { path: ["stage"], equals: "documents" } },
+        { request: { path: ["roleId"], equals: input.roleId } },
+        { request: { path: ["expectedRoleRevision"], equals: input.expectedRoleRevision } },
+      ],
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { id: true },
+  });
+  return effect?.id ?? null;
+}
+
 async function completedRecruitingApproval(
   tx: Tx,
   actor: Actor,
