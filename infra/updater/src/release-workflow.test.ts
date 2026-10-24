@@ -44,6 +44,10 @@ const ci = parse(read("ci.yml")) as Workflow;
 const images = parse(read("publish-server-image.yml")) as Workflow;
 const compact = (value: string) => value.replace(/\s+/g, " ").trim();
 const expression = (value: string) => ["$", "{{ ", value, " }}"].join("");
+const defined = <T>(value: T | undefined): T => {
+  expect(value).toBeDefined();
+  return value as T;
+};
 
 // These gates are intentionally conjunctions: an added OR can bypass a hold.
 function requiresAll(condition: string | undefined, requirements: string[]) {
@@ -73,7 +77,7 @@ describe("release workflow safety boundaries", () => {
   it("does not promote PR artifacts or unsuccessful/foreign main runs", () => {
     expect(Object.keys(validation.on).sort()).toEqual(["pull_request", "workflow_run"]);
     expect(validation.on.workflow_run).toEqual({ workflows: ["ci"], types: ["completed"] });
-    const job = validation.jobs.staging;
+    const job = defined(validation.jobs.staging);
     expect(compact(job.if ?? "")).toBe(
       "github.repository == 'WeKruit/rakazo' && " +
         "(github.event_name == 'pull_request' || " +
@@ -93,12 +97,12 @@ describe("release workflow safety boundaries", () => {
     }
     const tokenSteps = job.steps?.filter((step) => step.env?.GH_TOKEN);
     expect(tokenSteps).toHaveLength(1);
-    expect(tokenSteps?.[0].if).toBe("github.event_name == 'workflow_run'");
-    expect(tokenSteps?.[0].env?.GH_TOKEN).toBe(expression("github.token"));
+    expect(tokenSteps?.[0]?.if).toBe("github.event_name == 'workflow_run'");
+    expect(tokenSteps?.[0]?.env?.GH_TOKEN).toBe(expression("github.token"));
   });
 
   it("checks out the event's full SHA without persisting a checkout credential", () => {
-    const job = validation.jobs.staging;
+    const job = defined(validation.jobs.staging);
     expect(job.env?.SOURCE_SHA).toBe(
       expression("github.event.workflow_run.head_sha || github.event.pull_request.head.sha"),
     );
@@ -115,7 +119,7 @@ describe("release workflow safety boundaries", () => {
     expect(Object.keys(staging.on)).toEqual(["workflow_dispatch"]);
     expect(staging.permissions).toEqual({ contents: "read", actions: "read" });
     expect(staging.concurrency).toEqual({ group: "hosted-staging", "cancel-in-progress": false });
-    const job = staging.jobs.staging;
+    const job = defined(staging.jobs.staging);
     requiresAll(job.if, [
       "github.repository == 'WeKruit/rakazo'",
       "github.ref == 'refs/heads/main'",
@@ -132,9 +136,9 @@ describe("release workflow safety boundaries", () => {
     const deploy = job.steps?.findIndex((step) => step.run?.includes("release.py stage ")) ?? -1;
     expect(activation).toBeGreaterThanOrEqual(0);
     expect(deploy).toBeGreaterThan(activation);
-    expect(job.steps?.[activation].run).toContain('test "$STAGING_DEPLOYMENT_HOLD" = clear');
-    expect(job.steps?.[activation].run).toContain('test -n "$STAGING_RELEASE_APPROVAL"');
-    expect(job.steps?.[deploy].env).toMatchObject({
+    expect(job.steps?.[activation]?.run).toContain('test "$STAGING_DEPLOYMENT_HOLD" = clear');
+    expect(job.steps?.[activation]?.run).toContain('test -n "$STAGING_RELEASE_APPROVAL"');
+    expect(job.steps?.[deploy]?.env).toMatchObject({
       MODAL_TOKEN_ID: expression("secrets.STAGING_MODAL_TOKEN_ID"),
       MODAL_TOKEN_SECRET: expression("secrets.STAGING_MODAL_TOKEN_SECRET"),
       STAGING_MODAL_APP_NAME: expression("vars.STAGING_MODAL_APP_NAME"),
@@ -149,10 +153,10 @@ describe("release workflow safety boundaries", () => {
   });
 
   it("publishes only the hosted staging receipt after successful verification", () => {
-    const steps = staging.jobs.staging.steps ?? [];
+    const steps = defined(staging.jobs.staging).steps ?? [];
     const uploads = steps.filter((step) => step.uses?.startsWith("actions/upload-artifact@"));
     expect(uploads).toHaveLength(1);
-    const upload = uploads[0];
+    const upload = defined(uploads[0]);
     expect(upload.with).toMatchObject({
       name: `hosted-staging-${expression("github.run_id")}-${expression("github.run_attempt")}`,
       path: `${expression("runner.temp")}/candidate/staging.json`,
@@ -169,7 +173,7 @@ describe("release workflow safety boundaries", () => {
     expect(Object.keys(promotion.on)).toEqual(["workflow_dispatch"]);
     expect(promotion.permissions).toEqual({ contents: "read", actions: "read" });
     expect(promotion.concurrency).toEqual({ group: "production", "cancel-in-progress": false });
-    const job = promotion.jobs.promote;
+    const job = defined(promotion.jobs.promote);
     requiresAll(job.if, [
       "github.repository == 'WeKruit/rakazo'",
       "github.ref == 'refs/heads/main'",
@@ -188,18 +192,18 @@ describe("release workflow safety boundaries", () => {
       job.steps?.findIndex((step) => step.run?.includes("release.py promote ")) ?? -1;
     expect(activation).toBeGreaterThanOrEqual(0);
     expect(prerequisites).toBeGreaterThan(activation);
-    expect(job.steps?.[activation].run).toContain('test "$PRODUCTION_DEPLOYMENT_HOLD" = clear');
-    expect(job.steps?.[activation].run).toContain('test -n "$PRODUCTION_RELEASE_APPROVAL"');
-    expect(job.steps?.[prerequisites].name).toBe("Verify promotion prerequisites (cutover held)");
+    expect(job.steps?.[activation]?.run).toContain('test "$PRODUCTION_DEPLOYMENT_HOLD" = clear');
+    expect(job.steps?.[activation]?.run).toContain('test -n "$PRODUCTION_RELEASE_APPROVAL"');
+    expect(job.steps?.[prerequisites]?.name).toBe("Verify promotion prerequisites (cutover held)");
     expect(promotionText).not.toMatch(/MODAL_TOKEN_|pip install|modal deploy/);
   });
 
   it("passes release inputs as quoted environment arguments, never shell source", () => {
-    expect(promotion.jobs.promote.env).toMatchObject({
+    expect(defined(promotion.jobs.promote).env).toMatchObject({
       EXPECTED_SHA: expression("inputs.expected_sha"),
       STAGING_RUN_ID: expression("inputs.staging_run_id"),
     });
-    expect(staging.jobs.staging.env).toMatchObject({
+    expect(defined(staging.jobs.staging).env).toMatchObject({
       EXPECTED_SHA: expression("inputs.expected_sha"),
       VALIDATION_RUN_ID: expression("inputs.validation_run_id"),
     });
@@ -252,7 +256,7 @@ describe("release workflow safety boundaries", () => {
   );
 
   it("keeps legacy Compose disabled regardless of old opt-ins or release variables", () => {
-    const job = ci.jobs["deploy-production"];
+    const job = defined(ci.jobs["deploy-production"]);
     expect(job.if).toBe(expression("false"));
     expect(job.environment).toBeUndefined();
     expect(job.env).toBeUndefined();
@@ -268,14 +272,14 @@ describe("release workflow safety boundaries", () => {
   });
 
   it("requires separate opt-ins for OTA and mutable image publication", () => {
-    requiresAll(ci.jobs["publish-mobile-update"].if, [
+    requiresAll(defined(ci.jobs["publish-mobile-update"]).if, [
       "github.event_name == 'push'",
       "github.ref == 'refs/heads/main'",
       "vars.MOBILE_OTA_PUBLISH_ENABLED == 'true'",
       "vars.MODAL_PROMOTION_ENABLED != 'true'",
     ]);
     for (const name of ["build", "publish"]) {
-      requiresAll(images.jobs[name].if, [
+      requiresAll(defined(images.jobs[name]).if, [
         "github.event_name != 'pull_request'",
         "vars.SERVER_IMAGE_PUBLISH_ENABLED == 'true'",
       ]);
@@ -290,7 +294,7 @@ describe("release workflow safety boundaries", () => {
         ),
       ),
     ).toBe(true);
-    expect(ci.jobs["deploy-production"].needs).toContain("release-safeguards");
-    expect(ci.jobs["publish-mobile-update"].needs).toContain("release-safeguards");
+    expect(defined(ci.jobs["deploy-production"]).needs).toContain("release-safeguards");
+    expect(defined(ci.jobs["publish-mobile-update"]).needs).toContain("release-safeguards");
   });
 });
