@@ -184,9 +184,7 @@ it("leads with the supplied criterion name, preserves all assessment states, and
   expect(rows[0]?.textContent).toBe("GoGo services\n\nConcern: scale unverified.");
   expect(rows[1]?.textContent).toContain("RustNo evidence provided.");
   expect(rows[2]?.textContent).toContain("KotlinNo Kotlin experience.");
-  expect(rows[3]?.textContent).toContain(
-    "Criterion name unavailableR1C++ experience in a lab.",
-  );
+  expect(rows[3]?.textContent).toContain("Criterion name unavailableR1C++ experience in a lab.");
   expect([...view.querySelectorAll("mark")].map((item) => item.textContent)).toEqual([
     "Go",
     "Kotlin",

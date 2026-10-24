@@ -1642,7 +1642,13 @@ async function archiveRoleInTransaction(
 export async function setRecruitingRoleArchived(
   prisma: PrismaClient,
   actor: Actor,
-  untrusted: Omit<RoleArchiveInput, "intent"> & { intent?: RoleArchiveInput["intent"] },
+  untrusted: (RoleArchiveInput extends infer T
+    ? T extends unknown
+      ? Omit<T, "intent">
+      : never
+    : never) & {
+    intent?: RoleArchiveInput["intent"];
+  },
 ): Promise<RoleSnapshot> {
   const input = RecruitingRoleToolInputSchema.parse({
     intent: { basis: "direct", quote: "archive" },

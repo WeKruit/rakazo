@@ -201,7 +201,9 @@ export function AssessmentCard({
                   />
                   {name ? <span className="shrink-0 font-medium">{name}</span> : null}
                   {row.criterionId ? (
-                    <span className="shrink-0 text-xs text-muted-foreground">{row.criterionId}</span>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {row.criterionId}
+                    </span>
                   ) : null}
                   <span
                     className={`min-w-0 flex-1 text-muted-foreground ${expanded ? "" : "truncate"}`}

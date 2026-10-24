@@ -29,6 +29,8 @@ type Row = {
   endpoint?: string;
   secretId?: string | null;
   revision?: number;
+  enabled?: boolean;
+  transport?: string;
   organizationId?: string;
 };
 type Args = { where?: Record<string, unknown>; data?: Row; create?: Row; update?: Row };
@@ -378,9 +380,10 @@ describe("MCP OAuth prepared persistence", () => {
       const connect = vi
         .spyOn(McpSession.prototype, "connectRemote")
         .mockImplementation(async function (this: McpSession, options) {
-          held.set(this, options.authProvider!);
+          const authProvider = options.authProvider as OAuthClientProvider;
+          held.set(this, authProvider);
           if (refreshOnConnect)
-            await options.authProvider!.saveTokens({
+            await authProvider.saveTokens({
               access_token: "connect-refreshed",
               token_type: "bearer",
             });

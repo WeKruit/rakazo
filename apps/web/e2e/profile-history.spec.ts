@@ -104,7 +104,9 @@ for (const width of [1440, 390]) {
       "src",
       "https://assets.example.test/school-logo.svg",
     );
-    await expect(education.getByRole("heading", { name: "Education", exact: true })).toBeInViewport();
+    await expect(
+      education.getByRole("heading", { name: "Education", exact: true }),
+    ).toBeInViewport();
     await expect.poll(async () => (await education.boundingBox())?.y ?? Infinity).toBeLessThan(250);
     await page.screenshot({ path: testInfo.outputPath(`profile-education-${width}.png`) });
     expect(fixture.unknown).toEqual([]);

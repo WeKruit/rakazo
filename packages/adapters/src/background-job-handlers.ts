@@ -16,11 +16,11 @@ import { pollCloudAgent } from "./cloud-agent-poll.js";
 import { expireComputerControl } from "./computer-control.js";
 import { scheduleComputerSleep, sleepComputerIfIdle } from "./computer-idle.js";
 import { performComputerUpdate } from "./computer-update.js";
-import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import type { createRunExecutor } from "./executor.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import {
   pauseRoutineAfterRepeatedFailures,
   skipRoutineWithoutNewActivity,

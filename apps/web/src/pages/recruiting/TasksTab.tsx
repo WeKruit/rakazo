@@ -115,8 +115,9 @@ export function TasksTab({
   const [reload, setReload] = useState(0);
   const [editing, setEditing] = useState<string>();
   const [saveFailed, setSaveFailed] = useState(false);
-  const read = useKeyedRead(JSON.stringify([roleId, candidateKey, candidateKeys, refreshSignal, reload]), () =>
-    api.list({ roleId, candidateKeys: [...candidateKeys], status: "open" }),
+  const read = useKeyedRead(
+    JSON.stringify([roleId, candidateKey, candidateKeys, refreshSignal, reload]),
+    () => api.list({ roleId, candidateKeys: [...candidateKeys], status: "open" }),
   );
   const run = async (change: () => Promise<unknown>) => {
     setSaveFailed(false);

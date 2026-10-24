@@ -1,3 +1,4 @@
+import type { AdapterContext } from "@rakazo/adapter-kit";
 import { toolRequiresApproval, toolRequiresExplicitApproval } from "@rakazo/core";
 import * as schedulingDb from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
@@ -1686,6 +1687,7 @@ describe("MCP connector session cache", () => {
       loaded,
       persisted,
     ) => {
+      if (!loaded) throw new Error("expected loaded OAuth material");
       activeMaterial = loaded.material;
       return new StoredMcpOAuthProvider(SERVER.id, loaded.material, async () => undefined, {
         refreshNetwork: async () => ({ fetch: globalThis.fetch, close: async () => undefined }),
@@ -3183,7 +3185,7 @@ describe("first-party product OIDC MCP connection", () => {
     const state = { failNext: false, initializations: 0, calls: [] as string[] };
     vi.stubGlobal("fetch", mcpFetch(state, endpoint));
     let revoked = false;
-    const accessToken = vi.fn(async (actor: typeof context) => {
+    const accessToken = vi.fn(async (actor: AdapterContext) => {
       expect(actor.signal.aborted).toBe(false);
       if (revoked) throw new IsolationError("CRM identity disconnected");
       return "current-access";
@@ -3252,7 +3254,7 @@ describe("first-party product OIDC MCP connection", () => {
       }),
     );
     let token = "first-access";
-    const accessToken = vi.fn(async (actor: typeof context, rejected?: string) => {
+    const accessToken = vi.fn(async (actor: AdapterContext, rejected?: string) => {
       expect(actor.userId).toBe(context.userId);
       expect(actor.spaceId).toBe(context.spaceId);
       if (rejected) {

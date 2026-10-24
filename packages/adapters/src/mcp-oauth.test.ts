@@ -248,7 +248,7 @@ describe("MCP OAuth", () => {
       const checkout = new AsyncLocalStorage<boolean>();
       const timeline: string[] = [];
       const tx = {
-        $executeRaw: vi.fn(async () => 1),
+        $executeRaw: vi.fn(async (_sql: TemplateStringsArray) => 1),
         $queryRaw: vi.fn(async () => [{ id: server.id }]),
         mcpServer: {
           findFirst: vi.fn(async ({ where }) =>
