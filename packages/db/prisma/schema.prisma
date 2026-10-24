@@ -22,6 +22,8 @@ model AiDataConsent {
 }
 
 model User {
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
   aiDataConsents AiDataConsent[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
@@ -202,6 +204,8 @@ model Member {
 }
 
 model Space {
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
   aiDataConsents AiDataConsent[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
@@ -1185,6 +1189,8 @@ model Secret {
 }
 
 model McpServer {
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
   recruitingTasks RecruitingResearchTask[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
@@ -1965,4 +1971,62 @@ model RecruitingCrmWorkspaceAttachment {
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmRoleId], map: "recruiting_crm_workspace_exact_key")
   @@map("recruiting_crm_workspace_attachments")
+}
+
+/// Owner-scoped copy of one stored outreach campaign, including campaigns with no CRM role.
+/// Read-only copy: never starts, pauses or edits the campaign.
+model RecruitingCrmCampaign {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  crmCampaignId String
+  name String
+  /// Provider campaign status code as stored by the CRM mirror.
+  status Int?
+  crmRoleId String?
+  clientId String?
+  campaignCreatedAt DateTime?
+  campaignUpdatedAt DateTime?
+  mirrorSyncedAt DateTime
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmCampaignId])
+  @@map("recruiting_crm_campaigns")
+}
+
+/// One stored lead of a campaign: who (CRM candidate) and how the outreach went.
+model RecruitingCrmLead {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  crmLeadId String
+  crmCampaignId String
+  crmCandidateId String?
+  status Int?
+  interestStatus Int?
+  openCount Int?
+  replyCount Int?
+  lastContactAt DateTime?
+  lastReplyAt DateTime?
+  mirrorSyncedAt DateTime
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmLeadId])
+  @@index([userId, spaceId, crmCandidateId])
+  @@index([userId, spaceId, crmCampaignId])
+  @@map("recruiting_crm_leads")
 }

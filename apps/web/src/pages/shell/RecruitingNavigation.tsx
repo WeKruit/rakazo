@@ -23,6 +23,7 @@ import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { CrmBrowseSelection } from "../RecruitingPanel";
+import { useSequenceLabels } from "../recruiting/SequenceStats";
 
 export type RecruitingWorkspaceView =
   | "home"
@@ -138,6 +139,12 @@ export function RecruitingNavigation({
     failed?: boolean;
     unavailable?: boolean;
   }>();
+  type UnassignedSequence = Extract<
+    RecruitingCrmDataOutput,
+    { operation: "unassignedSequences" }
+  >["items"][number] & { key: string };
+  const [sequences, setSequences] = useState<{ key: string; items: UnassignedSequence[] }>();
+  const [sequencesOpen, setSequencesOpen] = useState(false);
   useEffect(() => {
     if (!crmContext) return;
     let cancelled = false;
@@ -169,6 +176,7 @@ export function RecruitingNavigation({
       .then(async (result) => {
         if (cancelled || invalidated()) return;
         if (result.operation !== "memberships") throw new Error("Unexpected CRM response");
+        const sequenceReads: Promise<UnassignedSequence[]>[] = [];
         const lists = await Promise.all(
           result.sources.flatMap((source) =>
             source.status === "ready"
@@ -189,6 +197,22 @@ export function RecruitingNavigation({
                     roles.source.organizationId !== membership.organizationId
                   )
                     throw new Error("CRM scope changed");
+                  // Saved sequences with no role are optional context; a failed read hides them.
+                  sequenceReads.push(
+                    rpc.recruiting
+                      .crmData({ ...target, ...selection, operation: "unassignedSequences" })
+                      .then((value) =>
+                        value.operation === "unassignedSequences" &&
+                        value.source.serverId === source.serverId &&
+                        value.source.organizationId === membership.organizationId
+                          ? value.items.map((item) => ({
+                              ...item,
+                              key: JSON.stringify([selection, item.id]),
+                            }))
+                          : [],
+                      )
+                      .catch(() => []),
+                  );
                   return roles.items.map((role) => ({
                     ...role,
                     selection: { ...selection, crmRoleId: role.crmRoleId },
@@ -201,6 +225,9 @@ export function RecruitingNavigation({
         if (cancelled || invalidated()) return;
         const roles = lists.flat();
         rememberRecruitingRead(cache, cacheKey, roles, epoch);
+        void Promise.all(sequenceReads).then((found) => {
+          if (!cancelled && !invalidated()) setSequences({ key: crmKey, items: found.flat() });
+        });
         setCrm({
           key: crmKey,
           roles,
@@ -216,6 +243,8 @@ export function RecruitingNavigation({
     };
   }, [crmKey]);
   const currentCrm = crm?.key === crmKey ? crm : undefined;
+  const currentSequences = sequences?.key === crmKey ? sequences.items : [];
+  const sequenceLabels = useSequenceLabels();
   // Routing uses only this conversation's own (or cached) roles, never a stale placeholder.
   const routableCrmRoles = currentCrm?.stale ? [] : (currentCrm?.roles ?? []);
   // Roles waiting on the recruiter come first; the rest keep their order.
@@ -451,6 +480,42 @@ export function RecruitingNavigation({
               </div>
             ))}
         </nav>
+        {currentSequences.length > 0 ? (
+          <div className="mt-3 border-t border-border pt-2">
+            <Button
+              variant="ghost"
+              className="w-full justify-between text-muted-foreground"
+              aria-expanded={sequencesOpen}
+              onClick={() => setSequencesOpen((open) => !open)}
+            >
+              <Trans>Sequences without a role</Trans>
+              <span>{currentSequences.length}</span>
+            </Button>
+            {sequencesOpen ? (
+              <ul aria-label={t`Sequences without a role`} className="space-y-1">
+                {currentSequences.map((sequence) => {
+                  const { people, replied } = sequence;
+                  return (
+                    <li key={sequence.key} className="rounded-lg px-3 py-2">
+                      <span className="block truncate text-sm" dir="auto">
+                        {sequence.name}
+                      </span>
+                      <span className="block truncate text-xs text-muted-foreground">
+                        {[
+                          sequence.status ? sequenceLabels.sequence[sequence.status] : null,
+                          t`${people} people`,
+                          sequenceLabels.replies(replied),
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
         {archivedGroups.length > 0 ? (
           <div className="mt-3 border-t border-border pt-2">
             <Button

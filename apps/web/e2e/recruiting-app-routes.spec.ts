@@ -215,6 +215,9 @@ for (const width of [1440, 390]) {
       const conversation = page.getByTestId("email-conversation");
       await expect(avery).toBeVisible();
       await expect(rail.getByRole("button", { name: "Avery Example", exact: true })).toHaveCount(1);
+      await expect(
+        rail.getByText("In progress · Opened 3 · Replied 1", { exact: true }),
+      ).toBeVisible();
       await capture(page, testInfo, `app-inbox-entry-${width}`);
       if (width === 390) {
         await expect(conversation).toBeHidden();

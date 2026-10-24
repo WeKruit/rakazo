@@ -216,6 +216,10 @@ msgstr "{name} पूरा हुआ"
 msgid "{name} stopped"
 msgstr "{name} रोक दिया गया"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "{people} people"
+msgstr ""
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} शेष · बॉट देख रहा है, कार्रवाई नहीं कर रहा"
@@ -1069,6 +1073,7 @@ msgstr ""
 msgid "Bots with their own computer and browser"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Bounced"
 msgstr ""
@@ -3100,6 +3105,7 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
@@ -3536,6 +3542,10 @@ msgstr "सब्सक्रिप्शन साइन-इन पूरा �
 msgid "finished"
 msgstr "पूर्ण"
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Finished"
+msgstr ""
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Finished."
@@ -3827,6 +3837,7 @@ msgid "Imported list"
 msgstr ""
 
 #: src/lib/ticket-status.ts
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
 msgstr ""
 
@@ -4068,6 +4079,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Last checked"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Last contacted"
 msgstr ""
 
 #: src/pages/recruiting/InboxTab.tsx
@@ -5415,7 +5430,12 @@ msgid "OpenAI-compatible server URL"
 msgstr "OpenAI-संगत सर्वर URL"
 
 #: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "Opened"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Opened {opens}"
 msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
@@ -5642,6 +5662,7 @@ msgstr "अपनी API कुंजी पेस्ट करें, फिर
 msgid "Pause consideration"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
@@ -6264,7 +6285,12 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "Replied"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Replied {replied}"
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -7160,12 +7186,20 @@ msgstr ""
 msgid "Sequence"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Sequence status"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sequence steps"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Sequence steps and delivery status are not included in these stored campaign associations."
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequences without a role"
 msgstr ""
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
@@ -7399,6 +7433,10 @@ msgstr ""
 msgid "Skip or deploy key"
 msgstr "छोड़ें या डिप्लॉय कुंजी दें"
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Skipped"
+msgstr ""
+
 #. placeholder {0}: skipped.join(", ")
 #: src/pages/Shell.tsx
 msgid "Skipped {0}"
@@ -7627,6 +7665,7 @@ msgstr "बोलना रोकें"
 msgid "Stop teaching"
 msgstr "सिखाना रोकें"
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Stopped"
 msgstr ""
@@ -8136,6 +8175,7 @@ msgstr "पिन हटाएं"
 msgid "Unread"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Unsubscribed"
 msgstr ""
