@@ -443,3 +443,111 @@ export function syncRecruitingCrmLeads(
     archivable: false,
   });
 }
+
+const sequenceStatus = (code: number | null) =>
+  code === null
+    ? null
+    : code === 0
+      ? ("draft" as const)
+      : code === 1 || code === 4
+        ? ("active" as const)
+        : code === 2
+          ? ("paused" as const)
+          : code === 3
+            ? ("completed" as const)
+            : ("stopped" as const);
+const leadStatus = (code: number | null) =>
+  code === 1
+    ? ("active" as const)
+    : code === 2
+      ? ("paused" as const)
+      : code === 3
+        ? ("completed" as const)
+        : code === -1
+          ? ("bounced" as const)
+          : code === -2
+            ? ("unsubscribed" as const)
+            : code === -3
+              ? ("skipped" as const)
+              : null;
+const latest = (values: (Date | null)[]) =>
+  values.reduce<Date | null>(
+    (best, value) => (value && (!best || value > best) ? value : best),
+    null,
+  );
+const total = (values: (number | null)[]) =>
+  values.some((value) => value !== null)
+    ? values.reduce<number>((sum, value) => sum + Math.max(0, value ?? 0), 0)
+    : null;
+
+/** Saved per-person sequence numbers across every synced sequence, for the listed people. */
+export async function listSyncedRecruitingSequenceStats(
+  prisma: PrismaClient,
+  actor: Actor,
+  scope: CrmSyncScope,
+  candidateIds: string[],
+) {
+  const leads = await prisma.recruitingCrmLead.findMany({
+    where: { ...owned(actor, scope), archivedAt: null, crmCandidateId: { in: candidateIds } },
+    orderBy: { crmLeadId: "asc" },
+  });
+  const byCandidate = new Map<string, typeof leads>();
+  for (const lead of leads) {
+    const rows = byCandidate.get(lead.crmCandidateId!) ?? [];
+    rows.push(lead);
+    byCandidate.set(lead.crmCandidateId!, rows);
+  }
+  return [...byCandidate].map(([candidateId, rows]) => {
+    // The person's current state is the one in the sequence that contacted them last.
+    const current = [...rows].sort(
+      (a, b) => (b.lastContactAt?.getTime() ?? 0) - (a.lastContactAt?.getTime() ?? 0),
+    )[0]!;
+    return {
+      candidateId,
+      sequences: new Set(rows.map((row) => row.crmCampaignId)).size,
+      opens: total(rows.map((row) => row.openCount)),
+      replies: total(rows.map((row) => row.replyCount)),
+      lastContactAt: latest(rows.map((row) => row.lastContactAt))?.toISOString() ?? null,
+      lastReplyAt: latest(rows.map((row) => row.lastReplyAt))?.toISOString() ?? null,
+      status: leadStatus(current.status),
+      syncedAt: latest(rows.map((row) => row.syncedAt))!.toISOString(),
+    };
+  });
+}
+
+/** Saved sequences with no role, with how many people each reached, opened and replied. */
+export async function listSyncedRecruitingUnassignedSequences(
+  prisma: PrismaClient,
+  actor: Actor,
+  scope: CrmSyncScope,
+) {
+  const owner = owned(actor, scope);
+  const campaigns = await prisma.recruitingCrmCampaign.findMany({
+    where: { ...owner, archivedAt: null, crmRoleId: null },
+    orderBy: [{ campaignUpdatedAt: { sort: "desc", nulls: "last" } }, { crmCampaignId: "asc" }],
+    take: 200,
+  });
+  const leads = campaigns.length
+    ? await prisma.recruitingCrmLead.findMany({
+        where: {
+          ...owner,
+          archivedAt: null,
+          crmCampaignId: { in: campaigns.map((row) => row.crmCampaignId) },
+        },
+        select: { crmCampaignId: true, openCount: true, replyCount: true, lastContactAt: true },
+      })
+    : [];
+  return campaigns.map((campaign) => {
+    const rows = leads.filter((lead) => lead.crmCampaignId === campaign.crmCampaignId);
+    return {
+      id: campaign.crmCampaignId,
+      name: campaign.name,
+      status: sequenceStatus(campaign.status),
+      people: rows.length,
+      opened: rows.filter((row) => (row.openCount ?? 0) > 0).length,
+      replied: rows.filter((row) => (row.replyCount ?? 0) > 0).length,
+      lastContactAt: latest(rows.map((row) => row.lastContactAt))?.toISOString() ?? null,
+      syncedAt: campaign.syncedAt.toISOString(),
+    };
+  });
+}

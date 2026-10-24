@@ -1,7 +1,12 @@
 import { ORPCError } from "@orpc/server";
 import type { Actor, RecruitingCrmDataInput, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
-import { createDb, listSyncedRecruitingCrmRoleContacts } from "@rakazo/db";
+import {
+  createDb,
+  listSyncedRecruitingCrmRoleContacts,
+  listSyncedRecruitingSequenceStats,
+  listSyncedRecruitingUnassignedSequences,
+} from "@rakazo/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { recordCrmRoleRead, syncRecruitingCrm } from "./recruiting-crm-sync.js";
 import type { ThreadTarget } from "./thread-target.js";
@@ -442,6 +447,35 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       { crmLeadId: "lead-3", crmCampaignId: "camp-a", crmCandidateId: null, replyCount: 0 },
       { crmLeadId: "lead-4", crmCampaignId: "camp-unmapped", crmCandidateId: null, replyCount: 0 },
     ]);
+
+    const scope = { mcpServerId: serverId, organizationId: ORG };
+    expect(
+      await listSyncedRecruitingSequenceStats(prisma, actor, scope, [person(1), person(3)]),
+    ).toEqual([
+      {
+        candidateId: person(1),
+        sequences: 1,
+        opens: 2,
+        replies: 1,
+        lastContactAt: "2026-10-04T00:00:00.000Z",
+        lastReplyAt: "2026-10-05T00:00:00.000Z",
+        status: "active",
+        syncedAt: expect.any(String),
+      },
+    ]);
+    expect(await listSyncedRecruitingUnassignedSequences(prisma, actor, scope)).toEqual([
+      {
+        id: "camp-unmapped",
+        name: "Sequence camp-unmapped",
+        status: "active",
+        people: 1,
+        opened: 1,
+        replied: 0,
+        lastContactAt: "2026-10-04T00:00:00.000Z",
+        syncedAt: expect.any(String),
+      },
+    ]);
+    expect(await listSyncedRecruitingSequenceStats(prisma, other, scope, [person(1)])).toEqual([]);
 
     const again = await runAll(actor, crm.read);
     expect(again).toMatchObject({

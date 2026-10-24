@@ -10,6 +10,7 @@ import type { EmailConversationItem } from "./EmailConversation";
 import { EmailConversation } from "./EmailConversation";
 import { ProfileImage } from "./ProfileImage";
 import { initials, storedProfileFields } from "./profile";
+import { sequenceLine, useSequenceLabels, useSequenceStats } from "./SequenceStats";
 import type { RecruitingTabProps } from "./shared";
 import {
   CrmGate,
@@ -263,6 +264,12 @@ export function InboxTab({
     )?.value;
     return { id, contact, latest, experience };
   });
+  const sequenceStats = useSequenceStats(
+    crm,
+    rail.map((row) => row.id),
+    props,
+  );
+  const sequenceLabels = useSequenceLabels();
   const statuses = [...new Set(rail.flatMap((row) => row.contact?.outreachStatus || []))];
   const search = query.trim().toLocaleLowerCase();
   const visibleRail = rail.filter(({ contact, latest, experience }) => {
@@ -424,6 +431,11 @@ export function InboxTab({
                               <time dateTime={contact.lastReplyAt}>
                                 {formatDate(contact.lastReplyAt)}
                               </time>
+                            </span>
+                          ) : null}
+                          {sequenceStats.has(id) ? (
+                            <span className="block text-xs text-muted-foreground">
+                              {sequenceLine(sequenceStats.get(id)!, sequenceLabels)}
                             </span>
                           ) : null}
                           {latest ? (

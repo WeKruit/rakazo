@@ -24,6 +24,7 @@ import { useRecruitingDetail } from "./recruiting/detail";
 import { EmailConversation } from "./recruiting/EmailConversation";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { SchedulingPlanForm } from "./recruiting/SchedulingPlan";
+import { sequenceLine, useSequenceLabels, useSequenceStats } from "./recruiting/SequenceStats";
 import { RoleCampaignCard } from "./recruiting/SequenceTab";
 import { LoadMore, type RoleCrm, useCrmPages, useKeyedRead } from "./recruiting/shared";
 
@@ -491,6 +492,17 @@ function SavedCorrespondenceView({
     readCacheScope,
     refreshSignal: refreshSignal + refresh,
   });
+  const sequenceStats = useSequenceStats(
+    crm,
+    (people.data?.items ?? []).map((person) => person.candidateId),
+    {
+      spaceId: workspace?.role.spaceId ?? "",
+      readCache,
+      readCacheScope,
+      refreshSignal: refreshSignal + refresh,
+    },
+  );
+  const sequenceLabels = useSequenceLabels();
   const matchesTarget = (email: SavedCorrespondence["emails"][number]) =>
     target &&
     email.crm &&
@@ -828,6 +840,14 @@ function SavedCorrespondenceView({
                           <strong className="block">{name}</strong>
                           {row.person?.title ? (
                             <span className="block">{row.person.title}</span>
+                          ) : null}
+                          {row.person && sequenceStats.has(row.person.candidateId) ? (
+                            <span className="block text-xs text-muted-foreground">
+                              {sequenceLine(
+                                sequenceStats.get(row.person.candidateId)!,
+                                sequenceLabels,
+                              )}
+                            </span>
                           ) : null}
                           {row.email ? (
                             <span className="block text-xs text-muted-foreground">

@@ -321,6 +321,24 @@ window.fetch = async (input, init) => {
         },
         outbox: [],
       };
+    else if (value.operation === "sequenceStats")
+      result = {
+        operation: "sequenceStats",
+        source,
+        checkedAt,
+        items: (value.candidateIds as string[])
+          .filter((id) => id.endsWith("0"))
+          .map((candidateId) => ({
+            candidateId,
+            sequences: 1,
+            opens: 3,
+            replies: 1,
+            lastContactAt: "2026-10-21T15:00:00Z",
+            lastReplyAt: "2026-10-22T09:30:00Z",
+            status: "active",
+            syncedAt: checkedAt,
+          })),
+      };
     else throw new Error(`Unexpected fixture CRM operation: ${String(value.operation)}`);
   } else if (path === "recruiting/notes/list") result = { items: [] };
   else if (path === "recruiting/reminders/list") result = { items: [], overdueCount: 0 };

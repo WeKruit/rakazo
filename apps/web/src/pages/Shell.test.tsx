@@ -1148,13 +1148,18 @@ it("re-reads the CRM workbench once for a burst of reconnects that missed no eve
         },
   );
   await renderFeedbackShell("group", undefined, { isDeploymentOwner: false, openFeedback: false });
-  const initialReads = shellApi.recruiting.crmData.mock.calls.length;
+  // Role-list reads; the optional saved-sequence read follows each of them.
+  const roleListReads = () =>
+    shellApi.recruiting.crmData.mock.calls.filter(
+      ([input]) => input.operation !== "unassignedSequences",
+    ).length;
+  const initialReads = roleListReads();
   for (let reconnect = 0; reconnect < 20; reconnect++)
     await act(async () => {
       await stream.refresh();
     });
   // The first reconnect may retry once; the other 19 missed nothing and stay quiet.
-  expect(shellApi.recruiting.crmData.mock.calls.length - initialReads).toBeLessThanOrEqual(2);
+  expect(roleListReads() - initialReads).toBeLessThanOrEqual(2);
 });
 
 it("re-reads the role list and inbox once when the stream recovers from an outage", async () => {

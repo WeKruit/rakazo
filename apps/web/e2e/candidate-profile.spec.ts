@@ -147,6 +147,20 @@ for (const width of [1440, 390]) {
     await expect(detail.getByText("Go distributed systems", { exact: true })).toBeVisible();
     await expect(detail.getByText("Unknown", { exact: true }).first()).toBeVisible();
     await captureScreenshot(page, testInfo, `profile-assessment-${width}`);
+    await detail.getByRole("button", { name: "Outreach", exact: true }).click();
+    await sectionBelowNavigation(page, "Outreach");
+    const outreach = detail.locator("#recruiting-detail-outreach");
+    for (const [label, value] of [
+      ["Sequence status", "In progress"],
+      ["Opened", "3"],
+      ["Replied", "1"],
+    ])
+      await expect(
+        outreach.getByText(label, { exact: true }).locator("xpath=following-sibling::dd[1]"),
+      ).toHaveText(value);
+    await expect(outreach.getByText("Last contacted", { exact: true })).toBeVisible();
+    await captureScreenshot(page, testInfo, `profile-outreach-${width}`);
+    await noOverflow(page);
     await detail.getByRole("button", { name: "Activity", exact: true }).click();
     await expect(detail.getByText("Avery availability", { exact: true })).toBeVisible();
     await expect(detail.getByText("Jordan Recruiter", { exact: false }).first()).toBeVisible();

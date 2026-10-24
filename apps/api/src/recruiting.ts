@@ -3306,6 +3306,20 @@ export async function getRecruitingCrmData(
         page.next_offset,
       );
     }
+    if (input.operation === "sequenceStats" || input.operation === "unassignedSequences") {
+      // Saved rows have exactly the authorization boundary of the CRM read that filled them.
+      const scope = { mcpServerId: server.id, organizationId: input.organizationId };
+      await sourceFence(server, "list_crm_campaigns");
+      const items =
+        input.operation === "sequenceStats"
+          ? await recruiting.listSyncedRecruitingSequenceStats(deps.prisma, actor, scope, [
+              ...new Set(input.candidateIds),
+            ])
+          : await recruiting.listSyncedRecruitingUnassignedSequences(deps.prisma, actor, scope);
+      invalidateFences();
+      await sourceFence(server, "list_crm_campaigns");
+      return finish({ operation: input.operation, items });
+    }
     if (input.operation === "campaigns" || input.operation === "campaignLeads") {
       const offset = pageOffset(input);
       const limit = input.limit ?? 25;

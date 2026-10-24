@@ -216,6 +216,10 @@ msgstr "{name} finished"
 msgid "{name} stopped"
 msgstr "{name} stopped"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "{people} people"
+msgstr "{people} people"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} left · bot is watching, not acting"
@@ -1069,6 +1073,7 @@ msgstr "Bots"
 msgid "Bots with their own computer and browser"
 msgstr "Bots with their own computer and browser"
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Bounced"
 msgstr "Bounced"
@@ -3100,6 +3105,7 @@ msgstr "Download Executor"
 msgid "Downloading…"
 msgstr "Downloading…"
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
@@ -3536,6 +3542,10 @@ msgstr "Finish subscription sign-in, then test again."
 msgid "finished"
 msgstr "finished"
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Finished"
+msgstr "Finished"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Finished."
@@ -3827,6 +3837,7 @@ msgid "Imported list"
 msgstr "Imported list"
 
 #: src/lib/ticket-status.ts
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
 msgstr "In progress"
 
@@ -4069,6 +4080,10 @@ msgstr "Last 7 days · UTC"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Last checked"
 msgstr "Last checked"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Last contacted"
+msgstr "Last contacted"
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Last reply"
@@ -5415,8 +5430,13 @@ msgid "OpenAI-compatible server URL"
 msgstr "OpenAI-compatible server URL"
 
 #: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "Opened"
 msgstr "Opened"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Opened {opens}"
+msgstr "Opened {opens}"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Opened {path}"
@@ -5642,6 +5662,7 @@ msgstr "Paste your API key, then test again."
 msgid "Pause consideration"
 msgstr "Pause consideration"
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
@@ -6264,8 +6285,13 @@ msgstr "Replaced"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "Replied"
 msgstr "Replied"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Replied {replied}"
+msgstr "Replied {replied}"
 
 #: src/pages/Shell.tsx
 msgid "Reply"
@@ -7160,6 +7186,10 @@ msgstr "Sentry alert"
 msgid "Sequence"
 msgstr "Sequence"
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Sequence status"
+msgstr "Sequence status"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sequence steps"
 msgstr "Sequence steps"
@@ -7167,6 +7197,10 @@ msgstr "Sequence steps"
 #: src/pages/RecruitingPanel.tsx
 msgid "Sequence steps and delivery status are not included in these stored campaign associations."
 msgstr "Sequence steps and delivery status are not included in these stored campaign associations."
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequences without a role"
+msgstr "Sequences without a role"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Serenity endpoint is required."
@@ -7399,6 +7433,10 @@ msgstr "Skip for now"
 msgid "Skip or deploy key"
 msgstr "Skip or deploy key"
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Skipped"
+msgstr "Skipped"
+
 #. placeholder {0}: skipped.join(", ")
 #: src/pages/Shell.tsx
 msgid "Skipped {0}"
@@ -7627,6 +7665,7 @@ msgstr "Stop speaking"
 msgid "Stop teaching"
 msgstr "Stop teaching"
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Stopped"
 msgstr "Stopped"
@@ -8136,6 +8175,7 @@ msgstr "Unpin"
 msgid "Unread"
 msgstr "Unread"
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Unsubscribed"
 msgstr "Unsubscribed"

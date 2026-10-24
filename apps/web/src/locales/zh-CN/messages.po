@@ -216,6 +216,10 @@ msgstr "{name} 已完成"
 msgid "{name} stopped"
 msgstr "{name} 已停止"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "{people} people"
+msgstr "{people} 人"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "剩余 {remaining} · Bot 只看不操作"
@@ -1069,9 +1073,10 @@ msgstr ""
 msgid "Bots with their own computer and browser"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Bounced"
-msgstr ""
+msgstr "退信"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Brain label"
@@ -3100,10 +3105,11 @@ msgstr ""
 msgid "Downloading…"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft"
-msgstr ""
+msgstr "草稿"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send."
@@ -3536,6 +3542,10 @@ msgstr "请完成订阅登录，然后重新测试。"
 msgid "finished"
 msgstr "已完成"
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Finished"
+msgstr "已完成"
+
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
 msgid "Finished."
@@ -3827,8 +3837,9 @@ msgid "Imported list"
 msgstr ""
 
 #: src/lib/ticket-status.ts
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
-msgstr ""
+msgstr "进行中"
 
 #: src/lib/ticket-status.ts
 msgid "In review"
@@ -4069,6 +4080,10 @@ msgstr "最近 7 天 · UTC"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Last checked"
 msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Last contacted"
+msgstr "最近联系"
 
 #: src/pages/recruiting/InboxTab.tsx
 msgid "Last reply"
@@ -5415,8 +5430,13 @@ msgid "OpenAI-compatible server URL"
 msgstr "OpenAI 兼容服务器 URL"
 
 #: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "Opened"
 msgstr "已打开"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Opened {opens}"
+msgstr "打开 {opens} 次"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Opened {path}"
@@ -5530,7 +5550,7 @@ msgstr ""
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Outreach"
-msgstr ""
+msgstr "外联"
 
 #: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
@@ -5642,6 +5662,7 @@ msgstr "请粘贴你的 API 密钥，然后重新测试。"
 msgid "Pause consideration"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RoutineEditor.tsx
 msgid "Paused"
@@ -6264,8 +6285,13 @@ msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 #: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
 msgid "Replied"
 msgstr "已回复"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Replied {replied}"
+msgstr "回复 {replied}"
 
 #: src/pages/Shell.tsx
 msgid "Reply"
@@ -7160,6 +7186,10 @@ msgstr "Sentry 告警"
 msgid "Sequence"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Sequence status"
+msgstr "序列状态"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sequence steps"
 msgstr ""
@@ -7167,6 +7197,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Sequence steps and delivery status are not included in these stored campaign associations."
 msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequences without a role"
+msgstr "未关联岗位的序列"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Serenity endpoint is required."
@@ -7399,6 +7433,10 @@ msgstr ""
 msgid "Skip or deploy key"
 msgstr "跳过或使用部署密钥"
 
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Skipped"
+msgstr "已跳过"
+
 #. placeholder {0}: skipped.join(", ")
 #: src/pages/Shell.tsx
 msgid "Skipped {0}"
@@ -7627,9 +7665,10 @@ msgstr "停止朗读"
 msgid "Stop teaching"
 msgstr "停止示范"
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Stopped"
-msgstr ""
+msgstr "已停止"
 
 #. js-lingui-explicit-id
 #: src/lib/browser-notifications.ts
@@ -8136,9 +8175,10 @@ msgstr "取消置顶"
 msgid "Unread"
 msgstr ""
 
+#: src/pages/recruiting/SequenceStats.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Unsubscribed"
-msgstr ""
+msgstr "已退订"
 
 #. placeholder {0}: file.name
 #. placeholder {0}: pending.file.name

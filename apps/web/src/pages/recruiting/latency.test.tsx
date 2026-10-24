@@ -176,7 +176,8 @@ for (const [name, Tab] of Object.entries(tabs)) {
     expect(listCandidates).not.toHaveBeenCalled();
     // List pages are 25 rows; Sequence also totals statuses in 50-row reads.
     for (const [input] of crmData.mock.calls)
-      expect([25, ...(name === "SequenceTab" ? [50] : [])]).toContain((input as Input).limit);
+      if ((input as Input).operation !== "sequenceStats")
+        expect([25, ...(name === "SequenceTab" ? [50] : [])]).toContain((input as Input).limit);
   });
 
   it(`${name}: a revisited tab renders cached rows at once and refreshes in the background`, async () => {

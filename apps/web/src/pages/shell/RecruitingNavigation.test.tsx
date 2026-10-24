@@ -14,6 +14,11 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
+const crmData = vi.fn();
+vi.mock("../../lib/rpc", () => ({
+  rpc: { recruiting: { crmData: (input: unknown) => crmData(input) } },
+}));
+
 import { RecruitingNavigation } from "./RecruitingNavigation";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -70,6 +75,90 @@ it("distinguishes duplicate role titles by creation time without showing interna
     );
     expect(container.textContent).not.toContain("thread-one");
     expect(container.textContent).not.toContain("space-test");
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it("lists saved sequences without a role, in business wording, and hides them when the read fails", async () => {
+  const source = { serverId: "server-1", serverRevision: 1, name: "CRM" };
+  const organizationId = "00000000-0000-4000-8000-000000000001";
+  const checkedAt = "2026-10-24T00:00:00.000Z";
+  crmData.mockImplementation(async (input: { operation: string }) => {
+    if (input.operation === "memberships")
+      return {
+        operation: "memberships",
+        checkedAt,
+        sources: [
+          {
+            ...source,
+            status: "ready",
+            memberships: [{ organizationId, name: "Org", role: "owner" }],
+          },
+        ],
+      };
+    if (input.operation === "roles")
+      return { operation: "roles", source: { ...source, organizationId }, checkedAt, items: [] };
+    if (input.operation === "unassignedSequences")
+      return {
+        operation: "unassignedSequences",
+        source: { ...source, organizationId },
+        checkedAt,
+        items: [
+          {
+            id: "sequence-1",
+            name: "Spring outreach",
+            status: "paused",
+            people: 12,
+            opened: 7,
+            replied: 3,
+            lastContactAt: checkedAt,
+            syncedAt: checkedAt,
+          },
+        ],
+      };
+    throw new Error(`unexpected ${input.operation}`);
+  });
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const render = () =>
+    root.render(
+      <RecruitingNavigation
+        crmContext={{
+          target: { groupId: "group-1" } as never,
+          scope: "scope",
+          cache: { entries: new Map(), epoch: 0 },
+        }}
+        groups={[]}
+        archivedGroups={[]}
+        archivedOpen={false}
+        query=""
+        canOpenDashboard
+        canCreateRole
+        onQueryChange={vi.fn()}
+        view="results"
+        onView={vi.fn()}
+        onCollapse={vi.fn()}
+        onOpenRole={vi.fn()}
+        onNewRole={vi.fn()}
+        canCreateRoleFrom={() => true}
+        onNewRoleFrom={vi.fn()}
+        onRoleMenu={vi.fn()}
+        onToggleArchived={vi.fn()}
+        onRestoreRole={vi.fn()}
+      />,
+    );
+  try {
+    await act(async () => render());
+    await act(async () => {});
+    const toggle = [...container.querySelectorAll("button")].find((button) =>
+      button.textContent?.startsWith("Sequences without a role"),
+    );
+    expect(toggle?.textContent).toBe("Sequences without a role1");
+    await act(async () => toggle!.click());
+    expect(container.textContent).toContain("Spring outreach");
+    expect(container.textContent).toContain("Paused · 12 people · Replied 3");
+    expect(container.textContent).not.toContain("sequence-1");
   } finally {
     act(() => root.unmount());
   }
