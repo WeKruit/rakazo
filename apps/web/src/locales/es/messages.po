@@ -93,11 +93,6 @@ msgstr "Conexión {0}"
 msgid "{0} default"
 msgstr ""
 
-#. placeholder {0}: sections.company.size
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "{0} employees"
-msgstr ""
-
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} handling"
@@ -240,6 +235,10 @@ msgstr ""
 #: src/components/ArtifactFileCard.tsx
 msgid "{size} B"
 msgstr "{size} B"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{sizeFact} employees"
+msgstr ""
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "{stepCount, plural, one {Done · # tool} other {Done · # tools}}"
@@ -2855,7 +2854,7 @@ msgstr "Predeterminado"
 #. placeholder {0}: thinkingLevelLabel("medium")
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Default ({0})"
-msgstr ""
+msgstr "Predeterminado ({0})"
 
 #. placeholder {0}: thinkingLevelLabel("medium")
 #. placeholder {0}: thinkingLevelLabel(defaultThinkingLevel)
@@ -2951,15 +2950,12 @@ msgstr "Denegar"
 msgid "Deployment default"
 msgstr "Predeterminado del despliegue"
 
-#: src/pages/Shell.tsx
-msgid "Describe the role and clarify what matters in the conversation."
-msgstr ""
-
 #: src/pages/shell/bot-panel.tsx
 msgid "Describe what this bot does"
 msgstr "Describe qué hace este bot"
 
 #: src/pages/Board.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Description"
 msgstr "Descripción"
@@ -3443,7 +3439,7 @@ msgstr "Extra alto"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Extra high"
-msgstr ""
+msgstr "Extra alto"
 
 #: src/components/CloudAgentCard.tsx
 msgid "failed"
@@ -3585,6 +3581,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "From this role’s saved requirements"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Full assessment"
 msgstr ""
 
 #: src/pages/WindowChrome.tsx
@@ -3747,7 +3747,7 @@ msgstr "Alto"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "High"
-msgstr ""
+msgstr "Alto"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "High probability"
@@ -4046,6 +4046,10 @@ msgstr "Conservar memorias"
 msgid "key"
 msgstr "Clave"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Key work"
+msgstr ""
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Knowledge"
 msgstr "Conocimientos"
@@ -4090,14 +4094,6 @@ msgstr ""
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Leave"
 msgstr "Salir"
-
-#: src/pages/Shell.tsx
-msgid "Let’s define the search."
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Let’s sharpen the search."
-msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Light"
@@ -4291,7 +4287,7 @@ msgstr "Bajo"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Low"
-msgstr ""
+msgstr "Bajo"
 
 #: src/pages/shell/bot-credentials.tsx
 msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
@@ -4381,7 +4377,7 @@ msgstr "Máx."
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Max"
-msgstr ""
+msgstr "Máx."
 
 #: src/pages/Artifacts.tsx
 msgid "Maximize"
@@ -4417,7 +4413,7 @@ msgstr "Medio"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Medium"
-msgstr ""
+msgstr "Medio"
 
 #: src/pages/GroupPanel.tsx
 msgid "Members ({GROUP_MEMBER_MIN}–{GROUP_MEMBER_MAX})"
@@ -4517,7 +4513,7 @@ msgstr "Mínimo"
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Minimal"
-msgstr ""
+msgstr "Mínimo"
 
 #: src/pages/WindowChrome.tsx
 msgid "Minimize"
@@ -6824,6 +6820,7 @@ msgstr ""
 msgid "Saved results"
 msgstr ""
 
+#: src/pages/RecruitingPanel.tsx
 #: src/pages/Shell.tsx
 msgid "Saved role summary"
 msgstr ""
@@ -7293,11 +7290,16 @@ msgstr ""
 msgid "Show computer"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Show less"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "Show list"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Show more"
 msgstr "Mostrar más"
@@ -7454,6 +7456,8 @@ msgid "Source context"
 msgstr ""
 
 #: src/components/ArtifactFileCard.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Source text"
 msgstr ""
 
@@ -7756,10 +7760,6 @@ msgstr "Mensaje de Teams"
 
 #: src/pages/RoutineEditor.tsx
 msgid "Teams not enabled"
-msgstr ""
-
-#: src/pages/Shell.tsx
-msgid "Tell WeKruit what to change for a person, a few candidates, or the whole search."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -8484,6 +8484,10 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "Trabajando…"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Worth checking"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"

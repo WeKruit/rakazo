@@ -5,6 +5,7 @@ import { listRecruitingCandidates } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentCrmCandidatesArgs } from "./mcp-connector.js";
 import {
+  listRecruitingRoleReplies,
   resolveRecruitingContact,
   resolveRecruitingContactAcrossRoles,
   unresolvedContactEmailError,
@@ -102,7 +103,14 @@ function fixture(
       { roleId: "native-role", nameOrEmail },
       context as never,
     );
-  return { calls, resolve, connector, mail };
+  const replies = (limit?: number) =>
+    listRecruitingRoleReplies(
+      { prisma: {} as never, connector },
+      actor,
+      { roleId: "native-role", ...(limit ? { limit } : {}) },
+      context as never,
+    );
+  return { calls, resolve, replies, connector, mail };
 }
 
 describe("resolveRecruitingContact", () => {
@@ -332,6 +340,81 @@ describe("agent list_crm_candidates arguments", () => {
     expect((await f.resolve("Sumeet")).matches[0]).toMatchObject({
       correspondence: { status: "unavailable", latest: null },
     });
+  });
+});
+
+describe("listRecruitingRoleReplies", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const mail = (id: string, candidate: string, direction: string, at: string) => ({
+    id,
+    organization_id: org,
+    candidate_id: `40000000-0000-4000-8000-00000000000${candidate}`,
+    lead_email: null,
+    thread_id: `t-${candidate}`,
+    direction,
+    timestamp_email: at,
+    campaign_id: null,
+    from_address: direction === "received" ? `p${candidate}@example.test` : "team@example.test",
+    to_address: direction === "received" ? "team@example.test" : `p${candidate}@example.test`,
+    subject: "Re: Data Infra",
+    body_text: `reply from ${candidate}`,
+  });
+
+  it("lists everyone on the role who replied, newest first, from the Inbox source", async () => {
+    const f = fixture([
+      crmRow("4", "Ada Example", "p4@example.test"),
+      crmRow("5", "Ben Example", "p5@example.test"),
+      crmRow("6", "Cy Example", "p6@example.test"),
+    ]);
+    f.mail.messages = [
+      mail("a2", "4", "received", "2026-10-22T10:00:00Z"),
+      mail("b1", "5", "received", "2026-10-23T09:00:00Z"),
+      mail("a1", "4", "received", "2026-10-21T10:00:00Z"),
+      mail("c1", "6", "sent", "2026-10-20T10:00:00Z"),
+    ];
+    const result = await f.replies();
+    expect(result).toMatchObject({ correspondence: "read", complete: true, total: 2 });
+    expect(result.people.map((person) => [person.name, person.replies])).toEqual([
+      ["Ben Example", 1],
+      ["Ada Example", 2],
+    ]);
+    expect(result.people[1]?.latestReceived).toMatchObject({ at: "2026-10-22T10:00:00Z" });
+    // The whole role is read: no candidate filter, exact org and role scope.
+    const reads = f.calls.filter((call) => call.route?.toolName === "list_crm_role_correspondence");
+    expect(reads[0]?.args).toEqual({ p_org: org, p_role: roleId, p_limit: 50, p_offset: 0 });
+    // Listed addresses count as resolved for later correspondence lookups in this run.
+    expect(unresolvedContactEmailError("run-resolve", "p5@example.test", "Ben Example")).toBeNull();
+  });
+
+  it("reports unbound or unreadable correspondence, never an empty reply list", async () => {
+    const f = fixture([crmRow("4", "Ada Example", "p4@example.test")]);
+    f.mail.fail = true;
+    expect(await f.replies()).toEqual({ correspondence: "unavailable", people: [] });
+    f.mail.fail = false;
+    f.mail.roleId = org;
+    expect(await f.replies()).toEqual({ correspondence: "unavailable", people: [] });
+    vi.mocked(listRecruitingCandidates).mockResolvedValue({
+      crmTarget: null,
+      items: [],
+      nextCursor: null,
+    } as never);
+    expect(await f.replies()).toEqual({ correspondence: "not_bound", people: [] });
+  });
+
+  it("rejects a page carrying another candidate's scope echo", async () => {
+    const f = fixture([crmRow("4", "Ada Example", "p4@example.test")]);
+    f.mail.messages = [mail("a1", "4", "received", "2026-10-22T10:00:00Z")];
+    const execute = f.connector.execute.bind(f.connector);
+    f.connector.execute = async function* (call: ConnectorCall) {
+      for await (const event of execute(call)) {
+        if (event.type === "result" && call.route?.toolName === "list_crm_role_correspondence")
+          (
+            event.data as { structuredContent: { data: Record<string, unknown> } }
+          ).structuredContent.data.candidate_id = "40000000-0000-4000-8000-000000000009";
+        yield event;
+      }
+    } as typeof f.connector.execute;
+    expect(await f.replies()).toEqual({ correspondence: "unavailable", people: [] });
   });
 });
 

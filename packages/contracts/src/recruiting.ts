@@ -405,6 +405,21 @@ export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
   }),
 ]);
 export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
+/**
+ * What the agent sends. A calibration request may omit the documents approval, the profiles and
+ * the rule changes: the server fills in this revision's approved documents and the recorded
+ * calibration round before the request is saved, so the stored request always matches
+ * RecruitingApprovalToolInputSchema.
+ */
+export const RecruitingApprovalToolCallSchema = z.discriminatedUnion("stage", [
+  RecruitingApprovalToolInputSchema.options[0],
+  RecruitingApprovalToolInputSchema.options[1],
+  RecruitingApprovalToolInputSchema.options[2].extend({
+    documentsApprovalEffectId: RecruitingId.optional(),
+    profiles: RecruitingApprovalToolInputSchema.options[2].shape.profiles.optional(),
+    ruleChanges: RecruitingCalibrationApproval.ruleChanges.default([]),
+  }),
+]);
 
 /** Decode exact retained requests only; historical assessments are never new native evidence. */
 export const RetainedRecruitingApprovalRequestSchema = z.union([
@@ -1533,6 +1548,10 @@ export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operati
   }),
   z.strictObject({ operation: z.literal("resolve"), nameOrEmail: Text.max(240) }),
   z.strictObject({ operation: z.literal("round") }),
+  z.strictObject({
+    operation: z.literal("replies"),
+    limit: z.number().int().min(1).max(100).optional(),
+  }),
 ]);
 export type RecruitingCandidatesToolInput = z.infer<typeof RecruitingCandidatesToolInputSchema>;
 

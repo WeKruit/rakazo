@@ -1038,28 +1038,7 @@ export async function resolveRecruitingContact(
   if (target && !deps.connector) crm = "unavailable";
   else if (target)
     try {
-      for (let offset = 0; offset < 1000; ) {
-        // list_crm_candidates filters by client/role LABELS, not role_spec_id; unreviewed-only is its default.
-        const page = RecruitingCrmCandidatesReadSchema.parse(
-          await crmData(deps.connector!, target, context, "list_crm_candidates", {
-            p_org: target.organizationId,
-            p_client: target.clientLabel,
-            p_role: target.roleLabel,
-            p_not_reviewed: false,
-            p_limit: 50,
-            p_offset: offset,
-          }),
-        );
-        crmRows.push(
-          ...page.rows.filter(
-            (row) =>
-              row.client_label.trim() === target.clientLabel.trim() &&
-              row.role_label.trim() === target.roleLabel.trim(),
-          ),
-        );
-        offset += page.rows.length;
-        if (!page.rows.length || offset >= page.total) break;
-      }
+      crmRows.push(...(await readCrmRoleContacts(deps.connector!, target, context)));
     } catch (error) {
       context.signal.throwIfAborted();
       getLogger().warn("recruiting.contact.resolve.crm_unavailable", { error: String(error) });
@@ -1074,42 +1053,11 @@ export async function resolveRecruitingContact(
   let correspondence: "read" | "unavailable" = "read";
   try {
     for (const candidateId of new Set(contacts.map((contact) => contact.crmCandidateId!))) {
-      let offset: number | null = 0;
-      const seen = new Set<string>();
-      while (offset !== null) {
-        const read = RecruitingCrmRoleMailReadSchema.parse(
-          await crmData(deps.connector!, target, context, "list_crm_role_correspondence", {
-            p_org: target.organizationId,
-            p_role: target.crmRoleId,
-            p_candidate: candidateId,
-            p_limit: 50,
-            p_offset: offset,
-          }),
-        );
-        if (
-          read.organization_id !== target.organizationId ||
-          read.role_id !== target.crmRoleId ||
-          read.candidate_id !== candidateId ||
-          read.messages.length > 50 ||
-          read.messages.some(
-            (message) =>
-              message.organization_id !== target.organizationId ||
-              message.candidate_id !== candidateId ||
-              seen.has(message.id),
-          ) ||
-          new Set(read.messages.map((message) => message.id)).size !== read.messages.length ||
-          (read.next_offset !== null &&
-            (!read.messages.length || read.next_offset !== offset + read.messages.length))
-        )
-          throw new IsolationError("CRM correspondence scope or pagination changed");
-        for (const message of read.messages) {
-          seen.add(message.id);
-          messages.push(message);
-        }
-        // Pages are newest first: once the latest incoming message is present, both requested answers are known.
-        if (read.messages.some((message) => message.direction === "received")) break;
-        offset = read.next_offset;
-      }
+      // Pages are newest first: once the latest incoming message is present, both requested answers are known.
+      const read = await readCrmRoleCorrespondence(deps.connector!, target, context, candidateId, {
+        stopAtReceived: true,
+      });
+      messages.push(...read.messages);
     }
   } catch (error) {
     context.signal.throwIfAborted();
@@ -1119,17 +1067,6 @@ export async function resolveRecruitingContact(
     correspondence = "unavailable";
     messages = [];
   }
-  const summary = (message: (typeof messages)[number] | undefined) =>
-    message
-      ? {
-          direction: message.direction,
-          at: message.timestamp_email,
-          from: message.from_address,
-          to: message.to_address,
-          subject: message.subject,
-          preview: message.body_text?.slice(0, 500) ?? null,
-        }
-      : null;
   return {
     ...result,
     crm,
@@ -1145,8 +1082,8 @@ export async function resolveRecruitingContact(
         correspondence: {
           source: "crm_role_correspondence" as const,
           status: correspondence,
-          latest: summary(mine[0]),
-          latestReceived: summary(mine.find((m) => m.direction === "received")),
+          latest: mailSummary(mine[0]),
+          latestReceived: mailSummary(mine.find((m) => m.direction === "received")),
         },
       };
     }),
@@ -1181,6 +1118,191 @@ async function crmData(
         ?.data;
   }
   return data;
+}
+
+type CrmRoleMail = ReturnType<typeof RecruitingCrmRoleMailReadSchema.parse>["messages"][number];
+type CrmReadTarget = {
+  mcpServerId: string;
+  serverRevision: number;
+  organizationId: string;
+  crmRoleId: string;
+  clientLabel: string;
+  roleLabel: string;
+};
+
+function mailSummary(message: CrmRoleMail | undefined, previewLength = 500) {
+  return message
+    ? {
+        direction: message.direction,
+        at: message.timestamp_email,
+        from: message.from_address,
+        to: message.to_address,
+        subject: message.subject,
+        preview: message.body_text?.slice(0, previewLength) ?? null,
+      }
+    : null;
+}
+
+/** The role's CRM contacts, matched on the exact client and role labels. */
+async function readCrmRoleContacts(
+  connector: Pick<ConnectorProvider, "execute">,
+  target: CrmReadTarget,
+  context: AdapterContext,
+) {
+  const rows: CrmRow[] = [];
+  for (let offset = 0; offset < 1000; ) {
+    // list_crm_candidates filters by client/role LABELS, not role_spec_id; unreviewed-only is its default.
+    const page = RecruitingCrmCandidatesReadSchema.parse(
+      await crmData(connector, target, context, "list_crm_candidates", {
+        p_org: target.organizationId,
+        p_client: target.clientLabel,
+        p_role: target.roleLabel,
+        p_not_reviewed: false,
+        p_limit: 50,
+        p_offset: offset,
+      }),
+    );
+    rows.push(
+      ...page.rows.filter(
+        (row) =>
+          row.client_label.trim() === target.clientLabel.trim() &&
+          row.role_label.trim() === target.roleLabel.trim(),
+      ),
+    );
+    offset += page.rows.length;
+    if (!page.rows.length || offset >= page.total) break;
+  }
+  return rows;
+}
+
+/**
+ * The role's stored correspondence (the Inbox source), newest first, for one candidate or the
+ * whole role. Every page must echo the exact organization, role and candidate scope.
+ */
+async function readCrmRoleCorrespondence(
+  connector: Pick<ConnectorProvider, "execute">,
+  target: CrmReadTarget,
+  context: AdapterContext,
+  candidateId: string | null,
+  options: { stopAtReceived?: boolean; maxPages?: number } = {},
+) {
+  const messages: CrmRoleMail[] = [];
+  const seen = new Set<string>();
+  let offset: number | null = 0;
+  for (let page = 0; offset !== null && page < (options.maxPages ?? 1000); page++) {
+    const read = RecruitingCrmRoleMailReadSchema.parse(
+      await crmData(connector, target, context, "list_crm_role_correspondence", {
+        p_org: target.organizationId,
+        p_role: target.crmRoleId,
+        ...(candidateId ? { p_candidate: candidateId } : {}),
+        p_limit: 50,
+        p_offset: offset,
+      }),
+    );
+    if (
+      read.organization_id !== target.organizationId ||
+      read.role_id !== target.crmRoleId ||
+      (candidateId ? read.candidate_id !== candidateId : read.candidate_id != null) ||
+      read.messages.length > 50 ||
+      read.messages.some(
+        (message) =>
+          message.organization_id !== target.organizationId ||
+          (candidateId !== null && message.candidate_id !== candidateId) ||
+          seen.has(message.id),
+      ) ||
+      new Set(read.messages.map((message) => message.id)).size !== read.messages.length ||
+      (read.next_offset !== null &&
+        (!read.messages.length || read.next_offset !== offset + read.messages.length))
+    )
+      throw new IsolationError("CRM correspondence scope or pagination changed");
+    for (const message of read.messages) {
+      seen.add(message.id);
+      messages.push(message);
+    }
+    if (options.stopAtReceived && read.messages.some((message) => message.direction === "received"))
+      return { messages, complete: true };
+    offset = read.next_offset;
+  }
+  return { messages, complete: offset === null };
+}
+
+/**
+ * Everyone on the role who has replied, from the role's stored correspondence (the Inbox
+ * source). Unbound or unreadable correspondence is reported as such, never as "nobody replied".
+ */
+export async function listRecruitingRoleReplies(
+  deps: { prisma: PrismaClient; connector?: Pick<ConnectorProvider, "execute"> },
+  actor: Actor,
+  input: { roleId: string; limit?: number },
+  context: AdapterContext,
+) {
+  const { crmTarget } = await listRecruitingCandidates(deps.prisma, actor, {
+    roleId: input.roleId,
+    limit: 1,
+  });
+  const target = crmTarget?.target;
+  if (!target) return { correspondence: "not_bound" as const, people: [] };
+  if (!deps.connector) return { correspondence: "unavailable" as const, people: [] };
+  // ponytail: reads at most 2,000 role messages (40 pages) per call; complete=false says so.
+  let read: Awaited<ReturnType<typeof readCrmRoleCorrespondence>>;
+  let contacts: CrmRow[];
+  try {
+    read = await readCrmRoleCorrespondence(deps.connector, target, context, null, {
+      maxPages: 40,
+    });
+    contacts = await readCrmRoleContacts(deps.connector, target, context);
+  } catch (error) {
+    context.signal.throwIfAborted();
+    getLogger().warn("recruiting.replies.correspondence_unavailable", { error: String(error) });
+    return { correspondence: "unavailable" as const, people: [] };
+  }
+  const byId = new Map(contacts.map((row) => [row.candidate_id, row]));
+  const received = new Map<string, CrmRoleMail[]>();
+  for (const message of read.messages) {
+    if (message.direction !== "received") continue;
+    received.set(message.candidate_id, [...(received.get(message.candidate_id) ?? []), message]);
+  }
+  const people = [...received.entries()]
+    .map(([candidateId, mail]) => {
+      const sorted = mail.toSorted((a, b) =>
+        String(b.timestamp_email ?? "").localeCompare(String(a.timestamp_email ?? "")),
+      );
+      const row = byId.get(candidateId);
+      return {
+        name: row?.full_name ?? null,
+        email: row?.email ?? null,
+        crmCandidateId: candidateId,
+        stage: row?.stage ?? null,
+        outreachStatus: row?.outreach_status ?? null,
+        replies: sorted.length,
+        latestReceived: mailSummary(sorted[0], 280),
+      };
+    })
+    .toSorted((a, b) =>
+      String(b.latestReceived?.at ?? "").localeCompare(String(a.latestReceived?.at ?? "")),
+    );
+  if (context.runId)
+    rememberResolvedContactEmails(
+      context.runId,
+      people.map((person) => ({
+        name: person.name,
+        email: person.email,
+        linkedinUrl: null,
+        sources: ["crm_contact"],
+        crmCandidateId: person.crmCandidateId,
+        candidateKey: null,
+        stage: person.stage,
+        outreachStatus: person.outreachStatus,
+      })),
+    );
+  const limit = input.limit ?? 50;
+  return {
+    correspondence: "read" as const,
+    complete: read.complete,
+    total: people.length,
+    people: people.slice(0, limit),
+    ...(people.length > limit ? { truncated: true } : {}),
+  };
 }
 
 /** A chat without a role: resolve across this user's active roles, each read with its own role checks. */

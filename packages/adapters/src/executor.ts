@@ -54,6 +54,7 @@ import {
   isAttachmentImageMimeType,
   MessageBlock as MessageBlockSchema,
   OPENAI_COMPATIBLE_PROVIDER_ID,
+  RecruitingApprovalToolCallSchema,
   RecruitingApprovalToolInputSchema,
   RecruitingCrmImportInputSchema,
   RecruitingCrmTargetToolInputSchema,
@@ -165,6 +166,8 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
+  latestRecruitingCalibrationProfiles,
+  latestRecruitingDocumentsApprovalId,
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
@@ -5425,6 +5428,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
             approvedEffectReplays.take(nextApprovedTool);
           }
           if (name === "recruiting_request_approval") {
+            if (nextApprovedTool !== name) {
+              const call = RecruitingApprovalToolCallSchema.safeParse(args);
+              if (!call.success) return { error: sanitizeConnectorError(call.error, runSecrets) };
+              if (call.data.stage === "calibration") {
+                const actor = {
+                  spaceId: run.spaceId,
+                  userId: run.userId,
+                  email: "",
+                  isDeploymentOwner: false,
+                };
+                // The approved documents receipt is not visible to every bot; the server owns it.
+                const documentsApprovalEffectId =
+                  call.data.documentsApprovalEffectId ??
+                  (await latestRecruitingDocumentsApprovalId(deps.prisma, actor, call.data));
+                if (!documentsApprovalEffectId)
+                  return {
+                    error:
+                      "This role revision has no approved documents yet. Request the documents approval first.",
+                  };
+                // Long source ids are not copied by hand: the recorded round carries them.
+                const profiles =
+                  call.data.profiles ??
+                  (await latestRecruitingCalibrationProfiles(deps.prisma, actor, call.data));
+                if (!profiles)
+                  return {
+                    error:
+                      "No calibration round of ten people is recorded for this role revision. Record the round first.",
+                  };
+                args = { ...call.data, documentsApprovalEffectId, profiles };
+              }
+            }
             const parsed = (
               nextApprovedTool === name
                 ? RetainedRecruitingApprovalRequestSchema
@@ -6971,7 +7005,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 );
                 files = recruitingApproval.files;
               } catch (error) {
-                const result = roleError(error);
+                const result =
+                  error instanceof IsolationError &&
+                  (args as { stage?: unknown }).stage === "calibration"
+                    ? {
+                        error:
+                          "The ten profiles do not match their saved sources. Omit profiles and the server uses the recorded calibration round.",
+                      }
+                    : roleError(error);
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
                   ? result
                   : uncertainEffectResult(name);
