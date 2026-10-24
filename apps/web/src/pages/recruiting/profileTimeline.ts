@@ -17,6 +17,8 @@ export type TimelineEntry = {
   secondary?: string;
   /** Remaining parts, such as a location. */
   detail?: string;
+  /** Hostname of the organization's own website, when the entry supplied one. */
+  website?: string;
   /** Date text as written, for display. */
   dateLabel?: string;
   /** Whether the range runs to the present, and the start as written. */
@@ -42,7 +44,24 @@ const RANGE = new RegExp(`(${DATE})${RANGE_SEP}(${DATE}|${PRESENT})`, "gi");
 const SINGLE = new RegExp(DATE, "gi");
 const PRESENT_ONLY = new RegExp(`^${PRESENT}$`, "i");
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
-const MAX_SEGMENT = 160;
+const MAX_SEGMENT = 240;
+/** Only explicit links count as a website, so names such as "Node.js" stay words. */
+const WEBSITE = /(?:^|(?<=[\s|,，;；(（]))(?:https?:\/\/|www\.)[^\s|,，;；)）]+/i;
+
+/** The supplied link removed from the text, with its hostname when it is a usable https site. */
+function takeWebsite(text: string): { rest: string; website?: string } {
+  const match = WEBSITE.exec(text);
+  if (!match) return { rest: text };
+  const rest = `${text.slice(0, match.index)} ${text.slice(match.index + match[0].length)}`;
+  try {
+    const url = new URL(/^www\./i.test(match[0]) ? `https://${match[0]}` : match[0]);
+    const host = url.hostname.toLowerCase();
+    if (url.username || url.password || /(^|\.)linkedin\.com$/.test(host)) return { rest };
+    return { rest, website: host };
+  } catch {
+    return { rest };
+  }
+}
 const SCHOOL = /universit|college|institute|school|academy|polytechnic|大学|学院|学校|研究院/i;
 const DEGREE =
   /^(?:ph\.?d|doctor|m\.?s\.?c?|b\.?s\.?c?|b\.?a|m\.?a|mba|m\.?eng|b\.?eng|bachelor|master|associate|博士|硕士|学士|本科|研究生)/i;
@@ -95,13 +114,16 @@ function splitParts(text: string): string[] {
 
 function parseSegment(text: string, kind: TimelineKind, now: Date): TimelineEntry {
   const plain: TimelineEntry = { text, structured: false, primary: text };
-  if (text.length > MAX_SEGMENT || /[.!?。]\s+\S.*[.!?。]/.test(text)) return plain;
+  const { rest: words, website } = takeWebsite(text);
+  const delimited = words.includes("|");
+  if (words.length > MAX_SEGMENT || (!delimited && /[.!?。]\s+\S.*[.!?。]/.test(words)))
+    return plain;
 
-  const ranges = [...text.matchAll(RANGE)];
-  const singles = ranges.length ? [] : [...text.matchAll(SINGLE)];
+  const ranges = [...words.matchAll(RANGE)];
+  const singles = ranges.length ? [] : [...words.matchAll(SINGLE)];
   if (ranges.length > 1 || singles.length > 1) return plain;
 
-  let rest = text;
+  let rest = words;
   const dates: Partial<TimelineEntry> = {};
   const range = ranges[0];
   const single = singles[0];
@@ -109,14 +131,14 @@ function parseSegment(text: string, kind: TimelineKind, now: Date): TimelineEntr
     const startIndex = dateIndex(range[1] ?? "");
     const present = PRESENT_ONLY.test((range[2] ?? "").trim());
     const endIndex = present ? nowIndex(now) : dateIndex(range[2] ?? "");
-    rest = text.replace(range[0], " ");
+    rest = words.replace(range[0], " ");
     dates.dateLabel = range[0];
     if (present) Object.assign(dates, { current: true, startLabel: (range[1] ?? "").trim() });
     if (endIndex >= startIndex && startIndex <= nowIndex(now)) {
       Object.assign(dates, { startIndex, endIndex, months: endIndex - startIndex });
     }
   } else if (single) {
-    rest = text.replace(single[0], " ");
+    rest = words.replace(single[0], " ");
     dates.dateLabel = single[0];
   }
 
@@ -154,6 +176,7 @@ function parseSegment(text: string, kind: TimelineKind, now: Date): TimelineEntr
     primary,
     secondary,
     detail: others.length ? others.join(", ") : undefined,
+    ...(website ? { website } : {}),
   };
 }
 

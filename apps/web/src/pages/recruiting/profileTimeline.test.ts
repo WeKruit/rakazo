@@ -4,6 +4,46 @@ import { companyHost, parseTimeline, timelineStats } from "./profileTimeline";
 const NOW = new Date(Date.UTC(2026, 9, 23));
 
 describe("parseTimeline", () => {
+  it("reads the requested pipe format with the organization's own website", () => {
+    const [job, earlier] = parseTimeline(
+      "Staff Engineer | Acme Inc. | https://www.acme.example | Jan 2022 – Present | St. Louis, MO\nEngineer | Beta | | 2019 – 2021 |",
+      "experience",
+      NOW,
+    );
+    expect(job).toMatchObject({
+      structured: true,
+      primary: "Staff Engineer",
+      secondary: "Acme Inc.",
+      website: "www.acme.example",
+      current: true,
+      detail: "St. Louis, MO",
+    });
+    expect(earlier).toMatchObject({ primary: "Engineer", secondary: "Beta", months: 24 });
+    expect(earlier?.website).toBeUndefined();
+
+    const [degree] = parseTimeline(
+      "Stanford University | M.S., Computer Science | https://stanford.example.edu | 2016 – 2018",
+      "education",
+      NOW,
+    );
+    expect(degree).toMatchObject({
+      primary: "Stanford University",
+      secondary: "M.S.",
+      detail: "Computer Science",
+      website: "stanford.example.edu",
+    });
+  });
+
+  it("never treats a LinkedIn page or a bare name as a website", () => {
+    const [entry] = parseTimeline(
+      "Node.js Developer | Gamma | https://www.linkedin.com/company/gamma | 2020 – 2021",
+      "experience",
+      NOW,
+    );
+    expect(entry).toMatchObject({ primary: "Node.js Developer", secondary: "Gamma" });
+    expect(entry?.website).toBeUndefined();
+  });
+
   it("splits positions on semicolons and parses title, company and years", () => {
     const entries = parseTimeline(
       "Senior Staff Research Scientist, NVIDIA (2021–Present); Research Scientist, Google Brain (2018–2021)",

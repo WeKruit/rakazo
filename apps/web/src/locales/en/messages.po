@@ -91,6 +91,11 @@ msgstr "{0} connection"
 msgid "{0} default"
 msgstr "{0} default"
 
+#. placeholder {0}: sections.company.size
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{0} employees"
+msgstr "{0} employees"
+
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} handling"
@@ -688,6 +693,14 @@ msgstr "Approval boundaries"
 #: src/pages/shell/message-cards.tsx
 msgid "Approve"
 msgstr "Approve"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr "Approve calibration"
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr "Approve documents"
 
 #: src/pages/shell/message-cards.tsx
 msgid "Approve this server to let your agent use its tools."
@@ -1622,6 +1635,10 @@ msgstr "Confirm password"
 #: src/components/AskCard.tsx
 msgid "Confirm reply"
 msgstr "Confirm reply"
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr "Confirm requirements"
 
 #: src/components/AskCard.tsx
 msgid "Confirm sending email"
@@ -7719,15 +7736,3 @@ msgstr "Your recruiting workspace."
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "Your tasks"
-
-#: src/components/AskCard.tsx
-msgid "Confirm requirements"
-msgstr "Confirm requirements"
-
-#: src/components/AskCard.tsx
-msgid "Approve documents"
-msgstr "Approve documents"
-
-#: src/components/AskCard.tsx
-msgid "Approve calibration"
-msgstr "Approve calibration"
