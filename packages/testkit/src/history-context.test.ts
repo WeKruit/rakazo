@@ -1,14 +1,36 @@
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
 import { PiAgentRuntime } from "@rakazo/adapters";
 import { describe, expect, it } from "vitest";
+import type { ModelEmulatorRequest } from "./model-emulator.js";
 import { startModelEmulator } from "./model-emulator.js";
+
+/** The characters Pi's token estimate counts: message text and tool-call arguments. */
+function textCharacters(request: ModelEmulatorRequest): number {
+  return request.messages.reduce((total, message) => {
+    const content = Array.isArray(message.content)
+      ? message.content.reduce(
+          (sum: number, part: { text?: unknown }) =>
+            sum + (typeof part.text === "string" ? part.text.length : 0),
+          0,
+        )
+      : String(message.content ?? "").length;
+    const calls = (message.tool_calls ?? []).reduce(
+      (sum, call) => sum + call.function.name.length + call.function.arguments.length,
+      0,
+    );
+    return total + content + calls;
+  }, 0);
+}
 
 describe("structured results through real Pi context selection", () => {
   it("preserves valid history JSON and follows a shortened original-text cursor", async () => {
-    const original = `Verified original fact: ORBIT-731.\n${'"\n'.repeat(2000)}`;
+    // Large enough that Pi's four-characters-per-token estimate cannot fit it in the window.
+    const pageLength = 16_000;
+    const original = `Verified original fact: ORBIT-731.\n${'"\n'.repeat(pageLength)}`;
     let cursor = 0;
     let calls = 0;
     const server = await startModelEmulator({
+      compactionSummary: "Earlier diagnostic progress.",
       steps: [
         {
           expect() {},
@@ -28,7 +50,7 @@ describe("structured results through real Pi context selection", () => {
             expect(result.messages[0].truncated).toBe(true);
             cursor = result.messages[0].nextTextOffset;
             expect(cursor).toBeGreaterThan(0);
-            expect(cursor).toBeLessThan(2000);
+            expect(cursor).toBeLessThan(pageLength);
             expect(result.messages[0].text).toBe(original.slice(0, cursor));
           },
           response: () => ({
@@ -77,7 +99,7 @@ describe("structured results through real Pi context selection", () => {
         ],
         executeTool: async (_name, args) => {
           const offset = (args as { textOffset: number }).textOffset;
-          const length = calls++ === 0 ? 2000 : 120;
+          const length = calls++ === 0 ? pageLength : 120;
           return {
             untrusted: true,
             messages: [
@@ -113,10 +135,12 @@ describe("structured results through real Pi context selection", () => {
       let calls = 0;
       const decisions: Array<{ droppedMessages: number; truncatedToolResults: number }> = [];
       const server = await startModelEmulator({
+        compactionSummary: "Earlier diagnostic progress.",
         steps: Array.from({ length: 13 }, (_, index) => ({
           expect(request) {
             const serialized = JSON.stringify(request.messages);
-            expect(Buffer.byteLength(serialized)).toBeLessThan(3584);
+            // Pi estimates four text characters per token; 4096 - 512 output leaves 3584 tokens.
+            expect(textCharacters(request)).toBeLessThan(4 * 3584);
             expect(serialized).toContain("Approval remains pending");
             expect(serialized).not.toContain("obsolete-old-0");
             if (index > 0) {
