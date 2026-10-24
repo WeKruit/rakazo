@@ -64,6 +64,9 @@ function fixture() {
   return { deps, document, findFirst, commit };
 }
 
+const routerDeps = (deps: MemoryDocumentDeps) =>
+  ({ ...deps, env: { deploymentModelConfigured: false } }) as unknown as RouterDeps;
+
 describe("native memory revisions", () => {
   it("carries the editor's loaded revision through a blank-body revocation", async () => {
     const { deps, commit } = fixture();
@@ -136,7 +139,7 @@ describe("native memory revisions", () => {
 
   it("wires authenticated history and CAS through the existing RPC router", async () => {
     const { deps, commit } = fixture();
-    const client = createRouterClient(createRouter(deps as RouterDeps), { context: { actor } });
+    const client = createRouterClient(createRouter(routerDeps(deps)), { context: { actor } });
     const history = await client.memory.history({ documentId: "memory-document" });
     expect(history).toHaveLength(2);
     await client.memory.update({ documentId: "memory-document", content: "", expectedRevision: 2 });
@@ -144,7 +147,7 @@ describe("native memory revisions", () => {
       expect.objectContaining({ expectedRevision: 2 }),
       expect.anything(),
     );
-    const unauthenticated = createRouterClient(createRouter(deps as RouterDeps), { context: {} });
+    const unauthenticated = createRouterClient(createRouter(routerDeps(deps)), { context: {} });
     await expect(
       unauthenticated.memory.history({ documentId: "memory-document" }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
@@ -152,7 +155,7 @@ describe("native memory revisions", () => {
 
   it("rejects a missing loaded revision at the RPC boundary", async () => {
     const { deps, commit } = fixture();
-    const client = createRouterClient(createRouter(deps as RouterDeps), { context: { actor } });
+    const client = createRouterClient(createRouter(routerDeps(deps)), { context: { actor } });
     await expect(
       client.memory.update({
         documentId: "memory-document",
@@ -282,7 +285,7 @@ describePostgres("native memory API ownership and revocation (PostgreSQL)", () =
     await expect(memoryHistory(db.prisma, otherUser, malformed.id)).rejects.toMatchObject({
       code: "NOT_FOUND",
     });
-    const client = createRouterClient(createRouter(deps as RouterDeps), {
+    const client = createRouterClient(createRouter(routerDeps(deps)), {
       context: { actor: otherUser },
     });
     expect(await client.memory.list({})).toEqual([]);
@@ -293,7 +296,7 @@ describePostgres("native memory API ownership and revocation (PostgreSQL)", () =
   });
 
   it("lets one owner's user memory span their bots without sharing it with another user", async () => {
-    const client = createRouterClient(createRouter(deps as RouterDeps), {
+    const client = createRouterClient(createRouter(routerDeps(deps)), {
       context: { actor: owner },
     });
     expect(await client.memory.list({ scope: "user" })).toMatchObject([

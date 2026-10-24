@@ -1695,6 +1695,19 @@ export class McpConnector implements ConnectorProvider {
     return changeVersion;
   }
 
+  private async serverUnchanged(server: McpServer, context: AdapterContext): Promise<boolean> {
+    if (context.signal.aborted) return false;
+    const current = await this.prisma.mcpServer.findFirst({
+      where: { id: server.id, userId: context.userId, spaceId: context.spaceId, enabled: true },
+    });
+    return (
+      current?.revision === server.revision &&
+      current.endpoint === server.endpoint &&
+      current.transport === server.transport &&
+      current.secretId === server.secretId
+    );
+  }
+
   private async sessionFor(server: McpServer, context: AdapterContext): Promise<McpSession> {
     const sessionKey = this.sessionKey(server, context);
     const existing = this.sessions.get(sessionKey);
@@ -1709,12 +1722,14 @@ export class McpConnector implements ConnectorProvider {
         } catch (error) {
           context.signal.throwIfAborted();
           if (!(error instanceof SecretStoreUnavailableError)) {
+            // The idle session's credential was replaced or removed; reconnect below
+            // from the committed record, which reports any remaining failure.
             await this.evict(sessionKey);
-            throw error;
+          } else {
+            // Keep live sessions usable during a store outage. Never log the error:
+            // provider errors can contain credential values or private response data.
+            getLogger().warn("MCP secret revalidation failed; retaining the live session");
           }
-          // Keep live sessions usable during a store outage. Never log the error:
-          // provider errors can contain credential values or private response data.
-          getLogger().warn("MCP secret revalidation failed; retaining the live session");
         }
       }
       if (this.sessions.get(sessionKey) === existing) {
@@ -1727,6 +1742,9 @@ export class McpConnector implements ConnectorProvider {
           }
         } catch (error) {
           await this.evict(sessionKey);
+          // Another connection renewed this grant while the session was idle. Reconnect
+          // from the committed credential only when the server itself is unchanged.
+          if (await this.serverUnchanged(server, context)) return this.sessionFor(server, context);
           throw new Error(sanitizeConnectorError(error, oauthMaterialSecrets(existing.material)));
         }
         if (this.sessions.get(sessionKey) === existing) return existing.session;

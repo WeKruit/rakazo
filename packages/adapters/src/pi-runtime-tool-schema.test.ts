@@ -226,7 +226,9 @@ describe("jsonSchemaParameters", () => {
       "intent",
     ])
       expect(tool.description).toContain(field);
-    expect(tool.description).toContain("runtime attaches the verified current human message");
+    expect(tool.description).toContain(
+      "the runtime adds the verified human instruction only as role authorization",
+    );
     expect(tool.description).toContain("Never invent message IDs, artifact IDs or read timestamps");
     expect(tool.description).not.toContain("expectedRevision:0");
     expect(tool.description).toContain("For JD URLs, call web_fetch before creating the role");
@@ -244,9 +246,9 @@ describe("jsonSchemaParameters", () => {
       "Correct deterministic schema rejections using the actual validator error and read receipt",
     ])
       expect(tool.description).toContain(guidance);
-    expect(tool.description).toContain(
-      "copy unchanged criteria, IDs, sourceRefs, preferences and definitionQuestions",
-    );
+    // Partial updates replace the old copy-everything revise guidance.
+    expect(tool.description).toContain("use update with only what changes");
+    expect(tool.description).toContain("omitted fields keep the saved values");
     expect(tool.description).not.toContain(
       "For the current human JD URL, description or attachment request, send sourceRefs:[]",
     );

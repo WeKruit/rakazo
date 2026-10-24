@@ -192,9 +192,7 @@ describe("lingui catalogs", () => {
       "Cards",
       "Table",
       "Candidate",
-      "Saved assessments",
       "Raw search results",
-      "Unassessed",
       "No saved result rows",
       "Could not load search results",
     ])
@@ -210,12 +208,14 @@ describe("lingui catalogs", () => {
       i18n.activate(locale);
       expect(i18n._({ id: "bn0SqF" }), locale).toBe("Recruiting");
       for (const [id, entry] of entries) {
-        const rendered = i18n._({ id, values: { 0: 2, count: 2 } });
+        const values = Object.fromEntries(
+          [...(entry.message ?? "").matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, "2"]),
+        );
+        const rendered = i18n._({ id, values: { 0: 2, count: 2, ...values } });
         expect(rendered, `${locale} ${id}`).not.toBe(id);
-        if (locale === "en")
-          expect(rendered, id).toBe(
-            entry.message?.replaceAll("{0}", "2").replaceAll("{count}", "2"),
-          );
+        // Plural messages are rendered by ICU; the candidate-count test checks their grammar.
+        if (locale === "en" && !entry.message?.includes(", plural,"))
+          expect(rendered, id).toBe(entry.message?.replaceAll(/\{\w+\}/g, "2"));
       }
     }
   });
@@ -229,7 +229,7 @@ describe("lingui catalogs", () => {
     const candidateCountId = Object.entries(source ?? {}).find(
       ([, entry]) =>
         entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx") &&
-        entry.message?.includes("# candidate"),
+        entry.message === "{0, plural, =1 {# candidate} other {# candidates}}",
     )?.[0];
     expect(candidateCountId).toBeDefined();
     for (const locale of config.locales) {

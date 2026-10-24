@@ -197,6 +197,7 @@ async function runWithModel(
     },
     recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: null })) },
     recruitingCandidate: { count: vi.fn(async () => options.savedRecruitingCandidates ?? 0) },
+    recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
     usageRecord: { create: vi.fn(async () => ({})), createMany: vi.fn(async () => ({ count: 1 })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
