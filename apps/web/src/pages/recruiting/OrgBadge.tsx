@@ -55,18 +55,24 @@ export function CompanyLogo({
 export function OrgBadge({
   name,
   host,
+  kind,
+  description,
   facts = [],
   logo = true,
 }: {
   name: string;
   host?: string | null;
+  /** What it is, such as company, school or lab. */
+  kind?: string | null;
+  description?: string | null;
   facts?: readonly (string | null | undefined)[];
   /** False where a larger logo already sits beside the name. */
   logo?: boolean;
 }) {
-  const lines = [...facts.filter((fact): fact is string => Boolean(fact?.trim())), host].filter(
-    Boolean,
-  );
+  const lines = [
+    ...[kind, description, ...facts].filter((fact): fact is string => Boolean(fact?.trim())),
+    host,
+  ].filter(Boolean);
   return (
     <Tooltip>
       <TooltipTrigger
