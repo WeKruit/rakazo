@@ -406,15 +406,18 @@ export const RecruitingApprovalToolInputSchema = z.discriminatedUnion("stage", [
 ]);
 export type RecruitingApprovalToolInput = z.infer<typeof RecruitingApprovalToolInputSchema>;
 /**
- * What the agent sends. A calibration request may omit the documents approval: the server fills
- * in this role revision's approved documents before the request is saved, so the stored request
- * always matches RecruitingApprovalToolInputSchema.
+ * What the agent sends. A calibration request may omit the documents approval, the profiles and
+ * the rule changes: the server fills in this revision's approved documents and the recorded
+ * calibration round before the request is saved, so the stored request always matches
+ * RecruitingApprovalToolInputSchema.
  */
 export const RecruitingApprovalToolCallSchema = z.discriminatedUnion("stage", [
   RecruitingApprovalToolInputSchema.options[0],
   RecruitingApprovalToolInputSchema.options[1],
   RecruitingApprovalToolInputSchema.options[2].extend({
     documentsApprovalEffectId: RecruitingId.optional(),
+    profiles: RecruitingApprovalToolInputSchema.options[2].shape.profiles.optional(),
+    ruleChanges: RecruitingCalibrationApproval.ruleChanges.default([]),
   }),
 ]);
 
