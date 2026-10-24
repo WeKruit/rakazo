@@ -1,15 +1,25 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Group } from "@rakazo/contracts";
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, Skeleton } from "@rakazo/ui-web";
+import type { Group, RecruitingCorrespondence } from "@rakazo/contracts";
+import {
+  Badge,
+  Button,
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  NativeSelect,
+  Skeleton,
+} from "@rakazo/ui-web";
 import { Check, ChevronRight, PanelLeftOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
 import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
-import type { FunnelStageKey, RoleSummary } from "./dashboard";
+import type { DashboardRoleView, FunnelStageKey, RoleSummary } from "./dashboard";
 import {
   bucketByWeek,
+  dashboardStageView,
   firstName,
   mapWithConcurrency,
   openTasks,
@@ -17,11 +27,20 @@ import {
   readShortlistPages,
   recentRoles,
   roleSummary,
+  weekStart,
 } from "./dashboard";
+import type { ShortlistWeekFilter } from "./dashboard-drilldown";
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
 
-type Overview = { roles: RoleSummary[]; incomplete: boolean };
+type ObservedBooking = { groupId: string; event: RecruitingCorrespondence["events"][number] };
+type Overview = {
+  roles: RoleSummary[];
+  incompleteGroups: string[];
+  missingGroups: string[];
+  bookings: ObservedBooking[];
+  bookingUnknownGroups: string[];
+};
 type OverviewRead = { key: string; data?: Overview; failed?: boolean };
 
 /** Every role's numbers, four roles at a time; cached in the Shell's display cache. */
@@ -50,9 +69,9 @@ function useOverview(
           () => rpc.recruiting.getWorkspace({ threadId: group.threadId }, { signal }),
           signal,
         );
-        if (!workspace) return { summary: null, incomplete: false };
+        if (!workspace) return { groupId: group.id, summary: null, incomplete: false };
         const conversation = { groupId: group.id };
-        const [shortlist, candidates, campaign] = await Promise.all([
+        const [shortlist, candidates, campaign, calendar] = await Promise.all([
           readShortlistPages((cursor) =>
             retryTransientRead(
               () =>
@@ -76,8 +95,12 @@ function useOverview(
             ),
           ),
           optional(() => rpc.recruiting.roleCampaign(conversation, { signal })),
+          optional(() =>
+            rpc.recruiting.correspondence({ ...conversation, view: "interview" }, { signal }),
+          ),
         ]);
         return {
+          groupId: group.id,
           summary: roleSummary(
             group.id,
             workspace.role.id,
@@ -86,9 +109,25 @@ function useOverview(
             campaign ?? null,
           ),
           incomplete: !candidates || !campaign,
+          bookings:
+            calendar?.roleId === workspace.role.id && ["ready", "empty"].includes(calendar.status)
+              ? calendar.events
+                  .filter(
+                    (event) =>
+                      event.kind === "event" &&
+                      (event.status === "confirmed" || event.status === "accepted") &&
+                      Date.parse(event.start) > Date.now(),
+                  )
+                  .map((event) => ({ groupId: group.id, event }))
+              : [],
+          bookingUnknown:
+            !calendar ||
+            calendar.roleId !== workspace.role.id ||
+            !["ready", "empty"].includes(calendar.status) ||
+            calendar.partial,
         };
       } catch {
-        return { summary: null, incomplete: true, failed: true };
+        return { groupId: group.id, summary: null, incomplete: true, failed: true };
       }
     }).then((results) => {
       if (cancelled) return;
@@ -97,7 +136,18 @@ function useOverview(
         return setRead({ key, failed: true });
       const data: Overview = {
         roles: results.flatMap((result) => (result.summary ? [result.summary] : [])),
-        incomplete: results.some((result) => result.incomplete),
+        bookings: results.flatMap((result) =>
+          "bookings" in result ? (result.bookings ?? []) : [],
+        ),
+        bookingUnknownGroups: results
+          .filter((result) => !("bookingUnknown" in result) || result.bookingUnknown)
+          .map((result) => result.groupId),
+        incompleteGroups: results
+          .filter((result) => result.incomplete)
+          .map((result) => result.groupId),
+        missingGroups: results
+          .filter((result) => "failed" in result)
+          .map((result) => result.groupId),
       };
       rememberRecruitingRead(cache, slot, data, epoch);
       setRead({ key, data });
@@ -120,47 +170,197 @@ function useOverview(
   };
 }
 
-function WeeklyShortlist({ roles }: { roles: readonly RoleSummary[] }) {
+type DashboardDrilldown = {
+  roleGroups: ReadonlyMap<string, Group>;
+  onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
+};
+
+function RoleBreakdown({
+  items,
+  view,
+  filterForRole,
+  genericNavigation,
+  roleGroups,
+  onOpenRole,
+}: DashboardDrilldown & {
+  items: readonly { role: RoleSummary; count: number | null; partial?: boolean }[];
+  view: DashboardRoleView;
+  filterForRole?: (role: RoleSummary) => ShortlistWeekFilter;
+  genericNavigation?: boolean;
+}) {
   const { t } = useLingui();
-  const weeks = bucketByWeek(
-    roles.flatMap((role) => role.shortlistedDates),
-    new Date(),
-  );
-  const max = Math.max(1, ...weeks.map((week) => week.count));
   return (
-    <section aria-label={t`Shortlisted profiles`} className="min-w-0">
-      <h3 className="text-sm font-medium">
-        <Trans>Shortlisted profiles</Trans>
-      </h3>
-      <ol className="mt-4 grid h-40 grid-cols-5 items-end gap-2">
-        {weeks.map((week) => {
+    <ul className="mt-3 space-y-1 border-t pt-2" aria-label={t`Projects`} aria-live="polite">
+      {items.map(({ role, count, partial }) => {
+        const group = roleGroups.get(role.roleId);
+        return group ? (
+          <li key={role.roleId}>
+            <Button
+              variant="ghost"
+              className="h-auto w-full justify-between gap-3 px-2 py-2 text-start font-normal"
+              onClick={() =>
+                filterForRole
+                  ? onOpenRole(group.id, view, filterForRole(role))
+                  : onOpenRole(group.id, view)
+              }
+            >
+              <span className="min-w-0 truncate">
+                {group.name}
+                {genericNavigation ? (
+                  <span className="block text-xs text-muted-foreground">
+                    <Trans>View role records</Trans>
+                  </span>
+                ) : null}
+              </span>
+              <span className="shrink-0 tabular-nums">
+                {count === null ? "—" : `${partial ? "≥" : ""}${count}`}
+              </span>
+              <ChevronRight size={14} aria-hidden />
+            </Button>
+          </li>
+        ) : null;
+      })}
+    </ul>
+  );
+}
+
+function WeeklyShortlist({
+  roles,
+  ...drilldown
+}: { roles: readonly RoleSummary[] } & DashboardDrilldown) {
+  const { t } = useLingui();
+  const [period, setPeriod] = useState(4);
+  const [selected, setSelected] = useState<number>();
+  const dates = roles.flatMap((role) => role.shortlistedDates);
+  const weeks = bucketByWeek(dates, new Date(), period);
+  const max = Math.max(1, ...weeks.map((week) => week.count));
+  const recorded = weeks.reduce((sum, week) => sum + week.count, 0);
+  const undated = dates.filter((date) => !date || !Number.isFinite(Date.parse(date))).length;
+  const selectedWeek = weeks.find((week) => week.start.getTime() === selected);
+  const labelIndexes = new Set(
+    Array.from({ length: 4 }, (_, index) => Math.round((index * (period - 1)) / 3)),
+  );
+  return (
+    <section aria-label={t`Shortlisted profiles`} className="min-w-0 rounded-xl bg-muted/40 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium">
+            <Trans>Shortlisted profiles</Trans>
+          </h3>
+          <p
+            data-testid="weekly-shortlist-total"
+            className="mt-1 text-3xl font-semibold tabular-nums"
+          >
+            {recorded}
+          </p>
+        </div>
+        <NativeSelect
+          aria-label={t`Shortlist period`}
+          value={period}
+          onChange={(event) => setPeriod(Number(event.target.value))}
+        >
+          {[4, 8, 12].map((count) => (
+            <option key={count} value={count}>{t`Last ${count} weeks`}</option>
+          ))}
+        </NativeSelect>
+      </div>
+      <ol
+        className="mt-4 grid h-44 items-end gap-2 px-3"
+        style={{ gridTemplateColumns: `repeat(${period}, minmax(0, 1fr))` }}
+      >
+        {weeks.map((week, index) => {
           const label = week.start.toLocaleDateString(undefined, {
             month: "short",
             day: "numeric",
           });
+          const showLabel = labelIndexes.has(index);
           return (
             <li
               key={week.start.toISOString()}
               aria-label={t`Week of ${label}: ${week.count}`}
               className="flex h-full min-w-0 flex-col items-center justify-end gap-1"
             >
-              <span className="text-xs tabular-nums">{week.count}</span>
-              <span
-                aria-hidden="true"
-                className="w-full max-w-12 rounded-t-md bg-primary"
-                style={{ height: `${(week.count / max) * 100}%`, minHeight: 2 }}
-              />
-              <span className="truncate text-xs text-muted-foreground">{label}</span>
+              <Button
+                variant="ghost"
+                className="flex h-full w-full flex-col items-center justify-end gap-1 rounded-md p-0 font-normal"
+                aria-label={t`Inspect week of ${label}`}
+                aria-pressed={selectedWeek === week}
+                onClick={() =>
+                  setSelected(selectedWeek === week ? undefined : week.start.getTime())
+                }
+              >
+                <span className="text-xs tabular-nums">{week.count}</span>
+                <span aria-hidden="true" className="flex h-32 w-full max-w-12 items-end">
+                  <span
+                    className="w-full rounded-t-md bg-primary"
+                    style={{ height: `${(week.count / max) * 100}%`, minHeight: 2 }}
+                  />
+                </span>
+                <span
+                  aria-hidden="true"
+                  className="relative block h-4 w-full text-xs text-muted-foreground"
+                >
+                  {showLabel ? (
+                    <span
+                      data-testid="weekly-shortlist-tick"
+                      className="absolute start-1/2 -translate-x-1/2 whitespace-nowrap"
+                    >
+                      {label}
+                    </span>
+                  ) : null}
+                </span>
+              </Button>
             </li>
           );
         })}
       </ol>
+      {selectedWeek ? (
+        <RoleBreakdown
+          {...drilldown}
+          view="contacts"
+          filterForRole={(role) => {
+            const before = new Date(selectedWeek.start);
+            before.setDate(before.getDate() + 7);
+            return {
+              kind: "shortlisted-week",
+              roleId: role.roleId,
+              from: selectedWeek.start.toISOString(),
+              before: before.toISOString(),
+              observedThrough: new Date().toISOString(),
+            };
+          }}
+          items={roles.map((role) => ({
+            role,
+            count: role.shortlistedDates.filter((value) => {
+              const time = value ? Date.parse(value) : Number.NaN;
+              return (
+                Number.isFinite(time) &&
+                time <= Date.now() &&
+                weekStart(new Date(time)).getTime() === selectedWeek.start.getTime()
+              );
+            }).length,
+          }))}
+        />
+      ) : null}
+      {undated ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          <Trans>{undated} without a recorded date</Trans>
+        </p>
+      ) : null}
     </section>
   );
 }
 
-function OutreachFunnel({ roles }: { roles: readonly RoleSummary[] }) {
+function OutreachFunnel({
+  roles,
+  incomplete,
+  ...drilldown
+}: {
+  roles: readonly RoleSummary[];
+  incomplete: boolean;
+} & DashboardDrilldown) {
   const { t } = useLingui();
+  const [selected, setSelected] = useState<FunnelStageKey>();
   const labels: Record<FunnelStageKey, string> = {
     shortlisted: t`Shortlisted`,
     contacted: t`Contacted`,
@@ -168,31 +368,69 @@ function OutreachFunnel({ roles }: { roles: readonly RoleSummary[] }) {
     interested: t`Interested`,
   };
   const stages = outreachFunnel(roles);
-  const base = stages[0]?.count || 0;
   return (
-    <section aria-label={t`Outreach conversion`} className="min-w-0">
+    <section aria-label={t`Outreach funnel`} className="min-w-0 rounded-xl bg-muted/40 p-4">
       <h3 className="text-sm font-medium">
-        <Trans>Outreach conversion</Trans>
+        <Trans>Outreach funnel</Trans>
       </h3>
-      <ol className="mt-4 grid grid-cols-4 gap-2">
-        {stages.map((stage) => (
-          <li key={stage.key} className="flex min-w-0 flex-col gap-1">
-            <span className="truncate text-xs text-muted-foreground">{labels[stage.key]}</span>
-            <span className="text-lg font-semibold tabular-nums">{stage.count ?? "—"}</span>
-            <span className="text-xs tabular-nums text-muted-foreground">
-              {stage.percent === null ? " " : `${stage.percent}%`}
-            </span>
-            <span aria-hidden="true" className="flex h-20 items-end rounded-md bg-muted">
-              <span
-                className="w-full rounded-md bg-primary"
-                style={{
-                  height: `${base && stage.count ? (stage.count / base) * 100 : 0}%`,
-                }}
-              />
-            </span>
-          </li>
-        ))}
+      <p className="mt-1 text-xs text-muted-foreground">
+        <Trans>Current totals · all dates</Trans>
+      </p>
+      <ol className="mt-4 grid grid-cols-2 gap-2">
+        {stages.map((stage) => {
+          const partial = stage.count !== null && (stage.partial || incomplete);
+          return (
+            <li key={stage.key} className="flex min-w-0 flex-col gap-1">
+              <Button
+                variant="ghost"
+                className="h-auto w-full flex-col items-stretch gap-1 rounded-lg bg-card/80 p-3 text-start whitespace-normal font-normal hover:bg-card"
+                aria-label={t`Inspect ${labels[stage.key]}`}
+                aria-pressed={selected === stage.key}
+                onClick={() => setSelected(selected === stage.key ? undefined : stage.key)}
+              >
+                <span className="break-words text-xs text-muted-foreground">
+                  {labels[stage.key]}
+                </span>
+                <span className="text-lg font-semibold tabular-nums">
+                  {stage.count === null ? "—" : `${partial ? "≥" : ""}${stage.count}`}
+                </span>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {stage.count === null ? (
+                    <Trans>Unknown</Trans>
+                  ) : partial ? (
+                    <Trans>Partial data</Trans>
+                  ) : (
+                    " "
+                  )}
+                </span>
+              </Button>
+            </li>
+          );
+        })}
       </ol>
+      {selected ? (
+        <RoleBreakdown
+          {...drilldown}
+          view={dashboardStageView(selected)}
+          genericNavigation={selected !== "shortlisted"}
+          items={roles.map((role) => ({
+            role,
+            count: role[selected],
+            partial: selected === "interested" && role.interestedPartial,
+          }))}
+        />
+      ) : null}
+      {selected && selected !== "shortlisted" ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          <Trans>
+            Opens this role’s records. The destination is not filtered to this metric’s exact
+            candidates.
+          </Trans>
+        </p>
+      ) : null}
+      <p className="mt-3 text-xs text-muted-foreground">
+        <Trans>Send totals are not available from these records.</Trans>
+      </p>
     </section>
   );
 }
@@ -203,12 +441,14 @@ function YourTasks({
   refreshSignal,
   roleGroups,
   onOpenRole,
+  project,
 }: {
   scope: string | undefined;
   refreshSignal: number;
   /** Role id → its conversation and name, for reminders tied to a role. */
   roleGroups: ReadonlyMap<string, Group>;
-  onOpenRole: (groupId: string) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
+  project: string | null;
 }) {
   const { t } = useLingui();
   const [reload, setReload] = useState(0);
@@ -219,7 +459,9 @@ function YourTasks({
     rpc.recruiting.reminders.list({ status: "open" }),
   );
   const tasks = openTasks(read.data?.items ?? [], new Date()).filter(
-    ({ reminder }) => !done.has(reminder.id),
+    ({ reminder }) =>
+      !done.has(reminder.id) &&
+      (!project || Boolean(reminder.roleId && roleGroups.get(reminder.roleId)?.id === project)),
   );
   async function complete(id: string) {
     setSaving(id);
@@ -237,7 +479,9 @@ function YourTasks({
     <Card>
       <CardHeader>
         <CardTitle>
-          <Trans>Your tasks</Trans>
+          <h2>
+            <Trans>Your tasks</Trans>
+          </h2>
         </CardTitle>
       </CardHeader>
       <CardContent className="px-2">
@@ -346,13 +590,31 @@ export function HomeDashboard({
   /** User and Space the cached overview belongs to. */
   readCacheScope?: string;
   refreshSignal?: number;
-  onOpenRole: (groupId: string) => void;
+  onOpenRole: (groupId: string, view?: DashboardRoleView, filter?: ShortlistWeekFilter) => void;
   onOpenNavigation?: () => void;
   navigationCollapsed?: boolean;
 }) {
   const { t } = useLingui();
   const overview = useOverview(groups, readCache, readCacheScope, refreshSignal);
-  const recents = recentRoles(groups);
+  const [selection, setSelection] = useState<{ scope: string | undefined; id: string | null }>({
+    scope: readCacheScope,
+    id: null,
+  });
+  const activeGroups = groups.filter((group) => !group.archivedAt);
+  const project =
+    selection.scope === readCacheScope && activeGroups.some((group) => group.id === selection.id)
+      ? selection.id
+      : null;
+  const selectedGroups = project
+    ? activeGroups.filter((group) => group.id === project)
+    : activeGroups;
+  const selectedRoles = (overview.data?.roles ?? []).filter((role) =>
+    selectedGroups.some((group) => group.id === role.groupId),
+  );
+  const incomplete =
+    overview.data?.incompleteGroups.some((id) => !project || id === project) ?? false;
+  const missing = overview.data?.missingGroups.some((id) => !project || id === project) ?? false;
+  const recents = recentRoles(selectedGroups);
   const name = firstName(userName);
   const roleGroups = new Map(
     (overview.data?.roles ?? []).flatMap((role) => {
@@ -363,7 +625,7 @@ export function HomeDashboard({
   return (
     <div className="rk-scroll min-h-0 flex-1 overflow-y-auto bg-background">
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {onOpenNavigation ? (
             <Button
               variant="ghost"
@@ -378,11 +640,32 @@ export function HomeDashboard({
           <h1 className="text-2xl font-semibold tracking-tight" dir="auto">
             {name ? <Trans>Hello, {name}</Trans> : <Trans>Hello</Trans>}
           </h1>
+          <div className="ms-auto w-full min-w-0 sm:w-64">
+            <NativeSelect
+              aria-label={t`Project`}
+              className="w-full"
+              value={project ?? ""}
+              onChange={(event) =>
+                setSelection({ scope: readCacheScope, id: event.target.value || null })
+              }
+            >
+              <option value="">
+                <Trans>All projects</Trans>
+              </option>
+              {activeGroups.map((group) => (
+                <option key={group.id} value={group.id}>
+                  {group.name}
+                </option>
+              ))}
+            </NativeSelect>
+          </div>
         </div>
         <Card>
           <CardHeader>
             <CardTitle>
-              <Trans>Overview</Trans>
+              <h2>
+                <Trans>Overview</Trans>
+              </h2>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -392,17 +675,32 @@ export function HomeDashboard({
               </RetryNotice>
             ) : !overview.data ? (
               <OverviewSkeleton />
-            ) : overview.data.roles.length === 0 ? (
-              <p className="py-6 text-sm text-muted-foreground">
-                <Trans>No shortlisted profiles yet.</Trans>
-              </p>
+            ) : selectedRoles.length === 0 ? (
+              missing ? (
+                <RetryNotice onRetry={overview.retry}>
+                  <Trans>Could not load your overview.</Trans>
+                </RetryNotice>
+              ) : (
+                <p className="py-6 text-sm text-muted-foreground">
+                  <Trans>No saved overview for these projects.</Trans>
+                </p>
+              )
             ) : (
               <>
                 <div className="grid gap-8 md:grid-cols-2">
-                  <WeeklyShortlist roles={overview.data.roles} />
-                  <OutreachFunnel roles={overview.data.roles} />
+                  <WeeklyShortlist
+                    roles={selectedRoles}
+                    roleGroups={roleGroups}
+                    onOpenRole={onOpenRole}
+                  />
+                  <OutreachFunnel
+                    roles={selectedRoles}
+                    incomplete={missing}
+                    roleGroups={roleGroups}
+                    onOpenRole={onOpenRole}
+                  />
                 </div>
-                {overview.data.incomplete ? (
+                {incomplete ? (
                   <RetryNotice onRetry={overview.retry}>
                     <Trans>Some roles could not be read.</Trans>
                   </RetryNotice>
@@ -411,11 +709,76 @@ export function HomeDashboard({
             )}
           </CardContent>
         </Card>
+        {overview.data ? (
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h2>
+                  <Trans>Upcoming recorded bookings</Trans>
+                </h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="mb-3 text-xs text-muted-foreground">
+                <Trans>
+                  Future confirmed events from saved calendar checks, shown in your local time. This
+                  is a recorded subset, not all bookings or availability.
+                </Trans>
+              </p>
+              <ul className="space-y-2" aria-label={t`Upcoming recorded bookings`}>
+                {overview.data.bookings
+                  .filter((booking) => !project || booking.groupId === project)
+                  .sort(
+                    (left, right) => Date.parse(left.event.start) - Date.parse(right.event.start),
+                  )
+                  .slice(0, 6)
+                  .map((booking) => {
+                    const group = groups.find((group) => group.id === booking.groupId);
+                    return group ? (
+                      <li key={JSON.stringify([booking.groupId, booking.event.id])}>
+                        <Button
+                          variant="ghost"
+                          className="h-auto w-full justify-between gap-3 whitespace-normal text-start"
+                          onClick={() => onOpenRole(booking.groupId, "interview")}
+                        >
+                          <span>
+                            <span className="block">
+                              {booking.event.title || t`Recorded event`}
+                            </span>
+                            <span className="block text-xs text-muted-foreground">
+                              {group.name}
+                            </span>
+                          </span>
+                          <time dateTime={booking.event.start} className="text-xs">
+                            {new Date(booking.event.start).toLocaleString()}
+                          </time>
+                        </Button>
+                      </li>
+                    ) : null;
+                  })}
+              </ul>
+              {!overview.data.bookings.some(
+                (booking) => !project || booking.groupId === project,
+              ) ? (
+                <p className="text-sm text-muted-foreground">
+                  <Trans>No future confirmed event appears in these saved checks.</Trans>
+                </p>
+              ) : null}
+              {overview.data.bookingUnknownGroups.some((id) => !project || id === project) ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  <Trans>Some role calendar records are unavailable or partial.</Trans>
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
         <div className="grid gap-6 md:grid-cols-2">
           <Card>
             <CardHeader>
               <CardTitle>
-                <Trans>Recents</Trans>
+                <h2>
+                  <Trans>Recents</Trans>
+                </h2>
               </CardTitle>
             </CardHeader>
             <CardContent className="px-2">
@@ -447,10 +810,12 @@ export function HomeDashboard({
             </CardContent>
           </Card>
           <YourTasks
+            key={readCacheScope}
             scope={readCacheScope}
             refreshSignal={refreshSignal}
             roleGroups={roleGroups}
             onOpenRole={onOpenRole}
+            project={project}
           />
         </div>
       </div>

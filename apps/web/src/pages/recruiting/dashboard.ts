@@ -18,21 +18,41 @@ export type RoleSummary = {
   shortlisted: number;
   /** Recorded shortlist dates; unknown historic dates remain null. */
   shortlistedDates: readonly (string | null)[];
-  /** People in the role's launched outreach campaign; null without a readable campaign. */
+  /** Confirmed sent-contact count; campaign enrollment alone cannot establish it. */
   contacted: number | null;
   /** CRM contacts whose outreach status is `replied`; null without a readable CRM binding. */
   replied: number | null;
   /** Campaign leads marked interested or further (meeting booked/completed, won); null without a campaign. */
   interested: number | null;
+  /** An explicitly partial observation must not be presented as a complete total. */
+  interestedPartial?: boolean;
 };
 
 export type WeekBucket = { start: Date; count: number };
 export type FunnelStageKey = "shortlisted" | "contacted" | "replied" | "interested";
+export type DashboardRoleView =
+  | "results"
+  | "shortlist"
+  | "contacts"
+  | "sequence"
+  | "inbox"
+  | "interview";
+
+/** Open the existing surface that owns this evidence; no unsupported cohort filter is invented. */
+export function dashboardStageView(stage: FunnelStageKey): DashboardRoleView {
+  return {
+    shortlisted: "shortlist",
+    contacted: "sequence",
+    replied: "inbox",
+    interested: "contacts",
+  }[stage] as DashboardRoleView;
+}
+
 export type FunnelStage = {
   key: FunnelStageKey;
   count: number | null;
-  /** Share of the first stage, 0–100, rounded; null when either count is unknown or zero. */
-  percent: number | null;
+  /** The count is a lower bound from the available records, not a complete total. */
+  partial: boolean;
 };
 
 /** Local midnight of the Monday that starts `date`'s week. */
@@ -52,7 +72,7 @@ export function bucketByWeek(dates: Iterable<string | null>, now: Date, weeks = 
   });
   for (const value of dates) {
     const time = value ? Date.parse(value) : Number.NaN;
-    if (!Number.isFinite(time)) continue;
+    if (!Number.isFinite(time) || time > now.getTime()) continue;
     const start = weekStart(new Date(time)).getTime();
     const bucket = buckets.find((item) => item.start.getTime() === start);
     if (bucket) bucket.count++;
@@ -61,11 +81,11 @@ export function bucketByWeek(dates: Iterable<string | null>, now: Date, weeks = 
 }
 
 const sumKnown = (values: (number | null)[]) =>
-  values.some((value) => value !== null)
+  values.length > 0 && values.every((value) => value !== null)
     ? values.reduce<number>((total, value) => total + (value ?? 0), 0)
     : null;
 
-/** Shortlisted → Contacted → Replied → Interested across roles; unknown stays null. */
+/** Current stage counts across roles; unknown and partial reads remain distinct. */
 export function outreachFunnel(roles: readonly RoleSummary[]): FunnelStage[] {
   const counts: Record<FunnelStageKey, number | null> = {
     shortlisted: sumKnown(roles.map((role) => role.shortlisted)),
@@ -73,13 +93,16 @@ export function outreachFunnel(roles: readonly RoleSummary[]): FunnelStage[] {
     replied: sumKnown(roles.map((role) => role.replied)),
     interested: sumKnown(roles.map((role) => role.interested)),
   };
-  const base = counts.shortlisted;
   return (["shortlisted", "contacted", "replied", "interested"] as const).map((key) => {
     const count = counts[key];
     return {
       key,
       count,
-      percent: count === null || !base ? null : Math.round((count / base) * 100),
+      partial:
+        count !== null &&
+        roles.some(
+          (role) => role[key] === null || (key === "interested" && role.interestedPartial),
+        ),
     };
   });
 }
@@ -87,24 +110,32 @@ export function outreachFunnel(roles: readonly RoleSummary[]): FunnelStage[] {
 /** Instantly lead interest values that mean interested or further along. */
 const INTERESTED = new Set([1, 2, 3, 4]);
 
-/** Contacted and interested from the role's campaign read; unknown without a launched campaign. */
+/** Campaign membership/status is not a sent receipt. Interest uses explicit recorded values only. */
 export function campaignStages(campaign: RecruitingRoleCampaign | null) {
-  if (campaign?.status !== "ready" || !campaign.campaign) {
-    return { contacted: null, interested: null };
+  if (
+    campaign?.status !== "ready" ||
+    !campaign.campaign ||
+    campaign.campaign.status === null ||
+    campaign.leadsComplete !== true
+  ) {
+    return { contacted: null, interested: null, interestedPartial: false };
   }
-  // A draft (0) campaign has sent nothing yet.
-  const launched = campaign.campaign.status !== 0;
+  // Draft campaigns have sent nothing. Enrollment/status does not prove actual sends.
   return {
-    contacted: launched ? campaign.leads.length : 0,
+    contacted: campaign.campaign.status === 0 ? 0 : null,
     interested: campaign.leads.filter(
       (lead) => lead.interestStatus !== null && INTERESTED.has(lead.interestStatus),
     ).length,
+    // Only a complete lead read supplies an exact interest count.
+    interestedPartial: false,
   };
 }
 
-/** Replied from the merged role read's CRM outreach counts; unknown without a readable CRM. */
+/** An exact reply total requires both authorized CRM data and complete count coverage. */
 export function crmReplied(candidates: RecruitingRoleCandidatesOutput | null) {
-  return candidates?.crmStatus === "ok" ? candidates.counts.replied : null;
+  return candidates?.crmStatus === "ok" && candidates.crmCountsComplete === true
+    ? candidates.counts.replied
+    : null;
 }
 
 export function roleSummary(

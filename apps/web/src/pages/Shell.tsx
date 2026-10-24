@@ -312,6 +312,7 @@ import type {
   CrmBrowseSelection,
   CrmReplyDraftContext,
 } from "./RecruitingPanel";
+import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingPanel } from "./RecruitingPanel";
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import type { RoutineDraftState } from "./RoutineEditor";
@@ -328,7 +329,10 @@ import {
   RecruitingDetailProvider,
   useRecruitingDetailController,
 } from "./recruiting";
+import { readShortlistWeekFilter, writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { HomeDashboard } from "./recruiting/HomeDashboard";
+import { InterviewTab } from "./recruiting/InterviewTab";
+import { SequenceTab } from "./recruiting/SequenceTab";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { CalibrationRoundCard } from "./recruiting/CalibrationRound";
 import { RoleSetupCard } from "./recruiting/RoleSetup";
@@ -2652,6 +2656,12 @@ export function ShellPage() {
   );
   const currentCorrespondenceScope = useRef(correspondenceScope);
   currentCorrespondenceScope.current = correspondenceScope;
+  const [selectedSchedulingPlan, setSelectedSchedulingPlan] = useState<{
+    scope: string | undefined;
+    threadId: string;
+    emailId: string;
+    id: string;
+  } | null>(null);
   const [selectedCorrespondence, setSelectedCorrespondence] = useState<{
     scope: typeof correspondenceScope;
     reference: RecruitingCorrespondenceReference;
@@ -2663,6 +2673,11 @@ export function ShellPage() {
         !discussionScope.current.active
       )
         return;
+      setSelectedSchedulingPlan((current) =>
+        current && reference && current.threadId === reference.threadId && current.emailId === reference.emailId
+          ? current
+          : null,
+      );
       setSelectedCorrespondence(
         reference && recruitingWorkspaceView === "inbox" && !workspaceNewRole
           ? { scope: correspondenceScope, reference }
@@ -3445,6 +3460,11 @@ export function ShellPage() {
             selectedContact?.scope === currentRecruitingCacheScope.current
               ? selectedContact?.contact
               : undefined,
+            selectedSchedulingPlan &&
+            selectedSchedulingPlan.scope === currentRecruitingCacheScope.current &&
+            selectedSchedulingPlan.threadId === knownThreadId
+              ? selectedSchedulingPlan.id
+              : undefined,
           );
       const correspondenceReference =
         !reroutedToGroup &&
@@ -3646,12 +3666,85 @@ export function ShellPage() {
       pendingAttachments,
       sending,
       selectedCorrespondence,
+      selectedSchedulingPlan,
+      knownThreadId,
       selectedContact,
       chatRoleTitle,
       showToolActivity,
       t,
     ],
   );
+  const [openingCrmRole, setOpeningCrmRole] = useState<{
+    selection: CrmBrowseSelection;
+    view: RecruitingWorkspaceView;
+    error?: string;
+  } | null>(null);
+  const crmRoleOpenRequest = useRef(0);
+  const crmOpenLocation = JSON.stringify([groupId, active?.id, searchParams.toString()]);
+  const currentCrmOpenLocation = useRef(crmOpenLocation);
+  currentCrmOpenLocation.current = crmOpenLocation;
+  function crmRoleBotIds() {
+    return activeGroup && canCreateRoleFrom(activeGroup.id)
+      ? activeGroup.members.map((member) => member.botId)
+      : ["main", "outreach", "scheduling"].flatMap((key) => {
+          const bot = managedConnectionBots.find(
+            (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
+          );
+          return bot ? [bot.id] : [];
+        });
+  }
+  async function openCrmRole(selection: CrmBrowseSelection, view: RecruitingWorkspaceView = "results") {
+    if (!selection.crmRoleId) return;
+    const request = ++crmRoleOpenRequest.current;
+    const submittedScope = crmComposerScope;
+    const submittedUser = botsRefreshUser.current;
+    const submittedSpace = bootstrapMe?.spaceId;
+    const stillCurrent = () => request === crmRoleOpenRequest.current &&
+      currentCrmOpenLocation.current === crmOpenLocation &&
+      currentCrmComposerScope.current === submittedScope &&
+      botsRefreshUser.current === submittedUser &&
+      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
+    setOpeningCrmRole({ selection, view });
+    try {
+      const botIds = crmRoleBotIds();
+      if (botIds.length < GROUP_MEMBER_MIN) throw new Error(t`The recruiting team is not ready yet.`);
+      const group = await rpc.groups.create({
+        name: t`Recruiting`, botIds,
+        crmRoleReference: {
+          sourceId: selection.serverId, serverRevision: selection.serverRevision,
+          organizationId: selection.organizationId, crmRoleId: selection.crmRoleId,
+        },
+      });
+      if (!stillCurrent()) return;
+      setGroups((current) => current.some((item) => item.id === group.id)
+        ? current.map((item) => item.id === group.id ? group : item) : [group, ...current]);
+      setSelectedContact(null);
+      setSelectedCorrespondence(null);
+      setPanel(null);
+      setMobileSidebarOpen(false);
+      setRoleChatOpen(true);
+      setOpeningCrmRole(null);
+      const search = new URLSearchParams({ view });
+      // Preserve an exact person link while converting an older role URL.
+      if (matchesCrmRole(selection, crmSelection) && searchParams.get("crmCandidate"))
+        search.set("crmCandidate", searchParams.get("crmCandidate")!);
+      navigate(`/app/g/${group.id}?${search}`);
+      void refreshBots().catch(() => undefined);
+    } catch (error) {
+      if (stillCurrent()) setOpeningCrmRole({ selection, view, error: errorText(error, t`Could not open this role.`) });
+    } finally {
+      if (!stillCurrent() && request === crmRoleOpenRequest.current) setOpeningCrmRole(null);
+    }
+  }
+  const legacyCrmOpenKey = crmMode && crmSelection?.crmRoleId
+    ? JSON.stringify([userId, bootstrapMe?.spaceId, crmSelection]) : null;
+  const openedLegacyCrmKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!legacyCrmOpenKey) { openedLegacyCrmKey.current = null; return; }
+    if (!initialBotsLoaded || !crmSelection || openedLegacyCrmKey.current === legacyCrmOpenKey) return;
+    openedLegacyCrmKey.current = legacyCrmOpenKey;
+    void openCrmRole(crmSelection, recruitingWorkspaceView);
+  }, [legacyCrmOpenKey, initialBotsLoaded]);
   const pendingCrmRoleSends = useRef(
     new Map<
       string,
@@ -3676,15 +3769,7 @@ export function ShellPage() {
       (selectedSpaceId() ?? submittedSpace) === submittedSpace;
     const attachments = attachmentsForThread(pendingAttachments, composerDraftKey);
     if (!text.trim() && !attachments.length) return false;
-    const botIds =
-      activeGroup && canCreateRoleFrom(activeGroup.id)
-        ? activeGroup.members.map((member) => member.botId)
-        : ["main", "outreach", "scheduling"].flatMap((key) => {
-            const bot = managedConnectionBots.find(
-              (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
-            );
-            return bot ? [bot.id] : [];
-          });
+    const botIds = crmRoleBotIds();
     if (botIds.length < GROUP_MEMBER_MIN) return false;
     const reference = {
       sourceId: crmSelection.serverId,
@@ -4435,16 +4520,28 @@ export function ShellPage() {
     />
   );
 
+  const reviewSchedulingPlan = (handoff: SchedulingPlanHandoff) => {
+    if (handoff.plan.threadId !== knownThreadId) return;
+    setSelectedSchedulingPlan({
+      scope: recruitingCacheScope,
+      threadId: handoff.plan.threadId,
+      emailId: handoff.plan.originalEmail.emailId,
+      id: handoff.plan.id,
+    });
+    openRoleChat(handoff.text);
+  };
+
   // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
   const nativeCorrespondence =
-    activeSnapshot?.threadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
+    knownThreadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
       <RecruitingCorrespondence
         view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
         messages={transcriptMessages}
         artifactTarget={transcriptArtifactTarget}
-        threadId={activeSnapshot.threadId}
+        threadId={knownThreadId}
         onEmailSelection={selectCorrespondence}
-        outreachBotIds={(activeSnapshot.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
+        onReviewSchedulingPlan={reviewSchedulingPlan}
+        outreachBotIds={(activeSnapshot?.members ?? []).filter((member) => member.name === "Outreach").map((member) => member.botId)}
         onConversation={(text) => {
           openRoleChat(text);
         }}
@@ -4543,12 +4640,7 @@ export function ShellPage() {
               onPrefetchRole={(id) => prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)}
               crmContext={recruitingCacheScope ? { target: transcriptArtifactTarget, scope: recruitingCacheScope, cache: recruitingReadCache.current, refreshSignal: recruitingRefresh } : undefined}
               crmSelection={effectiveCrmSelection}
-              onOpenCrmRole={(selection, linkedGroupId) => {
-                setPanel(null); setMobileSidebarOpen(false); setRoleChatOpen(true);
-                const search = new URLSearchParams({ view: "contacts", crmServer: selection.serverId, crmRevision: String(selection.serverRevision), crmOrganization: selection.organizationId, ...(selection.crmRoleId ? { crmRole: selection.crmRoleId } : {}) });
-                if (linkedGroupId) navigate(`/app/g/${linkedGroupId}?view=contacts`);
-                else setSearchParams(search);
-              }}
+              onOpenCrmRole={(selection) => void openCrmRole(selection)}
               groups={groups}
               archivedGroups={archivedGroups}
               archivedOpen={archivedOpen}
@@ -5325,7 +5417,7 @@ export function ShellPage() {
       )}
 
       {homeView ? <HomeDashboard userName={session.data?.user.name} groups={groups} readCache={recruitingReadCache.current} readCacheScope={userId && bootstrapMe?.spaceId ? JSON.stringify([userId, bootstrapMe.spaceId]) : undefined} refreshSignal={recruitingRefresh}
-        onOpenRole={(id) => navigate(`/app/g/${id}?view=results`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
+        onOpenRole={(id, view = "results", filter) => navigate(`/app/g/${id}?${writeShortlistWeekFilter(new URLSearchParams({ view }), filter)}`)} navigationCollapsed={botsSidebarCollapsed} onOpenNavigation={() => { setBotsSidebarCollapsedPref(false); setMobileSidebarOpen(true); }} /> : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
       <main
         aria-hidden={mobileSidebarOpen || undefined}
@@ -5368,6 +5460,9 @@ export function ShellPage() {
             readCacheScope={recruitingCacheScope}
           />
         ) : null}
+        {openingCrmRole ? <div className="px-6 py-3">
+          {openingCrmRole.error ? <RetryNotice onRetry={() => void openCrmRole(openingCrmRole.selection, openingCrmRole.view)}>{openingCrmRole.error}</RetryNotice> : <p role="status"><Trans>Opening role…</Trans></p>}
+        </div> : null}
         {workspaceNewRole ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
             {roleCreationForm}
@@ -5379,7 +5474,9 @@ export function ShellPage() {
         {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">{effectiveCrmSelection ? <RecruitingPanel
           threadId={activeSnapshot.threadId} botId={inGroup ? undefined : active?.id} groupId={inGroup ? groupId : undefined}
           readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} refreshSignal={recruitingRefresh} onClose={() => {}}
-          roleConversation={!emptyCrmChat} correspondence={nativeCorrespondence} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
+          shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined}
+          onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
+          onReviewSchedulingPlan={reviewSchedulingPlan} roleConversation={!emptyCrmChat} correspondence={nativeCorrespondence} onBrowseCandidates={() => openRecruitingView("results")} onDiscussCandidate={discussCandidate} onCandidateFeedback={feedbackCandidate} candidateFeedbackRecipients={candidateFeedbackRecipients}
           crmBrowse={{ selection: effectiveCrmSelection, view: recruitingWorkspaceView, candidateId: searchParams.get("crmCandidate") ?? undefined,
             onSelectCandidate: (id, view = "inbox") => setSearchParams(current => { const next = new URLSearchParams(current); next.set("crmCandidate", id); next.set("view", view); return next; }),
             onDraftReply: boundRoleCrmMode && !crmMode ? draftCrmReply : undefined,
@@ -5387,7 +5484,14 @@ export function ShellPage() {
         /> : <p role="alert"><Trans>Choose the role again.</Trans></p>}</div> : null}
         {workspaceCorrespondence && activeSnapshot?.threadId ? (
           <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
-            {nativeCorrespondence}
+            {currentBindingRead?.workspace && recruitingWorkspaceView !== "inbox" ? (
+              <div className="recruiting-workspace-content">
+                {recruitingWorkspaceView === "sequence" ? <>
+                  <SequenceTab roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />
+                  <details className="mt-6"><summary><Trans>Outreach drafts</Trans></summary>{nativeCorrespondence}</details>
+                </> : <InterviewTab onReviewSchedulingPlan={reviewSchedulingPlan} threadId={knownThreadId} roleId={currentBindingRead.workspace.role.id} spaceId={currentBindingRead.workspace.role.spaceId} conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }} crmTarget={currentBindingRead.workspace.crmTarget?.target ?? null} refreshSignal={recruitingRefresh} readCache={recruitingReadCache.current} readCacheScope={recruitingCacheScope} />}
+              </div>
+            ) : nativeCorrespondence}
           </div>
         ) : null}
         {workspaceCandidates && knownThreadId ? (
@@ -5406,6 +5510,8 @@ export function ShellPage() {
                 key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
                 presentation="workspace"
                 view={recruitingWorkspaceView === "shortlist" ? "shortlist" : recruitingWorkspaceView === "workflow" ? "results" : "contacts"}
+                shortlistWeekFilter={recruitingWorkspaceView === "contacts" ? readShortlistWeekFilter(searchParams) : undefined}
+                onClearShortlistWeekFilter={() => setSearchParams(current => writeShortlistWeekFilter(current))}
                 threadId={knownThreadId}
                 botId={inGroup ? undefined : active?.id}
                 groupId={inGroup ? groupId : undefined}
@@ -5430,15 +5536,13 @@ export function ShellPage() {
             </div>
           </div>
         ) : null}
-        {roleChatWorkspace && !roleChatOpen ? <Button ref={roleChatTrigger} className="absolute bottom-4 end-4 z-20" aria-label={t`Open role chat`} aria-controls={roleChatId} aria-expanded={false} onClick={() => openRoleChat()}><Sparkles size={17} aria-hidden /><Trans>Chat with WeKruit</Trans></Button> : null}
+        {roleChatWorkspace && !roleChatOpen ? <Button ref={roleChatTrigger} className="hire-role-chat-trigger absolute bottom-4 end-4 z-20" aria-label={t`Open role chat`} aria-controls={roleChatId} aria-expanded={false} onClick={() => openRoleChat()}><Sparkles size={17} aria-hidden /><Trans>Chat with WeKruit</Trans></Button> : null}
         <div className={workspaceBrief ? "hire-brief-view rk-scroll" : "contents"}>
           {workspaceBrief ? (
             <div className="hire-brief-top">
               <div>
-                <span className="hire-eyebrow">{recruitingWorkspaceView === "brief" ? <Trans>Job Brief</Trans> : <Trans>Client feedback</Trans>}</span>
-                <h1>{recruitingWorkspaceView === "brief" ? <Trans>Let’s define the search.</Trans> : <Trans>Let’s sharpen the search.</Trans>}</h1>
+                <h1>{recruitingWorkspaceView === "brief" ? <Trans>Job Brief</Trans> : <Trans>Client feedback</Trans>}</h1>
                 <p className="hire-brief-role" dir="auto">{inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}</p>
-                <p>{recruitingWorkspaceView === "brief" ? <Trans>Describe the role and clarify what matters in the conversation.</Trans> : <Trans>Tell WeKruit what to change for a person, a few candidates, or the whole search.</Trans>}</p>
               </div>
               <Button variant="outline" className="hire-outline-button" onClick={() => openRecruitingView("results")}><Trans>Back to results</Trans></Button>
             </div>
@@ -5614,7 +5718,7 @@ export function ShellPage() {
         ) : (
           <Transcript
             key={emptyCrmChat ? composerDraftKey : activeSnapshot?.threadId}
-            narrow={roleChatWorkspace}
+            narrow={roleChatWorkspace || !showToolActivity}
             visible={!workspaceFull || (roleChatWorkspace && roleChatOpen)}
             scrollRef={messageScroll}
             scrollRequest={scrollRequest}
@@ -5701,9 +5805,10 @@ export function ShellPage() {
             draftKey={composerDraftKey}
             contextKey={selectedCorrespondence?.scope === correspondenceScope ? JSON.stringify([userId, bootstrapMe?.spaceId, selectedCorrespondence.reference.threadId, selectedCorrespondence.reference.roleId, selectedCorrespondence.reference.sourceId, selectedCorrespondence.reference.providerMessageId, selectedCorrespondence.reference.emailId]) : undefined}
             enterToSend={enterToSend}
+            compact={!showToolActivity}
             activeName={emptyCrmChat ? t`Role conversation` : inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : active?.name}
             running={!emptyCrmChat && composerRunning}
-            disabled={Boolean(recordingSkill) || (emptyCrmChat && !crmSelection?.crmRoleId)}
+            disabled={Boolean(recordingSkill) || Boolean(openingCrmRole && !openingCrmRole.error) || (emptyCrmChat && !crmSelection?.crmRoleId)}
             pendingAttachments={emptyCrmChat ? attachmentsForThread(pendingAttachments, composerDraftKey) : activePendingAttachments}
             attachmentNotice={attachmentNotice}
             sendError={sendError}
@@ -7263,7 +7368,7 @@ const Transcript = memo(function Transcript({
             following.current = false;
           }
         }}
-        className="rk-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-5 md:px-7 md:py-6"
+        className="chat-transcript rk-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-5 md:px-7 md:py-6"
       >
         {olderCursor != null ? (
           <button
@@ -7300,6 +7405,7 @@ const Transcript = memo(function Transcript({
               ) : null}
               <div
                 data-message-id={message.id}
+                data-message-role={message.role}
                 className={peerReceipt ? "relative py-0.5" : "group/message relative hover:z-20"}
               >
                 <div
@@ -7587,6 +7693,7 @@ export const Composer = memo(function Composer({
   ref,
   artifactTarget,
   activeName,
+  compact = false,
   running,
   disabled,
   pendingAttachments,
@@ -7617,6 +7724,7 @@ export const Composer = memo(function Composer({
 }: {
   ref?: Ref<ComposerHandle>;
   activeName?: string;
+  compact?: boolean;
   running: boolean;
   disabled?: boolean;
   pendingAttachments: PendingAttachment[];
@@ -8055,7 +8163,7 @@ export const Composer = memo(function Composer({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6 ${
+      className={`chat-composer relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6 ${
         draggingFiles ? "rounded-[14px] ring-2 ring-inset ring-ring" : ""
       }`}
     >
@@ -8241,11 +8349,11 @@ export const Composer = memo(function Composer({
           aria-label={t`Attach file`}
           disabled={disabled}
           onClick={() => fileInputRef.current?.click()}
-          className="col-start-1 row-start-2 size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="composer-attach col-start-1 row-start-2 size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Plus size={16} strokeWidth={2} />
         </Button>
-        <div className="col-span-3 row-start-1 flex min-w-0 flex-wrap items-end gap-1.5 px-1.5">
+        <div className="composer-input col-span-3 row-start-1 flex min-w-0 flex-wrap items-end gap-1.5 px-1.5">
           {selectedSkill ? (
             <span
               data-testid="skill-chip"
@@ -8347,7 +8455,7 @@ export const Composer = memo(function Composer({
             disabled={disabled}
             placeholder={
               showComposerPlaceholder
-                ? activeName
+                ? activeName && !compact
                   ? t`Message ${activeName}`
                   : t`Message…`
                 : undefined
@@ -8362,11 +8470,11 @@ export const Composer = memo(function Composer({
             name="chat-message"
             autoComplete="off"
             dir="auto"
-            rows={2}
-            className="rk-scroll max-h-60 min-h-12 min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40"
+            rows={compact ? 1 : 2}
+            className={`rk-scroll max-h-60 ${compact ? "min-h-7" : "min-h-12"} min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40`}
           />
         </div>
-        <div className="col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
+        <div className="composer-actions col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
           {onVoice && draft.trim().length === 0 ? (
             <Button
               variant="outline"
@@ -8375,7 +8483,7 @@ export const Composer = memo(function Composer({
               title={t`Voice`}
               disabled={disabled}
               onClick={onVoice}
-              className="size-8 shrink-0 rounded-full text-foreground/75"
+              className="composer-secondary size-8 shrink-0 rounded-full text-foreground/75"
             >
               <Mic size={16} strokeWidth={1.8} />
             </Button>
@@ -8397,7 +8505,7 @@ export const Composer = memo(function Composer({
                 aria-label={t`Stop`}
                 disabled={sending}
                 onClick={() => void onStop()}
-                className="size-8 rounded-full border border-border bg-muted text-foreground/80 shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+                className="composer-secondary size-8 rounded-full border border-border bg-muted text-foreground/80 shadow-sm transition-colors hover:bg-accent hover:text-foreground"
               >
                 <Square size={11} strokeWidth={0} fill="currentColor" />
               </Button>

@@ -1,0 +1,775 @@
+From d447bfb4fee7f735e007123a35ce76116c8de660 Mon Sep 17 00:00:00 2001
+From: Development contributor <contributor@example.invalid>
+Date: Fri, 23 Oct 2026 18:51:45 +0000
+Subject: [PATCH 1/3] Page exact role correspondence through authorized SQL
+ reads
+
+---
+ supabase/functions/mcp/tools/crm.test.ts      | 154 ++++++++++--------
+ supabase/functions/mcp/tools/crm.ts           |  92 +++--------
+ ...23184734_crm_role_correspondence_pages.sql |  68 ++++++++
+ supabase/tests/crm-role-correspondence.sql    | 122 ++++++++++++++
+ 4 files changed, 299 insertions(+), 137 deletions(-)
+ create mode 100644 supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
+ create mode 100644 supabase/tests/crm-role-correspondence.sql
+
+diff --git a/supabase/functions/mcp/tools/crm.test.ts b/supabase/functions/mcp/tools/crm.test.ts
+index d1e7f64..200fe1b 100644
+--- a/supabase/functions/mcp/tools/crm.test.ts
++++ b/supabase/functions/mcp/tools/crm.test.ts
+@@ -2492,105 +2492,115 @@ const outsider = "00000000-0000-4000-8000-0000000000a3";
+ 
+ function roleCorrespondenceFixture() {
+   const fixture = setup();
+-  fixture.setRow("role_specs", { id: role, organization_id: org });
+-  fixture.setRow("candidate_role_memberships", [
+-    { id: "m1", organization_id: org, role_spec_id: role, candidate_id: memberA },
+-    { id: "m2", organization_id: org, role_spec_id: "other-role", candidate_id: outsider },
+-  ]);
+-  fixture.setRow("candidate_pipeline", [
+-    { id: "p1", organization_id: org, role_spec_id: role, candidate_id: memberB },
+-  ]);
+-  const mail = (id: string, candidate_id: string, day: number, organization_id = org) => ({
++  const rows = ["new", "mid", "old"].map((id) => ({
+     id,
+-    organization_id,
+-    candidate_id,
+-    lead_email: "x@example.com",
+-    thread_id: "t",
++    organization_id: org,
++    candidate_id: memberA,
++    lead_email: "candidate@example.test",
++    thread_id: "thread",
+     direction: "received",
+-    timestamp_email: `2026-10-${String(day).padStart(2, "0")}T12:00:00Z`,
+-    campaign_id: "c",
+-    from_address: "x@example.com",
+-    to_address: "r@example.test",
+-    subject: "s",
+-    body_text: `body ${id}`,
++    timestamp_email: "2026-10-22T12:00:00.000001+00:00",
++    campaign_id: "campaign",
++    from_address: "candidate@example.test",
++    to_address: "owner@example.test",
++    subject: "Synthetic",
++    body_text: "full body\n".repeat(2000),
++    eaccount: "owner@example.test",
++  }));
++  const response = (offset = 0, limit = 10) => ({
++    organization_id: org,
++    role_id: role,
++    pagination: "offset",
++    messages: rows.slice(offset, offset + limit),
++    next_offset: offset + limit < rows.length ? offset + limit : null,
+   });
+-  const rows = [mail("new", memberA, 22), mail("mid", memberB, 21), mail("old", memberA, 20)];
+-  fixture.setRow("instantly_emails", [
+-    mail("old", memberA, 20),
+-    mail("new", memberA, 22),
+-    mail("outsider", outsider, 23),
+-    mail("foreign", memberA, 24, foreignOrg),
+-    mail("mid", memberB, 21),
+-  ]);
+-  return { ...fixture, rows };
++  fixture.setRpc("crm_role_correspondence", response());
++  return { ...fixture, rows, response };
+ }
+ type RolePage = {
+   isError?: boolean;
+-  structuredContent: { data: { messages: { id: string }[]; next_offset: number | null } };
++  structuredContent: {
++    data: { messages: { id: string }[]; next_offset: number | null };
++  };
+ };
+-
+-Deno.test("role correspondence filters mail to role members newest first in the exact organization", async () => {
++Deno.test("role correspondence delegates exact bounded scope to SQL and retains full mail metadata", async () => {
+   const fixture = roleCorrespondenceFixture();
+-  const result = (await fixture.call("list_crm_role_correspondence", {
++  const result = await fixture.call("list_crm_role_correspondence", {
+     p_org: org,
+     p_role: role,
+-  })) as RolePage;
+-  if (JSON.stringify(result.structuredContent.data.messages) !== JSON.stringify(fixture.rows))
+-    throw new Error("Role mail included a non-member or foreign row, or changed order/shape");
+-  const mail = fixture.reads.find((read) => read.table === "instantly_emails");
++  }) as RolePage;
+   if (
+-    JSON.stringify(mail?.in) !== JSON.stringify([["candidate_id", [memberA, memberB]]]) ||
+-    !mail?.filters.some(([f, v]) => f === "organization_id" && v === org)
+-  )
+-    throw new Error("Job filter was not applied in the mail query");
++    JSON.stringify(result.structuredContent.data.messages) !==
++      JSON.stringify(fixture.rows)
++  ) {
++    throw new Error("Stored full body or exact mail metadata lost");
++  }
+   if (
+-    fixture.reads
+-      .filter((read) => read.table.startsWith("candidate_"))
+-      .some((read) => !read.filters.some(([f, v]) => f === "role_spec_id" && v === role))
+-  )
+-    throw new Error("Member lookup lost the role filter");
+-  const annotations = fixture.tools.get("list_crm_role_correspondence")?.annotations;
+-  if (annotations?.readOnlyHint !== true || annotations.destructiveHint !== false)
++    JSON.stringify(fixture.calls) !== JSON.stringify([{
++        name: "crm_role_correspondence",
++        args: { p_org: org, p_role: role, p_limit: 10, p_offset: 0 },
++      }]) || fixture.reads.length
++  ) throw new Error("Role candidates were collected into a capped HTTP filter");
++  const annotations = fixture.tools.get("list_crm_role_correspondence")
++    ?.annotations;
++  if (
++    annotations?.readOnlyHint !== true || annotations.destructiveHint !== false
++  ) {
+     throw new Error("Role correspondence was exposed as a write");
++  }
+ });
+-
+-Deno.test("role correspondence paginates newest first without skipping", async () => {
++Deno.test("role correspondence retains bounded SQL offset continuations", async () => {
+   const fixture = roleCorrespondenceFixture();
+   const ids: string[] = [];
+-  let offset: number | null = 0;
+-  for (let i = 0; offset !== null && i < 5; i++) {
+-    const page = (await fixture.call("list_crm_role_correspondence", {
++  for (const offset of [0, 2]) {
++    fixture.setRpc("crm_role_correspondence", fixture.response(offset, 2));
++    const result = await fixture.call("list_crm_role_correspondence", {
+       p_org: org,
+       p_role: role,
+       p_limit: 2,
+       p_offset: offset,
+-    })) as RolePage;
+-    if (page.structuredContent.data.messages.length > 2) throw new Error("Page exceeded limit");
+-    ids.push(...page.structuredContent.data.messages.map((m) => m.id));
+-    offset = page.structuredContent.data.next_offset;
+-    if (i === 0 && offset !== 2) throw new Error("First page lost its continuation");
++    }) as RolePage;
++    ids.push(...result.structuredContent.data.messages.map((row) => row.id));
++    if (
++      result.structuredContent.data.next_offset !== (offset === 0 ? 2 : null)
++    ) {
++      throw new Error("Continuation changed");
++    }
+   }
+-  if (offset !== null || ids.join() !== "new,mid,old") throw new Error("Pagination skipped mail");
++  if (ids.join() !== "new,mid,old") throw new Error("Page lost mail");
+ });
+-
+-Deno.test("role correspondence denies a foreign or missing role before member or mail access", async () => {
+-  for (const value of [null, { id: role, organization_id: foreignOrg }]) {
+-    const fixture = roleCorrespondenceFixture();
+-    fixture.setRow("role_specs", value);
+-    const result = (await fixture.call("list_crm_role_correspondence", {
++Deno.test("role correspondence fails closed on database denial, malformed IDs and scope mismatch", async () => {
++  const fixture = roleCorrespondenceFixture();
++  for (
++    const invalid of [
++      { ...fixture.response(), organization_id: foreignOrg },
++      { ...fixture.response(), role_id: outsider },
++      {
++        ...fixture.response(),
++        messages: [{ ...fixture.rows[0], candidate_id: "malformed" }],
++      },
++      {
++        ...fixture.response(),
++        messages: [{ ...fixture.rows[0], organization_id: foreignOrg }],
++      },
++      { ...fixture.response(), next_offset: 999 },
++      { ...fixture.response(), messages: Array(11).fill(fixture.rows[0]) },
++      null,
++    ]
++  ) {
++    fixture.setRpc("crm_role_correspondence", invalid);
++    const result = await fixture.call("list_crm_role_correspondence", {
+       p_org: org,
+       p_role: role,
+-    })) as { isError?: boolean };
+-    if (!result.isError || fixture.reads.length !== 1)
+-      throw new Error("Ineligible role reached member or mail data");
++    }) as RolePage;
++    if (!result.isError) throw new Error("Malformed role page accepted");
+   }
+-  const fixture = roleCorrespondenceFixture();
+-  fixture.failRead("instantly_emails", { message: "denied" });
+-  const result = (await fixture.call("list_crm_role_correspondence", {
++  fixture.setRpc("crm_role_correspondence", null, { message: "denied" });
++  const denied = await fixture.call("list_crm_role_correspondence", {
+     p_org: org,
+     p_role: role,
+-  })) as { isError?: boolean };
+-  if (!result.isError) throw new Error("Mail read error did not fail closed");
++  }) as RolePage;
++  if (!denied.isError) throw new Error("RPC denial ignored");
+ });
+ 
+ Deno.test("role correspondence rejects scope injection and unknown fields", async () => {
+diff --git a/supabase/functions/mcp/tools/crm.ts b/supabase/functions/mcp/tools/crm.ts
+index 35a9ef3..72700bc 100644
+--- a/supabase/functions/mcp/tools/crm.ts
++++ b/supabase/functions/mcp/tools/crm.ts
+@@ -446,83 +446,45 @@ export function registerCrmTools(server: McpServer, { supabase, userClaims }: To
+       p_offset: z.number().int().min(0).max(1_000_000).default(0),
+     })
+     .strict();
+-  // ponytail: member ids travel in one PostgREST `in` filter; cap fails closed, move to a CRM RPC if roles outgrow it.
+-  const roleMemberCap = 200;
+   server.registerTool(
+     "list_crm_role_correspondence",
+     {
+       description:
+         "Read complete stored Instantly email bodies, newest first, for every candidate attached to the exact role " +
+-        "(formal role memberships and pipeline rows) in the exact organization. Same fields as list_crm_candidate_correspondence; " +
++        "(formal, pipeline and exact campaign-role memberships) in the exact organization. Explicit other-role, foreign-organization or unresolved campaign mail is excluded; " +
+         "mail matched only by source-email alias is not included. Excludes the pending outbox and does not establish live provider state. " +
+         "Offset pages can shift when mail changes; omit p_offset to refresh.",
+       inputSchema: roleCorrespondenceInput,
+       annotations: readOnly,
+     },
+     async (args: unknown) => {
+-      const { p_org, p_role, p_limit, p_offset } = roleCorrespondenceInput.parse(args);
+-      const failed = () => errorResult("Could not load the role correspondence.");
+-      const role = await supabase
+-        .from("role_specs")
+-        .select("id,organization_id")
+-        .eq("organization_id", p_org)
+-        .eq("id", p_role)
+-        .maybeSingle();
+-      if (role.error || role.data?.id !== p_role || role.data.organization_id !== p_org)
+-        return failed();
+-      const members = new Set<string>();
+-      for (const table of ["candidate_role_memberships", "candidate_pipeline"]) {
+-        for (let from = 0; ; from += 1000) {
+-          const found = await supabase
+-            .from(table)
+-            .select("candidate_id")
+-            .eq("organization_id", p_org)
+-            .eq("role_spec_id", p_role)
+-            .order("id", { ascending: true })
+-            .range(from, from + 999);
+-          const parsed = z
+-            .array(z.object({ candidate_id: z.string().uuid() }))
+-            .safeParse(found.data);
+-          if (found.error || !parsed.success) return failed();
+-          for (const row of parsed.data) members.add(row.candidate_id);
+-          if (parsed.data.length < 1000) break;
+-        }
+-      }
+-      if (members.size > roleMemberCap)
+-        return errorResult("Role has too many candidates for one correspondence read.");
+-      if (!members.size)
+-        return jsonResult({
+-          organization_id: p_org,
+-          role_id: p_role,
+-          messages: [],
+-          pagination: "offset",
+-          next_offset: null,
+-        });
+-      const mail = await supabase
+-        .from("instantly_emails")
+-        .select(mailColumns)
+-        .eq("organization_id", p_org)
+-        .filter("candidate_id", "in", `(${[...members].map((id) => JSON.stringify(id)).join(",")})`)
+-        .order("timestamp_email", { ascending: false, nullsFirst: false })
+-        .order("id", { ascending: false })
+-        .range(p_offset, p_offset + p_limit);
+-      const rows = z.array(storedEmail).safeParse(mail.data);
+-      if (
+-        mail.error ||
+-        !rows.success ||
+-        rows.data.some(
+-          (row) =>
+-            row.organization_id !== p_org || !row.candidate_id || !members.has(row.candidate_id),
+-        )
+-      )
+-        return failed();
+-      return jsonResult({
+-        organization_id: p_org,
+-        role_id: p_role,
+-        messages: rows.data.slice(0, p_limit),
+-        pagination: "offset",
+-        next_offset: rows.data.length > p_limit ? p_offset + p_limit : null,
++      const { p_org, p_role, p_limit, p_offset } = roleCorrespondenceInput
++        .parse(args);
++      const failed = () =>
++        errorResult("Could not load the role correspondence.");
++      const mail = await supabase.rpc("crm_role_correspondence", {
++        p_org,
++        p_role,
++        p_limit,
++        p_offset,
+       });
++      const page = z.object({
++        organization_id: z.literal(p_org),
++        role_id: z.literal(p_role),
++        pagination: z.literal("offset"),
++        messages: z.array(
++          storedEmail.extend({ eaccount: z.string().nullable() }),
++        ).max(p_limit),
++        next_offset: z.literal(p_offset + p_limit).nullable(),
++      }).safeParse(mail.data);
++      if (
++        mail.error || !page.success || page.data.messages.some(
++          (row) => row.organization_id !== p_org || row.candidate_id === null,
++        ) ||
++        (page.data.next_offset !== null &&
++          page.data.messages.length !== p_limit)
++      ) return failed();
++      return jsonResult(page.data);
+     },
+   );
+ 
+diff --git a/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql b/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
+new file mode 100644
+index 0000000..4e5b66a
+--- /dev/null
++++ b/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
+@@ -0,0 +1,68 @@
++-- Bounded mail pages without collecting a role's candidate IDs in an HTTP filter.
++-- Invoker permissions and RLS remain in force; membership also fails closed explicitly.
++create or replace function public.crm_role_correspondence(
++  p_org uuid, p_role uuid, p_limit integer default 10, p_offset integer default 0
++)
++returns jsonb
++language plpgsql stable security invoker set search_path = ''
++as $$
++begin
++  if auth.uid() is null or p_org is null or not exists (
++    select 1 from public.memberships m
++    where m.user_id = auth.uid() and m.organization_id = p_org
++  ) then
++    raise exception 'CRM membership required' using errcode = '42501';
++  end if;
++  if p_role is null or not exists (
++    select 1 from public.role_specs r where r.id = p_role and r.organization_id = p_org
++  ) then
++    raise exception 'CRM role unavailable' using errcode = '42501';
++  end if;
++  if p_limit is null or p_limit < 1 or p_limit > 50
++    or p_offset is null or p_offset < 0 or p_offset > 1000000 then
++    raise exception 'Invalid correspondence page bounds' using errcode = '22023';
++  end if;
++  return (
++    with page as materialized (
++      select e.id, e.organization_id, e.candidate_id, e.lead_email, e.thread_id,
++        e.direction, e.timestamp_email, e.campaign_id, e.from_address, e.to_address,
++        e.subject, e.body_text,
++        case when jsonb_typeof(e.raw->'eaccount') = 'string' then e.raw->>'eaccount' end as eaccount
++      from public.instantly_emails e
++      join public.candidates c on c.id = e.candidate_id and c.organization_id = e.organization_id
++      where e.organization_id = p_org
++        and (
++          exists (select 1 from public.candidate_role_memberships m
++            where m.organization_id = p_org and m.role_spec_id = p_role and m.candidate_id = c.id)
++          or exists (select 1 from public.candidate_pipeline p
++            where p.organization_id = p_org and p.role_spec_id = p_role and p.candidate_id = c.id)
++          or exists (
++            select 1 from public.instantly_leads l
++            join public.instantly_campaigns campaign on campaign.id = l.campaign_id
++              and campaign.organization_id = l.organization_id
++            where l.organization_id = p_org and l.candidate_id = c.id and campaign.role_spec_id = p_role
++          )
++        )
++        -- Candidate membership does not authorize another role's explicitly bound mail.
++        -- Null/unbound campaign metadata retains the existing candidate-linked semantics.
++        and (e.campaign_id is null or exists (
++          select 1 from public.instantly_campaigns campaign where campaign.id = e.campaign_id
++            and campaign.organization_id = p_org
++            and (campaign.role_spec_id is null or campaign.role_spec_id = p_role)
++        ))
++      order by e.timestamp_email desc nulls last, e.id desc
++      limit p_limit + 1 offset p_offset
++    ), selected as (
++      select * from page order by timestamp_email desc nulls last, id desc limit p_limit
++    )
++    select jsonb_build_object(
++      'organization_id', p_org, 'role_id', p_role, 'pagination', 'offset',
++      'messages', coalesce((select jsonb_agg(to_jsonb(s) order by s.timestamp_email desc nulls last, s.id desc)
++        from selected s), '[]'::jsonb),
++      'next_offset', case when (select count(*) from page) > p_limit then p_offset + p_limit else null end
++    )
++  );
++end;
++$$;
++revoke all on function public.crm_role_correspondence(uuid, uuid, integer, integer) from public, anon;
++grant execute on function public.crm_role_correspondence(uuid, uuid, integer, integer) to authenticated;
+diff --git a/supabase/tests/crm-role-correspondence.sql b/supabase/tests/crm-role-correspondence.sql
+new file mode 100644
+index 0000000..341d214
+--- /dev/null
++++ b/supabase/tests/crm-role-correspondence.sql
+@@ -0,0 +1,122 @@
++-- Native PostgreSQL only, isolated synthetic schema. Never use a live database.
++\set ON_ERROR_STOP on
++begin;
++create schema auth;
++create function auth.uid() returns uuid language sql stable as
++  $$ select nullif(current_setting('test.user_id', true), '')::uuid $$;
++do $$ begin
++  if not exists(select 1 from pg_roles where rolname='anon') then create role anon; end if;
++  if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated; end if;
++end $$;
++create table memberships(user_id uuid, organization_id uuid);
++create table role_specs(id uuid, organization_id uuid, title text);
++create table candidates(id uuid, organization_id uuid);
++create table candidate_pipeline(candidate_id uuid, role_spec_id uuid, organization_id uuid);
++create table candidate_role_memberships(candidate_id uuid, role_spec_id uuid, organization_id uuid);
++create table instantly_campaigns(id text, organization_id uuid, role_spec_id uuid);
++create table instantly_leads(candidate_id uuid, campaign_id text, organization_id uuid);
++create table instantly_emails(id text primary key, organization_id uuid, candidate_id uuid,
++ lead_email text, thread_id text, direction text, timestamp_email timestamptz, campaign_id text,
++ from_address text, to_address text, subject text, body_text text, raw jsonb);
++\ir ../migrations/20261023184734_crm_role_correspondence_pages.sql
++select set_config('test.user_id','00000000-0000-4000-8000-000000000001',true);
++insert into memberships values ('00000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000010');
++insert into role_specs values
++ ('00000000-0000-4000-8000-000000000030','00000000-0000-4000-8000-000000000010','Same title'),
++ ('00000000-0000-4000-8000-000000000031','00000000-0000-4000-8000-000000000010','Same title'),
++ ('00000000-0000-4000-8000-000000000032','00000000-0000-4000-8000-000000000099','Foreign');
++insert into candidates select ('10000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
++ '00000000-0000-4000-8000-000000000010'::uuid from generate_series(1,205)n;
++insert into candidate_role_memberships select id,'00000000-0000-4000-8000-000000000030',organization_id
++ from candidates where right(id::text,12)::bigint <=201;
++insert into candidate_pipeline select id,'00000000-0000-4000-8000-000000000030',organization_id
++ from candidates where right(id::text,12)::bigint =202;
++insert into instantly_campaigns values
++ ('exact','00000000-0000-4000-8000-000000000010','00000000-0000-4000-8000-000000000030'),
++ ('other-role','00000000-0000-4000-8000-000000000010','00000000-0000-4000-8000-000000000031'),
++ ('foreign','00000000-0000-4000-8000-000000000099','00000000-0000-4000-8000-000000000030'),
++ ('unbound','00000000-0000-4000-8000-000000000010',null);
++insert into instantly_leads values
++ ('10000000-0000-4000-8000-000000000203','exact','00000000-0000-4000-8000-000000000010'),
++ ('10000000-0000-4000-8000-000000000204','other-role','00000000-0000-4000-8000-000000000010'),
++ ('10000000-0000-4000-8000-000000000205','exact','00000000-0000-4000-8000-000000000099');
++-- A candidate shared by two exact roles must not leak the second role's campaign mail.
++insert into candidate_role_memberships values
++ ('10000000-0000-4000-8000-000000000001','00000000-0000-4000-8000-000000000031','00000000-0000-4000-8000-000000000010');
++insert into instantly_emails select 'mail-'||right(id::text,12),organization_id,id,
++ 'candidate@example.test','thread-'||id,'received','2026-10-23T00:00:00.000001Z',
++ case when right(id::text,12)::bigint=203 then 'exact' else null end,
++ 'candidate@example.test','owner@example.test','Synthetic',repeat('full body ',3000),
++ '{"eaccount":"owner@example.test"}'::jsonb from candidates;
++insert into instantly_emails select 'exclude-'||campaign,id_org,candidate_id,
++ 'candidate@example.test','wrong-thread','received',now(),campaign,null,null,null,'must not leak','{}'
++ from (values
++ ('other-role','00000000-0000-4000-8000-000000000010'::uuid,'10000000-0000-4000-8000-000000000001'::uuid),
++ ('foreign','00000000-0000-4000-8000-000000000010'::uuid,'10000000-0000-4000-8000-000000000001'::uuid),
++ ('missing','00000000-0000-4000-8000-000000000010'::uuid,'10000000-0000-4000-8000-000000000001'::uuid),
++ ('exact','00000000-0000-4000-8000-000000000099'::uuid,'10000000-0000-4000-8000-000000000001'::uuid),
++ ('alias','00000000-0000-4000-8000-000000000010'::uuid,null::uuid)
++ )t(campaign,id_org,candidate_id);
++insert into instantly_emails values ('unbound-mail','00000000-0000-4000-8000-000000000010',
++ '10000000-0000-4000-8000-000000000001','candidate@example.test','unbound-thread','sent',null,
++ 'unbound',null,null,null,'complete unbound body','{"eaccount":null}');
++-- Exercise invoker mode, including an invisible foreign campaign row.
++grant usage on schema public,auth to authenticated;
++grant select on all tables in schema public to authenticated;
++alter table instantly_campaigns enable row level security;
++create policy org_campaigns on instantly_campaigns for select to authenticated
++ using (organization_id in (select organization_id from memberships where user_id=auth.uid()));
++alter table instantly_emails enable row level security;
++create policy org_emails on instantly_emails for select to authenticated
++ using (organization_id in (select organization_id from memberships where user_id=auth.uid()));
++do $$ begin
++ if has_function_privilege('anon','public.crm_role_correspondence(uuid,uuid,integer,integer)','EXECUTE')
++  or exists(select 1 from pg_proc where oid='public.crm_role_correspondence(uuid,uuid,integer,integer)'::regprocedure and prosecdef)
++ then raise exception 'Function widened anonymous access or bypasses invoker RLS'; end if;
++end $$;
++set local role authenticated;
++do $$
++declare
++ result jsonb; item jsonb; ids text[] := '{}'; off integer:=0; pages integer:=0;
++ org uuid := '00000000-0000-4000-8000-000000000010';
++ role_id uuid := '00000000-0000-4000-8000-000000000030';
++begin
++ loop
++  result:=public.crm_role_correspondence(org,role_id,50,off);
++  if jsonb_array_length(result->'messages')>50 then raise exception 'Unbounded page'; end if;
++  for item in select * from jsonb_array_elements(result->'messages') loop
++   if item->>'id'=any(ids) then raise exception 'Duplicate page ID'; end if;
++   ids:=array_append(ids,item->>'id');
++   if item->>'id'='unbound-mail' and item->'eaccount'<>'null'::jsonb
++    then raise exception 'Unknown mailbox was inferred'; end if;
++   if item->>'id' like 'mail-%' and (length(item->>'body_text')<>30000
++    or item->>'eaccount'<>'owner@example.test' or item->>'thread_id' not like 'thread-%')
++    then raise exception 'Mail metadata or full body changed'; end if;
++  end loop;
++  pages:=pages+1;
++  exit when result->>'next_offset' is null;
++  off:=(result->>'next_offset')::integer;
++  if pages>5 then raise exception 'Pagination did not terminate'; end if;
++ end loop;
++ if cardinality(ids)<>204 or pages<>5 or not ('mail-000000000203'=any(ids))
++  or 'mail-000000000204'=any(ids) or 'mail-000000000205'=any(ids)
++  or exists(select 1 from unnest(ids)i where i like 'exclude-%') then
++  raise exception 'Large role/campaign-only isolation failed: %',ids;
++ end if;
++ if ids[1]<>'mail-000000000203' or ids[204]<>'unbound-mail' then raise exception 'Null timestamp ordering changed'; end if;
++ begin perform public.crm_role_correspondence(org,role_id,51,0); raise exception 'Unbounded limit accepted';
++ exception when invalid_parameter_value then null; end;
++ begin perform public.crm_role_correspondence(org,role_id,1,-1); raise exception 'Negative offset accepted';
++ exception when invalid_parameter_value then null; end;
++ begin perform public.crm_role_correspondence(org,'malformed',1,0); raise exception 'Malformed ID accepted';
++ exception when invalid_text_representation then null; end;
++ begin perform public.crm_role_correspondence('00000000-0000-4000-8000-000000000099',role_id); raise exception 'Foreign org accepted';
++ exception when insufficient_privilege then null; end;
++ begin perform public.crm_role_correspondence(org,'00000000-0000-4000-8000-000000000032'); raise exception 'Foreign role accepted';
++ exception when insufficient_privilege then null; end;
++ perform set_config('test.user_id','00000000-0000-4000-8000-000000000002',true);
++ begin perform public.crm_role_correspondence(org,role_id); raise exception 'Nonmember accepted';
++ exception when insufficient_privilege then null; end;
++end $$;
++reset role;
++rollback;
+-- 
+2.52.0
+
+
+From 5fe805ff2443e52afdd0e0dc3af7b6c2b5da5775 Mon Sep 17 00:00:00 2001
+From: Development contributor <contributor@example.invalid>
+Date: Fri, 23 Oct 2026 18:53:15 +0000
+Subject: [PATCH 2/3] Require versioned role correspondence scope proof
+
+---
+ supabase/functions/mcp/tools/crm.test.ts                       | 3 +++
+ supabase/functions/mcp/tools/crm.ts                            | 1 +
+ .../20261023184734_crm_role_correspondence_pages.sql           | 2 +-
+ supabase/tests/crm-role-correspondence.sql                     | 1 +
+ 4 files changed, 6 insertions(+), 1 deletion(-)
+
+diff --git a/supabase/functions/mcp/tools/crm.test.ts b/supabase/functions/mcp/tools/crm.test.ts
+index 200fe1b..fe0936e 100644
+--- a/supabase/functions/mcp/tools/crm.test.ts
++++ b/supabase/functions/mcp/tools/crm.test.ts
+@@ -2508,6 +2508,7 @@ function roleCorrespondenceFixture() {
+     eaccount: "owner@example.test",
+   }));
+   const response = (offset = 0, limit = 10) => ({
++    version: 2,
+     organization_id: org,
+     role_id: role,
+     pagination: "offset",
+@@ -2573,6 +2574,8 @@ Deno.test("role correspondence fails closed on database denial, malformed IDs an
+   const fixture = roleCorrespondenceFixture();
+   for (
+     const invalid of [
++      { ...fixture.response(), version: undefined },
++      { ...fixture.response(), version: 1 },
+       { ...fixture.response(), organization_id: foreignOrg },
+       { ...fixture.response(), role_id: outsider },
+       {
+diff --git a/supabase/functions/mcp/tools/crm.ts b/supabase/functions/mcp/tools/crm.ts
+index 72700bc..f33f4a8 100644
+--- a/supabase/functions/mcp/tools/crm.ts
++++ b/supabase/functions/mcp/tools/crm.ts
+@@ -469,6 +469,7 @@ export function registerCrmTools(server: McpServer, { supabase, userClaims }: To
+         p_offset,
+       });
+       const page = z.object({
++        version: z.literal(2),
+         organization_id: z.literal(p_org),
+         role_id: z.literal(p_role),
+         pagination: z.literal("offset"),
+diff --git a/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql b/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
+index 4e5b66a..08ad300 100644
+--- a/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
++++ b/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
+@@ -56,7 +56,7 @@ begin
+       select * from page order by timestamp_email desc nulls last, id desc limit p_limit
+     )
+     select jsonb_build_object(
+-      'organization_id', p_org, 'role_id', p_role, 'pagination', 'offset',
++      'version', 2, 'organization_id', p_org, 'role_id', p_role, 'pagination', 'offset',
+       'messages', coalesce((select jsonb_agg(to_jsonb(s) order by s.timestamp_email desc nulls last, s.id desc)
+         from selected s), '[]'::jsonb),
+       'next_offset', case when (select count(*) from page) > p_limit then p_offset + p_limit else null end
+diff --git a/supabase/tests/crm-role-correspondence.sql b/supabase/tests/crm-role-correspondence.sql
+index 341d214..ecc5d99 100644
+--- a/supabase/tests/crm-role-correspondence.sql
++++ b/supabase/tests/crm-role-correspondence.sql
+@@ -83,6 +83,7 @@ declare
+ begin
+  loop
+   result:=public.crm_role_correspondence(org,role_id,50,off);
++  if (result->>'version') is distinct from '2' then raise exception 'Missing role-mail protocol fence'; end if;
+   if jsonb_array_length(result->'messages')>50 then raise exception 'Unbounded page'; end if;
+   for item in select * from jsonb_array_elements(result->'messages') loop
+    if item->>'id'=any(ids) then raise exception 'Duplicate page ID'; end if;
+-- 
+2.52.0
+
+
+From 34eca76027a932f5fb8ffac5f961a9debb291011 Mon Sep 17 00:00:00 2001
+From: Development contributor <contributor@example.invalid>
+Date: Fri, 23 Oct 2026 19:05:55 +0000
+Subject: [PATCH 3/3] Scope candidate mail through exact role correspondence
+
+---
+ supabase/functions/mcp/tools/crm.test.ts       | 18 ++++++++++++++++--
+ supabase/functions/mcp/tools/crm.ts            | 10 +++++++---
+ ...023184734_crm_role_correspondence_pages.sql |  9 +++++----
+ supabase/tests/crm-role-correspondence.sql     | 11 +++++++++--
+ 4 files changed, 37 insertions(+), 11 deletions(-)
+
+diff --git a/supabase/functions/mcp/tools/crm.test.ts b/supabase/functions/mcp/tools/crm.test.ts
+index fe0936e..687c65b 100644
+--- a/supabase/functions/mcp/tools/crm.test.ts
++++ b/supabase/functions/mcp/tools/crm.test.ts
+@@ -2539,7 +2539,7 @@ Deno.test("role correspondence delegates exact bounded scope to SQL and retains
+   if (
+     JSON.stringify(fixture.calls) !== JSON.stringify([{
+         name: "crm_role_correspondence",
+-        args: { p_org: org, p_role: role, p_limit: 10, p_offset: 0 },
++        args: { p_org: org, p_role: role, p_limit: 10, p_offset: 0, p_candidate: null },
+       }]) || fixture.reads.length
+   ) throw new Error("Role candidates were collected into a capped HTTP filter");
+   const annotations = fixture.tools.get("list_crm_role_correspondence")
+@@ -2608,7 +2608,7 @@ Deno.test("role correspondence fails closed on database denial, malformed IDs an
+ 
+ Deno.test("role correspondence rejects scope injection and unknown fields", async () => {
+   const fixture = roleCorrespondenceFixture();
+-  for (const extra of [{ p_candidate: memberA }, { organization_id: foreignOrg }]) {
++  for (const extra of [{ p_candidate: "invalid" }, { organization_id: foreignOrg }]) {
+     let rejected = false;
+     try {
+       await fixture.call("list_crm_role_correspondence", { p_org: org, p_role: role, ...extra });
+@@ -2719,3 +2719,17 @@ Deno.test("candidate presence uses bounded exact IDs and fails closed on foreign
+   )
+     throw new Error("Exact role presence rejected");
+ });
++
++Deno.test("role candidate mail requires exact candidate scope echo and excludes other candidates", async () => {
++  const f = roleCorrespondenceFixture();
++  const args = { p_org: org, p_role: role, p_candidate: memberA };
++  f.setRpc("crm_role_correspondence", { ...f.response(), candidate_id: memberA });
++  const result = await f.call("list_crm_role_correspondence", args) as RolePage;
++  if (result.isError || result.structuredContent.data.messages.length !== 3) throw new Error("Exact candidate mail lost");
++  if ((f.calls[0]?.args as Record<string, unknown>)?.p_candidate !== memberA) throw new Error("Candidate filter not sent to SQL");
++  for (const response of [f.response(), { ...f.response(), candidate_id: memberB },
++    { ...f.response(), candidate_id: memberA, messages: [{ ...f.rows[0], candidate_id: memberB }] }]) {
++    f.setRpc("crm_role_correspondence", response);
++    if (!(await f.call("list_crm_role_correspondence", args) as RolePage).isError) throw new Error("Unproven candidate scope accepted");
++  }
++});
+diff --git a/supabase/functions/mcp/tools/crm.ts b/supabase/functions/mcp/tools/crm.ts
+index f33f4a8..33fc6f0 100644
+--- a/supabase/functions/mcp/tools/crm.ts
++++ b/supabase/functions/mcp/tools/crm.ts
+@@ -442,6 +442,7 @@ export function registerCrmTools(server: McpServer, { supabase, userClaims }: To
+     .object({
+       p_org: z.string().uuid(),
+       p_role: z.string().uuid(),
++      p_candidate: z.string().uuid().optional(),
+       p_limit: z.number().int().min(1).max(50).default(10),
+       p_offset: z.number().int().min(0).max(1_000_000).default(0),
+     })
+@@ -453,12 +454,12 @@ export function registerCrmTools(server: McpServer, { supabase, userClaims }: To
+         "Read complete stored Instantly email bodies, newest first, for every candidate attached to the exact role " +
+         "(formal, pipeline and exact campaign-role memberships) in the exact organization. Explicit other-role, foreign-organization or unresolved campaign mail is excluded; " +
+         "mail matched only by source-email alias is not included. Excludes the pending outbox and does not establish live provider state. " +
+-        "Offset pages can shift when mail changes; omit p_offset to refresh.",
++        "Use p_candidate to restrict to one exact candidate without losing role isolation. Offset pages can shift when mail changes; omit p_offset to refresh.",
+       inputSchema: roleCorrespondenceInput,
+       annotations: readOnly,
+     },
+     async (args: unknown) => {
+-      const { p_org, p_role, p_limit, p_offset } = roleCorrespondenceInput
++      const { p_org, p_role, p_candidate, p_limit, p_offset } = roleCorrespondenceInput
+         .parse(args);
+       const failed = () =>
+         errorResult("Could not load the role correspondence.");
+@@ -467,11 +468,13 @@ export function registerCrmTools(server: McpServer, { supabase, userClaims }: To
+         p_role,
+         p_limit,
+         p_offset,
++        p_candidate: p_candidate ?? null,
+       });
+       const page = z.object({
+         version: z.literal(2),
+         organization_id: z.literal(p_org),
+         role_id: z.literal(p_role),
++        candidate_id: p_candidate ? z.literal(p_candidate) : z.null().optional(),
+         pagination: z.literal("offset"),
+         messages: z.array(
+           storedEmail.extend({ eaccount: z.string().nullable() }),
+@@ -480,7 +483,8 @@ export function registerCrmTools(server: McpServer, { supabase, userClaims }: To
+       }).safeParse(mail.data);
+       if (
+         mail.error || !page.success || page.data.messages.some(
+-          (row) => row.organization_id !== p_org || row.candidate_id === null,
++          (row) => row.organization_id !== p_org || row.candidate_id === null ||
++            (p_candidate !== undefined && row.candidate_id !== p_candidate),
+         ) ||
+         (page.data.next_offset !== null &&
+           page.data.messages.length !== p_limit)
+diff --git a/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql b/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
+index 08ad300..b09ddd1 100644
+--- a/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
++++ b/supabase/migrations/20261023184734_crm_role_correspondence_pages.sql
+@@ -1,7 +1,7 @@
+ -- Bounded mail pages without collecting a role's candidate IDs in an HTTP filter.
+ -- Invoker permissions and RLS remain in force; membership also fails closed explicitly.
+ create or replace function public.crm_role_correspondence(
+-  p_org uuid, p_role uuid, p_limit integer default 10, p_offset integer default 0
++  p_org uuid, p_role uuid, p_limit integer default 10, p_offset integer default 0, p_candidate uuid default null
+ )
+ returns jsonb
+ language plpgsql stable security invoker set search_path = ''
+@@ -31,6 +31,7 @@ begin
+       from public.instantly_emails e
+       join public.candidates c on c.id = e.candidate_id and c.organization_id = e.organization_id
+       where e.organization_id = p_org
++        and (p_candidate is null or e.candidate_id = p_candidate)
+         and (
+           exists (select 1 from public.candidate_role_memberships m
+             where m.organization_id = p_org and m.role_spec_id = p_role and m.candidate_id = c.id)
+@@ -56,7 +57,7 @@ begin
+       select * from page order by timestamp_email desc nulls last, id desc limit p_limit
+     )
+     select jsonb_build_object(
+-      'version', 2, 'organization_id', p_org, 'role_id', p_role, 'pagination', 'offset',
++      'version', 2, 'organization_id', p_org, 'role_id', p_role, 'candidate_id', p_candidate, 'pagination', 'offset',
+       'messages', coalesce((select jsonb_agg(to_jsonb(s) order by s.timestamp_email desc nulls last, s.id desc)
+         from selected s), '[]'::jsonb),
+       'next_offset', case when (select count(*) from page) > p_limit then p_offset + p_limit else null end
+@@ -64,5 +65,5 @@ begin
+   );
+ end;
+ $$;
+-revoke all on function public.crm_role_correspondence(uuid, uuid, integer, integer) from public, anon;
+-grant execute on function public.crm_role_correspondence(uuid, uuid, integer, integer) to authenticated;
++revoke all on function public.crm_role_correspondence(uuid, uuid, integer, integer, uuid) from public, anon;
++grant execute on function public.crm_role_correspondence(uuid, uuid, integer, integer, uuid) to authenticated;
+diff --git a/supabase/tests/crm-role-correspondence.sql b/supabase/tests/crm-role-correspondence.sql
+index ecc5d99..16b3eea 100644
+--- a/supabase/tests/crm-role-correspondence.sql
++++ b/supabase/tests/crm-role-correspondence.sql
+@@ -70,8 +70,8 @@ alter table instantly_emails enable row level security;
+ create policy org_emails on instantly_emails for select to authenticated
+  using (organization_id in (select organization_id from memberships where user_id=auth.uid()));
+ do $$ begin
+- if has_function_privilege('anon','public.crm_role_correspondence(uuid,uuid,integer,integer)','EXECUTE')
+-  or exists(select 1 from pg_proc where oid='public.crm_role_correspondence(uuid,uuid,integer,integer)'::regprocedure and prosecdef)
++ if has_function_privilege('anon','public.crm_role_correspondence(uuid,uuid,integer,integer,uuid)','EXECUTE')
++  or exists(select 1 from pg_proc where oid='public.crm_role_correspondence(uuid,uuid,integer,integer,uuid)'::regprocedure and prosecdef)
+  then raise exception 'Function widened anonymous access or bypasses invoker RLS'; end if;
+ end $$;
+ set local role authenticated;
+@@ -115,6 +115,13 @@ begin
+  exception when insufficient_privilege then null; end;
+  begin perform public.crm_role_correspondence(org,'00000000-0000-4000-8000-000000000032'); raise exception 'Foreign role accepted';
+  exception when insufficient_privilege then null; end;
++ result:=public.crm_role_correspondence(org,role_id,50,0,'10000000-0000-4000-8000-000000000001');
++ if result->>'candidate_id' <> '10000000-0000-4000-8000-000000000001'
++  or jsonb_array_length(result->'messages')<>2
++  or exists(select 1 from jsonb_array_elements(result->'messages') r where r->>'candidate_id'<>'10000000-0000-4000-8000-000000000001')
++ then raise exception 'Candidate scoped role mail leaked or lost history'; end if;
++ result:=public.crm_role_correspondence(org,role_id,50,0,'10000000-0000-4000-8000-000000000205');
++ if jsonb_array_length(result->'messages')<>0 then raise exception 'Other-role candidate mail leaked'; end if;
+  perform set_config('test.user_id','00000000-0000-4000-8000-000000000002',true);
+  begin perform public.crm_role_correspondence(org,role_id); raise exception 'Nonmember accepted';
+  exception when insufficient_privilege then null; end;
+-- 
+2.52.0
+

@@ -133,6 +133,7 @@ import {
   ListRecruitingRemindersInput,
   ListRecruitingRemindersOutput,
   ReadRecruitingSourceInput,
+  RecordRecruitingProfileViewInput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
   RecruitingCalibrationRoundOutput,
@@ -148,6 +149,9 @@ import {
   RecruitingCrmSyncInputFields,
   RecruitingCrmSyncOutputSchema,
   RecruitingId,
+  RecruitingProfileActivityInput,
+  RecruitingProfileActivityOutput,
+  RecruitingProfileViewSchema,
   RecruitingReminderSchema,
   RecruitingResearchActionSchema,
   RecruitingResearchSavedObservationSchema,
@@ -165,6 +169,11 @@ import {
   UpdateRecruitingReminderInput,
 } from "./recruiting.js";
 import { RecruitingCrmRoleReferenceSchema } from "./recruiting-crm.js";
+import {
+  RecruitingSchedulingPlanInputSchema,
+  RecruitingSchedulingPlanSchema,
+  RecruitingSchedulingSlotSchema,
+} from "./recruiting-scheduling.js";
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
@@ -623,9 +632,25 @@ export const appContract = {
     heartbeat: oc.input(botId).output(z.object({ ok: z.literal(true) })),
   },
   recruiting: {
+    profileActivity: {
+      list: oc.input(RecruitingProfileActivityInput).output(RecruitingProfileActivityOutput),
+      recordView: oc.input(RecordRecruitingProfileViewInput).output(RecruitingProfileViewSchema),
+    },
     crmData: oc
       .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
       .output(RecruitingCrmDataOutputSchema),
+    schedulingPlans: oc
+      .input(z.object({ threadId: Id }))
+      .output(
+        z.object({
+          plans: z.array(RecruitingSchedulingPlanSchema),
+          slots: z.array(RecruitingSchedulingSlotSchema.safeExtend({ observedAt: IsoDate })),
+          partial: z.boolean(),
+        }),
+      ),
+    saveSchedulingPlan: oc
+      .input(RecruitingSchedulingPlanInputSchema)
+      .output(RecruitingSchedulingPlanSchema),
     correspondence: oc
       .input(
         threadTarget.safeExtend({
@@ -634,7 +659,21 @@ export const appContract = {
         }),
       )
       .output(RecruitingCorrespondenceSchema),
-    roleCampaign: oc.input(threadTarget).output(RecruitingRoleCampaignSchema),
+    roleCampaign: oc
+      .input(
+        threadTarget.and(
+          z
+            .object({
+              campaignId: Id.optional(),
+              campaignOffset: z.number().int().min(0).max(1_000_000).optional(),
+            })
+            .refine(
+              (input) => input.campaignOffset === undefined || input.campaignId !== undefined,
+              "Campaign offset requires an exact campaign selection",
+            ),
+        ),
+      )
+      .output(RecruitingRoleCampaignSchema),
     roleSetup: oc.input(threadTarget).output(RecruitingRoleSetupSchema),
     /** The latest calibration review round of the thread's role (the ten people it showed). */
     calibrationRound: oc.input(threadTarget).output(RecruitingCalibrationRoundOutput),

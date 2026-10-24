@@ -62,6 +62,7 @@ function recruitingServices(
               "crm_import_candidate",
               "list_crm_candidate_roles",
               "list_crm_candidate_correspondence",
+              "list_crm_role_correspondence",
             ],
           },
         },

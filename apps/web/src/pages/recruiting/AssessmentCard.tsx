@@ -2,6 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Badge, Button } from "@rakazo/ui-web";
 import { ChevronDown, CircleCheck, CircleHelp, CircleX, Scale } from "lucide-react";
 import { useState } from "react";
+import { HighlightText } from "./evidence";
 import { OrgBadge } from "./OrgBadge";
 import type { RequirementRow, RequirementStatus } from "./profile";
 import { sourceLabel } from "./profile";
@@ -46,6 +47,7 @@ export function AssessmentCard({
   quick,
   rows,
   sourceUrls,
+  keywords = [],
 }: {
   score: string | null;
   rank: { label: string; value: string } | null;
@@ -53,6 +55,7 @@ export function AssessmentCard({
   quick: QuickOutput;
   rows: readonly RequirementRow[];
   sourceUrls: readonly string[];
+  keywords?: readonly string[];
 }) {
   const { t } = useLingui();
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
@@ -61,9 +64,9 @@ export function AssessmentCard({
     match: t`Match`,
     gap: t`Gap`,
     partial: t`Partial match`,
-    unknown: null,
+    unknown: t`Unknown`,
   };
-  const counts = (["match", "partial", "gap"] as const)
+  const counts = (["match", "partial", "gap", "unknown"] as const)
     .map((status) => ({ status, count: rows.filter((row) => row.status === status).length }))
     .filter((item) => item.count);
   const toggle = (key: string) =>
@@ -175,7 +178,10 @@ export function AssessmentCard({
           {rows.map((row) => {
             const { Icon, className } = ICONS[row.status];
             const label = statusLabel[row.status];
-            const name = row.brief?.name ?? row.label;
+            const name =
+              row.brief?.name ??
+              row.label ??
+              (row.criterionId ? t`Criterion name unavailable` : null);
             const verdict = row.brief?.verdict ?? null;
             const expanded = open.has(row.key);
             const hasDetail = Boolean(row.text || row.sourceUrls.length);
@@ -194,10 +200,13 @@ export function AssessmentCard({
                     className={`shrink-0 ${className}`}
                   />
                   {name ? <span className="shrink-0 font-medium">{name}</span> : null}
+                  {row.criterionId ? (
+                    <span className="shrink-0 text-xs text-muted-foreground">{row.criterionId}</span>
+                  ) : null}
                   <span
                     className={`min-w-0 flex-1 text-muted-foreground ${expanded ? "" : "truncate"}`}
                   >
-                    {verdict ?? (expanded ? null : row.text)}
+                    {verdict ?? (expanded ? null : row.text || t`No evidence provided.`)}
                   </span>
                   {hasDetail ? (
                     <ChevronDown
@@ -210,7 +219,12 @@ export function AssessmentCard({
                 {expanded ? (
                   <div className="space-y-0.5 pb-2 ps-6">
                     {row.text ? (
-                      <p className="whitespace-pre-wrap text-muted-foreground">{row.text}</p>
+                      <p className="break-words whitespace-pre-wrap text-muted-foreground">
+                        <HighlightText
+                          text={row.text}
+                          terms={[...keywords, ...(row.label ? [row.label] : [])]}
+                        />
+                      </p>
                     ) : null}
                     <SourceLinks urls={row.sourceUrls} />
                   </div>
@@ -230,7 +244,7 @@ export function AssessmentCard({
             <p
               className={`whitespace-pre-wrap text-muted-foreground ${summaryOpen ? "" : "line-clamp-3"}`}
             >
-              {summary}
+              <HighlightText text={summary} terms={keywords} />
             </p>
             <Button size="sm" variant="ghost" onClick={() => setSummaryOpen((value) => !value)}>
               {summaryOpen ? <Trans>Show less</Trans> : <Trans>Show more</Trans>}

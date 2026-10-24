@@ -210,6 +210,7 @@ import {
   lockOwnedGroup,
   newestModelCredentialOrder,
   newestVoiceCredentialOrder,
+  openVerifiedRecruitingCrmWorkspace,
   Prisma,
   parseComputerMode,
   pushSessionExpiresAt,
@@ -309,18 +310,24 @@ import {
   listRecruitingCandidateSources,
   listRecruitingCandidates,
   listRecruitingFeedback,
+  listRecruitingProfileActivity,
   listRecruitingQuestions,
   listRecruitingReminders,
   listRecruitingResearch,
   notifyRecruitingChange,
   readRecruitingCalibrationRound,
   readRecruitingSource,
+  recordRecruitingProfileView,
   reviseRecruitingRole,
   setRecruitingCandidateShortlist,
   updateRecruitingCandidateNote,
   updateRecruitingReminder,
 } from "./recruiting.js";
 import { syncRecruitingCrm } from "./recruiting-crm-sync.js";
+import {
+  getRecruitingSchedulingPlans,
+  saveRecruitingSchedulingPlan,
+} from "./recruiting-scheduling.js";
 import { listRoutineRuns } from "./routine-runs.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
@@ -2218,17 +2225,33 @@ export function createRouter(deps: RouterDeps) {
               target,
               { operation: "role", reference },
             );
-            if (existing) return { ...existing, crmRoleReference: reference };
-            const name = `${role.role_label} · ${role.client_label}`
-              .slice(0, 80)
-              .replace(/[\uD800-\uDBFF]$/, "");
-            const group = await groupRepos.createGroup(context.actor, { ...input, name });
-            if (
-              group.members[0]?.botId !==
-              (target.kind === "bot" ? target.botId : target.memberBotIds[0])
-            )
-              throw new IsolationError();
-            return group;
+            const opened = await openVerifiedRecruitingCrmWorkspace(deps.prisma, context.actor, {
+              target: {
+                mcpServerId: reference.sourceId,
+                serverRevision: reference.serverRevision,
+                organizationId: reference.organizationId,
+                crmRoleId: role.role_spec_id,
+                crmClientId: role.client_id,
+                clientLabel: role.client_label,
+                roleLabel: role.role_label,
+              },
+              verifiedBotId: target.kind === "bot" ? target.botId : target.memberBotIds[0]!,
+              botIds: input.botIds,
+              roleText: [
+                role.role_label,
+                role.client_label,
+                role.summary,
+                role.description,
+                role.jd_text,
+                role.jd_url,
+              ]
+                .filter(Boolean)
+                .join("\n\n"),
+            });
+            return groupRepos.mapGroup(
+              context.actor,
+              await groupRepos.getGroup(context.actor, opened.groupId),
+            );
           }
           return await groupRepos.createGroup(context.actor, input);
         } catch (error) {
@@ -3637,6 +3660,24 @@ export function createRouter(deps: RouterDeps) {
           input,
         ),
       ),
+      schedulingPlans: authed.recruiting.schedulingPlans.handler(async ({ context, input }) => {
+        return getRecruitingSchedulingPlans(
+          deps.prisma,
+          context.actor,
+          input,
+          context.stillAuthorized,
+        );
+      }),
+      saveSchedulingPlan: authed.recruiting.saveSchedulingPlan.handler(
+        async ({ context, input }) => {
+          return saveRecruitingSchedulingPlan(
+            deps.prisma,
+            context.actor,
+            input,
+            context.stillAuthorized,
+          );
+        },
+      ),
       correspondence: authed.recruiting.correspondence.handler(async ({ context, input }) =>
         getRecruitingCorrespondence(
           deps.prisma,
@@ -3651,18 +3692,40 @@ export function createRouter(deps: RouterDeps) {
             : undefined,
           mcpOAuth,
           { limit: input.limit, cursor: input.cursor },
+          {
+            connectors: deps.connectors,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
         ),
       ),
       roleCampaign: authed.recruiting.roleCampaign.handler(async ({ context, input }) =>
         getRecruitingRoleCampaign(
-          { prisma: deps.prisma, connectors: deps.connectors, signal: context.signal },
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
+          { campaignId: input.campaignId, campaignOffset: input.campaignOffset },
         ),
       ),
       roleSetup: authed.recruiting.roleSetup.handler(async ({ context, input }) =>
         getRecruitingRoleSetup(
-          { prisma: deps.prisma, connectors: deps.connectors, signal: context.signal },
+          {
+            prisma: deps.prisma,
+            connectors: deps.connectors,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, input),
+          },
           context.actor,
           await resolveThreadTarget(deps.prisma, context.actor, input),
         ),
@@ -3792,6 +3855,14 @@ export function createRouter(deps: RouterDeps) {
         ),
         delete: authed.recruiting.notes.delete.handler(({ context, input }) =>
           deleteRecruitingCandidateNote(deps.prisma, context.actor, input),
+        ),
+      },
+      profileActivity: {
+        list: authed.recruiting.profileActivity.list.handler(({ context, input }) =>
+          listRecruitingProfileActivity(deps.prisma, context.actor, input),
+        ),
+        recordView: authed.recruiting.profileActivity.recordView.handler(({ context, input }) =>
+          recordRecruitingProfileView(deps.prisma, context.actor, input),
         ),
       },
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>

@@ -179,6 +179,7 @@ body,
   container-type: inline-size;
 }
 [data-product-view="recruiting"] .hire-role-chat {
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   position: absolute;
   inset-block: 0;
   inset-inline-end: 0;
@@ -215,6 +216,13 @@ body,
   }
 }
 @media (max-width: 940px) {
+  [data-product-view="recruiting"] .hire-role-chat-trigger {
+    position: static;
+    align-self: flex-end;
+    flex-shrink: 0;
+    max-width: calc(100% - 28px);
+    margin: 8px 14px 12px;
+  }
   [data-product-view="recruiting"] .hire-role-chat-open > .recruiting-workspace-main {
     margin-inline-end: 0;
   }
@@ -229,23 +237,27 @@ body,
   }
 }
 [data-product-view="recruiting"] .hire-brief-view {
-  width: min(1200px, calc(100% - 80px));
+  font-family: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  width: min(1240px, calc(100% - 48px));
   min-height: 0;
   flex: 1;
   margin: 0 auto;
-  overflow-y: auto;
-  padding: 54px 0 70px;
+  overflow: hidden;
+  padding: 24px 0 0;
 }
 [data-product-view="recruiting"] .hire-brief-top {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  flex-shrink: 0;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
 }
 [data-product-view="recruiting"] .hire-brief-top h1 {
-  margin: 0 0 7px;
-  font-size: 30px;
+  margin: 0 0 4px;
+  font-size: 22px;
   font-weight: 650;
   letter-spacing: -0.045em;
 }
@@ -255,20 +267,19 @@ body,
   line-height: 1.6;
 }
 [data-product-view="recruiting"] .hire-brief-top .hire-brief-role {
-  margin-bottom: 6px;
-  color: var(--foreground);
-  font-weight: 600;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 [data-product-view="recruiting"] .hire-brief-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 370px;
-  align-items: start;
-  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  min-height: 0;
+  flex: 1;
+  gap: 24px;
 }
 [data-product-view="recruiting"] .hire-brief-grid > * {
   min-width: 0;
 }
-[data-product-view="recruiting"] .hire-chat-panel,
 [data-product-view="recruiting"] .hire-live-criteria {
   overflow: hidden;
   border: 1px solid var(--border);
@@ -277,9 +288,16 @@ body,
 }
 [data-product-view="recruiting"] .hire-chat-panel {
   display: flex;
-  height: 640px;
+  height: 100%;
   min-height: 0;
   flex-direction: column;
+  overflow: hidden;
+}
+[data-product-view="recruiting"] .hire-brief-grid > aside {
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 20px;
+  scrollbar-width: thin;
 }
 [data-product-view="recruiting"] .hire-panel-heading {
   display: flex;
@@ -303,6 +321,11 @@ body,
   margin-top: 3px;
   color: var(--muted-foreground);
   font-size: 10px;
+}
+[data-product-view="recruiting"] .hire-chat-panel > .hire-panel-heading {
+  padding: 12px 4px;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
 }
 [data-product-view="recruiting"] .hire-assistant-identity {
   display: flex;
@@ -350,42 +373,186 @@ body,
   flex-shrink: 0;
   margin-top: 1px;
 }
+[data-product-view="recruiting"] .hire-live-criteria[data-summary="feedback"] {
+  background: var(--card);
+  border: 0;
+  border-radius: 12px;
+}
+[data-product-view="recruiting"] .hire-live-criteria[data-summary="feedback"] .hire-panel-heading {
+  padding: 16px;
+  border: 0;
+}
+[data-product-view="recruiting"]
+  :where(.hire-live-criteria[data-summary="feedback"])
+  .hire-candidate-feedback-history {
+  margin: 0 16px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+[data-product-view="recruiting"] .hire-live-criteria[data-summary="feedback"] > details {
+  margin: 0 16px;
+  padding: 12px 0 0;
+  border-top: 1px solid var(--border);
+  border-bottom: 0;
+}
+[data-product-view="recruiting"] .hire-live-criteria[data-summary="feedback"] summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 550;
+}
+[data-product-view="recruiting"]
+  .hire-live-criteria[data-summary="feedback"]
+  .hire-criterion-row
+  .hire-criterion-row {
+  padding: 12px 0;
+  font-size: 13px;
+}
+[data-product-view="recruiting"]
+  .hire-live-criteria[data-summary="feedback"]
+  :is(.hire-panel-heading span, .hire-criterion-row > span, .hire-source-hint) {
+  font-size: 12px;
+}
 @media (max-width: 1180px) {
   [data-product-view="recruiting"] .hire-brief-view {
     width: calc(100% - 40px);
-    padding-top: 30px;
+    padding-top: 20px;
   }
   [data-product-view="recruiting"] .hire-brief-grid {
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr) 260px;
     gap: 16px;
   }
 }
 @media (max-width: 940px) {
+  [data-product-view="recruiting"] .hire-brief-view {
+    overflow-y: auto;
+  }
   [data-product-view="recruiting"] .hire-brief-grid {
-    grid-template-columns: minmax(0, 1fr);
+    display: flex;
+    flex: none;
+    flex-direction: column;
   }
   [data-product-view="recruiting"] .hire-chat-panel {
-    height: min(640px, 78dvh);
-    min-height: 400px;
+    height: calc(100dvh - 156px);
+    min-height: 280px;
+  }
+  [data-product-view="recruiting"] .hire-brief-grid > aside {
+    overflow: visible;
   }
 }
 @media (max-width: 600px) {
   [data-product-view="recruiting"] .hire-brief-view {
     width: calc(100% - 28px);
-    padding-top: 24px;
-    padding-bottom: 28px;
+    padding-top: 16px;
+    padding-bottom: env(safe-area-inset-bottom);
   }
   [data-product-view="recruiting"] .hire-brief-top {
     align-items: flex-start;
-    flex-direction: column;
-    gap: 16px;
-    margin-bottom: 20px;
+    gap: 12px;
+    margin-bottom: 12px;
   }
   [data-product-view="recruiting"] .hire-brief-top h1 {
-    font-size: 26px;
+    font-size: 20px;
   }
   [data-product-view="recruiting"] .hire-brief-top button {
     min-height: 44px;
+  }
+}
+/* One reading canvas across the role workspace, feedback and conversation. */
+[data-product-view="recruiting"] .chat-transcript {
+  width: 100%;
+  gap: 12px;
+  padding: 20px max(16px, calc((100% - 760px) / 2)) 28px;
+  scroll-padding-block: 20px;
+  overscroll-behavior-y: contain;
+}
+[data-product-view="recruiting"] .hire-chat-panel .chat-transcript {
+  padding-inline: max(4px, calc((100% - 720px) / 2));
+}
+[data-product-view="recruiting"] [data-message-role="bot"] [data-testid="message-bubble-frame"] {
+  max-width: 100%;
+}
+[data-product-view="recruiting"] [data-message-role="user"] [data-testid="message-bubble-frame"] {
+  max-width: 85%;
+}
+[data-product-view="recruiting"] [data-testid="message-bot-bubble"] {
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  font-size: 15px;
+  line-height: 1.7;
+}
+[data-product-view="recruiting"] [data-testid="message-user-bubble"] {
+  padding: 10px 14px;
+  border-radius: 16px 16px 4px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-product-view="recruiting"] .chat-composer {
+  flex-shrink: 0;
+  width: 100%;
+  max-width: 808px;
+  margin-inline: auto;
+  padding: 12px 16px max(16px, env(safe-area-inset-bottom));
+}
+[data-product-view="recruiting"] .hire-chat-panel .chat-composer {
+  padding-inline: 0;
+}
+[data-product-view="recruiting"] [data-testid="composer-bar"] {
+  align-items: end;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 18px;
+  background: var(--background);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--foreground) 4%, transparent);
+}
+[data-product-view="recruiting"] [data-testid="composer-bar"]:focus-within {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+[data-product-view="recruiting"] .composer-input {
+  grid-column: 2;
+  grid-row: 1;
+  padding: 4px 2px;
+}
+[data-product-view="recruiting"] .composer-input textarea {
+  min-width: 0;
+  max-height: min(192px, 30dvh);
+}
+[data-product-view="recruiting"] .composer-attach {
+  grid-row: 1;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  background: transparent;
+}
+[data-product-view="recruiting"] .composer-actions {
+  grid-row: 1;
+  gap: 6px;
+}
+[data-product-view="recruiting"] .composer-actions button {
+  width: 36px;
+  height: 36px;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+[data-product-view="recruiting"] .composer-actions button:disabled {
+  background: var(--muted);
+  color: var(--muted-foreground);
+  box-shadow: none;
+}
+[data-product-view="recruiting"] .composer-actions .composer-secondary {
+  background: var(--background);
+  color: var(--foreground);
+}
+@media (max-width: 600px) {
+  [data-product-view="recruiting"] .chat-composer button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  [data-product-view="recruiting"] .composer-input {
+    padding-block: 8px;
   }
 }
 [data-product-view="recruiting"] .hire-results-filters {
@@ -445,10 +612,6 @@ body,
   box-shadow: none;
   resize: vertical;
 }
-[data-product-view="recruiting"] textarea[name="chat-message"] {
-  min-height: 72px;
-  max-height: 320px;
-}
 [data-product-view="recruiting"] .hire-composer-actions {
   display: flex;
   align-items: center;
@@ -497,6 +660,9 @@ body,
   width: min(1200px, calc(100% - 80px));
   margin: 0 auto;
   padding: 54px 0 70px;
+}
+[data-product-view="recruiting"] .hire-standard-view-native {
+  padding-top: 16px;
 }
 [data-product-view="recruiting"] .hire-section-header {
   padding: 20px 0 27px;

@@ -5,6 +5,7 @@ import { listRecruitingCandidates } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { agentCrmCandidatesArgs } from "./mcp-connector.js";
 import {
+  listRecruitingRoleReplies,
   resolveRecruitingContact,
   resolveRecruitingContactAcrossRoles,
   unresolvedContactEmailError,
@@ -55,7 +56,7 @@ function fixture(
     nextCursor: null,
   } as never);
   const calls: ConnectorCall[] = [];
-  const mail = { messages: [] as Record<string, unknown>[], fail: false };
+  const mail = { messages: [] as Record<string, unknown>[], fail: false, roleId };
   const connector = {
     async *execute(call: ConnectorCall) {
       calls.push(call);
@@ -69,11 +70,19 @@ function fixture(
           data: {
             structuredContent: {
               data: {
+                version: 2,
                 organization_id: org,
-                role_id: roleId,
+                role_id: mail.roleId,
+                candidate_id: (call.args as { p_candidate: string }).p_candidate,
                 pagination: "offset",
-                messages: mail.messages,
-                next_offset: null,
+                messages: mail.messages.slice(
+                  Number(call.args.p_offset),
+                  Number(call.args.p_offset) + Number(call.args.p_limit),
+                ),
+                next_offset:
+                  Number(call.args.p_offset) + Number(call.args.p_limit) < mail.messages.length
+                    ? Number(call.args.p_offset) + Number(call.args.p_limit)
+                    : null,
               },
             },
           },
@@ -94,7 +103,14 @@ function fixture(
       { roleId: "native-role", nameOrEmail },
       context as never,
     );
-  return { calls, resolve, connector, mail };
+  const replies = (limit?: number) =>
+    listRecruitingRoleReplies(
+      { prisma: {} as never, connector },
+      actor,
+      { roleId: "native-role", ...(limit ? { limit } : {}) },
+      context as never,
+    );
+  return { calls, resolve, replies, connector, mail };
 }
 
 describe("resolveRecruitingContact", () => {
@@ -208,63 +224,83 @@ describe("resolveRecruitingContact", () => {
 });
 
 describe("agent list_crm_candidates arguments", () => {
-  it("includes contacted people and translates a role id to the role's labels", async () => {
-    const readRole = vi.fn(async () => ({
-      structuredContent: {
-        data: { role_spec_id: roleId, client_label: "Dyna", role_label: "Data Infra" },
-      },
-    }));
+  const binding = {
+    mcpServerId: "crm-server",
+    serverRevision: 1,
+    organizationId: org,
+    crmRoleId: roleId,
+    crmClientId: "30000000-0000-4000-8000-000000000003",
+    clientLabel: "Example Client",
+    roleLabel: "Data Infra",
+  };
+  it("fills only missing exact-workspace filters and includes contacted people", async () => {
+    expect(await agentCrmCandidatesArgs({ p_q: "Example" }, [binding])).toEqual({
+      p_org: org,
+      p_q: "Example",
+      p_not_reviewed: false,
+      p_client: binding.clientLabel,
+      p_role: binding.roleLabel,
+    });
     expect(
-      await agentCrmCandidatesArgs({ p_org: org, p_role: roleId, p_q: "Sumeet" }, readRole),
+      await agentCrmCandidatesArgs({ p_org: org, p_role: roleId, p_not_reviewed: true }, [binding]),
     ).toEqual({
       p_org: org,
-      p_q: "Sumeet",
-      p_not_reviewed: false,
-      p_client: "Dyna",
-      p_role: "Data Infra",
+      p_not_reviewed: true,
+      p_client: binding.clientLabel,
+      p_role: binding.roleLabel,
     });
-    expect(readRole).toHaveBeenCalledWith({ p_org: org, p_role: roleId });
-    // Labels and an explicit p_not_reviewed pass through untouched.
-    expect(
-      await agentCrmCandidatesArgs(
-        { p_org: org, p_role: "Data Infra", p_not_reviewed: true },
-        readRole,
-      ),
-    ).toEqual({ p_org: org, p_role: "Data Infra", p_not_reviewed: true });
-    expect(readRole).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { p_org: "other-org" },
+    { p_client: "Other client" },
+    { p_role: "Other role" },
+    { p_q: "Example", p_role: "Other role" },
+  ])("refuses mismatched explicit scope instead of rewriting or broadening: %j", async (args) => {
+    await expect(agentCrmCandidatesArgs(args, [binding])).rejects.toThrow(/current role workspace/);
+  });
+  it("refuses missing or ambiguous scope instead of selecting another owned role", async () => {
+    await expect(agentCrmCandidatesArgs({ p_org: org, p_role: roleId })).rejects.toThrow(
+      /workspace/,
+    );
+    await expect(
+      agentCrmCandidatesArgs({ p_q: "Example" }, [binding, { ...binding, roleLabel: "Other" }]),
+    ).rejects.toThrow(/workspace/);
   });
 
-  it("replaces a whoami org and free-text labels with the bound role's CRM binding", async () => {
-    const readRole = vi.fn();
-    const binding = {
-      organizationId: "8a545110-d526-47ff-a530-648ee7be139c",
-      clientLabel: "Dyna",
-      roleLabel: "SWE Data Infra",
-    };
-    const live = {
-      p_q: "Sumeet Parekh",
-      p_org: "ae29fbad-0000-4000-8000-000000000000",
-      p_client: "Dyna Robotics",
-      p_role: "Software Engineer, Data Infra",
-      p_not_reviewed: false,
-    };
-    expect(await agentCrmCandidatesArgs(live, readRole, [binding])).toEqual({
-      p_q: "Sumeet Parekh",
-      p_org: "8a545110-d526-47ff-a530-648ee7be139c",
-      p_client: "Dyna",
-      p_role: "SWE Data Infra",
-      p_not_reviewed: false,
+  it("finds incoming candidate mail beyond the former twenty-page cutoff", async () => {
+    const f = fixture([crmRow("4", "Example Person", "person@example.test")]);
+    f.mail.messages = Array.from({ length: 1051 }, (_, index) => ({
+      id: `mail-${index}`,
+      organization_id: org,
+      candidate_id: "40000000-0000-4000-8000-000000000004",
+      lead_email: null,
+      thread_id: "thread",
+      direction: index === 1050 ? "received" : "sent",
+      timestamp_email: "2026-10-22T00:00:00Z",
+      campaign_id: null,
+      from_address: "person@example.test",
+      to_address: "team@example.test",
+      subject: "Role",
+      body_text: `body-${index}`,
+    }));
+    const result = await f.resolve("Example");
+    expect(result.matches[0]).toMatchObject({
+      correspondence: { status: "read", latestReceived: { preview: "body-1050" } },
     });
-    // Several bound roles and no exact label match: a name-only search across the org.
-    expect(
-      await agentCrmCandidatesArgs(live, readRole, [
-        binding,
-        { ...binding, roleLabel: "Other role" },
-      ]),
-    ).toEqual({ p_q: "Sumeet Parekh", p_org: binding.organizationId, p_not_reviewed: false });
-    expect(readRole).not.toHaveBeenCalled();
+    const calls = f.calls.filter((call) => call.route?.toolName === "list_crm_role_correspondence");
+    expect(calls).toHaveLength(22);
+    expect(calls.at(-1)?.args).toMatchObject({
+      p_candidate: "40000000-0000-4000-8000-000000000004",
+      p_offset: 1050,
+    });
   });
-
+  it("does not report a foreign role correspondence page as successfully read", async () => {
+    const f = fixture([crmRow("4", "Example Person", "person@example.test")]);
+    f.mail.roleId = org;
+    expect((await f.resolve("Example")).matches[0]).toMatchObject({
+      correspondence: { status: "unavailable", latest: null },
+    });
+  });
   it("answers latest mail from the role's stored correspondence (the Inbox source)", async () => {
     const f = fixture([crmRow("4", "Sumeet Parekh", "sumeetparekh1@gmail.com")]);
     const message = (id: string, direction: string, at: string, from: string, to: string) => ({
@@ -304,6 +340,81 @@ describe("agent list_crm_candidates arguments", () => {
     expect((await f.resolve("Sumeet")).matches[0]).toMatchObject({
       correspondence: { status: "unavailable", latest: null },
     });
+  });
+});
+
+describe("listRecruitingRoleReplies", () => {
+  beforeEach(() => vi.clearAllMocks());
+  const mail = (id: string, candidate: string, direction: string, at: string) => ({
+    id,
+    organization_id: org,
+    candidate_id: `40000000-0000-4000-8000-00000000000${candidate}`,
+    lead_email: null,
+    thread_id: `t-${candidate}`,
+    direction,
+    timestamp_email: at,
+    campaign_id: null,
+    from_address: direction === "received" ? `p${candidate}@example.test` : "team@example.test",
+    to_address: direction === "received" ? "team@example.test" : `p${candidate}@example.test`,
+    subject: "Re: Data Infra",
+    body_text: `reply from ${candidate}`,
+  });
+
+  it("lists everyone on the role who replied, newest first, from the Inbox source", async () => {
+    const f = fixture([
+      crmRow("4", "Ada Example", "p4@example.test"),
+      crmRow("5", "Ben Example", "p5@example.test"),
+      crmRow("6", "Cy Example", "p6@example.test"),
+    ]);
+    f.mail.messages = [
+      mail("a2", "4", "received", "2026-10-22T10:00:00Z"),
+      mail("b1", "5", "received", "2026-10-23T09:00:00Z"),
+      mail("a1", "4", "received", "2026-10-21T10:00:00Z"),
+      mail("c1", "6", "sent", "2026-10-20T10:00:00Z"),
+    ];
+    const result = await f.replies();
+    expect(result).toMatchObject({ correspondence: "read", complete: true, total: 2 });
+    expect(result.people.map((person) => [person.name, person.replies])).toEqual([
+      ["Ben Example", 1],
+      ["Ada Example", 2],
+    ]);
+    expect(result.people[1]?.latestReceived).toMatchObject({ at: "2026-10-22T10:00:00Z" });
+    // The whole role is read: no candidate filter, exact org and role scope.
+    const reads = f.calls.filter((call) => call.route?.toolName === "list_crm_role_correspondence");
+    expect(reads[0]?.args).toEqual({ p_org: org, p_role: roleId, p_limit: 50, p_offset: 0 });
+    // Listed addresses count as resolved for later correspondence lookups in this run.
+    expect(unresolvedContactEmailError("run-resolve", "p5@example.test", "Ben Example")).toBeNull();
+  });
+
+  it("reports unbound or unreadable correspondence, never an empty reply list", async () => {
+    const f = fixture([crmRow("4", "Ada Example", "p4@example.test")]);
+    f.mail.fail = true;
+    expect(await f.replies()).toEqual({ correspondence: "unavailable", people: [] });
+    f.mail.fail = false;
+    f.mail.roleId = org;
+    expect(await f.replies()).toEqual({ correspondence: "unavailable", people: [] });
+    vi.mocked(listRecruitingCandidates).mockResolvedValue({
+      crmTarget: null,
+      items: [],
+      nextCursor: null,
+    } as never);
+    expect(await f.replies()).toEqual({ correspondence: "not_bound", people: [] });
+  });
+
+  it("rejects a page carrying another candidate's scope echo", async () => {
+    const f = fixture([crmRow("4", "Ada Example", "p4@example.test")]);
+    f.mail.messages = [mail("a1", "4", "received", "2026-10-22T10:00:00Z")];
+    const execute = f.connector.execute.bind(f.connector);
+    f.connector.execute = async function* (call: ConnectorCall) {
+      for await (const event of execute(call)) {
+        if (event.type === "result" && call.route?.toolName === "list_crm_role_correspondence")
+          (
+            event.data as { structuredContent: { data: Record<string, unknown> } }
+          ).structuredContent.data.candidate_id = "40000000-0000-4000-8000-000000000009";
+        yield event;
+      }
+    } as typeof f.connector.execute;
+    expect(await f.replies()).toEqual({ correspondence: "unavailable", people: [] });
   });
 });
 

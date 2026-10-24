@@ -36,6 +36,7 @@ import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
 import { createRecruitingCandidateReportReader } from "./recruiting-research.js";
 import {
+  listRecruitingRoleReplies,
   resolveRecruitingContact,
   resolveRecruitingContactAcrossRoles,
 } from "./recruiting-tools.js";
@@ -123,6 +124,17 @@ export async function executeRecruitingCandidatesTool(
     if (!roleId) {
       succeeded = true;
       return { status: "no_current_role" as const };
+    }
+    if (input.operation === "replies") {
+      const result = await listRecruitingRoleReplies(
+        deps,
+        trusted.actor,
+        { roleId, ...(input.limit ? { limit: input.limit } : {}) },
+        context,
+      );
+      itemCount = result.people.length;
+      succeeded = true;
+      return result;
     }
     if (input.operation === "round") {
       const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {

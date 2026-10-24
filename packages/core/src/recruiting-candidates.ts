@@ -1,9 +1,11 @@
 import type { RecruitingCandidateProfile, RecruitingCandidateReport } from "@rakazo/contracts";
 import {
+  isRecruitingCandidateReportField,
   RECRUITING_CANDIDATE_OUTPUT_JSON_SCHEMA,
   RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
   RecruitingCandidateOutputRowSchema,
   RecruitingCandidateProfileSchema,
+  RecruitingCandidateReportSchema,
 } from "@rakazo/contracts";
 import { isMatchScoreKey, matchScore100, matchScoreScale } from "./match-score.js";
 import { recruitingCalibrationIdentity } from "./recruiting-playbook.js";
@@ -144,55 +146,21 @@ export function normalizeRecruitingCandidateRow(
   };
 }
 
-// These are transport/provenance fields, not provider observations about the person.
-const reportMetadata = new Set([
-  "id",
-  "taskid",
-  "taskids",
-  "providertaskid",
-  "artifactid",
-  "artifactids",
-  "artifactref",
-  "actionid",
-  "effectid",
-  "runid",
-  "threadid",
-  "roleid",
-  "rolerevisionid",
-  "sourceid",
-  "shardid",
-  "shardids",
-  "outputid",
-  "receiptid",
-  "request",
-  "response",
-  "route",
-  "routing",
-  "cursor",
-  "nextcursor",
-  "requestcursor",
-  "providerresult",
-  "observation",
-  "metadata",
-  "traceid",
-  "storagekey",
-  "sha256",
-  "hash",
-  "toolname",
-  "connectorid",
-  "resourceid",
-  "resourcerevision",
-  "cataloggroup",
-  "clientnonce",
-]);
+export { isRecruitingCandidateReportField } from "@rakazo/contracts";
 
-/** The same business/provenance boundary governs report display and retained row equivalence. */
-export function isRecruitingCandidateReportField(key: string): boolean {
-  return !key.startsWith("_") && !reportMetadata.has(key.replace(/[_-]/g, "").toLowerCase());
+/** Keep nested business values and source provenance; the original artifact retains diagnostics. */
+function reportValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(reportValue);
+  if (!record(value)) return value;
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => isRecruitingCandidateReportField(key) || key === "source_id")
+      .map(([key, nested]) => [key, reportValue(nested)]),
+  );
 }
 
 /**
- * Display supplied scalar observations only; the original artifact remains authoritative.
+ * Preserve supplied scalar and structured observations; the original artifact remains authoritative.
  * Score cells are shown on 0–100; `pageRows` (the row's whole saved result) decides whether its
  * plain numbers were on 0–10.
  */
@@ -234,7 +202,13 @@ export function projectRecruitingCandidateReport(
       typeof cell.absent === "boolean";
     const value =
       cell && Object.hasOwn(cell, "value") ? cell.value : absent ? cell.absent : rawCell;
-    if (!scalar(value) && !(Array.isArray(value) && value.every(scalar))) continue;
+    const textValue = scalar(value) || (Array.isArray(value) && value.every(scalar));
+    const structured = textValue
+      ? undefined
+      : RecruitingCandidateReportSchema.shape.fields.element.shape.structuredValue
+          .unwrap()
+          .safeParse(reportValue(value));
+    if (!textValue && !structured?.success) continue;
     const sourceIds = cell
       ? Array.isArray(cell.source_id)
         ? cell.source_id
@@ -271,11 +245,21 @@ export function projectRecruitingCandidateReport(
       value:
         score !== null
           ? String(score)
-          : value === null
+          : !textValue || value === null
             ? null
             : Array.isArray(value)
               ? value.map(String).join("\n")
               : String(value),
+      ...(structured?.success
+        ? {
+            structuredValue: structured.data,
+            sourceIds: sourceIds.filter((id): id is string => typeof id === "string"),
+            sourceUrlsById: Object.fromEntries(
+              Object.entries(sources ?? {}).map(([id, value]) => [id, links(value)]),
+            ),
+          }
+        : {}),
+
       ...(providerStatus ? { providerStatus } : {}),
       ...(typeof cell?.evidence === "string" ? { evidence: cell.evidence } : {}),
       ...(typeof cell?.reasoning === "string" ? { reasoning: cell.reasoning } : {}),
