@@ -3293,6 +3293,10 @@ msgstr ""
 msgid "From this role’s saved requirements"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Full assessment"
+msgstr ""
+
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "Tam ekran"
@@ -3725,6 +3729,10 @@ msgstr "Hafızayı koru"
 
 #: src/pages/RoutineEditor.tsx
 msgid "key"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Key work"
 msgstr ""
 
 #: src/pages/KnowledgeSection.tsx
@@ -6591,11 +6599,16 @@ msgstr ""
 msgid "Show computer"
 msgstr ""
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Show less"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "Show list"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Show more"
 msgstr "Daha fazla göster"
@@ -7685,6 +7698,10 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "Çalışıyor…"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Worth checking"
+msgstr ""
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"

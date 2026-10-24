@@ -3293,6 +3293,10 @@ msgstr "From {0}"
 msgid "From this role’s saved requirements"
 msgstr "From this role’s saved requirements"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Full assessment"
+msgstr "Full assessment"
+
 #: src/pages/WindowChrome.tsx
 msgid "Fullscreen"
 msgstr "Fullscreen"
@@ -3726,6 +3730,10 @@ msgstr "Keep memories"
 #: src/pages/RoutineEditor.tsx
 msgid "key"
 msgstr "key"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Key work"
+msgstr "Key work"
 
 #: src/pages/KnowledgeSection.tsx
 msgid "Knowledge"
@@ -6591,11 +6599,16 @@ msgstr "Show bots"
 msgid "Show computer"
 msgstr "Show computer"
 
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Show less"
+msgstr "Show less"
+
 #: src/pages/Artifacts.tsx
 msgid "Show list"
 msgstr "Show list"
 
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Show more"
 msgstr "Show more"
@@ -7685,6 +7698,10 @@ msgstr "Working on it"
 #: src/pages/Shell.tsx
 msgid "Working…"
 msgstr "Working…"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Worth checking"
+msgstr "Worth checking"
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Wrote {path}"

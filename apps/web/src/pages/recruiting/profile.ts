@@ -30,6 +30,31 @@ const PHOTO = /^(?:profile (?:image|photo|picture)|photo|avatar)(?: url)?$/i;
 const COMPANY_URL = /^current company (?:url|website)$/i;
 const COMPANY_INDUSTRY = /^current company industry$/i;
 const COMPANY_SIZE = /^current company (?:size|employees|headcount)$/i;
+const HEADLINE = /^headline$/i;
+const HIGHLIGHTS = /^highlights$/i;
+const KEY_WORKS = /^key works$/i;
+const CONCERNS = /^concerns$/i;
+const CRITERIA_BRIEF = /^criteria brief$/i;
+
+/** One entry per line of a returned list column, trimmed, empty lines dropped. */
+function lines(fields: readonly Field[]) {
+  return fields.flatMap((field) =>
+    (field.value ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean),
+  );
+}
+
+/** A criterion column name or display label reduced to the letters both share. */
+function criterionKey(name: string) {
+  return name
+    .trim()
+    .replace(/^(?:rule_[a-z]+\d+|round\d+)_/i, "")
+    .replace(/^rule_/i, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "");
+}
 
 /** The lead clause of a provider fact ("Logistics (LinkedIn label). Blurb…" → "Logistics"). */
 export function shortFact(value: string | null | undefined) {
@@ -78,7 +103,25 @@ export function candidateSections(fields: readonly Field[] | undefined) {
   const companyUrl = contact(COMPANY_URL);
   const companyIndustry = contact(COMPANY_INDUSTRY);
   const companySize = contact(COMPANY_SIZE);
+  const headline = contact(HEADLINE);
+  const highlights = contact(HIGHLIGHTS);
+  const keyWorks = contact(KEY_WORKS);
+  const concerns = contact(CONCERNS);
+  const criteriaBrief = contact(CRITERIA_BRIEF);
+  const briefs = new Map(
+    lines(criteriaBrief).flatMap((line) => {
+      const [key, name, verdict] = line.split("|").map((part) => part.trim());
+      return key && (name || verdict)
+        ? [[criterionKey(key), { name: name || null, verdict: verdict || null }] as const]
+        : [];
+    }),
+  );
   const placed = new Set<Field>([
+    ...headline,
+    ...highlights,
+    ...keyWorks,
+    ...concerns,
+    ...criteriaBrief,
     ...photo,
     ...companyUrl,
     ...companyIndustry,
@@ -99,7 +142,26 @@ export function candidateSections(fields: readonly Field[] | undefined) {
     fit: roleCandidateFit(all) as RoleCandidateFit | null,
     summary: summary?.value ?? null,
     criteria,
-    requirements: [...criteria.map(criterionRow), ...assessed.flatMap((item) => item.rows)],
+    requirements: [
+      ...criteria.map((field) => criterionRow(field, briefs.get(criterionKey(field.label)))),
+      ...assessed.flatMap((item) => item.rows),
+    ],
+    quick: {
+      headline: headline[0]?.value?.trim() || null,
+      highlights: lines(highlights),
+      keyWorks: lines(keyWorks)
+        .map((line) => {
+          const [title = "", ...rest] = line.split("|").map((part) => part.trim());
+          const url = rest.find((part) => httpsUrl(part))?.trim() ?? null;
+          return {
+            title,
+            detail: rest.filter((part) => part && part !== url).join(" · ") || null,
+            url,
+          };
+        })
+        .filter((work) => work.title),
+      concerns: lines(concerns),
+    },
     requirementSources: [
       ...new Set(
         assessment.flatMap((field, index) => [...assessed[index]!.sourceUrls, ...field.sourceUrls]),
@@ -146,6 +208,8 @@ export type RequirementRow = {
   /** Autumn's requirement reference ("R2") or criterion name, when it gave one. */
   label: string | null;
   status: RequirementStatus;
+  /** Autumn's own short name and verdict for this criterion, when it returned them. */
+  brief?: { name: string | null; verdict: string | null };
   text: string;
   sourceUrls: readonly string[];
 };
@@ -166,9 +230,13 @@ function statusOf(word: string): RequirementStatus | null {
   return STATUS_WORDS.find(([pattern]) => pattern.test(clean))?.[1] ?? null;
 }
 
-function criterionRow(field: Field): RequirementRow {
+function criterionRow(
+  field: Field,
+  brief?: { name: string | null; verdict: string | null },
+): RequirementRow {
   return {
     key: `criterion:${field.label}`,
+    ...(brief ? { brief } : {}),
     label: field.label,
     status:
       field.providerStatus === "match"
