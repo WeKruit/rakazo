@@ -22,11 +22,13 @@ import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
-import { CompanyLogo, EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
+import { OrgBadge } from "./OrgBadge";
+import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
   initials,
   linkedinHandle,
+  shortFact,
   sourceLabel,
   storedProfileFields,
 } from "./profile";
@@ -157,6 +159,9 @@ export function RecruitingDetailPanel({
   const email = person.email ?? sections.email;
   const phone = person.phone ?? sections.phone;
   const company = person.company ?? candidate?.company;
+  const sizeFact = shortFact(sections.company.size);
+  const companySize =
+    sizeFact && !/employee|员工|人/i.test(sizeFact) ? t`${sizeFact} employees` : sizeFact;
   const role =
     person.title && company ? t`${person.title} at ${company}` : (person.title ?? company);
   const resumeUrl = candidate?.resumeUrl ?? sections.resumeUrl;
@@ -250,19 +255,21 @@ export function RecruitingDetailPanel({
                   <span className="truncate">{role}</span>
                 </p>
               ) : null}
-              {sections.company.industry || sections.company.size ? (
-                <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  {company ? (
-                    <CompanyLogo name={company} host={sections.company.host} small />
-                  ) : null}
-                  <span className="truncate">
-                    {[
-                      sections.company.industry,
-                      sections.company.size ? t`${sections.company.size} employees` : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
+              {company &&
+              (sections.company.industry || sections.company.size || sections.company.host) ? (
+                <p className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+                  <OrgBadge
+                    name={company}
+                    host={sections.company.host}
+                    facts={[sections.company.industry, sections.company.size]}
+                  />
+                  {[shortFact(sections.company.industry), companySize]
+                    .filter(Boolean)
+                    .map((fact) => (
+                      <span key={fact} className="shrink-0 truncate">
+                        · {fact}
+                      </span>
+                    ))}
                 </p>
               ) : null}
               {person.location || handle ? (

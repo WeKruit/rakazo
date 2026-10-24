@@ -56,6 +56,16 @@ function criterionKey(name: string) {
     .replace(/[^\p{L}\p{N}]+/gu, "");
 }
 
+/** The lead clause of a provider fact ("Logistics (LinkedIn label). Blurb…" → "Logistics"). */
+export function shortFact(value: string | null | undefined) {
+  const lead = value
+    ?.split(/\s*[(（;；]|\.\s/)[0]
+    ?.trim()
+    .replace(/[.,，。]$/, "");
+  if (!lead) return null;
+  return lead.length > 40 ? `${lead.slice(0, 39)}…` : lead;
+}
+
 /** An https link with no credentials, as written; anything else is not used as an image or site. */
 function httpsUrl(value: string | null | undefined) {
   try {

@@ -45,6 +45,9 @@ const SINGLE = new RegExp(DATE, "gi");
 const PRESENT_ONLY = new RegExp(`^${PRESENT}$`, "i");
 const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 const MAX_SEGMENT = 240;
+/** Research notes ("checked 2026-10-24", "Partial: ...") are prose; their dates are not tenure. */
+const NOTE =
+  /:\s|\b(?:checked|accessed|retrieved|verified|as of|snippet|not (?:publicly )?(?:readable|available))\b/i;
 /** Only explicit links count as a website, so names such as "Node.js" stay words. */
 const WEBSITE = /(?:^|(?<=[\s|,，;；(（]))(?:https?:\/\/|www\.)[^\s|,，;；)）]+/i;
 
@@ -116,7 +119,10 @@ function parseSegment(text: string, kind: TimelineKind, now: Date): TimelineEntr
   const plain: TimelineEntry = { text, structured: false, primary: text };
   const { rest: words, website } = takeWebsite(text);
   const delimited = words.includes("|");
-  if (words.length > MAX_SEGMENT || (!delimited && /[.!?。]\s+\S.*[.!?。]/.test(words)))
+  if (
+    words.length > MAX_SEGMENT ||
+    (!delimited && (/[.!?。]\s+\S.*[.!?。]/.test(words) || NOTE.test(words)))
+  )
     return plain;
 
   const ranges = [...words.matchAll(RANGE)];
