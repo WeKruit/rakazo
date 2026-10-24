@@ -386,3 +386,60 @@ export async function listSyncedRecruitingCrmRoleContacts(
       : { profile: RecruitingCrmProfileSchema.parse(contact.profile) }),
   }));
 }
+
+export type CrmSyncCampaign = {
+  crmCampaignId: string;
+  name: string;
+  status: number | null;
+  crmRoleId: string | null;
+  clientId: string | null;
+  campaignCreatedAt: Date | null;
+  campaignUpdatedAt: Date | null;
+  mirrorSyncedAt: Date;
+};
+export type CrmSyncLead = {
+  crmLeadId: string;
+  crmCampaignId: string;
+  crmCandidateId: string | null;
+  status: number | null;
+  interestStatus: number | null;
+  openCount: number | null;
+  replyCount: number | null;
+  lastContactAt: Date | null;
+  lastReplyAt: Date | null;
+  mirrorSyncedAt: Date;
+};
+
+/** Upserts stored campaigns. Offset pages cannot prove absence, so nothing is archived here. */
+export function syncRecruitingCrmCampaigns(
+  prisma: PrismaClient,
+  actor: Actor,
+  scope: CrmSyncScope,
+  campaigns: CrmSyncCampaign[],
+  options: Options,
+) {
+  return upsertKeyed(
+    prisma.recruitingCrmCampaign,
+    owned(actor, scope),
+    "crmCampaignId",
+    campaigns,
+    {
+      ...options,
+      archivable: false,
+    },
+  );
+}
+
+/** Upserts one campaign's stored lead stats; same no-archive rule as campaigns. */
+export function syncRecruitingCrmLeads(
+  prisma: PrismaClient,
+  actor: Actor,
+  scope: CrmSyncScope,
+  leads: CrmSyncLead[],
+  options: Options,
+) {
+  return upsertKeyed(prisma.recruitingCrmLead, owned(actor, scope), "crmLeadId", leads, {
+    ...options,
+    archivable: false,
+  });
+}

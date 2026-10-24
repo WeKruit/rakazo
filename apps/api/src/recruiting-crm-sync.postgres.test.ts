@@ -72,6 +72,19 @@ function fakeCrm(serverId: string) {
         candidateId: person(1),
       },
     ],
+    campaigns: [
+      { id: "camp-a", crmRoleId: ROLE_A as string | null },
+      { id: "camp-b", crmRoleId: ROLE_A as string | null },
+      // Not mapped to any role: still copied.
+      { id: "camp-unmapped", crmRoleId: null as string | null },
+    ],
+    leads: [
+      { id: "lead-1", campaignId: "camp-a", candidateId: person(1) as string | null, replies: 1 },
+      { id: "lead-2", campaignId: "camp-a", candidateId: person(2) as string | null, replies: 0 },
+      { id: "lead-3", campaignId: "camp-a", candidateId: null as string | null, replies: 0 },
+      { id: "lead-4", campaignId: "camp-unmapped", candidateId: null as string | null, replies: 0 },
+    ],
+    failCampaigns: false,
     failLinks: null as string | null,
     reads: 0,
   };
@@ -174,6 +187,53 @@ function fakeCrm(serverId: string) {
         nextCursor: nextOffset === null ? null : String(nextOffset),
       };
     }
+    if (input.operation === "campaigns") {
+      if (state.failCampaigns)
+        throw new ORPCError("SERVICE_UNAVAILABLE", { message: "Campaigns unavailable" });
+      const { slice, nextOffset } = page(state.campaigns, offset, limit);
+      return {
+        operation: "campaigns",
+        source,
+        checkedAt,
+        items: slice.map((row) => ({
+          id: row.id,
+          name: `Sequence ${row.id}`,
+          status: 1,
+          crmRoleId: row.crmRoleId,
+          clientId: row.crmRoleId ? CLIENT : null,
+          createdAt: "2026-10-01T00:00:00.000Z",
+          updatedAt: "2026-10-02T00:00:00.000Z",
+          syncedAt: "2026-10-03T00:00:00.000Z",
+        })),
+        offset,
+        nextOffset,
+        nextCursor: nextOffset === null ? null : String(nextOffset),
+      };
+    }
+    if (input.operation === "campaignLeads") {
+      const rows = state.leads.filter((row) => row.campaignId === input.campaignId);
+      const { slice, nextOffset } = page(rows, offset, limit);
+      return {
+        operation: "campaignLeads",
+        source,
+        checkedAt,
+        campaignId: input.campaignId,
+        items: slice.map((row) => ({
+          id: row.id,
+          candidateId: row.candidateId,
+          status: 1,
+          interestStatus: null,
+          openCount: 2,
+          replyCount: row.replies,
+          lastContactAt: "2026-10-04T00:00:00.000Z",
+          lastReplyAt: row.replies ? "2026-10-05T00:00:00.000Z" : null,
+          syncedAt: "2026-10-03T00:00:00.000Z",
+        })),
+        offset,
+        nextOffset,
+        nextCursor: nextOffset === null ? null : String(nextOffset),
+      };
+    }
     throw new Error(`unexpected ${input.operation}`);
   };
   return { state, read };
@@ -269,6 +329,8 @@ describePostgres("CRM sync (PostgreSQL)", () => {
   });
   beforeEach(async () => {
     for (const who of [userId, otherUserId]) {
+      await prisma.recruitingCrmLead.deleteMany({ where: { userId: who } });
+      await prisma.recruitingCrmCampaign.deleteMany({ where: { userId: who } });
       await prisma.recruitingCrmMessage.deleteMany({ where: { userId: who } });
       await prisma.recruitingCrmContact.deleteMany({ where: { userId: who } });
       await prisma.recruitingCrmRole.deleteMany({ where: { userId: who } });
@@ -331,9 +393,12 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       contacts: { seen: 3, created: 3, archived: 0 },
       links: { seen: 3, created: 3 },
       messages: { seen: 1, created: 1 },
+      campaigns: { seen: 3, created: 3 },
+      leads: { seen: 4, created: 4 },
       skipped: [],
     });
     expect(dry.calls).toBeGreaterThan(5);
+    expect(await prisma.recruitingCrmCampaign.count({ where: scoped(actor) })).toBe(0);
     expect(await prisma.recruitingCrmContact.count({ where: scoped(actor) })).toBe(0);
 
     const real = await runAll(actor, crm.read);
@@ -360,8 +425,28 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       subject: "Re: role",
     });
 
+    expect(
+      await prisma.recruitingCrmCampaign.findFirst({
+        where: { ...scoped(actor), crmCampaignId: "camp-unmapped" },
+      }),
+    ).toMatchObject({ crmRoleId: null, clientId: null, name: "Sequence camp-unmapped" });
+    expect(
+      await prisma.recruitingCrmLead.findMany({
+        where: scoped(actor),
+        orderBy: { crmLeadId: "asc" },
+        select: { crmLeadId: true, crmCampaignId: true, crmCandidateId: true, replyCount: true },
+      }),
+    ).toEqual([
+      { crmLeadId: "lead-1", crmCampaignId: "camp-a", crmCandidateId: person(1), replyCount: 1 },
+      { crmLeadId: "lead-2", crmCampaignId: "camp-a", crmCandidateId: person(2), replyCount: 0 },
+      { crmLeadId: "lead-3", crmCampaignId: "camp-a", crmCandidateId: null, replyCount: 0 },
+      { crmLeadId: "lead-4", crmCampaignId: "camp-unmapped", crmCandidateId: null, replyCount: 0 },
+    ]);
+
     const again = await runAll(actor, crm.read);
     expect(again).toMatchObject({
+      campaigns: { created: 0, updated: 0, unchanged: 3 },
+      leads: { created: 0, updated: 0, unchanged: 4 },
       roles: { seen: 2, created: 0, updated: 0, unchanged: 2, archived: 0 },
       contacts: { seen: 3, created: 0, updated: 0, unchanged: 3, archived: 0 },
       links: { created: 0, unchanged: 3, archived: 0 },
@@ -408,6 +493,33 @@ describePostgres("CRM sync (PostgreSQL)", () => {
         where: { archivedAt: null, contact: scoped(actor) },
       }),
     ).toBe(3);
+  });
+
+  it("finishes roles, contacts and mail when the stored campaigns cannot be read", async () => {
+    crm.state.failCampaigns = true;
+    const result = await runAll(actor, crm.read);
+    expect(result.skipped).toEqual([
+      { organizationId: ORG, crmRoleId: null, step: "campaigns", reason: "Campaigns unavailable" },
+    ]);
+    expect(result).toMatchObject({ contacts: { created: 3 }, messages: { created: 1 } });
+    expect(await prisma.recruitingCrmLead.count({ where: scoped(actor) })).toBe(0);
+  });
+
+  it("keeps a campaign row when it leaves the CRM, and updates changed lead stats", async () => {
+    await runAll(actor, crm.read);
+    crm.state.campaigns = crm.state.campaigns.slice(0, 1);
+    crm.state.leads = [{ ...crm.state.leads[0]!, replies: 2 }];
+    const result = await runAll(actor, crm.read);
+    expect(result).toMatchObject({
+      campaigns: { unchanged: 1, archived: 0 },
+      leads: { updated: 1, archived: 0 },
+    });
+    expect(await prisma.recruitingCrmCampaign.count({ where: scoped(actor) })).toBe(3);
+    expect(
+      await prisma.recruitingCrmLead.findFirst({
+        where: { ...scoped(actor), crmLeadId: "lead-1" },
+      }),
+    ).toMatchObject({ replyCount: 2 });
   });
 
   it("keeps each user's copy separate", async () => {

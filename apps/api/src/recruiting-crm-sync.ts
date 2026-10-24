@@ -131,18 +131,29 @@ async function syncSlice(
   const since = new Date(cursor.startedAt);
   const budget = options.budgetMs ?? DEFAULT_BUDGET_MS;
   const write = { dryRun, now: began };
-  /** Next unit: contacts, then links and mail for each role, then the next organization. */
+  /**
+   * Next unit: contacts, then links and mail for each role, then the organization's stored
+   * campaigns and each campaign's leads, then the next organization.
+   */
   const advance = () => {
-    const roles = cursor.orgs[cursor.at.g]!.roles.length;
-    const { step, j } = cursor.at;
+    const org = cursor.orgs[cursor.at.g]!;
+    const roles = org.roles.length;
+    const campaigns = org.campaigns?.length ?? 0;
+    const { g, step, j } = cursor.at;
     const next: Pick<Cursor["at"], "g" | "step" | "j"> =
       step === "contacts" && roles
-        ? { g: cursor.at.g, step: "links", j: 0 }
+        ? { g, step: "links", j: 0 }
         : step === "links"
-          ? { g: cursor.at.g, step: "mail", j }
+          ? { g, step: "mail", j }
           : step === "mail" && j + 1 < roles
-            ? { g: cursor.at.g, step: "links", j: j + 1 }
-            : { g: cursor.at.g + 1, step: "contacts", j: 0 };
+            ? { g, step: "links", j: j + 1 }
+            : step === "contacts" || step === "mail"
+              ? { g, step: "campaigns", j: 0 }
+              : step === "campaigns" && campaigns
+                ? { g, step: "leads", j: 0 }
+                : step === "leads" && j + 1 < campaigns
+                  ? { g, step: "leads", j: j + 1 }
+                  : { g: g + 1, step: "contacts", j: 0 };
     cursor.at = { ...next, offset: 0, matched: 0, seen: [] };
   };
   // At least one read per call, so a cursor always makes progress.
@@ -152,8 +163,71 @@ async function syncSlice(
     const scope: CrmSyncScope = { mcpServerId: org.s, organizationId: org.o };
     const pinned = { serverId: org.s, serverRevision: org.r, organizationId: org.o };
     const { step, j, offset } = cursor.at;
-    const crmRoleId = step === "contacts" ? null : org.roles[j]!;
+    const crmRoleId = step === "links" || step === "mail" ? org.roles[j]! : null;
     try {
+      if (step === "campaigns") {
+        const page = await read({ operation: "campaigns", ...pinned, limit: PAGE, offset });
+        if (page.operation !== "campaigns") throw new ORPCError("SERVICE_UNAVAILABLE");
+        if (offset === 0) org.campaigns = [];
+        org.campaigns = [...new Set([...(org.campaigns ?? []), ...page.items.map((c) => c.id)])];
+        recruiting.addCrmSyncCounts(
+          cursor.totals.campaigns,
+          await recruiting.syncRecruitingCrmCampaigns(
+            prisma,
+            actor,
+            scope,
+            page.items.map((item) => ({
+              crmCampaignId: item.id,
+              name: item.name,
+              status: item.status,
+              crmRoleId: item.crmRoleId,
+              clientId: item.clientId,
+              campaignCreatedAt: item.createdAt ? new Date(item.createdAt) : null,
+              campaignUpdatedAt: item.updatedAt ? new Date(item.updatedAt) : null,
+              mirrorSyncedAt: new Date(item.syncedAt),
+            })),
+            write,
+          ),
+        );
+        if (page.nextOffset !== null && page.items.length) cursor.at.offset = page.nextOffset;
+        else advance();
+        continue;
+      }
+      if (step === "leads") {
+        const campaignId = org.campaigns![j]!;
+        const page = await read({
+          operation: "campaignLeads",
+          ...pinned,
+          campaignId,
+          limit: PAGE,
+          offset,
+        });
+        if (page.operation !== "campaignLeads") throw new ORPCError("SERVICE_UNAVAILABLE");
+        recruiting.addCrmSyncCounts(
+          cursor.totals.leads,
+          await recruiting.syncRecruitingCrmLeads(
+            prisma,
+            actor,
+            scope,
+            page.items.map((item) => ({
+              crmLeadId: item.id,
+              crmCampaignId: campaignId,
+              crmCandidateId: item.candidateId,
+              status: item.status,
+              interestStatus: item.interestStatus,
+              openCount: item.openCount,
+              replyCount: item.replyCount,
+              lastContactAt: item.lastContactAt ? new Date(item.lastContactAt) : null,
+              lastReplyAt: item.lastReplyAt ? new Date(item.lastReplyAt) : null,
+              mirrorSyncedAt: new Date(item.syncedAt),
+            })),
+            write,
+          ),
+        );
+        if (page.nextOffset !== null && page.items.length) cursor.at.offset = page.nextOffset;
+        else advance();
+        continue;
+      }
       if (step === "contacts" || step === "links") {
         const page = await read({
           operation: "candidates",
@@ -348,6 +422,8 @@ async function start(
       contacts: recruiting.emptyCrmSyncCounts(),
       links: recruiting.emptyCrmSyncCounts(),
       messages: recruiting.emptyCrmSyncCounts(),
+      campaigns: recruiting.emptyCrmSyncCounts(),
+      leads: recruiting.emptyCrmSyncCounts(),
     },
     skipped: [],
   };
