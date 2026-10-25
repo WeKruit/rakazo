@@ -32,7 +32,10 @@ const LABELS = {
 
 /** Words that mark a lookup note ("来源 …", "search-index snippet, checked …", "页面 403"). */
 const PROVENANCE =
-  /来源|出处|检索|索引|片段|引语|快照|核实|查证|截至|非本次|读取|页面|provider|snippet|search[- ]index|checked|accessed|retrieved|verified|cached|lookup|\bas of\b|\bsources?\s*[:：]|\bsources? read\b|readable source|\b40[134]\b/i;
+  /来源|出处|检索|索引|片段|引语|快照|核实|查证|截至|非本次|读取|页面|provider|snippet|search[- ]index|checked|accessed|retrieved|verified|cached|lookup|\bas of\b|\bsources?\s*[:：]|\bsources? read\b|readable source|truncated|stored text|\b40[134]\b/i;
+/** An item that only says nothing was found. */
+const NONE_FOUND =
+  /^(?:未发现|未找到|暂无|没有|无(?:具体|明确|公开)|none\b|no (?:specific |public )?(?:works?|record))/i;
 const URL_TEXT = /https?:\/\/[^\s|,，;；()（）[\]【】“”"]+/gi;
 const OPEN = "(（[【“";
 const CLOSE = ")）]】”";
@@ -300,7 +303,8 @@ export function quickOutput(fields: readonly Field[]) {
     ].slice(0, 6),
     keyWorks: items(keyWorks)
       .map(parseWork)
-      .filter((work) => work.title)
+      // "未发现具体代表作品" says there is none; it is not a work.
+      .filter((work) => work.title && !NONE_FOUND.test(work.title))
       .slice(0, 4),
     concerns: items(concerns)
       .map((concern) => {
@@ -321,20 +325,66 @@ export function quickOutput(fields: readonly Field[]) {
   };
 }
 
+/** A lead sentence that only says how the record was obtained. */
+const LOOKUP_SENTENCE =
+  /\b(?:recovered|cached|truncated|profile record|profile lookup|search[- ]index|snippet|checked|retrieved)\b/i;
+/** A label in front of the list itself ("Roles: …"). */
+const LIST_LABEL =
+  /^(?:roles?|positions?|experience|work history|employment|education|degrees?|schools?)\s*[:：]\s*/i;
+const QUALIFIER =
+  /^[^:：.。|]{0,40}?\b(?:only|partial(?:ly)?|undated|unverified|snippet)\b[^:：|]{0,30}[:：]\s*/i;
+
+function historyNoteLine(line: string, firstOnly: boolean) {
+  const clean = withoutProvenance(line);
+  const sentences = clean.split(/(?<=\S{2}[.。])\s+/);
+  let lead = 0;
+  while (
+    lead < sentences.length - 1 &&
+    !sentences[lead]?.includes("|") &&
+    LOOKUP_SENTENCE.test(sentences[lead] ?? "")
+  )
+    lead += 1;
+  let rest = sentences.slice(lead).join(" ");
+  const labelled = LIST_LABEL.test(rest);
+  rest = rest.replace(LIST_LABEL, "");
+  if (QUALIFIER.test(rest)) {
+    rest = rest.replace(QUALIFIER, "");
+    if (firstOnly)
+      rest =
+        rest
+          .split(/(?<=\S{2})\.\s+|。/)[0]
+          ?.replace(/\.$/, "")
+          .trim() ?? rest;
+  } else if (!lead && !labelled) return clean === tidy(decodeEntities(line)) ? line : clean;
+  return rest;
+}
+
 /**
- * A research note in a history cell ("Institution only (search-index snippet, checked …): School.
- * Degree unknown …") reduced to what it names; other text is returned unchanged.
+ * Research notes in a history cell ("Institution only (search-index snippet, checked …): School.
+ * Degree unknown …", "Recovered cached profile record (…). Roles: Title | Company | …") reduced
+ * to what they name, line by line; other text is returned unchanged.
  */
 export function historyNoteText(value: string, firstOnly: boolean) {
-  const clean = withoutProvenance(value);
-  const prefix =
-    /^[^:：.。|]{0,40}?\b(?:only|partial(?:ly)?|undated|unverified|snippet)\b[^:：|]{0,30}[:：]\s*/i;
-  if (!prefix.test(clean)) return clean === tidy(decodeEntities(value)) ? value : clean;
-  const rest = clean.replace(prefix, "");
-  return firstOnly
-    ? (rest
-        .split(/(?<=\S{2})\.\s+|。/)[0]
-        ?.replace(/\.$/, "")
-        .trim() ?? rest)
-    : rest;
+  return value
+    .split(/\r?\n/)
+    .map((line) => (line.trim() ? historyNoteLine(line, firstOnly) : line))
+    .join("\n");
+}
+
+/** An organization name reduced for matching ("GOFO Express, Inc." → "gofoexpressinc"). */
+export function organizationKey(name: string) {
+  return name.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+}
+
+/** Each named organization's own website host, from the returned entities and the current employer. */
+export function organizationHosts(
+  entities: readonly QuickEntity[],
+  current?: { name: string | null | undefined; host: string | null | undefined },
+): ReadonlyMap<string, string> {
+  const hosts = new Map<string, string>();
+  if (current?.name && current.host) hosts.set(organizationKey(current.name), current.host);
+  for (const entity of entities)
+    if (entity.host && !hosts.has(organizationKey(entity.name)))
+      hosts.set(organizationKey(entity.name), entity.host);
+  return hosts;
 }

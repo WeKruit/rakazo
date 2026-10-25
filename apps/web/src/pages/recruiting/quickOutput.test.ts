@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { historyNoteText, quickOutput, withoutProvenance } from "./quickOutput";
+import { parseTimeline } from "./profileTimelineModel";
+import { historyNoteText, organizationHosts, quickOutput, withoutProvenance } from "./quickOutput";
 
 const field = (label: string, value: string) => ({ label, value, sourceUrls: [] });
 const NOTE = "（来源 2026-10-23 provider档案保留引语（非本次读取；当前LinkedIn页面403））";
@@ -113,5 +114,40 @@ describe("historyNoteText", () => {
     const value =
       "Stanford University | M.S., Computer Science | https://stanford.example.edu | 2016 – 2018";
     expect(historyNoteText(value, true)).toBe(value);
+  });
+});
+
+describe("history notes and organization sites", () => {
+  it("drops a recovered-record lead-in and keeps the roles it lists", () => {
+    const value =
+      "Recovered cached original profile record (stored text truncated at ~12k chars, so the history may be incomplete). Roles: Service Center Manager | SpeedX | Jan 2026 - Jul 2026 | New York, United States\nRegional Operations Lead | Acme | Dec 2024 - Jul 2025";
+    expect(historyNoteText(value, false).split("\n")).toEqual([
+      "Service Center Manager | SpeedX | Jan 2026 - Jul 2026 | New York, United States",
+      "Regional Operations Lead | Acme | Dec 2024 - Jul 2025",
+    ]);
+    const entries = parseTimeline(value, "experience", new Date("2026-10-01T00:00:00Z"));
+    expect(entries.map((entry) => [entry.structured, entry.primary, entry.secondary])).toEqual([
+      [true, "Service Center Manager", "SpeedX"],
+      [true, "Regional Operations Lead", "Acme"],
+    ]);
+  });
+
+  it("does not show a note that nothing was found as a key work", () => {
+    const { quick } = quickOutput([
+      field("Representative work zh", "未发现具体代表作品（未知，非不满足）。记录中仅有职位信息。"),
+    ]);
+    expect(quick.keyWorks).toEqual([]);
+  });
+
+  it("maps organizations to their returned sites, current employer first", () => {
+    const hosts = organizationHosts(
+      [
+        { name: "GOFO Express", kind: "company", host: "gofo.example", description: null },
+        { name: "SpeedX", kind: "company", host: "other.example", description: null },
+      ],
+      { name: "SpeedX", host: "speedx.example" },
+    );
+    expect(hosts.get("gofoexpress")).toBe("gofo.example");
+    expect(hosts.get("speedx")).toBe("speedx.example");
   });
 });
