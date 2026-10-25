@@ -289,6 +289,21 @@ export function recruiterConnectBlock<
   return {
     ...block,
     text: `连接${name}`,
-    connection: { ...block.connection, name, reason: hideVendorNames(block.connection.reason) },
+    connection: {
+      ...block.connection,
+      name,
+      // Cards are for Chinese recruiters; an English reason saved earlier becomes the plain purpose.
+      reason: CJK.test(block.connection.reason)
+        ? hideVendorNames(block.connection.reason)
+        : (SERVICE_PURPOSE[name] ?? hideVendorNames(block.connection.reason)),
+    },
   };
 }
+
+const SERVICE_PURPOSE: Record<string, string> = {
+  人才搜索: "用于为这个岗位搜索候选人。",
+  人才资料库: "用于补全候选人的完整经历、学历和公司信息。",
+  联系方式补全: "用于查找候选人的联系方式。",
+  邮件发送: "用于给候选人发送和查看邮件。",
+  集成服务: "用于连接这项工作需要的服务。",
+};
