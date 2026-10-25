@@ -254,8 +254,9 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
   const listing = LISTING_SEARCH_HOSTS.has(host(endpoint) ?? "");
   const people = new Map<string, PeopleSearchRow>();
   const found = listing
-    ? objects(result)
-        .flatMap((record) => (typeof record.text === "string" ? peopleFromListing(record.text) : []))
+    ? objects(result).flatMap((record) =>
+        typeof record.text === "string" ? peopleFromListing(record.text) : [],
+      )
     : objects(result);
   for (const record of found) {
     const name = first(record, PEOPLE_NAME_KEYS);
