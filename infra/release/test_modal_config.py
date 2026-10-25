@@ -21,6 +21,16 @@ def fixture():
 
 
 class ModalConfigTests(unittest.TestCase):
+    def test_public_origin_defaults_to_modal_url_and_accepts_only_bare_https(self):
+        modal = "https://workspace--app-server.us-east.modal.direct"
+        self.assertEqual(config.public_origin({}, modal), (modal, ""))
+        self.assertEqual(config.public_origin({"RAKAZO_PUBLIC_ORIGIN": "https://app.example.com/"}, modal),
+                         ("https://app.example.com", "workspace--app-server.us-east.modal.direct"))
+        for bad in ("http://app.example.com", "https://app.example.com/app", "https://u:p@app.example.com",
+                    "https://app.example.com:8443", "app.example.com"):
+            with self.assertRaises(ValueError):
+                config.public_origin({"RAKAZO_PUBLIC_ORIGIN": bad}, modal)
+
     def test_staging_never_inherits_provider_or_modal_credentials(self):
         parent = {**fixture(), "MODAL_TOKEN_SECRET": "do-not-inherit", "OPENAI_API_KEY": "do-not-inherit",
                   "NODE_OPTIONS": "do-not-inherit", "AXIOM_TOKEN": "do-not-inherit", "PGSERVICE": "do-not-inherit",

@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/app")
 # The container runs this file outside the checkout; its source copy lives in /app.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from infra.modal.release_config import check_staging_database, reject_staging_dotenv, release_profile, staging_environment  # noqa: E402
+from infra.modal.release_config import check_staging_database, public_origin, reject_staging_dotenv, release_profile, staging_environment  # noqa: E402
 RELEASE_PROFILE = release_profile(os.environ)
 APP_NAME = os.environ.get("MODAL_APP_NAME", "rakazo-recruiting")
 SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")
@@ -116,7 +116,7 @@ class Recruiting:
         phase("boot.start")
         self.stopping = threading.Event()
         self.processes = []
-        origin = Recruiting.get_url().rstrip("/")
+        origin, modal_host = public_origin(os.environ, Recruiting.get_url().rstrip("/"))
         env = {
             **os.environ,
             "NODE_ENV": "production",
@@ -125,6 +125,7 @@ class Recruiting:
             "WEB_ORIGIN": origin,
             "API_URL": origin,
             "RAKAZO_HOST": urlsplit(origin).hostname,
+            "RAKAZO_ALLOWED_HOSTS": modal_host,
             "API_HOST": "127.0.0.1",
             "API_PORT": "3100",
             "WEB_PORT": "8000",
