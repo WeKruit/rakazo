@@ -8,7 +8,20 @@ import {
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SCALE_START,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
+  RECRUITING_SEARCH_SAVED_NEXT_STEP,
+  recruitingBriefConfirmedNextStep,
 } from "./recruiting-defaults.js";
+
+describe("calibration fast path", () => {
+  it("hands the new revision on with the confirmed brief", () => {
+    expect(recruitingBriefConfirmedNextStep(5)).toContain("expectedRoleRevision 5");
+  });
+
+  it("keeps the pick off files and shell", () => {
+    expect(RECRUITING_SEARCH_SAVED_NEXT_STEP).toContain("calibration_round");
+    expect(RECRUITING_SEARCH_SAVED_NEXT_STEP).toContain("no files, shell");
+  });
+});
 
 describe("maintained recruiting defaults", () => {
   it.each(RECRUITING_DEFAULT_BOTS)(

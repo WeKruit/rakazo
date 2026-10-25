@@ -118,9 +118,11 @@ import {
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_ROUND_NEXT_STEP,
+  RECRUITING_SEARCH_SAVED_NEXT_STEP,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   recruiterConnectBlock,
+  recruitingBriefConfirmedNextStep,
   redactSecrets,
   renderBotDirectory,
   resolveActionApprovalDetail,
@@ -7993,7 +7995,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (researchInput.data.operation === "save_search") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // Internal record keeping like import_csv: page, rows and effect commit together.
-                return await saveRecruitingPeopleSearch(
+                const saved = await saveRecruitingPeopleSearch(
                   { prisma: deps.prisma, artifacts: deps.artifacts },
                   {
                     ...researchActor,
@@ -8005,6 +8007,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchInput.data,
                   context,
                 );
+                return saved && typeof saved === "object" && !Array.isArray(saved)
+                  ? { ...saved, next: RECRUITING_SEARCH_SAVED_NEXT_STEP }
+                  : saved;
               }
               if (researchInput.data.operation === "import_csv") {
                 if (!applied || !claimedEffect) throw new IsolationError();
@@ -8192,7 +8197,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               if (!deps.artifacts || !applied || !claimedEffect) throw new IsolationError();
               // The domain receipt and effect complete together; keep the original human approval time.
-              return await executeRecruitingApproval(
+              const approved = await executeRecruitingApproval(
                 deps.prisma,
                 researchActor.actor,
                 {
@@ -8207,6 +8212,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 args,
                 { artifacts: deps.artifacts, context },
               );
+              if (approved.stage !== "brief") return approved;
+              const revision = await deps.prisma.recruitingRoleRevision.findFirst({
+                where: { id: approved.roleRevisionId, roleId: approved.roleId },
+                select: { revision: true },
+              });
+              return revision
+                ? { ...approved, next: recruitingBriefConfirmedNextStep(revision.revision) }
+                : approved;
             } catch (error) {
               return finish(roleError(error));
             }
