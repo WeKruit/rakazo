@@ -3226,6 +3226,92 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).rejects.toThrow(IsolationError);
   });
 
+  it("lets a turn-end auto-continue act on the recruiter's last message", async () => {
+    const { id: botId } = await prisma.bot.create({
+      data: { spaceId, userId, name: "Continue", color: "blue" },
+    });
+    const thread = await prisma.thread.create({ data: { spaceId, userId, botId } });
+    const human = await prisma.message.create({
+      data: {
+        threadId: thread.id,
+        seq: 1,
+        role: "user",
+        blocks: [{ kind: "text", text: "Austin metro, hybrid three days" }],
+      },
+    });
+    await prisma.message.create({
+      data: { threadId: thread.id, seq: 2, role: "assistant", botId, blocks: [] },
+    });
+    const nudge = await prisma.message.create({
+      data: {
+        threadId: thread.id,
+        seq: 3,
+        role: "user",
+        clientNonce: "autocontinue:previous-run:1",
+        blocks: [{ kind: "text", text: "继续下一步：确认简报。" }],
+      },
+    });
+    const task = await prisma.task.create({
+      data: { spaceId, userId, botId, threadId: thread.id, prompt: "continue", status: "running" },
+    });
+    const run = await prisma.run.create({
+      data: {
+        spaceId,
+        userId,
+        botId,
+        threadId: thread.id,
+        taskId: task.id,
+        sourceMessageId: nudge.id,
+        trigger: "follow_up",
+        status: "running",
+      },
+    });
+    const input = {
+      operation: "create" as const,
+      title: "Customer success manager",
+      sourceRefs: [],
+      criteria: [
+        {
+          ...roleInput().criteria[0]!,
+          sourceRefs: [
+            {
+              id: "austin",
+              kind: "original_material" as const,
+              anchor: { kind: "message" as const, messageId: human.id, locator: "blocks[0].text" },
+              readState: "read" as const,
+              readAt: "2026-10-25T20:00:00.000Z",
+              quote: "Austin metro",
+            },
+          ],
+        },
+      ],
+      preferences: [],
+      definitionQuestions: [],
+      intent: { basis: "direct" as const, quote: "Austin metro" },
+    };
+    const saved = await mutateRole(
+      prisma,
+      actor,
+      { runId: run.id, sourceMessageId: nudge.id },
+      input,
+    );
+    expect(saved.status).toBe("saved");
+    expect(saved.source?.anchor).toMatchObject({ kind: "message", messageId: human.id });
+    // The nudge text itself never authorizes a change.
+    await expect(
+      mutateRole(
+        prisma,
+        actor,
+        { runId: run.id, sourceMessageId: nudge.id },
+        {
+          ...input,
+          title: "Other",
+          intent: { basis: "direct", quote: "继续下一步" },
+        },
+      ),
+    ).rejects.toThrow(IsolationError);
+  });
+
   it("verifies native human authorship and current source atomically for role tools", async () => {
     expect(recruiting.executeRecruitingRoleMutation).toBeTypeOf("function");
     let seq = 1_000;

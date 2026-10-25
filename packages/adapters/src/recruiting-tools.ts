@@ -66,6 +66,29 @@ import {
   recruitingResearchPollDelay,
 } from "./recruiting-research-poll.js";
 
+/**
+ * Repairs two harmless slips before validation: a read carries only its operation, and a read
+ * human-message reference without readAt gets the call time (message reads have no receipt time).
+ */
+export function normalizeRecruitingRoleArgs(
+  args: Record<string, unknown>,
+  now: string,
+): Record<string, unknown> {
+  if (args.operation === "read") return { operation: "read" };
+  const visit = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(visit);
+    if (!value || typeof value !== "object") return value;
+    const record = Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, visit(item)]),
+    );
+    const anchor = record.anchor as { kind?: unknown } | undefined;
+    return anchor?.kind === "message" && record.readState === "read" && record.readAt == null
+      ? { ...record, readAt: now }
+      : record;
+  };
+  return visit(args) as Record<string, unknown>;
+}
+
 export async function executeRecruitingRoleTool(
   prisma: PrismaClient,
   context: {
