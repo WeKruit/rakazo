@@ -8,7 +8,6 @@ import type {
 import { recruitingCalibrationIdentity } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
-  assignedMcpEndpoints,
   listRecruitingSavedProfiles,
   listRunToolResults,
   saveRecruitingSavedProfile,
@@ -23,11 +22,8 @@ const isRecord = (value: unknown): value is Record_ =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 /** Profile-data connectors whose person records this adapter understands, by MCP host. */
-const PROVIDERS: Record<
-  string,
-  { name: string; connect: string; normalize: (record: Record_) => Facts | null }
-> = {
-  "mcp.coresignal.com": { name: "coresignal", connect: "coresignal", normalize: coresignalProfile },
+const PROVIDERS: Record<string, { name: string; normalize: (record: Record_) => Facts | null }> = {
+  "mcp.coresignal.com": { name: "coresignal", normalize: coresignalProfile },
 };
 
 function providerFor(endpoint: string) {
@@ -193,7 +189,6 @@ export async function executeRecruitingProfilesTool(
   actor: Actor,
   runId: string,
   input: RecruitingProfilesToolInput,
-  botId?: string,
 ) {
   if (input.operation === "list") {
     const saved = await listRecruitingSavedProfiles(prisma, actor, input.candidateKeys);
@@ -201,17 +196,7 @@ export async function executeRecruitingProfilesTool(
       const profile = saved.get(candidateKey);
       return profile ? { ...summary(profile), saved: true } : { candidateKey, saved: false };
     });
-    const missing = items.some((item) => !item.saved);
-    const connected =
-      !missing ||
-      !botId ||
-      (await assignedMcpEndpoints(prisma, actor, botId)).some((endpoint) => providerFor(endpoint));
-    return connected
-      ? { items }
-      : {
-          items,
-          next: `No profile-data connection is assigned to you. Call request_connection with provider "${Object.values(PROVIDERS)[0]!.connect}" now and wait for the user to connect it; do not ask the research agent for full profiles instead.`,
-        };
+    return { items };
   }
   if (!input.candidateKey.startsWith("linkedin:"))
     throw new RecruitingProfileError(

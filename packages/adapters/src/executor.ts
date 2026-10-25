@@ -8085,7 +8085,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchActor.actor,
                   runId,
                   RecruitingProfilesToolInputSchema.parse(args),
-                  run.botId,
                 ),
               );
             } catch (error) {
