@@ -153,9 +153,10 @@ class Recruiting:
         ]
         for package, command in services:
             phase(f"{package}.spawn")
-            # One page load fans out a dozen API reads; a pool of 4 queued them. The shared
-            # DB_POOL_MAX stays the worker's size; the API always gets 12.
-            service_env = {**env, "DB_POOL_MAX": "12"} if package == "api" else env
+            # A pool of 4 queued page loads. The session-mode pooler admits 15 clients in total,
+            # shared with the worker (DB_POOL_MAX), migrations and other services, so the API
+            # gets 6.
+            service_env = {**env, "DB_POOL_MAX": "6"} if package == "api" else env
             self.processes.append(subprocess.Popen(
                 command, cwd=f"/app/apps/{package}", env=service_env, start_new_session=True,
             ))
