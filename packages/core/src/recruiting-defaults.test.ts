@@ -81,8 +81,16 @@ describe("maintained recruiting defaults", () => {
     expect(main.instructions).toContain(
       "Round feedback before the calibration is accepted goes into your next quick search",
     );
-    expect(main.instructions).toContain("recruiting_research save_search");
+    expect(main.instructions).toContain("load the Calibration quick search skill");
     expect(main.instructions).toContain("Use Autumn only to scale after a round is accepted");
+    // The procedure ships as a shared skill, so accounts with customized bot text still get it.
+    const quick = RECRUITING_DEFAULT_SKILLS.find(
+      (skill) => skill.name === "Calibration quick search",
+    )!;
+    expect(quick.body).toContain("recruiting_research save_search");
+    expect(quick.body).toContain('"category:people"');
+    expect(quick.body).toContain("never request a connection for it");
+    expect(quick.body).toContain("not just a matching title");
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
@@ -109,10 +117,10 @@ describe("maintained recruiting defaults", () => {
     const intake = skill("Recruitment intake and handoff");
     expect(intake).toContain("Always settle the language requirement");
     expect(intake).toContain("stays a preference, never a reject rule");
-    expect(intake).toContain("rather than a matching title");
+    expect(intake).toContain("Calibration quick search skill");
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("not just a matching title");
+    expect(main.instructions).toContain("Calibration quick search");
     expect(sourcer.instructions).toContain("show that person as needing a check");
     const draft = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Review recruiting draft",
