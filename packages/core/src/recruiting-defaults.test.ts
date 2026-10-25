@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
+  RECRUITING_INTAKE_FLOW,
+  RECRUITING_PDF_RENDERING,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
 } from "./recruiting-defaults.js";
 
@@ -192,5 +194,13 @@ describe("maintained recruiting defaults", () => {
     );
     expect(bot.instructions).not.toContain("no CRM role is linked");
     expect(bot.instructions).not.toContain("set up a campaign, pick a mailbox");
+  });
+
+  it("ships the PDF rendering rule in the intake skill", () => {
+    const intake = RECRUITING_DEFAULT_SKILLS.find(
+      (skill) => skill.name === "Recruitment intake and handoff",
+    )!;
+    expect(intake.body).toContain(RECRUITING_PDF_RENDERING);
+    expect(RECRUITING_INTAKE_FLOW).toContain("Role documents never hold up the calibration search");
   });
 });
