@@ -14,8 +14,11 @@ import ptBR from "../../scripts/translations-pt-BR.json";
 import tr from "../../scripts/translations-tr.json";
 import zhCN from "../../scripts/translations-zh-CN.json";
 
-// Recruiters read the recruiting product in Chinese; other locales fall back to English.
-const ZH_RECRUITING: Record<string, string> = { "Match score": "匹配分数" };
+// The product is translated to Chinese; other locales fall back to English.
+const ZH_RECRUITING: Record<string, string> = {
+  "Match score": "匹配分数",
+  "Stop {name}": "停止 Synthetic agent",
+};
 
 describe("lingui catalogs", () => {
   beforeEach(() => {
