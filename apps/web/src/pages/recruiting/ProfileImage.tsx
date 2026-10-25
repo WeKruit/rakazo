@@ -8,13 +8,17 @@ export function ProfileImage({
   fallback,
   className,
   photo = false,
+  onUnusable,
 }: {
   src?: string | null;
   fallback: ReactNode;
   className: string;
   photo?: boolean;
+  /** Called when the image fails to load. */
+  onUnusable?: () => void;
 }) {
-  const url = profileImageUrl(src);
+  // A data: image is an icon our own API already fetched and re-encoded.
+  const url = src?.startsWith("data:image/") ? src : profileImageUrl(src);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   return (
     <span aria-hidden className={className}>
@@ -26,7 +30,10 @@ export function ProfileImage({
           className={`size-full ${photo ? "object-cover" : "object-contain"}`}
           referrerPolicy="no-referrer"
           loading="lazy"
-          onError={() => setFailedUrl(url)}
+          onError={() => {
+            setFailedUrl(url);
+            onUnusable?.();
+          }}
         />
       ) : (
         fallback

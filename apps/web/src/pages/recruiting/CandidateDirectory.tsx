@@ -14,6 +14,7 @@ import {
   profileImageUrl,
 } from "./profileAssets";
 import { parseTimeline, structuredProfileTimeline } from "./profileTimelineModel";
+import { organizationHosts, organizationKey } from "./quickOutput";
 import { statusText } from "./shared";
 import type { RoleCandidate } from "./useRoleCandidates";
 
@@ -44,7 +45,21 @@ function directoryProfile(row: RoleCandidate, revision?: ProfileCriterionRevisio
         ? []
         : structuredProfileTimeline(field.structuredValue, "education", now, field.sourceUrlsById),
     )[0] ?? parseTimeline(sections.education[0]?.value, "education", now)[0];
-  return { company, assets, sections, school, profileUrl: profileImageUrl(row.linkedinUrl) };
+  const hosts = organizationHosts(sections.quick.entities, {
+    name: company,
+    host: sections.company.host,
+  });
+  const host = (name: string | null | undefined) =>
+    name ? hosts.get(organizationKey(name)) : undefined;
+  return {
+    company,
+    companyHost: host(company),
+    assets,
+    sections,
+    school,
+    schoolHost: school?.website ?? host(school?.primary),
+    profileUrl: profileImageUrl(row.linkedinUrl),
+  };
 }
 
 type DirectoryProfile = ReturnType<typeof directoryProfile>;
@@ -70,7 +85,11 @@ function Company({ profile, title }: { profile: DirectoryProfile; title: string 
     <div className="flex min-w-0 items-center gap-2">
       {company ? (
         <span className="shrink-0 [&>span]:size-6 [&>span]:text-[9px]">
-          <CompanyLogo name={company} src={organizationLogo(company, assets.company)} />
+          <CompanyLogo
+            name={company}
+            src={organizationLogo(company, assets.company)}
+            host={profile.companyHost}
+          />
         </span>
       ) : null}
       <div className="min-w-0">
@@ -96,6 +115,7 @@ function Education({ profile, compact = false }: { profile: DirectoryProfile; co
         <CompanyLogo
           name={school.primary}
           src={profileImageUrl(school.logoUrl) ?? organizationLogo(school.primary, assets.school)}
+          host={profile.schoolHost}
         />
       </span>
       <div className="min-w-0">
@@ -401,6 +421,7 @@ export function CandidateDirectory({
                         <CompanyLogo
                           name={profile.company}
                           src={organizationLogo(profile.company, profile.assets.company)}
+                          host={profile.companyHost}
                         />
                       </span>
                     ) : null}
