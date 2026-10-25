@@ -100,7 +100,8 @@ describe("maintained recruiting defaults", () => {
       "Round feedback before the calibration is accepted goes into your next quick search",
     );
     expect(main.instructions).toContain("recruiting_research save_search");
-    expect(main.instructions).toContain("use Autumn only to scale after a round is accepted");
+    expect(main.instructions).toContain("Deep check, started in parallel");
+    expect(main.instructions).toContain("Use that research task, not a new one, for scale");
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
