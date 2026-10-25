@@ -31,6 +31,14 @@ const RECRUITING_SERVICES = [
     bots: ["main", "outreach"],
     tools: ["get_credits", "enrich_bulk", "get_enrichment_results"],
   },
+  {
+    slug: "people-search",
+    name: "People search",
+    description: "Platform people search for quick calibration rounds",
+    endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
+    bots: ["main"],
+    tools: ["web_search_exa", "web_search_advanced_exa"],
+  },
 ];
 
 const CRM_READ_TOOLS = [

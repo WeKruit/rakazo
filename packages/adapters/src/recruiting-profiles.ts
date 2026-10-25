@@ -172,6 +172,177 @@ export function profileFromLookup(
   return null;
 }
 
+const PEOPLE_NAME_KEYS = ["full_name", "name", "person_name"];
+const PEOPLE_TITLE_KEYS = [
+  "active_experience_title",
+  "job_title",
+  "current_title",
+  "title",
+  "position_title",
+  "headline",
+];
+const PEOPLE_COMPANY_KEYS = [
+  "active_experience_company_name",
+  "company_name",
+  "current_company",
+  "company",
+];
+const PEOPLE_LOCATION_KEYS = ["location_full", "location", "location_raw_address", "region"];
+const PEOPLE_LINK_KEYS = [...PROFILE_LINK_KEYS, "profile_url", "url", "websites_linkedin"];
+
+/** Rows of a markdown table in connector text, keyed by normalized header. */
+function markdownRows(text: string): Record_[] {
+  const lines = text.split("\n").map((line) => line.trim());
+  const rows: Record_[] = [];
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (!lines[i]!.startsWith("|") || !/^\|[\s:|-]+\|$/.test(lines[i + 1]!)) continue;
+    const cells = (line: string) =>
+      line
+        .replace(/^\||\|$/g, "")
+        .split("|")
+        .map((cell) => cell.trim());
+    const header = cells(lines[i]!).map((cell) => cell.toLowerCase().replace(/[^a-z0-9]+/g, "_"));
+    for (let j = i + 2; j < lines.length && lines[j]!.startsWith("|"); j++) {
+      const values = cells(lines[j]!);
+      rows.push(Object.fromEntries(header.map((key, index) => [key, values[index] ?? ""])));
+      i = j;
+    }
+  }
+  return rows;
+}
+
+/** Every object in a connector result, including JSON and markdown tables inside text blocks. */
+function objects(value: unknown, depth = 0, found: Record_[] = []): Record_[] {
+  if (depth > 8 || found.length > 2000) return found;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return objects(JSON.parse(trimmed), depth + 1, found);
+      } catch {
+        // Not JSON; fall through to tables.
+      }
+    }
+    for (const row of markdownRows(trimmed)) found.push(row);
+    return found;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) objects(item, depth + 1, found);
+    return found;
+  }
+  if (!isRecord(value)) return found;
+  found.push(value);
+  for (const nested of Object.values(value)) objects(nested, depth + 1, found);
+  return found;
+}
+
+export type PeopleSearchRow = {
+  name: string;
+  linkedin_url: string;
+  current_title?: string;
+  current_company?: string;
+  location?: string;
+};
+
+/**
+ * People in a profile-data connector's search or fetch result, one per LinkedIn profile, in
+ * result order. Only hosts this adapter knows count; anything without a name and LinkedIn is
+ * left out, since a round needs both.
+ */
+export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearchRow[] {
+  if (!isPeopleSearchEndpoint(endpoint)) return [];
+  const listing = LISTING_SEARCH_HOSTS.has(host(endpoint) ?? "");
+  const people = new Map<string, PeopleSearchRow>();
+  const found = listing
+    ? objects(result).flatMap((record) =>
+        typeof record.text === "string" ? peopleFromListing(record.text) : [],
+      )
+    : objects(result);
+  for (const record of found) {
+    const name = first(record, PEOPLE_NAME_KEYS);
+    const href = PEOPLE_LINK_KEYS.map((key) => link(record[key])).find(
+      (value) => value && linkedinPersonKey(value),
+    );
+    const key = href ? linkedinPersonKey(href) : null;
+    if (!name || !href || !key || people.has(key) || name.length > 120) continue;
+    // Country hosts and tracking parameters collapse to the pool's canonical profile link.
+    const row: PeopleSearchRow = {
+      name,
+      linkedin_url: `https://www.linkedin.com${key.slice("linkedin:".length)}`,
+    };
+    const title = first(record, PEOPLE_TITLE_KEYS);
+    const company = first(record, PEOPLE_COMPANY_KEYS);
+    const location = first(record, PEOPLE_LOCATION_KEYS);
+    if (title) row.current_title = title.slice(0, 300);
+    if (company) row.current_company = company.slice(0, 200);
+    if (location) row.location = location.slice(0, 200);
+    people.set(key, row);
+  }
+  return [...people.values()];
+}
+
+/** People-search hosts whose results are text listings rather than person records. */
+const LISTING_SEARCH_HOSTS = new Set(["mcp.exa.ai"]);
+
+function host(endpoint: string): string | null {
+  try {
+    return new URL(endpoint).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** The MCP hosts whose people results save_search understands. */
+export function isPeopleSearchEndpoint(endpoint: string): boolean {
+  return providerFor(endpoint) !== null || LISTING_SEARCH_HOSTS.has(host(endpoint) ?? "");
+}
+
+const LOCATION_LINE = /\([A-Z]{2}\)$/;
+
+/**
+ * People in a web-search listing ("Title: <name>\nURL: <linkedin>\n…Highlights" entries),
+ * reading headline, location and the current job from the profile text when present.
+ */
+function peopleFromListing(text: string): Record_[] {
+  const found: Record_[] = [];
+  for (const entry of text.split(/^(?=Title: )/m)) {
+    const name = entry.match(/^Title: (.+)$/m)?.[1]?.trim();
+    const url = entry.match(/^URL: (\S+)$/m)?.[1];
+    if (!name || !url) continue;
+    const lines = (entry.split(/^# .+$/m)[1] ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const [first, second] = lines;
+    const headline = first && !first.startsWith("#") && !LOCATION_LINE.test(first) ? first : null;
+    const location = [first, second].find((line) => line && LOCATION_LINE.test(line));
+    // Jobs read "### Title - [Company](…) (Current)" or, for several roles at one company,
+    // "### [Company](…)" followed by "#### Title (Current)".
+    const jobs: Array<{ title: string; company: string; current: boolean }> = [];
+    let company: string | null = null;
+    for (const line of entry.split("\n")) {
+      const single = line.match(/^### (.+?) - \[([^\]]+)\]\([^)]*\)( \(Current\))?/);
+      const group = line.match(/^### \[([^\]]+)\]\([^)]*\)/);
+      const role = line.match(/^#### (.+?)( \(Current\))?$/);
+      if (single) {
+        company = null;
+        jobs.push({ title: single[1]!, company: single[2]!, current: Boolean(single[3]) });
+      } else if (group) company = group[1]!;
+      else if (role && company) jobs.push({ title: role[1]!, company, current: Boolean(role[2]) });
+      else if (line.startsWith("## ")) company = null;
+    }
+    const job = jobs.find((item) => item.current) ?? jobs[0];
+    found.push({
+      full_name: name,
+      linkedin_url: url,
+      job_title: job?.title ?? headline,
+      company_name: job?.company ?? null,
+      location: location?.replace(/\s*\([A-Z]{2}\)$/, "") ?? null,
+    });
+  }
+  return found;
+}
+
 function summary(profile: RecruitingSavedProfile) {
   return {
     candidateKey: profile.personKey,
