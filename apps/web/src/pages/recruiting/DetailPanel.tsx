@@ -25,7 +25,7 @@ import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
-import { CompanyLogo, OrgBadge, websiteFavicon } from "./OrgBadge";
+import { CompanyLogo, OrgBadge } from "./OrgBadge";
 import { ProfileImage } from "./ProfileImage";
 import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
@@ -284,8 +284,7 @@ export function RecruitingDetailPanel({
     name: company,
     host: sections.company.host,
   });
-  const companyLogo =
-    organizationLogo(company ?? undefined, assets.company) ?? websiteFavicon(sections.company.host);
+  const companyLogo = organizationLogo(company ?? undefined, assets.company);
   const companySite =
     organizationLogo(company ?? undefined, assets.companyLink) ??
     (sections.company.host ? `https://${sections.company.host}/` : null);
@@ -388,8 +387,8 @@ export function RecruitingDetailPanel({
               </h2>
               {role ? (
                 <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                  {company && companyLogo ? (
-                    <CompanyLogo name={company} src={companyLogo} />
+                  {company && (companyLogo || sections.company.host) ? (
+                    <CompanyLogo name={company} src={companyLogo} host={sections.company.host} />
                   ) : (
                     <BriefcaseBusiness size={14} aria-hidden className="shrink-0" />
                   )}

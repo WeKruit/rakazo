@@ -12,7 +12,11 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
+import { LinkFaviconsContext } from "@rakazo/chat-ui/web";
 import { AssessmentCard } from "./AssessmentCard";
+
+const ICON = "data:image/png;base64,AAAA";
+const loadFavicon = vi.fn(async (_origin: string) => ({ icon: ICON }));
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let host: HTMLDivElement | null = null;
@@ -30,29 +34,31 @@ function render(quick: Parameters<typeof AssessmentCard>[0]["quick"]) {
   const root = createRoot(host);
   act(() =>
     root.render(
-      <AssessmentCard
-        score="78"
-        rank={null}
-        summary={SUMMARY}
-        quick={quick}
-        rows={[
-          {
-            key: "criterion:Bay area based",
-            label: "Bay area based",
-            status: "match",
-            ...(quick.headline ? { brief: { name: "常驻湾区", verdict: "人在湾区" } } : {}),
-            text: REASONING,
-            sourceUrls: ["https://example.test/source"],
-          },
-        ]}
-        sourceUrls={[]}
-      />,
+      <LinkFaviconsContext.Provider value={{ load: loadFavicon }}>
+        <AssessmentCard
+          score="78"
+          rank={null}
+          summary={SUMMARY}
+          quick={quick}
+          rows={[
+            {
+              key: "criterion:Bay area based",
+              label: "Bay area based",
+              status: "match",
+              ...(quick.headline ? { brief: { name: "常驻湾区", verdict: "人在湾区" } } : {}),
+              text: REASONING,
+              sourceUrls: ["https://example.test/source"],
+            },
+          ]}
+          sourceUrls={[]}
+        />
+      </LinkFaviconsContext.Provider>,
     ),
   );
   return host;
 }
 
-it("leads with the short output and keeps reasoning and summary one click away", () => {
+it("leads with the short output and keeps reasoning and summary one click away", async () => {
   const view = render({
     headline: "斯坦福博士，移动操作一作",
     highlights: ["湾区", "NVIDIA GEAR 实习"],
@@ -62,7 +68,10 @@ it("leads with the short output and keeps reasoning and summary one click away",
   });
   expect(view.textContent).toContain("斯坦福博士，移动操作一作");
   expect(view.textContent).toContain("湾区");
-  expect(view.querySelector('img[src="https://nvidia.example/favicon.ico"]')).not.toBeNull();
+  // The organization's icon comes from our API, never straight from its site.
+  await act(async () => {});
+  expect(loadFavicon).toHaveBeenCalledWith("https://nvidia.example");
+  expect(view.querySelector(`img[src="${ICON}"]`)).not.toBeNull();
   expect(view.textContent).toContain("NVIDIA GEAR 实习");
   expect(view.querySelector('a[href="https://example.test/brs"]')?.textContent).toBe(
     "BRSCoRL 2025",

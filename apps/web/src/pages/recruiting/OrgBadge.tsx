@@ -1,3 +1,4 @@
+import { useLinkFavicon } from "@rakazo/chat-ui/web";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@rakazo/ui-web";
 import { ProfileImage } from "./ProfileImage";
 import { profileImageUrl } from "./profileAssets";
@@ -15,12 +16,10 @@ function logoInitials(name: string) {
   return letters.slice(0, 2).join("").toUpperCase();
 }
 
-/** The favicon of an organization's own website, when one was supplied for it. */
-export function websiteFavicon(host: string | undefined | null) {
-  return host ? `https://${host}/favicon.ico` : null;
-}
-
-/** A supplied company/school image, or the favicon of its own supplied website; otherwise initials. */
+/**
+ * A supplied company/school image, or the icon of its own returned website (looked up by our API,
+ * which reads the site's declared icon, so the browser never contacts the site); otherwise initials.
+ */
 export function CompanyLogo({
   name,
   src,
@@ -32,9 +31,12 @@ export function CompanyLogo({
   host?: string | null;
   small?: boolean;
 }) {
+  const supplied = profileImageUrl(src);
+  const { icon, unusable } = useLinkFavicon(!supplied && host ? `https://${host}/` : "");
   return (
     <ProfileImage
-      src={profileImageUrl(src) ?? websiteFavicon(host)}
+      src={supplied ?? icon}
+      onUnusable={supplied ? undefined : unusable}
       fallback={logoInitials(name)}
       className={`flex shrink-0 items-center justify-center overflow-hidden bg-muted font-medium text-muted-foreground ${
         small ? "size-4 rounded-sm text-[8px]" : "size-10 rounded-md text-xs"

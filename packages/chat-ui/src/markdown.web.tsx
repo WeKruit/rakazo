@@ -495,6 +495,6 @@ export const ChatMarkdown = memo(function ChatMarkdown({
 });
 
 export type { ChatMarkdownProps, LinkFavicons } from "./markdown";
-export { LinkFaviconsContext, RemoteImagesContext } from "./markdown";
+export { LinkFaviconsContext, RemoteImagesContext, useLinkFavicon } from "./markdown";
 
 export { MarkdownLinkPromptProvider } from "./markdown-link-prompt";

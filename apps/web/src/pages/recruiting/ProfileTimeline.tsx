@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { recruitingCandidateSourceText } from "@rakazo/contracts";
 import type { ReactNode } from "react";
 import { useMemo } from "react";
-import { CompanyLogo, OrgBadge, websiteFavicon } from "./OrgBadge";
+import { CompanyLogo, OrgBadge } from "./OrgBadge";
 import type { ProfileAssets } from "./profileAssets";
 import { organizationLogo, profileImageUrl } from "./profileAssets";
 import type { TimelineEntry, TimelineKind } from "./profileTimelineModel";
@@ -108,11 +108,8 @@ function Row({
       {logoName ? (
         <CompanyLogo
           name={logoName}
-          src={
-            profileImageUrl(entry.logoUrl) ??
-            organizationLogo(logoName, asset ?? null) ??
-            websiteFavicon(website)
-          }
+          src={profileImageUrl(entry.logoUrl) ?? organizationLogo(logoName, asset ?? null)}
+          host={website}
         />
       ) : (
         <span aria-hidden className="size-10 shrink-0" />
