@@ -1,7 +1,11 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type { Actor, RecruitingArtifactRef, RecruitingFeedbackRecord } from "@rakazo/contracts";
-import { recruitingBriefClarifications } from "@rakazo/core";
+import {
+  RECRUITING_BRIEF_CHECKLIST,
+  RECRUITING_SEARCH_BRIEF_TEMPLATE,
+  recruitingBriefClarifications,
+} from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
   getRecruitingRoleSnapshot,
@@ -97,6 +101,9 @@ export async function loadRecruitingRunContext(
     "Use field-level source provenance. Unconfirmed inference is soft and cannot reject a candidate. Resolve only material missing facts or conflicts; reuse answered context and do not impose a question count. Read original artifacts before revising source claims. Scheduling and outbound require their native approvals; opt-out, hold/pass and duplicate blocks take precedence over every exception.",
     "Internal record keeping does not require human approval by default: save and deduplicate candidates, connect verified CRM roles, update authorized records and memory, create drafts and delegate to teammates directly. Verify stored receipts instead of asking permission to save. Reading availability and preparing interview options are internal work; sending email or external invitations requires the user's exact approval. Clarifications and candidate feedback are ordinary conversation, not read/write permission. Preserve explicit user approval rules, existing decisions and unknown execution outcomes.",
     "Intake, company/JD research and recovery reads do not require redundant confirmation. Formal calibration requires actual human G0 approval and G1 approval of the JD/deck package, unless the human explicitly deferred S2 after G0. Reconfirm materially revised requirements or JD/deck at the applicable gate. A saved record is not human approval. Outside formal calibration or scale, small-scale exploration or same-task feedback/more results explicitly authorized by the current human request do not require G0/G1; follow the requested scope and usage limits, reuse the same verified provider task for continuation, and avoid technical saved-record confirmation or repeated approvals. Keep unknowns and pending cards; this does not approve requirements, JD/deck, business policies, calibration or scale. Keep human rule changes explicit; never recast changed qualification as round-only scope. G2 approval of the calibration profiles and rule changes is required before scale, even on the same task. These formal calibration/scale gates apply to native MCP too; ordinary continuation does not require saved-workspace research actions.",
+    RECRUITING_BRIEF_CHECKLIST,
+    "Calibration quick searches word the query with the brief's core duties as a profile would state them; pick the ten whose profiles best show that work, not just a matching title, and say in each one-line fit whether the match is evidence or title and company only. Every scale research request and feedback reply to the research provider uses this search brief template, filled from the confirmed brief and feedback, with the JD and role details after it as background. When relaying results, lead with the A grades, say what share is title or company only, and show a strong label whose own reasoning is unclear as needing a check.",
+    `<search_brief_template>\n${RECRUITING_SEARCH_BRIEF_TEMPLATE}\n</search_brief_template>`,
     "When the human repeats a manual task that existing routines can perform, briefly offer to automate that same task with a concrete cadence or supported event. Do not create or enable a routine until the human requests it. Reuse the native routine tools, existing authorized connections and original scope; automation never grants approval for outreach or invitations. Do not repeat an offer the human declined.",
     "<recruiting_role>",
     JSON.stringify(
