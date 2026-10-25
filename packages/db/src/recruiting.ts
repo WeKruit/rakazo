@@ -4424,7 +4424,8 @@ export async function latestRecruitingCalibrationProfiles(
       orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
       include: { page: { include: { effect: { select: { request: true } } } } },
     });
-    if (!occurrence?.linkedinUrl || csvImportRequest(occurrence.page.effect.request)) return null;
+    if (!occurrence?.linkedinUrl || unassessedPageRequest(occurrence.page.effect.request))
+      return null;
     let reference: ReturnType<typeof candidateSourceReference>;
     try {
       reference = candidateSourceReference(occurrence.page, occurrence.rowIndex);
@@ -6983,8 +6984,8 @@ export async function listRecruitingResearch(
       await candidatePageArtifacts(tx, actor, pages, false, afterRead);
       const observations = [];
       for (const page of pages) {
-        // CSV imports are recruiter lists, not provider observations.
-        if (csvImportRequest(page.effect.request)) continue;
+        // CSV imports and people searches are unassessed lists, not provider observations.
+        if (unassessedPageRequest(page.effect.request)) continue;
         const call = researchReadRequest(page.effect.request, undefined, "get_rows");
         observations.push(
           RecruitingResearchSavedObservationSchema.parse({
@@ -7411,10 +7412,16 @@ export async function saveNativeRecruitingCandidatePage(
 
 type CsvImportInput = Extract<RecruitingResearchToolInput, { operation: "import_csv" }>;
 
-/** Non-null only for a recruiter CSV import effect; such pages have no provider task. */
-function csvImportRequest(request: unknown): CsvImportInput | null {
+/**
+ * Non-null for a CSV import or people-search save effect: an unassessed page with no provider
+ * task, whose artifact proof differs from a provider observation's.
+ */
+function unassessedPageRequest(request: unknown): CsvImportInput | PeopleSearchInput | null {
   const parsed = RecruitingResearchToolInputSchema.safeParse(request);
-  return parsed.success && parsed.data.operation === "import_csv" ? parsed.data : null;
+  return parsed.success &&
+    (parsed.data.operation === "import_csv" || parsed.data.operation === "save_search")
+    ? parsed.data
+    : null;
 }
 
 /** Canonical receipt bytes for one CSV import; recomputed here, never trusted from the caller. */
@@ -7996,7 +8003,7 @@ async function candidatePageArtifacts(
       parent.userId !== actor.userId
     )
       throw new IsolationError();
-    const imported = csvImportRequest(effect.request);
+    const imported = unassessedPageRequest(effect.request);
     if (imported) {
       // ponytail: metadata proof only; the receipt bytes stay in ArtifactStore (adapter-verified
       // at import). Re-read them here only if a reader needs the raw CSV rows.
@@ -8009,9 +8016,12 @@ async function candidatePageArtifacts(
         artifact.userId !== actor.userId ||
         artifact.runId !== run.id ||
         artifact.botId !== run.botId ||
-        artifact.clientNonce !== `recruiting-csv-import:${effect.id}` ||
+        artifact.clientNonce !==
+          (imported.operation === "import_csv"
+            ? `recruiting-csv-import:${effect.id}`
+            : `recruiting-people-search:${effect.id}`) ||
         artifact.hash !== page.artifactHash ||
-        imported.roleId !== page.roleId ||
+        (imported.operation === "import_csv" ? imported.roleId : result?.roleId) !== page.roleId ||
         result?.roleRevisionId !== page.roleRevisionId ||
         result?.outputArtifact?.artifactId !== artifact.id ||
         result?.outputArtifact?.sha256 !== artifact.hash
@@ -10699,7 +10709,7 @@ function candidateSourceReference(
   rowIndex: number,
 ) {
   return {
-    providerTaskId: csvImportRequest(page.effect.request)
+    providerTaskId: unassessedPageRequest(page.effect.request)
       ? null
       : researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id,
     taskId: page.taskId,

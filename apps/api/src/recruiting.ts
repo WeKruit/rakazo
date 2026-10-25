@@ -85,8 +85,14 @@ async function authenticated<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
   } catch (error) {
-    if (error instanceof IsolationError)
+    if (error instanceof IsolationError) {
+      // The caller only sees "not found"; keep which check refused it.
+      getLogger().warn("recruiting.not_found", {
+        error: error.name,
+        at: error.stack?.split("\n")[1]?.trim(),
+      });
       throw new ORPCError("NOT_FOUND", { message: "Resource not found" });
+    }
     if (error instanceof RecruitingConflictError)
       throw new ORPCError("CONFLICT", { message: error.message });
     if (error instanceof RecruitingPlaybookValidationError)
