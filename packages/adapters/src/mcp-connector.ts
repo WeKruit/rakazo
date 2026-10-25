@@ -62,6 +62,7 @@ import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
+  requireQuickSearchBeforeResearch,
 } from "./recruiting-research.js";
 import {
   assertSchedulingCall,
@@ -772,6 +773,13 @@ export class McpConnector implements ConnectorProvider {
         call.args,
       );
       await requireFullEnrichJobOwnership(
+        this.prisma,
+        context,
+        assignment.server,
+        call.route.toolName,
+        call.args,
+      );
+      await requireQuickSearchBeforeResearch(
         this.prisma,
         context,
         assignment.server,

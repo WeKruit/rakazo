@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_INTAKE_FLOW,
@@ -84,7 +85,7 @@ describe("maintained recruiting defaults", () => {
       "Round feedback before the calibration is accepted goes into your next quick search",
     );
     expect(main.instructions).toContain("recruiting_research save_search");
-    expect(main.instructions).toContain("Use Autumn only to scale after a round is accepted");
+    expect(main.instructions).toContain("use Autumn only to scale after a round is accepted");
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
@@ -202,5 +203,14 @@ describe("maintained recruiting defaults", () => {
     )!;
     expect(intake.body).toContain(RECRUITING_PDF_RENDERING);
     expect(RECRUITING_INTAKE_FLOW).toContain("Role documents never hold up the calibration search");
+  });
+
+  it("keeps calibration searches parallel and tops up a short search", () => {
+    for (const part of [
+      "issued together as parallel tool calls in one step",
+      "top up the same round with one research request on this role for only the missing number",
+      "Never tell the recruiter about search quotas",
+    ])
+      expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);
   });
 });
