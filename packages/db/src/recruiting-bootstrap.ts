@@ -36,7 +36,7 @@ const RECRUITING_SERVICES = [
     name: "People search",
     description: "Platform people search for quick calibration rounds",
     endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
-    bots: ["main"],
+    bots: ["main", "sourcer"],
     tools: ["web_search_exa", "web_search_advanced_exa"],
   },
 ];
@@ -693,10 +693,11 @@ export async function ensureRecruitingWorkspace(
 }
 
 /**
- * Add the platform people search to a recruiting lead that predates it, including crews set up
- * before the managed preset existed. Additive and one-time: it runs only while no connection with
- * that slug exists, so a later removal by the user stays removed. It does not wait for runs to
- * finish, because adding a tool changes nothing an active run already holds.
+ * Give the recruiting lead and the sourcing specialist the platform people search, including
+ * crews set up before the managed preset existed. Additive: it creates the platform connection
+ * only while none with that slug exists, never touches a customized or disabled one, and adds
+ * only missing links. It does not wait for runs, because adding a tool changes nothing an active
+ * run already holds.
  */
 export async function ensurePlatformPeopleSearch(
   prisma: PrismaClient,
@@ -706,32 +707,47 @@ export async function ensurePlatformPeopleSearch(
   const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn");
   if (!search || !research) return;
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  if (await prisma.mcpServer.count({ where: { ...scope, slug: search.slug } })) return;
-  await prisma.$transaction(async (tx) => {
-    await lockSpaceForContentCreation(tx, actor);
-    if (await tx.mcpServer.count({ where: { ...scope, slug: search.slug } })) return;
-    const leads = await tx.bot.findMany({
+  const plan = async (client: Pick<PrismaClient, "mcpServer" | "bot">) => {
+    const server = await client.mcpServer.findFirst({
+      where: { ...scope, slug: search.slug },
+      select: { id: true, endpoint: true, secretId: true, enabled: true },
+    });
+    if (server && (server.endpoint !== search.endpoint || server.secretId || !server.enabled))
+      return null;
+    const bots = await client.bot.findMany({
       where: {
         ...scope,
         archivedAt: null,
-        OR: [{ spawnKey: `recruiting:${actor.userId}:main` }, { name: "Main" }],
+        OR: search.bots.flatMap((key) => [
+          { spawnKey: `recruiting:${actor.userId}:${key}` },
+          { name: key === "main" ? "Main" : "Sourcer" },
+        ]),
         mcpServers: { some: { ...scope, server: { ...scope, endpoint: research.endpoint } } },
+        ...(server ? { NOT: { mcpServers: { some: { serverId: server.id } } } } : {}),
       },
       select: { id: true },
     });
-    if (!leads.length) return;
-    const server = await tx.mcpServer.create({
-      data: {
-        ...scope,
-        slug: search.slug,
-        name: search.name,
-        description: search.description,
-        transport: "streamable_http",
-        endpoint: search.endpoint,
-      },
-    });
+    return bots.length ? { server, bots } : null;
+  };
+  if (!(await plan(prisma))) return;
+  await prisma.$transaction(async (tx) => {
+    await lockSpaceForContentCreation(tx, actor);
+    const todo = await plan(tx);
+    if (!todo) return;
+    const server =
+      todo.server ??
+      (await tx.mcpServer.create({
+        data: {
+          ...scope,
+          slug: search.slug,
+          name: search.name,
+          description: search.description,
+          transport: "streamable_http",
+          endpoint: search.endpoint,
+        },
+      }));
     await tx.botMcpServer.createMany({
-      data: leads.map((bot) => ({
+      data: todo.bots.map((bot) => ({
         ...scope,
         botId: bot.id,
         serverId: server.id,
