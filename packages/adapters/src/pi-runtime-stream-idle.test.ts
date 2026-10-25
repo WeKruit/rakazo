@@ -13,7 +13,11 @@ import {
   codexStreamIdleWatchdog,
   reliableModelStream,
 } from "./pi-runtime.js";
-import { MODEL_STREAM_IDLE_TIMEOUT_MS, MODEL_STREAM_TIMEOUT_MS } from "./pi-runtime-limits.js";
+import {
+  CODEX_STREAM_HEADERS_TIMEOUT_MS,
+  MODEL_STREAM_IDLE_TIMEOUT_MS,
+  MODEL_STREAM_TIMEOUT_MS,
+} from "./pi-runtime-limits.js";
 
 function assistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
   return {
@@ -50,6 +54,22 @@ const context = { messages: [] } as Context;
 
 describe("Codex stream idle watchdog", () => {
   afterEach(() => vi.useRealTimers());
+
+  it("caps a stream that keeps sending events but never finishes", async () => {
+    vi.useFakeTimers();
+    const watchdog = codexStreamIdleWatchdog(undefined, 1_000, 5_000);
+    watchdog.ping();
+    for (let elapsed = 0; elapsed < 4_800; elapsed += 800) {
+      await vi.advanceTimersByTimeAsync(800);
+      watchdog.ping();
+    }
+    expect(watchdog.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(watchdog.signal.aborted).toBe(true);
+    expect((watchdog.signal.reason as Error).message).toBe(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE);
+    watchdog.dispose();
+    expect(vi.getTimerCount()).toBe(0);
+  });
 
   it("aborts the composed signal after the idle bound and relabels the terminal error", async () => {
     vi.useFakeTimers();
@@ -258,7 +278,7 @@ describe("reliableModelStream idle gating", () => {
     const guardedOptions = streamSimple.mock.calls[0]?.[2];
     expect(guardedOptions?.signal).not.toBe(caller.signal);
     expect(guardedOptions?.fetch).not.toBe(callerFetch);
-    expect(guardedOptions?.timeoutMs).toBe(MODEL_STREAM_TIMEOUT_MS);
+    expect(guardedOptions?.timeoutMs).toBe(CODEX_STREAM_HEADERS_TIMEOUT_MS);
     expect(guardedOptions?.transport).toBe("sse");
     expect(guarded).not.toBe(inner);
     expect(guarded).toBeInstanceOf(AssistantMessageEventStream);
