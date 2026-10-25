@@ -102,4 +102,29 @@ describe("attachment uploads", () => {
     expect(await uploads.resolve([{ id: "x", file }], { botId: "bot" })).toEqual(["content"]);
     expect(read).toHaveBeenCalledTimes(2);
   });
+
+  it("resolves one early read with its per-file idempotency options", async () => {
+    const { createAttachmentUploads } = await import("./pending-attachments.js");
+    const read = vi.fn(async (file: File) => `read-${file.name}`);
+    const upload = vi.fn(async () => "artifact-x");
+    const uploads = createAttachmentUploads(upload, read);
+    const file = new File(["x"], "x.txt");
+    uploads.start("x", file);
+
+    await expect(
+      uploads.resolveOne(
+        { id: "x", file },
+        { groupId: "role-group" },
+        { clientNonce: "attachment-nonce" },
+      ),
+    ).resolves.toBe("artifact-x");
+
+    expect(read).toHaveBeenCalledOnce();
+    expect(upload).toHaveBeenCalledExactlyOnceWith(
+      file,
+      "read-x.txt",
+      { groupId: "role-group" },
+      { clientNonce: "attachment-nonce" },
+    );
+  });
 });

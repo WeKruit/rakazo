@@ -5,8 +5,8 @@ import type {
   RecruitingSavedProfile,
 } from "@rakazo/contracts";
 import { recruitingCandidateSourceText } from "@rakazo/contracts";
-import type { TimelineEntry } from "./profileTimeline";
-import { storedExperienceTimeline, structuredProfileTimeline } from "./profileTimeline";
+import type { TimelineEntry } from "./profileTimelineModel";
+import { storedExperienceTimeline, structuredProfileTimeline } from "./profileTimelineModel";
 import type { RoleCandidateFit } from "./roleCandidates";
 import { roleCandidateFit } from "./roleCandidates";
 

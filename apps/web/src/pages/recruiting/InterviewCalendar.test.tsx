@@ -14,7 +14,7 @@ vi.mock("@lingui/react/macro", () => ({
 }));
 
 import { InterviewCalendar } from "./InterviewCalendar";
-import type { InterviewCalendarEvent } from "./interviewCalendar";
+import type { InterviewCalendarEvent } from "./interviewCalendarModel";
 
 const now = new Date("2026-10-21T12:00:00Z");
 const source = (extra: Partial<InterviewCalendarEvent> = {}): InterviewCalendarEvent => ({

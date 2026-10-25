@@ -41,6 +41,7 @@ export function readFileAsBase64(file: File): Promise<string> {
 }
 
 type UploadTarget = { botId: string } | { groupId: string };
+type UploadOptions = { clientNonce?: string };
 
 /**
  * Attachments are read the moment they are picked, and Send uploads them all in parallel.
@@ -48,7 +49,12 @@ type UploadTarget = { botId: string } | { groupId: string };
  * (new role, feedback) never leaves a file behind.
  */
 export function createAttachmentUploads(
-  upload: (file: File, contentBase64: string, target: UploadTarget) => Promise<string>,
+  upload: (
+    file: File,
+    contentBase64: string,
+    target: UploadTarget,
+    options?: UploadOptions,
+  ) => Promise<string>,
   read: (file: File) => Promise<string> = readFileAsBase64,
 ) {
   const reads = new Map<string, Promise<string>>();
@@ -59,22 +65,28 @@ export function createAttachmentUploads(
     reads.set(id, content);
     return content;
   };
+  const resolveOne = async (
+    { id, file }: { id: string; file: File },
+    target: UploadTarget,
+    options?: UploadOptions,
+  ) => {
+    const early = reads.get(id);
+    const content = await (early ?? begin(id, file)).catch(() => begin(id, file));
+    return upload(file, content, target, options);
+  };
   return {
     start: begin,
     discard(id: string) {
       reads.delete(id);
     },
+    resolveOne,
     /** Artifact ids in pick order. A failed early read is retried once. */
     async resolve(
       attachments: ReadonlyArray<{ id: string; file: File }>,
       target: UploadTarget,
     ): Promise<string[]> {
       const ids = await Promise.all(
-        attachments.map(async ({ id, file }) => {
-          const early = reads.get(id);
-          const content = await (early ?? begin(id, file)).catch(() => begin(id, file));
-          return upload(file, content, target);
-        }),
+        attachments.map((attachment) => resolveOne(attachment, target)),
       );
       for (const { id } of attachments) reads.delete(id);
       return ids;

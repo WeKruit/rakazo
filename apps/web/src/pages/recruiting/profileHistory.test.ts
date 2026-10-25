@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { richProfileRow } from "./__fixtures__/profile-history";
 import { candidateSections, storedProfileFields } from "./profile";
 import { profileAssets, profileContentFields } from "./profileAssets";
-import { structuredProfileTimeline } from "./profileTimeline";
+import { structuredProfileTimeline } from "./profileTimelineModel";
 
 describe("retained profile history projection", () => {
   it("preserves nested source cells through report serialization and renders explicit records", () => {

@@ -531,6 +531,22 @@ async function render(node: ReactNode) {
 }
 
 describe("web external link confirmation", () => {
+  it("lets LinkedIn links open directly without a confirmation dialog", async () => {
+    const view = await render(
+      <ChatMarkdown>{"See [LinkedIn](https://www.linkedin.com/in/lamhharrison)"}</ChatMarkdown>,
+    );
+    const link = view.container.querySelector("a")!;
+    const click = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 });
+
+    await act(async () => {
+      link.dispatchEvent(click);
+    });
+
+    expect(click.defaultPrevented).toBe(false);
+    expect(document.querySelector("[role='alertdialog']")).toBeNull();
+    await view.cleanup();
+  });
+
   it("asks before an external bot link and opens it only after confirmation", async () => {
     const open = vi.spyOn(window, "open").mockReturnValue(null);
     const view = await render(

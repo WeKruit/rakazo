@@ -3397,7 +3397,7 @@ export function ShellPage() {
     [t],
   );
   const attachmentUploads = useRef(
-    createAttachmentUploads(async (file, contentBase64, target) => {
+    createAttachmentUploads(async (file, contentBase64, target, options) => {
       const mimeType = inferAttachmentMimeType(file.name, file.type);
       if (!mimeType)
         throw new Error(
@@ -3410,6 +3410,7 @@ export function ShellPage() {
         name: file.name,
         mimeType,
         contentBase64,
+        ...(options?.clientNonce ? { clientNonce: options.clientNonce } : {}),
       });
       return artifact.id;
     }),
@@ -3439,7 +3440,7 @@ export function ShellPage() {
           continue;
         }
         next.push({
-          id: `${file.name}-${file.size}-${file.lastModified}-${next.length}`,
+          id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
           threadKey,
           file,
           previewUrl: mimeType.startsWith("image/") ? URL.createObjectURL(file) : undefined,
@@ -4033,7 +4034,7 @@ export function ShellPage() {
     key: string;
     group: Group;
     clientNonce: string;
-    artifactIds: string[];
+    uploads: Map<string, { clientNonce: string; artifactId?: string }>;
   } | null>(null);
   async function createGroup(input: { name: string; botIds: string[]; description?: string }) {
     const attachments = showToolActivity
@@ -4070,7 +4071,17 @@ export function ShellPage() {
       const group =
         attempt?.group ?? (await rpc.groups.create({ name: input.name, botIds: input.botIds }));
       if (input.description && !attempt) {
-        attempt = { key, group, clientNonce: crypto.randomUUID(), artifactIds: [] };
+        attempt = {
+          key,
+          group,
+          clientNonce: crypto.randomUUID(),
+          uploads: new Map(
+            attachments.map((pending) => [
+              attachmentUploadKey(pending),
+              { clientNonce: crypto.randomUUID() },
+            ]),
+          ),
+        };
         pendingRoleCreation.current = attempt;
       }
       if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
@@ -4078,31 +4089,37 @@ export function ShellPage() {
         current.some((item) => item.id === group.id) ? current : [group, ...current],
       );
       if (input.description && attempt) {
-        for (const pending of attachments.slice(attempt.artifactIds.length)) {
-          const mimeType = inferAttachmentMimeType(pending.file.name, pending.file.type);
-          if (!mimeType)
-            throw new Error(
-              isXlsxFileName(pending.file.name)
-                ? t`XLSX is not supported yet. Save as CSV and upload again.`
-                : t`Unsupported file type: ${pending.file.name}`,
+        const currentAttempt = attempt;
+        const settled = await Promise.allSettled(
+          attachments.map(async (pending) => {
+            const id = attachmentUploadKey(pending);
+            const upload = currentAttempt.uploads.get(id);
+            if (!upload) throw new Error(t`The workspace changed. Open the role again.`);
+            if (upload.artifactId) return;
+            upload.artifactId = await attachmentUploads.current.resolveOne(
+              { id, file: pending.file },
+              { groupId: group.id },
+              { clientNonce: upload.clientNonce },
             );
-          const contentBase64 = await readFileAsBase64(pending.file);
-          if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
-          const artifact = await rpc.artifacts.create({
-            groupId: group.id,
-            name: pending.file.name,
-            mimeType,
-            contentBase64,
-          });
-          attempt.artifactIds.push(artifact.id);
-        }
+            attachmentUploads.current.discard(id);
+          }),
+        );
+        const failed = settled.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        if (failed) throw failed.reason;
+        const artifactIds = attachments.map((pending) => {
+          const artifactId = currentAttempt.uploads.get(attachmentUploadKey(pending))?.artifactId;
+          if (!artifactId) throw new Error(t`Could not upload file`);
+          return artifactId;
+        });
         if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
         await rpc.threads.followUp({
           groupId: group.id,
           text: input.description,
-          ...(attempt.artifactIds.length ? { artifactIds: attempt.artifactIds } : {}),
+          ...(artifactIds.length ? { artifactIds } : {}),
           mentions: [input.botIds[0]!],
-          clientNonce: attempt.clientNonce,
+          clientNonce: currentAttempt.clientNonce,
         });
         pendingRoleCreation.current = null;
       }
