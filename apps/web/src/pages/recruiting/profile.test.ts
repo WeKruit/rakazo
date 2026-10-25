@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProfileCriterionRevision } from "./profile";
-import { candidateSections, requirementRows, shortFact } from "./profile";
+import { candidateSections, requirementRows, shortFact, withSavedProfile } from "./profile";
 
 const ASSESSMENT =
   "R1: Fact - PhD EE Stanford and MS/PhD-level background. R2: Gap - no explicit named sim stack hands-on evidence. R3: Partial - large-scale simulation mentioned. R4: hands-on robotics; [Sources read 2026-10-20: LINKEDIN, https://example.test/a, https://example.test/b/]";
@@ -355,5 +355,53 @@ describe("shortFact", () => {
     );
     expect(shortFact("1,001-5,000")).toBe("1,001-5,000");
     expect(shortFact("  ")).toBeNull();
+  });
+});
+
+describe("withSavedProfile", () => {
+  it("leads with the saved full profile and drops the report fields it covers", () => {
+    const fields = withSavedProfile(
+      {
+        personKey: "linkedin:/in/sam-example",
+        provider: "example",
+        fetchedAt: "2026-10-24T00:00:00.000Z",
+        headline: null,
+        profileImageUrl: "https://img.example/sam.jpg",
+        experience: [
+          {
+            title: "Operations Manager",
+            company_name: "Acme Logistics",
+            company_url: "https://acme.example/",
+            company_linkedin_url: null,
+            company_logo_url: "https://img.example/acme.png",
+            company_industry: "Logistics",
+            company_size: "1,001-5,000",
+            location: null,
+            start_date: "2021-03",
+            end_date: null,
+            is_current: true,
+            description: null,
+          },
+        ],
+        education: [],
+      },
+      [
+        { label: "Experience", value: "Manager at Acme (dates unknown)", sourceUrls: [] },
+        { label: "Education", value: "State University", sourceUrls: [] },
+      ],
+    );
+    expect(fields.map((field) => field.label)).toEqual([
+      "Profile image url",
+      "Current company url",
+      "Current company industry",
+      "Current company size",
+      "Experience",
+      "Education",
+    ]);
+    expect(fields[4]!.value).toBe("Operations Manager · Acme Logistics · 2021-03");
+    expect(fields[5]!.value).toBe("State University");
+    const sections = candidateSections(fields);
+    expect(sections.photoUrl).toBe("https://img.example/sam.jpg");
+    expect(withSavedProfile(null, fields.slice(5))).toEqual(fields.slice(5));
   });
 });

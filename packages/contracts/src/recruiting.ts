@@ -1367,8 +1367,57 @@ export const RecruitingCandidateConsiderationSchema = z.strictObject({
   }),
 });
 
+// Saved public-profile facts for one person, normalized from a profile-data connector's retained
+// result. Field names match the timeline interchange; null means the source did not say.
+const ProfileText = z.string().max(4000).nullable();
+export const RecruitingProfileExperienceSchema = z.strictObject({
+  title: ProfileText,
+  company_name: ProfileText,
+  company_url: ProfileText,
+  company_linkedin_url: ProfileText,
+  company_logo_url: ProfileText,
+  company_industry: ProfileText,
+  company_size: ProfileText,
+  location: ProfileText,
+  start_date: ProfileText,
+  end_date: ProfileText,
+  is_current: z.boolean().nullable(),
+  description: ProfileText,
+});
+export const RecruitingProfileEducationSchema = z.strictObject({
+  school_name: ProfileText,
+  degree: ProfileText,
+  field_of_study: ProfileText,
+  school_url: ProfileText,
+  school_logo_url: ProfileText,
+  start_date: ProfileText,
+  end_date: ProfileText,
+});
+export const RecruitingSavedProfileSchema = z.strictObject({
+  personKey: RecruitingId,
+  provider: Text,
+  fetchedAt: IsoDate,
+  headline: ProfileText,
+  profileImageUrl: ProfileText,
+  experience: z.array(RecruitingProfileExperienceSchema).max(80),
+  education: z.array(RecruitingProfileEducationSchema).max(40),
+});
+export type RecruitingSavedProfile = z.infer<typeof RecruitingSavedProfileSchema>;
+export type RecruitingProfileExperience = z.infer<typeof RecruitingProfileExperienceSchema>;
+export type RecruitingProfileEducation = z.infer<typeof RecruitingProfileEducationSchema>;
+/** list reads what is already saved (the cache); save stores a lookup made in this run. */
+export const RecruitingProfilesToolInputSchema = z.discriminatedUnion("operation", [
+  z.strictObject({
+    operation: z.literal("list"),
+    candidateKeys: z.array(RecruitingId).min(1).max(50),
+  }),
+  z.strictObject({ operation: z.literal("save"), candidateKey: RecruitingId }),
+]);
+export type RecruitingProfilesToolInput = z.infer<typeof RecruitingProfilesToolInputSchema>;
+
 export const RecruitingCandidateSchema = z.strictObject({
   latestSource: RecruitingCandidateSourceReferenceSchema.optional(),
+  savedProfile: RecruitingSavedProfileSchema.nullable().optional(),
   crm: RecruitingCrmCandidateSyncSchema.nullable(),
   roleId: RecruitingId,
   candidateKey: RecruitingId,

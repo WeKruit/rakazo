@@ -31,6 +31,7 @@ model User {
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
   recruitingCandidateNotes RecruitingCandidateNote[] @relation("RecruitingCandidateNoteOwner")
+  recruitingSavedProfiles RecruitingSavedProfile[] @relation("RecruitingSavedProfileOwner")
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
@@ -212,6 +213,7 @@ model Space {
   recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[]
+  recruitingSavedProfiles RecruitingSavedProfile[]
   recruitingCandidateNotes RecruitingCandidateNote[]
   recruitingRoles RecruitingRole[]
   id                          String                       @id
@@ -1953,6 +1955,27 @@ model RecruitingCandidateNote {
 
   @@index([spaceId, candidateKey, createdAt])
   @@map("recruiting_candidate_notes")
+}
+
+/// One person's public-profile facts saved from a profile-data lookup the agent made, owner-scoped
+/// like notes. The provider's full result stays on its effect; this row is the display/cache copy.
+model RecruitingSavedProfile {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingSavedProfileOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  /// The pool's candidate key, e.g. "linkedin:<handle>".
+  personKey String
+  provider String
+  sourceEffectId String
+  profile Json
+  fetchedAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([spaceId, ownerUserId, personKey])
+  @@map("recruiting_saved_profiles")
 }
 
 /// Exact CRM workspace selected through an authenticated read, never an execution/approval receipt.
