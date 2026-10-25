@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { createVendorNameStream, hideVendorNames, isVendorUrl } from "./vendor-names.js";
+import {
+  createVendorNameStream,
+  hideVendorBlocks,
+  hideVendorNames,
+  isVendorUrl,
+  vendorNeutralServiceName,
+} from "./vendor-names.js";
 
 describe("hideVendorNames", () => {
   it("replaces the search provider in Chinese without stray spaces", () => {
@@ -66,5 +72,58 @@ describe("createVendorNameStream", () => {
   it("holds an unfinished provider link", () => {
     const out = stream(["see https://autumn", "-assets.s3.amazonaws.com/a.png ok"]);
     expect(out).toBe("see  ok");
+  });
+});
+
+describe("hideVendorBlocks", () => {
+  it("hides names in choice, card and sub-task blocks but keeps approval and connect cards", () => {
+    const approval = {
+      kind: "ask" as const,
+      text: "Send via Instantly",
+      approvalEffectId: "effect",
+    };
+    const connect = {
+      kind: "ask" as const,
+      text: "Connect Coresignal",
+      connection: { serverId: "server", name: "Coresignal", reason: "Profile history." },
+    };
+    expect(
+      hideVendorBlocks([
+        {
+          kind: "choice",
+          question: "要让 Autumn 继续吗？",
+          options: [{ id: "a", letter: "A", label: "让 Autumn 再找 10 人" }],
+        },
+        { kind: "card", lines: [{ k: "来源", v: "Lusha 查到了邮箱" }] },
+        { kind: "subagent", agentId: "s", name: "Sourcer", task: "Ask Autumn", status: "running" },
+        approval,
+        connect,
+      ]),
+    ).toEqual([
+      {
+        kind: "choice",
+        question: "要让人才搜索继续吗？",
+        options: [{ id: "a", letter: "A", label: "让人才搜索再找 10 人" }],
+      },
+      { kind: "card", lines: [{ k: "来源", v: "联系方式补全查到了邮箱" }] },
+      {
+        kind: "subagent",
+        agentId: "s",
+        name: "Sourcer",
+        task: "Ask the search",
+        status: "running",
+      },
+      approval,
+      connect,
+    ]);
+  });
+});
+
+describe("vendorNeutralServiceName", () => {
+  it("names what a hidden provider does and keeps the user's own accounts", () => {
+    expect(vendorNeutralServiceName("Coresignal")).toBe("人才资料库");
+    expect(vendorNeutralServiceName("Autumn")).toBe("人才搜索");
+    expect(vendorNeutralServiceName("ContactOut")).toBe("联系方式补全");
+    expect(vendorNeutralServiceName("Gmail")).toBe("Gmail");
   });
 });
