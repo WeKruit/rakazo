@@ -3306,6 +3306,8 @@ export function isCodexModel(model: Pick<Model<Api>, "api" | "provider">): boole
 
 /** Abort reason recorded when a Codex stream goes silent past the idle bound. */
 export const CODEX_STREAM_IDLE_TIMEOUT_MESSAGE = "Codex stream idle timeout";
+/** How long a stream may take to end on its own after the watchdog aborts it. */
+const ABORT_GRACE_MS = 5_000;
 
 export interface StreamIdleWatchdog {
   /** Composed abort signal to hand to the provider request. */
@@ -3313,7 +3315,10 @@ export interface StreamIdleWatchdog {
   /** Re-arms the idle bound; invoke on response headers and each delivered event. */
   ping(): void;
   /** Wraps the provider stream so every delivered event re-arms the idle bound. */
-  wrap(stream: AssistantMessageEventStream): AssistantMessageEventStream;
+  wrap(
+    stream: AssistantMessageEventStream,
+    model?: Pick<Model<Api>, "api" | "provider" | "id">,
+  ): AssistantMessageEventStream;
   /** Stops the timer and drops the caller-signal listener. */
   dispose(): void;
 }
@@ -3350,13 +3355,37 @@ export function codexStreamIdleWatchdog(
   if (upstream?.aborted) controller.abort(upstream.reason);
   else upstream?.addEventListener("abort", onUpstreamAbort, { once: true });
 
+  // Resolves when the watchdog itself gives up, so the wrapper can end a stream whose
+  // transport never reacts to the abort.
+  let stop!: () => void;
+  const stopped = new Promise<"stopped">((resolve) => {
+    stop = () => resolve("stopped");
+  });
+  // After the watchdog fires, the transport normally ends the stream itself, which keeps the
+  // fallback chain's own error handling; only a stream that ignores the abort is ended here.
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+  let endGrace: (() => void) | undefined;
+  const grace = stopped.then(
+    () =>
+      new Promise<"stopped">((resolve) => {
+        endGrace = () => resolve("stopped");
+        if (disposed) return endGrace();
+        graceTimer = setTimeout(endGrace, ABORT_GRACE_MS);
+        graceTimer.unref?.();
+      }),
+  );
+  const fire = () => {
+    if (controller.signal.aborted) return;
+    timedOut = true;
+    controller.abort(new Error(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE));
+    stop();
+  };
+
   const arm = () => {
     if (disposed || controller.signal.aborted) return;
     timer = setTimeout(() => {
       timer = undefined;
-      if (controller.signal.aborted) return;
-      timedOut = true;
-      controller.abort(new Error(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE));
+      fire();
     }, idleTimeoutMs);
     timer.unref?.();
   };
@@ -3365,6 +3394,8 @@ export function codexStreamIdleWatchdog(
     disposed = true;
     if (timer !== undefined) clearTimeout(timer);
     if (capTimer !== undefined) clearTimeout(capTimer);
+    if (graceTimer !== undefined) clearTimeout(graceTimer);
+    endGrace?.();
     timer = undefined;
     upstream?.removeEventListener("abort", onUpstreamAbort);
   };
@@ -3381,11 +3412,7 @@ export function codexStreamIdleWatchdog(
     timer = undefined;
     arm();
     if (capTimer === undefined && !disposed && !controller.signal.aborted) {
-      capTimer = setTimeout(() => {
-        if (controller.signal.aborted) return;
-        timedOut = true;
-        controller.abort(new Error(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE));
-      }, totalTimeoutMs);
+      capTimer = setTimeout(fire, totalTimeoutMs);
       capTimer.unref?.();
     }
   };
@@ -3409,11 +3436,41 @@ export function codexStreamIdleWatchdog(
     signal: controller.signal,
     ping,
     dispose,
-    wrap(inner) {
+    wrap(inner, model) {
+      let partial: AssistantMessage | undefined;
+      const timeoutMessage = (): AssistantMessage => ({
+        role: "assistant",
+        content: [],
+        api: model?.api ?? partial?.api ?? "openai-codex-responses",
+        provider: model?.provider ?? partial?.provider ?? "openai-codex",
+        model: model?.id ?? partial?.model ?? "",
+        usage: partial?.usage ?? {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        ...partial,
+        stopReason: "error",
+        errorMessage: CODEX_STREAM_IDLE_TIMEOUT_MESSAGE,
+        timestamp: partial?.timestamp ?? Date.now(),
+      });
       class Watched extends AssistantMessageEventStream {
         override async *[Symbol.asyncIterator](): AsyncGenerator<AssistantMessageEvent> {
+          const iterator = inner[Symbol.asyncIterator]();
           try {
-            for await (const event of inner) {
+            while (true) {
+              const next = await Promise.race([iterator.next(), grace]);
+              if (next === "stopped") {
+                void Promise.resolve(iterator.return?.()).catch(() => undefined);
+                yield { type: "error", reason: "error", error: timeoutMessage() };
+                return;
+              }
+              if (next.done) return;
+              const event = next.value;
+              if ("partial" in event && event.partial) partial = event.partial;
               ping();
               yield rewrite(event);
             }
@@ -3422,7 +3479,9 @@ export function codexStreamIdleWatchdog(
           }
         }
         override result(): Promise<AssistantMessage> {
-          return inner.result().then(describeTimeout).finally(dispose);
+          return Promise.race([inner.result().then(describeTimeout), grace])
+            .then((value) => (value === "stopped" ? timeoutMessage() : value))
+            .finally(dispose);
         }
       }
       return new Watched();
@@ -3527,7 +3586,7 @@ export function reliableModelStream(
     const stream = runStream
       ? runStream(preparedOptions)
       : models.streamSimple(model, context, preparedOptions);
-    return watchdog ? watchdog.wrap(stream) : stream;
+    return watchdog ? watchdog.wrap(stream, model) : stream;
   } catch (error) {
     watchdog?.dispose();
     throw error;
