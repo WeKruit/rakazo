@@ -4,6 +4,8 @@ import type { Actor, RecruitingArtifactRef, RecruitingFeedbackRecord } from "@ra
 import {
   RECRUITING_BRIEF_CHECKLIST,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
+  RECRUITING_INTAKE_FLOW,
+  RECRUITING_PDF_RENDERING,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   recruitingBriefClarifications,
 } from "@rakazo/core";
@@ -103,6 +105,8 @@ export async function loadRecruitingRunContext(
     "Internal record keeping does not require human approval by default: save and deduplicate candidates, connect verified CRM roles, update authorized records and memory, create drafts and delegate to teammates directly. Verify stored receipts instead of asking permission to save. Reading availability and preparing interview options are internal work; sending email or external invitations requires the user's exact approval. Clarifications and candidate feedback are ordinary conversation, not read/write permission. Preserve explicit user approval rules, existing decisions and unknown execution outcomes.",
     "Intake, company/JD research and recovery reads do not require redundant confirmation. Formal calibration requires actual human G0 approval and G1 approval of the JD/deck package, unless the human explicitly deferred S2 after G0. Reconfirm materially revised requirements or JD/deck at the applicable gate. A saved record is not human approval. Outside formal calibration or scale, small-scale exploration or same-task feedback/more results explicitly authorized by the current human request do not require G0/G1; follow the requested scope and usage limits, reuse the same verified provider task for continuation, and avoid technical saved-record confirmation or repeated approvals. Keep unknowns and pending cards; this does not approve requirements, JD/deck, business policies, calibration or scale. Keep human rule changes explicit; never recast changed qualification as round-only scope. G2 approval of the calibration profiles and rule changes is required before scale, even on the same task. These formal calibration/scale gates apply to native MCP too; ordinary continuation does not require saved-workspace research actions.",
     RECRUITING_BRIEF_CHECKLIST,
+    RECRUITING_INTAKE_FLOW,
+    RECRUITING_PDF_RENDERING,
     // Calibration runs from code so accounts with older customized bots or skills get it too.
     `${RECRUITING_CALIBRATION_QUICK_SEARCH} Start the first round in the same turn the brief is confirmed. Before a round is accepted, never start a research task or hand a calibration round to the research liaison; a teammate without the people search hands the round back to Main.`,
     "Calibration quick searches word the query with the brief's core duties as a profile would state them; pick the ten whose profiles best show that work, not just a matching title, and say in each one-line fit whether the match is evidence or title and company only. Every scale research request and feedback reply to the research provider uses this search brief template, filled from the confirmed brief and feedback, with the JD and role details after it as background. When relaying results, lead with the A grades, say what share is title or company only, and show a strong label whose own reasoning is unclear as needing a check.",
