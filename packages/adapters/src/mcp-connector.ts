@@ -406,6 +406,9 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
   return undefined;
 }
 
+/** Tools listed outside the lazy catalog even when an agent has many connected tools. */
+const directTools = new WeakSet<ConnectorTool>();
+
 export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
   "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
 
@@ -522,6 +525,19 @@ export class McpConnector implements ConnectorProvider {
   async discoverTools(context: AdapterContext): Promise<ConnectorTool[]> {
     const tools = await this.authorizedTools(context);
     if (tools.length <= DIRECT_TOOL_LIMIT) return tools;
+    // The built-in people search stays directly callable, so a calibration round needs no
+    // catalog search and load turns before its first search.
+    const direct = tools.filter((tool) => directTools.has(tool));
+    if (direct.length)
+      return [
+        ...direct,
+        ...lazyCatalogTools(
+          catalogToolPrefix("mcp"),
+          "mcp",
+          "MCP",
+          catalogEntries(tools.filter((tool) => !directTools.has(tool))),
+        ),
+      ];
     // The catalog wrappers must not be named `mcp_*`: Anthropic rejects Claude Code OAuth
     // requests that carry a tool whose name starts with "mcp_" (single underscore) with a
     // misleading "You're out of extra usage" 400, on every model. Direct MCP tools are
@@ -591,6 +607,8 @@ export class McpConnector implements ConnectorProvider {
                 catalogGroup: assignment.server.slug,
               },
             }));
+          if (assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
+            for (const tool of remoteTools) directTools.add(tool);
           if (
             assignment.server.transport === "streamable_http" &&
             assignment.server.endpoint === INSTANTLY_MCP &&

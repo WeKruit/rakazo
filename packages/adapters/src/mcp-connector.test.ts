@@ -13,6 +13,7 @@ import {
   firstPartyMcpUrl,
   loadMcpCredentialRecord,
   McpConnector,
+  PLATFORM_PEOPLE_SEARCH_ENDPOINT,
   requireMcpToolAssignment,
 } from "./mcp-connector.js";
 import type { OAuthMaterial } from "./mcp-oauth.js";
@@ -2104,6 +2105,59 @@ describe("MCP connector session cache", () => {
     // Anthropic rejects Claude Code OAuth requests carrying any `mcp_`-prefixed tool name.
     expect(tools.every((tool) => !tool.name.startsWith("mcp_"))).toBe(true);
     expect(JSON.stringify(tools)).not.toContain("schema-marker");
+    await connector.close();
+  });
+
+  it("keeps the built-in people search direct when the rest moves to the catalog", async () => {
+    const state = {
+      failNext: false,
+      initializations: 0,
+      tools: Array.from({ length: 21 }, (_, index) => ({
+        name: `tool_${index}`,
+        inputSchema: { type: "object" },
+      })),
+    };
+    const demo = mcpFetch(state);
+    const exa = mcpFetch(state, PLATFORM_PEOPLE_SEARCH_ENDPOINT);
+    vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) =>
+      logicalHref(input, init) === PLATFORM_PEOPLE_SEARCH_ENDPOINT
+        ? exa(input, init)
+        : demo(input, init),
+    );
+    const search = {
+      ...ASSIGNMENT,
+      serverId: "server-search",
+      allowAllTools: false,
+      allowedTools: ["tool_0"],
+      server: {
+        ...SERVER,
+        id: "server-search",
+        slug: "people-search",
+        endpoint: PLATFORM_PEOPLE_SEARCH_ENDPOINT,
+      },
+    };
+    const connector = new McpConnector(
+      {
+        botMcpServer: {
+          findMany: vi.fn().mockResolvedValue([ASSIGNMENT, search]),
+          findFirst: vi.fn().mockResolvedValue(ASSIGNMENT),
+        },
+      } as never,
+      {} as never,
+      { network: TEST_NETWORK },
+    );
+    const tools = await connector.discoverTools({
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    } as never);
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "mcp__people-search__tool_0",
+      "connectors_search_tools",
+      "connectors_load_tool",
+      "connectors_execute_tool",
+    ]);
     await connector.close();
   });
 
