@@ -8,6 +8,11 @@ export const OPEN_SCRATCHPAD_STATUSES: ScratchpadStatus[] = ["open", "parked"];
 const TITLE_MAX = 200;
 const NOTES_MAX = 4_000;
 
+/** Tells the agent how to fix an oversized note in one retry instead of resending it. */
+function notesTooLong(length: number) {
+  return `notes must be at most ${NOTES_MAX} characters (got ${length}). Keep only the current decisions and next steps, drop history the conversation already holds, and retry once.`;
+}
+
 export type ScratchpadToolDeps = {
   prisma: PrismaClient;
 };
@@ -82,7 +87,7 @@ export async function addScratchpadItemFromTool(
   if (!title) return { error: "title is required." };
   if (title.length > TITLE_MAX) return { error: `title must be at most ${TITLE_MAX} characters.` };
   const notes = (input.notes ?? "").trim();
-  if (notes.length > NOTES_MAX) return { error: `notes must be at most ${NOTES_MAX} characters.` };
+  if (notes.length > NOTES_MAX) return { error: notesTooLong(notes.length) };
 
   let status: ScratchpadStatus = "open";
   if (input.status !== undefined) {
@@ -146,8 +151,7 @@ export async function updateScratchpadItemFromTool(
   }
   if (input.notes !== undefined) {
     const notes = input.notes.trim();
-    if (notes.length > NOTES_MAX)
-      return { error: `notes must be at most ${NOTES_MAX} characters.` };
+    if (notes.length > NOTES_MAX) return { error: notesTooLong(notes.length) };
     data.notes = notes;
   }
   if (Object.keys(data).length === 0) {

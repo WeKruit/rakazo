@@ -1400,7 +1400,9 @@ describe("official Autumn task dispatch", () => {
         expect(events).toEqual([
           expect.objectContaining({
             type: "error",
-            message: expect.stringMatching(/scoped research history/i),
+            message: expect.stringMatching(
+              /scoped research history|Listing all research is unavailable/i,
+            ),
           }),
         ]);
         expect(fetch).not.toHaveBeenCalled();

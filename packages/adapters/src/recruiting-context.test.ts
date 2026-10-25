@@ -404,8 +404,9 @@ describe("recruiting run context", () => {
       );
       expect(text).toContain("never recast changed qualification as round-only scope");
       expect(text).toContain(
-        "G2 approval of the calibration profiles and rule changes is required before scale",
+        "The recruiter's acceptance of a calibration round is required before scale",
       );
+      expect(text).toContain("never a second confirmation or a separate ten-profile approval card");
       expect(text).toContain("These formal calibration/scale gates apply to native MCP too");
       expect(text).toContain(
         "ordinary continuation does not require saved-workspace research actions",

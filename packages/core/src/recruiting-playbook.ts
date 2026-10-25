@@ -333,6 +333,8 @@ export type RecruitingPlaybookStep = {
 };
 
 const CALIBRATION_TARGET = 10;
+const NEXT_STEP_CARD =
+  "展示完名单后，用一张问题卡（ask_user）主动给出下一步选择，例如「找 100 个类似的人」「先准备邮件活动」「再调一轮」。";
 
 /**
  * What the agent should do next for a role in `stage`. Null means the stage has no
@@ -370,21 +372,21 @@ export function nextPlaybookStep(
         label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
         prompt: remaining
           ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后直接列出名单。`
-          : "把这 10 位校准候选人记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单并收集本轮反馈；面板已提供反馈入口，不要重复创建问题卡。允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。",
+          : `把这 10 位校准候选人记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单；面板已提供逐人反馈入口，不要另建逐人评分卡。${NEXT_STEP_CARD}允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。`,
       };
     }
     case "feedback":
       return {
         stage,
         label: "收集校准反馈",
-        prompt:
-          "通过已记录的 Results 校准面板展示本轮 10 人名单并收集一次反馈，不要重复创建问题卡；允许针对个人、子集或整体方向反馈，不要求逐人评分。本轮反馈到了就把全部意见合进下一次快速搜索（同一 brief 加上反馈，排除这个岗位已返回过的所有人），save_search 保存后选 10 位全新的人记录为下一轮并说明变化。用户明确接受某一轮及规则修改之后才进入规模化搜寻，不能把已保存名单或普通反馈当作批准；没有新反馈时不要重复追问。",
+        prompt: `先看用户最新一条消息：如果是要找更多或类似的人、扩大搜索或直接开始（例如「找 100 个」「直接找」「不用再确认」，或在下一步卡片上选了找更多），这就是接受本轮：立刻用 recruiting_feedback（target round，operation approve，引用原话）记录，然后按规模化规则在本轮开始扩大搜索，不要再跑校准轮，也不要再要求确认。否则把本轮全部意见合进下一次快速搜索（同一 brief 加上反馈，换一种说法搜索，排除这个岗位已返回过的所有人），save_search 保存后选 10 位全新的人记录为下一轮并说明变化。${NEXT_STEP_CARD}只对个别人的评价不算接受；没有新反馈时不要重复追问。`,
       };
     case "scale":
       return {
         stage,
         label: "规模化搜寻",
-        prompt: "按确认后的标准启动规模化搜寻；开始前告知用户，完成后汇总数量与亮点。",
+        prompt:
+          "本轮已获接受，开始扩大搜索：同一步并行跑 3–4 个换说法的快速人才搜索并 save_search，让新的人马上出现在结果里；把剩下的目标人数（默认 100）交给搜寻同事做深度搜索，带上确认后的 brief、每轮反馈，并排除已返回的人；同时让外联同事起草这个岗位的邮件序列（只是草稿，不导入、不启动、不发送）。然后用两三句话说明已加入多少新人、深度搜索在继续并会陆续补进结果、邮件草稿在准备。",
       };
     case "enrichment":
       return {

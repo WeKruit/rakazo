@@ -5,6 +5,8 @@ import {
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_INTAKE_FLOW,
   RECRUITING_PDF_RENDERING,
+  RECRUITING_ROUND_NEXT_STEP,
+  RECRUITING_SCALE_START,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
 } from "./recruiting-defaults.js";
 
@@ -212,5 +214,26 @@ describe("maintained recruiting defaults", () => {
       "Never tell the recruiter about search quotas",
     ])
       expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);
+  });
+
+  it("offers the next step after every round and starts scale on the recruiter's request", () => {
+    expect(RECRUITING_ROUND_NEXT_STEP).toContain("找 100 个类似的人");
+    expect(RECRUITING_ROUND_NEXT_STEP).toContain("ask_user");
+    for (const part of [
+      "That request is the acceptance",
+      "never ask them to confirm the round again",
+      "Feedback about individual people alone is not acceptance",
+      "save_search, so new people appear in Results within a minute",
+      "everyone already returned excluded",
+      "a draft only: no campaign activation, import or send",
+    ])
+      expect(RECRUITING_SCALE_START).toContain(part);
+    for (const bot of RECRUITING_DEFAULT_BOTS) {
+      expect(bot.instructions).toContain(RECRUITING_SCALE_START);
+      expect(bot.instructions).toContain(RECRUITING_ROUND_NEXT_STEP);
+    }
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
+      "nobody already returned for this role is ever shown again",
+    );
   });
 });

@@ -104,7 +104,7 @@ export async function requireAutumnTaskOwnership(
     !args.task_id.trim()
   )
     throw new IsolationError(
-      "Use scoped research history or start new research in this conversation; account-wide Autumn access is unavailable.",
+      "Listing all research is unavailable. Continue this role's research with get_task or reply on the task id from this conversation's earlier research calls, or start new research in this conversation.",
     );
   const task = await prisma.recruitingResearchTask.findFirst({
     where: {

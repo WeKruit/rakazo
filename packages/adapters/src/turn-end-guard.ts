@@ -126,6 +126,20 @@ export async function guardRecruitingTurnEnd(
         select: { id: true },
       });
       if (effect) return { action: "ended", classification: "question" };
+      // One push per recruiter message: a second one only re-presents the same round.
+      const latest = await deps.prisma.message.findFirst({
+        where: {
+          threadId: run.threadId,
+          OR: [
+            { role: "user" },
+            { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
+          ],
+        },
+        orderBy: { seq: "desc" },
+        select: { clientNonce: true },
+      });
+      if (latest?.clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX))
+        return { action: "ended", classification: "question" };
     }
   }
   const classification = classifyTurnEnd(
