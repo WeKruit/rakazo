@@ -82,6 +82,19 @@ export async function listRunToolResults(
   });
 }
 
+/** Endpoints of the enabled MCP servers this actor has assigned to the bot. */
+export async function assignedMcpEndpoints(
+  prisma: Pick<PrismaClient, "botMcpServer">,
+  actor: Actor,
+  botId: string,
+): Promise<string[]> {
+  const rows = await prisma.botMcpServer.findMany({
+    where: { botId, spaceId: actor.spaceId, userId: actor.userId, server: { enabled: true } },
+    select: { server: { select: { endpoint: true } } },
+  });
+  return rows.flatMap((row) => (row.server.endpoint ? [row.server.endpoint] : []));
+}
+
 function view(row: {
   personKey: string;
   provider: string;

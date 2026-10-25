@@ -631,7 +631,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_profiles",
     description:
-      "Saved full profiles (dated work history, education, photo, company websites and logos) for candidates in the pool, owner-scoped and reused as a cache. operation list {candidateKeys (1-50)} says who already has one and when it was fetched; reuse it instead of paying for another lookup. To add one: fetch the person's full record by their LinkedIn URL with the connected profile-data connector, then call save {candidateKey} in the same run. The server reads that lookup's own retained result, matches it to this person by LinkedIn URL and stores it; never pass profile facts yourself. Internal record keeping: no approval, nothing is sent. Profile facts are attributed provider data, not an assessment.",
+      "Saved full profiles (dated work history, education, photo, company websites and logos) for candidates in the pool, owner-scoped and reused as a cache. operation list {candidateKeys (1-50)} says who already has one and when it was fetched; reuse it instead of paying for another lookup. When the result has next, follow it (no profile-data connection: call request_connection; never use a research task for this). To add one: fetch the person's full record by their LinkedIn URL with the connected profile-data connector, then call save {candidateKey} in the same run. The server reads that lookup's own retained result, matches it to this person by LinkedIn URL and stores it; never pass profile facts yourself. Internal record keeping: no approval, nothing is sent. Profile facts are attributed provider data, not an assessment.",
     inputSchema: z.toJSONSchema(RecruitingProfilesToolInputSchema, { io: "input" }),
   },
   {

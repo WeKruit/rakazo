@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
+  assignedMcpEndpoints: vi.fn(),
   listRecruitingSavedProfiles: vi.fn(),
   listRunToolResults: vi.fn(),
   saveRecruitingSavedProfile: vi.fn(),
@@ -189,5 +190,27 @@ describe("executeRecruitingProfilesTool", () => {
         { candidateKey: "linkedin:/in/new", saved: false },
       ],
     });
+  });
+  it("tells the agent to request the connection when none is assigned", async () => {
+    db.listRecruitingSavedProfiles.mockResolvedValue(new Map());
+    db.assignedMcpEndpoints.mockResolvedValue(["https://api.autumn.ai/mcp"]);
+    const missing = await executeRecruitingProfilesTool(
+      prisma,
+      actor,
+      "run1",
+      { operation: "list", candidateKeys: [KEY] },
+      "bot1",
+    );
+    expect(missing).toMatchObject({ next: expect.stringContaining("request_connection") });
+    db.assignedMcpEndpoints.mockResolvedValue([ENDPOINT]);
+    expect(
+      await executeRecruitingProfilesTool(
+        prisma,
+        actor,
+        "run1",
+        { operation: "list", candidateKeys: [KEY] },
+        "bot1",
+      ),
+    ).toEqual({ items: [{ candidateKey: KEY, saved: false }] });
   });
 });
