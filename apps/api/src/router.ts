@@ -194,6 +194,7 @@ import {
   deleteEmptySpaceForMember,
   deleteUnreferencedCredentialSecret,
   ensureBoard,
+  ensurePlatformPeopleSearch,
   ensureRecruitingWorkspace,
   findDefaultModelCredential,
   findDefaultVoiceCredential,
@@ -1229,6 +1230,10 @@ export function createRouter(deps: RouterDeps) {
         sandboxKind: deps.env.sandboxProvider,
         firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
       });
+      // Additive setup for older crews; a failure must not block sign-in.
+      await ensurePlatformPeopleSearch(deps.prisma, actor).catch((error: unknown) =>
+        getLogger().error("platform people search setup failed", error),
+      );
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
       void prewarmTeamComputer(deps, actor).catch(() => undefined);
       const [me, navigation, archivedBots, archivedGroups, groupThread] = await Promise.all([
