@@ -3129,6 +3129,28 @@ describe("native recruiting package approval", () => {
         "No calibration round of ten people is recorded for this role revision. Record the round first.",
     });
     expect(none.effects).toHaveLength(0);
+
+    // A quick people-search round has no research-task sources: point to round acceptance.
+    for (const [approvedAt, expected] of [
+      [null, "accepted without this card"],
+      [new Date("2026-10-25T00:00:00Z"), "already accepted the latest calibration round"],
+    ] as const) {
+      const quick = approvalFixture();
+      Object.assign(quick.prisma, {
+        recruitingRoleRevision: { findFirst: vi.fn(async () => ({ id: "role-revision" })) },
+        recruitingCalibrationRound: {
+          findFirst: vi.fn(async () => ({ approvedAt, candidateKeys: keys })),
+        },
+        recruitingCandidateOccurrence: { findFirst: vi.fn(async () => null) },
+      });
+      Object.assign(quick.prisma.externalEffect, {
+        findFirst: vi.fn(async () => ({ id: "g1-approved" })),
+      });
+      quick.setCalls([{ args: request, executionId: `native-g2-quick-${String(approvedAt)}` }]);
+      await quick.run();
+      expect((quick.results.at(-1) as { error: string }).error).toContain(expected);
+      expect(quick.effects).toHaveLength(0);
+    }
   });
   it("replays an exact stored assessment approval while refusing to create another legacy request", async () => {
     const f = approvalFixture();
