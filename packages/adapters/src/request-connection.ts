@@ -33,12 +33,6 @@ const CONNECTOR_CATALOG = [
     aliases: [],
   },
   { slug: "autumn", name: "Autumn", endpoint: "https://api.autumn.ai/mcp", aliases: [] },
-  {
-    slug: "coresignal",
-    name: "Coresignal",
-    endpoint: "https://mcp.coresignal.com/mcp/v2",
-    aliases: ["profile data"],
-  },
 ];
 
 const key = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "");
