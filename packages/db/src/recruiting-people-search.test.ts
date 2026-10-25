@@ -9,26 +9,32 @@ const actor: Actor = {
   email: "a@example.test",
   isDeploymentOwner: false,
 };
+const ENDPOINT = "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
 
-function fixture(options: { existing?: boolean; leads?: string[] } = {}) {
-  const servers: Array<{ id: string; slug: string }> = options.existing
-    ? [{ id: "own", slug: "people-search" }]
-    : [];
+type Server = { id: string; endpoint: string; secretId: string | null; enabled: boolean };
+
+function fixture(options: { server?: Server; missing?: string[] } = {}) {
+  let server = options.server ?? null;
+  let missing = options.missing ?? [];
   const tx = {
     $queryRaw: vi.fn(async () => []),
     spaceMember: {
       findUnique: vi.fn(async () => ({ organizationId: "org", space: { deletingAt: null } })),
     },
     mcpServer: {
-      count: vi.fn(async () => servers.length),
-      create: vi.fn(async ({ data }: { data: { slug: string } }) => {
-        const row = { id: "search", ...data };
-        servers.push(row);
-        return row;
+      findFirst: vi.fn(async () => server),
+      create: vi.fn(async ({ data }: { data: { endpoint: string } }) => {
+        server = { id: "search", endpoint: data.endpoint, secretId: null, enabled: true };
+        return server;
       }),
     },
-    bot: { findMany: vi.fn(async () => (options.leads ?? []).map((id) => ({ id }))) },
-    botMcpServer: { createMany: vi.fn(async () => ({ count: 1 })) },
+    bot: { findMany: vi.fn(async () => missing.map((id) => ({ id }))) },
+    botMcpServer: {
+      createMany: vi.fn(async () => {
+        missing = [];
+        return { count: 1 };
+      }),
+    },
   };
   const prisma = {
     ...tx,
@@ -38,38 +44,52 @@ function fixture(options: { existing?: boolean; leads?: string[] } = {}) {
 }
 
 describe("ensurePlatformPeopleSearch", () => {
-  it("adds the search once to a crew lead that predates it", async () => {
-    const f = fixture({ leads: ["main-bot"] });
+  it("creates the search and links the lead and sourcer that predate it", async () => {
+    const f = fixture({ missing: ["main-bot", "sourcer-bot"] });
     await ensurePlatformPeopleSearch(f.prisma, actor);
     expect(f.tx.mcpServer.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        slug: "people-search",
-        endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
-        spaceId: actor.spaceId,
-        userId: actor.userId,
-      }),
+      data: expect.objectContaining({ slug: "people-search", endpoint: ENDPOINT }),
     });
     expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
-      data: [
+      data: ["main-bot", "sourcer-bot"].map((botId) =>
         expect.objectContaining({
-          botId: "main-bot",
+          botId,
           serverId: "search",
           allowAllTools: false,
           allowedTools: ["web_search_exa", "web_search_advanced_exa"],
         }),
-      ],
+      ),
       skipDuplicates: true,
     });
-    f.tx.mcpServer.create.mockClear();
+    f.tx.botMcpServer.createMany.mockClear();
     await ensurePlatformPeopleSearch(f.prisma, actor);
-    expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
+    expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
   });
 
-  it("leaves an existing connection and non-recruiting spaces alone", async () => {
-    const existing = fixture({ existing: true, leads: ["main-bot"] });
-    await ensurePlatformPeopleSearch(existing.prisma, actor);
-    expect(existing.tx.mcpServer.create).not.toHaveBeenCalled();
-    const none = fixture({ leads: [] });
+  it("adds a missing sourcer link to an existing platform search", async () => {
+    const f = fixture({
+      server: { id: "search", endpoint: ENDPOINT, secretId: null, enabled: true },
+      missing: ["sourcer-bot"],
+    });
+    await ensurePlatformPeopleSearch(f.prisma, actor);
+    expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ botId: "sourcer-bot", serverId: "search" })],
+      skipDuplicates: true,
+    });
+  });
+
+  it("leaves customized or disabled connections and non-recruiting spaces alone", async () => {
+    for (const server of [
+      { id: "own", endpoint: "https://search.example.test/mcp", secretId: null, enabled: true },
+      { id: "own", endpoint: ENDPOINT, secretId: "secret", enabled: true },
+      { id: "own", endpoint: ENDPOINT, secretId: null, enabled: false },
+    ]) {
+      const f = fixture({ server, missing: ["main-bot"] });
+      await ensurePlatformPeopleSearch(f.prisma, actor);
+      expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+    }
+    const none = fixture();
     await ensurePlatformPeopleSearch(none.prisma, actor);
     expect(none.tx.mcpServer.create).not.toHaveBeenCalled();
     expect(none.tx.botMcpServer.createMany).not.toHaveBeenCalled();
