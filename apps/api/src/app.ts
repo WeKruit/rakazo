@@ -600,8 +600,11 @@ export async function createApp(
   });
   const rpc = new RPCHandler(router, {
     clientInterceptors: [
-      async ({ path, next }) => {
+      async ({ path, input, next }) => {
         enrichLogContext({ "rpc.procedure": path.join(".") });
+        // The role a recruiting read was asked about, so a not-found answer can be traced.
+        const roleId = (input as { roleId?: unknown } | undefined)?.roleId;
+        if (typeof roleId === "string") enrichLogContext({ "recruiting.role_id": roleId });
         const started = performance.now();
         try {
           return await next();

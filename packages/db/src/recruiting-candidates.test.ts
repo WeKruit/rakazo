@@ -7098,3 +7098,41 @@ describe("recruiter CSV page provenance on read", () => {
     ).rejects.toThrow(IsolationError);
   });
 });
+
+describe("people-search page provenance on read", () => {
+  async function searchedSourceFixture() {
+    const f = await nativeSourceFixture();
+    Object.assign(f.read, {
+      request: { operation: "save_search", expectedRoleRevision: 1 },
+      result: {
+        status: "saved",
+        roleId: "role",
+        roleRevisionId: "revision",
+        outputArtifact: { artifactId: f.artifact.id, sha256: f.artifact.hash },
+      },
+    });
+    Object.assign(f.artifact, { clientNonce: `recruiting-people-search:${f.read.id}` });
+    f.tx.event.findMany.mockResolvedValue([] as never);
+    return f;
+  }
+  it("lists a searched row as a source with no provider task", async () => {
+    const f = await searchedSourceFixture();
+    const sources = await recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+      roleId: "role",
+      candidateKey: f.occurrence.candidateKey,
+    });
+    expect(sources.items[0]).toMatchObject({ providerTaskId: null, effectId: f.read.id });
+  });
+  it.each(["nonce", "role"])("rejects a searched page with a forged %s", async (b) => {
+    const f = await searchedSourceFixture();
+    if (b === "nonce")
+      Object.assign(f.artifact, { clientNonce: `recruiting-csv-import:${f.read.id}` });
+    if (b === "role") Object.assign(f.read.result as object, { roleId: "other-role" });
+    await expect(
+      recruiting.listRecruitingCandidateSources(f.prisma, actor, {
+        roleId: "role",
+        candidateKey: f.occurrence.candidateKey,
+      }),
+    ).rejects.toThrow(IsolationError);
+  });
+});
