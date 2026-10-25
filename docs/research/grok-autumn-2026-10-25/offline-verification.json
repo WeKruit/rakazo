@@ -1,0 +1,91 @@
+{
+  "attribution": "Source owner's offline verification, read in the complete Library report; not re-executed by this checkout.",
+  "checkedAtUtc": "2026-10-25T17:14:04.838124+00:00",
+  "operation": "offline mechanical verification of existing local artifacts only",
+  "providerCalls": 0,
+  "sourceFilesRead": 17,
+  "all200PageHashesMatchManifest": true,
+  "rowCount": 200,
+  "nonemptyDistinctLinkedInIdentities": 200,
+  "old100Rows": 100,
+  "old100IdentityRetention": 100,
+  "netNewIdentities": 100,
+  "tierCounts": {
+    "Promising": 51,
+    "Strong": 20,
+    "Partial": 103,
+    "Uncertain": 26
+  },
+  "fiveStructuredRuleValuesAllMatchCount": 20,
+  "fiveAllMatchExactlyStrong": true,
+  "all200ScoresNull": true,
+  "updatedRanksUniqueAndComplete1To200": true,
+  "cursorChain": [
+    {
+      "request": null,
+      "next": "20"
+    },
+    {
+      "request": "20",
+      "next": "40"
+    },
+    {
+      "request": "40",
+      "next": "60"
+    },
+    {
+      "request": "60",
+      "next": "80"
+    },
+    {
+      "request": "80",
+      "next": "100"
+    },
+    {
+      "request": "100",
+      "next": "120"
+    },
+    {
+      "request": "120",
+      "next": "140"
+    },
+    {
+      "request": "140",
+      "next": "160"
+    },
+    {
+      "request": "160",
+      "next": "180"
+    },
+    {
+      "request": "180",
+      "next": null
+    }
+  ],
+  "topViewRows": 20,
+  "top20ExactlyProviderUpdatedRanks1To20": true,
+  "topViewFieldValuesEqualOriginal200Rows": {
+    "name": true,
+    "linkedin_url": true,
+    "updated_rank": true,
+    "match_tier": true,
+    "match_score": true,
+    "resume_url": true
+  },
+  "top10FlagsCorrect": true,
+  "compactViewMissingColumns": {
+    "current_title": 20,
+    "current_company": 20,
+    "location": 20
+  },
+  "v77RenderedRows": 20,
+  "v77RenderedIdentityRankAndTop10EqualOriginalProvider200": true,
+  "v77RenderedObservedAt": "2026-10-18T12:18:16.457Z",
+  "limits": [
+    "Counts compare provider-supplied structured values; no independent validation of factual claims, source quotes, eligibility or source-read completeness.",
+    "No fair Grok-vs-Rakazo comparison: Grok wire-level Dyna request/results pair not present in the inspected archive.",
+    "v77 is a historical display capture; no claim about current production."
+  ],
+  "originalFailedRunReturnedRows": 200,
+  "recovered200AllRawCellsAndOrderEqualOriginalFailedRunReturn": true
+}
