@@ -113,7 +113,7 @@ it("bounds records, declares unsupported evidence, propagates aborts and restore
   expect(second).toEqual([]);
 });
 
-it("observes actual Pi post-selection JSON controls through twelve dependent compressed results", async () => {
+it("observes actual Pi post-selection JSON controls through twelve dependent bounded results", async () => {
   const services = new EvalServices();
   services.enableDiagnosticChain();
   const server = await startModelEmulator({
@@ -193,8 +193,9 @@ it("observes actual Pi post-selection JSON controls through twelve dependent com
       expect(
         record.results?.every((r) => r.jsonValid && r.controlsValidated && r.nextCursorPresent),
       ).toBe(true);
-      expect(record.results?.at(-1)?.bytes).toBeLessThanOrEqual(12000);
-      expect(record.results?.slice(0, -1).every((r) => r.bytes <= 1024)).toBe(true);
+      // Each result keeps the 12,000-character tool-result bound; a large window keeps
+      // earlier results intact instead of compressing them further.
+      expect(record.results?.every((r) => r.bytes <= 12000)).toBe(true);
     }
     expect(records.at(-1)?.results?.at(-1)?.nextCursor).toBeNull();
     expect(JSON.stringify(records)).not.toMatch(/private|Synthetic detailed|ledger-indexer/);

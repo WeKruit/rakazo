@@ -27,12 +27,16 @@ describe.skipIf(!enabled)("product history diagnostic loop", () => {
       outgoingBytes: number;
       toolResults: number;
     }> = [];
+    // A clipped result keeps its JSON and appends where the complete output is saved.
+    const resultJson = (content: unknown) =>
+      JSON.parse(String(content).replace(/\n\[Output clipped\. [^\n]*\]$/, ""));
+    const firstSeen = new Map<number, string>();
     const latest = (request: ModelEmulatorRequest) => {
       expect(JSON.stringify(request.messages)).toContain("Do not deploy.");
       const tools = request.messages.filter((row) => row.role === "tool");
       const parsed = tools.map(
         (row) =>
-          JSON.parse(String(row.content)) as {
+          resultJson(row.content) as {
             segment: number;
             nextCursor: string | null;
             diagnostic: string;
@@ -49,12 +53,14 @@ describe.skipIf(!enabled)("product history diagnostic loop", () => {
         expect(JSON.parse(call!.function.arguments).cursor).toBe(
           index === 0 ? "start" : parsed[index - 1]!.nextCursor,
         );
+        // Without budget pressure, earlier results replay exactly as first returned.
         if (index < tools.length - 1)
-          expect(Buffer.byteLength(String(row.content))).toBeLessThanOrEqual(1024);
+          expect(String(row.content)).toBe(firstSeen.get(parsed[index]!.segment));
       }
       const message = tools.at(-1);
       const content = String(message?.content);
-      const result = JSON.parse(content) as {
+      firstSeen.set(parsed.at(-1)!.segment, content);
+      const result = resultJson(content) as {
         segment: number;
         nextCursor: string | null;
         diagnostic: string;

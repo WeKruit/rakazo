@@ -34,9 +34,11 @@ import {
   shortFact,
   sourceLabel,
   storedProfileFields,
+  withSavedProfile,
 } from "./profile";
 import { organizationLogo, profileAssets, profileContentFields } from "./profileAssets";
 import { RetryNotice } from "./RetryNotice";
+import { usePersonSequenceFacts } from "./SequenceStats";
 import { SkillEvidence } from "./SkillEvidence";
 import { statusText } from "./shared";
 import { reminderCandidateKeys, TasksTab } from "./TasksTab";
@@ -60,6 +62,34 @@ export function PersonAvatar({
         size === "sm" ? "size-8 text-[11px]" : "size-14 text-base"
       }`}
     />
+  );
+}
+
+/** Stored outreach state plus the saved sequence numbers; nothing when neither exists. */
+function OutreachSection({
+  id,
+  role,
+  candidateId,
+  stage,
+}: {
+  id: string;
+  role: Parameters<typeof usePersonSequenceFacts>[0];
+  candidateId: string | null;
+  stage: { label: string; value: string }[];
+}) {
+  const facts = [...stage, ...usePersonSequenceFacts(role, candidateId)];
+  if (!facts.length) return null;
+  return (
+    <Section id={id} title={<Trans>Outreach</Trans>}>
+      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2">
+        {facts.map(({ label, value }) => (
+          <div key={label} className="contents">
+            <dt className="text-muted-foreground">{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </Section>
   );
 }
 
@@ -237,10 +267,10 @@ export function RecruitingDetailPanel({
   ];
   const view = views.some((option) => option.view === current.view) ? current.view : "contact";
   const candidate = current.candidate;
-  const fields = [
+  const fields = withSavedProfile(candidate?.savedProfile, [
     ...(candidate?.latestSource?.report?.fields ?? []),
     ...storedProfileFields(person.profile),
-  ];
+  ]);
   const company = person.company ?? candidate?.company;
   const assets = profileAssets(fields, company);
   const sections = candidateSections(profileContentFields(fields), {
@@ -620,18 +650,12 @@ export function RecruitingDetailPanel({
                   <FieldList fields={sections.findings} keywords={sections.skills} />
                 </Section>
               ) : null}
-              {stage.length ? (
-                <Section id={anchorId("outreach")} title={<Trans>Outreach</Trans>}>
-                  <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2">
-                    {stage.map(({ label, value }) => (
-                      <div key={label} className="contents">
-                        <dt className="text-muted-foreground">{label}</dt>
-                        <dd>{statusText(value)}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                </Section>
-              ) : null}
+              <OutreachSection
+                id={anchorId("outreach")}
+                role={current.role}
+                candidateId={crm ? person.candidateId : null}
+                stage={stage.map(({ label, value }) => ({ label, value: statusText(value) }))}
+              />
             </div>
           ) : (
             <>

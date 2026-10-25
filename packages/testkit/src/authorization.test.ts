@@ -989,9 +989,9 @@ describeWithDatabase("API authorization and resource isolation", () => {
         support.id,
       ),
     ).resolves.toMatchObject({ status: 409 });
-    expect(await rpc(app, cookie, "memory/list", { botId: originalBot.id }, support.id)).toEqual(
-      [],
-    );
+    await expect(
+      raw(app, cookie, "memory/list", { botId: originalBot.id }, support.id),
+    ).resolves.toMatchObject({ status: 404 });
     await expect(
       raw(app, cookie, "artifacts/getById", { artifactId: originalArtifact.id }, support.id),
     ).resolves.toMatchObject({ status: 500 });

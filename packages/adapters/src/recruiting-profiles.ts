@@ -1,0 +1,235 @@
+import type {
+  Actor,
+  RecruitingProfileEducation,
+  RecruitingProfileExperience,
+  RecruitingProfilesToolInput,
+  RecruitingSavedProfile,
+} from "@rakazo/contracts";
+import { recruitingCalibrationIdentity } from "@rakazo/core";
+import type { PrismaClient } from "@rakazo/db";
+import {
+  assignedMcpEndpoints,
+  listRecruitingSavedProfiles,
+  listRunToolResults,
+  saveRecruitingSavedProfile,
+} from "@rakazo/db";
+
+type Facts = Omit<RecruitingSavedProfile, "personKey" | "provider" | "fetchedAt">;
+type Record_ = Record<string, unknown>;
+
+export class RecruitingProfileError extends Error {}
+
+const isRecord = (value: unknown): value is Record_ =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Profile-data connectors whose person records this adapter understands, by MCP host. */
+const PROVIDERS: Record<
+  string,
+  { name: string; connect: string; normalize: (record: Record_) => Facts | null }
+> = {
+  "mcp.coresignal.com": { name: "coresignal", connect: "coresignal", normalize: coresignalProfile },
+};
+
+function providerFor(endpoint: string) {
+  try {
+    return PROVIDERS[new URL(endpoint).hostname.toLowerCase()] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function text(value: unknown, max = 4000): string | null {
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, max) : null;
+}
+
+/** A supplied web link as an https/http URL without credentials; a bare domain gets https. */
+function link(value: unknown): string | null {
+  const raw = text(value);
+  if (!raw || /\s/.test(raw)) return null;
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The pool's key for a LinkedIn profile link, accepting country hosts and a missing scheme. */
+export function linkedinPersonKey(value: unknown): string | null {
+  const href = link(value);
+  if (!href) return null;
+  const url = new URL(href);
+  if (!/(^|\.)linkedin\.com$/i.test(url.hostname)) return null;
+  const identity = recruitingCalibrationIdentity(
+    `https://www.linkedin.com${url.pathname.replace(/\/+$/, "")}`,
+  );
+  return identity ? `linkedin:${identity}` : null;
+}
+
+function first(record: Record_, keys: readonly string[]) {
+  for (const key of keys) {
+    const value = text(record[key]);
+    if (value) return value;
+  }
+  return null;
+}
+
+/** "YYYY-MM" from year/month parts, or the provider's own date text. */
+function date(record: Record_, prefix: "date_from" | "date_to") {
+  const year = Number(record[`${prefix}_year`]);
+  const month = Number(record[`${prefix}_month`]);
+  if (Number.isInteger(year) && year > 1900) {
+    return Number.isInteger(month) && month >= 1 && month <= 12
+      ? `${year}-${String(month).padStart(2, "0")}`
+      : String(year);
+  }
+  return text(record[prefix], 40);
+}
+
+function coresignalProfile(record: Record_): Facts | null {
+  const jobs = Array.isArray(record.experience) ? record.experience.filter(isRecord) : [];
+  const schools = Array.isArray(record.education) ? record.education.filter(isRecord) : [];
+  const experience = jobs.slice(0, 80).map((job): RecruitingProfileExperience => {
+    const end = date(job, "date_to");
+    const active = job.active_experience;
+    return {
+      title: first(job, ["position_title", "title"]),
+      company_name: first(job, ["company_name"]),
+      company_url: link(job.company_website),
+      company_linkedin_url: link(job.company_linkedin_url ?? job.company_url),
+      company_logo_url: link(job.company_logo_url),
+      company_industry: first(job, ["company_industry"]),
+      company_size: first(job, ["company_size_range", "company_employees_count"]),
+      location: first(job, ["location", "company_location"]),
+      start_date: date(job, "date_from"),
+      end_date: end,
+      is_current: active === true || active === 1 ? true : end ? false : null,
+      description: first(job, ["description"]),
+    };
+  });
+  const education = schools.slice(0, 40).map(
+    (school): RecruitingProfileEducation => ({
+      school_name: first(school, ["institution_name", "title"]),
+      degree: first(school, ["degree"]),
+      field_of_study: first(school, ["field_of_study", "major"]),
+      school_url: link(school.institution_website),
+      school_logo_url: link(school.institution_logo_url),
+      start_date: date(school, "date_from"),
+      end_date: date(school, "date_to"),
+    }),
+  );
+  const profileImageUrl = link(record.picture_url ?? record.profile_picture_url);
+  const headline = first(record, ["headline", "generated_headline"]);
+  if (!experience.length && !education.length && !profileImageUrl && !headline) return null;
+  return {
+    headline,
+    profileImageUrl,
+    experience: experience.filter((job) => job.title || job.company_name),
+    education: education.filter((school) => school.school_name || school.degree),
+  };
+}
+
+/** Person-shaped objects in an MCP result: structured content, JSON text blocks or nested data. */
+function records(value: unknown, depth = 0, found: Record_[] = []): Record_[] {
+  if (depth > 6 || found.length > 200) return found;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        records(JSON.parse(trimmed), depth + 1, found);
+      } catch {
+        // Not JSON; ignore.
+      }
+    }
+    return found;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) records(item, depth + 1, found);
+    return found;
+  }
+  if (!isRecord(value)) return found;
+  if (Array.isArray(value.experience) || "picture_url" in value) found.push(value);
+  for (const nested of Object.values(value)) records(nested, depth + 1, found);
+  return found;
+}
+
+const PROFILE_LINK_KEYS = ["linkedin_url", "professional_network_url", "linkedin_profile_url"];
+
+/** The one profile in a connector result that belongs to this person, or null. */
+export function profileFromLookup(
+  result: unknown,
+  endpoint: string,
+  personKey: string,
+): { provider: string; facts: Facts } | null {
+  const provider = providerFor(endpoint);
+  if (!provider) return null;
+  for (const record of records(result)) {
+    if (!PROFILE_LINK_KEYS.some((key) => linkedinPersonKey(record[key]) === personKey)) continue;
+    const facts = provider.normalize(record);
+    if (facts) return { provider: provider.name, facts };
+  }
+  return null;
+}
+
+function summary(profile: RecruitingSavedProfile) {
+  return {
+    candidateKey: profile.personKey,
+    fetchedAt: profile.fetchedAt,
+    positions: profile.experience.length,
+    datedPositions: profile.experience.filter((job) => job.start_date).length,
+    degrees: profile.education.length,
+    photo: profile.profileImageUrl !== null,
+  };
+}
+
+/** Saved profiles are the lookup cache; save stores only a lookup this run already made. */
+export async function executeRecruitingProfilesTool(
+  prisma: PrismaClient,
+  actor: Actor,
+  runId: string,
+  input: RecruitingProfilesToolInput,
+  botId?: string,
+) {
+  if (input.operation === "list") {
+    const saved = await listRecruitingSavedProfiles(prisma, actor, input.candidateKeys);
+    const items = input.candidateKeys.map((candidateKey) => {
+      const profile = saved.get(candidateKey);
+      return profile ? { ...summary(profile), saved: true } : { candidateKey, saved: false };
+    });
+    const missing = items.some((item) => !item.saved);
+    const connected =
+      !missing ||
+      !botId ||
+      (await assignedMcpEndpoints(prisma, actor, botId)).some((endpoint) => providerFor(endpoint));
+    return connected
+      ? { items }
+      : {
+          items,
+          next: `No profile-data connection is assigned to you. Call request_connection with provider "${Object.values(PROVIDERS)[0]!.connect}" now and wait for the user to connect it; do not ask the research agent for full profiles instead.`,
+        };
+  }
+  if (!input.candidateKey.startsWith("linkedin:"))
+    throw new RecruitingProfileError(
+      "This person has no LinkedIn profile on record, so there is nothing to look up.",
+    );
+  for (const call of await listRunToolResults(prisma, actor, runId)) {
+    const found = profileFromLookup(call.result, call.endpoint, input.candidateKey);
+    if (!found) continue;
+    const profile = await saveRecruitingSavedProfile(prisma, actor, runId, {
+      personKey: input.candidateKey,
+      provider: found.provider,
+      sourceEffectId: call.effectId,
+      fetchedAt: call.createdAt,
+      profile: found.facts,
+    });
+    return { saved: true, ...summary(profile) };
+  }
+  throw new RecruitingProfileError(
+    "No profile lookup for this person in this run. Fetch the person's full record by their LinkedIn URL with the connected profile-data connector first, then save.",
+  );
+}

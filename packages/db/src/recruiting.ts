@@ -139,6 +139,7 @@ import {
   loadRunHumanSources,
   validateRunHumanSourceRows,
 } from "./messages.js";
+import { listRecruitingSavedProfiles } from "./recruiting-saved-profiles.js";
 import { IsolationError, scoped } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
@@ -1642,7 +1643,13 @@ async function archiveRoleInTransaction(
 export async function setRecruitingRoleArchived(
   prisma: PrismaClient,
   actor: Actor,
-  untrusted: Omit<RoleArchiveInput, "intent"> & { intent?: RoleArchiveInput["intent"] },
+  untrusted: (RoleArchiveInput extends infer T
+    ? T extends unknown
+      ? Omit<T, "intent">
+      : never
+    : never) & {
+    intent?: RoleArchiveInput["intent"];
+  },
 ): Promise<RoleSnapshot> {
   const input = RecruitingRoleToolInputSchema.parse({
     intent: { basis: "direct", quote: "archive" },
@@ -10701,6 +10708,11 @@ export async function listRecruitingCandidates(
         );
         for (const [key, link] of latest) syncs.set(key, projected.get(link.effectId)!);
       }
+      const savedProfiles = await listRecruitingSavedProfiles(
+        tx,
+        actor,
+        selected.map((row) => row.candidateKey),
+      );
       return ListRecruitingCandidatesOutput.parse({
         sortAvailability: { rank: rankAvailable, tier: tierAvailable, score: scoreAvailable },
         crmTarget: attached
@@ -10739,6 +10751,7 @@ export async function listRecruitingCandidates(
                 score: numeric(_score),
               },
               crm: syncs.get(profile.candidateKey) ?? null,
+              savedProfile: savedProfiles.get(profile.candidateKey) ?? null,
               decision: decision?.operation ?? null,
               decisionReason: decision?.source.quote ?? null,
               decisionAt: decision?.source.createdAt ?? null,

@@ -1174,13 +1174,18 @@ it("re-reads the CRM workbench once for a burst of reconnects that missed no eve
         },
   );
   await renderFeedbackShell("group", undefined, { isDeploymentOwner: false, openFeedback: false });
-  const initialReads = shellApi.recruiting.crmData.mock.calls.length;
+  // Role-list reads; the optional saved-sequence read follows each of them.
+  const roleListReads = () =>
+    shellApi.recruiting.crmData.mock.calls.filter(
+      ([input]) => input.operation !== "unassignedSequences",
+    ).length;
+  const initialReads = roleListReads();
   for (let reconnect = 0; reconnect < 20; reconnect++)
     await act(async () => {
       await stream.refresh();
     });
   // The first reconnect may retry once; the other 19 missed nothing and stay quiet.
-  expect(shellApi.recruiting.crmData.mock.calls.length - initialReads).toBeLessThanOrEqual(2);
+  expect(roleListReads() - initialReads).toBeLessThanOrEqual(2);
 });
 
 it("re-reads the role list and inbox once when the stream recovers from an outage", async () => {
@@ -3699,6 +3704,7 @@ it("retries an exact natural role request in its confirmed native group with the
     name: "role.pdf",
     mimeType: "application/pdf",
     contentBase64: expect.any(String),
+    clientNonce: expect.any(String),
   });
   expect(shellApi.followUp).toHaveBeenCalledTimes(2);
   expect(shellApi.followUp.mock.calls[1]).toEqual(shellApi.followUp.mock.calls[0]);
@@ -3706,6 +3712,93 @@ it("retries an exact natural role request in its confirmed native group with the
   expect(shellApi.send).not.toHaveBeenCalled();
   expect(container?.querySelector('textarea[aria-label="Job description"]')).toBeNull();
   expect(container?.querySelector(".hire-brief-role")?.textContent).toBe(fresh.name);
+});
+
+it("uploads New Role files concurrently and retries only a failed file with its stable nonce", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  const fresh = {
+    ...view.group,
+    id: "parallel-role-group",
+    threadId: "parallel-role-thread",
+    name: "New role",
+  };
+  shellApi.createGroup.mockImplementation(async () => {
+    view.navigation.current.groups.unshift(fresh);
+    return fresh;
+  });
+  shellApi.get.mockImplementation(async ({ groupId }) =>
+    groupId === fresh.id
+      ? {
+          ...view.thread,
+          groupId: fresh.id,
+          groupName: fresh.name,
+          threadId: fresh.threadId,
+          messages: [],
+          run: null,
+        }
+      : view.thread,
+  );
+  await view.click("New Role");
+  type(
+    container!.querySelector<HTMLTextAreaElement>('textarea[aria-label="Job description"]')!,
+    "Test parallel JD uploads.",
+  );
+  const first = new File(["first JD"], "first.pdf", { type: "application/pdf" });
+  const second = new File(["second JD"], "second.pdf", { type: "application/pdf" });
+  const upload = container!.querySelector<HTMLInputElement>(
+    'input[aria-label="Attach role files"]',
+  )!;
+  Object.defineProperty(upload, "files", { configurable: true, value: [first, second] });
+  await act(async () => upload.dispatchEvent(new Event("change", { bubbles: true })));
+
+  let failFirst!: (error: Error) => void;
+  let finishSecond!: (value: { id: string }) => void;
+  shellApi.createArtifact.mockImplementation(({ name }: { name: string }) => {
+    if (name === "first.pdf")
+      return new Promise((_resolve, reject) => {
+        failFirst = reject;
+      });
+    return new Promise((resolve) => {
+      finishSecond = resolve;
+    });
+  });
+  void view.click("Continue");
+  await vi.waitFor(() => expect(shellApi.createArtifact).toHaveBeenCalledTimes(2));
+  const firstNonce = shellApi.createArtifact.mock.calls[0]![0].clientNonce;
+  const secondNonce = shellApi.createArtifact.mock.calls[1]![0].clientNonce;
+  expect(firstNonce).toEqual(expect.any(String));
+  expect(secondNonce).toEqual(expect.any(String));
+  expect(firstNonce).not.toBe(secondNonce);
+  await act(async () => {
+    finishSecond({ id: "second-artifact" });
+    failFirst(new Error("first upload failed"));
+  });
+  await vi.waitFor(() =>
+    expect(container?.querySelector('[role="alert"]')?.textContent).toBe("first upload failed"),
+  );
+  expect(shellApi.followUp).not.toHaveBeenCalled();
+
+  shellApi.createArtifact.mockImplementation(async ({ name }: { name: string }) => ({
+    id: `${name}-artifact`,
+  }));
+  shellApi.followUp.mockResolvedValue(undefined);
+  await view.click("Continue");
+
+  expect(shellApi.createGroup).toHaveBeenCalledOnce();
+  expect(shellApi.createArtifact).toHaveBeenCalledTimes(3);
+  expect(shellApi.createArtifact.mock.calls[2]![0]).toEqual(
+    expect.objectContaining({ name: "first.pdf", clientNonce: firstNonce }),
+  );
+  expect(shellApi.followUp).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      groupId: fresh.id,
+      artifactIds: ["first.pdf-artifact", "second-artifact"],
+    }),
+  );
 });
 
 it.each([false, true])(

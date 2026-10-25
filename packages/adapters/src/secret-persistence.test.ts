@@ -29,6 +29,8 @@ type Row = {
   endpoint?: string;
   secretId?: string | null;
   revision?: number;
+  enabled?: boolean;
+  transport?: string;
   organizationId?: string;
 };
 type Args = { where?: Record<string, unknown>; data?: Row; create?: Row; update?: Row };
@@ -352,6 +354,8 @@ describe("MCP OAuth prepared persistence", () => {
         endpoint: "https://mcp.example.test/mcp",
         secretId: initial.id,
         revision: 1,
+        enabled: true,
+        transport: "streamable_http",
         spaceId: "space",
         userId: "user",
       });
@@ -376,9 +380,10 @@ describe("MCP OAuth prepared persistence", () => {
       const connect = vi
         .spyOn(McpSession.prototype, "connectRemote")
         .mockImplementation(async function (this: McpSession, options) {
-          held.set(this, options.authProvider!);
+          const authProvider = options.authProvider as OAuthClientProvider;
+          held.set(this, authProvider);
           if (refreshOnConnect)
-            await options.authProvider!.saveTokens({
+            await authProvider.saveTokens({
               access_token: "connect-refreshed",
               token_type: "bearer",
             });
@@ -408,13 +413,15 @@ describe("MCP OAuth prepared persistence", () => {
         refreshOnConnect = true;
         const tools = await owner.discoverTools(actor);
         expect(tools).toHaveLength(1);
-        expect(closed.has(otherSession)).toBe(true);
+        // The idle foreign session is closed and replaced when it is next used.
+        expect(closed.has(otherSession)).toBe(false);
         const ownerSession = [...held.keys()][1]!;
         expect(closed.has(ownerSession)).toBe(false);
         refreshOnConnect = false;
         expect(await owner.discoverTools(actor)).toHaveLength(1);
         expect(connect).toHaveBeenCalledTimes(2);
         expect(await other.discoverTools(actor)).toHaveLength(1);
+        expect(closed.has(otherSession)).toBe(true);
         const secondOther = [...held.keys()][2]!;
         const events = [];
         for await (const event of owner.execute(
@@ -424,10 +431,14 @@ describe("MCP OAuth prepared persistence", () => {
           events.push(event);
         expect(events.find((event) => event.type === "error")).toBeUndefined();
         expect(events).toMatchObject([{ type: "result" }]);
-        expect(closed.has(secondOther)).toBe(true);
+        expect(closed.has(secondOther)).toBe(false);
         expect(closed.has(ownerSession)).toBe(false);
         expect(await owner.discoverTools(actor)).toHaveLength(1);
         expect(connect).toHaveBeenCalledTimes(3);
+        expect(await other.discoverTools(actor)).toHaveLength(1);
+        expect(closed.has(secondOther)).toBe(true);
+        expect(closed.has(ownerSession)).toBe(false);
+        expect(connect).toHaveBeenCalledTimes(4);
       } finally {
         await owner.close();
         await other.close();

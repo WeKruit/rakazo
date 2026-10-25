@@ -7659,7 +7659,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       sort: "score",
     });
     expect(page.sortAvailability.score).toBe(true);
-    expect(page.items.map((item) => [item.candidateKey, item.match.score])).toEqual([
+    expect(page.items.map((item) => [item.candidateKey, item.match?.score])).toEqual([
       ["linkedin:/in/cell-c", 82],
       ["linkedin:/in/cell-a", 62],
       ["linkedin:/in/cell-b", 45],
@@ -7688,7 +7688,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       roleId: f.role.role.id,
       sort: "score",
     });
-    expect(page.items.map((item) => [item.candidateKey, item.match.score])).toEqual([
+    expect(page.items.map((item) => [item.candidateKey, item.match?.score])).toEqual([
       ["linkedin:/in/ten-a", 85],
       ["linkedin:/in/ten-c", 70],
       ["linkedin:/in/ten-b", 60],
@@ -7787,7 +7787,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ["f", "b", "c", "a", "d", "h", "e", "g", "i", "j"].map(key),
     );
     // Shown on 0–100: 72.5 rounds, a negative score clamps to 0.
-    expect(saved.items.map((item) => item.match.score)).toEqual([
+    expect(saved.items.map((item) => item.match?.score)).toEqual([
       90,
       73,
       73,

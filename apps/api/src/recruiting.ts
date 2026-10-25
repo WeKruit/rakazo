@@ -34,6 +34,8 @@ import type {
 } from "@rakazo/contracts";
 import {
   RecruitingCorrespondenceSchema,
+  RecruitingCrmCampaignLeadsReadSchema,
+  RecruitingCrmCampaignsReadSchema,
   RecruitingCrmCandidatesReadSchema,
   RecruitingCrmClientsReadSchema,
   RecruitingCrmDataInputSchema,
@@ -3300,6 +3302,87 @@ export async function getRecruitingCrmData(
           ...mailItem(row),
           candidateId: row.candidate_id,
           ...(row.eaccount !== undefined ? { eaccount: row.eaccount } : {}),
+        })),
+        page.next_offset,
+      );
+    }
+    if (input.operation === "sequenceStats" || input.operation === "unassignedSequences") {
+      // Saved rows have exactly the authorization boundary of the CRM read that filled them.
+      const scope = { mcpServerId: server.id, organizationId: input.organizationId };
+      await sourceFence(server, "list_crm_campaigns");
+      const items =
+        input.operation === "sequenceStats"
+          ? await recruiting.listSyncedRecruitingSequenceStats(deps.prisma, actor, scope, [
+              ...new Set(input.candidateIds),
+            ])
+          : await recruiting.listSyncedRecruitingUnassignedSequences(deps.prisma, actor, scope);
+      invalidateFences();
+      await sourceFence(server, "list_crm_campaigns");
+      return finish({ operation: input.operation, items });
+    }
+    if (input.operation === "campaigns" || input.operation === "campaignLeads") {
+      const offset = pageOffset(input);
+      const limit = input.limit ?? 25;
+      const leads = input.operation === "campaignLeads";
+      const done = (items: unknown[], nextOffset: number | null) =>
+        finish({
+          operation: input.operation,
+          ...(leads ? { campaignId: input.campaignId } : {}),
+          items,
+          offset,
+          nextOffset,
+        });
+      const value = await read(server, "list_crm_campaigns", {
+        p_org: input.organizationId,
+        ...(leads ? { p_view: "leads", p_campaign: input.campaignId } : { p_view: "campaigns" }),
+        p_limit: limit,
+        p_offset: offset,
+      });
+      const badPage = (next: number | null, rows: number) =>
+        rows > limit || (next !== null && next <= offset);
+      if (leads) {
+        const page = parse(RecruitingCrmCampaignLeadsReadSchema, value);
+        if (
+          page.organization_id !== input.organizationId ||
+          page.campaign_id !== input.campaignId ||
+          badPage(page.next_offset, page.leads.length) ||
+          new Set(page.leads.map((row) => row.id)).size !== page.leads.length
+        )
+          throw unavailable();
+        await sourceFence(server, "list_crm_campaigns");
+        return done(
+          page.leads.map((row) => ({
+            id: row.id,
+            candidateId: row.candidate_id,
+            status: row.status,
+            interestStatus: row.interest_status,
+            openCount: row.email_open_count,
+            replyCount: row.email_reply_count,
+            lastContactAt: row.timestamp_last_contact,
+            lastReplyAt: row.timestamp_last_reply,
+            syncedAt: row.synced_at,
+          })),
+          page.next_offset,
+        );
+      }
+      const page = parse(RecruitingCrmCampaignsReadSchema, value);
+      if (
+        page.organization_id !== input.organizationId ||
+        badPage(page.next_offset, page.campaigns.length) ||
+        new Set(page.campaigns.map((row) => row.id)).size !== page.campaigns.length
+      )
+        throw unavailable();
+      await sourceFence(server, "list_crm_campaigns");
+      return done(
+        page.campaigns.map((row) => ({
+          id: row.id,
+          name: row.name,
+          status: row.status,
+          crmRoleId: row.role_spec_id,
+          clientId: row.client_id,
+          createdAt: row.timestamp_created,
+          updatedAt: row.timestamp_updated,
+          syncedAt: row.synced_at,
         })),
         page.next_offset,
       );

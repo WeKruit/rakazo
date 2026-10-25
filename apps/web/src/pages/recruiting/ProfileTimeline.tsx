@@ -5,8 +5,8 @@ import { useMemo } from "react";
 import { CompanyLogo, OrgBadge, websiteFavicon } from "./OrgBadge";
 import type { ProfileAssets } from "./profileAssets";
 import { organizationLogo, profileImageUrl } from "./profileAssets";
-import type { TimelineEntry, TimelineKind } from "./profileTimeline";
-import { parseTimeline, structuredProfileTimeline, timelineStats } from "./profileTimeline";
+import type { TimelineEntry, TimelineKind } from "./profileTimelineModel";
+import { parseTimeline, structuredProfileTimeline, timelineStats } from "./profileTimelineModel";
 
 type TimelineField = {
   label: string;

@@ -789,4 +789,8 @@ export const DE_MESSAGES: Record<string, string> = {
     "Melde dich bei deinem bestehenden Konto an, um SSO zu verknüpfen",
   "SSO is temporarily unavailable. Try again.":
     "SSO ist vorübergehend nicht verfügbar. Versuche es erneut.",
+  Decline: "Ablehnen",
+  Instructions: "Anweisungen",
+  Select: "Auswählen",
+  "Source unavailable": "Quelle nicht verfügbar",
 };

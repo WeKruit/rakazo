@@ -1261,6 +1261,18 @@ function activeCompaction(
       return;
     }
     lastAttempt = fingerprint;
+    // A summary request carries every message it summarizes, so Pi cannot summarize
+    // more than fits the window. Then the context policy bounds the request instead.
+    const summaryInput = estimateModelContextTokens(
+      {
+        messages: runtimeMessagesToLlm([
+          ...preparation.messagesToSummarize,
+          ...preparation.turnPrefixMessages,
+        ]),
+      },
+      estimatePiImageTokens,
+    );
+    if (summaryInput + output > window) return;
     host.queue.push({ type: "progress", text: "", activity: true, phase: "compacting" });
     const summaryModels: Models = {
       ...target.models,

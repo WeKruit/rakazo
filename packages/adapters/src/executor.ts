@@ -61,6 +61,7 @@ import {
   RecruitingFeedbackInputSchema,
   RecruitingNotesToolInputSchema,
   RecruitingPreferenceFeedbackSchema,
+  RecruitingProfilesToolInputSchema,
   RecruitingRemindersToolInputSchema,
   RecruitingReplyInputSchema,
   RecruitingResearchToolInputSchema,
@@ -420,6 +421,7 @@ import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
 } from "./recruiting-feedback.js";
+import { executeRecruitingProfilesTool, RecruitingProfileError } from "./recruiting-profiles.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { mcpObject } from "./recruiting-research.js";
 import {
@@ -8055,6 +8057,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ),
               );
             } catch (error) {
+              return finish(roleError(error));
+            }
+          }
+          if (name === "recruiting_profiles") {
+            // Internal bookkeeping: stores a lookup this run already made; no approval card.
+            try {
+              return finish(
+                await executeRecruitingProfilesTool(
+                  deps.prisma,
+                  researchActor.actor,
+                  runId,
+                  RecruitingProfilesToolInputSchema.parse(args),
+                  run.botId,
+                ),
+              );
+            } catch (error) {
+              if (error instanceof RecruitingProfileError) return finish({ error: error.message });
               return finish(roleError(error));
             }
           }

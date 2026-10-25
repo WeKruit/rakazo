@@ -1212,8 +1212,6 @@ describe("userTurnInstructions", () => {
         ...base,
         groupContext: undefined,
         messagingContext: undefined,
-        redactedMemoryContext: undefined,
-        redactedScratchpadContext: undefined,
         hasHistoricalContext: false,
         agentEnvironmentInstruction: undefined,
         botDirectory: undefined,

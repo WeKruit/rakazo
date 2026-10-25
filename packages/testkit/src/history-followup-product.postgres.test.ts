@@ -30,9 +30,11 @@ describe.skipIf(!enabled)("persisted source-verified history followups", () => {
       const followup = (request: ModelEmulatorRequest, index: number) => {
         const serialized = JSON.stringify(request.messages);
         expect(serialized).toContain(questions[index]);
+        // Prior verified replies are replayed as the bot's own assistant messages.
         expect(
-          request.messages.filter((row) =>
-            String(row.content).includes(`Assistant: ${verifiedReply}`),
+          request.messages.filter(
+            (row) =>
+              row.role === "assistant" && JSON.stringify(row.content).includes(verifiedReply),
           ),
         ).toHaveLength(index);
         expect(serialized).toContain("do not repeat retrieval solely because the user asks again");
@@ -40,6 +42,8 @@ describe.skipIf(!enabled)("persisted source-verified history followups", () => {
       const key = "synthetic-history-followup-key";
       const model = await startModelEmulator({
         apiKey: key,
+        // Long fixture threads correctly queue background history compaction.
+        compactionSummary: "Earlier archive notes; no action required.",
         steps: [
           {
             expect(request) {
@@ -139,13 +143,15 @@ describe.skipIf(!enabled)("persisted source-verified history followups", () => {
         expect(result).toMatchObject({
           status: "passed",
           toolCalls: 2,
-          modelCalls: 5,
+          // Usage accounting includes background compaction calls.
+          modelCalls: 5 + model.compactions.length,
           cleanupFailed: false,
         });
         expect(result.historyPreparationState).toMatchObject({
           generation: 0,
           beforeCursor: size === 1000 ? 949 : null,
-          afterCursor: size === 1000 ? 949 : null,
+          // The 100-original thread compacts its first batch once a turn pushes it over the window.
+          afterCursor: size === 1000 ? 949 : model.compactions.length ? 49 : null,
         });
       } finally {
         await model.close();

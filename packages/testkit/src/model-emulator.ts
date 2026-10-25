@@ -3,6 +3,12 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
 
+/** Distinctive system-prompt phrases of Pi turn compaction and executor history compaction. */
+const COMPACTION_PROMPTS = [
+  "context summarization assistant",
+  "Produce a complete replacement summary",
+];
+
 export interface ModelEmulatorRequest {
   model: string;
   stream: boolean;
@@ -56,9 +62,16 @@ export async function startModelEmulator(options: {
   steps: ModelEmulatorStep[];
   modelId?: string;
   apiKey?: string;
+  /**
+   * Answers compaction requests (Pi's native turn compaction and the executor's
+   * background history compaction) with this summary without consuming a step, for
+   * fixtures about the turn itself. Omit it to assert compaction as steps.
+   */
+  compactionSummary?: string;
 }) {
   const modelId = options.modelId ?? "offline-fixture";
   const requests: ModelEmulatorRequest[] = [];
+  const compactions: ModelEmulatorRequest[] = [];
   const failures: Error[] = [];
   let stepIndex = 0;
   const server = createServer((request, response) => {
@@ -78,7 +91,17 @@ export async function startModelEmulator(options: {
       assert.equal(body.model, modelId, "Model routing changed");
       assert.equal(body.stream, true, "Expected streaming model request");
       assert.ok(Array.isArray(body.messages), "Expected model messages");
-      const step = options.steps[stepIndex++];
+      const compaction =
+        options.compactionSummary !== undefined &&
+        body.messages.some(
+          (message) =>
+            message.role === "system" &&
+            COMPACTION_PROMPTS.some((prompt) => String(message.content).includes(prompt)),
+        );
+      if (compaction) compactions.push(body);
+      const step: ModelEmulatorStep | undefined = compaction
+        ? { expect() {}, response: { type: "text", text: options.compactionSummary! } }
+        : options.steps[stepIndex++];
       assert.ok(step, `Unexpected model request ${stepIndex}`);
       await step.expect(body);
       const reply = typeof step.response === "function" ? step.response(body) : step.response;
@@ -168,6 +191,7 @@ export async function startModelEmulator(options: {
     baseUrl,
     model,
     requests,
+    compactions,
     assertComplete() {
       if (failures.length)
         throw new AggregateError(failures, failures.map((error) => error.message).join("\n"));

@@ -2,10 +2,11 @@ import type {
   RecruitingCandidateReport,
   RecruitingRoleCandidate,
   RecruitingRoleRevision,
+  RecruitingSavedProfile,
 } from "@rakazo/contracts";
 import { recruitingCandidateSourceText } from "@rakazo/contracts";
-import type { TimelineEntry } from "./profileTimeline";
-import { storedExperienceTimeline, structuredProfileTimeline } from "./profileTimeline";
+import type { TimelineEntry } from "./profileTimelineModel";
+import { storedExperienceTimeline, structuredProfileTimeline } from "./profileTimelineModel";
 import type { RoleCandidateFit } from "./roleCandidates";
 import { roleCandidateFit } from "./roleCandidates";
 
@@ -531,4 +532,58 @@ export function storedProfileFields(
       ? [{ label: "Skills", value: profile.skills.join(", "), sourceUrls: [] }]
       : []),
   ];
+}
+
+/**
+ * A saved full profile as report fields, placed before the research report so its dated
+ * history, photo and current employer facts lead; the report's own words stay available.
+ */
+export function savedProfileFields(profile: RecruitingSavedProfile | null | undefined): Field[] {
+  if (!profile) return [];
+  const field = (label: string, value: string | null | undefined): Field[] =>
+    value?.trim() ? [{ label, value, sourceUrls: [] }] : [];
+  const current =
+    profile.experience.find((job) => job.is_current === true) ??
+    profile.experience.find((job) => !job.end_date);
+  const summarize = (parts: readonly (string | null)[]) => parts.filter(Boolean).join(" · ");
+  return [
+    ...field("Profile image url", profile.profileImageUrl),
+    ...field("Current company url", current?.company_url),
+    ...field("Current company industry", current?.company_industry),
+    ...field("Current company size", current?.company_size),
+    ...(profile.experience.length
+      ? [
+          {
+            label: "Experience",
+            value: profile.experience
+              .map((job) => summarize([job.title, job.company_name, job.start_date, job.end_date]))
+              .join("\n"),
+            structuredValue: profile.experience,
+            sourceUrls: [],
+          },
+        ]
+      : []),
+    ...(profile.education.length
+      ? [
+          {
+            label: "Education",
+            value: profile.education
+              .map((school) => summarize([school.school_name, school.degree, school.end_date]))
+              .join("\n"),
+            structuredValue: profile.education,
+            sourceUrls: [],
+          },
+        ]
+      : []),
+  ];
+}
+
+/** Saved full-profile fields first; report fields the saved profile already covers are dropped. */
+export function withSavedProfile(
+  profile: RecruitingSavedProfile | null | undefined,
+  fields: readonly Field[],
+): Field[] {
+  const saved = savedProfileFields(profile);
+  const covered = new Set(saved.map((field) => field.label));
+  return [...saved, ...fields.filter((field) => !covered.has(field.label))];
 }

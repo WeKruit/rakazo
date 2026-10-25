@@ -1367,8 +1367,57 @@ export const RecruitingCandidateConsiderationSchema = z.strictObject({
   }),
 });
 
+// Saved public-profile facts for one person, normalized from a profile-data connector's retained
+// result. Field names match the timeline interchange; null means the source did not say.
+const ProfileText = z.string().max(4000).nullable();
+export const RecruitingProfileExperienceSchema = z.strictObject({
+  title: ProfileText,
+  company_name: ProfileText,
+  company_url: ProfileText,
+  company_linkedin_url: ProfileText,
+  company_logo_url: ProfileText,
+  company_industry: ProfileText,
+  company_size: ProfileText,
+  location: ProfileText,
+  start_date: ProfileText,
+  end_date: ProfileText,
+  is_current: z.boolean().nullable(),
+  description: ProfileText,
+});
+export const RecruitingProfileEducationSchema = z.strictObject({
+  school_name: ProfileText,
+  degree: ProfileText,
+  field_of_study: ProfileText,
+  school_url: ProfileText,
+  school_logo_url: ProfileText,
+  start_date: ProfileText,
+  end_date: ProfileText,
+});
+export const RecruitingSavedProfileSchema = z.strictObject({
+  personKey: RecruitingId,
+  provider: Text,
+  fetchedAt: IsoDate,
+  headline: ProfileText,
+  profileImageUrl: ProfileText,
+  experience: z.array(RecruitingProfileExperienceSchema).max(80),
+  education: z.array(RecruitingProfileEducationSchema).max(40),
+});
+export type RecruitingSavedProfile = z.infer<typeof RecruitingSavedProfileSchema>;
+export type RecruitingProfileExperience = z.infer<typeof RecruitingProfileExperienceSchema>;
+export type RecruitingProfileEducation = z.infer<typeof RecruitingProfileEducationSchema>;
+/** list reads what is already saved (the cache); save stores a lookup made in this run. */
+export const RecruitingProfilesToolInputSchema = z.discriminatedUnion("operation", [
+  z.strictObject({
+    operation: z.literal("list"),
+    candidateKeys: z.array(RecruitingId).min(1).max(50),
+  }),
+  z.strictObject({ operation: z.literal("save"), candidateKey: RecruitingId }),
+]);
+export type RecruitingProfilesToolInput = z.infer<typeof RecruitingProfilesToolInputSchema>;
+
 export const RecruitingCandidateSchema = z.strictObject({
   latestSource: RecruitingCandidateSourceReferenceSchema.optional(),
+  savedProfile: RecruitingSavedProfileSchema.nullable().optional(),
   crm: RecruitingCrmCandidateSyncSchema.nullable(),
   roleId: RecruitingId,
   candidateKey: RecruitingId,
@@ -1540,8 +1589,10 @@ export type ListRecruitingCandidateSourcesInput = z.infer<
   typeof ListRecruitingCandidateSourcesInput
 >;
 export const RecruitingCandidatesToolInputSchema = z.discriminatedUnion("operation", [
-  ListRecruitingCandidatesInput.pick({ query: true, cursor: true, limit: true }).extend({
+  // The web list pages up to 200 rows; an agent reads bounded pages of at most 100.
+  ListRecruitingCandidatesInput.pick({ query: true, cursor: true }).extend({
     operation: z.literal("list"),
+    limit: z.number().int().min(1).max(100).optional(),
   }),
   ListRecruitingCandidateSourcesInput.omit({ roleId: true }).extend({
     operation: z.literal("sources"),
@@ -2077,8 +2128,53 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     crmRoleId: z.uuid(),
     ...crmOffsetPage,
   }),
+  /** Saved sequence numbers for listed people, from the last CRM sync. */
+  z.object({
+    operation: z.literal("sequenceStats"),
+    ...crmBrowsePinned,
+    candidateIds: z.array(z.uuid()).min(1).max(100),
+  }),
+  /** Saved sequences that are not linked to any role, from the last CRM sync. */
+  z.object({
+    operation: z.literal("unassignedSequences"),
+    ...crmBrowsePinned,
+  }),
+  /** Every stored outreach campaign of the organization, including ones with no role. */
+  z.object({
+    operation: z.literal("campaigns"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    ...crmOffsetPage,
+  }),
+  /** One stored campaign's lead stats. */
+  z.object({
+    operation: z.literal("campaignLeads"),
+    ...crmBrowsePinned,
+    ...crmBrowsePage,
+    campaignId: Id,
+    ...crmOffsetPage,
+  }),
 ]);
 export type RecruitingCrmDataInput = z.infer<typeof RecruitingCrmDataInputSchema>;
+/** Business meaning of a saved sequence's state; source codes never reach the UI. */
+export const RecruitingSequenceStatusSchema = z.enum([
+  "draft",
+  "active",
+  "paused",
+  "completed",
+  "stopped",
+]);
+export type RecruitingSequenceStatus = z.infer<typeof RecruitingSequenceStatusSchema>;
+/** One person's state inside a saved sequence. */
+export const RecruitingSequenceLeadStatusSchema = z.enum([
+  "active",
+  "paused",
+  "completed",
+  "bounced",
+  "unsubscribed",
+  "skipped",
+]);
+export type RecruitingSequenceLeadStatus = z.infer<typeof RecruitingSequenceLeadStatusSchema>;
 export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
   z.strictObject({
     operation: z.literal("presence"),
@@ -2211,6 +2307,83 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     nextOffset: z.number().int().nonnegative().nullable(),
     ...crmNextCursor,
   }),
+  z.strictObject({
+    operation: z.literal("campaigns"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    items: z.array(
+      z.strictObject({
+        id: Id,
+        name: z.string(),
+        status: z.number().int().nullable(),
+        crmRoleId: z.uuid().nullable(),
+        clientId: z.uuid().nullable(),
+        createdAt: IsoDate.nullable(),
+        updatedAt: IsoDate.nullable(),
+        syncedAt: IsoDate,
+      }),
+    ),
+    offset: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+    ...crmNextCursor,
+  }),
+  z.strictObject({
+    operation: z.literal("sequenceStats"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    /** Only people with a saved sequence record; absent people have none. */
+    items: z.array(
+      z.strictObject({
+        candidateId: z.uuid(),
+        sequences: z.number().int().nonnegative(),
+        opens: z.number().int().nonnegative().nullable(),
+        replies: z.number().int().nonnegative().nullable(),
+        lastContactAt: IsoDate.nullable(),
+        lastReplyAt: IsoDate.nullable(),
+        status: RecruitingSequenceLeadStatusSchema.nullable(),
+        syncedAt: IsoDate,
+      }),
+    ),
+  }),
+  z.strictObject({
+    operation: z.literal("unassignedSequences"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    items: z.array(
+      z.strictObject({
+        id: Id,
+        name: z.string(),
+        status: RecruitingSequenceStatusSchema.nullable(),
+        people: z.number().int().nonnegative(),
+        opened: z.number().int().nonnegative(),
+        replied: z.number().int().nonnegative(),
+        lastContactAt: IsoDate.nullable(),
+        syncedAt: IsoDate,
+      }),
+    ),
+  }),
+  z.strictObject({
+    operation: z.literal("campaignLeads"),
+    source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
+    checkedAt: IsoDate,
+    campaignId: Id,
+    items: z.array(
+      z.strictObject({
+        id: Id,
+        candidateId: z.uuid().nullable(),
+        status: z.number().int().nullable(),
+        interestStatus: z.number().int().nullable(),
+        openCount: z.number().int().nullable(),
+        replyCount: z.number().int().nullable(),
+        lastContactAt: IsoDate.nullable(),
+        lastReplyAt: IsoDate.nullable(),
+        syncedAt: IsoDate,
+      }),
+    ),
+    offset: z.number().int().nonnegative(),
+    nextOffset: z.number().int().nonnegative().nullable(),
+    ...crmNextCursor,
+  }),
 ]);
 export type RecruitingCrmDataOutput = z.infer<typeof RecruitingCrmDataOutputSchema>;
 
@@ -2291,6 +2464,45 @@ const CrmStoredEmail = z.object({
   to_address: z.string().nullable(),
   subject: z.string().nullable(),
   body_text: z.string().nullable(),
+});
+const CrmStoredTime = IsoDate.nullable();
+export const RecruitingCrmCampaignsReadSchema = z.object({
+  organization_id: z.uuid(),
+  campaigns: z.array(
+    z.object({
+      id: Id,
+      name: z.string(),
+      status: z.number().int().nullable(),
+      role_spec_id: z.uuid().nullable(),
+      client_id: z.uuid().nullable(),
+      timestamp_created: CrmStoredTime,
+      timestamp_updated: CrmStoredTime,
+      synced_at: IsoDate,
+    }),
+  ),
+  pagination: z.literal("offset"),
+  offset: z.number().int().nonnegative(),
+  next_offset: z.number().int().nonnegative().nullable(),
+});
+export const RecruitingCrmCampaignLeadsReadSchema = z.object({
+  organization_id: z.uuid(),
+  campaign_id: Id,
+  leads: z.array(
+    z.object({
+      id: Id,
+      candidate_id: z.uuid().nullable(),
+      status: z.number().int().nullable(),
+      interest_status: z.number().int().nullable(),
+      email_open_count: z.number().int().nullable(),
+      email_reply_count: z.number().int().nullable(),
+      timestamp_last_contact: CrmStoredTime,
+      timestamp_last_reply: CrmStoredTime,
+      synced_at: IsoDate,
+    }),
+  ),
+  pagination: z.literal("offset"),
+  offset: z.number().int().nonnegative(),
+  next_offset: z.number().int().nonnegative().nullable(),
 });
 export const RecruitingCrmRoleMailReadSchema = z.object({
   version: z.literal(2),
@@ -2490,12 +2702,15 @@ export const RecruitingCrmSyncOutputSchema = z.strictObject({
   contacts: RecruitingCrmSyncCounts,
   links: RecruitingCrmSyncCounts,
   messages: RecruitingCrmSyncCounts,
+  /** Stored outreach campaigns and their lead stats. Never archived by the sync. */
+  campaigns: RecruitingCrmSyncCounts,
+  leads: RecruitingCrmSyncCounts,
   /** Reads that could not complete; their rows are left as they were (nothing archived). */
   skipped: z.array(
     z.strictObject({
       organizationId: z.uuid().nullable(),
       crmRoleId: z.uuid().nullable(),
-      step: z.enum(["organizations", "roles", "contacts", "links", "mail"]),
+      step: z.enum(["organizations", "roles", "contacts", "links", "mail", "campaigns", "leads"]),
       reason: z.string(),
     }),
   ),
@@ -2511,6 +2726,14 @@ const CrmSyncCursorCounts = z.object({
   archived: z.number().int().nonnegative(),
   restored: z.number().int().nonnegative(),
 });
+const emptyCrmSyncCursorCounts = () => ({
+  seen: 0,
+  created: 0,
+  updated: 0,
+  unchanged: 0,
+  archived: 0,
+  restored: 0,
+});
 export const RecruitingCrmSyncCursorSchema = z.object({
   v: z.literal(1),
   dryRun: z.boolean(),
@@ -2521,11 +2744,13 @@ export const RecruitingCrmSyncCursorSchema = z.object({
       r: z.number().int().positive(),
       o: z.uuid(),
       roles: z.array(z.uuid()),
+      /** Filled when this organization's campaign list completes; drives the leads step. */
+      campaigns: z.array(Id).optional(),
     }),
   ),
   at: z.object({
     g: z.number().int().nonnegative(),
-    step: z.enum(["contacts", "links", "mail"]),
+    step: z.enum(["contacts", "links", "mail", "campaigns", "leads"]),
     j: z.number().int().nonnegative(),
     offset: z.number().int().nonnegative(),
     /** Stored active rows this pass has matched so far, for the dry-run archive count. */
@@ -2537,6 +2762,9 @@ export const RecruitingCrmSyncCursorSchema = z.object({
     contacts: CrmSyncCursorCounts,
     links: CrmSyncCursorCounts,
     messages: CrmSyncCursorCounts,
+    // Progress saved before campaigns were synced has no campaign totals yet.
+    campaigns: CrmSyncCursorCounts.default(emptyCrmSyncCursorCounts),
+    leads: CrmSyncCursorCounts.default(emptyCrmSyncCursorCounts),
   }),
   skipped: RecruitingCrmSyncOutputSchema.shape.skipped,
 });

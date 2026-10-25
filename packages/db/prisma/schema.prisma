@@ -22,6 +22,8 @@ model AiDataConsent {
 }
 
 model User {
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
   aiDataConsents AiDataConsent[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
@@ -29,6 +31,7 @@ model User {
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[] @relation("RecruitingReminderOwner")
   recruitingCandidateNotes RecruitingCandidateNote[] @relation("RecruitingCandidateNoteOwner")
+  recruitingSavedProfiles RecruitingSavedProfile[] @relation("RecruitingSavedProfileOwner")
   recruitingRoles RecruitingRole[]
   id                          String                       @id
   name                        String
@@ -202,12 +205,15 @@ model Member {
 }
 
 model Space {
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
   aiDataConsents AiDataConsent[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
   recruitingCrmSyncProgress RecruitingCrmSyncProgress[]
   recruitingCrmMessages RecruitingCrmMessage[]
   recruitingReminders RecruitingReminder[]
+  recruitingSavedProfiles RecruitingSavedProfile[]
   recruitingCandidateNotes RecruitingCandidateNote[]
   recruitingRoles RecruitingRole[]
   id                          String                       @id
@@ -1185,6 +1191,8 @@ model Secret {
 }
 
 model McpServer {
+  recruitingCrmCampaigns RecruitingCrmCampaign[]
+  recruitingCrmLeads RecruitingCrmLead[]
   recruitingTasks RecruitingResearchTask[]
   recruitingCrmRoles RecruitingCrmRole[]
   recruitingCrmContacts RecruitingCrmContact[]
@@ -1949,6 +1957,27 @@ model RecruitingCandidateNote {
   @@map("recruiting_candidate_notes")
 }
 
+/// One person's public-profile facts saved from a profile-data lookup the agent made, owner-scoped
+/// like notes. The provider's full result stays on its effect; this row is the display/cache copy.
+model RecruitingSavedProfile {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  ownerUserId String
+  owner User @relation("RecruitingSavedProfileOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  /// The pool's candidate key, e.g. "linkedin:<handle>".
+  personKey String
+  provider String
+  sourceEffectId String
+  profile Json
+  fetchedAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([spaceId, ownerUserId, personKey])
+  @@map("recruiting_saved_profiles")
+}
+
 /// Exact CRM workspace selected through an authenticated read, never an execution/approval receipt.
 model RecruitingCrmWorkspaceAttachment {
   roleId String @id
@@ -1965,4 +1994,62 @@ model RecruitingCrmWorkspaceAttachment {
 
   @@unique([userId, spaceId, mcpServerId, organizationId, crmRoleId], map: "recruiting_crm_workspace_exact_key")
   @@map("recruiting_crm_workspace_attachments")
+}
+
+/// Owner-scoped copy of one stored outreach campaign, including campaigns with no CRM role.
+/// Read-only copy: never starts, pauses or edits the campaign.
+model RecruitingCrmCampaign {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  crmCampaignId String
+  name String
+  /// Provider campaign status code as stored by the CRM mirror.
+  status Int?
+  crmRoleId String?
+  clientId String?
+  campaignCreatedAt DateTime?
+  campaignUpdatedAt DateTime?
+  mirrorSyncedAt DateTime
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmCampaignId])
+  @@map("recruiting_crm_campaigns")
+}
+
+/// One stored lead of a campaign: who (CRM candidate) and how the outreach went.
+model RecruitingCrmLead {
+  id String @id @default(cuid())
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mcpServerId String
+  mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
+  organizationId String
+  crmLeadId String
+  crmCampaignId String
+  crmCandidateId String?
+  status Int?
+  interestStatus Int?
+  openCount Int?
+  replyCount Int?
+  lastContactAt DateTime?
+  lastReplyAt DateTime?
+  mirrorSyncedAt DateTime
+  firstSyncedAt DateTime @default(now())
+  syncedAt DateTime
+  archivedAt DateTime?
+
+  @@unique([userId, spaceId, mcpServerId, organizationId, crmLeadId])
+  @@index([userId, spaceId, crmCandidateId])
+  @@index([userId, spaceId, crmCampaignId])
+  @@map("recruiting_crm_leads")
 }

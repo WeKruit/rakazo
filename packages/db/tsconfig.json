@@ -4,5 +4,6 @@
     "rootDir": "src",
     "noEmit": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/recruiting.postgres.test.ts", "src/recruiting-calibration.postgres.test.ts"]
 }

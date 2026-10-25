@@ -50,6 +50,9 @@ function latestToolResult(request: ModelEmulatorRequest) {
   return request.messages.findLast((message) => message.role === "tool");
 }
 
+// Pi estimates four characters per token; an 8K window with 1K output leaves 7K tokens.
+const PI_INPUT_CHARS_8K = 4 * (8192 - 1024);
+
 describe("real Pi against an offline model HTTP endpoint", () => {
   it("retries a dropped stream and an overloaded provider after tool work without replaying the effect", async () => {
     const delay = vi.spyOn(Core, "abortableDelay").mockResolvedValue(undefined);
@@ -114,7 +117,7 @@ describe("real Pi against an offline model HTTP endpoint", () => {
     async (contextStrategy) => {
       const decisions: Array<{ droppedMessages: number; truncatedToolResults: number }> = [];
       const assertBounded = (request: ModelEmulatorRequest) => {
-        expect(Buffer.byteLength(JSON.stringify(request.messages))).toBeLessThan(7168);
+        expect(Buffer.byteLength(JSON.stringify(request.messages))).toBeLessThan(PI_INPUT_CHARS_8K);
         expect(JSON.stringify(request.messages)).toContain("Save hello to notes.txt.");
       };
       const server = await startModelEmulator({
@@ -171,25 +174,14 @@ describe("real Pi against an offline model HTTP endpoint", () => {
   );
 
   it("sends the same provider context for omitted and explicit retrieval when history tools are usable", async () => {
-    let firstMessages: ModelEmulatorRequest["messages"] | undefined;
-    let firstTools: ModelEmulatorRequest["tools"] | undefined;
+    // Each run makes the same native compaction request, then the same turn request.
+    const requests: ModelEmulatorRequest[] = [];
+    const record = { expect: (request: ModelEmulatorRequest) => void requests.push(request) };
     const server = await startModelEmulator({
-      steps: [
-        {
-          expect(request) {
-            firstMessages = request.messages;
-            firstTools = request.tools;
-          },
-          response: { type: "text", text: "Done." },
-        },
-        {
-          expect(request) {
-            expect(request.messages).toEqual(firstMessages);
-            expect(request.tools).toEqual(firstTools);
-          },
-          response: { type: "text", text: "Done." },
-        },
-      ],
+      steps: Array.from({ length: 4 }, () => ({
+        ...record,
+        response: { type: "text" as const, text: "Done." },
+      })),
     });
     cleanups.push(() => server.close());
     const history = Array.from({ length: 40 }, (_, index) => ({
@@ -212,8 +204,16 @@ describe("real Pi against an offline model HTTP endpoint", () => {
         ),
       );
     server.assertComplete();
-    expect(JSON.stringify(firstMessages)).not.toContain("Original 0:");
-    expect(JSON.stringify(firstMessages)).toContain("Original 39:");
+    const [omitted, explicit] = [requests.slice(0, 2), requests.slice(2)];
+    expect(explicit.map((request) => request.messages)).toEqual(
+      omitted.map((request) => request.messages),
+    );
+    expect(explicit.map((request) => request.tools)).toEqual(
+      omitted.map((request) => request.tools),
+    );
+    const turn = JSON.stringify(omitted[1]!.messages);
+    expect(turn).not.toContain("Original 0:");
+    expect(turn).toContain("compacted into the following summary");
   });
 
   it("keeps fitting standalone originals under the shared default without unavailable history tools", async () => {
@@ -328,7 +328,9 @@ describe("real Pi against an offline model HTTP endpoint", () => {
         },
         {
           expect(request) {
-            expect(Buffer.byteLength(JSON.stringify(request.messages))).toBeLessThan(7168);
+            expect(Buffer.byteLength(JSON.stringify(request.messages))).toBeLessThan(
+              PI_INPUT_CHARS_8K,
+            );
             expect(latestToolResult(request)?.tool_call_id).toBe("child-write");
             expect(String(latestToolResult(request)?.content)).toContain("truncated");
             expect(JSON.stringify(request.messages)).toContain("Save hello to notes.txt.");

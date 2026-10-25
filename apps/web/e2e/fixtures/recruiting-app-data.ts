@@ -815,6 +815,26 @@ export async function mockRecruitingApp(
           },
           outbox: [],
         };
+      else if (input.operation === "sequenceStats")
+        value = {
+          operation: "sequenceStats",
+          source,
+          checkedAt,
+          items: input.candidateIds.includes(people[0]!.candidateId)
+            ? [
+                {
+                  candidateId: people[0]!.candidateId,
+                  sequences: 1,
+                  opens: 3,
+                  replies: 1,
+                  lastContactAt: "2026-10-21T15:00:00Z",
+                  lastReplyAt: "2026-10-22T09:30:00Z",
+                  status: "active",
+                  syncedAt: checkedAt,
+                },
+              ]
+            : [],
+        };
       else if (input.operation === "important")
         value = { ...base, scope: "organization_candidate_roles", items: [], total: 0 };
       else {

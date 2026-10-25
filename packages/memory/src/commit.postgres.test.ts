@@ -332,6 +332,8 @@ describePostgres("memory commits (PostgreSQL)", () => {
         },
       }) as PrismaClient,
     );
+    // Role setup records its own thread event; the failed commit must not take a sequence.
+    const { nextEventSeq } = await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } });
     await expect(
       rejectingStore.commit({ ...f.commit, recruiting: f.recruiting }, f.agentContext),
     ).rejects.toThrow();
@@ -342,7 +344,7 @@ describePostgres("memory commits (PostgreSQL)", () => {
     expect(await prisma.event.count({ where: { runId: f.run.id } })).toBe(0);
     expect(
       (await prisma.thread.findUniqueOrThrow({ where: { id: f.thread.id } })).nextEventSeq,
-    ).toBe(0);
+    ).toBe(nextEventSeq);
   });
 
   it("allows a current human to edit owned memory after its prior source message is deleted", async () => {

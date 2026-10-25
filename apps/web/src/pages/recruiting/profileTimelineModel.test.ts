@@ -1,9 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { parseTimeline, timelineStats } from "./profileTimeline";
+import { parseTimeline, timelineStats } from "./profileTimelineModel";
 
 const NOW = new Date(Date.UTC(2026, 9, 23));
 
 describe("parseTimeline", () => {
+  it("keeps lookup bookkeeping out of dated positions", () => {
+    const [entry] = parseTimeline(
+      "Recovered cached original profile record (profile lookup 2026-10-23T15:48:51Z) | Example Co",
+      "experience",
+      new Date("2026-10-25T00:00:00Z"),
+    );
+    expect(entry).toMatchObject({ structured: false });
+    expect(entry?.dateLabel).toBeUndefined();
+  });
+
   it("preserves stored CRM role and employer hierarchy separated by middle dots", () => {
     expect(
       parseTimeline("Engineer · Example Labs · 2020 – 2022", "experience", NOW)[0],

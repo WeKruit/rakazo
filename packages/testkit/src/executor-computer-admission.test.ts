@@ -402,7 +402,11 @@ describe("native first-use computer admission", () => {
         const f = fixture([], { shutdownSignal: shutdown.signal });
         const runtime = new PiAgentRuntime();
         f.runtimeRun.mockImplementation(async function* (request, context) {
-          yield* runtime.run({ ...request, model: server.model }, context);
+          // The native tool catalog alone exceeds the 32K default window for unknown models.
+          yield* runtime.run(
+            { ...request, model: { ...server.model, contextWindow: 272_000 } },
+            context,
+          );
         });
         acquireLease.mockImplementationOnce(async (_prisma, input) => {
           if (interruption === "busy") throw new ComputerBusyError();

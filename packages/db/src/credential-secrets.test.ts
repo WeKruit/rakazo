@@ -17,10 +17,10 @@ function credentialSecretPrisma(modelReferences: number, voiceReferences: number
 describe("model credential refresh locks", () => {
   it("locks exact credential ownership before its account-level model secret without another transaction", async () => {
     const query = vi
-      .fn()
+      .fn<(sql: Prisma.Sql) => Promise<unknown>>()
       .mockResolvedValueOnce([{ id: "credential", secretId: "secret" }])
       .mockResolvedValueOnce([{ id: "secret", ciphertext: "sealed" }]);
-    const execute = vi.fn(async () => 0);
+    const execute = vi.fn(async (_sql: TemplateStringsArray) => 0);
     const tx = { $queryRaw: query, $executeRaw: execute } as unknown as Prisma.TransactionClient;
     await expect(
       lockModelCredentialSecret(tx, {
@@ -35,7 +35,7 @@ describe("model credential refresh locks", () => {
     });
     expect(execute.mock.calls[0]?.[0].join("")).toContain("SET LOCAL lock_timeout = '5s'");
     expect(execute.mock.invocationCallOrder[0]).toBeLessThan(query.mock.invocationCallOrder[0]!);
-    const [credential, secret] = query.mock.calls.map(([sql]) => sql);
+    const [credential, secret] = query.mock.calls.map(([sql]) => sql) as [Prisma.Sql, Prisma.Sql];
     expect(credential.sql).toMatch(
       /user_model_credentials[\s\S]*"userId" = \?[\s\S]*provider = \?[\s\S]*"secretId" = \?[\s\S]*id = \?[\s\S]*FOR UPDATE/,
     );

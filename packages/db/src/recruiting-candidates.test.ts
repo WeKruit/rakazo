@@ -50,6 +50,7 @@ function fixture() {
     consideration: null as unknown,
   };
   const tx = {
+    recruitingSavedProfile: { findMany: vi.fn(async () => []) },
     $queryRaw: vi.fn(async (_query: unknown) => [] as unknown[]),
     $executeRaw: vi.fn(async (_query: unknown) => 0),
     recruitingCrmWorkspaceAttachment: {
