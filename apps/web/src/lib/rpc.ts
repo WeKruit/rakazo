@@ -59,6 +59,49 @@ export function withSpaceHeaders(
   return headers;
 }
 
+/** Recruiting reads in flight at once; the rest wait so one page load cannot drain the API's DB pool. */
+export const RECRUITING_READ_LIMIT = 4;
+const WRITE_PREFIX = /^(set|save|approve|confirm|edit|create|update|delete|remove|archive|restore|sync|bind|send|record)/i;
+let recruitingReadsInFlight = 0;
+const recruitingReadQueue: Array<() => void> = [];
+
+/** Whether a request path is a recruiting read that shares the page's concurrency budget. */
+export function isRecruitingRead(pathname: string): boolean {
+  const match = /\/rpc\/recruiting\/(.+)$/.exec(pathname);
+  const name = match?.[1]?.split("/").pop();
+  return Boolean(name && !WRITE_PREFIX.test(name));
+}
+
+/** Runs `call` once a recruiting read slot is free; an abort while waiting skips the request. */
+export async function withRecruitingReadSlot<T>(
+  signal: AbortSignal | undefined,
+  call: () => Promise<T>,
+): Promise<T> {
+  if (recruitingReadsInFlight >= RECRUITING_READ_LIMIT) {
+    await new Promise<void>((resolve, reject) => {
+      const start = () => {
+        signal?.removeEventListener("abort", cancel);
+        resolve();
+      };
+      const cancel = () => {
+        const index = recruitingReadQueue.indexOf(start);
+        if (index >= 0) recruitingReadQueue.splice(index, 1);
+        reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+      };
+      if (signal?.aborted) return cancel();
+      signal?.addEventListener("abort", cancel, { once: true });
+      recruitingReadQueue.push(start);
+    });
+  }
+  recruitingReadsInFlight += 1;
+  try {
+    return await call();
+  } finally {
+    recruitingReadsInFlight -= 1;
+    recruitingReadQueue.shift()?.();
+  }
+}
+
 const link = new RPCLink<RpcClientContext>({
   url: () =>
     typeof window === "undefined"
@@ -79,11 +122,14 @@ const link = new RPCLink<RpcClientContext>({
       options.context.spaceId === undefined ? selectedSpaceId() : options.context.spaceId;
     const headers = withSpaceHeaders(request.headers, spaceId);
     if (!headers.has("x-request-id")) headers.set("x-request-id", crypto.randomUUID());
-    const started = performance.now();
-    const response = await fetch(request, {
-      headers,
-      credentials: "include",
-    });
+    const send = () => {
+      started = performance.now();
+      return fetch(request, { headers, credentials: "include" });
+    };
+    let started = performance.now();
+    const response = isRecruitingRead(new URL(request.url).pathname)
+      ? await withRecruitingReadSlot(request.signal, send)
+      : await send();
     if (!response.ok) {
       const requestId = response.headers.get("x-request-id");
       const traceparent = response.headers.get("traceparent");

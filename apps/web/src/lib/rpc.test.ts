@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearSpaceSelection, selectedSpaceId, selectSpace } from "./rpc.js";
+import {
+  clearSpaceSelection,
+  isRecruitingRead,
+  RECRUITING_READ_LIMIT,
+  selectedSpaceId,
+  selectSpace,
+  withRecruitingReadSlot,
+} from "./rpc.js";
 
 const transport = vi.hoisted(() =>
   vi.fn<
@@ -173,5 +180,46 @@ describe("space selection storage", () => {
 
     expect(selectSpace("space-support")).toBe(true);
     expect(setItem).toHaveBeenCalledWith("rakazo:space-id", "space-support");
+  });
+});
+
+describe("recruiting read budget", () => {
+  it("treats recruiting reads, not writes or other routes, as budgeted", () => {
+    expect(isRecruitingRead("/rpc/recruiting/roleCandidates")).toBe(true);
+    expect(isRecruitingRead("/rpc/recruiting/reminders/list")).toBe(true);
+    expect(isRecruitingRead("/rpc/recruiting/setCandidateShortlist")).toBe(false);
+    expect(isRecruitingRead("/rpc/recruiting/reminders/update")).toBe(false);
+    expect(isRecruitingRead("/rpc/threads/get")).toBe(false);
+  });
+
+  it("keeps at most the limit in flight and skips a request aborted while waiting", async () => {
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let peak = 0;
+    const call = () =>
+      new Promise<void>((resolve) => {
+        active += 1;
+        peak = Math.max(peak, active);
+        releases.push(() => {
+          active -= 1;
+          resolve();
+        });
+      });
+    const abort = new AbortController();
+    const started = vi.fn(call);
+    const runs = Array.from({ length: RECRUITING_READ_LIMIT + 2 }, (_, index) =>
+      withRecruitingReadSlot(index === RECRUITING_READ_LIMIT ? abort.signal : undefined, started),
+    );
+    await Promise.resolve();
+    expect(started).toHaveBeenCalledTimes(RECRUITING_READ_LIMIT);
+    abort.abort();
+    await expect(runs[RECRUITING_READ_LIMIT]).rejects.toBeDefined();
+    while (releases.length) {
+      releases.shift()?.();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    await Promise.all(runs.filter((_, index) => index !== RECRUITING_READ_LIMIT));
+    expect(started).toHaveBeenCalledTimes(RECRUITING_READ_LIMIT + 1);
+    expect(peak).toBe(RECRUITING_READ_LIMIT);
   });
 });
