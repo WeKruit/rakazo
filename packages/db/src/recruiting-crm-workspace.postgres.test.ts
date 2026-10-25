@@ -2,12 +2,14 @@ import { randomUUID } from "node:crypto";
 import { boundDirectApprovalRequest } from "@rakazo/core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb } from "./client.js";
+import { createGroupInTransaction } from "./groups.js";
 import {
   getRecruitingWorkspace,
   getRecruitingWorkspaceCrmSourceMaterial,
   getRecruitingWorkspaceCrmTarget,
   openVerifiedRecruitingCrmWorkspace,
   recordRecruitingContextAdoption,
+  recruitingCrmConversationId,
 } from "./recruiting.js";
 
 const suite = process.env.VERIFY_DATABASE ? describe.sequential : describe.skip;
@@ -185,6 +187,31 @@ suite("verified legacy CRM workspace", () => {
       data: { allowedTools: ["get_crm_role"] },
     });
   });
+  it("attaches a role to an earlier CRM conversation that has none", async () => {
+    const crmRoleId = "00000000-0000-4000-8000-000000000007";
+    const reference = {
+      sourceId: serverId,
+      serverRevision: 1,
+      organizationId: target.organizationId,
+      crmRoleId,
+    };
+    const earlier = await prisma.$transaction((tx) =>
+      createGroupInTransaction(tx, actor, {
+        id: recruitingCrmConversationId(actor, reference),
+        name: "Engineer · Client",
+        botIds: bots,
+        crmRoleReference: reference,
+      }),
+    );
+    const opened = await open(crmRoleId);
+    expect(opened.groupId).toBe(earlier.id);
+    expect(opened.threadId).toBe(earlier.thread!.id);
+    expect(
+      (await prisma.thread.findUniqueOrThrow({ where: { id: opened.threadId } }))
+        .activeRecruitingRoleId,
+    ).toBe(opened.roleId);
+    expect(await open(crmRoleId)).toEqual(opened);
+  });
   it("does not guess roles from matching titles", async () => {
     const a = await open();
     const b = await open("00000000-0000-4000-8000-000000000004");
@@ -328,6 +355,6 @@ suite("verified legacy CRM workspace", () => {
       data: { archivedAt: new Date() },
     });
     await expect(open()).rejects.toThrow();
-    expect(await prisma.recruitingRole.count({ where: { userId, spaceId } })).toBe(3);
+    expect(await prisma.recruitingRole.count({ where: { userId, spaceId } })).toBe(4);
   });
 });
