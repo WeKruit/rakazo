@@ -55,6 +55,8 @@ const MAX_SEGMENT = 240;
 /** Research notes ("checked 2026-10-24", "Partial: ...") are prose; their dates are not tenure. */
 const NOTE =
   /:\s|\b(?:checked|accessed|retrieved|verified|as of|snippet|not (?:publicly )?(?:readable|available))\b/i;
+/** Lookup bookkeeping ("Recovered cached profile record (profile lookup …)") is never a position. */
+const PROVENANCE = /\b(?:cached|recovered|profile lookup|provider[- ]reported|search[- ]index)\b/i;
 /** Only explicit links count as a website, so names such as "Node.js" stay words. */
 const WEBSITE = /(?:^|(?<=[\s|,，;；(（]))(?:https?:\/\/|www\.)[^\s|,，;；)）]+/i;
 
@@ -141,6 +143,7 @@ function parseSegment(text: string, kind: TimelineKind, now: Date): TimelineEntr
   const delimited = words.includes("|");
   if (
     words.length > MAX_SEGMENT ||
+    PROVENANCE.test(words) ||
     (!delimited && (/[.!?。]\s+\S.*[.!?。]/.test(words) || NOTE.test(words)))
   )
     return plain;

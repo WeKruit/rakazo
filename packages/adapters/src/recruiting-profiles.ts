@@ -8,6 +8,7 @@ import type {
 import { recruitingCalibrationIdentity } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
+  assignedMcpEndpoints,
   listRecruitingSavedProfiles,
   listRunToolResults,
   saveRecruitingSavedProfile,
@@ -22,9 +23,20 @@ const isRecord = (value: unknown): value is Record_ =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
 /** Profile-data connectors whose person records this adapter understands, by MCP host. */
-const PROVIDERS: Record<string, { name: string; normalize: (record: Record_) => Facts | null }> = {
-  "mcp.coresignal.com": { name: "coresignal", normalize: coresignalProfile },
+const PROVIDERS: Record<
+  string,
+  { name: string; connect: string; normalize: (record: Record_) => Facts | null }
+> = {
+  "mcp.coresignal.com": { name: "coresignal", connect: "coresignal", normalize: coresignalProfile },
 };
+
+function providerFor(endpoint: string) {
+  try {
+    return PROVIDERS[new URL(endpoint).hostname.toLowerCase()] ?? null;
+  } catch {
+    return null;
+  }
+}
 
 function text(value: unknown, max = 4000): string | null {
   if (typeof value === "number" && Number.isFinite(value)) return String(value);
@@ -154,13 +166,7 @@ export function profileFromLookup(
   endpoint: string,
   personKey: string,
 ): { provider: string; facts: Facts } | null {
-  let host: string;
-  try {
-    host = new URL(endpoint).hostname.toLowerCase();
-  } catch {
-    return null;
-  }
-  const provider = PROVIDERS[host];
+  const provider = providerFor(endpoint);
   if (!provider) return null;
   for (const record of records(result)) {
     if (!PROFILE_LINK_KEYS.some((key) => linkedinPersonKey(record[key]) === personKey)) continue;
@@ -187,15 +193,25 @@ export async function executeRecruitingProfilesTool(
   actor: Actor,
   runId: string,
   input: RecruitingProfilesToolInput,
+  botId?: string,
 ) {
   if (input.operation === "list") {
     const saved = await listRecruitingSavedProfiles(prisma, actor, input.candidateKeys);
-    return {
-      items: input.candidateKeys.map((candidateKey) => {
-        const profile = saved.get(candidateKey);
-        return profile ? { ...summary(profile), saved: true } : { candidateKey, saved: false };
-      }),
-    };
+    const items = input.candidateKeys.map((candidateKey) => {
+      const profile = saved.get(candidateKey);
+      return profile ? { ...summary(profile), saved: true } : { candidateKey, saved: false };
+    });
+    const missing = items.some((item) => !item.saved);
+    const connected =
+      !missing ||
+      !botId ||
+      (await assignedMcpEndpoints(prisma, actor, botId)).some((endpoint) => providerFor(endpoint));
+    return connected
+      ? { items }
+      : {
+          items,
+          next: `No profile-data connection is assigned to you. Call request_connection with provider "${Object.values(PROVIDERS)[0]!.connect}" now and wait for the user to connect it; do not ask the research agent for full profiles instead.`,
+        };
   }
   if (!input.candidateKey.startsWith("linkedin:"))
     throw new RecruitingProfileError(
