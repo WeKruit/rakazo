@@ -118,6 +118,7 @@ import {
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
+  recruiterConnectBlock,
   redactSecrets,
   renderBotDirectory,
   resolveActionApprovalDetail,
@@ -129,7 +130,6 @@ import {
   truncatedPlainText,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
-  vendorNeutralServiceName,
   workActivityForTool,
 } from "@rakazo/core";
 import {
@@ -11994,22 +11994,6 @@ async function requeueComputerRun(
     ...runContinueJob(run.id),
     availableAt: new Date(Date.now() + computerRetryDelay(fence)),
   });
-}
-
-/** A recruiter's connect card names what the service does, in their language, not its brand. */
-function recruiterConnectBlock<
-  T extends { kind: "ask"; text: string; connection: { name: string; reason: string } },
->(block: T): T {
-  const name = vendorNeutralServiceName(block.connection.name);
-  return {
-    ...block,
-    text: `连接${name}`,
-    connection: {
-      ...block.connection,
-      name,
-      reason: hideVendorNames(block.connection.reason),
-    },
-  };
 }
 
 function redactBlocks(

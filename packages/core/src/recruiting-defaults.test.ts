@@ -107,6 +107,8 @@ describe("maintained recruiting defaults", () => {
     const skill = (name: string) => RECRUITING_DEFAULT_SKILLS.find((s) => s.name === name)!.body;
     expect(skill("Recruitment sourcing continuation")).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
     const intake = skill("Recruitment intake and handoff");
+    for (const { body } of RECRUITING_DEFAULT_SKILLS)
+      expect(body).toContain("Never name a vendor or tool (Autumn");
     expect(intake).toContain("Calibration rounds are quick searches you run yourself");
     expect(intake).toContain('query starting "category:people"');
     expect(intake).toContain("Always settle the language requirement");
