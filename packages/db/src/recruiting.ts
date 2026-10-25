@@ -238,6 +238,17 @@ export async function readRecruitingPlaybookStep(
 
 export type { RecruitingAssessmentSnapshot } from "@rakazo/contracts";
 
+/** The intent quote is not in the recruiter's current message; says which words to copy. */
+export class RecruitingIntentQuoteError extends IsolationError {
+  constructor(text: string) {
+    const excerpt = text.length > 300 ? `${text.slice(0, 300)}…` : text;
+    super(
+      `intent.quote must be exact words copied from the recruiter's current message, not from a system or agent message. Their current message reads: ${JSON.stringify(excerpt)}`,
+    );
+    this.name = "RecruitingIntentQuoteError";
+  }
+}
+
 export class RecruitingConflictError extends Error {
   constructor(message = "Recruiting revision changed") {
     super(message);
@@ -552,6 +563,56 @@ function validateBriefAuthorship(
     const message = messages.get(id);
     if (!message || !isNativeHumanMessage(message)) throw new IsolationError();
   }
+}
+
+/**
+ * Brief facts may cite a recruiter message by its runtime id ("human-message:<messageId>")
+ * without repeating the full reference. Supply that reference from the native message itself,
+ * quoting its first text block; later validation still checks the quote and human authorship.
+ */
+async function citedHumanMessageSources(
+  tx: Tx,
+  threadId: string,
+  definition: Pick<RecruitingRoleRevision, "sourceRefs" | "criteria"> & {
+    brief?: CreateRoleInput["brief"];
+  },
+): Promise<RecruitingSourceRef[]> {
+  if (!definition.brief) return [];
+  const known = new Set(definitionSources(definition).map((source) => source.id));
+  const missing = new Map<string, string>();
+  for (const item of [
+    ...definition.brief.fields,
+    ...definition.brief.rules,
+    ...definition.brief.searchFilters,
+  ])
+    for (const id of item.sourceRefIds) {
+      const messageId = /^human-message:(.+)$/.exec(id)?.[1];
+      if (messageId && !known.has(id)) missing.set(id, messageId);
+    }
+  if (!missing.size) return [];
+  const messages = await tx.message.findMany({
+    where: { id: { in: [...missing.values()] }, threadId },
+    include: humanMessageInclude,
+  });
+  const readAt = new Date().toISOString();
+  return [...missing].flatMap(([id, messageId]) => {
+    const message = messages.find((row) => row.id === messageId);
+    if (!message || !isNativeHumanMessage(message)) return [];
+    const blocks = message.blocks as { kind: string; text?: string }[];
+    const blockIndex = blocks.findIndex((block) => block.kind === "text" && block.text?.trim());
+    const quote = blocks[blockIndex]?.text;
+    if (!quote) return [];
+    return [
+      {
+        id,
+        kind: "original_material" as const,
+        anchor: { kind: "message" as const, messageId, locator: `blocks[${blockIndex}].text` },
+        readState: "read" as const,
+        readAt,
+        quote,
+      },
+    ];
+  });
 }
 
 function definitionData(input: CreateRoleInput | ReviseRoleInput) {
@@ -1913,11 +1974,17 @@ async function requireCurrentHumanSource(
     steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > source.seq)
   )
     throw new IsolationError();
-  const quoteIndex = (source.blocks as { kind: string; text?: string }[]).findIndex(
+  const sourceBlocks = source.blocks as { kind: string; text?: string }[];
+  const quoteIndex = sourceBlocks.findIndex(
     (block) =>
       block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
   );
-  if (quoteIndex < 0) throw new IsolationError();
+  if (quoteIndex < 0)
+    throw new RecruitingIntentQuoteError(
+      sourceBlocks
+        .flatMap((block) => (block.kind === "text" && block.text ? [block.text] : []))
+        .join("\n"),
+    );
   const humanSource: RecruitingSourceRef = {
     id: `human-message:${source.id}`,
     kind: "original_material",
@@ -2928,6 +2995,9 @@ export async function executeRecruitingRoleMutation(
           preferences: definitionInput.preferences,
           definitionQuestions: definitionInput.definitionQuestions,
         };
+        definition.sourceRefs.push(
+          ...(await citedHumanMessageSources(tx, run.threadId, definition)),
+        );
         workspace =
           definitionInput.operation === "create"
             ? await createRoleInTransaction(

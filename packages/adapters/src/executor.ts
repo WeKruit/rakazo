@@ -189,6 +189,7 @@ import {
   prepareRecruitingCrmBinding,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
+  RecruitingIntentQuoteError,
   RecruitingSourceValidationError,
   readHistory,
   readNativeCrmWriteApproval,
@@ -6468,6 +6469,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               deps.artifacts ? { artifacts: deps.artifacts, context } : undefined,
             );
           const roleError = (error: unknown) => {
+            if (error instanceof RecruitingIntentQuoteError) return { error: error.message };
             if (error instanceof IsolationError)
               return { error: "Recruiting role or source is unavailable" };
             if (error instanceof RecruitingConflictError)

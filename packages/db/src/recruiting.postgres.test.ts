@@ -3231,6 +3231,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       data: { spaceId, userId, name: "Continue", color: "blue" },
     });
     const thread = await prisma.thread.create({ data: { spaceId, userId, botId } });
+    const jd = await prisma.message.create({
+      data: {
+        threadId: thread.id,
+        seq: 0,
+        role: "user",
+        blocks: [{ kind: "text", text: "Customer success manager, B2B SaaS" }],
+      },
+    });
     const human = await prisma.message.create({
       data: {
         threadId: thread.id,
@@ -3297,7 +3305,56 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     );
     expect(saved.status).toBe("saved");
     expect(saved.source?.anchor).toMatchObject({ kind: "message", messageId: human.id });
-    // The nudge text itself never authorizes a change.
+    // A brief may cite the recruiter's message by its runtime id alone.
+    const briefed = await mutateRole(
+      prisma,
+      actor,
+      { runId: run.id, sourceMessageId: nudge.id },
+      {
+        operation: "update",
+        roleId: saved.workspace!.role.id,
+        expectedRevision: saved.workspace!.role.revision,
+        intent: { basis: "direct", quote: "Austin metro" },
+        brief: {
+          searchFilters: [],
+          fields: [
+            {
+              key: "location",
+              value: "Austin metro, hybrid",
+              origin: "user_instruction",
+              state: "known",
+              consequential: true,
+              sourceRefIds: [`human-message:${human.id}`],
+            },
+            {
+              key: "title",
+              value: "Customer success manager",
+              origin: "user_instruction",
+              state: "known",
+              consequential: true,
+              sourceRefIds: [`human-message:${jd.id}`],
+            },
+          ],
+          questions: [],
+          rules: [
+            {
+              criterionId: "experience",
+              origin: "user_instruction",
+              effect: "reject",
+              sourceRefIds: [`human-message:${human.id}`],
+            },
+          ],
+        },
+      },
+    );
+    expect(briefed.status).toBe("saved");
+    expect(briefed.workspace?.revision.sourceRefs).toContainEqual(
+      expect.objectContaining({
+        id: `human-message:${jd.id}`,
+        quote: "Customer success manager, B2B SaaS",
+      }),
+    );
+    // The nudge text itself never authorizes a change, and the error names the words to copy.
     await expect(
       mutateRole(
         prisma,
@@ -3309,7 +3366,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           intent: { basis: "direct", quote: "继续下一步" },
         },
       ),
-    ).rejects.toThrow(IsolationError);
+    ).rejects.toThrow(/Austin metro, hybrid three days/);
   });
 
   it("verifies native human authorship and current source atomically for role tools", async () => {
