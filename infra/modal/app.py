@@ -9,6 +9,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -17,6 +18,11 @@ from urllib.parse import urlsplit
 import modal
 
 ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/app")
+# The container runs this file outside the checkout; its source copy lives in /app.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from infra.modal.release_config import check_staging_database, reject_staging_dotenv, release_profile, staging_environment  # noqa: E402
+RELEASE_PROFILE = release_profile(os.environ)
 APP_NAME = os.environ.get("MODAL_APP_NAME", "rakazo-recruiting")
 SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")
 VOLUME_NAME = os.environ.get("MODAL_VOLUME_NAME", f"{APP_NAME}-files")
@@ -37,7 +43,7 @@ def source_revision() -> str:
 
 
 SOURCE_REVISION = source_revision() if modal.is_local() else "unknown"
-files = modal.Volume.from_name(VOLUME_NAME, create_if_missing=True)
+files = modal.Volume.from_name(VOLUME_NAME, create_if_missing=False)
 config = modal.Secret.from_name(SECRET_NAME)
 image = (
     modal.Image.from_registry("node:24.22.0-bookworm-slim", add_python="3.11")
@@ -81,7 +87,9 @@ image = (
     image=image,
     secrets=[config],
     volumes={"/data": files},
-    env={"MODAL_APP_NAME": APP_NAME, "RAKAZO_GIT_SHA": SOURCE_REVISION},
+    env={"MODAL_APP_NAME": APP_NAME, "MODAL_SECRET_NAME": SECRET_NAME, "MODAL_VOLUME_NAME": VOLUME_NAME,
+         "MODAL_ENVIRONMENT": os.environ.get("MODAL_ENVIRONMENT", "main"),
+         "RAKAZO_RELEASE_PROFILE": RELEASE_PROFILE, "RAKAZO_GIT_SHA": SOURCE_REVISION},
     port=8000,
     compute_region="us-west",
     unauthenticated=True,  # Native Better Auth protects application/API routes.
@@ -122,6 +130,12 @@ class Recruiting:
             "WEB_PORT": "8000",
             "API_PROXY_TARGET": "http://127.0.0.1:3100",
         }
+        if RELEASE_PROFILE == "staging":
+            env = staging_environment(os.environ, origin, os.environ.get("RAKAZO_GIT_SHA", ""))
+            Path(env["HOME"]).mkdir(parents=True, exist_ok=True)
+            # Prisma loads dotenv independently. Verify isolation before any migration.
+            reject_staging_dotenv(ROOT)
+            check_staging_database(env, ROOT)
         # Same migration-before-API order as the upstream Compose entrypoint.
         phase("migrate.start")
         migrate = time.monotonic()

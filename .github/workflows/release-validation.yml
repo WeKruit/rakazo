@@ -1,0 +1,63 @@
+name: release-validation
+
+on:
+  pull_request:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: release-validation-${{ github.event.pull_request.number || github.event.workflow_run.head_sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  staging:
+    name: Synthetic validation
+    if: >-
+      github.repository == 'WeKruit/rakazo' &&
+      (github.event_name == 'pull_request' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ env.SOURCE_SHA }}
+          persist-credentials: false
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Install native PostgreSQL tools
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-16
+      - name: Validate release safeguards
+        run: python3 -m unittest discover -s infra/release -p 'test_*.py' -v
+      - name: Run isolated synthetic validation
+        run: python3 infra/release/validate.py --sha "$SOURCE_SHA" --pg-bin /usr/lib/postgresql/16/bin
+      # PR code receives no credentials, deployment environment or promotable artifact.
+      # Only a main revision whose complete CI and synthetic validation passed can be packaged.
+      - name: Package tested main source
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python3 infra/release/release.py package --run-id "$CI_RUN_ID" --directory "$RUNNER_TEMP/release"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: github.event_name == 'workflow_run'
+        with:
+          name: release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/release/
+          retention-days: 30
+          if-no-files-found: error

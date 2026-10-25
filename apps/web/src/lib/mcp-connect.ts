@@ -2,11 +2,13 @@ import { t } from "@lingui/core/macro";
 import type { McpOAuthConfig } from "@rakazo/contracts";
 import { fetchAccountSecurity } from "./account-security";
 import { authClient } from "./auth";
+import { MCP_OAUTH_CHANNEL } from "./mcp-oauth-channel";
 import { rpc, selectedSpaceId } from "./rpc";
 import { runSsoFlow } from "./sso-flow";
 import { authErrorText } from "./user-error";
 
-export const MCP_OAUTH_CHANNEL = "rakazo-mcp-oauth";
+export { MCP_OAUTH_CHANNEL };
+
 const MCP_OAUTH_TIMEOUT_MS = 10 * 60_000;
 
 export type McpOauthResult =

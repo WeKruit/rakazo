@@ -46,8 +46,10 @@ describe("server image publish workflow", () => {
     const build = workflow.jobs.build;
     const publish = workflow.jobs.publish;
     expect(validate.if).toBe("github.event_name == 'pull_request'");
-    expect(build.if).toBe("github.event_name != 'pull_request'");
-    expect(publish.if).toBe("github.event_name != 'pull_request'");
+    expect(build.if).toBe(
+      "github.event_name != 'pull_request' && vars.SERVER_IMAGE_PUBLISH_ENABLED == 'true'",
+    );
+    expect(publish.if).toBe(build.if);
     expect(workflowText).toContain("push: false");
     for (const match of workflowText.matchAll(/uses:\s+([^\s#]+)/g)) {
       expect(match[1], match[1]).toMatch(/@[0-9a-f]{40}$/);

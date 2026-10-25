@@ -1,0 +1,72 @@
+name: staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      validation_run_id:
+        description: Successful main release-validation run containing the candidate
+        required: true
+        type: string
+      expected_sha:
+        description: Full tested product SHA approved for hosted staging
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: hosted-staging
+  cancel-in-progress: false
+
+jobs:
+  staging:
+    name: Hosted staging
+    if: github.repository == 'WeKruit/rakazo' && github.ref == 'refs/heads/main'
+    environment: staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      VALIDATION_RUN_ID: ${{ inputs.validation_run_id }}
+      STAGING_DEPLOY_ENABLED: ${{ vars.STAGING_DEPLOY_ENABLED }}
+      STAGING_DEPLOYMENT_HOLD: ${{ vars.STAGING_DEPLOYMENT_HOLD }}
+      STAGING_RELEASE_APPROVAL: ${{ secrets.STAGING_RELEASE_APPROVAL }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Require staging activation and preserve the hold
+        run: |
+          test "$STAGING_DEPLOY_ENABLED" = true
+          test "$STAGING_DEPLOYMENT_HOLD" = clear
+          test -n "$STAGING_RELEASE_APPROVAL"
+      - name: Fetch and verify exact validated candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 infra/release/release.py fetch-validation --run-id "$VALIDATION_RUN_ID" --sha "$EXPECTED_SHA" --directory "$RUNNER_TEMP/candidate"
+      - name: Install existing Modal CLI
+        run: python3 -m pip install modal==1.6.2
+      - name: Deploy isolated staging and verify readiness
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ENVIRONMENT_AUDIT_TOKEN: ${{ secrets.ENVIRONMENT_AUDIT_TOKEN }}
+          MODAL_TOKEN_ID: ${{ secrets.STAGING_MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.STAGING_MODAL_TOKEN_SECRET }}
+          STAGING_MODAL_APP_NAME: ${{ vars.STAGING_MODAL_APP_NAME }}
+          STAGING_MODAL_SECRET_NAME: ${{ vars.STAGING_MODAL_SECRET_NAME }}
+          STAGING_MODAL_VOLUME_NAME: ${{ vars.STAGING_MODAL_VOLUME_NAME }}
+          STAGING_ORIGIN: ${{ vars.STAGING_ORIGIN }}
+          MODAL_ENVIRONMENT: staging
+          RAKAZO_RELEASE_PROFILE: staging
+        run: python3 infra/release/release.py stage --directory "$RUNNER_TEMP/candidate" --sha "$EXPECTED_SHA"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: hosted-staging-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/candidate/staging.json
+          retention-days: 30
+          if-no-files-found: error
