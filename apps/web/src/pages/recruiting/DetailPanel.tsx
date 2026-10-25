@@ -38,6 +38,7 @@ import {
   withSavedProfile,
 } from "./profile";
 import { organizationLogo, profileAssets, profileContentFields } from "./profileAssets";
+import { organizationHosts } from "./quickOutput";
 import { RetryNotice } from "./RetryNotice";
 import { usePersonSequenceFacts } from "./SequenceStats";
 import { SkillEvidence } from "./SkillEvidence";
@@ -278,6 +279,10 @@ export function RecruitingDetailPanel({
   const sections = candidateSections(profileContentFields(fields), {
     roleRevisionId: candidate?.latestSource?.roleRevisionId,
     revision: current.criterionRevision,
+  });
+  const orgHosts = organizationHosts(sections.quick.entities, {
+    name: company,
+    host: sections.company.host,
   });
   const companyLogo =
     organizationLogo(company ?? undefined, assets.company) ?? websiteFavicon(sections.company.host);
@@ -625,6 +630,7 @@ export function RecruitingDetailPanel({
                     Sources={Sources}
                     asset={assets.company}
                     link={assets.companyLink}
+                    hosts={orgHosts}
                   />
                 </Section>
               ) : null}
@@ -635,6 +641,7 @@ export function RecruitingDetailPanel({
                     Sources={Sources}
                     asset={assets.school}
                     link={assets.schoolLink}
+                    hosts={orgHosts}
                   />
                 </Section>
               ) : null}

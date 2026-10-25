@@ -7,6 +7,7 @@ import type { ProfileAssets } from "./profileAssets";
 import { organizationLogo, profileImageUrl } from "./profileAssets";
 import type { TimelineEntry, TimelineKind } from "./profileTimelineModel";
 import { parseTimeline, structuredProfileTimeline, timelineStats } from "./profileTimelineModel";
+import { organizationKey } from "./quickOutput";
 
 type TimelineField = {
   label: string;
@@ -64,12 +65,14 @@ function Row({
   kind,
   asset,
   link,
+  hosts,
   Sources,
 }: {
   entry: TimelineEntry;
   kind: TimelineKind;
   asset?: ProfileAssets["company"];
   link?: ProfileAssets["companyLink"];
+  hosts?: ReadonlyMap<string, string>;
   Sources: SourcesRenderer;
 }) {
   const duration = useDuration();
@@ -83,12 +86,14 @@ function Row({
       : kind === "experience"
         ? (entry.secondary ?? entry.primary)
         : entry.primary;
+  // An entry without its own site uses the site returned for the same organization elsewhere.
+  const website = entry.website ?? (logoName ? hosts?.get(organizationKey(logoName)) : undefined);
   const href =
     profileImageUrl(entry.organizationUrl) ??
-    websiteUrl(entry.website) ??
+    websiteUrl(website) ??
     organizationLogo(logoName ?? undefined, link ?? null);
   const organization = (name: string) => {
-    const badge = <OrgBadge name={name} host={entry.website} logo={false} />;
+    const badge = <OrgBadge name={name} host={website} logo={false} />;
     return href ? (
       <a href={href} target="_blank" rel="noreferrer">
         {badge}
@@ -106,7 +111,7 @@ function Row({
           src={
             profileImageUrl(entry.logoUrl) ??
             organizationLogo(logoName, asset ?? null) ??
-            websiteFavicon(entry.website)
+            websiteFavicon(website)
           }
         />
       ) : (
@@ -162,12 +167,14 @@ function Timeline({
   Sources,
   asset,
   link,
+  hosts,
 }: {
   fields: readonly TimelineField[];
   kind: TimelineKind;
   Sources: SourcesRenderer;
   asset?: ProfileAssets["company"];
   link?: ProfileAssets["companyLink"];
+  hosts?: ReadonlyMap<string, string>;
 }) {
   const now = useMemo(() => new Date(), []);
   const parsed = useMemo(
@@ -215,6 +222,7 @@ function Timeline({
                   kind={kind}
                   asset={asset}
                   link={link}
+                  hosts={hosts}
                   Sources={Sources}
                 />
               ))}
@@ -253,6 +261,7 @@ export function ExperienceTimeline(props: {
   Sources: SourcesRenderer;
   asset?: ProfileAssets["company"];
   link?: ProfileAssets["companyLink"];
+  hosts?: ReadonlyMap<string, string>;
 }) {
   return <Timeline {...props} kind="experience" />;
 }
@@ -262,6 +271,7 @@ export function EducationTimeline(props: {
   Sources: SourcesRenderer;
   asset?: ProfileAssets["company"];
   link?: ProfileAssets["companyLink"];
+  hosts?: ReadonlyMap<string, string>;
 }) {
   return <Timeline {...props} kind="education" />;
 }
