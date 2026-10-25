@@ -61,7 +61,8 @@ export function withSpaceHeaders(
 
 /** Recruiting reads in flight at once; the rest wait so one page load cannot drain the API's DB pool. */
 export const RECRUITING_READ_LIMIT = 4;
-const WRITE_PREFIX = /^(set|save|approve|confirm|edit|create|update|delete|remove|archive|restore|sync|bind|send|record)/i;
+const WRITE_PREFIX =
+  /^(set|save|approve|confirm|edit|create|update|delete|remove|archive|restore|sync|bind|send|record)/i;
 let recruitingReadsInFlight = 0;
 const recruitingReadQueue: Array<() => void> = [];
 
