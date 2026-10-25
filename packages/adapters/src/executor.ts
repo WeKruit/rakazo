@@ -4611,12 +4611,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         const applyTool = async (
           name: string,
-          args: Record<string, unknown>,
+          rawArgs: Record<string, unknown>,
           executionId: string,
           _route?: unknown,
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
+          // instead of costing a rejected call and a retry.
+          let args =
+            name === "recruiting_research" && Object.hasOwn(rawArgs, "roleId")
+              ? Object.fromEntries(Object.entries(rawArgs).filter(([key]) => key !== "roleId"))
+              : rawArgs;
           if (handedOff) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",

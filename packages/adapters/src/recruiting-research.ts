@@ -28,8 +28,9 @@ import {
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
-import { IsolationError, listRecruitingResearch } from "@rakazo/db";
+import { IsolationError, listRecruitingResearch, listRunToolResults } from "@rakazo/db";
 import { readActorArtifact } from "./artifact-read.js";
+import { isPeopleSearchEndpoint } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -124,6 +125,49 @@ export async function requireAutumnTaskOwnership(
   }
   throw new IsolationError(
     "This research is not available in your workspace. Use scoped research history or start new research in this conversation.",
+  );
+}
+
+/**
+ * A role's first calibration rounds come from the built-in people search, which answers in
+ * seconds. Before any round is accepted, a new research task on a role that has none yet starts
+ * only after a people search ran in this run (to top up a short one). Roles that already have
+ * research keep their existing flow.
+ */
+export async function requireQuickSearchBeforeResearch(
+  prisma: PrismaClient,
+  context: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  server: Pick<McpServer, "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<void> {
+  if (
+    server.transport !== "streamable_http" ||
+    server.endpoint !== "https://api.autumn.ai/mcp" ||
+    toolName !== "research" ||
+    args.task_id !== undefined ||
+    !context.runId
+  )
+    return;
+  const scope = { spaceId: context.spaceId, userId: context.userId };
+  const run = await prisma.run.findFirst({
+    where: { id: context.runId, ...scope },
+    select: { thread: { select: { activeRecruitingRoleId: true } } },
+  });
+  const roleId = run?.thread.activeRecruitingRoleId;
+  if (!roleId) return;
+  const [searchAssigned, earlierResearch, acceptedRound] = await Promise.all([
+    prisma.botMcpServer.count({
+      where: { ...scope, server: { ...scope, slug: "people-search", enabled: true } },
+    }),
+    prisma.recruitingResearchTask.count({ where: { roleId } }),
+    prisma.recruitingCalibrationRound.count({ where: { roleId, approvedAt: { not: null } } }),
+  ]);
+  if (!searchAssigned || earlierResearch || acceptedRound) return;
+  const calls = await listRunToolResults(prisma, { ...scope } as Actor, context.runId);
+  if (calls.some((call) => isPeopleSearchEndpoint(call.endpoint))) return;
+  throw new IsolationError(
+    "Calibration rounds use the built-in people search, not a research task: Main calls web_search_exa (two or three searches in one step), then recruiting_research save_search and calibration_round. A teammate without that search hands the round back to Main. Research starts after a round is accepted, or to top up a short people search in the same run.",
   );
 }
 
