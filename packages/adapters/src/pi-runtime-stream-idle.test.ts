@@ -55,6 +55,28 @@ const context = { messages: [] } as Context;
 describe("Codex stream idle watchdog", () => {
   afterEach(() => vi.useRealTimers());
 
+  it("ends a stream whose transport ignores the abort", async () => {
+    vi.useFakeTimers();
+    const watchdog = codexStreamIdleWatchdog(undefined, 1_000, 60_000);
+    const inner = new AssistantMessageEventStream();
+    const stream = watchdog.wrap(inner, codexModel as Model<Api> & { id: string });
+    const iterator = stream[Symbol.asyncIterator]();
+    const first = iterator.next();
+    inner.push({ type: "start", partial: assistantMessage({ content: [] }) });
+    await first;
+    const ended = iterator.next();
+    await vi.advanceTimersByTimeAsync(1_000 + 5_000);
+    expect((await ended).value).toEqual({
+      type: "error",
+      reason: "error",
+      error: expect.objectContaining({
+        stopReason: "error",
+        errorMessage: CODEX_STREAM_IDLE_TIMEOUT_MESSAGE,
+      }),
+    });
+    await expect(stream.result()).resolves.toMatchObject({ stopReason: "error" });
+  });
+
   it("caps a stream that keeps sending events but never finishes", async () => {
     vi.useFakeTimers();
     const watchdog = codexStreamIdleWatchdog(undefined, 1_000, 5_000);

@@ -32,8 +32,12 @@ export async function reconcileRecruitingQuestions(deps: {
   });
   for (const run of runs) {
     const event = await deps.prisma.$transaction(async (tx) => {
-      // Same lock as answering a card: an answer wins before the nudge or follows it.
-      await tx.$queryRaw`SELECT id FROM threads WHERE id = ${run.threadId} FOR UPDATE`;
+      // Same lock as answering a card: an answer wins before the nudge or follows it. A thread
+      // busy with other work is skipped until the next pass rather than held in this transaction.
+      const locked = await tx.$queryRaw<
+        { id: string }[]
+      >`SELECT id FROM threads WHERE id = ${run.threadId} FOR UPDATE SKIP LOCKED`;
+      if (!locked.length) return null;
       const waiting = await tx.run.findFirst({
         where: { id: run.id, status: "waiting_input", updatedAt: run.updatedAt },
         select: { id: true },

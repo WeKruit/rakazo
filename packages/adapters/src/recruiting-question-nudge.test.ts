@@ -13,7 +13,7 @@ function fixture(options: { approval?: boolean; answered?: boolean; previous?: b
     updatedAt: new Date("2026-10-23T00:00:00Z"),
   };
   const tx = {
-    $queryRaw: vi.fn(async () => []),
+    $queryRaw: vi.fn(async () => [{ id: "thread" }]),
     run: { findFirst: vi.fn(async () => (options.answered ? null : { id: run.id })) },
     message: {
       findFirst: vi.fn(async () => ({
@@ -65,6 +65,13 @@ describe("recruiting question nudge", () => {
       data: { unread: true },
     });
     expect(f.notify).toHaveBeenCalledWith("thread", 9);
+  });
+  it("skips a thread another transaction holds instead of waiting on it", async () => {
+    const f = fixture();
+    f.tx.$queryRaw.mockResolvedValueOnce([]);
+    await reconcileRecruitingQuestions(f.deps);
+    expect(f.tx.run.findFirst).not.toHaveBeenCalled();
+    expect(f.tx.thread.update).not.toHaveBeenCalled();
   });
   it.each([{ approval: true }, { answered: true }, { previous: true }])(
     "does not nudge an approval, answered card or duplicate: %j",
