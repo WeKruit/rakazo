@@ -117,7 +117,7 @@ export async function runTrial(
   const captureUsage = async () => {
     if (!handles) return;
     const usage = await handles.prisma.usageRecord.findMany({
-      where: { OR: actorScopes(actors) },
+      where: { OR: actorScopes(actors), unit: "tokens" },
     });
     for (const row of usage)
       seenUsage.set(row.id, {

@@ -892,6 +892,42 @@ export const UsageRecordSchema = z.object({
   createdAt: z.string(),
 });
 
+/** Spend in neutral units; `estimatedUsd` and service names are only sent to the deployment owner. */
+const UsageAmountsSchema = z.object({
+  credits: z.number().nonnegative(),
+  calls: z.number().int().nonnegative(),
+  tokens: z.number().int().nonnegative(),
+  estimatedUsd: z.number().nonnegative().optional(),
+});
+export type UsageAmounts = z.infer<typeof UsageAmountsSchema>;
+
+export const UsageCostsSchema = z.object({
+  total: UsageAmountsSchema,
+  month: UsageAmountsSchema,
+  /** The last 30 days, oldest first, only days with spend. */
+  days: z.array(UsageAmountsSchema.extend({ day: z.string() })),
+  roles: z.array(
+    UsageAmountsSchema.extend({
+      roleId: z.string(),
+      title: z.string().nullable(),
+      /** A calibration round includes the work that prepared it; `scale` is after approval. */
+      rounds: z.array(
+        UsageAmountsSchema.extend({
+          round: z.number().int().positive().nullable(),
+          scale: z.boolean(),
+        }),
+      ),
+    }),
+  ),
+  services: z
+    .array(z.object({ service: z.string(), unit: z.string(), quantity: z.number() }))
+    .optional(),
+  accounts: z
+    .array(UsageAmountsSchema.extend({ userId: z.string(), email: z.string().nullable() }))
+    .optional(),
+});
+export type UsageCosts = z.infer<typeof UsageCostsSchema>;
+
 export const COMPUTER_UPDATE_STAGES = [
   "preparing",
   "saving",

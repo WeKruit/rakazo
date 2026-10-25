@@ -1138,9 +1138,20 @@ model UsageRecord {
   /// Durable attribution, deliberately without lifecycle foreign keys.
   parentRunId       String?
   agentId           String?
+  /// "tokens" for model calls (the token columns), "credits" for research credits and
+  /// "calls" for connector calls (`quantity`). Credits and calls rows are written by database
+  /// triggers on research actions and completed connector effects, so every execution path
+  /// records them; `provider` is the service slug and `model` the tool or action kind.
+  unit              String   @default("tokens")
+  quantity          Float?
+  /// The recruiting role the spend served; filled from the run's thread on insert and kept
+  /// without a foreign key so it outlives the run and the role.
+  roleId            String?
   createdAt         DateTime @default(now())
 
   @@index([spaceId, userId, createdAt])
+  @@index([spaceId, userId, unit, createdAt])
+  @@index([roleId, createdAt])
   @@map("usage_records")
 }
 

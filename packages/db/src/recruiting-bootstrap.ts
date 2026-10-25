@@ -41,6 +41,18 @@ const RECRUITING_SERVICES = [
   },
 ];
 
+/**
+ * Plan list prices of the platform services by slug, used only for the deployment owner's
+ * spend estimate. The research plan is US$850 a month for 100,000 credits; people search
+ * runs on a free tier. Model calls carry their own cost on each usage row.
+ */
+export const RECRUITING_SERVICE_UNIT_PRICES_USD: Readonly<
+  Record<string, { credits?: number; calls?: number }>
+> = {
+  autumn: { credits: 850 / 100_000 },
+  "people-search": { calls: 0 },
+};
+
 const CRM_READ_TOOLS = [
   "whoami",
   "list_crm_memberships",

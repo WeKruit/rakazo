@@ -123,12 +123,6 @@ msgstr ""
 msgid "{0} rollup hours"
 msgstr "{0} heures de regroupement"
 
-#. placeholder {0}: usage.runs
-#. placeholder {1}: usage.totalTokens ?? "—"
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "{0} runs · {1} tokens"
-msgstr "{0} exécutions · {1} jetons"
-
 #. placeholder {0}: candidate.discoveryCount
 #: src/pages/RecruitingPanel.tsx
 msgid "{0} saved discoveries"
@@ -345,6 +339,7 @@ msgstr "ID de compte"
 msgid "Account label"
 msgstr "Libellé du compte"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr "Comptes"
@@ -608,6 +603,7 @@ msgstr ""
 msgid "All statuses"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Artifacts.tsx
 msgid "All time"
 msgstr "Toute la période"
@@ -1105,6 +1101,10 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 msgid "Built-in"
 msgstr "Intégré"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "By role"
+msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Calendar"
@@ -2975,6 +2975,10 @@ msgstr "Supprimer l'espace"
 msgid "deleted"
 msgstr "supprimé"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Deleted role"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Deleting…"
@@ -3388,6 +3392,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Error details"
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Estimated cost"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
@@ -4153,6 +4161,10 @@ msgstr ""
 msgid "Last {count} weeks"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Last 30 days"
+msgstr ""
+
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Last 7 days · UTC"
 msgstr ""
@@ -4669,8 +4681,8 @@ msgid "Model options"
 msgstr "Options du modèle"
 
 #: src/pages/AccountSettingsOverlay.tsx
-msgid "Model spend uses your provider keys."
-msgstr "La consommation du modèle utilise vos clés de fournisseur."
+msgid "Model tokens"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model updated."
@@ -6741,6 +6753,11 @@ msgid "Rotate key"
 msgstr "Tourner la clé"
 
 #. placeholder {0}: round.round
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Round {0}"
+msgstr ""
+
+#. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Round {0} · {1} people"
@@ -6754,6 +6771,10 @@ msgstr ""
 #. placeholder {0}: round.round
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Round {0} looks good. Start finding more people."
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Rounds"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -7007,6 +7028,10 @@ msgstr "Enregistrement en cours…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "Dites oui ou non, ou répondez en une phrase."
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Scaling"
+msgstr ""
+
 #. placeholder {0}: person.name
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Schedule an interview with {0}. Check availability and prepare the invitation here for my approval; do not send it yet."
@@ -7094,6 +7119,10 @@ msgstr ""
 msgid "Search contacts"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Search credits"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Search Criteria"
 msgstr ""
@@ -7160,6 +7189,10 @@ msgstr ""
 #. placeholder {0}: filters.query.trim()
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Searches"
 msgstr ""
 
 #: src/components/LiveWork.tsx
@@ -7336,6 +7369,10 @@ msgstr "URL du serveur"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Services"
 msgstr ""
 
 #: src/components/call/CallCard.tsx
@@ -8052,6 +8089,7 @@ msgstr ""
 msgid "this Mac"
 msgstr "ce Mac"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Artifacts.tsx
 msgid "This month"
 msgstr "Ce mois-ci"
@@ -8386,6 +8424,10 @@ msgstr ""
 #: src/pages/Shell.tsx
 msgid "Usage"
 msgstr "Utilisation"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Usage totals"
+msgstr ""
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "Use {hostLabel}"
