@@ -2938,218 +2938,45 @@ describe("native recruiting package approval", () => {
     expect(f.pauseRunForInput).toHaveBeenCalledOnce();
     expect(f.results.at(-1)).toEqual(result);
   });
-  it("renders only the verified native role and ten saved people without changing effect arguments", async () => {
-    const f = approvalFixture();
-    const profiles = Array.from({ length: 10 }, (_, index) => ({
-      candidateKey: `linkedin:example-${index}`,
-      linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-      evidenceUrl: `https://example.test/evidence/${index}`,
-      source: {
-        effectId: "raw-read",
-        rowIndex: index,
-        roleRevisionId: "role-revision",
-        providerTaskId: "provider-task",
-        artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
-      },
-    }));
-    const request = {
-      stage: "calibration",
-      roleId: "role-example",
-      expectedRoleRevision: 2,
-      documentsApprovalEffectId: "g1",
-      profiles,
-      ruleChanges: ["Keep original evidence."],
-    };
-    recruitingApproval.prepare.mockResolvedValue({
-      files: [file],
-      roleTitle: "Verified role",
-      profiles: profiles.map((profile, index) => ({
-        name: `Verified person ${index}`,
-        linkedinUrl: profile.linkedinUrl,
-        evidenceUrl: profile.evidenceUrl,
-      })),
-    });
-    f.setCalls([{ args: request, executionId: "native-g2" }]);
-    await f.run();
-    const paused = f.pauseRunForInput.mock.calls[0]![0] as PauseRunForInput;
-    const card = paused.blocks.find((block) => block.kind === "ask");
-    expect(card).toMatchObject({
-      actions: [
-        { id: "allow", label: "Approve calibration" },
-        { id: "deny", label: "Deny" },
-      ],
-    });
-    expect(card?.kind === "ask" && card.detail).toContain("Role: Verified role");
-    expect(card?.kind === "ask" && card.detail).toContain("Verified person 9");
-    expect(card?.kind === "ask" && card.detail).not.toMatch(
-      /Assessment version|raw-read|raw-artifact|provider-task|role-revision/,
-    );
-    expect(f.effects[0]!.request).toEqual(request);
-  });
-  it("fills in the approved documents when a calibration request omits them", async () => {
-    const f = approvalFixture();
-    const profiles = Array.from({ length: 10 }, (_, index) => ({
-      candidateKey: `linkedin:example-${index}`,
-      linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-      evidenceUrl: `https://example.test/evidence/${index}`,
-      source: {
-        effectId: "raw-read",
-        rowIndex: index,
-        roleRevisionId: "role-revision",
-        providerTaskId: "provider-task",
-        artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
-      },
-    }));
-    const request = {
-      stage: "calibration",
-      roleId: "role-example",
-      expectedRoleRevision: 2,
-      profiles,
-      ruleChanges: [],
-    };
-    const findFirst = vi.fn(async () => ({ id: "g1-approved" }));
-    Object.assign(f.prisma.externalEffect, { findFirst });
-    recruitingApproval.prepare.mockResolvedValue({
-      files: [file],
-      roleTitle: "Verified role",
-      profiles: profiles.map((profile, index) => ({
-        name: `Verified person ${index}`,
-        linkedinUrl: profile.linkedinUrl,
-        evidenceUrl: profile.evidenceUrl,
-      })),
-    });
-    f.setCalls([{ args: request, executionId: "native-g2-lookup" }]);
-    await f.run();
-    expect(findFirst).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          kind: "recruiting_request_approval",
-          status: "completed",
-        }),
-      }),
-    );
-    expect(f.effects[0]!.request).toEqual({ ...request, documentsApprovalEffectId: "g1-approved" });
-
-    const missing = approvalFixture();
-    Object.assign(missing.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
-    missing.setCalls([{ args: request, executionId: "native-g2-missing" }]);
-    await missing.run();
-    expect(missing.results.at(-1)).toEqual({
-      error:
-        "This role revision has no approved documents yet. Request the documents approval first.",
-    });
-    expect(missing.effects).toHaveLength(0);
-  });
-  it("fills in the recorded calibration round when a request omits the profiles", async () => {
-    const f = approvalFixture();
+  it("never opens an approval card for a calibration round", async () => {
     const keys = Array.from({ length: 10 }, (_, index) => `linkedin:example-${index}`);
-    Object.assign(f.prisma, {
-      recruitingRoleRevision: { findFirst: vi.fn(async () => ({ id: "role-revision" })) },
-      recruitingCalibrationRound: { findFirst: vi.fn(async () => ({ candidateKeys: keys })) },
-      recruitingCandidateOccurrence: {
-        findFirst: vi.fn(async ({ where }: { where: { candidateKey: string } }) => {
-          const index = keys.indexOf(where.candidateKey);
-          return {
-            rowIndex: index,
-            linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-            evidenceUrls: [`https://example.test/evidence/${index}`],
-            page: {
-              effectId: "raw-read",
-              roleRevisionId: "role-revision",
-              taskId: null,
-              actionId: null,
-              artifactId: "raw-artifact",
-              artifactHash: "a".repeat(64),
-              requestCursor: null,
-              outputId: null,
-              observedAt: new Date("2026-10-24T00:00:00Z"),
-              effect: {
-                request: [
-                  "__rakazoCatalogTool",
-                  "direct",
-                  {
-                    route: {
-                      connectorId: "mcp",
-                      resourceId: "research-server",
-                      resourceRevision: 1,
-                      toolName: "get_rows",
-                    },
-                    args: { task_id: "provider-task" },
-                  },
-                ],
-              },
-            },
-          };
-        }),
-      },
-    });
-    Object.assign(f.prisma.externalEffect, {
-      findFirst: vi.fn(async () => ({ id: "g1-approved" })),
-    });
-    recruitingApproval.prepare.mockResolvedValue({
-      files: [file],
-      roleTitle: "Verified role",
-      profiles: keys.map((_, index) => ({
-        name: `Verified person ${index}`,
-        linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
-        evidenceUrl: `https://example.test/evidence/${index}`,
-      })),
-    });
-    const request = { stage: "calibration", roleId: "role-example", expectedRoleRevision: 2 };
-    f.setCalls([{ args: request, executionId: "native-g2-round" }]);
-    await f.run();
-    const stored = f.effects[0]!.request as { profiles: unknown[]; ruleChanges: unknown[] };
-    expect(stored.ruleChanges).toEqual([]);
-    expect(stored.profiles).toHaveLength(10);
-    expect(stored.profiles[3]).toEqual({
-      candidateKey: "linkedin:example-3",
-      linkedinUrl: "https://www.linkedin.com/in/example-3",
-      evidenceUrl: "https://example.test/evidence/3",
+    const profiles = keys.map((candidateKey, index) => ({
+      candidateKey,
+      linkedinUrl: `https://www.linkedin.com/in/example-${index}`,
+      evidenceUrl: `https://example.test/evidence/${index}`,
       source: {
-        providerTaskId: "provider-task",
-        roleRevisionId: "role-revision",
         effectId: "raw-read",
-        rowIndex: 3,
+        rowIndex: index,
+        roleRevisionId: "role-revision",
+        providerTaskId: "provider-task",
         artifactRef: { artifactId: "raw-artifact", sha256: "a".repeat(64) },
       },
-    });
-
-    const none = approvalFixture();
-    Object.assign(none.prisma, {
-      recruitingRoleRevision: { findFirst: vi.fn(async () => ({ id: "role-revision" })) },
-      recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
-    });
-    Object.assign(none.prisma.externalEffect, {
-      findFirst: vi.fn(async () => ({ id: "g1-approved" })),
-    });
-    none.setCalls([{ args: request, executionId: "native-g2-no-round" }]);
-    await none.run();
-    expect(none.results.at(-1)).toEqual({
-      error:
-        "No calibration round of ten people is recorded for this role revision. Record the round first.",
-    });
-    expect(none.effects).toHaveLength(0);
-
-    // A quick people-search round has no research-task sources: point to round acceptance.
-    for (const [approvedAt, expected] of [
-      [null, "accepted without this card"],
-      [new Date("2026-10-25T00:00:00Z"), "already accepted the latest calibration round"],
+    }));
+    const base = { stage: "calibration", roleId: "role-example", expectedRoleRevision: 2 };
+    for (const [round, request, expected] of [
+      [null, base, "Record the ten with recruiting_research calibration_round"],
+      [{ approvedAt: null, candidateKeys: keys }, base, "never use an approval card"],
+      [
+        { approvedAt: null, candidateKeys: keys },
+        { ...base, documentsApprovalEffectId: "g1", profiles, ruleChanges: [] },
+        "never use an approval card",
+      ],
+      [
+        { approvedAt: new Date("2026-10-25T00:00:00Z"), candidateKeys: keys },
+        base,
+        "already accepted the latest calibration round",
+      ],
     ] as const) {
-      const quick = approvalFixture();
-      Object.assign(quick.prisma, {
-        recruitingRoleRevision: { findFirst: vi.fn(async () => ({ id: "role-revision" })) },
-        recruitingCalibrationRound: {
-          findFirst: vi.fn(async () => ({ approvedAt, candidateKeys: keys })),
-        },
-        recruitingCandidateOccurrence: { findFirst: vi.fn(async () => null) },
+      const f = approvalFixture();
+      Object.assign(f.prisma, {
+        recruitingCalibrationRound: { findFirst: vi.fn(async () => round) },
       });
-      Object.assign(quick.prisma.externalEffect, {
-        findFirst: vi.fn(async () => ({ id: "g1-approved" })),
-      });
-      quick.setCalls([{ args: request, executionId: `native-g2-quick-${String(approvedAt)}` }]);
-      await quick.run();
-      expect((quick.results.at(-1) as { error: string }).error).toContain(expected);
-      expect(quick.effects).toHaveLength(0);
+      f.setCalls([{ args: request, executionId: `calibration-${expected}-${keys.length}` }]);
+      await f.run();
+      expect((f.results.at(-1) as { error: string }).error).toContain(expected);
+      expect(f.effects).toHaveLength(0);
+      expect(f.pauseRunForInput).not.toHaveBeenCalled();
+      expect(recruitingApproval.prepare).not.toHaveBeenCalled();
     }
   });
   it("replays an exact stored assessment approval while refusing to create another legacy request", async () => {

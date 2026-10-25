@@ -334,19 +334,18 @@ export async function projectRecruitingApprovalFiles<
                   refs.every((other) => other.id !== source.id || isDeepStrictEqual(other, source)),
               )
             : undefined;
+        // Without a readable saved source the plain file card (name, size, download) is more useful.
+        if (!source || !revision) return block;
         return {
           ...block,
           preview: {
             label: "Job description",
-            source:
-              source && revision
-                ? {
-                    kind: "role" as const,
-                    threadId,
-                    roleRevisionId: revision.id,
-                    sourceRefId: source.id,
-                  }
-                : null,
+            source: {
+              kind: "role" as const,
+              threadId,
+              roleRevisionId: revision.id,
+              sourceRefId: source.id,
+            },
           },
         };
       }),

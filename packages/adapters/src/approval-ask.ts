@@ -161,11 +161,11 @@ export function buildApprovalAskBlock(
                           ? "Review CRM stage change"
                           : crmOperation === "crm_append_candidate_note"
                             ? "Review CRM note"
-                            : toolName === "create_space" || recruitingApproval
-                              ? args.stage === "brief" && recruitingApproval
-                                ? summary
-                                : `${summary}?`
-                              : `Review before ${summary}`,
+                            : recruitingApproval
+                              ? summary
+                              : toolName === "create_space"
+                                ? `${summary}?`
+                                : `Review before ${summary}`,
         secrets,
       ),
       MAX_APPROVAL_SUMMARY_LENGTH,
@@ -291,8 +291,8 @@ function describeApprovalAction(
     return args.stage === "brief"
       ? "Confirm requirements"
       : args.stage === "documents"
-        ? "Approve role documents"
-        : "Approve 10-profile calibration";
+        ? "Approve documents"
+        : "Approve calibration";
   }
   if (toolName === "destination.write") {
     const collection = args.collection ? String(args.collection) : "records";

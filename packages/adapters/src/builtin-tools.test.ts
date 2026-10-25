@@ -75,7 +75,7 @@ describe("native recruiting approval tool", () => {
 
     expect(tool?.description).toContain("purpose, approvalEffectId");
     expect(tool?.description).toContain("calibration uses the G1 documents approval receipt");
-    expect(tool?.description).toContain("scale uses the G2 calibration approval receipt");
+    expect(tool?.description).toContain("Calibration rounds are never approved on a card");
     expect(tool?.description).toContain("continue keeps the same task and phase");
   });
   it("reuses indexed native row identities when assessing research results", () => {

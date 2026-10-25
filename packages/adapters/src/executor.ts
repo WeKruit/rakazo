@@ -176,8 +176,6 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
-  latestRecruitingCalibrationProfiles,
-  latestRecruitingDocumentsApprovalId,
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
@@ -5481,42 +5479,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const call = RecruitingApprovalToolCallSchema.safeParse(args);
               if (!call.success) return { error: sanitizeConnectorError(call.error, runSecrets) };
               if (call.data.stage === "calibration") {
-                const actor = {
-                  spaceId: run.spaceId,
-                  userId: run.userId,
-                  email: "",
-                  isDeploymentOwner: false,
+                // A calibration round is never approved on a card: the recruiter answers on the
+                // round panel or in their own words. Only already approved originals replay above.
+                const round = await deps.prisma.recruitingCalibrationRound.findFirst({
+                  where: { roleId: call.data.roleId, role: { spaceId: run.spaceId } },
+                  orderBy: { round: "desc" },
+                  select: { approvedAt: true, candidateKeys: true },
+                });
+                return {
+                  error: round?.approvedAt
+                    ? "The recruiter already accepted the latest calibration round. Start the scale-out now: send the research provider's research tool the confirmed brief, every round's feedback and the target number; no card is needed."
+                    : round?.candidateKeys.length === 10
+                      ? "Calibration rounds never use an approval card. The round is recorded: list the ten in chat and end with the next-step question. When the recruiter asks for more people or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
+                      : "Calibration rounds never use an approval card. Record the ten with recruiting_research calibration_round, list them in chat and end with the next-step question.",
                 };
-                // The approved documents receipt is not visible to every bot; the server owns it.
-                const documentsApprovalEffectId =
-                  call.data.documentsApprovalEffectId ??
-                  (await latestRecruitingDocumentsApprovalId(deps.prisma, actor, call.data));
-                if (!documentsApprovalEffectId)
-                  return {
-                    error:
-                      "This role revision has no approved documents yet. Request the documents approval first.",
-                  };
-                // Long source ids are not copied by hand: the recorded round carries them.
-                const profiles =
-                  call.data.profiles ??
-                  (await latestRecruitingCalibrationProfiles(deps.prisma, actor, call.data));
-                if (!profiles) {
-                  // A round from the quick people search has no research-task sources, so it is
-                  // accepted on the round panel or in the recruiter's words, never with this card.
-                  const round = await deps.prisma.recruitingCalibrationRound.findFirst({
-                    where: { roleId: call.data.roleId, role: { spaceId: run.spaceId } },
-                    orderBy: { round: "desc" },
-                    select: { approvedAt: true, candidateKeys: true },
-                  });
-                  return {
-                    error: round?.approvedAt
-                      ? "The recruiter already accepted the latest calibration round. Start the scale-out now: send the research provider's research tool the confirmed brief, every round's feedback and the target number; this card is not needed."
-                      : round?.candidateKeys.length === 10
-                        ? "This round came from the quick people search, so it is accepted without this card: when the recruiter asks for more people, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out with the research provider's research tool."
-                        : "No calibration round of ten people is recorded for this role revision. Record the round first.",
-                  };
-                }
-                args = { ...call.data, documentsApprovalEffectId, profiles };
               }
             }
             const parsed = (
