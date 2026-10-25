@@ -143,6 +143,7 @@ import type {
   McpServer,
   Me,
   ProductEvent,
+  RecruitingCrmRoleReference,
   Routine,
   SidebarBotState,
   SpaceNavigation,
@@ -202,6 +203,8 @@ import {
   findSpaceMemoryConfig,
   findTicket,
   formatMessagingLinkCode,
+  getRecruitingGroupCrmReferences,
+  getRecruitingWorkspaceRoleId,
   InvalidSpaceNameError,
   IsolationError,
   issueMessagingLinkCode,
@@ -923,6 +926,83 @@ export function createRouter(deps: RouterDeps) {
     }
   }
   const groupRepos = createGroupRepos(deps.prisma);
+  /** Reads the exact CRM role through the caller's authorized connector, then opens its native role workspace. */
+  async function openCrmRoleWorkspace(
+    context: { actor: Actor; signal?: AbortSignal; stillAuthorized?: () => Promise<boolean> },
+    reference: RecruitingCrmRoleReference,
+    route: { groupId: string } | { botId: string },
+    botIds: string[],
+  ) {
+    const target = await resolveThreadTarget(deps.prisma, context.actor, route);
+    const role = await getRecruitingCrmData(
+      {
+        prisma: deps.prisma,
+        connectors: deps.connectors,
+        firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+        signal: context.signal,
+        stillAuthorized: context.stillAuthorized,
+        reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, route),
+      },
+      context.actor,
+      target,
+      { operation: "role", reference },
+    );
+    return openVerifiedRecruitingCrmWorkspace(deps.prisma, context.actor, {
+      target: {
+        mcpServerId: reference.sourceId,
+        serverRevision: reference.serverRevision,
+        organizationId: reference.organizationId,
+        crmRoleId: role.role_spec_id,
+        crmClientId: role.client_id,
+        clientLabel: role.client_label,
+        roleLabel: role.role_label,
+      },
+      verifiedBotId: target.kind === "bot" ? target.botId : target.memberBotIds[0]!,
+      botIds,
+      roleText: [
+        role.role_label,
+        role.client_label,
+        role.summary,
+        role.description,
+        role.jd_text,
+        role.jd_url,
+      ]
+        .filter(Boolean)
+        .join("\n\n"),
+    });
+  }
+  /**
+   * CRM conversations opened before role workspaces existed have the CRM locator but no native
+   * role, so the agent cannot tell which role "who replied" refers to. Attach it on the next send.
+   */
+  async function attachCrmRoleBeforeSend(
+    context: { actor: Actor; signal?: AbortSignal; stillAuthorized?: () => Promise<boolean> },
+    target: { groupId: string; threadId: string; memberBotIds: string[] },
+  ) {
+    if (!target.groupId.startsWith("recruiting-crm-")) return;
+    if (
+      await getRecruitingWorkspaceRoleId(deps.prisma, context.actor, { threadId: target.threadId })
+    )
+      return;
+    const reference = (
+      await getRecruitingGroupCrmReferences(deps.prisma, context.actor, [target.groupId])
+    ).get(target.groupId);
+    if (!reference) return;
+    try {
+      await openCrmRoleWorkspace(
+        context,
+        reference,
+        { groupId: target.groupId },
+        target.memberBotIds,
+      );
+    } catch (error) {
+      // The message still goes out; the conversation simply stays without a linked role.
+      getLogger().warn("crm role attach before send failed", {
+        groupId: target.groupId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
   const taughtSkills = createTaughtSkillsService({
     prisma: deps.prisma,
     events: deps.events,
@@ -2215,44 +2295,12 @@ export function createRouter(deps: RouterDeps) {
               groups.find(
                 (group) => group.id === recruitingCrmConversationId(context.actor, reference),
               );
-            const route = existing ? { groupId: existing.id } : { botId: input.botIds[0]! };
-            const target = await resolveThreadTarget(deps.prisma, context.actor, route);
-            const role = await getRecruitingCrmData(
-              {
-                prisma: deps.prisma,
-                connectors: deps.connectors,
-                firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-                signal: context.signal,
-                stillAuthorized: context.stillAuthorized,
-                reauthorize: () => resolveThreadTarget(deps.prisma, context.actor, route),
-              },
-              context.actor,
-              target,
-              { operation: "role", reference },
+            const opened = await openCrmRoleWorkspace(
+              context,
+              reference,
+              existing ? { groupId: existing.id } : { botId: input.botIds[0]! },
+              input.botIds,
             );
-            const opened = await openVerifiedRecruitingCrmWorkspace(deps.prisma, context.actor, {
-              target: {
-                mcpServerId: reference.sourceId,
-                serverRevision: reference.serverRevision,
-                organizationId: reference.organizationId,
-                crmRoleId: role.role_spec_id,
-                crmClientId: role.client_id,
-                clientLabel: role.client_label,
-                roleLabel: role.role_label,
-              },
-              verifiedBotId: target.kind === "bot" ? target.botId : target.memberBotIds[0]!,
-              botIds: input.botIds,
-              roleText: [
-                role.role_label,
-                role.client_label,
-                role.summary,
-                role.description,
-                role.jd_text,
-                role.jd_url,
-              ]
-                .filter(Boolean)
-                .join("\n\n"),
-            });
             return groupRepos.mapGroup(
               context.actor,
               await groupRepos.getGroup(context.actor, opened.groupId),
@@ -2538,6 +2586,7 @@ export function createRouter(deps: RouterDeps) {
         if ("error" in resolvedTarget) throw resolvedTarget.error;
         if ("error" in teaching) throw teaching.error;
         const target = resolvedTarget.value;
+        if (target.kind === "group") await attachCrmRoleBeforeSend(context, target);
         const authorizedAt = performance.now();
         const result = await sendThreadMessage(
           deps,
