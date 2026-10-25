@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { RECRUITING_DEFAULT_BOTS, RECRUITING_DEFAULT_SKILLS } from "./recruiting-defaults.js";
+import {
+  RECRUITING_DEFAULT_BOTS,
+  RECRUITING_DEFAULT_SKILLS,
+  RECRUITING_SEARCH_BRIEF_TEMPLATE,
+} from "./recruiting-defaults.js";
 
 describe("maintained recruiting defaults", () => {
   it.each(RECRUITING_DEFAULT_BOTS)(
@@ -84,6 +88,28 @@ describe("maintained recruiting defaults", () => {
     )!;
     expect(sourcing.body).toContain("Calibration rounds come from Main's quick searches");
     expect(sourcing.body).not.toContain("ask Autumn on the same task, in one reply per round");
+  });
+
+  it("sources on core-work evidence with the search brief template", () => {
+    for (const part of [
+      "A matching title alone is NOT enough",
+      "{min}-{max} years",
+      "never infer from names",
+      "current role started after {today minus 6 months",
+      "Title-only matches are not returned",
+      "current role start month",
+    ])
+      expect(RECRUITING_SEARCH_BRIEF_TEMPLATE).toContain(part);
+    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
+    expect(sourcer.instructions).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
+    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
+    expect(main.instructions).toContain("Always settle the language requirement");
+    expect(main.instructions).toContain("not just a matching title");
+    expect(main.instructions).toContain("a maximum as well as a minimum");
+    const draft = RECRUITING_DEFAULT_SKILLS.find(
+      (skill) => skill.name === "Review recruiting draft",
+    )!;
+    expect(draft.body).toContain("never says BDR or SDR");
   });
 
   it("asks for one round of feedback without rating every person", () => {
