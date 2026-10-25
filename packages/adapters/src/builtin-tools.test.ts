@@ -140,7 +140,7 @@ describe("recruiting brief checklist", () => {
       "ask the unstated language requirement before this card",
     );
     expect(description("recruiting_request_approval")).toContain(
-      "run the first calibration round as a quick people search in the same turn, never a research task except to top up a short search",
+      "plus the one parallel deep evidence request the calibration rule describes",
     );
   });
 });
