@@ -5499,11 +5499,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const profiles =
                   call.data.profiles ??
                   (await latestRecruitingCalibrationProfiles(deps.prisma, actor, call.data));
-                if (!profiles)
+                if (!profiles) {
+                  // A round from the quick people search has no research-task sources, so it is
+                  // accepted on the round panel or in the recruiter's words, never with this card.
+                  const round = await deps.prisma.recruitingCalibrationRound.findFirst({
+                    where: { roleId: call.data.roleId, role: { spaceId: run.spaceId } },
+                    orderBy: { round: "desc" },
+                    select: { approvedAt: true, candidateKeys: true },
+                  });
                   return {
-                    error:
-                      "No calibration round of ten people is recorded for this role revision. Record the round first.",
+                    error: round?.approvedAt
+                      ? "The recruiter already accepted the latest calibration round. Start the scale-out now: send the research provider's research tool the confirmed brief, every round's feedback and the target number; this card is not needed."
+                      : round?.candidateKeys.length === 10
+                        ? "This round came from the quick people search, so it is accepted without this card: when the recruiter asks for more people, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out with the research provider's research tool."
+                        : "No calibration round of ten people is recorded for this role revision. Record the round first.",
                   };
+                }
                 args = { ...call.data, documentsApprovalEffectId, profiles };
               }
             }
