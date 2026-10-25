@@ -162,7 +162,8 @@ async function syncSlice(
   const write = { dryRun, now: began };
   /**
    * Next unit: contacts, then links and mail for each role, then the organization's stored
-   * campaigns and each campaign's leads, then the next organization.
+   * campaigns, each campaign's leads and the leads without a campaign (j === campaigns),
+   * then the next organization.
    */
   const advance = () => {
     const org = cursor.orgs[cursor.at.g]!;
@@ -178,9 +179,9 @@ async function syncSlice(
             ? { g, step: "links", j: j + 1 }
             : step === "contacts" || step === "mail"
               ? { g, step: "campaigns", j: 0 }
-              : step === "campaigns" && campaigns
+              : step === "campaigns"
                 ? { g, step: "leads", j: 0 }
-                : step === "leads" && j + 1 < campaigns
+                : step === "leads" && j < campaigns
                   ? { g, step: "leads", j: j + 1 }
                   : { g: g + 1, step: "contacts", j: 0 };
     cursor.at = { ...next, offset: 0, matched: 0, seen: [] };
@@ -223,7 +224,8 @@ async function syncSlice(
         continue;
       }
       if (step === "leads") {
-        const campaignId = org.campaigns![j]!;
+        const campaigns = org.campaigns ?? [];
+        const campaignId = j < campaigns.length ? campaigns[j]! : null;
         const page = await read({
           operation: "campaignLeads",
           ...pinned,
@@ -261,7 +263,8 @@ async function syncSlice(
         const page = await read({
           operation: "candidates",
           ...pinned,
-          ...(crmRoleId ? { crmRoleId } : {}),
+          // The organization-wide copy keeps people on archived roles too.
+          ...(crmRoleId ? { crmRoleId } : { includeArchived: true as const }),
           limit: PAGE,
           offset,
         });

@@ -2035,7 +2035,7 @@ model RecruitingCrmLead {
   mcpServer McpServer @relation(fields: [mcpServerId], references: [id], onDelete: Cascade)
   organizationId String
   crmLeadId String
-  crmCampaignId String
+  crmCampaignId String?
   crmCandidateId String?
   status Int?
   interestStatus Int?
