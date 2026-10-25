@@ -1677,6 +1677,10 @@ msgstr "公司"
 msgid "Company deck"
 msgstr "公司介绍材料"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Company type"
+msgstr "公司类型"
+
 #. placeholder {0}: candidate.company
 #: src/pages/Shell.tsx
 msgid "Company: {0}"
@@ -1723,6 +1727,10 @@ msgstr "电脑已可用。请刷新或打开一个助手继续。"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "电脑未开启。请设置 SANDBOX_PROVIDER=docker 并提供 SANDBOX_SUPERVISOR_TOKEN，或将 SANDBOX_PROVIDER 设为 e2b、daytona 或 box 并提供对应 API 密钥。更改 .env 后请重建环境。"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Concerns"
+msgstr "顾虑"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Configure a plugin catalog on the server to connect apps."
@@ -2007,6 +2015,14 @@ msgstr "复制"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "复制 .env 示例"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core duties"
+msgstr "核心职责"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core work evidence"
+msgstr "核心工作证据"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not access"
@@ -2612,6 +2628,7 @@ msgid "Could not update this task. Try again."
 msgstr "无法更新此任务，请重试。"
 
 #: src/components/computer/FilesApp.tsx
+#: src/pages/Shell.tsx
 msgid "Could not upload file"
 msgstr "无法上传文件"
 
@@ -2725,11 +2742,19 @@ msgstr "标准"
 msgid "Criterion {0}"
 msgstr "标准 {0}"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion findings"
+msgstr "标准核查结果"
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Criterion name unavailable"
 msgstr "标准名称不可用"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion summary"
+msgstr "标准摘要"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
@@ -2746,6 +2771,10 @@ msgstr "Cron 表达式"
 #: src/pages/RecruitingPanel.tsx
 msgid "Current"
 msgstr "当前"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current company"
+msgstr "当前公司"
 
 #: src/components/AccountAccess.tsx
 #: src/pages/AccountSettingsOverlay.tsx
@@ -2765,6 +2794,7 @@ msgid "Current result: rejected"
 msgstr "当前结果：已拒绝"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr "当前职位"
@@ -2773,6 +2803,10 @@ msgstr "当前职位"
 msgid "Current role not returned"
 msgstr "未返回当前职位"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current role start"
+msgstr "当前职位开始时间"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Current tenure"
 msgstr "当前任期"
@@ -2780,6 +2814,10 @@ msgstr "当前任期"
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Current time"
 msgstr "当前时间"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current title"
+msgstr "当前职位"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Current totals · all dates"
@@ -2872,6 +2910,10 @@ msgstr "默认（{0}）"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "默认范围"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Degree"
+msgstr "学位"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay unavailable."
@@ -3394,9 +3436,14 @@ msgid "Every week"
 msgstr "每周"
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Evidence"
 msgstr "证据"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Evidence quote"
+msgstr "证据原文"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Exclude"
@@ -3559,6 +3606,10 @@ msgstr "正在完成 MCP 连接…"
 msgid "Fit"
 msgstr "匹配度"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Fit rationale"
+msgstr "匹配理由"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Fixed date"
 msgstr "固定日期"
@@ -3649,6 +3700,14 @@ msgstr "好的例子"
 msgid "Good example: {name}"
 msgstr "合适：{name}"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade"
+msgstr "等级"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade reason"
+msgstr "评级理由"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
 msgid "Group"
@@ -3712,6 +3771,10 @@ msgstr "请求头名称"
 msgid "Header value"
 msgstr "请求头值"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Headline"
+msgstr "简介"
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Hear a sample"
 msgstr "试听"
@@ -3766,6 +3829,10 @@ msgstr "可能性高"
 #: src/pages/RecruitingPanel.tsx
 msgid "High signal"
 msgstr "信号强"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Highlights"
+msgstr "亮点"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Hiring manager"
@@ -3862,6 +3929,10 @@ msgstr "收件箱和邮件"
 #: src/pages/RecruitingPanel.tsx
 msgid "Include"
 msgstr "包含"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Industry"
+msgstr "行业"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Inherit default"
@@ -4066,7 +4137,16 @@ msgid "Knowledge"
 msgstr "知识"
 
 #: src/pages/AccountSettingsOverlay.tsx
+#: src/pages/recruiting/fieldLabels.ts
 msgid "Language"
+msgstr "语言"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Language evidence"
+msgstr "语言能力证据"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Languages"
 msgstr "语言"
 
 #: src/pages/recruiting/HomeDashboard.tsx
@@ -4275,6 +4355,7 @@ msgid "Local Server Settings"
 msgstr "本地服务器设置"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Location"
@@ -4375,6 +4456,10 @@ msgstr "已标记为高意向"
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
 msgstr "符合"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Match reasons"
+msgstr "匹配原因"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Match score"
@@ -5235,6 +5320,7 @@ msgid "Note"
 msgstr "备注"
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Notes"
 msgstr "备注"
@@ -5793,6 +5879,10 @@ msgstr "上一步"
 msgid "Previous campaigns"
 msgstr "之前的邮件活动"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Previous companies"
+msgstr "过往公司"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous contact campaigns"
 msgstr "联系人之前的邮件活动"
@@ -5958,6 +6048,7 @@ msgid "Reading files"
 msgstr "正在读取文件"
 
 #: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr "原因"
@@ -6509,6 +6600,10 @@ msgstr "查看安排"
 msgid "Review provider settings and test again."
 msgstr "请检查提供方设置并重新测试。"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Review rationale"
+msgstr "审核理由"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Review status unknown"
 msgstr "审核状态未知"
@@ -6566,6 +6661,10 @@ msgstr "第 {0} 版"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Revoke"
 msgstr "撤销"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Risks"
+msgstr "风险"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Robot"
@@ -7037,6 +7136,10 @@ msgstr "搜索模型"
 msgid "Search providers"
 msgstr "搜索提供方"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Search query"
+msgstr "搜索词"
+
 #: src/pages/Shell.tsx
 msgid "Search refinement"
 msgstr "搜索调整"
@@ -7099,6 +7202,10 @@ msgstr "选择日程查看来源详情。这些日历记录未包含候选人关
 #: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
 msgstr "所选收件人不可用"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Selection basis"
+msgstr "选择依据"
 
 #: src/pages/Shell.tsx
 msgid "Send"
@@ -7167,6 +7274,10 @@ msgstr "发送安排"
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "正在发送…"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Seniority"
+msgstr "职级"
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sent"
@@ -7725,6 +7836,10 @@ msgstr "订阅"
 msgid "Subscription required"
 msgstr "需要订阅"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Summary"
+msgstr "摘要"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Supports images"
@@ -8001,6 +8116,10 @@ msgstr "对话"
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Time"
 msgstr "时间"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Time in current role"
+msgstr "当前职位任职时长"
 
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/EmailConversation.tsx
@@ -8540,6 +8659,10 @@ msgstr "XLSX 暂不支持，请另存为 CSV 后上传"
 #: src/lib/billing.ts
 msgid "year"
 msgstr "年"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Years of experience"
+msgstr "工作年限"
 
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx

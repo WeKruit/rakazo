@@ -82,8 +82,12 @@ function httpsUrl(value: string | null | undefined) {
   }
 }
 
-// Provider bookkeeping a recruiter never needs: where an asset came from, raw cache records.
-const INTERNAL_FIELD = /\b(?:logo|provider|cached?)\b/i;
+// Provider bookkeeping a recruiter never needs: where an asset came from, raw cache records,
+// sampling flags.
+const INTERNAL_FIELD = /\b(?:logo|provider|cached?|source url|sample)\b/i;
+// A bracketed note on where the provider kept a quote ("[retained quote from … record]").
+const PROVENANCE_NOTE =
+  /\s*\[[^\]\n]*\b(?:provider|record|retained|cached?|profile record)\b[^\]\n]*\]/gi;
 const LANGUAGE_SUFFIX = /[\s_]+(?:zh|cn|en)$/i;
 
 /**
@@ -94,7 +98,11 @@ function recruiterField(field: Field): Field[] {
   const label = field.label.trim().replace(LANGUAGE_SUFFIX, "").replace(/_+/g, " ");
   if (field.providerStatus === undefined && INTERNAL_FIELD.test(label)) return [];
   if (/\bprovider record\b/i.test(`${field.value ?? ""} ${field.evidence ?? ""}`)) return [];
-  const text = (value: string | undefined) => (value ? hideVendorNames(value).trim() : value);
+  // A bare true/false is a provider flag, not a finding.
+  if (field.providerStatus === undefined && /^(?:true|false)$/i.test(field.value?.trim() ?? ""))
+    return [];
+  const text = (value: string | undefined) =>
+    value ? hideVendorNames(value.replace(PROVENANCE_NOTE, "")).trim() : value;
   return [
     {
       ...field,
