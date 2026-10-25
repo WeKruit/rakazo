@@ -360,22 +360,20 @@ async function main() {
 
   let groupId = option("--group");
   if (!groupId) {
-    const bots = await rpc("bots/list");
-    const role = (bot, key) =>
-      bot.spawnKey?.endsWith(`:${key}`) || bot.name.toLowerCase() === key;
-    const crew = ["main", "sourcer", "outreach", "scheduling"]
-      .map((key) => bots.find((bot) => !bot.archivedAt && role(bot, key)))
-      .filter(Boolean);
-    if (!crew.length || !role(crew[0], "main")) fail("No recruiting crew on this account");
+    // The account's recruiting crew, provisioned on first use exactly as the web onboarding does.
+    const workspace = await rpc("onboarding/ensureRecruiting", {});
+    const home = await rpc("groups/get", { groupId: workspace.groupId });
+    const crew = home.members.map((member) => member.botId);
+    if (!crew.includes(workspace.botId)) fail("No recruiting crew on this account");
     const group = await rpc("groups/create", {
       name: `延迟测试 ${new Date().toISOString().slice(5, 16).replace("T", " ")}`,
-      botIds: crew.map((bot) => bot.id),
+      botIds: [workspace.botId, ...crew.filter((id) => id !== workspace.botId)],
     });
     groupId = group.id;
     report.groupId = groupId;
     save();
     // Same call the web app's new-role form makes.
-    await rpc("threads/followUp", { groupId, text: JD, mentions: [crew[0].id] });
+    await rpc("threads/followUp", { groupId, text: JD, mentions: [workspace.botId] });
     mark("jd_sent");
   } else {
     report.groupId = groupId;
