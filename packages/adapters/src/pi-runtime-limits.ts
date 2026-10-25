@@ -7,7 +7,15 @@ export const MODEL_STREAM_TIMEOUT_MS = 120_000;
  * unbounded. A Codex stream silent this long is a dead connection — reasoning
  * models emit thinking deltas continuously while generating.
  */
-export const MODEL_STREAM_IDLE_TIMEOUT_MS = 180_000;
+export const MODEL_STREAM_IDLE_TIMEOUT_MS = 120_000;
+/**
+ * Codex sends response headers as soon as the stream opens, so a request still without headers
+ * after this long is hung: fail the attempt and let the retry or the fallback model take over
+ * instead of holding the recruiter for minutes.
+ */
+export const CODEX_STREAM_HEADERS_TIMEOUT_MS = 30_000;
+/** One model response, even one that keeps streaming, ends within this; a lease is 5 minutes. */
+export const MODEL_STREAM_TOTAL_TIMEOUT_MS = 240_000;
 export const DEFAULT_MODEL_STREAM_MAX_RETRIES = 1;
 
 /** More retries extend the worst-case turn; the executor heartbeat renews its leases. */

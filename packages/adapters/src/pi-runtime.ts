@@ -71,11 +71,13 @@ import {
   registerOpenAiCompatibleRuntime,
 } from "./pi-openai-compatible-provider.js";
 import {
+  CODEX_STREAM_HEADERS_TIMEOUT_MS,
   clipContentWithFullOutput,
   clipToolResultText,
   clipWithFullOutput,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
+  MODEL_STREAM_TOTAL_TIMEOUT_MS,
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
@@ -3337,6 +3339,7 @@ export interface StreamIdleWatchdog {
 export function codexStreamIdleWatchdog(
   upstream: AbortSignal | undefined,
   idleTimeoutMs: number = MODEL_STREAM_IDLE_TIMEOUT_MS,
+  totalTimeoutMs: number = MODEL_STREAM_TOTAL_TIMEOUT_MS,
 ): StreamIdleWatchdog {
   const controller = new AbortController();
   let timedOut = false;
@@ -3361,6 +3364,7 @@ export function codexStreamIdleWatchdog(
   const dispose = () => {
     disposed = true;
     if (timer !== undefined) clearTimeout(timer);
+    if (capTimer !== undefined) clearTimeout(capTimer);
     timer = undefined;
     upstream?.removeEventListener("abort", onUpstreamAbort);
   };
@@ -3369,10 +3373,21 @@ export function codexStreamIdleWatchdog(
   // pre-headers window is bounded per attempt by timeoutMs and retry backoff
   // by maxRetryDelayMs, so idle budget must not burn there and a retry always
   // starts from a fresh full budget.
+  // A stream that keeps sending events but never finishes is bounded by one overall cap,
+  // started when the first successful response arrives.
+  let capTimer: ReturnType<typeof setTimeout> | undefined;
   const ping = () => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
     arm();
+    if (capTimer === undefined && !disposed && !controller.signal.aborted) {
+      capTimer = setTimeout(() => {
+        if (controller.signal.aborted) return;
+        timedOut = true;
+        controller.abort(new Error(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE));
+      }, totalTimeoutMs);
+      capTimer.unref?.();
+    }
   };
 
   const describeTimeout = (message: AssistantMessage): AssistantMessage =>
@@ -3550,7 +3565,11 @@ export function reliableStreamOptions(
     // Pi cannot fall back after a WebSocket has emitted its start event. Long tool
     // runs then surface abnormal close 1006 as a terminal model error. SSE has
     // bounded network retries and no long-lived connection between tool turns.
-    next = { ...next, transport: "sse" };
+    next = {
+      ...next,
+      transport: "sse",
+      timeoutMs: options?.timeoutMs ?? CODEX_STREAM_HEADERS_TIMEOUT_MS,
+    };
     // Forward the account's compute residency so the Codex backend routes to the
     // right region. Models.applyAuth resolves auth — including an OAuth refresh
     // that swaps the stored credential — after these options are built, so the

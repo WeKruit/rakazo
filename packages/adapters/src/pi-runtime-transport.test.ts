@@ -14,7 +14,11 @@ import {
   reliableStreamOptions,
   resolveRuntimeModel,
 } from "./pi-runtime.js";
-import { DEFAULT_MODEL_STREAM_MAX_RETRIES, MODEL_STREAM_TIMEOUT_MS } from "./pi-runtime-limits.js";
+import {
+  CODEX_STREAM_HEADERS_TIMEOUT_MS,
+  DEFAULT_MODEL_STREAM_MAX_RETRIES,
+  MODEL_STREAM_TIMEOUT_MS,
+} from "./pi-runtime-limits.js";
 
 const streamDefaults = {
   timeoutMs: MODEL_STREAM_TIMEOUT_MS,
@@ -59,6 +63,7 @@ describe("Pi runtime transport", () => {
 
     expect(rest).toEqual({
       ...streamDefaults,
+      timeoutMs: CODEX_STREAM_HEADERS_TIMEOUT_MS,
       transport: "sse",
       maxRetries: 4,
     });
@@ -150,7 +155,11 @@ describe("Pi runtime transport", () => {
         undefined,
         token,
       );
-      expect(rest).toEqual({ ...streamDefaults, transport: "sse" });
+      expect(rest).toEqual({
+        ...streamDefaults,
+        timeoutMs: CODEX_STREAM_HEADERS_TIMEOUT_MS,
+        transport: "sse",
+      });
       expect(await transformHeaders?.({})).toEqual({
         "x-openai-internal-codex-residency": "us-east",
       });
