@@ -199,12 +199,12 @@ export function buildApprovalAskBlock(
                   id: "allow",
                   label:
                     args.stage === "brief"
-                      ? "Confirm requirements"
+                      ? "Looks good, start searching"
                       : args.stage === "documents"
                         ? "Approve documents"
                         : "Approve calibration",
                 },
-                { id: "deny", label: "Deny" },
+                { id: "deny", label: args.stage === "brief" ? "Needs changes" : "Deny" },
               ]
             : [
                 { id: "allow", label: "Allow once" },
@@ -289,7 +289,7 @@ function describeApprovalAction(
 ): string {
   if (toolName === "recruiting_request_approval") {
     return args.stage === "brief"
-      ? "Confirm requirements"
+      ? "Role requirements"
       : args.stage === "documents"
         ? "Approve documents"
         : "Approve calibration";
@@ -426,7 +426,7 @@ function formatApprovalDetail(
   if (toolName === "recruiting_request_approval") {
     const request = RetainedRecruitingApprovalRequestSchema.parse(args);
     if (recruiting) lines.push(`Role: ${recruiting.roleTitle}`);
-    lines.push(`Role version: ${request.expectedRoleRevision}`);
+    if (request.stage !== "brief") lines.push(`Role version: ${request.expectedRoleRevision}`);
     if (request.stage === "brief") {
       if (!recruiting?.roleTitle.trim() || !recruiting.requirements?.trim())
         throw new Error("Requirements confirmation requires verified role requirements.");

@@ -20,12 +20,12 @@ describe("buildApprovalAskBlock", () => {
         recruiting: { roleTitle: "Platform engineer", requirements },
       },
     );
-    expect(block.text).toBe("Confirm requirements");
+    expect(block.text).toBe("Role requirements");
     expect(block.actions).toEqual([
-      { id: "allow", label: "Confirm requirements" },
-      { id: "deny", label: "Deny" },
+      { id: "allow", label: "Looks good, start searching" },
+      { id: "deny", label: "Needs changes" },
     ]);
-    expect(block.detail).toBe(`Role: Platform engineer\nRole version: 3\n${requirements}`);
+    expect(block.detail).toBe(`Role: Platform engineer\n${requirements}`);
     expect(block.detail).not.toContain("internal-role");
     expect(block.detail!.length).toBeGreaterThan(4_000);
     expect(() =>

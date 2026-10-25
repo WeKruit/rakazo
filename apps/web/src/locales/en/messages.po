@@ -683,6 +683,7 @@ msgstr "Answer"
 msgid "Answered"
 msgstr "Answered"
 
+#. placeholder {0}: label === undefined ? selectedAskActionLabel(answer, actions) : approvalActionLabel(answer, label)
 #. placeholder {0}: selectedAskActionLabel(answer, actions)
 #: src/components/AskCard.tsx
 msgid "Answered: {0}"
@@ -4386,6 +4387,10 @@ msgstr "Log out"
 msgid "Looks good, find more"
 msgstr "Looks good, find more"
 
+#: src/components/AskCard.tsx
+msgid "Looks good, start searching"
+msgstr "Looks good, start searching"
+
 #: src/lib/ticket-priority.ts
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4794,6 +4799,10 @@ msgstr "Name: {0}"
 #: src/lib/roster-status.ts
 msgid "Needs an answer"
 msgstr "Needs an answer"
+
+#: src/components/AskCard.tsx
+msgid "Needs changes"
+msgstr "Needs changes"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
@@ -6711,6 +6720,10 @@ msgstr "Role details needing clarification: {0}"
 #: src/pages/RecruitingPanel.tsx
 msgid "Role interest"
 msgstr "Role interest"
+
+#: src/components/AskCard.tsx
+msgid "Role requirements"
+msgstr "Role requirements"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"

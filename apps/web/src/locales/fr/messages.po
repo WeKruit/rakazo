@@ -683,6 +683,7 @@ msgstr "Répondre"
 msgid "Answered"
 msgstr "Répondu"
 
+#. placeholder {0}: label === undefined ? selectedAskActionLabel(answer, actions) : approvalActionLabel(answer, label)
 #. placeholder {0}: selectedAskActionLabel(answer, actions)
 #: src/components/AskCard.tsx
 msgid "Answered: {0}"
@@ -4386,6 +4387,10 @@ msgstr "Se déconnecter"
 msgid "Looks good, find more"
 msgstr ""
 
+#: src/components/AskCard.tsx
+msgid "Looks good, start searching"
+msgstr ""
+
 #: src/lib/ticket-priority.ts
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4793,6 +4798,10 @@ msgstr ""
 
 #: src/lib/roster-status.ts
 msgid "Needs an answer"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Needs changes"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -6710,6 +6719,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role interest"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Role requirements"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
