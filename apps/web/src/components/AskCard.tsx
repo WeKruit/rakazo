@@ -47,7 +47,7 @@ function formatAnsweredState(
   )
     return t`Always allowed`;
   if (answer === "deny" && (label === undefined || label === "Deny")) return t`Denied`;
-  return t`Answered: ${selectedAskActionLabel(answer, actions)}`;
+  return t`Answered: ${label === undefined ? selectedAskActionLabel(answer, actions) : approvalActionLabel(answer, label)}`;
 }
 
 function approvalActionLabel(
@@ -63,6 +63,9 @@ function approvalActionLabel(
   if (id === "deny" && fallback === "Deny") return t`Deny`;
   if (id === "allow" && fallback === "Confirm and send") return t`Confirm and send`;
   if (id === "deny" && fallback === "Cancel") return t`Cancel`;
+  if (id === "allow" && fallback === "Looks good, start searching")
+    return t`Looks good, start searching`;
+  if (id === "deny" && fallback === "Needs changes") return t`Needs changes`;
   return fallback;
 }
 
@@ -74,6 +77,7 @@ function approvalTitle(text: string): string {
     "Confirm sending the first email": t`Confirm sending the first email`,
     "Confirm reply": t`Confirm reply`,
     "Confirm requirements": t`Confirm requirements`,
+    "Role requirements": t`Role requirements`,
     "Approve documents": t`Approve documents`,
     "Approve calibration": t`Approve calibration`,
     "Confirm sending email": t`Confirm sending email`,

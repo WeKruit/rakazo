@@ -683,6 +683,7 @@ msgstr "回答"
 msgid "Answered"
 msgstr "已回答"
 
+#. placeholder {0}: label === undefined ? selectedAskActionLabel(answer, actions) : approvalActionLabel(answer, label)
 #. placeholder {0}: selectedAskActionLabel(answer, actions)
 #: src/components/AskCard.tsx
 msgid "Answered: {0}"
@@ -4386,6 +4387,10 @@ msgstr "退出登录"
 msgid "Looks good, find more"
 msgstr "可以，开始扩大搜索"
 
+#: src/components/AskCard.tsx
+msgid "Looks good, start searching"
+msgstr "没问题，开始找人"
+
 #: src/lib/ticket-priority.ts
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4794,6 +4799,10 @@ msgstr "姓名：{0}"
 #: src/lib/roster-status.ts
 msgid "Needs an answer"
 msgstr "需要回答"
+
+#: src/components/AskCard.tsx
+msgid "Needs changes"
+msgstr "需要修改"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
@@ -6711,6 +6720,10 @@ msgstr "仍需澄清的岗位信息：{0} 项"
 #: src/pages/RecruitingPanel.tsx
 msgid "Role interest"
 msgstr "岗位意向"
+
+#: src/components/AskCard.tsx
+msgid "Role requirements"
+msgstr "岗位要求"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Role revision"
