@@ -99,7 +99,7 @@ export async function guardRecruitingTurnEnd(
     const round = await deps.prisma.recruitingCalibrationRound.findFirst({
       where: { roleId: input.roleId },
       orderBy: { round: "desc" },
-      select: { effectId: true, candidateKeys: true, approvedAt: true },
+      select: { effectId: true, candidateKeys: true, approvedAt: true, createdAt: true },
     });
     if (
       round &&
@@ -107,6 +107,13 @@ export async function guardRecruitingTurnEnd(
       round.candidateKeys.length === 10 &&
       new Set(round.candidateKeys).size === 10
     ) {
+      // A presented round waits on the recruiter until they write (panel feedback is a message);
+      // later turns cannot reopen the panel, so pushing them only repeats the same reply.
+      const answered = await deps.prisma.message.findFirst({
+        where: { threadId: run.threadId, role: "user", createdAt: { gt: round.createdAt } },
+        select: { id: true },
+      });
+      if (!answered) return { action: "ended", classification: "question" };
       const effect = await deps.prisma.externalEffect.findFirst({
         where: {
           id: round.effectId,
