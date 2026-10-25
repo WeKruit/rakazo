@@ -41,6 +41,8 @@ describe.skipIf(!enabled)("history retrieval through executor", () => {
         for (const secret of fakeSecrets) expect(excerpt).not.toContain(secret);
       };
       const model = await startModelEmulator({
+        // The 101-message fixture thread correctly queues background history compaction.
+        compactionSummary: "Earlier filler exchanges.",
         steps: [
           {
             expect: assertActiveState,

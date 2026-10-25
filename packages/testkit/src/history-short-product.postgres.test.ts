@@ -20,6 +20,13 @@ describe.skipIf(!enabled)("short original product history", () => {
       const fixtureKey = "synthetic-short-history-key";
       const model = await startModelEmulator({
         apiKey: fixtureKey,
+        // 100 originals plus a turn correctly queue background history compaction. The
+        // summary copies the compacted constraints verbatim, as the summary template requires.
+        compactionSummary: [
+          "The calibration label for the Aurora export project is ORBIT-731.",
+          "Aurora exports use the batch size 37; never change it without explicit approval.",
+          "Batching is proposed; approval remains pending. No changes deployed.",
+        ].join("\n"),
         steps: questions.map((question) => ({
           expect(request) {
             const wire = JSON.stringify(request.messages);
@@ -79,10 +86,16 @@ describe.skipIf(!enabled)("short original product history", () => {
         expect(result).toMatchObject({
           status: "passed",
           toolCalls: 0,
-          modelCalls: 3,
+          // Usage accounting includes background compaction calls.
+          modelCalls: 3 + model.compactions.length,
           cleanupFailed: false,
         });
-        expect(model.requests).toHaveLength(3);
+        expect(model.requests.length - model.compactions.length).toBe(3);
+        for (const compaction of model.compactions) {
+          const transcript = JSON.stringify(compaction.messages);
+          expect(transcript).toContain("ORBIT-731");
+          expect(transcript).toContain("never change it without explicit approval");
+        }
         expect(result.historyPreparationState?.generation).toBe(0);
       } finally {
         await model.close();
