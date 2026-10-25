@@ -190,6 +190,8 @@ function scanText() {
   for (const message of messages) {
     if (message.role === "user" || seenText.has(message.id)) continue;
     seenText.add(message.id);
+    if (/Source unavailable|来源不可用/i.test(JSON.stringify(message.blocks)))
+      violation("source_unavailable_chip", message.id);
     for (const block of message.blocks) {
       const text =
         block.kind === "text"
@@ -298,6 +300,14 @@ async function handleCards(groupId, phase) {
         continue;
       }
       mark("first_question");
+      const brief = block.actions.find((action) => /开始找人|confirm requirements/i.test(action.label));
+      if (brief || /岗位要求/.test(block.text)) {
+        mark("brief_card_shown", { title: block.text.slice(0, 40), buttons: labels });
+        const go = brief ?? block.actions.find((action) => CONFIRM_CHOICE.test(action.label)) ?? block.actions[0];
+        await answer(groupId, ask, go.id, go.label);
+        mark("brief_confirmed");
+        continue;
+      }
       const pick =
         block.actions.find((action) => DEFER_CHOICE.test(action.label) && /材料|文件|document/i.test(block.text)) ??
         block.actions.find((action) => NEUTRAL_CHOICE.test(action.label)) ??
