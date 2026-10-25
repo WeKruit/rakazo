@@ -23,6 +23,8 @@ function fixture(
     stage?: string;
     round?: { effectId: string; candidateKeys: string[]; approvedAt: Date | null };
     completedRoundEffect?: boolean;
+    /** The recruiter wrote after the round was recorded. */
+    roundAnswered?: boolean;
     researchTasks?: { id: string; providerTaskId: string; mcpServerId: string; startedAt: Date }[];
     wokenNonces?: string[];
     acceptedRound?: boolean;
@@ -43,7 +45,10 @@ function fixture(
   recent.push({ clientNonce: "send:human" });
   const deps = {
     prisma: {
-      message: { findMany: vi.fn(async () => recent) },
+      message: {
+        findMany: vi.fn(async () => recent),
+        findFirst: vi.fn(async () => (options.roundAnswered ? { id: "feedback" } : null)),
+      },
       recruitingCandidatePage: {
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
       },
@@ -185,13 +190,14 @@ describe("guardRecruitingTurnEnd", () => {
   });
 
   it.each([
-    [10, false, true, "ended"],
-    [9, false, true, "continued"],
-    [10, true, true, "continued"],
-    [10, false, false, "continued"],
+    [10, false, true, false, "ended"],
+    [9, false, true, false, "continued"],
+    [10, true, true, false, "continued"],
+    [10, false, false, false, "ended"],
+    [10, false, false, true, "continued"],
   ])(
-    "requires a complete unapproved current-run round (%s, %s, %s)",
-    async (count, approved, completed, action) => {
+    "waits on a complete unapproved round until the recruiter writes (%s, %s, %s, %s)",
+    async (count, approved, completed, answered, action) => {
       const f = fixture({
         stage: "feedback",
         round: {
@@ -200,6 +206,7 @@ describe("guardRecruitingTurnEnd", () => {
           approvedAt: approved ? new Date() : null,
         },
         completedRoundEffect: completed,
+        roundAnswered: answered,
       });
       const result = await guardRecruitingTurnEnd(f.deps, {
         run,
@@ -213,7 +220,7 @@ describe("guardRecruitingTurnEnd", () => {
       expect(f.deps.prisma.recruitingCalibrationRound.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { roleId: "role-1" }, orderBy: { round: "desc" } }),
       );
-      if (count === 10 && !approved)
+      if (count === 10 && !approved && answered)
         expect(f.deps.prisma.externalEffect.findFirst).toHaveBeenCalledWith(
           expect.objectContaining({
             where: {
