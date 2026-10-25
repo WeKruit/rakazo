@@ -107,7 +107,7 @@ import {
 } from "../lib/composer-enter-to-send-pref";
 import { getRemoteImagesEnabled } from "../lib/remote-images-preference";
 import { TOOL_ACTIVITY_STORAGE_KEY } from "../lib/tool-activity-preference";
-import { GeneralSettingsPanels } from "./AccountSettingsOverlay";
+import { GeneralSettingsPanels, UsageSettingsPanel } from "./AccountSettingsOverlay";
 
 afterEach(() => {
   localStorage.clear();
@@ -276,6 +276,59 @@ it("updates the Enter preference from Settings and reflects external changes", a
     expect(toggle.getAttribute("aria-checked")).toBe("true");
   } finally {
     await act(async () => root.unmount());
+    vi.unstubAllGlobals();
+  }
+});
+
+it("shows spend per role and round, with dollars and services only for the owner", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const amounts = { credits: 150, calls: 2, tokens: 1200 };
+  const usage = {
+    total: amounts,
+    month: amounts,
+    days: [{ day: "2026-10-25", ...amounts }],
+    roles: [
+      {
+        roleId: "role-1",
+        title: "Quality manager",
+        ...amounts,
+        rounds: [{ round: 1, scale: false, ...amounts }],
+      },
+    ],
+  };
+  try {
+    await act(async () => root.render(<UsageSettingsPanel usage={usage} />));
+    expect(container.textContent).toContain("Quality manager");
+    expect(container.textContent).toContain("Search credits");
+    expect(container.textContent).not.toContain("Estimated cost");
+    expect(container.querySelector('[data-testid="usage-services"]')).toBeNull();
+
+    const priced = { ...amounts, estimatedUsd: 1.28 };
+    await act(async () =>
+      root.render(
+        <UsageSettingsPanel
+          usage={{
+            ...usage,
+            total: priced,
+            month: priced,
+            services: [{ service: "people-search", unit: "calls", quantity: 2 }],
+            accounts: [{ userId: "user-1", email: "owner@example.test", ...priced }],
+          }}
+        />,
+      ),
+    );
+    expect(container.textContent).toContain("Estimated cost");
+    expect(container.textContent).toContain("$1.28");
+    expect(container.querySelector('[data-testid="usage-services"]')?.textContent).toContain(
+      "people-search",
+    );
+    expect(container.textContent).toContain("owner@example.test");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
     vi.unstubAllGlobals();
   }
 });

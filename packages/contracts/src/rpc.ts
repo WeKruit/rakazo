@@ -95,6 +95,7 @@ import {
   UpdateExternalConversationPolicyInput,
   UpdateGroupInput,
   UpdateRoutineInput,
+  UsageCostsSchema,
   UsageRecordSchema,
   VoiceCatalogEntrySchema,
   VoiceCredentialSchema,
@@ -1174,6 +1175,7 @@ export const appContract = {
         runs: z.number(),
       }),
     ),
+    costs: oc.output(UsageCostsSchema),
   },
   export: {
     bot: oc.input(botId).output(ExportManifestSchema),

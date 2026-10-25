@@ -233,6 +233,7 @@ import {
   SpaceNotFoundError,
   selectSpaceModelPreference,
   selectSpaceVoicePreference,
+  summarizeUsageCosts,
   toBoardDto,
   toTicketCommentDto,
   toTicketDto,
@@ -6517,7 +6518,7 @@ export function createRouter(deps: RouterDeps) {
     usage: {
       list: authed.usage.list.handler(async ({ context }) => {
         const rows = await deps.prisma.usageRecord.findMany({
-          where: { spaceId: context.actor.spaceId, userId: context.actor.userId },
+          where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
           orderBy: { createdAt: "desc" },
           take: 100,
         });
@@ -6549,13 +6550,13 @@ export function createRouter(deps: RouterDeps) {
       summary: authed.usage.summary.handler(async ({ context }) => {
         const [result, runGroups] = await Promise.all([
           deps.prisma.usageRecord.aggregate({
-            where: { spaceId: context.actor.spaceId, userId: context.actor.userId },
+            where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
             _sum: { inputTokens: true, outputTokens: true, totalTokens: true },
             _count: { _all: true, inputTokens: true, outputTokens: true, totalTokens: true },
           }),
           deps.prisma.usageRecord.groupBy({
             by: ["runId", "parentRunId"],
-            where: { spaceId: context.actor.spaceId, userId: context.actor.userId },
+            where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
           }),
         ]);
         const runs = new Set(runGroups.map((row) => row.parentRunId ?? row.runId).filter(Boolean))
@@ -6570,6 +6571,9 @@ export function createRouter(deps: RouterDeps) {
           runs,
         };
       }),
+      costs: authed.usage.costs.handler(({ context }) =>
+        summarizeUsageCosts(deps.prisma, context.actor),
+      ),
     },
     export: {
       bot: authed.export.bot.handler(async ({ context, input }) => {

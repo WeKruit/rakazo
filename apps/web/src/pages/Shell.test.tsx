@@ -174,7 +174,14 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
     agentSkills: { list: shellApi.listAgentSkills },
     voice: { status: vi.fn().mockResolvedValue(null) },
     messaging: { status: vi.fn().mockResolvedValue({ enabled: false, providers: [] }) },
-    usage: { summary: vi.fn().mockResolvedValue({ inputTokens: 0, outputTokens: 0, runs: 0 }) },
+    usage: {
+      costs: vi.fn().mockResolvedValue({
+        total: { credits: 0, calls: 0, tokens: 0 },
+        month: { credits: 0, calls: 0, tokens: 0 },
+        days: [],
+        roles: [],
+      }),
+    },
     connections: { list: vi.fn().mockResolvedValue([]), catalog: vi.fn().mockResolvedValue([]) },
     recruiting: shellApi.recruiting,
   },

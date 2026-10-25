@@ -1,29 +1,40 @@
 import { expect, test } from "@playwright/test";
 import { captureScreenshot, completeOnboarding, openUserSettings, signup } from "./helpers";
 
-for (const totalTokens of [201, null]) {
-  test(`usage shows ${totalTokens === null ? "unknown" : "complete"} token totals`, async ({
-    page,
-  }, testInfo) => {
-    await page.route("**/rpc/usage/summary", (route) =>
-      route.fulfill({
-        json: { json: { runs: 2, inputTokens: 10, outputTokens: 1, totalTokens } },
-      }),
-    );
-    const stamp = Date.now();
-    await signup(page, `usage-total-${stamp}@rakazo.test`, "password12", "Usage totals");
-    await completeOnboarding(page);
-    await openUserSettings(page, "usage");
-    await expect(page.getByTestId("usage-settings")).toContainText(
-      `2 runs · ${totalTokens ?? "—"} tokens`,
-    );
-    await captureScreenshot(
-      page,
-      testInfo,
-      totalTokens === null ? "usage-unknown-total" : "usage-complete-total",
-    );
-  });
-}
+test("usage shows spend per role and calibration round", async ({ page }, testInfo) => {
+  const amounts = { credits: 228, calls: 14, tokens: 51200 };
+  await page.route("**/rpc/usage/costs", (route) =>
+    route.fulfill({
+      json: {
+        json: {
+          total: amounts,
+          month: amounts,
+          days: [{ day: "2026-10-25", ...amounts }],
+          roles: [
+            {
+              roleId: "role-1",
+              title: "Quality manager",
+              ...amounts,
+              rounds: [
+                { round: 1, scale: false, credits: 177, calls: 9, tokens: 40000 },
+                { round: 2, scale: false, credits: 51, calls: 5, tokens: 11200 },
+              ],
+            },
+          ],
+        },
+      },
+    }),
+  );
+  const stamp = Date.now();
+  await signup(page, `usage-total-${stamp}@rakazo.test`, "password12", "Usage totals");
+  await completeOnboarding(page);
+  await openUserSettings(page, "usage");
+  const usage = page.getByTestId("usage-settings");
+  await expect(usage).toContainText("Search credits");
+  await usage.getByTestId("usage-role").locator("summary").click();
+  await expect(usage.getByTestId("usage-role")).toContainText("Round 2");
+  await captureScreenshot(page, testInfo, "usage-role-rounds");
+});
 
 test("settings shell is two-pane and deep-links Models Memory Voice Usage", async ({
   page,

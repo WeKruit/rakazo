@@ -123,12 +123,6 @@ msgstr "{0} 分钟"
 msgid "{0} rollup hours"
 msgstr "{0} 小时汇总"
 
-#. placeholder {0}: usage.runs
-#. placeholder {1}: usage.totalTokens ?? "—"
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "{0} runs · {1} tokens"
-msgstr "{0} 次运行 · {1} tokens"
-
 #. placeholder {0}: candidate.discoveryCount
 #: src/pages/RecruitingPanel.tsx
 msgid "{0} saved discoveries"
@@ -345,6 +339,7 @@ msgstr "账户 ID"
 msgid "Account label"
 msgstr "账号名称"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr "账号"
@@ -608,6 +603,7 @@ msgstr "全部轮次"
 msgid "All statuses"
 msgstr "全部状态"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Artifacts.tsx
 msgid "All time"
 msgstr "全部时间"
@@ -1105,6 +1101,10 @@ msgstr "浏览器"
 #: src/pages/KnowledgeSection.tsx
 msgid "Built-in"
 msgstr "内置"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "By role"
+msgstr "按岗位"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Calendar"
@@ -2975,6 +2975,10 @@ msgstr "删除空间"
 msgid "deleted"
 msgstr "已删除"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Deleted role"
+msgstr "已删除的岗位"
+
 #: src/pages/Artifacts.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Deleting…"
@@ -3389,6 +3393,10 @@ msgstr "错误"
 #: src/pages/RecruitingPanel.tsx
 msgid "Error details"
 msgstr "错误详情"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Estimated cost"
+msgstr "估算成本"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Event details"
@@ -4153,6 +4161,10 @@ msgstr "语言"
 msgid "Last {count} weeks"
 msgstr "最近 {count} 周"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Last 30 days"
+msgstr "最近 30 天"
+
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Last 7 days · UTC"
 msgstr "最近 7 天 · UTC"
@@ -4669,8 +4681,8 @@ msgid "Model options"
 msgstr "模型选项"
 
 #: src/pages/AccountSettingsOverlay.tsx
-msgid "Model spend uses your provider keys."
-msgstr "模型费用使用你的提供方密钥。"
+msgid "Model tokens"
+msgstr "模型 tokens"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model updated."
@@ -6741,6 +6753,11 @@ msgid "Rotate key"
 msgstr "轮换密钥"
 
 #. placeholder {0}: round.round
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Round {0}"
+msgstr "第 {0} 轮"
+
+#. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Round {0} · {1} people"
@@ -6755,6 +6772,10 @@ msgstr "第 {0} 轮反馈："
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Round {0} looks good. Start finding more people."
 msgstr "第 {0} 轮这批人可以，开始扩大搜索。"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Rounds"
+msgstr "轮次"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
@@ -7007,6 +7028,10 @@ msgstr "正在保存…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "回答是或否，或一句话说明。"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Scaling"
+msgstr "扩大搜索"
+
 #. placeholder {0}: person.name
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Schedule an interview with {0}. Check availability and prepare the invitation here for my approval; do not send it yet."
@@ -7094,6 +7119,10 @@ msgstr "搜索候选人"
 msgid "Search contacts"
 msgstr "搜索联系人"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Search credits"
+msgstr "搜索额度"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Search Criteria"
 msgstr "搜索标准"
@@ -7161,6 +7190,10 @@ msgstr "搜索更新 {0}"
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
 msgstr "搜索：{0}"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Searches"
+msgstr "搜索次数"
 
 #: src/components/LiveWork.tsx
 msgid "Searching candidates"
@@ -7337,6 +7370,10 @@ msgstr "服务器 URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "服务连接"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Services"
+msgstr "服务"
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -8052,6 +8089,7 @@ msgstr "这个筛选属于另一个岗位。"
 msgid "this Mac"
 msgstr "这台 Mac"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Artifacts.tsx
 msgid "This month"
 msgstr "本月"
@@ -8386,6 +8424,10 @@ msgstr "紧急"
 #: src/pages/Shell.tsx
 msgid "Usage"
 msgstr "用量"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Usage totals"
+msgstr "用量合计"
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "Use {hostLabel}"

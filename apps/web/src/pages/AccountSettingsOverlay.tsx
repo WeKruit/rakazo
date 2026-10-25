@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { AccountSecurity, AvatarStyle } from "@rakazo/contracts";
+import type { AccountSecurity, AvatarStyle, UsageAmounts, UsageCosts } from "@rakazo/contracts";
 import { BotAvatar, Button, Field, FieldLabel, Input, Label, Switch, Toggle } from "@rakazo/ui-web";
 import { ChevronDown } from "lucide-react";
 import type { KeyboardEvent as ReactKeyboardEvent, RefObject } from "react";
@@ -320,34 +320,201 @@ export function UsageSettingsPanel({
   usage,
   panelRef,
 }: {
-  usage?: {
-    runs: number;
-    inputTokens: number | null;
-    outputTokens: number | null;
-    totalTokens?: number | null;
-  } | null;
+  usage?: UsageCosts | null;
   panelRef?: RefObject<HTMLDivElement | null>;
 }) {
+  const { t } = useLingui();
+  const owner = usage?.total.estimatedUsd !== undefined;
   return (
     <div
       ref={panelRef}
       tabIndex={-1}
       data-testid="usage-settings"
-      className="rounded-xl border border-border px-4 py-4 outline-none"
+      className="space-y-5 rounded-xl border border-border px-4 py-4 outline-none"
     >
       <h3 className="text-[15px] font-medium text-foreground">
         <Trans>Usage</Trans>
       </h3>
       {usage ? (
-        <p className="mt-3 text-[14px] text-foreground/75">
-          <Trans>
-            {usage.runs} runs · {usage.totalTokens ?? "—"} tokens
-          </Trans>
-        </p>
+        <>
+          <UsageTable
+            label={t`Usage totals`}
+            owner={owner}
+            rows={[
+              { key: "month", name: t`This month`, value: usage.month },
+              { key: "total", name: t`All time`, value: usage.total },
+            ]}
+          />
+          {usage.roles.length ? (
+            <section className="space-y-2">
+              <h4 className="text-[13px] font-medium text-foreground/80">
+                <Trans>By role</Trans>
+              </h4>
+              {usage.roles.map((role) => (
+                <details
+                  key={role.roleId}
+                  data-testid="usage-role"
+                  className="group rounded-lg border border-border"
+                >
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-3 py-2 text-[13px]">
+                    <span className="min-w-0 truncate text-foreground">
+                      {role.title ?? t`Deleted role`}
+                    </span>
+                    <span className="shrink-0 tabular-nums text-muted-foreground">
+                      {usageAmountsText(role, owner)}
+                    </span>
+                  </summary>
+                  <div className="border-t border-border px-3 py-2">
+                    <UsageTable
+                      label={t`Rounds`}
+                      owner={owner}
+                      rows={role.rounds.map((round) => ({
+                        key: round.scale ? "scale" : String(round.round),
+                        name: round.scale ? t`Scaling` : t`Round ${round.round}`,
+                        value: round,
+                      }))}
+                    />
+                  </div>
+                </details>
+              ))}
+            </section>
+          ) : null}
+          {usage.days.length ? (
+            <details className="group">
+              <summary className="cursor-pointer list-none text-[13px] font-medium text-foreground/80">
+                <Trans>Last 30 days</Trans>
+              </summary>
+              <div className="mt-2">
+                <UsageTable
+                  label={t`Last 30 days`}
+                  owner={owner}
+                  rows={[...usage.days].reverse().map((day) => ({
+                    key: day.day,
+                    name: day.day,
+                    value: day,
+                  }))}
+                />
+              </div>
+            </details>
+          ) : null}
+          {usage.services?.length ? (
+            <section className="space-y-2" data-testid="usage-services">
+              <h4 className="text-[13px] font-medium text-foreground/80">
+                <Trans>Services</Trans>
+              </h4>
+              <table className="w-full text-[12.5px]">
+                <tbody>
+                  {usage.services.map((service) => (
+                    <tr
+                      key={`${service.unit}:${service.service}`}
+                      className="border-t border-border"
+                    >
+                      <td className="py-1.5 pr-3 text-foreground">{service.service}</td>
+                      <td className="py-1.5 pr-3 text-muted-foreground">{service.unit}</td>
+                      <td className="py-1.5 text-right tabular-nums text-foreground/80">
+                        {formatUsageNumber(service.quantity)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          ) : null}
+          {usage.accounts?.length ? (
+            <section className="space-y-2" data-testid="usage-accounts">
+              <h4 className="text-[13px] font-medium text-foreground/80">
+                <Trans>Accounts</Trans>
+              </h4>
+              <UsageTable
+                label={t`Accounts`}
+                owner
+                rows={usage.accounts.map((account) => ({
+                  key: account.userId,
+                  name: account.email ?? account.userId,
+                  value: account,
+                }))}
+              />
+            </section>
+          ) : null}
+        </>
       ) : null}
-      <p className={`text-[12.5px] text-muted-foreground/80 ${usage ? "mt-2" : "mt-3"}`}>
-        <Trans>Model spend uses your provider keys.</Trans>
-      </p>
+    </div>
+  );
+}
+
+function formatUsageNumber(value: number) {
+  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 }).format(value);
+}
+
+function formatUsd(value: number) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function usageAmountsText(value: UsageAmounts, owner: boolean) {
+  return owner && value.estimatedUsd !== undefined
+    ? formatUsd(value.estimatedUsd)
+    : formatUsageNumber(value.credits);
+}
+
+function UsageTable({
+  label,
+  owner,
+  rows,
+}: {
+  label: string;
+  owner: boolean;
+  rows: Array<{ key: string; name: string; value: UsageAmounts }>;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table aria-label={label} className="w-full text-[12.5px]">
+        <thead>
+          <tr className="text-left text-muted-foreground">
+            <th className="py-1.5 pr-3 font-normal">
+              <span className="sr-only">{label}</span>
+            </th>
+            <th className="py-1.5 pr-3 text-right font-normal">
+              <Trans>Search credits</Trans>
+            </th>
+            <th className="py-1.5 pr-3 text-right font-normal">
+              <Trans>Searches</Trans>
+            </th>
+            <th className="py-1.5 text-right font-normal">
+              <Trans>Model tokens</Trans>
+            </th>
+            {owner ? (
+              <th className="py-1.5 pl-3 text-right font-normal">
+                <Trans>Estimated cost</Trans>
+              </th>
+            ) : null}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.key} className="border-t border-border tabular-nums">
+              <td className="max-w-40 truncate py-1.5 pr-3 text-foreground">{row.name}</td>
+              <td className="py-1.5 pr-3 text-right text-foreground/80">
+                {formatUsageNumber(row.value.credits)}
+              </td>
+              <td className="py-1.5 pr-3 text-right text-foreground/80">
+                {formatUsageNumber(row.value.calls)}
+              </td>
+              <td className="py-1.5 text-right text-foreground/80">
+                {formatUsageNumber(row.value.tokens)}
+              </td>
+              {owner ? (
+                <td className="py-1.5 pl-3 text-right text-foreground">
+                  {formatUsd(row.value.estimatedUsd ?? 0)}
+                </td>
+              ) : null}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -26,6 +26,7 @@ import type {
   ThinkingLevel,
   ThreadMessage,
   ThreadSnapshot,
+  UsageCosts,
   VoiceStatus,
 } from "@rakazo/contracts";
 import {
@@ -1009,15 +1010,10 @@ export function ShellPage() {
       cancelled = true;
     };
   }, [session.data?.user]);
-  const [usage, setUsage] = useState<{
-    inputTokens: number | null;
-    outputTokens: number | null;
-    totalTokens?: number | null;
-    runs: number;
-  } | null>(null);
+  const [usage, setUsage] = useState<UsageCosts | null>(null);
   const refreshUsage = useCallback(() => {
     void rpc.usage
-      .summary()
+      .costs()
       .then(setUsage)
       .catch(() => undefined);
   }, []);

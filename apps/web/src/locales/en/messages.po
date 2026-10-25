@@ -123,12 +123,6 @@ msgstr "{0} minutes"
 msgid "{0} rollup hours"
 msgstr "{0} rollup hours"
 
-#. placeholder {0}: usage.runs
-#. placeholder {1}: usage.totalTokens ?? "—"
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "{0} runs · {1} tokens"
-msgstr "{0} runs · {1} tokens"
-
 #. placeholder {0}: candidate.discoveryCount
 #: src/pages/RecruitingPanel.tsx
 msgid "{0} saved discoveries"
@@ -345,6 +339,7 @@ msgstr "Account ID"
 msgid "Account label"
 msgstr "Account label"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr "Accounts"
@@ -608,6 +603,7 @@ msgstr "All rounds"
 msgid "All statuses"
 msgstr "All statuses"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Artifacts.tsx
 msgid "All time"
 msgstr "All time"
@@ -1105,6 +1101,10 @@ msgstr "Browser"
 #: src/pages/KnowledgeSection.tsx
 msgid "Built-in"
 msgstr "Built-in"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "By role"
+msgstr "By role"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Calendar"
@@ -2975,6 +2975,10 @@ msgstr "Delete space"
 msgid "deleted"
 msgstr "deleted"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Deleted role"
+msgstr "Deleted role"
+
 #: src/pages/Artifacts.tsx
 #: src/pages/shell/dialogs.tsx
 msgid "Deleting…"
@@ -3389,6 +3393,10 @@ msgstr "Error"
 #: src/pages/RecruitingPanel.tsx
 msgid "Error details"
 msgstr "Error details"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Estimated cost"
+msgstr "Estimated cost"
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Event details"
@@ -4153,6 +4161,10 @@ msgstr "Languages"
 msgid "Last {count} weeks"
 msgstr "Last {count} weeks"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Last 30 days"
+msgstr "Last 30 days"
+
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Last 7 days · UTC"
 msgstr "Last 7 days · UTC"
@@ -4669,8 +4681,8 @@ msgid "Model options"
 msgstr "Model options"
 
 #: src/pages/AccountSettingsOverlay.tsx
-msgid "Model spend uses your provider keys."
-msgstr "Model spend uses your provider keys."
+msgid "Model tokens"
+msgstr "Model tokens"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model updated."
@@ -6741,6 +6753,11 @@ msgid "Rotate key"
 msgstr "Rotate key"
 
 #. placeholder {0}: round.round
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Round {0}"
+msgstr "Round {0}"
+
+#. placeholder {0}: round.round
 #. placeholder {1}: round.candidates.length
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Round {0} · {1} people"
@@ -6755,6 +6772,10 @@ msgstr "Round {0} feedback:"
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Round {0} looks good. Start finding more people."
 msgstr "Round {0} looks good. Start finding more people."
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Rounds"
+msgstr "Rounds"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/Shell.tsx
@@ -7007,6 +7028,10 @@ msgstr "Saving…"
 msgid "Say yes or no, or answer in a sentence."
 msgstr "Say yes or no, or answer in a sentence."
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Scaling"
+msgstr "Scaling"
+
 #. placeholder {0}: person.name
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Schedule an interview with {0}. Check availability and prepare the invitation here for my approval; do not send it yet."
@@ -7094,6 +7119,10 @@ msgstr "Search candidates"
 msgid "Search contacts"
 msgstr "Search contacts"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Search credits"
+msgstr "Search credits"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Search Criteria"
 msgstr "Search Criteria"
@@ -7161,6 +7190,10 @@ msgstr "Search update {0}"
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
 msgstr "Search: {0}"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Searches"
+msgstr "Searches"
 
 #: src/components/LiveWork.tsx
 msgid "Searching candidates"
@@ -7337,6 +7370,10 @@ msgstr "Server URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "Service connections"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Services"
+msgstr "Services"
 
 #: src/components/call/CallCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -8052,6 +8089,7 @@ msgstr "This filter belongs to another role."
 msgid "this Mac"
 msgstr "this Mac"
 
+#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/Artifacts.tsx
 msgid "This month"
 msgstr "This month"
@@ -8386,6 +8424,10 @@ msgstr "Urgent"
 #: src/pages/Shell.tsx
 msgid "Usage"
 msgstr "Usage"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Usage totals"
+msgstr "Usage totals"
 
 #: src/pages/HostComputerPrompt.tsx
 msgid "Use {hostLabel}"

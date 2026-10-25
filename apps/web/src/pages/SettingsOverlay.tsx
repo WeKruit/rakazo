@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
-import type { AvatarStyle, SpaceMemoryConfig } from "@rakazo/contracts";
+import type { AvatarStyle, SpaceMemoryConfig, UsageCosts } from "@rakazo/contracts";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import {
   Brain,
@@ -63,12 +63,7 @@ export function SettingsOverlay({
 }: {
   email?: string | null;
   name: string;
-  usage?: {
-    runs: number;
-    inputTokens: number | null;
-    outputTokens: number | null;
-    totalTokens?: number | null;
-  } | null;
+  usage?: UsageCosts | null;
   onUsageOpen: () => void;
   initialSection?: SettingsSection;
   avatarStyle: AvatarStyle;
