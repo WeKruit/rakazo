@@ -148,7 +148,7 @@ describe("recruiterConnectBlock", () => {
         connection: {
           serverId: "server",
           name: "人才资料库",
-          reason: "Profile data adds dated history.",
+          reason: "用于补全候选人的完整经历、学历和公司信息。",
         },
       },
     ]);
