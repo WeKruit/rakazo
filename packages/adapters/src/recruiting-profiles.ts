@@ -172,6 +172,114 @@ export function profileFromLookup(
   return null;
 }
 
+const PEOPLE_NAME_KEYS = ["full_name", "name", "person_name"];
+const PEOPLE_TITLE_KEYS = [
+  "active_experience_title",
+  "job_title",
+  "current_title",
+  "title",
+  "position_title",
+  "headline",
+];
+const PEOPLE_COMPANY_KEYS = [
+  "active_experience_company_name",
+  "company_name",
+  "current_company",
+  "company",
+];
+const PEOPLE_LOCATION_KEYS = ["location_full", "location", "location_raw_address", "region"];
+const PEOPLE_LINK_KEYS = [...PROFILE_LINK_KEYS, "profile_url", "url", "websites_linkedin"];
+
+/** Rows of a markdown table in connector text, keyed by normalized header. */
+function markdownRows(text: string): Record_[] {
+  const lines = text.split("\n").map((line) => line.trim());
+  const rows: Record_[] = [];
+  for (let i = 0; i + 1 < lines.length; i++) {
+    if (!lines[i]!.startsWith("|") || !/^\|[\s:|-]+\|$/.test(lines[i + 1]!)) continue;
+    const cells = (line: string) =>
+      line
+        .replace(/^\||\|$/g, "")
+        .split("|")
+        .map((cell) => cell.trim());
+    const header = cells(lines[i]!).map((cell) => cell.toLowerCase().replace(/[^a-z0-9]+/g, "_"));
+    for (let j = i + 2; j < lines.length && lines[j]!.startsWith("|"); j++) {
+      const values = cells(lines[j]!);
+      rows.push(Object.fromEntries(header.map((key, index) => [key, values[index] ?? ""])));
+      i = j;
+    }
+  }
+  return rows;
+}
+
+/** Every object in a connector result, including JSON and markdown tables inside text blocks. */
+function objects(value: unknown, depth = 0, found: Record_[] = []): Record_[] {
+  if (depth > 8 || found.length > 2000) return found;
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return objects(JSON.parse(trimmed), depth + 1, found);
+      } catch {
+        // Not JSON; fall through to tables.
+      }
+    }
+    for (const row of markdownRows(trimmed)) found.push(row);
+    return found;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) objects(item, depth + 1, found);
+    return found;
+  }
+  if (!isRecord(value)) return found;
+  found.push(value);
+  for (const nested of Object.values(value)) objects(nested, depth + 1, found);
+  return found;
+}
+
+export type PeopleSearchRow = {
+  name: string;
+  linkedin_url: string;
+  current_title?: string;
+  current_company?: string;
+  location?: string;
+};
+
+/**
+ * People in a profile-data connector's search or fetch result, one per LinkedIn profile, in
+ * result order. Only hosts this adapter knows count; anything without a name and LinkedIn is
+ * left out, since a round needs both.
+ */
+export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearchRow[] {
+  if (!providerFor(endpoint)) return [];
+  const people = new Map<string, PeopleSearchRow>();
+  for (const record of objects(result)) {
+    const name = first(record, PEOPLE_NAME_KEYS);
+    const href = PEOPLE_LINK_KEYS.map((key) => link(record[key])).find(
+      (value) => value && linkedinPersonKey(value),
+    );
+    const key = href ? linkedinPersonKey(href) : null;
+    if (!name || !href || !key || people.has(key) || name.length > 120) continue;
+    // Country hosts and tracking parameters collapse to the pool's canonical profile link.
+    const row: PeopleSearchRow = {
+      name,
+      linkedin_url: `https://www.linkedin.com${key.slice("linkedin:".length)}`,
+    };
+    const title = first(record, PEOPLE_TITLE_KEYS);
+    const company = first(record, PEOPLE_COMPANY_KEYS);
+    const location = first(record, PEOPLE_LOCATION_KEYS);
+    if (title) row.current_title = title.slice(0, 300);
+    if (company) row.current_company = company.slice(0, 200);
+    if (location) row.location = location.slice(0, 200);
+    people.set(key, row);
+  }
+  return [...people.values()];
+}
+
+/** The MCP hosts whose people results save_search understands. */
+export function isPeopleSearchEndpoint(endpoint: string): boolean {
+  return providerFor(endpoint) !== null;
+}
+
 function summary(profile: RecruitingSavedProfile) {
   return {
     candidateKey: profile.personKey,

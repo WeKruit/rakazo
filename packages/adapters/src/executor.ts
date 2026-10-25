@@ -445,8 +445,10 @@ import {
   prepareRecruitingResearchTool,
   RecruitingCandidateOutputError,
   RecruitingCsvImportError,
+  RecruitingPeopleSearchError,
   resolveRecruitingResearchTool,
   saveNativeRecruitingCandidateResults,
+  saveRecruitingPeopleSearch,
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
@@ -4663,6 +4665,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (researchInput?.success === true &&
               (researchInput.data.operation === "save_results" ||
                 researchInput.data.operation === "import_csv" ||
+                researchInput.data.operation === "save_search" ||
                 researchInput.data.operation === "calibration_round"));
           const researchActor = {
             actor: {
@@ -4968,9 +4971,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (
             researchInput?.success &&
-            !["prepare", "continue", "save_results", "import_csv", "calibration_round"].includes(
-              researchInput.data.operation,
-            )
+            ![
+              "prepare",
+              "continue",
+              "save_results",
+              "import_csv",
+              "save_search",
+              "calibration_round",
+            ].includes(researchInput.data.operation)
           ) {
             if (!deps.artifacts) return { error: "Recruiting research requires artifact storage" };
             try {
@@ -4980,6 +4988,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 input.operation === "continue" ||
                 input.operation === "save_results" ||
                 input.operation === "import_csv" ||
+                input.operation === "save_search" ||
                 input.operation === "calibration_round"
               )
                 throw new IsolationError();
@@ -7935,6 +7944,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 researchInput.data.operation !== "continue" &&
                 researchInput.data.operation !== "save_results" &&
                 researchInput.data.operation !== "import_csv" &&
+                researchInput.data.operation !== "save_search" &&
                 researchInput.data.operation !== "calibration_round")
             )
               return finish({
@@ -7959,6 +7969,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     effectRequest: applied.effect.request,
                   },
                   researchInput.data,
+                );
+              }
+              if (researchInput.data.operation === "save_search") {
+                if (!applied || !claimedEffect) throw new IsolationError();
+                // Internal record keeping like import_csv: page, rows and effect commit together.
+                return await saveRecruitingPeopleSearch(
+                  { prisma: deps.prisma, artifacts: deps.artifacts },
+                  {
+                    ...researchActor,
+                    leaseOwner: workerId,
+                    leaseFence: fence,
+                    effectId: applied.effect.id,
+                    effectRequest: applied.effect.request,
+                  },
+                  researchInput.data,
+                  context,
                 );
               }
               if (researchInput.data.operation === "import_csv") {
@@ -8032,6 +8058,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (
                 error instanceof RecruitingCandidateOutputError ||
                 error instanceof RecruitingCsvImportError ||
+                error instanceof RecruitingPeopleSearchError ||
                 error instanceof RecruitingCalibrationRoundError
               )
                 return finish({ error: error.message });

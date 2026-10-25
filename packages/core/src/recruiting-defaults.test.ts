@@ -72,14 +72,18 @@ describe("maintained recruiting defaults", () => {
     );
   });
 
-  it("keeps feedback and recalibration on the same Autumn task", () => {
+  it("runs calibration rounds as quick searches and keeps Autumn for scale", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("Route candidate or search-direction feedback to Sourcer");
+    expect(main.instructions).toContain(
+      "Round feedback before the calibration is accepted goes into your next quick search",
+    );
+    expect(main.instructions).toContain("recruiting_research save_search");
+    expect(main.instructions).toContain("Use Autumn only to scale after a round is accepted");
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
-    expect(sourcing.body).toContain("ask Autumn on the same task, in one reply per round");
-    expect(sourcing.body).toContain("excluding everyone it already returned for this role");
+    expect(sourcing.body).toContain("Calibration rounds come from Main's quick searches");
+    expect(sourcing.body).not.toContain("ask Autumn on the same task, in one reply per round");
   });
 
   it("asks for one round of feedback without rating every person", () => {
@@ -90,15 +94,13 @@ describe("maintained recruiting defaults", () => {
     expect(sourcer.instructions).not.toContain("turn each comment into a rule");
   });
 
-  it("gives Sourcer the find-people stage order and the no-polling continuation rule", () => {
+  it("gives Sourcer the scale stage order and the no-polling continuation rule", () => {
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
     const order = [
-      "saved JD",
-      "decision-affecting gaps",
+      "accepted round and every round's feedback",
       "confirmed brief version",
       "Autumn research",
       "save every returned page",
-      "ten-profile calibration",
       "feedback of any scope",
       "reply on the same Autumn task",
       "save the expanded pool",
@@ -130,20 +132,17 @@ describe("maintained recruiting defaults", () => {
       expect(bot.instructions).toContain(
         "A turn never ends on a bare save or acknowledgement: after saving an answer, in the same turn ask the next single most decision-affecting question, or when none is missing present the brief for confirmation and say what happens next.",
       );
-      expect(bot.instructions).toContain("Sourcer runs the search for exactly 10 profiles");
+      expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
       expect(bot.instructions).toContain("no process narration");
     },
   );
 
-  it("Main hands off to Sourcer in the same turn once the brief is confirmed", () => {
+  it("Main runs the first round itself once the brief is confirmed", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain(
-      "hand off to Sourcer in the same turn so the calibration search for exactly 10 profiles starts now",
+      "the moment it is confirmed, run the calibration quick search yourself in the same turn and present the 10 profiles",
     );
-    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
-    expect(sourcer.instructions).toContain(
-      "start the calibration search for exactly 10 profiles in the same turn",
-    );
+    expect(main.instructions).not.toContain("hand off to Sourcer in the same turn");
   });
 
   it.each(RECRUITING_DEFAULT_BOTS)("$name never exposes CRM, campaign or lead setup", (bot) => {

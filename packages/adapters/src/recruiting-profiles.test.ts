@@ -10,6 +10,7 @@ vi.mock("@rakazo/db", () => db);
 import {
   executeRecruitingProfilesTool,
   linkedinPersonKey,
+  peopleFromSearch,
   profileFromLookup,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
@@ -194,5 +195,62 @@ describe("executeRecruitingProfilesTool", () => {
         { candidateKey: "linkedin:/in/new", saved: false },
       ],
     });
+  });
+});
+
+describe("peopleFromSearch", () => {
+  it("reads people from JSON previews, nested records and markdown tables", () => {
+    const json = {
+      structuredContent: {
+        total: 412,
+        preview: [
+          {
+            full_name: "Ada Example",
+            active_experience_title: "Sort Center Manager",
+            active_experience_company_name: "Acme Parcel",
+            location_full: "Edison, New Jersey, United States",
+            professional_network_url: "https://uk.linkedin.com/in/Ada-Example/?trk=x",
+            experience: [{ title: "Shift Lead", company_name: "Beta", url: "https://x.example" }],
+          },
+          { full_name: "No Link", active_experience_title: "Manager" },
+          { name: "Acme Parcel", linkedin_url: "https://www.linkedin.com/company/acme" },
+        ],
+      },
+    };
+    const table = {
+      content: [
+        {
+          type: "text",
+          text: "Found 2 people\n\n| Full name | Job title | Company name | Location | LinkedIn URL |\n|---|---|---|---|---|\n| Ben Sample | Warehouse Ops Supervisor | Gamma Fulfillment | Newark, NJ | linkedin.com/in/ben-sample |\n| Ada Example | Sort Center Manager | Acme Parcel | Edison, NJ | https://www.linkedin.com/in/ada-example |",
+        },
+      ],
+    };
+    expect(peopleFromSearch(json, ENDPOINT)).toEqual([
+      {
+        name: "Ada Example",
+        linkedin_url: "https://www.linkedin.com/in/ada-example",
+        current_title: "Sort Center Manager",
+        current_company: "Acme Parcel",
+        location: "Edison, New Jersey, United States",
+      },
+    ]);
+    expect(peopleFromSearch(table, ENDPOINT).map((person) => person.linkedin_url)).toEqual([
+      "https://www.linkedin.com/in/ben-sample",
+      "https://www.linkedin.com/in/ada-example",
+    ]);
+    expect(peopleFromSearch(table, ENDPOINT)[0]).toMatchObject({
+      name: "Ben Sample",
+      current_title: "Warehouse Ops Supervisor",
+      current_company: "Gamma Fulfillment",
+    });
+  });
+
+  it("ignores connectors that are not profile-data providers", () => {
+    expect(
+      peopleFromSearch(
+        { full_name: "Ada", linkedin_url: "https://www.linkedin.com/in/ada" },
+        "https://mcp.other.example/mcp",
+      ),
+    ).toEqual([]);
   });
 });

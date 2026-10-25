@@ -7456,105 +7456,268 @@ export async function saveRecruitingCandidateCsvImport(
       file.clientNonce !== `recruiting-csv-import:${saving.id}`
     )
       throw new IsolationError();
-    const artifact = await createResearchArtifact(tx, actor, run, thread, file);
-    if (captured.rows.some((row, index) => row.rowIndex !== index)) throw new IsolationError();
-    const rows = captured.rows.map(({ rowIndex, row }) => {
-      // Unmapped or blank columns stay absent (missing_field), so they never mask older values.
-      const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
-        schemaKnown: true,
-      });
-      return {
-        pageId: saving.id,
-        rowIndex,
-        roleId: role.id,
-        candidateKey: candidateKey ?? `source-row:${saving.id}:${rowIndex}`,
-        ...profile,
-        evidenceUrls: Prisma.DbNull,
-        issues: [...profile.issues],
-      };
-    });
-    const observedAt = new Date();
-    await tx.recruitingCandidatePage.create({
-      data: {
-        effectId: saving.id,
-        roleId: role.id,
-        taskId: null,
-        actionId: null,
-        roleRevisionId: role.currentRevisionId,
-        artifactId: artifact.id,
-        artifactHash: artifact.hash,
-        requestCursor: null,
-        outputId: null,
-        observedAt,
-        rowCount: rows.length,
+    return saveUnassessedCandidatePage(
+      tx,
+      actor,
+      { run, thread, role, saving, trusted, file },
+      {
+        rows: captured.rows,
+        describe: ({ artifact, observedAt, candidateRows }) => ({
+          source: {
+            kind: "csv_import",
+            artifactId: csv.id,
+            artifactSha256: csv.hash,
+            importedBy: { userId: actor.userId, runId: run.id },
+            observedAt: observedAt.toISOString(),
+          },
+          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+          candidateRows: candidateRows.map((row) => ({
+            ...row,
+            csvRowIndex: captured.rows[row.rowIndex]!.csvRowIndex,
+          })),
+          skipped: captured.skipped,
+          truncated: captured.truncated,
+        }),
       },
-    });
-    const keys = [...new Set(rows.map((row) => row.candidateKey))];
-    const existing = new Set(
-      (
-        await tx.recruitingCandidate.findMany({
-          where: { roleId: role.id, candidateKey: { in: keys } },
-          select: { candidateKey: true },
-        })
-      ).map((candidate) => candidate.candidateKey),
     );
-    if (rows.length) {
-      await tx.recruitingCandidate.createMany({
-        data: keys.map((candidateKey) => ({ roleId: role.id, candidateKey })),
-        skipDuplicates: true,
-      });
-      await tx.recruitingCandidateOccurrence.createMany({ data: rows });
-      await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
-      await advanceStageAfterSave(tx, role.id);
-    }
-    const result = {
-      status: "saved",
-      roleId: role.id,
-      roleRevisionId: role.currentRevisionId,
-      sourceEffectId: saving.id,
-      source: {
-        kind: "csv_import",
-        artifactId: csv.id,
-        artifactSha256: csv.hash,
-        importedBy: { userId: actor.userId, runId: run.id },
-        observedAt: observedAt.toISOString(),
+  });
+}
+
+type PeopleSearchInput = Extract<RecruitingResearchToolInput, { operation: "save_search" }>;
+
+/** Canonical receipt bytes for one people-search save; recomputed here, never trusted from the caller. */
+export function recruitingPeopleSearchReceipt(
+  input: PeopleSearchInput,
+  captured: {
+    /** Completed connector calls of this run the rows were read from. */
+    sources: ReadonlyArray<{ effectId: string; toolName: string; host: string }>;
+    rows: ReadonlyArray<{ rowIndex: number; sourceEffectId: string; row: Record<string, string> }>;
+    truncated: boolean;
+  },
+) {
+  return {
+    version: 1,
+    kind: "people_search",
+    request: input,
+    sources: captured.sources,
+    rows: captured.rows,
+    truncated: captured.truncated,
+  };
+}
+
+/**
+ * Save the people a people-search connector returned earlier in this run as one unassessed
+ * candidate page on the thread's role. Every source must be a completed call of this run.
+ */
+export async function saveRecruitingCandidatePeopleSearch(
+  prisma: PrismaClient,
+  actor: Actor,
+  trusted: ResearchLease & { effectId: string; effectRequest: unknown },
+  raw: PeopleSearchInput,
+  captured: Parameters<typeof recruitingPeopleSearchReceipt>[1] & {
+    outputArtifact: RecruitingResearchArtifactInput;
+  },
+) {
+  const input = RecruitingResearchToolInputSchema.parse(raw);
+  if (
+    input.operation !== "save_search" ||
+    stableJsonValue(input) !==
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(trusted.effectRequest))
+  )
+    throw new IsolationError();
+  return prisma.$transaction(async (tx) => {
+    const { run, thread } = await lockLiveRecruitingRun(tx, actor, trusted.runId, false);
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "external_effects" WHERE "id" = ${trusted.effectId} FOR UPDATE`,
+    );
+    const saving = await tx.externalEffect.findFirst({
+      where: {
+        id: trusted.effectId,
+        spaceId: actor.spaceId,
+        runId: run.id,
+        kind: "recruiting_research",
       },
-      outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+    });
+    if (
+      saving?.kind !== "recruiting_research" ||
+      saving.runId !== run.id ||
+      stableJsonValue(RecruitingResearchToolInputSchema.parse(saving.request)) !==
+        stableJsonValue(input)
+    )
+      throw new IsolationError();
+    if (saving.status === "completed") return saving.result;
+    requireResearchLease(run, trusted);
+    if (saving.status !== "executing" || !thread.activeRecruitingRoleId) throw new IsolationError();
+    const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
+    if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
+      throw new RecruitingConflictError();
+    const sourceIds = [...new Set(captured.sources.map((source) => source.effectId))];
+    const completedSources = await tx.externalEffect.count({
+      where: { id: { in: sourceIds }, spaceId: actor.spaceId, runId: run.id, status: "completed" },
+    });
+    if (
+      !sourceIds.length ||
+      completedSources !== sourceIds.length ||
+      captured.rows.some((row) => !sourceIds.includes(row.sourceEffectId))
+    )
+      throw new IsolationError();
+    const bytes = Buffer.from(stableJsonValue(recruitingPeopleSearchReceipt(input, captured)));
+    const file = captured.outputArtifact;
+    if (
+      file.hash !== createHash("sha256").update(bytes).digest("hex") ||
+      file.size !== bytes.length ||
+      file.clientNonce !== `recruiting-people-search:${saving.id}`
+    )
+      throw new IsolationError();
+    return saveUnassessedCandidatePage(
+      tx,
+      actor,
+      { run, thread, role, saving, trusted, file },
+      {
+        rows: captured.rows,
+        describe: ({ artifact, observedAt, candidateRows }) => ({
+          source: {
+            kind: "people_search",
+            searchedBy: { userId: actor.userId, runId: run.id },
+            observedAt: observedAt.toISOString(),
+          },
+          outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
+          candidateRows: candidateRows.map((row) => {
+            const saved = captured.rows[row.rowIndex]!.row;
+            return {
+              ...row,
+              name: saved.name ?? null,
+              title: saved.current_title ?? null,
+              company: saved.current_company ?? null,
+              location: saved.location ?? null,
+            };
+          }),
+          truncated: captured.truncated,
+        }),
+      },
+    );
+  });
+}
+
+type UnassessedPageContext = {
+  run: { id: string; botId: string; threadId: string };
+  thread: { groupId: string | null };
+  role: { id: string; currentRevisionId: string | null };
+  saving: { id: string };
+  trusted: ResearchLease;
+  file: RecruitingResearchArtifactInput;
+};
+
+/**
+ * Store one unassessed candidate page (CSV import or people search) and complete its effect in
+ * the caller's transaction. Rows go through the same identity normalization as provider pages;
+ * nothing is scored or rejected.
+ */
+async function saveUnassessedCandidatePage(
+  tx: Tx,
+  actor: Actor,
+  { run, thread, role, saving, trusted, file }: UnassessedPageContext,
+  input: {
+    rows: ReadonlyArray<{ rowIndex: number; row: Record<string, string> }>;
+    describe: (saved: {
+      artifact: { id: string; hash: string };
+      observedAt: Date;
+      candidateRows: Array<{ rowIndex: number; candidateKey: string; alreadyInPool: boolean }>;
+    }) => Record<string, unknown>;
+  },
+) {
+  if (!role.currentRevisionId) throw new RecruitingConflictError();
+  const artifact = await createResearchArtifact(tx, actor, run, thread, file);
+  if (input.rows.some((row, index) => row.rowIndex !== index)) throw new IsolationError();
+  const rows = input.rows.map(({ rowIndex, row }) => {
+    // Unmapped or blank columns stay absent (missing_field), so they never mask older values.
+    const { candidateKey, ...profile } = normalizeRecruitingCandidateRow(row, {
+      schemaKnown: true,
+    });
+    return {
+      pageId: saving.id,
+      rowIndex,
+      roleId: role.id,
+      candidateKey: candidateKey ?? `source-row:${saving.id}:${rowIndex}`,
+      ...profile,
+      evidenceUrls: Prisma.DbNull,
+      issues: [...profile.issues],
+    };
+  });
+  const observedAt = new Date();
+  await tx.recruitingCandidatePage.create({
+    data: {
+      effectId: saving.id,
+      roleId: role.id,
+      taskId: null,
+      actionId: null,
+      roleRevisionId: role.currentRevisionId,
+      artifactId: artifact.id,
+      artifactHash: artifact.hash,
+      requestCursor: null,
+      outputId: null,
+      observedAt,
+      rowCount: rows.length,
+    },
+  });
+  const keys = [...new Set(rows.map((row) => row.candidateKey))];
+  const existing = new Set(
+    (
+      await tx.recruitingCandidate.findMany({
+        where: { roleId: role.id, candidateKey: { in: keys } },
+        select: { candidateKey: true },
+      })
+    ).map((candidate) => candidate.candidateKey),
+  );
+  if (rows.length) {
+    await tx.recruitingCandidate.createMany({
+      data: keys.map((candidateKey) => ({ roleId: role.id, candidateKey })),
+      skipDuplicates: true,
+    });
+    await tx.recruitingCandidateOccurrence.createMany({ data: rows });
+    await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
+    await advanceStageAfterSave(tx, role.id);
+  }
+  const result = {
+    status: "saved",
+    roleId: role.id,
+    roleRevisionId: role.currentRevisionId,
+    sourceEffectId: saving.id,
+    ...input.describe({
+      artifact,
+      observedAt,
       candidateRows: rows.map(({ rowIndex, candidateKey }) => ({
         rowIndex,
-        csvRowIndex: captured.rows[rowIndex]!.csvRowIndex,
         candidateKey,
         alreadyInPool: existing.has(candidateKey),
       })),
-      skipped: captured.skipped,
-      truncated: captured.truncated,
-    };
-    const completed = await tx.externalEffect.updateMany({
-      where: {
-        id: saving.id,
-        spaceId: actor.spaceId,
-        runId: run.id,
-        status: "executing",
-        run: {
-          status: "running",
-          leaseOwner: trusted.leaseOwner,
-          leaseFence: trusted.leaseFence,
-          leaseExpiresAt: { gt: new Date() },
-        },
-      },
-      data: { status: "completed", result },
-    });
-    if (completed.count !== 1) throw new IsolationError();
-    await appendEventInTransaction(tx, {
+    }),
+  };
+  const completed = await tx.externalEffect.updateMany({
+    where: {
+      id: saving.id,
       spaceId: actor.spaceId,
-      threadId: run.threadId,
-      botId: run.botId,
       runId: run.id,
-      type: "effect.recorded",
-      payload: { effectId: saving.id, tool: "recruiting_research", ...result },
-    });
-    return result;
+      status: "executing",
+      run: {
+        status: "running",
+        leaseOwner: trusted.leaseOwner,
+        leaseFence: trusted.leaseFence,
+        leaseExpiresAt: { gt: new Date() },
+      },
+    },
+    data: { status: "completed", result },
   });
+  if (completed.count !== 1) throw new IsolationError();
+  await appendEventInTransaction(tx, {
+    spaceId: actor.spaceId,
+    threadId: run.threadId,
+    botId: run.botId,
+    runId: run.id,
+    type: "effect.recorded",
+    payload: { effectId: saving.id, tool: "recruiting_research", ...result },
+  });
+  return result;
 }
 
 /** One provenance check for both historical action pages and native candidate saves. */
@@ -11230,7 +11393,7 @@ export async function saveRecruitingCalibrationRound(
       );
       if (seen.length)
         throw new RecruitingCalibrationRoundError(
-          `Round ${previous.round + 1} must show only new people, but ${seen.length} of these ten were already returned before round ${previous.round}. Reply on the same Autumn task with the round feedback and ask for ten new people, excluding everyone it already returned for this role, then save those results and record the new round.`,
+          `Round ${previous.round + 1} must show only new people, but ${seen.length} of these ten were already returned before round ${previous.round}. Run a new quick people search with the round feedback that excludes everyone already returned for this role, save it with save_search, and record ten people whose alreadyInPool is false.`,
         );
     }
     const round = await tx.recruitingCalibrationRound.create({
