@@ -21,6 +21,23 @@ def release_profile(environ):
     return profile
 
 
+def public_origin(environ, modal_origin):
+    """The browser-facing origin and the extra hosts the Web server must accept.
+
+    RAKAZO_PUBLIC_ORIGIN names a custom domain whose proxy forwards to the Modal URL with the
+    Modal Host header. Auth, callbacks and links use the public origin; the Modal host stays
+    accepted because every proxied request arrives with it.
+    """
+    configured = environ.get("RAKAZO_PUBLIC_ORIGIN", "").strip().rstrip("/")
+    if not configured:
+        return modal_origin, ""
+    url = urlsplit(configured)
+    if (url.scheme != "https" or not url.hostname or url.username or url.password or url.port
+            or url.path or url.query or url.fragment):
+        raise ValueError("RAKAZO_PUBLIC_ORIGIN must be a bare https:// origin")
+    return f"https://{url.hostname}", urlsplit(modal_origin).hostname or ""
+
+
 def staging_environment(environ, origin, revision):
     """No production credentials, persisted provider configuration or dotenv inheritance."""
     if release_profile(environ) != "staging":

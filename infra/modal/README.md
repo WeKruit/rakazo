@@ -74,6 +74,19 @@ adds Modal's published compute multiplier, within the existing usage budget; it
 does not require another plan. Keep the single-writer bounds and use the immediately
 previous frozen product release for rollback, not an older core-package baseline.
 
+## Custom domain
+
+Modal Servers are reachable only on their Modal URL. To serve the product on your own
+domain, put a reverse proxy in front that forwards to that URL with the Modal Host header,
+such as the Cloudflare Worker in `infra/cloudflare/custom-domain-proxy.js` (set its
+`UPSTREAM_ORIGIN` variable to the Modal URL and attach the domain as a Worker custom domain).
+
+Once the domain serves the product, add `RAKAZO_PUBLIC_ORIGIN=https://<domain>` to the
+deployment Secret and redeploy. Sign-in, OAuth callbacks and links then use that origin,
+and the Web server keeps accepting the Modal host the proxy forwards to. Register
+`https://<domain>/api/auth/callback/oidc` with the OIDC provider when product SSO is
+configured. Sign-in on the bare Modal URL stops working after the switch; share the new URL.
+
 ## Cold start
 
 A deployment replaces the only container, so the site is unavailable from the old
