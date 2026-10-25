@@ -105,7 +105,12 @@ describe("profileFromLookup", () => {
 });
 
 describe("executeRecruitingProfilesTool", () => {
-  const actor = { spaceId: "s1", userId: "u1" };
+  const actor = {
+    spaceId: "s1",
+    userId: "u1",
+    email: "owner@example.com",
+    isDeploymentOwner: false,
+  };
   const prisma = {} as never;
   beforeEach(() => vi.resetAllMocks());
 
