@@ -7,6 +7,7 @@ import type {
 import { recruitingCandidateSourceText } from "@rakazo/contracts";
 import type { TimelineEntry } from "./profileTimelineModel";
 import { storedExperienceTimeline, structuredProfileTimeline } from "./profileTimelineModel";
+import { quickOutput } from "./quickOutput";
 import type { RoleCandidateFit } from "./roleCandidates";
 import { roleCandidateFit } from "./roleCandidates";
 
@@ -50,23 +51,6 @@ const PHOTO = /^(?:profile (?:image|photo|picture)|photo|avatar)(?: url)?$/i;
 const COMPANY_URL = /^current company (?:url|website)$/i;
 const COMPANY_INDUSTRY = /^current company industry$/i;
 const COMPANY_SIZE = /^current company (?:size|employees|headcount)$/i;
-const HEADLINE = /^headline$/i;
-const HIGHLIGHTS = /^highlights$/i;
-const KEY_WORKS = /^key works$/i;
-const CONCERNS = /^concerns$/i;
-const CRITERIA_BRIEF = /^criteria brief$/i;
-const ENTITIES = /^entities$/i;
-
-/** One entry per line of a returned list column, trimmed, empty lines dropped. */
-function lines(fields: readonly Field[]) {
-  return fields.flatMap((field) =>
-    (field.value ?? "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean),
-  );
-}
-
 /** A criterion column name or display label reduced to the letters both share. */
 function criterionKey(name: string) {
   return name
@@ -142,27 +126,20 @@ export function candidateSections(
   const companyUrl = contact(COMPANY_URL);
   const companyIndustry = contact(COMPANY_INDUSTRY);
   const companySize = contact(COMPANY_SIZE);
-  const headline = contact(HEADLINE);
-  const highlights = contact(HIGHLIGHTS);
-  const keyWorks = contact(KEY_WORKS);
-  const concerns = contact(CONCERNS);
-  const criteriaBrief = contact(CRITERIA_BRIEF);
-  const entities = contact(ENTITIES);
-  const briefs = new Map(
-    lines(criteriaBrief).flatMap((line) => {
-      const [key, name, verdict] = line.split("|").map((part) => part.trim());
-      return key && (name || verdict)
-        ? [[criterionKey(key), { name: name || null, verdict: verdict || null }] as const]
-        : [];
-    }),
+  const short = quickOutput(all);
+  const keyedBriefs = new Map(
+    short.briefs.flatMap((item) =>
+      item.key ? [[criterionKey(item.key), item.brief] as const] : [],
+    ),
   );
+  const orderedBriefs = short.briefs.filter((item) => !item.key);
+  const briefFor = (field: Field, index: number) =>
+    keyedBriefs.get(criterionKey(field.label)) ??
+    (orderedBriefs.length === criteria.length
+      ? orderedBriefs.find((item) => item.index === index)?.brief
+      : undefined);
   const placed = new Set<Field>([
-    ...headline,
-    ...highlights,
-    ...keyWorks,
-    ...concerns,
-    ...criteriaBrief,
-    ...entities,
+    ...short.placed,
     ...photo,
     ...companyUrl,
     ...companyIndustry,
@@ -180,7 +157,7 @@ export function candidateSections(
     ...all.filter((field) => field.structuredValue === undefined && FIT_LABELS.has(field.label)),
   ]);
   const criterionRows = criteria.map((field, index) => ({
-    ...criterionRow(field, criterionContext, briefs.get(criterionKey(field.label))),
+    ...criterionRow(field, criterionContext, briefFor(field, index)),
     key: `criterion:${index}:${field.label}`,
   }));
   const assessmentRows = assessed.map((item, index) =>
@@ -266,36 +243,7 @@ export function candidateSections(
     criteria,
     requirements,
     skillEvidence,
-    quick: {
-      headline: headline[0]?.value?.trim() || null,
-      highlights: lines(highlights),
-      keyWorks: lines(keyWorks)
-        .map((line) => {
-          const [title = "", ...rest] = line.split("|").map((part) => part.trim());
-          const url = rest.find((part) => httpsUrl(part))?.trim() ?? null;
-          return {
-            title,
-            detail: rest.filter((part) => part && part !== url).join(" · ") || null,
-            url,
-          };
-        })
-        .filter((work) => work.title),
-      concerns: lines(concerns),
-      entities: lines(entities).flatMap((line) => {
-        const [name, kind, site, description] = line.split("|").map((part) => part.trim());
-        if (!name) return [];
-        const url = httpsUrl(/^www\./i.test(site ?? "") ? `https://${site}` : site);
-        return [
-          {
-            name,
-            kind: kind || null,
-            host:
-              url && !/(^|\.)linkedin\.com$/.test(url.hostname) ? url.hostname.toLowerCase() : null,
-            description: description || null,
-          },
-        ];
-      }),
-    },
+    quick: short.quick,
     requirementSources: [
       ...new Set(
         assessment.flatMap((field, index) => [...assessed[index]!.sourceUrls, ...field.sourceUrls]),

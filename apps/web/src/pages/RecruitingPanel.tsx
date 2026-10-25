@@ -41,6 +41,7 @@ import {
   verifyRecruitingArtifactBytes,
 } from "@rakazo/core";
 import {
+  Badge,
   Button,
   Card,
   CardContent,
@@ -97,6 +98,7 @@ import { ContactsTab } from "./recruiting/ContactsTab";
 import type { ShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
+import { quickOutput } from "./recruiting/quickOutput";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
@@ -878,6 +880,7 @@ function SourcingCandidateCard({
       field.label,
     ),
   );
+  const { quick } = quickOutput(fields);
   return (
     <article className="hire-candidate-card" data-selected={selected || undefined}>
       <div className="hire-card-top">
@@ -925,7 +928,23 @@ function SourcingCandidateCard({
           </strong>
         </span>
       </div>
-      {summary ? (
+      {quick.headline ? (
+        <div className="hire-card-evidence">
+          <Sparkles size={14} aria-hidden />
+          <div>
+            <p>{quick.headline}</p>
+            {quick.highlights.length ? (
+              <ul className="flex flex-wrap gap-1">
+                {quick.highlights.slice(0, 4).map((tag) => (
+                  <li key={tag}>
+                    <Badge variant="secondary">{tag}</Badge>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        </div>
+      ) : summary ? (
         <div className="hire-card-evidence">
           <Sparkles size={14} aria-hidden />
           <div>

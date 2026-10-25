@@ -280,6 +280,22 @@ describe("guardRecruitingTurnEnd", () => {
     expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("完成岗位信息"));
   });
 
+  it("says what was saved when the cap is reached after results were saved", async () => {
+    const f = fixture({ priorAutoContinues: 3, savedCandidates: 4, stage: "calibration_10" });
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run,
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+      max: 3,
+    });
+    expect(result).toMatchObject({ action: "capped" });
+    expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("已保存 4 位候选人"));
+    expect(f.postAssistant).not.toHaveBeenCalledWith(expect.stringContaining("没有产出"));
+  });
+
   it("is disabled by RAKAZO_AUTOCONTINUE_MAX=0 and skips non-human triggers", async () => {
     expect(autoContinueMax({ RAKAZO_AUTOCONTINUE_MAX: "0" })).toBe(0);
     expect(autoContinueMax({})).toBe(3);
