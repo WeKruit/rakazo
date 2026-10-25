@@ -3,6 +3,12 @@ import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { AgentRunRequest } from "@rakazo/adapter-kit";
 
+/** Distinctive system-prompt phrases of Pi turn compaction and executor history compaction. */
+const COMPACTION_PROMPTS = [
+  "context summarization assistant",
+  "Produce a complete replacement summary",
+];
+
 export interface ModelEmulatorRequest {
   model: string;
   stream: boolean;
@@ -57,8 +63,9 @@ export async function startModelEmulator(options: {
   modelId?: string;
   apiKey?: string;
   /**
-   * Answers Pi's native compaction requests with this summary without consuming a
-   * step, for fixtures about the turn itself. Omit it to assert compaction as steps.
+   * Answers compaction requests (Pi's native turn compaction and the executor's
+   * background history compaction) with this summary without consuming a step, for
+   * fixtures about the turn itself. Omit it to assert compaction as steps.
    */
   compactionSummary?: string;
 }) {
@@ -89,7 +96,7 @@ export async function startModelEmulator(options: {
         body.messages.some(
           (message) =>
             message.role === "system" &&
-            String(message.content).includes("context summarization assistant"),
+            COMPACTION_PROMPTS.some((prompt) => String(message.content).includes(prompt)),
         );
       if (compaction) compactions.push(body);
       const step: ModelEmulatorStep | undefined = compaction
