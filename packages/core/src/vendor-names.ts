@@ -33,12 +33,20 @@ const HIDDEN_VENDORS: readonly HiddenVendor[] = [
   },
   {
     pattern: new RegExp(
-      `\\b(?:Coresignal|Core\\s+Signal|FullEnrich|Full\\s+Enrich|Juicebox|PeopleDataLabs|People\\s+Data\\s+Labs|Proxycurl|Apollo\\.io)${POSSESSIVE}(?!\\w|[.-]\\w)`,
+      `\\b(?:Coresignal|Core\\s+Signal|FullEnrich|Full\\s+Enrich|Juicebox|PeopleDataLabs|People\\s+Data\\s+Labs|Proxycurl|Crustdata|Apollo\\.io)${POSSESSIVE}(?!\\w|[.-]\\w)`,
       "gi",
     ),
     zh: "资料库",
     en: "profile data",
-    hosts: ["coresignal", "fullenrich", "juicebox", "peopledatalabs", "proxycurl", "apollo.io"],
+    hosts: [
+      "coresignal",
+      "fullenrich",
+      "juicebox",
+      "peopledatalabs",
+      "proxycurl",
+      "crustdata",
+      "apollo.io",
+    ],
     label: "人才资料库",
   },
   {
@@ -204,7 +212,7 @@ export function isRecruitingSpawnKey(spawnKey: string | null | undefined): boole
 
 /**
  * {@link hideVendorNames} over the readable fields of chat blocks. Approval cards stay
- * byte-exact (their text is bound evidence) and connect cards keep the provider they connect.
+ * byte-exact (their text is bound evidence); connect cards name what the service does.
  */
 export function hideVendorBlocks<T extends MessageBlock>(blocks: readonly T[]): T[] {
   return blocks.map((block): T => {
@@ -213,7 +221,8 @@ export function hideVendorBlocks<T extends MessageBlock>(blocks: readonly T[]): 
       case "meta":
         return { ...block, text: hideVendorNames(block.text) };
       case "ask":
-        if (block.approvalEffectId || block.approvalEvidenceHash || block.connection) return block;
+        if (block.connection) return recruiterConnectBlock(block) as T;
+        if (block.approvalEffectId || block.approvalEvidenceHash) return block;
         return {
           ...block,
           text: hideVendorNames(block.text),
@@ -268,4 +277,18 @@ export function vendorNeutralServiceName(name: string): string {
     }
   }
   return name;
+}
+
+/** A recruiter's connect card names what the service does, in their language, not its brand. */
+export function recruiterConnectBlock<
+  T extends { text: string; connection?: { name: string; reason: string } },
+>(block: T): T {
+  if (!block.connection) return block;
+  const name = vendorNeutralServiceName(block.connection.name);
+  if (name === block.connection.name) return block;
+  return {
+    ...block,
+    text: `连接${name}`,
+    connection: { ...block.connection, name, reason: hideVendorNames(block.connection.reason) },
+  };
 }

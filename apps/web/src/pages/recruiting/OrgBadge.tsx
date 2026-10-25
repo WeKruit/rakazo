@@ -1,5 +1,6 @@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@rakazo/ui-web";
 import { ProfileImage } from "./ProfileImage";
+import { profileImageUrl } from "./profileAssets";
 
 function logoInitials(name: string) {
   const letters = [...name].filter((char) => /\p{L}|\p{N}/u.test(char));
@@ -33,7 +34,7 @@ export function CompanyLogo({
 }) {
   return (
     <ProfileImage
-      src={src ?? websiteFavicon(host)}
+      src={profileImageUrl(src) ?? websiteFavicon(host)}
       fallback={logoInitials(name)}
       className={`flex shrink-0 items-center justify-center overflow-hidden bg-muted font-medium text-muted-foreground ${
         small ? "size-4 rounded-sm text-[8px]" : "size-10 rounded-md text-xs"

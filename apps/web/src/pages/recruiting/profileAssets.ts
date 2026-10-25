@@ -1,4 +1,5 @@
 import type { RecruitingCandidateReport } from "@rakazo/contracts";
+import { isVendorUrl } from "@rakazo/core";
 import { parseTimeline, structuredProfileTimeline } from "./profileTimelineModel";
 
 type Field = RecruitingCandidateReport["fields"][number];
@@ -21,7 +22,10 @@ export function profileImageUrl(value: string | null | undefined): string | null
   if (!value || /\s/.test(value.trim())) return null;
   try {
     const url = new URL(value.trim());
-    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
+    // A provider-hosted image would show the provider in the page source and network log.
+    return url.protocol === "https:" && !url.username && !url.password && !isVendorUrl(url.href)
+      ? url.href
+      : null;
   } catch {
     return null;
   }

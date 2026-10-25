@@ -4,6 +4,7 @@ import {
   hideVendorBlocks,
   hideVendorNames,
   isVendorUrl,
+  recruiterConnectBlock,
   vendorNeutralServiceName,
 } from "./vendor-names.js";
 
@@ -76,7 +77,7 @@ describe("createVendorNameStream", () => {
 });
 
 describe("hideVendorBlocks", () => {
-  it("hides names in choice, card and sub-task blocks but keeps approval and connect cards", () => {
+  it("hides names in choice, card and sub-task blocks but keeps approval cards", () => {
     const approval = {
       kind: "ask" as const,
       text: "Send via Instantly",
@@ -84,8 +85,8 @@ describe("hideVendorBlocks", () => {
     };
     const connect = {
       kind: "ask" as const,
-      text: "Connect Coresignal",
-      connection: { serverId: "server", name: "Coresignal", reason: "Profile history." },
+      text: "Connect Gmail",
+      connection: { serverId: "server", name: "Gmail", reason: "Read replies." },
     };
     expect(
       hideVendorBlocks([
@@ -125,5 +126,43 @@ describe("vendorNeutralServiceName", () => {
     expect(vendorNeutralServiceName("Autumn")).toBe("人才搜索");
     expect(vendorNeutralServiceName("ContactOut")).toBe("联系方式补全");
     expect(vendorNeutralServiceName("Gmail")).toBe("Gmail");
+  });
+});
+
+describe("recruiterConnectBlock", () => {
+  it("rewrites a saved connect card for a hidden provider and keeps the user's own accounts", () => {
+    const saved = {
+      kind: "ask" as const,
+      text: "Connect Coresignal",
+      status: "pending" as const,
+      connection: {
+        serverId: "server",
+        name: "Coresignal",
+        reason: "Coresignal adds dated history.",
+      },
+    };
+    expect(hideVendorBlocks([saved])).toEqual([
+      {
+        ...saved,
+        text: "连接人才资料库",
+        connection: {
+          serverId: "server",
+          name: "人才资料库",
+          reason: "Profile data adds dated history.",
+        },
+      },
+    ]);
+    const gmail = {
+      ...saved,
+      text: "Connect Gmail",
+      connection: { ...saved.connection, name: "Gmail" },
+    };
+    expect(recruiterConnectBlock(gmail)).toBe(gmail);
+  });
+
+  it("treats provider-hosted images as provider links", () => {
+    expect(isVendorUrl("https://crustdata-media.s3.us-east-2.amazonaws.com/logos/acme.png")).toBe(
+      true,
+    );
   });
 });
