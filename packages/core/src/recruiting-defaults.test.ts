@@ -121,7 +121,7 @@ describe("maintained recruiting defaults", () => {
     expect(intake).toContain("rather than a matching title");
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("not just a matching title");
+    expect(main.instructions).toContain("rather than just a matching title");
     expect(sourcer.instructions).toContain("show that person as needing a check");
     const draft = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Review recruiting draft",
@@ -235,5 +235,17 @@ describe("maintained recruiting defaults", () => {
     expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
       "nobody already returned for this role is ever shown again",
     );
+  });
+
+  it("runs the first round before documents and weighs location first", () => {
+    expect(RECRUITING_INTAKE_FLOW).toContain(
+      "run the first calibration round before preparing any JD",
+    );
+    for (const part of [
+      "put the brief's priority location (city and metro) in every query",
+      "anyone outside it never makes the ten",
+      "meets every hard requirement",
+    ])
+      expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);
   });
 });

@@ -388,10 +388,8 @@ describe("recruiting run context", () => {
       expect(text).toContain(
         "Intake, company/JD research and recovery reads do not require redundant confirmation",
       );
-      expect(text).toContain(
-        "Formal calibration requires actual human G0 approval and G1 approval of the JD/deck package",
-      );
-      expect(text).toContain("the human explicitly deferred S2 after G0");
+      expect(text).toContain("Calibration rounds start right after G0 (the confirmed brief)");
+      expect(text).toContain("must be approved before G2");
       expect(text).toContain("Reconfirm materially revised requirements or JD/deck");
       expect(text).toContain(
         "Outside formal calibration or scale, small-scale exploration or same-task feedback/more results explicitly authorized by the current human request do not require G0/G1",

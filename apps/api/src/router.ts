@@ -2317,16 +2317,6 @@ export function createRouter(deps: RouterDeps) {
         groupRepos.listGroups(context.actor, { archived: true }),
       ),
       get: authed.groups.get.handler(async ({ context, input }) => {
-        if (input.groupId.startsWith("recruiting-crm-"))
-          await attachMissingCrmRole(
-            context,
-            await resolveThreadTarget(deps.prisma, context.actor, { groupId: input.groupId }).then(
-              (target) => {
-                if (target.kind !== "group") throw new IsolationError();
-                return target;
-              },
-            ),
-          );
         const group = await groupRepos.getGroup(context.actor, input.groupId);
         const page = await loadMessagePage(
           deps.prisma,
@@ -2465,6 +2455,7 @@ export function createRouter(deps: RouterDeps) {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input, {
           includeArchived: true,
         });
+        if (target.kind === "group") await attachMissingCrmRole(context, target);
         const resolvedAt = performance.now();
         const snapshot = await threadSnapshot(deps, target);
         const snapshotAt = performance.now();

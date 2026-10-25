@@ -431,3 +431,21 @@ describe("research findings", () => {
     ]);
   });
 });
+
+describe("research findings bookkeeping", () => {
+  it("drops source urls, sampling flags and provenance notes", () => {
+    const sections = candidateSections([
+      { label: "Profile photo source url", value: "https://example.test/p.jpg", sourceUrls: [] },
+      { label: "Review sample", value: "false", sourceUrls: [] },
+      {
+        label: "fit_rationale_zh",
+        value:
+          "做过 3PL 运营 [retained quote from cached provider LinkedIn profile record 2026-10]",
+        sourceUrls: [],
+      },
+    ]);
+    expect(sections.findings.map((field) => [field.label, field.value])).toEqual([
+      ["Fit rationale", "做过 3PL 运营"],
+    ]);
+  });
+});
