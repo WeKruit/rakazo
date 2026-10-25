@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { recruitingCandidateSourceText } from "@rakazo/contracts";
+import { isVendorUrl } from "@rakazo/core";
 import { Button, buttonVariants } from "@rakazo/ui-web";
 import {
   ArrowLeft,
@@ -104,7 +105,8 @@ function Section({ id, title, children }: { id: string; title: ReactNode; childr
   );
 }
 
-function Sources({ urls }: { urls: readonly string[] }) {
+function Sources({ urls: allUrls }: { urls: readonly string[] }) {
+  const urls = allUrls.filter((url) => !isVendorUrl(url));
   if (!urls.length) return null;
   return (
     <span className="flex flex-wrap gap-x-2 text-xs">

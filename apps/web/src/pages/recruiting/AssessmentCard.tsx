@@ -1,4 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
+import { isVendorUrl } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
 import { ChevronDown, CircleCheck, CircleHelp, CircleX, Scale } from "lucide-react";
 import { useState } from "react";
@@ -264,7 +265,9 @@ export function AssessmentCard({
   );
 }
 
-export function SourceLinks({ urls }: { urls: readonly string[] }) {
+export function SourceLinks({ urls: allUrls }: { urls: readonly string[] }) {
+  // A provider's own link (its app or file storage) is not a source a recruiter can read.
+  const urls = allUrls.filter((url) => !isVendorUrl(url));
   if (!urls.length) return null;
   return (
     <span className="flex flex-wrap gap-x-2 text-xs">

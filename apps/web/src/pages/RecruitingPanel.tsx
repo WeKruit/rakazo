@@ -32,6 +32,7 @@ import type {
 } from "@rakazo/contracts";
 import { RecruitingEmploymentDaySchema, RecruitingEmploymentRuleSchema } from "@rakazo/contracts";
 import {
+  isVendorUrl,
   readRecruitingJsonString,
   readRecruitingResearchReadArtifact,
   recruitingBriefClarifications,
@@ -929,11 +930,13 @@ function SourcingCandidateCard({
           <Sparkles size={14} aria-hidden />
           <div>
             <p>{recruitingMatchSummaryText(summary.value!)}</p>
-            {summary.sourceUrls.map((url) => (
-              <a key={url} href={url} target="_blank" rel="noreferrer">
-                {new URL(url).hostname}
-              </a>
-            ))}
+            {summary.sourceUrls
+              .filter((url) => !isVendorUrl(url))
+              .map((url) => (
+                <a key={url} href={url} target="_blank" rel="noreferrer">
+                  {new URL(url).hostname}
+                </a>
+              ))}
           </div>
         </div>
       ) : null}

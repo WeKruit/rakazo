@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { userVisibleMessages } from "./message-visibility.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import {
   addPendingUserMessage,
@@ -125,6 +126,20 @@ describe("shared thread reducer", () => {
       }),
     );
     expect(settled.messages.map((message) => message.id)).toEqual(["pending:a", "durable-two"]);
+  });
+
+  it("keeps a harness auto-continue turn internal so it is never shown live", () => {
+    const live = reduceThreadEvent(
+      base,
+      event(11, "thread.message.created", {
+        messageId: "auto-1",
+        role: "system",
+        internal: true,
+        blocks: [{ kind: "text", text: "继续下一步：收集校准反馈。" }],
+      }),
+    );
+    expect(live.messages[0]).toMatchObject({ id: "auto-1", internal: true });
+    expect(userVisibleMessages(live.messages)).toEqual([]);
   });
 
   it("marks compaction on the live bubble and clears it on the next update", () => {

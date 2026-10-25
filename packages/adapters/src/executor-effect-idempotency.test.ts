@@ -1285,6 +1285,52 @@ describe("tool audit ordering", () => {
   });
 });
 
+describe("recruiter-facing provider names", () => {
+  it("never shows a provider name in streamed, mid-turn or final recruiting text", async () => {
+    const f = fixture("hide-vendor-names");
+    const botRow = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...botRow,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof botRow);
+    const final = "已把反馈发回同一个 Autumn 任务，Coresignal 资料已补全。";
+    f.runtimeRun.mockImplementation(async function* (request) {
+      yield { type: "text" as const, text: "我先看看 Aut" };
+      yield { type: "text" as const, text: "umn 的结果。" };
+      const args = { message: "Autumn 还在找人，见 https://files.autumn.ai/x.csv" };
+      yield { type: "tool" as const, name: "message_user", args, executionId: "vendor-call" };
+      f.results.push(await request.executeTool!("message_user", args, "vendor-call"));
+      yield { type: "text" as const, text: final };
+      yield { type: "done" as const, text: final };
+    });
+
+    await f.run();
+
+    const shown = JSON.stringify([
+      f.published,
+      vi.mocked(f.executorDeps.events.publishTransient).mock.calls,
+      f.finalizeRun.mock.calls,
+    ]);
+    expect(shown).not.toMatch(/Autumn|Coresignal|autumn\.ai|Aut"|"umn/);
+    expect(shown).toContain("人才搜索");
+    expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain(
+      "已把反馈发回同一个人才搜索任务，资料库资料已补全。",
+    );
+  });
+
+  it("leaves provider names alone outside recruiting conversations", async () => {
+    const f = fixture("keep-vendor-names");
+    f.runtimeRun.mockImplementation(async function* () {
+      yield { type: "text" as const, text: "Autumn returned results." };
+      yield { type: "done" as const, text: "Autumn returned results." };
+    });
+
+    await f.run();
+
+    expect(JSON.stringify(f.finalizeRun.mock.calls)).toContain("Autumn returned results.");
+  });
+});
+
 describe("durable mid-turn narration", () => {
   it.each(["web_search", "message_user"])(
     "retries the message transaction before %s without repeating narration or tool execution",
