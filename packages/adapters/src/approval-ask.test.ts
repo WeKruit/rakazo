@@ -765,7 +765,7 @@ describe("buildApprovalAskBlock", () => {
     expect(block).toMatchObject({
       kind: "ask",
       approvalEffectId: "documents-effect",
-      text: "Approve role documents?",
+      text: "Approve documents",
       actions: [
         { id: "allow", label: "Approve documents" },
         { id: "deny", label: "Deny" },
@@ -827,7 +827,7 @@ describe("buildApprovalAskBlock", () => {
     expect(block).toMatchObject({
       kind: "ask",
       approvalEffectId: "calibration-effect",
-      text: "Approve 10-profile calibration?",
+      text: "Approve calibration",
       actions: [
         { id: "allow", label: "Approve calibration" },
         { id: "deny", label: "Deny" },

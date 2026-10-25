@@ -348,7 +348,7 @@ describe("native approval file previews", () => {
     "source-hash",
     "source-id-conflict",
     "source-kind",
-  ])("keeps the trusted label but no target for %s", async (change) => {
+  ])("keeps the plain file card without a readable source for %s", async (change) => {
     const f = fixture();
     if (change === "revision") f.role.revision = 6;
     if (change === "role") f.role.id = "other-role";
@@ -367,10 +367,7 @@ describe("native approval file previews", () => {
     if (change === "source-kind")
       Object.assign(f.source.anchor, { kind: "message", messageId: "message", locator: "text" });
     const [message] = await f.read();
-    expect(message!.blocks[0]).toEqual({
-      ...f.file,
-      preview: { label: "Job description", source: null },
-    });
+    expect(message!.blocks[0]).toEqual(f.file);
   });
 
   it("inherits only the exact completed documents request for a calibration card", async () => {
