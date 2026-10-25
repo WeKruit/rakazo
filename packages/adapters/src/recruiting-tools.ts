@@ -500,6 +500,9 @@ export async function admitRecruitingResearchCall(
             mcpServerId: route.resourceId,
             serverRevision: Number(route.resourceRevision),
             providerTaskId: String(call.args.task_id ?? ""),
+            // Research started directly on the provider is only followed in the background;
+            // its reads stay ordinary native reads.
+            actions: { some: {} },
           },
           select: { id: true },
         })

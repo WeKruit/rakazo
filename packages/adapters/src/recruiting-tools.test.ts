@@ -1152,11 +1152,14 @@ describe("native research preparation", () => {
           mcpServerId: "source",
           serverRevision: 2,
           providerTaskId: "provider-original",
+          actions: { some: {} },
         }),
       }),
     );
   });
 
+  // Research started directly on the provider has a followed task row but no native actions;
+  // the lookup's `actions: { some: {} }` filter returns nothing, so its reads stay native.
   it("leaves an unrelated raw MCP read outside the recruiting lifecycle", async () => {
     const f = researchFixture("continue");
     f.saved.thread.activeRecruitingRoleId = null;
