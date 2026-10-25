@@ -9936,6 +9936,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
           // ponytail: this attempt's spend only; earlier attempts of a resumed run are not summed.
           const runtimeStartedAt = Date.now();
           let runCostUsd = 0;
+          // Prompt cache use for the run.timing log: cached tokens out of all prompt tokens.
+          const promptCache = { calls: 0, cachedTokens: 0, promptTokens: 0 };
+          const countPromptCache = (usage: {
+            inputTokens: number | null;
+            cacheReadTokens?: number | null;
+            cacheWriteTokens?: number | null;
+          }) => {
+            promptCache.calls += 1;
+            promptCache.cachedTokens += usage.cacheReadTokens ?? 0;
+            promptCache.promptTokens +=
+              (usage.inputTokens ?? 0) +
+              (usage.cacheReadTokens ?? 0) +
+              (usage.cacheWriteTokens ?? 0);
+          };
+          let firstModelEventMs: number | null = null;
           let runToolCalls = 0;
           // Pi runs a tool the moment it queues the "tool" event, so a fast tool's completion
           // audit raced ahead of the "called" audit this loop appends after flushing narration.
@@ -9974,6 +9989,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               sourceMessageId: nativeSources?.currentAnswer?.id ?? run.sourceMessageId,
               onUsage: async (event) => {
                 runCostUsd += event.costUsd ?? 0;
+                countPromptCache(event);
                 await recordUsage(deps.prisma, event, {
                   spaceId: run.spaceId,
                   botId: bot.id,
@@ -10257,6 +10273,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
 
+            firstModelEventMs ??= Date.now() - runtimeStartedAt;
             if (event.type === "text") {
               assembled += event.text;
               currentTextSegment += event.text;
@@ -10584,6 +10601,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             } else if (event.type === "usage" && !event.accounted) {
               runCostUsd += event.costUsd ?? 0;
+              countPromptCache(event);
               await recordUsage(deps.prisma, event, {
                 spaceId: run.spaceId,
                 botId: bot.id,
@@ -10738,6 +10756,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             timing: runTiming,
           });
           if (!completed) return;
+          getLogger().info("run.timing", {
+            runId,
+            sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
+            firstModelEventMs,
+            runtimeMs: Date.now() - runtimeStartedAt,
+            modelCalls: promptCache.calls,
+            promptSize: promptCache.promptTokens,
+            cachedPromptSize: promptCache.cachedTokens,
+            promptCacheHitRate: promptCache.promptTokens
+              ? Math.round((promptCache.cachedTokens / promptCache.promptTokens) * 1000) / 1000
+              : null,
+          });
           let recruitingContinued = false;
           if (completed.continuationRunId) {
             await deps.jobs

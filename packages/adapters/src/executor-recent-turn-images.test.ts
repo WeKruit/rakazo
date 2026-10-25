@@ -428,6 +428,42 @@ describe("recent turn images follow model vision", () => {
     expect(Number.isInteger(setup[0]!.modelKeyOwnMs)).toBe(true);
   });
 
+  it("logs first model output time and prompt cache use when the run completes", async () => {
+    const previous = getLogger();
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "run-timing-check", sinks: [sink] }));
+    try {
+      await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+        events: [
+          {
+            type: "usage",
+            provider: "openrouter",
+            model: TEXT_ONLY_MODEL,
+            inputTokens: 10,
+            cacheReadTokens: 30,
+            cacheWriteTokens: 0,
+            outputTokens: 5,
+            costUsd: 0,
+          },
+        ],
+      });
+    } finally {
+      installLogger(previous);
+    }
+    const timing = sink.events.filter((event) => event.message === "run.timing");
+    expect(timing).toHaveLength(1);
+    expect(timing[0]).toMatchObject({
+      modelCalls: 1,
+      promptSize: 40,
+      cachedPromptSize: 30,
+      promptCacheHitRate: 0.75,
+    });
+    expect(Number.isInteger(timing[0]!.firstModelEventMs)).toBe(true);
+    expect(timing[0]!.firstModelEventMs as number).toBeLessThanOrEqual(
+      timing[0]!.runtimeMs as number,
+    );
+  });
+
   it("runs the independent setup reads alongside tool discovery instead of after it", async () => {
     let stoppedNoticeReadWhileDiscovering = false;
     let stoppedNoticeRead = false;
