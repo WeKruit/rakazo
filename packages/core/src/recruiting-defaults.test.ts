@@ -103,12 +103,16 @@ describe("maintained recruiting defaults", () => {
       "current role start month",
     ])
       expect(RECRUITING_SEARCH_BRIEF_TEMPLATE).toContain(part);
+    // Skills ship with the code, so accounts with customized bot text still get these rules.
+    const skill = (name: string) => RECRUITING_DEFAULT_SKILLS.find((s) => s.name === name)!.body;
+    expect(skill("Recruitment sourcing continuation")).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
+    const intake = skill("Recruitment intake and handoff");
+    expect(intake).toContain("Always settle the language requirement");
+    expect(intake).toContain("stays a preference, never a reject rule");
+    expect(intake).toContain("rather than a matching title");
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
-    expect(sourcer.instructions).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("Always settle the language requirement");
     expect(main.instructions).toContain("not just a matching title");
-    expect(main.instructions).toContain("stays a preference, never a reject rule");
     expect(sourcer.instructions).toContain("show that person as needing a check");
     const draft = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Review recruiting draft",
