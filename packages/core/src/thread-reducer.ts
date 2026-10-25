@@ -36,6 +36,8 @@ export type LiveThreadMessage = {
   replyToMessageId?: string;
   replyQuote?: string;
   replyPreview?: ReplyPreview | null;
+  /** Server-generated continuation: kept in history, never shown in the conversation. */
+  internal?: boolean;
   createdAt?: string;
 };
 
@@ -508,6 +510,7 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
       // the message already carries instead of dropping it out of its call.
       callId: typeof payload.callId === "string" ? payload.callId : known?.callId,
       ...replyMetadata(payload, known),
+      ...(payload.internal === true || known?.internal ? { internal: true } : {}),
       createdAt: known?.createdAt ?? event.createdAt,
     });
     const replacedSubagentIds = new Set(

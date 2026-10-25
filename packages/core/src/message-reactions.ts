@@ -5,6 +5,8 @@ type ReactionMessage = {
   role: string;
   blocks: MessageBlock[];
   replyToMessageId?: string | null;
+  /** Server-generated continuation: kept in history, never shown. */
+  internal?: boolean;
 };
 
 /** Emoji-only user replies are conversation messages displayed compactly beneath their target. */
@@ -23,6 +25,7 @@ export function projectMessageReactions<Message extends ReactionMessage>(
   const parents = new Map(messages.map((message) => [message.id, message]));
   const reactions = new Map<string, Map<MessageReaction, number>>();
   const visibleMessages = messages.filter((message) => {
+    if (message.internal) return false;
     const emoji = messageReaction(message);
     const parentId = message.replyToMessageId;
     const parent = parentId ? parents.get(parentId) : undefined;

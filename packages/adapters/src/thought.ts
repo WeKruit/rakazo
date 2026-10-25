@@ -1,3 +1,5 @@
+import { scrubVendorNames } from "@rakazo/core";
+
 export const THOUGHT_MAX_CHARS = 200;
 
 // Vendor, protocol and plumbing words a user should never see in a thinking line.
@@ -21,10 +23,8 @@ export function sanitizeThought(raw: string, toolNames: Iterable<string> = []): 
   for (const name of toolNames) {
     if (name) text = text.replace(new RegExp(`\\b${escapeRegExp(name)}\\b`, "gi"), " ");
   }
-  text = text
-    .replace(/[*_`#>]+/g, " ")
-    .replace(VENDOR_WORDS, " ")
-    .replace(ID_TOKENS, " ");
+  text = text.replace(/[*_`#>]+/g, " ").replace(VENDOR_WORDS, " ");
+  text = scrubVendorNames(text).replace(ID_TOKENS, " ");
   const line =
     text
       .split(/\r?\n/)

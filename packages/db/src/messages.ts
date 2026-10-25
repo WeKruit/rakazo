@@ -3,7 +3,7 @@ import {
   MessageBlock as MessageBlockSchema,
   NativeAskAnswerPayloadSchema,
 } from "@rakazo/contracts";
-import { resolveAskChoice } from "@rakazo/core";
+import { resolveAskChoice, scrubVendorBlocks } from "@rakazo/core";
 import type { Prisma, PrismaClient } from "./client.js";
 import { IsolationError } from "./scope.js";
 import { withTransactionRetry } from "./transaction-retry.js";
@@ -230,7 +230,10 @@ export async function createThreadMessageInTransaction(
       threadId: input.threadId,
       seq: thread.nextMessageSeq - 1,
       role: input.role,
-      blocks: input.blocks as Prisma.InputJsonValue,
+      // Bot text never names a sourcing/enrichment vendor to the recruiter.
+      blocks: (input.role === "bot"
+        ? scrubVendorBlocks(input.blocks)
+        : input.blocks) as Prisma.InputJsonValue,
       botId: input.botId,
       replyToMessageId: input.replyToMessageId,
       replyQuote: input.replyQuote,

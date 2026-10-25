@@ -23,6 +23,7 @@ import {
   isBackgroundRunTrigger,
   isPeerReceiptBlocks,
   mergeMessagesById,
+  scrubVendorBlocks,
 } from "@rakazo/core";
 import { messageReplyPreview } from "@rakazo/core/message-quote";
 import type { Prisma, PrismaClient } from "@rakazo/db";
@@ -663,7 +664,11 @@ function toThreadMessage(row: {
     threadId: row.threadId,
     seq: row.seq,
     role: row.role as ThreadMessage["role"],
-    blocks: row.blocks as ThreadMessage["blocks"],
+    // Also hides vendor names in bot messages saved before the write-side scrub.
+    blocks:
+      row.role === "bot"
+        ? scrubVendorBlocks(row.blocks as ThreadMessage["blocks"])
+        : (row.blocks as ThreadMessage["blocks"]),
     botId: row.botId ?? undefined,
     replyToMessageId: row.replyToMessageId ?? undefined,
     replyQuote: row.replyQuote ?? undefined,

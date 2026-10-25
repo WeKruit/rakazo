@@ -27,6 +27,7 @@ import {
   messagingChannelId,
   resolveAskChoice,
   sanitizeJsonValue,
+  scrubVendorBlocks,
   type WorkActivity,
   workActivityForTool,
 } from "@rakazo/core";
@@ -2019,9 +2020,23 @@ async function assertEventRunWritable(tx: Prisma.TransactionClient, input: Appen
   }
 }
 
+/** Live bot messages carry the same vendor-free text as the stored row. */
+function scrubBotMessagePayload(input: AppendEventInput): unknown {
+  const payload = input.payload as Record<string, unknown> | null | undefined;
+  if (
+    (input.type !== "thread.message.created" && input.type !== "thread.message.updated") ||
+    !payload ||
+    payload.role === "user" ||
+    payload.role === "system" ||
+    !Array.isArray(payload.blocks)
+  )
+    return input.payload;
+  return { ...payload, blocks: scrubVendorBlocks(payload.blocks as MessageBlock[]) };
+}
+
 function eventRow(input: AppendEventInput, seq: number) {
   // Unpaired UTF-16 surrogates (e.g. a split emoji high half) are invalid JSON for Postgres.
-  const payload = sanitizeJsonValue(input.payload) as Prisma.InputJsonValue;
+  const payload = sanitizeJsonValue(scrubBotMessagePayload(input)) as Prisma.InputJsonValue;
   return {
     spaceId: input.spaceId,
     threadId: input.threadId,
