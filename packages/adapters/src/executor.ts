@@ -448,6 +448,7 @@ import {
   completeRecruitingResearchCall,
   executeRecruitingRoleTool,
   importRecruitingCandidateCsv,
+  normalizeRecruitingRoleArgs,
   prepareRecruitingResearchTool,
   RecruitingCandidateOutputError,
   RecruitingCsvImportError,
@@ -4627,7 +4628,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           let args =
             name === "recruiting_research" && Object.hasOwn(rawArgs, "roleId")
               ? Object.fromEntries(Object.entries(rawArgs).filter(([key]) => key !== "roleId"))
-              : rawArgs;
+              : name === "recruiting_role"
+                ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
+                : rawArgs;
           if (handedOff) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",

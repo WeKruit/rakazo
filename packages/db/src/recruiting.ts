@@ -1803,6 +1803,35 @@ function compareHumanMessages(
     : left.createdAt.getTime() - right.createdAt.getTime();
 }
 
+/**
+ * A turn-end auto-continue acts for the recruiter's last message: the system nudge carries no
+ * authority of its own, so resolve the newest native human message before it in the thread.
+ */
+async function autoContinuedHumanMessage(
+  tx: Tx,
+  run: { threadId: string; sourceMessageId: string | null },
+  message: SourceMessage,
+): Promise<SourceMessage | null> {
+  if (
+    message.id !== run.sourceMessageId ||
+    message.threadId !== run.threadId ||
+    !message.clientNonce?.startsWith("autocontinue:")
+  )
+    return null;
+  const previous = await tx.message.findFirst({
+    where: {
+      threadId: run.threadId,
+      seq: { lt: message.seq },
+      role: "user",
+      botId: null,
+      OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
+    },
+    orderBy: { seq: "desc" },
+    include: humanMessageInclude,
+  });
+  return previous && isNativeHumanMessage(previous) ? previous : null;
+}
+
 async function requireCurrentHumanSource(
   tx: Tx,
   actor: Actor,
@@ -1823,10 +1852,11 @@ async function requireCurrentHumanSource(
     answers,
   } = await requireRunSource(tx, actor, run, sourceMessageId);
   if (hint.id !== run.sourceMessageId && !isNativeHumanMessage(hint)) throw new IsolationError();
-  const latest = answers.reduce(
+  const newest = answers.reduce(
     (current, answer) => (answer.seq > current.seq ? answer : current),
     hint,
   );
+  const latest = (await autoContinuedHumanMessage(tx, run, newest)) ?? newest;
   if (!isNativeHumanMessage(latest)) {
     const { sender } = await requireResearchHandoff(tx, actor, run, latest, true);
     const inherited = await loadRunHumanSources(tx, actor, sender);
