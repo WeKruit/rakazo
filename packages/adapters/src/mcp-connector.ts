@@ -399,14 +399,21 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
     return { key: process.env.AUTUMN_API_KEY?.trim(), label: "Recruiting research" };
   if (server.endpoint === "https://mcp.fullenrich.com/mcp")
     return { key: process.env.FULLENRICH_API_KEY?.trim(), label: "Contact enrichment" };
+  // People search also works keyless at a lower rate limit, so a missing key is not a setup gap.
+  if (server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
+    return { key: process.env.EXA_API_KEY?.trim(), label: "People search", keyless: true };
   return undefined;
 }
+
+export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
+  "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
 
 /** Connection readiness only; never return deployment credentials to product clients. */
 export function hasPlatformMcpCredential(
   server: Pick<McpServer, "secretId" | "transport" | "endpoint">,
 ): boolean {
-  return Boolean(platformMcpCredential(server)?.key);
+  const credential = platformMcpCredential(server);
+  return Boolean(credential?.key || credential?.keyless);
 }
 
 export async function loadMcpCredentialRecord(
@@ -424,12 +431,16 @@ export async function loadMcpCredentialRecord(
   if (secret) onRef?.(secret.ciphertext, secret.id);
   const platformService = platformMcpCredential(server);
   const deploymentKey = platformService?.key;
-  if (platformService && !deploymentKey)
+  if (platformService && !deploymentKey && !platformService.keyless)
     throw new Error(`${platformService.label} is not configured on this server`);
   const plaintext = secret
     ? await secrets.load(secret.ciphertext, { recordId: secret.id, signal: context.signal })
     : deploymentKey
-      ? JSON.stringify({ secret: deploymentKey })
+      ? JSON.stringify(
+          platformService?.keyless
+            ? { headers: { "x-api-key": deploymentKey } }
+            : { secret: deploymentKey },
+        )
       : undefined;
   return { secret, plaintext };
 }

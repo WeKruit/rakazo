@@ -33,6 +33,7 @@ import {
   getRecruitingWorkspace,
   IsolationError,
   listRecruitingCandidates,
+  listRunToolResults,
   listUnmappedRecruitingResearchReads,
   prepareRecruitingResearchAction,
   RecruitingConflictError,
@@ -41,15 +42,18 @@ import {
   reconcileRecruitingResearchAction,
   recordRecruitingResearchObservation,
   recruitingCsvImportReceipt,
+  recruitingPeopleSearchReceipt,
   recruitingResearchSnapshot,
   saveNativeRecruitingCandidatePage,
   saveRecruitingCandidateCsvImport,
+  saveRecruitingCandidatePeopleSearch,
   scoped,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
 import { readActorArtifact } from "./artifact-read.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
+import { isPeopleSearchEndpoint, peopleFromSearch } from "./recruiting-profiles.js";
 import type { RecruitingResearchRequest } from "./recruiting-research.js";
 import {
   buildRecruitingResearchRequest,
@@ -765,6 +769,78 @@ export async function importRecruitingCandidateCsv(
       hash,
       storageKey: stored.id,
       clientNonce: `recruiting-csv-import:${trusted.effectId}`,
+    },
+  });
+}
+
+export class RecruitingPeopleSearchError extends Error {}
+
+const PEOPLE_SEARCH_PAGE_LIMIT = 100;
+
+/** Save the people this run's profile-data searches returned as one unassessed candidate page. */
+export async function saveRecruitingPeopleSearch(
+  deps: ResearchDeps,
+  trusted: ResearchActor & {
+    leaseOwner: string;
+    leaseFence: number;
+    effectId: string;
+    effectRequest: unknown;
+  },
+  input: Extract<RecruitingResearchToolInput, { operation: "save_search" }>,
+  context: AdapterContext,
+) {
+  if (
+    context.runId !== trusted.runId ||
+    context.spaceId !== trusted.actor.spaceId ||
+    context.userId !== trusted.actor.userId
+  )
+    throw new IsolationError();
+  const sources: Array<{ effectId: string; toolName: string; host: string }> = [];
+  const rows: Array<{ rowIndex: number; sourceEffectId: string; row: Record<string, string> }> = [];
+  const seen = new Set<string>();
+  let truncated = false;
+  // Oldest call first, so the page keeps the order the searches returned people in.
+  const calls = (await listRunToolResults(deps.prisma, trusted.actor, trusted.runId)).reverse();
+  for (const call of calls) {
+    if (!isPeopleSearchEndpoint(call.endpoint)) continue;
+    const people = peopleFromSearch(call.result, call.endpoint);
+    if (!people.length) continue;
+    sources.push({
+      effectId: call.effectId,
+      toolName: call.toolName,
+      host: new URL(call.endpoint).hostname,
+    });
+    for (const person of people) {
+      if (seen.has(person.linkedin_url)) continue;
+      if (rows.length >= PEOPLE_SEARCH_PAGE_LIMIT) {
+        truncated = true;
+        break;
+      }
+      seen.add(person.linkedin_url);
+      rows.push({ rowIndex: rows.length, sourceEffectId: call.effectId, row: { ...person } });
+    }
+  }
+  if (!rows.length)
+    throw new RecruitingPeopleSearchError(
+      "No people with a name and LinkedIn profile came back from a profile-data search in this run. Run the people search with the connected profile-data connector first, then save.",
+    );
+  const captured = { sources, rows, truncated };
+  const bytes = Buffer.from(
+    stableJsonValue(recruitingPeopleSearchReceipt(input, captured)),
+    "utf8",
+  );
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const name = `recruiting-people-search-${hash}.json`;
+  const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
+  return saveRecruitingCandidatePeopleSearch(deps.prisma, trusted.actor, trusted, input, {
+    ...captured,
+    outputArtifact: {
+      name,
+      mimeType: "application/json",
+      size: bytes.byteLength,
+      hash,
+      storageKey: stored.id,
+      clientNonce: `recruiting-people-search:${trusted.effectId}`,
     },
   });
 }

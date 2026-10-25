@@ -6954,6 +6954,99 @@ describe("recruiter CSV candidate import", () => {
   );
 });
 
+describe("people search candidate save", () => {
+  function peopleSearchFixture() {
+    const f = nativeCandidateFixture();
+    const input = { operation: "save_search" as const, expectedRoleRevision: 1 };
+    Object.assign(f.saveEffect, { request: input });
+    const trusted = { ...f.trusted, effectRequest: input };
+    const existing: Array<{ candidateKey: string }> = [];
+    Object.assign(f.tx.recruitingCandidate, {
+      findMany: vi.fn(async () => existing),
+      createMany: vi.fn(async () => ({ count: 1 })),
+    });
+    const completedSources = { count: 1 };
+    Object.assign(f.tx.externalEffect, { count: vi.fn(async () => completedSources.count) });
+    const captured: Parameters<typeof recruiting.recruitingPeopleSearchReceipt>[1] = {
+      sources: [{ effectId: "search", toolName: "entity_search", host: "mcp.coresignal.com" }],
+      rows: [
+        {
+          rowIndex: 0,
+          sourceEffectId: "search",
+          row: {
+            name: "Ada Example",
+            linkedin_url: "https://www.linkedin.com/in/example",
+            current_title: "Sort Center Manager",
+            current_company: "Example Co",
+            location: "Edison, NJ",
+          },
+        },
+      ],
+      truncated: false,
+    };
+    const bytes = Buffer.from(
+      stableJsonValue(recruiting.recruitingPeopleSearchReceipt(input, captured)),
+    );
+    const outputArtifact = {
+      name: "recruiting-people-search.json",
+      mimeType: "application/json",
+      size: bytes.length,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      storageKey: "receipt",
+      clientNonce: "recruiting-people-search:save",
+    };
+    const save = () =>
+      recruiting.saveRecruitingCandidatePeopleSearch(f.prisma, actor, trusted, input, {
+        ...captured,
+        outputArtifact,
+      });
+    return { ...f, input, captured, outputArtifact, existing, completedSources, save };
+  }
+
+  it("saves the run's search results as one unassessed page with names for picking ten", async () => {
+    const f = peopleSearchFixture();
+    const result = (await f.save()) as Record<string, unknown>;
+    expect(f.tx.recruitingCandidatePage.create).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ effectId: "save", taskId: null, rowCount: 1 }),
+    });
+    expect(result).toMatchObject({
+      status: "saved",
+      source: { kind: "people_search", searchedBy: { userId: actor.userId, runId: "run" } },
+      candidateRows: [
+        {
+          rowIndex: 0,
+          candidateKey: "linkedin:/in/example",
+          alreadyInPool: false,
+          name: "Ada Example",
+          title: "Sort Center Manager",
+          company: "Example Co",
+          location: "Edison, NJ",
+        },
+      ],
+      truncated: false,
+    });
+    expect(f.saveEffect).toMatchObject({ status: "completed", result });
+  });
+
+  it("marks people already in the pool so a later round can skip them", async () => {
+    const f = peopleSearchFixture();
+    f.existing.push({ candidateKey: "linkedin:/in/example" });
+    const result = (await f.save()) as { candidateRows: Array<Record<string, unknown>> };
+    expect(result.candidateRows[0]).toMatchObject({ alreadyInPool: true });
+  });
+
+  it.each(["foreign-source", "receipt-hash", "stale-role"])("refuses %s", async (boundary) => {
+    const f = peopleSearchFixture();
+    if (boundary === "foreign-source") f.completedSources.count = 0;
+    if (boundary === "receipt-hash") f.outputArtifact.hash = "e".repeat(64);
+    if (boundary === "stale-role") f.role.revision = 2;
+    await expect(f.save()).rejects.toThrow(
+      boundary === "stale-role" ? recruiting.RecruitingConflictError : IsolationError,
+    );
+    expect(f.tx.recruitingCandidatePage.create).not.toHaveBeenCalled();
+  });
+});
+
 describe("recruiter CSV page provenance on read", () => {
   async function importedSourceFixture() {
     const f = await nativeSourceFixture();

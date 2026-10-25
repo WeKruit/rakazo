@@ -1099,6 +1099,11 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
     providerTaskId: RecruitingId,
     cursor: z.string().min(1).nullable().default(null),
   }),
+  // People returned by a people-search connector call in this same run, saved as one unassessed page.
+  z.strictObject({
+    operation: z.literal("save_search"),
+    expectedRoleRevision: Revision,
+  }),
   // Recruiter-supplied text/csv artifact saved as one unassessed candidate page; values are column names.
   z.strictObject({
     operation: z.literal("import_csv"),

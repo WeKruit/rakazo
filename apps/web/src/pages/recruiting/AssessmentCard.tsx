@@ -7,25 +7,13 @@ import { HighlightText } from "./evidence";
 import { OrgBadge } from "./OrgBadge";
 import type { RequirementRow, RequirementStatus } from "./profile";
 import { sourceLabel } from "./profile";
+import type { QuickOutput } from "./quickOutput";
 
 const ICONS: Record<RequirementStatus, { Icon: typeof CircleCheck; className: string }> = {
   match: { Icon: CircleCheck, className: "text-success" },
   gap: { Icon: CircleX, className: "text-destructive" },
   partial: { Icon: Scale, className: "text-warning" },
   unknown: { Icon: CircleHelp, className: "text-muted-foreground" },
-};
-
-export type QuickOutput = {
-  headline: string | null;
-  highlights: readonly string[];
-  keyWorks: readonly { title: string; detail: string | null; url: string | null }[];
-  concerns: readonly string[];
-  entities: readonly {
-    name: string;
-    kind: string | null;
-    host: string | null;
-    description: string | null;
-  }[];
 };
 
 /** The longest returned organization whose name the tag mentions. */

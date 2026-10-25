@@ -356,7 +356,7 @@ export function nextPlaybookStep(
         ? {
             stage,
             label: "开始校准搜寻",
-            prompt: `岗位已保存。立即启动校准搜寻，目标 ${CALIBRATION_TARGET} 人；开始前在聊天里告诉用户你在做什么，完成后在这里列出。`,
+            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（web_search_exa category:people → recruiting_research save_search → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
           }
         : {
             stage,
@@ -369,7 +369,7 @@ export function nextPlaybookStep(
         stage,
         label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
         prompt: remaining
-          ? `继续校准搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}）。开始前告诉用户，完成后列出名单。`
+          ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后直接列出名单。`
           : "把这 10 位校准候选人记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单并收集本轮反馈；面板已提供反馈入口，不要重复创建问题卡。允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。",
       };
     }
@@ -378,7 +378,7 @@ export function nextPlaybookStep(
         stage,
         label: "收集校准反馈",
         prompt:
-          "通过已记录的 Results 校准面板展示本轮 10 人名单并收集一次反馈，不要重复创建问题卡；允许针对个人、子集或整体方向反馈，不要求逐人评分。本轮反馈到了就把全部意见合成一次，回复到同一个搜索任务，由它处理反馈并找 10 位全新的人（排除它为这个岗位返回过的所有人），保存后记录为下一轮并说明变化，不自行重评候选人。用户明确接受某一轮及规则修改之后才进入规模化搜寻，不能把已保存名单或普通反馈当作批准；没有新反馈时不要重复追问。",
+          "通过已记录的 Results 校准面板展示本轮 10 人名单并收集一次反馈，不要重复创建问题卡；允许针对个人、子集或整体方向反馈，不要求逐人评分。本轮反馈到了就把全部意见合进下一次快速搜索（同一 brief 加上反馈，排除这个岗位已返回过的所有人），save_search 保存后选 10 位全新的人记录为下一轮并说明变化。用户明确接受某一轮及规则修改之后才进入规模化搜寻，不能把已保存名单或普通反馈当作批准；没有新反馈时不要重复追问。",
       };
     case "scale":
       return {
