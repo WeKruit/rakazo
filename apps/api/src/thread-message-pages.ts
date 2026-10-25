@@ -19,15 +19,35 @@ import {
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
   extractRecruitingCrmTarget,
+  hideVendorBlocks,
   isBackgroundInputBlock,
   isBackgroundRunTrigger,
   isPeerReceiptBlocks,
+  isRecruitingSpawnKey,
   mergeMessagesById,
 } from "@rakazo/core";
 import { messageReplyPreview } from "@rakazo/core/message-quote";
 import type { Prisma, PrismaClient } from "@rakazo/db";
 
 type MessageDb = PrismaClient | Prisma.TransactionClient;
+
+/** Recruiting conversations never show a provider's name (see the executor's write-side filter). */
+async function threadHidesVendorNames(prisma: MessageDb, threadId: string): Promise<boolean> {
+  const thread = await prisma.thread.findUnique({
+    where: { id: threadId },
+    select: {
+      activeRecruitingRoleId: true,
+      bot: { select: { spawnKey: true } },
+      group: { select: { members: { select: { bot: { select: { spawnKey: true } } } } } },
+    },
+  });
+  if (!thread) return false;
+  return Boolean(
+    thread.activeRecruitingRoleId ||
+      isRecruitingSpawnKey(thread.bot?.spawnKey) ||
+      thread.group?.members.some((member) => isRecruitingSpawnKey(member.bot.spawnKey)),
+  );
+}
 
 /** Public DTO only: native approval targets and stored blocks remain unchanged. */
 export async function projectRecruitingApprovalFiles<
@@ -46,6 +66,16 @@ export async function projectRecruitingApprovalFiles<
       }),
     };
   });
+  // Messages saved before provider names were hidden at write time are hidden here too.
+  // The thread is looked up only when some bot message would actually change.
+  const hidden = clean.map((message) =>
+    message.role === "bot" ? { ...message, blocks: hideVendorBlocks(message.blocks) } : message,
+  );
+  if (
+    hidden.some((message, index) => !isDeepStrictEqual(message.blocks, clean[index]!.blocks)) &&
+    (await threadHidesVendorNames(prisma, threadId))
+  )
+    clean = hidden;
   const candidates = clean.filter(
     (message) =>
       message.id &&

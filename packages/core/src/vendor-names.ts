@@ -1,3 +1,5 @@
+import type { MessageBlock } from "@rakazo/contracts";
+
 /**
  * Provider names a recruiter never sees. The recruiter talks to one colleague, so a search,
  * profile-data or mail provider is described by what it does, never by its brand.
@@ -10,6 +12,8 @@ type HiddenVendor = {
   en: string;
   /** Host fragments whose links are dropped from recruiter text. */
   hosts: readonly string[];
+  /** What a connect card calls the service, e.g. 连接人才资料库. */
+  label: string;
 };
 
 const POSSESSIVE = "(?:['’]s)?";
@@ -25,6 +29,7 @@ const HIDDEN_VENDORS: readonly HiddenVendor[] = [
     zh: "人才搜索",
     en: "the search",
     hosts: ["autumn"],
+    label: "人才搜索",
   },
   {
     pattern: new RegExp(
@@ -34,24 +39,52 @@ const HIDDEN_VENDORS: readonly HiddenVendor[] = [
     zh: "资料库",
     en: "profile data",
     hosts: ["coresignal", "fullenrich", "juicebox", "peopledatalabs", "proxycurl", "apollo.io"],
+    label: "人才资料库",
+  },
+  {
+    pattern: new RegExp(`\\bPDL${POSSESSIVE}(?!\\w|[.-]\\w)`, "g"),
+    zh: "资料库",
+    en: "profile data",
+    hosts: [],
+    label: "人才资料库",
+  },
+  {
+    pattern: new RegExp(
+      `\\b(?:Contact\\s?Out|Lead\\s?Magic|Lusha|Rocket\\s?Reach)${POSSESSIVE}(?!\\w|[.-]\\w)`,
+      "gi",
+    ),
+    zh: "联系方式补全",
+    en: "contact lookup",
+    hosts: ["contactout", "leadmagic", "lusha.com", "rocketreach"],
+    label: "联系方式补全",
+  },
+  {
+    pattern: new RegExp(`\\b(?:Serper|Firecrawl)(?:\\.dev)?${POSSESSIVE}(?!\\w|[.-]\\w)`, "gi"),
+    zh: "搜索",
+    en: "search",
+    hosts: ["serper.dev", "firecrawl"],
+    label: "人才搜索",
   },
   {
     pattern: new RegExp(`\\bExa(?:\\.ai)?${POSSESSIVE}(?!\\w|[.-]\\w)`, "g"),
     zh: "搜索",
     en: "search",
     hosts: ["exa.ai"],
+    label: "人才搜索",
   },
   {
     pattern: new RegExp(`\\bInstantly(?:\\.ai)?${POSSESSIVE}(?!\\w|[.-]\\w)`, "g"),
     zh: "邮件",
     en: "email",
     hosts: ["instantly.ai"],
+    label: "邮件发送",
   },
   {
     pattern: new RegExp(`\\bComposio${POSSESSIVE}(?!\\w|[.-]\\w)`, "gi"),
     zh: "连接",
     en: "connection",
     hosts: ["composio"],
+    label: "集成服务",
   },
 ];
 
@@ -162,4 +195,77 @@ export function createVendorNameStream() {
       return emit(rest);
     },
   };
+}
+
+/** Bots provisioned by the recruiting product carry this spawn-key prefix. */
+export function isRecruitingSpawnKey(spawnKey: string | null | undefined): boolean {
+  return Boolean(spawnKey?.startsWith("recruiting:"));
+}
+
+/**
+ * {@link hideVendorNames} over the readable fields of chat blocks. Approval cards stay
+ * byte-exact (their text is bound evidence) and connect cards keep the provider they connect.
+ */
+export function hideVendorBlocks<T extends MessageBlock>(blocks: readonly T[]): T[] {
+  return blocks.map((block): T => {
+    switch (block.kind) {
+      case "text":
+      case "meta":
+        return { ...block, text: hideVendorNames(block.text) };
+      case "ask":
+        if (block.approvalEffectId || block.approvalEvidenceHash || block.connection) return block;
+        return {
+          ...block,
+          text: hideVendorNames(block.text),
+          ...(block.detail ? { detail: hideVendorNames(block.detail) } : {}),
+          ...(block.actions
+            ? {
+                actions: block.actions.map((action) => ({
+                  ...action,
+                  label: hideVendorNames(action.label),
+                })),
+              }
+            : {}),
+        };
+      case "card":
+        return {
+          ...block,
+          lines: block.lines.map((line) => ({ ...line, v: hideVendorNames(line.v) })),
+        };
+      case "choice":
+        return {
+          ...block,
+          question: hideVendorNames(block.question),
+          ...(block.subtitle ? { subtitle: hideVendorNames(block.subtitle) } : {}),
+          options: block.options.map((option) => ({
+            ...option,
+            label: hideVendorNames(option.label),
+          })),
+        };
+      case "subagent":
+        return {
+          ...block,
+          task: hideVendorNames(block.task),
+          ...(block.progress ? { progress: hideVendorNames(block.progress) } : {}),
+          ...(block.result ? { result: hideVendorNames(block.result) } : {}),
+        };
+      default:
+        return block;
+    }
+  });
+}
+
+/**
+ * A connect card's service name for a recruiter: a hidden provider becomes what it does
+ * (Coresignal → 人才资料库); the user's own accounts (Gmail, a calendar) keep their names.
+ */
+export function vendorNeutralServiceName(name: string): string {
+  for (const vendor of HIDDEN_VENDORS) {
+    vendor.pattern.lastIndex = 0;
+    if (vendor.pattern.test(name.trim())) {
+      vendor.pattern.lastIndex = 0;
+      return vendor.label;
+    }
+  }
+  return name;
 }

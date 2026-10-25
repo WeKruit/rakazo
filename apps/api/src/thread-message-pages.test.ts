@@ -1397,3 +1397,47 @@ it("derives attachment metadata from a validated parent outside the loaded page"
   const page = await loadMessagePage(prisma, "thread", undefined, 1);
   expect(page.messages[0]?.replyPreview).toEqual({ role: "user", text: "", attachment: image });
 });
+
+describe("provider names in saved messages", () => {
+  const actor = {
+    userId: "owner",
+    spaceId: "space",
+    email: "owner@example.test",
+    isDeploymentOwner: false,
+  };
+  const saved = {
+    id: "message",
+    threadId: "thread",
+    runId: "run",
+    botId: "bot",
+    role: "bot" as const,
+    blocks: [{ kind: "text" as const, text: "已回复到同一个 Autumn 任务。" }],
+  };
+  const prismaFor = (thread: unknown) =>
+    ({ thread: { findUnique: vi.fn(async () => thread) } }) as unknown as PrismaClient;
+
+  it("hides them in a recruiting conversation saved before the write-side filter", async () => {
+    const [shown] = await projectRecruitingApprovalFiles(
+      prismaFor({ activeRecruitingRoleId: null, bot: { spawnKey: "recruiting:owner:main" } }),
+      actor,
+      "thread",
+      [saved],
+    );
+    expect(shown!.blocks).toEqual([{ kind: "text", text: "已回复到同一个人才搜索任务。" }]);
+  });
+
+  it("keeps them in other conversations and skips the lookup when nothing would change", async () => {
+    const prisma = prismaFor({
+      activeRecruitingRoleId: null,
+      bot: { spawnKey: null },
+      group: null,
+    });
+    expect(
+      (await projectRecruitingApprovalFiles(prisma, actor, "thread", [saved]))[0]!.blocks,
+    ).toEqual(saved.blocks);
+    const plain = { ...saved, blocks: [{ kind: "text" as const, text: "已回复。" }] };
+    const quiet = prismaFor(null);
+    await projectRecruitingApprovalFiles(quiet, actor, "thread", [plain]);
+    expect(quiet.thread.findUnique).not.toHaveBeenCalled();
+  });
+});

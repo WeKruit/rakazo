@@ -94,6 +94,7 @@ import {
   externalTextTriggerToolRefusal,
   formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
+  hideVendorBlocks,
   hideVendorNames,
   humanizeToolName,
   inferAttachmentMimeType,
@@ -103,6 +104,7 @@ import {
   isCallClientNonce,
   isMessagingChannelRun,
   isOneShotRoutineCrons,
+  isRecruitingSpawnKey,
   isTerminal,
   messageFileReferences,
   messagingChannelId,
@@ -127,6 +129,7 @@ import {
   truncatedPlainText,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
+  vendorNeutralServiceName,
   workActivityForTool,
 } from "@rakazo/core";
 import {
@@ -3638,7 +3641,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         setupMark("contextLoad");
         // A recruiter never sees a provider's name; connect cards (not text) still name it.
         const hideVendors = Boolean(
-          bot.spawnKey?.startsWith("recruiting:") || thread.activeRecruitingRoleId,
+          isRecruitingSpawnKey(bot.spawnKey) || thread.activeRecruitingRoleId,
         );
         const visible = (text: string) => (hideVendors ? hideVendorNames(text) : text);
         const historySearchBeforeSeq =
@@ -4556,7 +4559,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             deps.prisma,
             { spaceId: run.spaceId, userId: run.userId, botId: bot.id, threadId: thread.id },
             args,
-            async (block) => {
+            async (requested) => {
+              const block = hideVendors ? recruiterConnectBlock(requested) : requested;
               if (!(await renewRunLease(deps, runId, workerId, fence))) {
                 leaseLost = true;
                 return;
@@ -4575,7 +4579,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (!paused) throw new Error("Could not pause this run for a connection; try again.");
               await notifyRun(deps, run, {
                 kind: "help",
-                title: `${bot.name} needs ${block.connection.name}`,
+                title: hideVendors ? block.text : `${bot.name} needs ${block.connection.name}`,
                 body: block.connection.reason,
                 botId: bot.id,
                 threadId: thread.id,
@@ -10119,7 +10123,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 deps,
                 run,
                 "bot",
-                redactBlocks(messageSegments, runSecrets, visible),
+                redactBlocks(messageSegments, runSecrets, hideVendors),
               );
             }
             await workspaceCheckpoint.flush();
@@ -10599,7 +10603,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const blocks = handedOff
             ? []
             : finalBlocksAfterMidTurnProgress(
-                redactBlocks(completionBlocks, runSecrets, visible),
+                redactBlocks(completionBlocks, runSecrets, hideVendors),
                 publishedMidTurnUserMessage || runAllowsSilentEmpty(run.trigger),
               );
           const text = handedOff
@@ -11965,16 +11969,32 @@ async function requeueComputerRun(
   });
 }
 
+/** A recruiter's connect card names what the service does, in their language, not its brand. */
+function recruiterConnectBlock<
+  T extends { kind: "ask"; text: string; connection: { name: string; reason: string } },
+>(block: T): T {
+  const name = vendorNeutralServiceName(block.connection.name);
+  return {
+    ...block,
+    text: `连接${name}`,
+    connection: {
+      ...block.connection,
+      name,
+      reason: hideVendorNames(block.connection.reason),
+    },
+  };
+}
+
 function redactBlocks(
   blocks: MessageBlock[],
   secrets: string[],
-  visible: (text: string) => string = (text) => text,
+  hideVendors = false,
 ): MessageBlock[] {
-  return blocks.map((block) => {
+  const redacted = blocks.map((block) => {
     if (block.kind === "text") {
       return {
         kind: "text" as const,
-        text: visible(redactSecrets(block.text, secrets)),
+        text: redactSecrets(block.text, secrets),
       };
     }
     if (block.kind === "bot_message_sent" || block.kind === "bot_message_received") {
@@ -11982,6 +12002,7 @@ function redactBlocks(
     }
     return block;
   });
+  return hideVendors ? hideVendorBlocks(redacted) : redacted;
 }
 
 function isUniqueViolation(error: unknown): boolean {

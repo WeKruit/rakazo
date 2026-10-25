@@ -394,7 +394,13 @@ export const builtinAgentTools: ConnectorTool[] = [
           minLength: 1,
           description: "Service name or slug, e.g. hubspot, gmail, instantly, cal.com.",
         },
-        reason: { type: "string", minLength: 1, maxLength: 240 },
+        reason: {
+          type: "string",
+          minLength: 1,
+          maxLength: 240,
+          description:
+            "One sentence, in the language the user writes in, on what connecting lets you do for them.",
+        },
       },
       required: ["reason"],
       additionalProperties: false,
