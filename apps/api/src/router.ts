@@ -973,9 +973,10 @@ export function createRouter(deps: RouterDeps) {
   }
   /**
    * CRM conversations opened before role workspaces existed have the CRM locator but no native
-   * role, so the agent cannot tell which role "who replied" refers to. Attach it on the next send.
+   * role, so the agent cannot tell which role "who replied" refers to. Attach it when the
+   * conversation is opened or sent to.
    */
-  async function attachCrmRoleBeforeSend(
+  async function attachMissingCrmRole(
     context: { actor: Actor; signal?: AbortSignal; stillAuthorized?: () => Promise<boolean> },
     target: { groupId: string; threadId: string; memberBotIds: string[] },
   ) {
@@ -997,7 +998,7 @@ export function createRouter(deps: RouterDeps) {
       );
     } catch (error) {
       // The message still goes out; the conversation simply stays without a linked role.
-      getLogger().warn("crm role attach before send failed", {
+      getLogger().warn("crm role attach failed", {
         groupId: target.groupId,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -2316,6 +2317,16 @@ export function createRouter(deps: RouterDeps) {
         groupRepos.listGroups(context.actor, { archived: true }),
       ),
       get: authed.groups.get.handler(async ({ context, input }) => {
+        if (input.groupId.startsWith("recruiting-crm-"))
+          await attachMissingCrmRole(
+            context,
+            await resolveThreadTarget(deps.prisma, context.actor, { groupId: input.groupId }).then(
+              (target) => {
+                if (target.kind !== "group") throw new IsolationError();
+                return target;
+              },
+            ),
+          );
         const group = await groupRepos.getGroup(context.actor, input.groupId);
         const page = await loadMessagePage(
           deps.prisma,
@@ -2586,7 +2597,7 @@ export function createRouter(deps: RouterDeps) {
         if ("error" in resolvedTarget) throw resolvedTarget.error;
         if ("error" in teaching) throw teaching.error;
         const target = resolvedTarget.value;
-        if (target.kind === "group") await attachCrmRoleBeforeSend(context, target);
+        if (target.kind === "group") await attachMissingCrmRole(context, target);
         const authorizedAt = performance.now();
         const result = await sendThreadMessage(
           deps,
