@@ -115,6 +115,7 @@ import {
   oneTimeMcpWriteEndpoint,
   planActionGate,
   promptInvokesSkill,
+  RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
@@ -9962,6 +9963,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 taughtSkillsLine,
                 replyGuidance: runReplyGuidance(run.trigger),
                 disabledBuiltinTools,
+                recruiterLanguage: hideVendors ? RECRUITER_LANGUAGE : undefined,
               })
                 .filter((instruction): instruction is string => Boolean(instruction))
                 .join("\n\n"),
@@ -11404,10 +11406,13 @@ export function userTurnInstructions(parts: {
   taughtSkillsLine: string | undefined;
   replyGuidance: string;
   disabledBuiltinTools?: ReadonlySet<string>;
+  /** Recruiting runs: the recruiter-language rule, delivered in code so customized bots get it. */
+  recruiterLanguage?: string;
 }): (string | undefined)[] {
   return [
     parts.botInstructions,
     RECRUITING_PRESENTATION_INSTRUCTION,
+    parts.recruiterLanguage,
     parts.historyRetrievalEnabled &&
     builtinOffered(parts.disabledBuiltinTools, "search_history") &&
     builtinOffered(parts.disabledBuiltinTools, "read_history")

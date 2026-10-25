@@ -1,6 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE } from "@rakazo/contracts";
-import { ONCE_ROUTINE_CRON } from "@rakazo/core";
+import { ONCE_ROUTINE_CRON, RECRUITER_LANGUAGE } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -1117,6 +1117,24 @@ describe("userTurnInstructions", () => {
     expect(context!.indexOf("Scratchpad context")).toBeGreaterThan(context!.indexOf(roleContext));
     expect(context!.endsWith("Native message source reference")).toBe(true);
     expect(userTurnContext({})).toBeUndefined();
+  });
+
+  it("adds the recruiter-language rule only to recruiting runs", () => {
+    const parts = {
+      ...base,
+      groupContext: undefined,
+      messagingContext: undefined,
+      hasHistoricalContext: false,
+      agentEnvironmentInstruction: undefined,
+      botDirectory: undefined,
+      pluginLine: undefined,
+      agentSkillsLine: undefined,
+      taughtSkillsLine: undefined,
+    };
+    expect(userTurnInstructions(parts).join("\n")).not.toContain(RECRUITER_LANGUAGE);
+    expect(
+      userTurnInstructions({ ...parts, recruiterLanguage: RECRUITER_LANGUAGE }).join("\n"),
+    ).toContain(RECRUITER_LANGUAGE);
   });
 
   it("places stable guidance before volatile context when every optional context is present", () => {
