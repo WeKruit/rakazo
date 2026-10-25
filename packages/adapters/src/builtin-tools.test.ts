@@ -8,6 +8,7 @@ import {
   RecruitingReplyInputSchema,
   RecruitingShortlistToolInputSchema,
 } from "@rakazo/contracts";
+import { RECRUITING_BRIEF_CHECKLIST } from "@rakazo/core";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { builtinAgentTools } from "./builtin-tools.js";
@@ -127,5 +128,16 @@ describe("native recruiting approval tool", () => {
         "recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary",
       );
     }
+  });
+});
+
+describe("recruiting brief checklist", () => {
+  it("reaches every account through the role and brief-approval tools", () => {
+    const description = (name: string) =>
+      builtinAgentTools.find((tool) => tool.name === name)!.description;
+    expect(description("recruiting_role")).toContain(RECRUITING_BRIEF_CHECKLIST);
+    expect(description("recruiting_request_approval")).toContain(
+      "ask the unstated language requirement before this card",
+    );
   });
 });
