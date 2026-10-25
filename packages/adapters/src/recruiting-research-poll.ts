@@ -7,13 +7,16 @@ import type {
 import { recruitingResearchPollJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
-import { classifyRecruitingResearchResult } from "./recruiting-research.js";
+import { classifyRecruitingResearchResult, mcpObject } from "./recruiting-research.js";
 
 /** How long a foreground status read waits at the provider before the turn moves on. */
 export const RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS = 10;
 /** Shown to the model when a task is still working after the foreground wait. */
 export const RECRUITING_RESEARCH_BACKGROUND_NOTICE =
   "Research continues in the background. Its results are delivered to this conversation automatically when the provider finishes; do not poll status.";
+/** Returned with a research request or reply the server now follows in the background. */
+export const RECRUITING_RESEARCH_DIRECT_NOTICE =
+  "This research continues in the background. People are saved into Results as they come back, and the final results are delivered to this conversation automatically. Do not call get_task again or wait for it in this turn: reply with where it stands and end the turn.";
 /** Polls stop after this many checks (2 hours at the fixed interval). */
 export const RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS = 720;
 /** A status probe is a free provider read; a short fixed interval keeps the handoff delay small. */
@@ -112,6 +115,87 @@ export async function recruitingResearchInFlight(
   return false;
 }
 
+const AUTUMN_MCP = "https://api.autumn.ai/mcp";
+
+/**
+ * A research request or reply sent straight through the provider's tools on a role conversation
+ * gets the same background follow-up as a saved research action: the task is recorded on the
+ * role and polled, so the agent never waits inside its turn and results reach the conversation
+ * (and Results) as they arrive. Best effort: tracking never changes the call's own result.
+ */
+export async function trackDirectRecruitingResearch(
+  deps: { prisma: PrismaClient; jobs?: JobPublisher },
+  context: Pick<AdapterContext, "spaceId" | "userId" | "runId">,
+  route: { connectorId: string; resourceId?: string; toolName: string } | undefined,
+  args: Record<string, unknown>,
+  result: unknown,
+): Promise<string | null> {
+  if (
+    !deps.jobs ||
+    !context.runId ||
+    route?.connectorId !== "mcp" ||
+    !route.resourceId ||
+    !["research", "reply"].includes(route.toolName)
+  )
+    return null;
+  const create = route.toolName === "research" && args.task_id === undefined;
+  if (!create && route.toolName !== "reply") return null;
+  const observation = classifyRecruitingResearchResult(result, {
+    operation: create ? "create" : "continue",
+    ...(create ? {} : { providerTaskId: String(args.task_id ?? "") }),
+  });
+  const providerTaskId = observation.providerTaskId;
+  if (observation.deliveryState !== "accepted" || !providerTaskId) return null;
+  const scope = { spaceId: context.spaceId, userId: context.userId };
+  const [server, run] = await Promise.all([
+    deps.prisma.mcpServer.findFirst({
+      where: { id: route.resourceId, ...scope },
+      select: { id: true, revision: true, endpoint: true, transport: true },
+    }),
+    deps.prisma.run.findFirst({
+      where: { id: context.runId, ...scope },
+      select: { id: true, thread: { select: { activeRecruitingRoleId: true } } },
+    }),
+  ]);
+  const roleId = run?.thread.activeRecruitingRoleId;
+  if (server?.transport !== "streamable_http" || server.endpoint !== AUTUMN_MCP || !roleId)
+    return null;
+  const role = await deps.prisma.recruitingRole.findFirst({
+    where: { id: roleId, ...scope },
+    select: { id: true },
+  });
+  if (!role) return null;
+  const identity = { mcpServerId: server.id, serverRevision: server.revision, providerTaskId };
+  const task = await deps.prisma.recruitingResearchTask.upsert({
+    where: { mcpServerId_serverRevision_providerTaskId: identity },
+    update: {},
+    create: { ...identity, roleId, createdByRunId: run.id },
+    select: { id: true, roleId: true, state: true },
+  });
+  // A task already recorded on another role stays where it is.
+  if (task.roleId !== roleId) return null;
+  if (task.state !== "active")
+    await deps.prisma.recruitingResearchTask.update({
+      where: { id: task.id },
+      data: { state: "active" },
+    });
+  await deps.jobs.enqueue(
+    recruitingResearchPollJob({ taskId: task.id }, recruitingResearchPollDelay(0)),
+  );
+  return task.id;
+}
+
+/** New rows at the provider that justify showing them in Results before the research finishes. */
+export const RECRUITING_RESEARCH_PARTIAL_STEP = 20;
+
+function progressRows(raw: unknown): number | null {
+  const body = mcpObject(raw);
+  const progress = body?.progress;
+  if (!progress || typeof progress !== "object" || Array.isArray(progress)) return null;
+  const rows = (progress as Record<string, unknown>).rows;
+  return typeof rows === "number" && Number.isSafeInteger(rows) && rows >= 0 ? rows : null;
+}
+
 /**
  * Sibling of `cloud_agent.poll`: one read-only `get_task` probe per tick, never a paid search.
  * On a terminal provider state, exactly one wake run opens for the owning actor/space/bot/thread
@@ -190,6 +274,10 @@ export async function pollRecruitingResearch(
         providerTaskId: task.providerTaskId,
       });
   const terminal = observation?.deliveryState === "accepted" && observation.done === true;
+  if (!terminal && observation?.deliveryState === "accepted") {
+    const rows = progressRows(result);
+    if (rows !== null) await wakeForPartialRows(deps, task, run, nonce, rows);
+  }
   if (!terminal) {
     if (attempt + 1 >= RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS) return;
     await deps.jobs.enqueue(
@@ -220,7 +308,10 @@ export async function pollRecruitingResearch(
     ]);
     if (!bot || existing) return null;
     // Provider text is untrusted. Wake with local identity and status only.
-    const summary = `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then read and save every rows page with save_results, following each returned cursor, so all returned people are kept, including unassessed people. Do not start new research. Then continue the playbook in this same turn: during calibration, record the ten new people as the round and present them for feedback.`;
+    const direct = !(await tx.recruitingResearchAction.count({ where: { taskId: task.id } }));
+    const summary = direct
+      ? `Research for recruiting role ${task.roleId} is ${state}. Read the people not saved yet with the research provider's get_rows on the same research (task ${providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results, so all returned people are kept, including unassessed people. Do not start new research. Then report how many new people were added in total and the highlights, and offer the next step in one question card.`
+      : `Research task ${task.id} for recruiting role ${task.roleId} is ${state}. Use recruiting_research status, then read and save every rows page with save_results, following each returned cursor, so all returned people are kept, including unassessed people. Do not start new research. Then continue the playbook in this same turn: during calibration, record the ten new people as the round and present them for feedback.`;
     const wakeTask = await tx.task.create({
       data: {
         spaceId: run.spaceId,
@@ -249,5 +340,81 @@ export async function pollRecruitingResearch(
   // The existing run reconciler recovers a queued wake after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(wakeRunId)).catch(() => {
     getLogger().warn("recruiting research wake deferred to reconciliation");
+  });
+}
+
+/**
+ * While a long research is still working, wake the owning conversation each time the provider
+ * reports another RECRUITING_RESEARCH_PARTIAL_STEP people, so they are saved into Results now
+ * instead of after the whole search. One partial wake runs at a time; the final wake still comes.
+ */
+async function wakeForPartialRows(
+  deps: RecruitingResearchPollDeps,
+  task: { id: string; roleId: string; providerTaskId: string | null },
+  run: { spaceId: string; userId: string; botId: string; threadId: string },
+  nonce: string,
+  rows: number,
+): Promise<void> {
+  const prefix = `${nonce}:rows:`;
+  const previous = await deps.prisma.run.findMany({
+    where: { spaceId: run.spaceId, clientNonce: { startsWith: prefix } },
+    select: { clientNonce: true, status: true },
+  });
+  if (previous.some((wake) => ["queued", "running"].includes(wake.status))) return;
+  const last = Math.max(
+    0,
+    ...previous.map((wake) => Number(wake.clientNonce?.slice(prefix.length)) || 0),
+  );
+  if (rows - last < RECRUITING_RESEARCH_PARTIAL_STEP) return;
+  const wakeRunId = await deps.prisma.$transaction(async (tx) => {
+    const locked = await tx.thread.updateMany({
+      where: { id: run.threadId, spaceId: run.spaceId },
+      data: { nextEventSeq: { increment: 0 } },
+    });
+    if (!locked.count) return null;
+    const [bot, existing, busy] = await Promise.all([
+      tx.bot.findFirst({
+        where: { id: run.botId, spaceId: run.spaceId, userId: run.userId, archivedAt: null },
+        select: { id: true },
+      }),
+      tx.run.findFirst({
+        where: { spaceId: run.spaceId, clientNonce: `${prefix}${rows}` },
+        select: { id: true },
+      }),
+      // Never interleave with a turn already working in this conversation.
+      tx.run.findFirst({
+        where: { threadId: run.threadId, status: { in: ["queued", "running"] } },
+        select: { id: true },
+      }),
+    ]);
+    if (!bot || existing || busy) return null;
+    const summary = `Research for recruiting role ${task.roleId} is still working and has returned ${rows} people so far. Read the people not saved yet with the research provider's get_rows on the same research (task ${task.providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results so they show in Results now. Do not reply to, restart or wait for the research; the rest arrives on its own. Then say in one short line how many new people were added, and end the turn.`;
+    const wakeTask = await tx.task.create({
+      data: {
+        spaceId: run.spaceId,
+        botId: run.botId,
+        threadId: run.threadId,
+        userId: run.userId,
+        prompt: summary,
+        status: "queued",
+      },
+    });
+    const wake = await tx.run.create({
+      data: {
+        spaceId: run.spaceId,
+        botId: run.botId,
+        threadId: run.threadId,
+        userId: run.userId,
+        taskId: wakeTask.id,
+        status: "queued",
+        trigger: "recruiting_research",
+        clientNonce: `${prefix}${rows}`,
+      },
+    });
+    return wake.id;
+  });
+  if (!wakeRunId) return;
+  await deps.jobs.enqueue(runContinueJob(wakeRunId)).catch(() => {
+    getLogger().warn("recruiting research partial wake deferred to reconciliation");
   });
 }

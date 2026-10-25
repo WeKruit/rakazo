@@ -5003,9 +5003,24 @@ export async function executeRecruitingApproval(
       );
       approvedRevisionId = confirmed.revision.id;
     } else await recruitingApprovalPackage(tx, actor, input, true, bytes);
-    // An approved ten-profile calibration opens the next playbook stage.
-    if (input.stage === "calibration")
+    // An approved ten-profile calibration accepts the round it showed and opens the next stage,
+    // so the round panel stops asking for feedback on a round the recruiter already approved.
+    if (input.stage === "calibration") {
+      const latest = await tx.recruitingCalibrationRound.findFirst({
+        where: { roleId: input.roleId },
+        orderBy: { round: "desc" },
+        select: { id: true },
+      });
+      await tx.recruitingCalibrationRound.updateMany({
+        where: { id: latest?.id ?? "", approvedAt: null },
+        data: {
+          approvedAt: proof.createdAt,
+          approvedByUserId: actor.userId,
+          approvalSource: { kind: "approval", effectId: effect.id },
+        },
+      });
       await advanceRecruitingPlaybookStage(tx, input.roleId, "scale");
+    }
     const result: RecruitingApprovalResult = {
       status: "approved",
       stage: input.stage,
@@ -7581,6 +7596,8 @@ export async function saveRecruitingCandidatePeopleSearch(
             searchedBy: { userId: actor.userId, runId: run.id },
             observedAt: observedAt.toISOString(),
           },
+          /** People never returned before for this role; only they may fill a later round. */
+          newPeople: candidateRows.filter((row) => !row.alreadyInPool).length,
           outputArtifact: { artifactId: artifact.id, sha256: artifact.hash },
           candidateRows: candidateRows.map((row) => {
             const saved = captured.rows[row.rowIndex]!.row;

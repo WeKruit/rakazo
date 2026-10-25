@@ -483,9 +483,16 @@ describe("playbook stage machine", () => {
     expect(present).toContain("calibration_round");
     expect(present).toContain("不要求逐人评分");
     expect(present).toContain("Results 校准面板");
-    expect(present).toContain("不要重复创建问题卡");
+    expect(present).toContain("下一步选择");
     expect(nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt).toContain(
       "10 位全新的人",
+    );
+    const feedback = nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt;
+    expect(feedback).toContain("「找 100 个」");
+    expect(feedback).toContain("operation approve");
+    expect(feedback).toContain("下一步选择");
+    expect(nextPlaybookStep("scale", { hasBrief: true, savedCandidates: 20 })?.prompt).toContain(
+      "save_search",
     );
     expect(nextPlaybookStep("closed", { hasBrief: true, savedCandidates: 50 })).toBeNull();
     expect(nextPlaybookStep("screening", { hasBrief: true, savedCandidates: 50 })).toBeNull();

@@ -135,6 +135,10 @@ function fixture(crmBindingEffectId: string | null = null) {
         return message;
       }),
     },
+    recruitingCalibrationRound: {
+      findFirst: vi.fn(async () => ({ id: "latest-round" })),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+    },
     recruitingRole: {
       findFirst: vi.fn(async () => role),
       updateMany: vi.fn(async ({ data }) => {
@@ -2952,6 +2956,13 @@ describe("native calibration approval evidence", () => {
     });
     expect(stableJsonValue(f.effects.get("native-g2")!.request)).toBe(original);
     expect(f.tx.recruitingAssessment.findFirst).not.toHaveBeenCalled();
+    // The approved ten are the latest round; the round panel shows it as accepted.
+    expect(f.tx.recruitingCalibrationRound.updateMany).toHaveBeenCalledWith({
+      where: { id: "latest-round", approvedAt: null },
+      data: expect.objectContaining({
+        approvalSource: { kind: "approval", effectId: "native-g2" },
+      }),
+    });
     f.thread.activeRecruitingRoleId = "another-role";
     f.run.status = "completed";
     f.tx.recruitingRole.findFirst.mockResolvedValue({

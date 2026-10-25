@@ -25,6 +25,8 @@ function fixture(
     completedRoundEffect?: boolean;
     /** The recruiter wrote after the round was recorded. */
     roundAnswered?: boolean;
+    /** clientNonce of the newest recruiter or continuation message. */
+    latestNonce?: string;
     researchTasks?: { id: string; providerTaskId: string; mcpServerId: string; startedAt: Date }[];
     wokenNonces?: string[];
     acceptedRound?: boolean;
@@ -47,7 +49,11 @@ function fixture(
     prisma: {
       message: {
         findMany: vi.fn(async () => recent),
-        findFirst: vi.fn(async () => (options.roundAnswered ? { id: "feedback" } : null)),
+        findFirst: vi.fn(async () =>
+          options.roundAnswered
+            ? { id: "feedback", clientNonce: options.latestNonce ?? null }
+            : null,
+        ),
       },
       recruitingCandidatePage: {
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
@@ -235,6 +241,29 @@ describe("guardRecruitingTurnEnd", () => {
         );
     },
   );
+
+  it("pushes a presented round at most once per recruiter message", async () => {
+    const f = fixture({
+      stage: "feedback",
+      round: {
+        effectId: "effect-1",
+        candidateKeys: Array.from({ length: 10 }, (_, i) => `person-${i}`),
+        approvedAt: null,
+      },
+      roundAnswered: true,
+      latestNonce: "autocontinue:run-0:1",
+    });
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run: { ...run, trigger: "follow_up" },
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    });
+    expect(result).toEqual({ action: "ended", classification: "question" });
+    expect(f.sendUserMessage).not.toHaveBeenCalled();
+  });
 
   it("lets a question end the turn", async () => {
     const f = fixture();

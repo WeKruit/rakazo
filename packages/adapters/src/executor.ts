@@ -117,6 +117,7 @@ import {
   promptInvokesSkill,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_ROUND_NEXT_STEP,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   recruiterConnectBlock,
@@ -430,6 +431,10 @@ import {
 import { executeRecruitingProfilesTool, RecruitingProfileError } from "./recruiting-profiles.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { mcpObject } from "./recruiting-research.js";
+import {
+  RECRUITING_RESEARCH_DIRECT_NOTICE,
+  trackDirectRecruitingResearch,
+} from "./recruiting-research-poll.js";
 import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
@@ -7965,7 +7970,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               if (researchInput.data.operation === "calibration_round") {
                 if (!applied || !claimedEffect) throw new IsolationError();
                 // Internal record keeping: the round and this native effect complete together.
-                return await saveRecruitingCalibrationRound(
+                const round = await saveRecruitingCalibrationRound(
                   deps.prisma,
                   researchActor.actor,
                   {
@@ -7977,6 +7982,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   researchInput.data,
                 );
+                // The round is shown now; the turn ends on the next-step choice.
+                return round && typeof round === "object" && !Array.isArray(round)
+                  ? { ...round, next: RECRUITING_ROUND_NEXT_STEP }
+                  : round;
               }
               if (researchInput.data.operation === "save_search") {
                 if (!applied || !claimedEffect) throw new IsolationError();
@@ -9593,6 +9602,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 sourceReadEffectId: replyEvidence.effectId,
                 providerResult: result,
               });
+            }
+            const followed = await trackDirectRecruitingResearch(
+              deps,
+              context,
+              connectorCall.route,
+              connectorCall.args,
+              result,
+            ).catch((error) => {
+              getLogger().warn("recruiting research follow-up not scheduled", {
+                error: String(error),
+              });
+              return null;
+            });
+            if (followed) {
+              const body =
+                result !== null && typeof result === "object" && !Array.isArray(result)
+                  ? (result as Record<string, unknown>)
+                  : { providerResult: result };
+              return finish({ ...body, background: RECRUITING_RESEARCH_DIRECT_NOTICE });
             }
             return finish(result);
           }

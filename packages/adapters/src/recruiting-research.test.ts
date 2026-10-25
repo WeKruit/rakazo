@@ -242,7 +242,7 @@ describe("Autumn task ownership", () => {
     "denies account-wide or unsupported %s before querying receipts",
     async (tool) => {
       const db = fixture();
-      await expect(authorize(db, tool, {})).rejects.toThrow(/scoped research history/i);
+      await expect(authorize(db, tool, {})).rejects.toThrow(/Listing all research is unavailable/i);
       expect(db.externalEffect.findMany).not.toHaveBeenCalled();
     },
   );

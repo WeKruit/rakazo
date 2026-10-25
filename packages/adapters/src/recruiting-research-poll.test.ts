@@ -5,6 +5,7 @@ import {
   pollRecruitingResearch,
   RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS,
   recruitingResearchWakeNonce,
+  trackDirectRecruitingResearch,
 } from "./recruiting-research-poll.js";
 
 const owner = { spaceId: "space", userId: "owner" };
@@ -27,6 +28,7 @@ function fixture(options: {
   wokenAlready?: boolean;
   wokenInTx?: boolean;
   latestReply?: string | null;
+  partialWakes?: Array<{ clientNonce: string; status: string }>;
 }) {
   const runs: Array<{ clientNonce: string; trigger: string }> = [];
   const runCreate = vi.fn(async ({ data }: { data: { clientNonce: string; trigger: string } }) => {
@@ -41,6 +43,7 @@ function fixture(options: {
       create: runCreate,
     },
     task: { create: vi.fn(async () => ({ id: "wake-task" })) },
+    recruitingResearchAction: { count: vi.fn(async () => 1) },
   };
   const prisma = {
     recruitingResearchTask: {
@@ -48,6 +51,7 @@ function fixture(options: {
     },
     run: {
       findFirst: vi.fn(async () => (options.wokenAlready ? { id: "wake-existing" } : null)),
+      findMany: vi.fn(async () => options.partialWakes ?? []),
     },
     externalEffect: {
       findFirst: vi.fn(async () => (options.latestReply ? { id: options.latestReply } : null)),
@@ -201,5 +205,155 @@ describe("pollRecruitingResearch", () => {
     expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ name: "recruiting_research.poll" }),
     );
+  });
+});
+
+describe("streaming a long research into Results", () => {
+  const progress = (rows: number) => ({
+    structuredContent: {
+      task_id: "provider-task",
+      state: "working",
+      done: false,
+      progress: { rows, target: 100 },
+    },
+  });
+
+  it("wakes the conversation to save people while the research is still working", async () => {
+    const f = fixture({ provider: progress(25) });
+    await pollRecruitingResearch(f.deps, { taskId: "task" });
+    expect(f.runs).toEqual([
+      expect.objectContaining({ trigger: "recruiting_research", clientNonce: `${nonce}:rows:25` }),
+    ]);
+    const prompt = vi.mocked(f.tx.task.create).mock.calls[0]![0 as never] as never as {
+      data: { prompt: string };
+    };
+    expect(prompt.data.prompt).toContain("still working");
+    expect(prompt.data.prompt).toContain("save_results");
+    // Polling continues toward the final wake.
+    expect(f.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "recruiting_research.poll" }),
+    );
+  });
+
+  it("waits for enough new people and never stacks partial wakes", async () => {
+    const few = fixture({
+      provider: progress(30),
+      partialWakes: [{ clientNonce: `${nonce}:rows:20`, status: "completed" }],
+    });
+    await pollRecruitingResearch(few.deps, { taskId: "task" });
+    expect(few.runs).toHaveLength(0);
+    const busy = fixture({
+      provider: progress(80),
+      partialWakes: [{ clientNonce: `${nonce}:rows:20`, status: "running" }],
+    });
+    await pollRecruitingResearch(busy.deps, { taskId: "task" });
+    expect(busy.runs).toHaveLength(0);
+    const enough = fixture({
+      provider: progress(45),
+      partialWakes: [{ clientNonce: `${nonce}:rows:20`, status: "completed" }],
+    });
+    await pollRecruitingResearch(enough.deps, { taskId: "task" });
+    expect(enough.runs).toEqual([expect.objectContaining({ clientNonce: `${nonce}:rows:45` })]);
+  });
+
+  it("tells a research sent straight to the provider how to read its rows", async () => {
+    const f = fixture({ provider: completed });
+    f.tx.recruitingResearchAction.count.mockResolvedValue(0);
+    await pollRecruitingResearch(f.deps, { taskId: "task" });
+    const prompt = vi.mocked(f.tx.task.create).mock.calls[0]![0 as never] as never as {
+      data: { prompt: string };
+    };
+    expect(prompt.data.prompt).toContain("get_rows on the same research (task provider-task)");
+    expect(prompt.data.prompt).toContain("save_results");
+  });
+});
+
+describe("trackDirectRecruitingResearch", () => {
+  const route = { connectorId: "mcp", resourceId: "autumn", toolName: "research" };
+  const accepted = { structuredContent: { task_id: "provider-1", status: "accepted" } };
+  function deps(options: { endpoint?: string; roleId?: string | null; taskRole?: string } = {}) {
+    const upsert = vi.fn(async ({ create }: { create: { roleId: string } }) => ({
+      id: "local-task",
+      roleId: options.taskRole ?? create.roleId,
+      state: "active",
+    }));
+    const enqueue = vi.fn(async () => undefined);
+    const prisma = {
+      mcpServer: {
+        findFirst: vi.fn(async () => ({
+          id: "autumn",
+          revision: 3,
+          transport: "streamable_http",
+          endpoint: options.endpoint ?? "https://api.autumn.ai/mcp",
+        })),
+      },
+      run: {
+        findFirst: vi.fn(async () => ({
+          id: "run-1",
+          thread: {
+            activeRecruitingRoleId: options.roleId === undefined ? "role" : options.roleId,
+          },
+        })),
+      },
+      recruitingRole: { findFirst: vi.fn(async () => ({ id: "role" })) },
+      recruitingResearchTask: { upsert, update: vi.fn() },
+    };
+    return {
+      deps: {
+        prisma: prisma as unknown as PrismaClient,
+        jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn() },
+      },
+      upsert,
+      enqueue,
+    };
+  }
+  const context = { spaceId: "space", userId: "owner", runId: "run-1" };
+
+  it("records an accepted research on the role and polls it in the background", async () => {
+    const f = deps();
+    await expect(
+      trackDirectRecruitingResearch(f.deps, context, route, { prompt: "find" }, accepted),
+    ).resolves.toBe("local-task");
+    expect(f.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: {
+          mcpServerId: "autumn",
+          serverRevision: 3,
+          providerTaskId: "provider-1",
+          roleId: "role",
+          createdByRunId: "run-1",
+        },
+      }),
+    );
+    expect(f.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ payload: { taskId: "local-task" } }),
+    );
+  });
+
+  it("leaves other services, role-less chats and other roles' tasks alone", async () => {
+    const other = deps({ endpoint: "https://example.test/mcp" });
+    await expect(
+      trackDirectRecruitingResearch(other.deps, context, route, { prompt: "x" }, accepted),
+    ).resolves.toBeNull();
+    const noRole = deps({ roleId: null });
+    await expect(
+      trackDirectRecruitingResearch(noRole.deps, context, route, { prompt: "x" }, accepted),
+    ).resolves.toBeNull();
+    const elsewhere = deps({ taskRole: "other-role" });
+    await expect(
+      trackDirectRecruitingResearch(elsewhere.deps, context, route, { prompt: "x" }, accepted),
+    ).resolves.toBeNull();
+    expect(elsewhere.enqueue).not.toHaveBeenCalled();
+    const read = deps();
+    await expect(
+      trackDirectRecruitingResearch(
+        read.deps,
+        context,
+        { ...route, toolName: "get_task" },
+        { task_id: "provider-1" },
+        accepted,
+      ),
+    ).resolves.toBeNull();
+    expect(read.upsert).not.toHaveBeenCalled();
   });
 });

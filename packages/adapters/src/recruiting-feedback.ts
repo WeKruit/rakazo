@@ -9,7 +9,7 @@ import type {
   RecruitingSourceRef,
 } from "@rakazo/contracts";
 import { RecruitingFeedbackInputSchema } from "@rakazo/contracts";
-import { applyRecruitingPreferenceEdit } from "@rakazo/core";
+import { applyRecruitingPreferenceEdit, RECRUITING_SCALE_START } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
   approveRecruitingCalibrationRoundFromMessage,
@@ -39,6 +39,8 @@ export type RecruitingFeedbackResult = {
       choice?: RecruitingCandidateFeedbackSelection["choice"];
       /** The calibration round an approval accepted. */
       round?: number;
+      /** What to do in the same turn once a round is accepted. */
+      next?: string;
     }
   | {
       status: "saved";
@@ -132,6 +134,7 @@ export async function executeRecruitingFeedback(
       ...result,
       status: approved.already ? "already_recorded" : "recorded",
       round: approved.round,
+      next: RECRUITING_SCALE_START,
     };
   }
   if (feedback.target === "round" || feedback.target === "candidate")
