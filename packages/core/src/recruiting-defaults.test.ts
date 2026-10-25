@@ -232,6 +232,7 @@ describe("maintained recruiting defaults", () => {
   it("offers the next step after every round and starts scale on the recruiter's request", () => {
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("找 100 个类似的人");
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("ask_user");
+    expect(RECRUITING_ROUND_NEXT_STEP).toContain("table of the ten");
     for (const part of [
       "That request is the acceptance",
       "never ask them to confirm the round again",
