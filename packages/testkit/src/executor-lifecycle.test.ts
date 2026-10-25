@@ -479,7 +479,7 @@ describeIntegration("run executor lifecycle", () => {
     }
   });
 
-  it("discards pending steering when the user stops active work", async () => {
+  it("keeps unread steering as pending input when the user stops active work", async () => {
     const seeded = await seedRun("steering-stop", "keep working", {
       status: "running",
       leaseOwner: "stop-worker",
@@ -498,7 +498,13 @@ describeIntegration("run executor lifecycle", () => {
     await expect(
       handles.prisma.run.findUniqueOrThrow({ where: { id: seeded.run.id } }),
     ).resolves.toMatchObject({ status: "cancelled" });
-    expect(await handles.prisma.steeringMessage.count({ where: { botId: seeded.bot.id } })).toBe(0);
+    // Stop cancels the run, not what the user said while it ran: the next run claims it.
+    await expect(
+      handles.prisma.steeringMessage.findMany({
+        where: { botId: seeded.bot.id },
+        select: { runId: true, claimedAt: true },
+      }),
+    ).resolves.toEqual([{ runId: null, claimedAt: null }]);
     expect(
       await handles.prisma.run.count({
         where: { threadId: seeded.thread.id, trigger: { not: "created" } },
