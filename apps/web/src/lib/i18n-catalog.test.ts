@@ -14,6 +14,9 @@ import ptBR from "../../scripts/translations-pt-BR.json";
 import tr from "../../scripts/translations-tr.json";
 import zhCN from "../../scripts/translations-zh-CN.json";
 
+// Recruiters read the recruiting product in Chinese; other locales fall back to English.
+const ZH_RECRUITING: Record<string, string> = { "Match score": "匹配分数" };
+
 describe("lingui catalogs", () => {
   beforeEach(() => {
     i18n.load("en", {});
@@ -172,7 +175,8 @@ describe("lingui catalogs", () => {
       i18n.activate(locale);
       for (const [id, entry] of entries)
         expect(i18n._({ id, values: { name: "Synthetic agent" } }), locale).toBe(
-          entry.message?.replaceAll("{name}", "Synthetic agent"),
+          (locale === "zh-CN" ? ZH_RECRUITING[entry.message!] : undefined) ??
+            entry.message?.replaceAll("{name}", "Synthetic agent"),
         );
     }
   });
@@ -206,7 +210,7 @@ describe("lingui catalogs", () => {
       expect(compiled.errors).toEqual([]);
       i18n.load(locale, JSON.parse(compiled.source).messages);
       i18n.activate(locale);
-      expect(i18n._({ id: "bn0SqF" }), locale).toBe("Recruiting");
+      expect(i18n._({ id: "bn0SqF" }), locale).toBe(locale === "zh-CN" ? "招聘" : "Recruiting");
       for (const [id, entry] of entries) {
         const values = Object.fromEntries(
           [...(entry.message ?? "").matchAll(/\{(\w+)\}/g)].map(([, name]) => [name, "2"]),
@@ -220,7 +224,7 @@ describe("lingui catalogs", () => {
     }
   });
 
-  it("compiles candidate counts with English fallback grammar in every locale", async () => {
+  it("compiles candidate counts with English fallback grammar in every other locale", async () => {
     const config = getConfig({
       configPath: fileURLToPath(new URL("../../lingui.config.ts", import.meta.url)),
     });
@@ -244,7 +248,7 @@ describe("lingui catalogs", () => {
       i18n.activate(locale);
       for (const count of [0, 1, 2])
         expect(i18n._({ id: candidateCountId!, values: { 0: count } }), `${locale}: ${count}`).toBe(
-          `${count} candidate${count === 1 ? "" : "s"}`,
+          locale === "zh-CN" ? `${count} 位候选人` : `${count} candidate${count === 1 ? "" : "s"}`,
         );
     }
   });

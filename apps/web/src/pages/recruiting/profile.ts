@@ -5,6 +5,7 @@ import type {
   RecruitingSavedProfile,
 } from "@rakazo/contracts";
 import { recruitingCandidateSourceText } from "@rakazo/contracts";
+import { hideVendorNames, isVendorUrl } from "@rakazo/core";
 import type { TimelineEntry } from "./profileTimelineModel";
 import { storedExperienceTimeline, structuredProfileTimeline } from "./profileTimelineModel";
 import { quickOutput } from "./quickOutput";
@@ -81,6 +82,31 @@ function httpsUrl(value: string | null | undefined) {
   }
 }
 
+// Provider bookkeeping a recruiter never needs: where an asset came from, raw cache records.
+const INTERNAL_FIELD = /\b(?:logo|provider|cached?)\b/i;
+const LANGUAGE_SUFFIX = /[\s_]+(?:zh|cn|en)$/i;
+
+/**
+ * A report field as a recruiter reads it: provider names and links removed, a column name
+ * ("review_rationale_zh") shown as words, and provider bookkeeping dropped.
+ */
+function recruiterField(field: Field): Field[] {
+  const label = field.label.trim().replace(LANGUAGE_SUFFIX, "").replace(/_+/g, " ");
+  if (field.providerStatus === undefined && INTERNAL_FIELD.test(label)) return [];
+  if (/\bprovider record\b/i.test(`${field.value ?? ""} ${field.evidence ?? ""}`)) return [];
+  const text = (value: string | undefined) => (value ? hideVendorNames(value).trim() : value);
+  return [
+    {
+      ...field,
+      label: label ? label[0]!.toUpperCase() + label.slice(1) : field.label,
+      value: field.value ? (text(field.value) ?? null) : field.value,
+      ...(field.evidence ? { evidence: text(field.evidence) } : {}),
+      ...(field.reasoning ? { reasoning: text(field.reasoning) } : {}),
+      sourceUrls: field.sourceUrls.filter((url) => !isVendorUrl(url)),
+    },
+  ];
+}
+
 /**
  * Autumn's report fields sorted into the sections a recruiter reads, as returned and never
  * re-judged. Fields that fit no named section stay together as research findings.
@@ -89,14 +115,16 @@ export function candidateSections(
   fields: readonly Field[] | undefined,
   criterionContext?: ProfileCriterionContext,
 ) {
-  const all = (fields ?? []).filter(
-    (field) =>
-      field.value?.trim() ||
-      field.evidence?.trim() ||
-      field.reasoning?.trim() ||
-      field.structuredValue !== undefined ||
-      field.providerStatus,
-  );
+  const all = (fields ?? [])
+    .flatMap(recruiterField)
+    .filter(
+      (field) =>
+        field.value?.trim() ||
+        field.evidence?.trim() ||
+        field.reasoning?.trim() ||
+        field.structuredValue !== undefined ||
+        field.providerStatus,
+    );
   const take = (test: (field: Field) => boolean) => all.filter(test);
   const contact = (pattern: RegExp) =>
     take((field) => field.structuredValue === undefined && pattern.test(field.label.trim()));

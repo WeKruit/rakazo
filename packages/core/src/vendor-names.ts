@@ -141,7 +141,13 @@ export function hideVendorNames(
     out = out.replace(vendor.pattern, (match: string, offset: number, whole: string) => {
       const possessive = /['’]s$/.test(match);
       if (chinese) return `${ZH_START}${vendor.zh}${possessive ? "的" : ""}${ZH_END}`;
-      const word = possessive ? `${vendor.en}'s` : vendor.en;
+      // After a determiner ("the existing Autumn rank order") the brand needs no article.
+      const modifier =
+        /\b(?:the|a|an|this|that|our|its|same|existing|current|original|each)\s+$/i.test(
+          (options.before ?? "") + whole.slice(0, offset),
+        );
+      const en = modifier ? vendor.en.replace(/^the /, "") : vendor.en;
+      const word = possessive ? `${en}'s` : en;
       const sentenceStart = /(?:^|[.!?\n]\s*|^\s*[-*]\s+)$/.test(
         (options.before ?? "") + whole.slice(0, offset),
       );

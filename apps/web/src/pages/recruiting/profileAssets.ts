@@ -32,13 +32,8 @@ export function profileImageUrl(value: string | null | undefined): string | null
 }
 
 export function isProfileAssetField(field: Field) {
-  if (
-    field.structuredValue !== undefined ||
-    field.providerStatus !== undefined ||
-    field.evidence ||
-    field.reasoning
-  )
-    return false;
+  // A provider's note on where it found the asset is not a finding.
+  if (field.structuredValue !== undefined || field.providerStatus !== undefined) return false;
   return [PHOTO, COMPANY_LOGO, SCHOOL_LOGO, COMPANY_LINK, SCHOOL_LINK].some((pattern) =>
     pattern.test(field.label.trim()),
   );
