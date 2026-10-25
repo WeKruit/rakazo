@@ -173,8 +173,12 @@ export async function guardRecruitingTurnEnd(
       reason,
       count: count - 1,
     });
+    // Saved results are a real outcome even when this step is not finished yet.
+    const saved = Math.max(playbook.savedCandidates ?? 0, savedRows._sum.rowCount ?? 0);
     await input.postAssistant(
-      `我先停在这里：已连续自动推进 ${max} 次仍没有产出可交付结果。下一步是「${step.label}」；回复一句「继续」我就接着做。`,
+      saved > 0
+        ? `我先停在这里：已保存 ${saved} 位候选人，「${step.label}」还没完成。回复一句「继续」我就接着做。`
+        : `我先停在这里：已连续自动推进 ${max} 次仍没有产出可交付结果。下一步是「${step.label}」；回复一句「继续」我就接着做。`,
     );
     return { action: "capped", stage, label: step.label, count: count - 1 };
   }

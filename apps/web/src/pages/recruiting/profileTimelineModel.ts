@@ -1,8 +1,10 @@
 /**
  * Best-effort structure for the free-text experience and education a research agent wrote.
- * Nothing is invented or dropped: a segment that does not parse stays as its original words,
- * and every number comes only from dates found in the text.
+ * Nothing is invented: lookup notes ("search-index snippet, checked …") are removed, a segment
+ * that does not parse stays as its words, and every number comes only from dates in the text.
  */
+
+import { historyNoteText } from "./quickOutput";
 
 export type TimelineKind = "experience" | "education";
 
@@ -208,7 +210,9 @@ export function parseTimeline(
   kind: TimelineKind,
   now: Date,
 ): TimelineEntry[] {
-  return splitSegments(value ?? "").map((segment) => parseSegment(segment, kind, now));
+  return splitSegments(historyNoteText(value ?? "", kind === "education")).map((segment) =>
+    parseSegment(segment, kind, now),
+  );
 }
 
 /** Existing CRM history objects already identify the role and company. Do not reparse names. */
