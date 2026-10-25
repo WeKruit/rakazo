@@ -95,7 +95,10 @@ describe("maintained recruiting defaults", () => {
       "A matching title alone is NOT enough",
       "{min}-{max} years",
       "never infer from names",
-      "current role started after {today minus 6 months",
+      "only when the brief sets a tenure rule",
+      "never add a constraint it does not state",
+      "never silently passed",
+      "POSITIVE EXAMPLES",
       "Title-only matches are not returned",
       "current role start month",
     ])
@@ -105,7 +108,8 @@ describe("maintained recruiting defaults", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain("Always settle the language requirement");
     expect(main.instructions).toContain("not just a matching title");
-    expect(main.instructions).toContain("a maximum as well as a minimum");
+    expect(main.instructions).toContain("stays a preference, never a reject rule");
+    expect(sourcer.instructions).toContain("show that person as needing a check");
     const draft = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Review recruiting draft",
     )!;

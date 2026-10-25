@@ -2,7 +2,7 @@
 
 Source: grokbot's own nine-step write-up, its Sourcer chat (Oct 19–25) and Rakazo `main` at 8406abd0.
 Grokbot said Rakazo only covers JD → sourcing → calibration. That is wrong for most of steps 3–8;
-the table checks the code.
+the table checks the code. "Covered" means the code path exists, not that the step passed a real business run; see `docs/research/grok-autumn-2026-10-25/` for evidence levels.
 
 | # | Grokbot step | Rakazo today | Gap |
 |---|---|---|---|
