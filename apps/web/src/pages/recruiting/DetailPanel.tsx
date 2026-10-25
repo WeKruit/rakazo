@@ -21,6 +21,7 @@ import { ActivityTab } from "./ActivityTab";
 import { AssessmentCard } from "./AssessmentCard";
 import type { RecruitingDetailController, RecruitingDetailView } from "./detail";
 import { HighlightText } from "./evidence";
+import { fieldLabel } from "./fieldLabels";
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
 import { InterviewTab } from "./InterviewTab";
@@ -712,7 +713,7 @@ function FieldList({
     <dl className="space-y-3">
       {fields.map((field) => (
         <div key={field.label} className="space-y-1">
-          <dt className="text-xs text-muted-foreground">{field.label}</dt>
+          <dt className="text-xs text-muted-foreground">{fieldLabel(field.label)}</dt>
           <dd className="space-y-1 break-words whitespace-pre-wrap">
             {[
               ...new Set(

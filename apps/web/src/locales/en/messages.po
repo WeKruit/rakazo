@@ -1677,6 +1677,10 @@ msgstr "Company"
 msgid "Company deck"
 msgstr "Company deck"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Company type"
+msgstr "Company type"
+
 #. placeholder {0}: candidate.company
 #: src/pages/Shell.tsx
 msgid "Company: {0}"
@@ -1723,6 +1727,10 @@ msgstr "Computers are available. Reload or open a bot to continue."
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Concerns"
+msgstr "Concerns"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Configure a plugin catalog on the server to connect apps."
@@ -2007,6 +2015,14 @@ msgstr "Copy"
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
 msgstr "Copy .env example"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core duties"
+msgstr "Core duties"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core work evidence"
+msgstr "Core work evidence"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Could not access"
@@ -2612,6 +2628,7 @@ msgid "Could not update this task. Try again."
 msgstr "Could not update this task. Try again."
 
 #: src/components/computer/FilesApp.tsx
+#: src/pages/Shell.tsx
 msgid "Could not upload file"
 msgstr "Could not upload file"
 
@@ -2725,11 +2742,19 @@ msgstr "Criterion"
 msgid "Criterion {0}"
 msgstr "Criterion {0}"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion findings"
+msgstr "Criterion findings"
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Criterion name unavailable"
 msgstr "Criterion name unavailable"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion summary"
+msgstr "Criterion summary"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "CRM receipt"
@@ -2746,6 +2771,10 @@ msgstr "Cron expression"
 #: src/pages/RecruitingPanel.tsx
 msgid "Current"
 msgstr "Current"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current company"
+msgstr "Current company"
 
 #: src/components/AccountAccess.tsx
 #: src/pages/AccountSettingsOverlay.tsx
@@ -2765,6 +2794,7 @@ msgid "Current result: rejected"
 msgstr "Current result: rejected"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr "Current role"
@@ -2773,6 +2803,10 @@ msgstr "Current role"
 msgid "Current role not returned"
 msgstr "Current role not returned"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current role start"
+msgstr "Current role start"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Current tenure"
 msgstr "Current tenure"
@@ -2780,6 +2814,10 @@ msgstr "Current tenure"
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Current time"
 msgstr "Current time"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current title"
+msgstr "Current title"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Current totals · all dates"
@@ -2872,6 +2910,10 @@ msgstr "Default ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "Default scope"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Degree"
+msgstr "Degree"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay unavailable."
@@ -3394,9 +3436,14 @@ msgid "Every week"
 msgstr "Every week"
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Evidence"
 msgstr "Evidence"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Evidence quote"
+msgstr "Evidence quote"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Exclude"
@@ -3559,6 +3606,10 @@ msgstr "Finishing MCP connection…"
 msgid "Fit"
 msgstr "Fit"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Fit rationale"
+msgstr "Fit rationale"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Fixed date"
 msgstr "Fixed date"
@@ -3649,6 +3700,14 @@ msgstr "Good example"
 msgid "Good example: {name}"
 msgstr "Good example: {name}"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade"
+msgstr "Grade"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade reason"
+msgstr "Grade reason"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
 msgid "Group"
@@ -3712,6 +3771,10 @@ msgstr "Header name"
 msgid "Header value"
 msgstr "Header value"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Headline"
+msgstr "Headline"
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Hear a sample"
 msgstr "Hear a sample"
@@ -3766,6 +3829,10 @@ msgstr "High probability"
 #: src/pages/RecruitingPanel.tsx
 msgid "High signal"
 msgstr "High signal"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Highlights"
+msgstr "Highlights"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Hiring manager"
@@ -3862,6 +3929,10 @@ msgstr "Inbox & email"
 #: src/pages/RecruitingPanel.tsx
 msgid "Include"
 msgstr "Include"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Industry"
+msgstr "Industry"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Inherit default"
@@ -4066,8 +4137,17 @@ msgid "Knowledge"
 msgstr "Knowledge"
 
 #: src/pages/AccountSettingsOverlay.tsx
+#: src/pages/recruiting/fieldLabels.ts
 msgid "Language"
 msgstr "Language"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Language evidence"
+msgstr "Language evidence"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Languages"
+msgstr "Languages"
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Last {count} weeks"
@@ -4275,6 +4355,7 @@ msgid "Local Server Settings"
 msgstr "Local Server Settings"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Location"
@@ -4375,6 +4456,10 @@ msgstr "Marked high signal"
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
 msgstr "Match"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Match reasons"
+msgstr "Match reasons"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Match score"
@@ -5235,6 +5320,7 @@ msgid "Note"
 msgstr "Note"
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Notes"
 msgstr "Notes"
@@ -5793,6 +5879,10 @@ msgstr "Previous"
 msgid "Previous campaigns"
 msgstr "Previous campaigns"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Previous companies"
+msgstr "Previous companies"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous contact campaigns"
 msgstr "Previous contact campaigns"
@@ -5958,6 +6048,7 @@ msgid "Reading files"
 msgstr "Reading files"
 
 #: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr "Reason"
@@ -6509,6 +6600,10 @@ msgstr "Review plan"
 msgid "Review provider settings and test again."
 msgstr "Review provider settings and test again."
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Review rationale"
+msgstr "Review rationale"
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Review status unknown"
 msgstr "Review status unknown"
@@ -6566,6 +6661,10 @@ msgstr "Revision {0}"
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Revoke"
 msgstr "Revoke"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Risks"
+msgstr "Risks"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Robot"
@@ -7037,6 +7136,10 @@ msgstr "Search models"
 msgid "Search providers"
 msgstr "Search providers"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Search query"
+msgstr "Search query"
+
 #: src/pages/Shell.tsx
 msgid "Search refinement"
 msgstr "Search refinement"
@@ -7099,6 +7202,10 @@ msgstr "Select an event to see its source details. Candidate links are not inclu
 #: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
 msgstr "Selected recipient unavailable"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Selection basis"
+msgstr "Selection basis"
 
 #: src/pages/Shell.tsx
 msgid "Send"
@@ -7167,6 +7274,10 @@ msgstr "Sending schedule"
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "Sending…"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Seniority"
+msgstr "Seniority"
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sent"
@@ -7725,6 +7836,10 @@ msgstr "Subscribe"
 msgid "Subscription required"
 msgstr "Subscription required"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Summary"
+msgstr "Summary"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Supports images"
@@ -8001,6 +8116,10 @@ msgstr "Thread"
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Time"
 msgstr "Time"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Time in current role"
+msgstr "Time in current role"
 
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/EmailConversation.tsx
@@ -8540,6 +8659,10 @@ msgstr "XLSX is not supported yet. Save as CSV and upload again."
 #: src/lib/billing.ts
 msgid "year"
 msgstr "year"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Years of experience"
+msgstr "Years of experience"
 
 #: src/pages/Shell.tsx
 #: src/pages/shell/chat-context.tsx

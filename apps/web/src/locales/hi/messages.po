@@ -1677,6 +1677,10 @@ msgstr ""
 msgid "Company deck"
 msgstr ""
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Company type"
+msgstr ""
+
 #. placeholder {0}: candidate.company
 #: src/pages/Shell.tsx
 msgid "Company: {0}"
@@ -1723,6 +1727,10 @@ msgstr ""
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "कंप्यूटर बंद हैं। SANDBOX_PROVIDER=docker और SANDBOX_SUPERVISOR_TOKEN सेट करें, या SANDBOX_PROVIDER को e2b, daytona, या box पर सेट कर उसका API key दें। .env बदलने के बाद स्टैक फिर बनाएँ।"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Concerns"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Configure a plugin catalog on the server to connect apps."
@@ -2006,6 +2014,14 @@ msgstr "कॉपी करें"
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Copy .env example"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core duties"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core work evidence"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2612,6 +2628,7 @@ msgid "Could not update this task. Try again."
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
+#: src/pages/Shell.tsx
 msgid "Could not upload file"
 msgstr ""
 
@@ -2725,10 +2742,18 @@ msgstr ""
 msgid "Criterion {0}"
 msgstr ""
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion findings"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Criterion name unavailable"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion summary"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -2745,6 +2770,10 @@ msgstr "Cron एक्सप्रेशन"
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Current"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current company"
 msgstr ""
 
 #: src/components/AccountAccess.tsx
@@ -2765,6 +2794,7 @@ msgid "Current result: rejected"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Current role"
 msgstr ""
@@ -2773,12 +2803,20 @@ msgstr ""
 msgid "Current role not returned"
 msgstr ""
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current role start"
+msgstr ""
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Current tenure"
 msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Current time"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current title"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
@@ -2872,6 +2910,10 @@ msgstr "डिफ़ॉल्ट ({0})"
 #: src/pages/MemorySettingsOverlay.tsx
 msgid "Default scope"
 msgstr "डिफ़ॉल्ट स्कोप"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Degree"
+msgstr ""
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay unavailable."
@@ -3394,8 +3436,13 @@ msgid "Every week"
 msgstr "हर सप्ताह"
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Evidence"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Evidence quote"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -3559,6 +3606,10 @@ msgstr "MCP कनेक्शन पूरा हो रहा है…"
 msgid "Fit"
 msgstr ""
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Fit rationale"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Fixed date"
 msgstr ""
@@ -3649,6 +3700,14 @@ msgstr ""
 msgid "Good example: {name}"
 msgstr ""
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade reason"
+msgstr ""
+
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/Shell.tsx
 msgid "Group"
@@ -3712,6 +3771,10 @@ msgstr "हेडर नाम"
 msgid "Header value"
 msgstr "हेडर मान"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Headline"
+msgstr ""
+
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Hear a sample"
 msgstr "एक नमूना सुनें"
@@ -3765,6 +3828,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "High signal"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Highlights"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -3861,6 +3928,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Include"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Industry"
 msgstr ""
 
 #: src/pages/shell/bot-panel.tsx
@@ -4066,8 +4137,17 @@ msgid "Knowledge"
 msgstr "ज्ञान"
 
 #: src/pages/AccountSettingsOverlay.tsx
+#: src/pages/recruiting/fieldLabels.ts
 msgid "Language"
 msgstr "भाषा"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Language evidence"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Languages"
+msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Last {count} weeks"
@@ -4275,6 +4355,7 @@ msgid "Local Server Settings"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Location"
@@ -4374,6 +4455,10 @@ msgstr ""
 #: src/pages/recruiting/SkillEvidence.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Match"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Match reasons"
 msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
@@ -5235,6 +5320,7 @@ msgid "Note"
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Notes"
 msgstr ""
@@ -5793,6 +5879,10 @@ msgstr ""
 msgid "Previous campaigns"
 msgstr ""
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Previous companies"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Previous contact campaigns"
 msgstr ""
@@ -5958,6 +6048,7 @@ msgid "Reading files"
 msgstr ""
 
 #: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/fieldLabels.ts
 #: src/pages/RecruitingPanel.tsx
 msgid "Reason"
 msgstr ""
@@ -6509,6 +6600,10 @@ msgstr ""
 msgid "Review provider settings and test again."
 msgstr "प्रोवाइडर सेटिंग्स की समीक्षा करें और फिर से परीक्षण करें।"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Review rationale"
+msgstr ""
+
 #: src/pages/RecruitingPanel.tsx
 msgid "Review status unknown"
 msgstr ""
@@ -6565,6 +6660,10 @@ msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Revoke"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Risks"
 msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
@@ -7037,6 +7136,10 @@ msgstr ""
 msgid "Search providers"
 msgstr "प्रोवाइडर्स खोजें"
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Search query"
+msgstr ""
+
 #: src/pages/Shell.tsx
 msgid "Search refinement"
 msgstr ""
@@ -7098,6 +7201,10 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Selected recipient unavailable"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Selection basis"
 msgstr ""
 
 #: src/pages/Shell.tsx
@@ -7167,6 +7274,10 @@ msgstr ""
 #: src/pages/RecruitingPanel.tsx
 msgid "Sending…"
 msgstr "भेजा जा रहा है…"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Seniority"
+msgstr ""
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sent"
@@ -7725,6 +7836,10 @@ msgstr ""
 msgid "Subscription required"
 msgstr ""
 
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Summary"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Supports images"
@@ -8000,6 +8115,10 @@ msgstr ""
 
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Time"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Time in current role"
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -8539,6 +8658,10 @@ msgstr ""
 
 #: src/lib/billing.ts
 msgid "year"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Years of experience"
 msgstr ""
 
 #: src/pages/Shell.tsx
