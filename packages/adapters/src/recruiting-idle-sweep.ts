@@ -47,7 +47,7 @@ export async function sweepIdleRecruitingRoles(deps: {
         none: { status: { in: ACTIVE_RUN_STATUSES } },
       },
     },
-    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     take: deps.batchSize,
     select: { id: true, activeRecruitingRoleId: true },
   });
