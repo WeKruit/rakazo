@@ -250,9 +250,14 @@ export type PeopleSearchRow = {
  * left out, since a round needs both.
  */
 export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearchRow[] {
-  if (!providerFor(endpoint)) return [];
+  if (!isPeopleSearchEndpoint(endpoint)) return [];
+  const listing = LISTING_SEARCH_HOSTS.has(host(endpoint) ?? "");
   const people = new Map<string, PeopleSearchRow>();
-  for (const record of objects(result)) {
+  const found = listing
+    ? objects(result)
+        .flatMap((record) => (typeof record.text === "string" ? peopleFromListing(record.text) : []))
+    : objects(result);
+  for (const record of found) {
     const name = first(record, PEOPLE_NAME_KEYS);
     const href = PEOPLE_LINK_KEYS.map((key) => link(record[key])).find(
       (value) => value && linkedinPersonKey(value),
@@ -275,9 +280,66 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
   return [...people.values()];
 }
 
+/** People-search hosts whose results are text listings rather than person records. */
+const LISTING_SEARCH_HOSTS = new Set(["mcp.exa.ai"]);
+
+function host(endpoint: string): string | null {
+  try {
+    return new URL(endpoint).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
 /** The MCP hosts whose people results save_search understands. */
 export function isPeopleSearchEndpoint(endpoint: string): boolean {
-  return providerFor(endpoint) !== null;
+  return providerFor(endpoint) !== null || LISTING_SEARCH_HOSTS.has(host(endpoint) ?? "");
+}
+
+const LOCATION_LINE = /\([A-Z]{2}\)$/;
+
+/**
+ * People in a web-search listing ("Title: <name>\nURL: <linkedin>\n…Highlights" entries),
+ * reading headline, location and the current job from the profile text when present.
+ */
+function peopleFromListing(text: string): Record_[] {
+  const found: Record_[] = [];
+  for (const entry of text.split(/^(?=Title: )/m)) {
+    const name = entry.match(/^Title: (.+)$/m)?.[1]?.trim();
+    const url = entry.match(/^URL: (\S+)$/m)?.[1];
+    if (!name || !url) continue;
+    const lines = (entry.split(/^# .+$/m)[1] ?? "")
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+    const [first, second] = lines;
+    const headline = first && !first.startsWith("#") && !LOCATION_LINE.test(first) ? first : null;
+    const location = [first, second].find((line) => line && LOCATION_LINE.test(line));
+    // Jobs read "### Title - [Company](…) (Current)" or, for several roles at one company,
+    // "### [Company](…)" followed by "#### Title (Current)".
+    const jobs: Array<{ title: string; company: string; current: boolean }> = [];
+    let company: string | null = null;
+    for (const line of entry.split("\n")) {
+      const single = line.match(/^### (.+?) - \[([^\]]+)\]\([^)]*\)( \(Current\))?/);
+      const group = line.match(/^### \[([^\]]+)\]\([^)]*\)/);
+      const role = line.match(/^#### (.+?)( \(Current\))?$/);
+      if (single) {
+        company = null;
+        jobs.push({ title: single[1]!, company: single[2]!, current: Boolean(single[3]) });
+      } else if (group) company = group[1]!;
+      else if (role && company) jobs.push({ title: role[1]!, company, current: Boolean(role[2]) });
+      else if (line.startsWith("## ")) company = null;
+    }
+    const job = jobs.find((item) => item.current) ?? jobs[0];
+    found.push({
+      full_name: name,
+      linkedin_url: url,
+      job_title: job?.title ?? headline,
+      company_name: job?.company ?? null,
+      location: location?.replace(/\s*\([A-Z]{2}\)$/, "") ?? null,
+    });
+  }
+  return found;
 }
 
 function summary(profile: RecruitingSavedProfile) {

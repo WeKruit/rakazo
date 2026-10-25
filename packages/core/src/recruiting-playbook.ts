@@ -356,7 +356,7 @@ export function nextPlaybookStep(
         ? {
             stage,
             label: "开始校准搜寻",
-            prompt: `岗位已保存。立即在本轮用人才数据搜索做校准快速搜寻（people search → recruiting_research save_search → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
+            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（web_search_exa category:people → recruiting_research save_search → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
           }
         : {
             stage,

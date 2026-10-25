@@ -16,6 +16,7 @@ import {
 } from "./recruiting-profiles.js";
 
 const ENDPOINT = "https://mcp.coresignal.com/mcp/v2";
+const PLATFORM_SEARCH = "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
 const KEY = "linkedin:/in/ada-example";
 const record = {
   linkedin_url: "https://uk.linkedin.com/in/Ada-Example/",
@@ -243,6 +244,58 @@ describe("peopleFromSearch", () => {
       current_title: "Warehouse Ops Supervisor",
       current_company: "Gamma Fulfillment",
     });
+  });
+
+  it("reads people from a web-search listing, preferring the current job", () => {
+    const text = [
+      "Title: Ada Example",
+      "URL: https://www.linkedin.com/in/ada-example",
+      "Published: N/A",
+      "Highlights:",
+      "# Ada Example",
+      "",
+      "Sort Center Manager at Acme Parcel",
+      "",
+      "Edison, New Jersey, United States (US)",
+      "",
+      "## Experience",
+      "### Shift Lead - [Beta Freight](https://beta.example)",
+      "### Sort Center Manager - [Acme Parcel](https://acme.example) (Current)",
+      "---",
+      "Title: Ben Sample",
+      "URL: https://linkedin.com/in/ben-sample/",
+      "Highlights:",
+      "# Ben Sample",
+      "",
+      "Operations leader",
+      "",
+      "Newark, NJ (US)",
+      "",
+      "## Experience",
+      "### [Gamma Fulfillment](https://gamma.example)",
+      "",
+      "#### Area Manager (Current)",
+      "---",
+      "Title: Acme Parcel",
+      "URL: https://www.linkedin.com/company/acme",
+    ].join("\n");
+    const listing = { content: [{ type: "text", text }] };
+    expect(peopleFromSearch(listing, PLATFORM_SEARCH)).toEqual([
+      {
+        name: "Ada Example",
+        linkedin_url: "https://www.linkedin.com/in/ada-example",
+        current_title: "Sort Center Manager",
+        current_company: "Acme Parcel",
+        location: "Edison, New Jersey, United States",
+      },
+      {
+        name: "Ben Sample",
+        linkedin_url: "https://www.linkedin.com/in/ben-sample",
+        current_title: "Area Manager",
+        current_company: "Gamma Fulfillment",
+        location: "Newark, NJ",
+      },
+    ]);
   });
 
   it("ignores connectors that are not profile-data providers", () => {
