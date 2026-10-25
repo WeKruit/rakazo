@@ -19,6 +19,7 @@
 | [调用链和保留边界](code-paths.md) | helper/native、旧 gateway/mock、输出字段、上下文与预算 |
 | [Grok UI 与模板](grok-ui-and-template.md) | UI 可见内容、模板意图与执行证明的界线 |
 | [离线案例](dyna-offline-comparison.md) | 已有请求/输出的脱敏对照，不是新付费搜索或对照实验 |
+| [其他已有观察](other-existing-evidence.md) | 定向反馈、source lineage 和旧 benchmark 的证据边界 |
 | [九阶段现状](nine-stage-status.md) | 代码、历史开发/业务记录与未验收分列 |
 | [16:54 历史快照](snapshot-1654-main-audit.md) | 保存当时的固定 SHA、反馈歧义与 helper/native 检查 |
 | [下一步离线验证](validation-and-next-steps.md) | 可复核问题、最小改进候选及本次文档验证 |

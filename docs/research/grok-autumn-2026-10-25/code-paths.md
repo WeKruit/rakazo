@@ -42,4 +42,6 @@
 
 - PLAN 中的旧 benchmark 不是 Grokbot / Rakazo 同岗比较；曾有提取条件不同、历史不相同，不能用单个准确率宣称某路径更优。
 - UI 看到了文字只能证明可见内容；Bot 自述已发、可复制 prompt、工具执行成功、provider accepted 与结果成功是不同层次。
-- 没有配对原请求时，OR 被改成 AND、单人反馈偷偷扩量、某一模型更差都应保持未证实，不能作为既定根因。
+- 完整离线比较未发现本 Dyna 请求 OR 被改成 AND 的直接证据；原十人纠错明确禁止增人，后续扩量有分别确认。Grok 相同 run 原请求/输出仍缺失，某一模型更差不能作为既定根因。
+
+源所有者最新报告补充了 Grok REST wrapper/scout 的方法自述和一个明确 dry-run 重建样例；它不是已直接检查的脚本或 wire receipt。详见 [Grok UI 与模板](grok-ui-and-template.md)。

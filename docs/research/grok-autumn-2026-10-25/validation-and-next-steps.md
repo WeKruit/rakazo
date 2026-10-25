@@ -41,12 +41,16 @@ Use deidentified fixtures only after the actual source shape is established. Fix
 
 ## Review checklist
 
-- [ ] Every claim has an evidence level and fixed version/date where known.
-- [ ] Source-owner report was read before its hash, model or exact template was transcribed.
-- [ ] Grok UI examples and the Dyna offline case remain separate; no unsupported matched-pair claim.
-- [ ] Draft/self-report/accepted/complete states are kept distinct.
-- [ ] Earlier main findings are not presented as defects in later main without rechecking.
-- [ ] No candidate-level personal data, private URL/path/identifier or credential entered the diff.
-- [ ] Changed files are docs only; no implementation from the prior profile/CRM/CI branches is included.
+- [x] Every claim has an evidence level and fixed version/date where known.
+- [x] Source-owner report was read before its hash, model or exact template was transcribed.
+- [x] Grok UI examples and the Dyna offline case remain separate; no unsupported matched-pair claim.
+- [x] Draft/self-report/accepted/complete states are kept distinct.
+- [x] Earlier main findings are not presented as defects in later main without rechecking.
+- [x] No candidate-level personal data, private URL/path/identifier or credential entered the diff.
+- [x] Changed files are docs only; no implementation from the prior profile/CRM/CI branches is included.
 - [ ] Publication side effects have the required decision before push/PR.
 - [ ] The PR stays Draft; no merge/deployment/live acceptance is claimed.
+
+### Actual document checks
+
+Relative Markdown links resolved; the public-content scan rejected local paths, private Library/run/session IDs and email addresses; JSON parsed and the 20/51/103/26 categories sum to 200. Whitespace errors at the initial local commit were corrected before publication. These checks do not re-execute the source owner's 17-file mechanical verification. Six complete Library text reads succeeded; signed-file download failed once and was stopped.

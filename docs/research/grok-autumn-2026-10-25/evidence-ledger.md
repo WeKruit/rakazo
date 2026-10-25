@@ -21,10 +21,10 @@
 | H1 | PLAN archive section | H, exact source links retained in snapshot report | Historical export was reported complete; two CSVs archived to Sourcer messages | Exact archive filenames/IDs, current source coverage, latest Grok session |
 | H2 | Development handoff | H, checkpoints including 98e7d490 and 861dba93 | Reported scoped synthetic/PG/browser results and disclosed failures | Current main or production passes |
 | H3 | Historical controlled email | H, 2026-10-23 handoff around v123 | First email approved/sent/received; inbound reply read; stop-on-reply | Product-side subsequent reply or current whole-loop completion |
-| O1 | Source Grokbot session / Sourcer UI | O, owner summary supplied; sanitized report transfer pending | Template visible at 12:00:45 PM, zone unknown; separate first round of 11 followed by changed criteria | Provider acceptance, same Dyna run, exact model or UTC time |
-| O2 | Existing Dyna offline request/output | O here; original bytes inspected by source owner, detailed transfer pending | Reported Main → Sourcer → native MCP route; accepted timestamp and aggregate output findings | Current production or matched Grok comparison |
+| O1 | Source Grokbot session / Sourcer UI | O, six complete sanitized reports read through Library | Template visible at 12:00:45 PM, zone unknown; separate first round of 11 followed by changed criteria | Provider acceptance, same Dyna run, exact model or UTC time |
+| O2 | Existing Dyna offline request/output | O here; full comparison/index/mechanical verification read; original bytes inspected by source owner | Reported Main → Sourcer → native MCP route; accepted timestamp and aggregate output findings | Current production or matched Grok comparison |
 | O3 | Grok batch messages | O, owner summary | Batches 6/7 are self-reported sends; 10/14 are copyable drafts | Verified Autumn execution for those messages |
-| U1 | Exact paired Grok request/result | U | A concrete remaining evidence gap | Permission to start new paid research |
+| U1 | Exact paired Grok wire request/result | U | A concrete remaining evidence gap | Permission to start new paid research |
 | U2 | Per-run model and cost adoption | U unless original same-run record supplies it | No model winner or budget-efficiency claim yet | Brand, UI title, runtime class or current code as a substitute |
 
 Internal session/task identifiers and private storage references are retained by their owner, not committed. Record labels above are public-safe aliases.
@@ -37,6 +37,12 @@ Internal session/task identifiers and private storage references are retained by
 4. A retained provider row can have contradictory explanation and labels. Preservation proves what was returned; it does not validate that reasoning.
 5. A title-matching result, missing source, failed fetch and actual counterevidence are distinct states.
 
-## Transfer gate
+## Six-report transfer and final boundary
 
-The coordinating reviewer is supplying a sanitized report for O1–O3 and the user template. Until that report is read, no missing hash, model, timezone, exact wording or provenance is filled from memory. No local private paths or original candidate payloads are required in this public PR.
+The complete text of these owner-authored v0 reports was read: GROK-AUTUMN-LOCAL-FINDINGS, GROK-AUTUMN-EVIDENCE-INDEX, DYNA-GROK-RAKAZO-COMPARISON, DYNA-COMPARISON-SOURCES, DYNA-OFFLINE-VERIFICATION and DYNA-TOOLTRACE-BOUNDARY (all dated 2026-10-25). The two source indexes cover 23 and 33 entries, with overlap; the mechanical verification covers 17 original files. Public-safe digests are in [source-metadata.json](source-metadata.json), and attributed results in [offline-verification.json](offline-verification.json).
+
+Official materialization preparation succeeded, but the first helper download failed and was not retried. Library full-text reads all returned has_more=false; readable local text copies were produced outside the repository. Each rendered copy is one byte smaller than Library's original size, so no original-byte materialization or original-file hash verification is claimed. Source-owner raw candidate files were never transferred to this checkout or published.
+
+O1–O3 now include the complete reports, not only the initial summary. They remain owner-observed evidence for original UI/raw files; this author directly read only the sanitized reports. The final source report records an automatic approval denial for entering batch06 in Grok Search because it could trigger a search. That action is known not to have executed, was not retried and is closed. It supersedes earlier no-blocker language; it is separate from this PR's pending CI publication decision.
+
+Exact underlying LLM models and a matched Grok wire request/raw output pair remain unknown. R1's provider runtime/opaque version, dates and prompt hash are documented in the case report and must not be interpreted as a model/tier identity.
