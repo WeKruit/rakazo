@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseTimeline, timelineStats } from "./profileTimeline";
+import { parseTimeline, timelineStats } from "./profileTimelineModel";
 
 const NOW = new Date(Date.UTC(2026, 9, 23));
 

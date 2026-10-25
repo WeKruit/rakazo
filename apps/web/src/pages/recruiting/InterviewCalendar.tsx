@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Badge, Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CalendarTimeIssue, InterviewCalendarEvent } from "./interviewCalendar";
+import type { CalendarTimeIssue, InterviewCalendarEvent } from "./interviewCalendarModel";
 import {
   calendarDay,
   calendarInstant,
@@ -11,7 +11,7 @@ import {
   layoutCalendarEvents,
   shiftCalendarDay,
   validCalendarZone,
-} from "./interviewCalendar";
+} from "./interviewCalendarModel";
 
 const MINUTE_HEIGHT = 0.8;
 const HOURS = Array.from({ length: 24 }, (_, hour) => hour);

@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import type { InterviewCalendarEvent } from "./interviewCalendar";
+import type { InterviewCalendarEvent } from "./interviewCalendarModel";
 import {
   calendarDay,
   calendarInstant,
@@ -7,7 +7,7 @@ import {
   layoutCalendarEvents,
   shiftCalendarDay,
   validCalendarZone,
-} from "./interviewCalendar";
+} from "./interviewCalendarModel";
 
 const event = (extra: Partial<InterviewCalendarEvent> = {}): InterviewCalendarEvent => ({
   id: "event",

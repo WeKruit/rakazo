@@ -115,6 +115,7 @@ export function sanitizeMarkdownUrl(url: string, allowRelative = false): string 
 }
 
 const httpUrlProtocols = new Set(["http:", "https:"]);
+const directOpenExternalHosts = new Set(["linkedin.com", "www.linkedin.com"]);
 
 function markdownLinkBase(appOrigin?: string | null) {
   if (!appOrigin) return "https://app.invalid";
@@ -137,6 +138,7 @@ export function markdownLinkRequiresConfirmation(url: string, appOrigin?: string
   if (!httpUrlProtocols.has(parsed.protocol)) return false;
   const explicitDestination = /^[a-z][a-z\d+.-]*:/i.test(value) || value.startsWith("//");
   if (!explicitDestination) return false;
+  if (directOpenExternalHosts.has(parsed.hostname)) return false;
   if (!appOrigin) return true;
   try {
     return parsed.origin !== new URL(appOrigin).origin;

@@ -157,6 +157,21 @@ describe("markdownLinkRequiresConfirmation", () => {
     expect(markdownLinkRequiresConfirmation("?tab=files", origin)).toBe(false);
   });
 
+  it("opens LinkedIn directly without trusting lookalike hosts", () => {
+    expect(
+      markdownLinkRequiresConfirmation("https://www.linkedin.com/in/lamhharrison", origin),
+    ).toBe(false);
+    expect(markdownLinkRequiresConfirmation("https://linkedin.com/jobs/view/123", origin)).toBe(
+      false,
+    );
+    expect(
+      markdownLinkRequiresConfirmation("https://linkedin.com.evil.example/in/person", origin),
+    ).toBe(true);
+    expect(
+      markdownLinkRequiresConfirmation("https://linkedin.com@evil.example/in/person", origin),
+    ).toBe(true);
+  });
+
   it("opens mailto and tel without asking", () => {
     expect(markdownLinkRequiresConfirmation("mailto:hello@example.test", origin)).toBe(false);
     expect(markdownLinkRequiresConfirmation("mailto:hello@example.test?subject=Hi", origin)).toBe(

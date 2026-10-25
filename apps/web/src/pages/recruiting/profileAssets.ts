@@ -1,5 +1,5 @@
 import type { RecruitingCandidateReport } from "@rakazo/contracts";
-import { parseTimeline, structuredProfileTimeline } from "./profileTimeline";
+import { parseTimeline, structuredProfileTimeline } from "./profileTimelineModel";
 
 type Field = RecruitingCandidateReport["fields"][number];
 export type ProfileAssets = {

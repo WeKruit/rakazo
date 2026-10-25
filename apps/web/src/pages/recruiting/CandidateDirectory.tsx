@@ -13,7 +13,7 @@ import {
   profileContentFields,
   profileImageUrl,
 } from "./profileAssets";
-import { parseTimeline, structuredProfileTimeline } from "./profileTimeline";
+import { parseTimeline, structuredProfileTimeline } from "./profileTimelineModel";
 import { statusText } from "./shared";
 import type { RoleCandidate } from "./useRoleCandidates";
 
