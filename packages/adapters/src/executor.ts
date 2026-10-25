@@ -88,11 +88,13 @@ import {
   connectorKindFromToolName,
   containsSecret,
   createStreamingRedactor,
+  createVendorNameStream,
   endsSentence,
   expandSkillReferencesInPrompt,
   externalTextTriggerToolRefusal,
   formatSkillRunPrompt,
   formatSkillsCatalogInstruction,
+  hideVendorNames,
   humanizeToolName,
   inferAttachmentMimeType,
   internalMcpWriteEndpoint,
@@ -3634,6 +3636,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           loadBotCommandEnvironment(deps.prisma, deps.secretStore, run),
         ]);
         setupMark("contextLoad");
+        // A recruiter never sees a provider's name; connect cards (not text) still name it.
+        const hideVendors = Boolean(
+          bot.spawnKey?.startsWith("recruiting:") || thread.activeRecruitingRoleId,
+        );
+        const visible = (text: string) => (hideVendors ? hideVendorNames(text) : text);
         const historySearchBeforeSeq =
           contextStrategy !== "current" && run.sourceMessageId
             ? (messages.find((message) => message.id === run.sourceMessageId)?.seq ??
@@ -4440,7 +4447,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
-        let progressRedactor = createStreamingRedactor(runSecrets);
+        const newProgressRedactor = () => {
+          const secrets = createStreamingRedactor(runSecrets);
+          if (!hideVendors) return secrets;
+          const vendors = createVendorNameStream();
+          return {
+            push: (chunk: string) => vendors.push(secrets.push(chunk)),
+            finish: () => vendors.push(secrets.finish()) + vendors.finish(),
+          };
+        };
+        let progressRedactor = newProgressRedactor();
         const scripted = deps.runtime.describe().capabilities.scripted;
         const scriptMemory = scripted
           ? await Promise.all([
@@ -4480,7 +4496,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         };
         const publishMidTurnNarration = async () => {
           const extracted = extractNarrationText(messageSegments, currentTextSegment);
-          const narration = redactSecrets(extracted.text, runSecrets).trim();
+          const narration = visible(redactSecrets(extracted.text, runSecrets)).trim();
           messageSegments = extracted.remaining;
           currentTextSegment = "";
           if (!narration) return;
@@ -7264,7 +7280,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (additions.length === 0) return;
             pendingProgress += progressRedactor.finish();
             runSecrets.push(...additions);
-            progressRedactor = createStreamingRedactor(runSecrets);
+            progressRedactor = newProgressRedactor();
           };
           const appendComputerCommand = (payload: ComputerCommand) =>
             deps.events
@@ -8973,7 +8989,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               runSecrets.push(plaintext);
               // Keep the tail the old redactor still holds; a fresh instance drops it.
               pendingProgress += progressRedactor.finish();
-              progressRedactor = createStreamingRedactor(runSecrets);
+              progressRedactor = newProgressRedactor();
               const purpose = String(args.purpose ?? "otp");
               if (applied && !claimedEffect) {
                 if (applied.effect.status === "intended") {
@@ -9289,7 +9305,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           }
           if (name === "message_user") {
-            const rawMessage = redactSecrets(String(args.message ?? ""), runSecrets);
+            const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
             const text = clampUserProgressMessage(rawMessage);
             if (!text) return finish({ error: "message is required" });
             const truncated = isProgressMessageTruncated(rawMessage);
@@ -10100,7 +10116,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             flushPendingTools();
             if (!(await renewRunLease(deps, runId, workerId, fence))) return;
             if (messageSegments.length > 0) {
-              await publishMessage(deps, run, "bot", redactBlocks(messageSegments, runSecrets));
+              await publishMessage(
+                deps,
+                run,
+                "bot",
+                redactBlocks(messageSegments, runSecrets, visible),
+              );
             }
             await workspaceCheckpoint.flush();
             terminalCheckpointComplete = true;
@@ -10200,11 +10221,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 runId,
                 payload: {
                   ...runTiming,
-                  text: redactSecrets(event.text, runSecrets),
+                  text: visible(redactSecrets(event.text, runSecrets)),
                   ...(event.activity ? { activity: true } : {}),
                   ...(event.phase ? { phase: event.phase } : {}),
-                  ...(event.summary ? { summary: event.summary } : {}),
-                  ...(event.thought ? { thought: event.thought } : {}),
+                  ...(event.summary ? { summary: visible(event.summary) } : {}),
+                  ...(event.thought ? { thought: visible(event.thought) } : {}),
                   ...(event.at ? { at: event.at } : {}),
                 },
               });
@@ -10216,13 +10237,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 containsSecret(JSON.stringify(event.requestedSchema), runSecrets)
               )
                 throw new Error("Ask form contains protected input");
-              const safeText = redactSecrets(event.text, runSecrets);
+              const safeText = visible(redactSecrets(event.text, runSecrets));
               const safeDetail = event.detail
-                ? redactSecrets(event.detail, runSecrets)
+                ? visible(redactSecrets(event.detail, runSecrets))
                 : event.detail;
               const safeActions = event.actions?.map((action) => ({
                 id: action.id,
-                label: redactSecrets(action.label, runSecrets),
+                label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
               const paused = await deps.events.pauseRunForInput({
@@ -10279,7 +10300,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               // does not treat pre-takeover text as the delegated final result.
               await publishMidTurnNarration();
               if (assembled.trim()) {
-                const narration = redactSecrets(assembled, runSecrets).trim();
+                const narration = visible(redactSecrets(assembled, runSecrets)).trim();
                 if (narration && runPromotesMidTurnNarration(run.trigger)) {
                   await publishMessage(
                     deps,
@@ -10440,11 +10461,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 }
               }
             } else if (event.type === "subagent") {
-              const safeTask = redactSecrets(event.task, runSecrets);
+              const safeTask = visible(redactSecrets(event.task, runSecrets));
               const safeProgress = event.progress
-                ? redactSecrets(event.progress, runSecrets)
+                ? visible(redactSecrets(event.progress, runSecrets))
                 : undefined;
-              const safeResult = event.result ? redactSecrets(event.result, runSecrets) : undefined;
+              const safeResult = event.result
+                ? visible(redactSecrets(event.result, runSecrets))
+                : undefined;
               await deps.events.append({
                 spaceId: run.spaceId,
                 threadId: thread.id,
@@ -10577,12 +10600,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const blocks = handedOff
             ? []
             : finalBlocksAfterMidTurnProgress(
-                redactBlocks(completionBlocks, runSecrets),
+                redactBlocks(completionBlocks, runSecrets, visible),
                 publishedMidTurnUserMessage || runAllowsSilentEmpty(run.trigger),
               );
           const text = handedOff
             ? ""
-            : redactSecrets(completionNotificationBody(silentReply.assembled, blocks), runSecrets);
+            : visible(
+                redactSecrets(
+                  completionNotificationBody(silentReply.assembled, blocks),
+                  runSecrets,
+                ),
+              );
           if (containsSecret(text, runSecrets)) {
             throw new Error("refusing to persist a secret in the thread");
           }
@@ -11938,12 +11966,16 @@ async function requeueComputerRun(
   });
 }
 
-function redactBlocks(blocks: MessageBlock[], secrets: string[]): MessageBlock[] {
+function redactBlocks(
+  blocks: MessageBlock[],
+  secrets: string[],
+  visible: (text: string) => string = (text) => text,
+): MessageBlock[] {
   return blocks.map((block) => {
     if (block.kind === "text") {
       return {
         kind: "text" as const,
-        text: redactSecrets(block.text, secrets),
+        text: visible(redactSecrets(block.text, secrets)),
       };
     }
     if (block.kind === "bot_message_sent" || block.kind === "bot_message_received") {

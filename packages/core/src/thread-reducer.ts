@@ -37,6 +37,8 @@ export type LiveThreadMessage = {
   replyQuote?: string;
   replyPreview?: ReplyPreview | null;
   createdAt?: string;
+  /** Harness-authored turn (e.g. an auto-continue prompt): never shown as conversation. */
+  internal?: boolean;
 };
 
 export type LiveThread = {
@@ -509,6 +511,7 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
       callId: typeof payload.callId === "string" ? payload.callId : known?.callId,
       ...replyMetadata(payload, known),
       createdAt: known?.createdAt ?? event.createdAt,
+      ...(payload.internal === true || known?.internal ? { internal: true } : {}),
     });
     const replacedSubagentIds = new Set(
       blocks.filter((block) => block.kind === "subagent").map((block) => block.agentId),

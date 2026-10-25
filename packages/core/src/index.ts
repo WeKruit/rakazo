@@ -69,4 +69,5 @@ export * from "./thread-tail.js";
 export * from "./time-separators.js";
 export * from "./tool-activity.js";
 export * from "./user-error.js";
+export * from "./vendor-names.js";
 export * from "./voice-chat-groups.js";

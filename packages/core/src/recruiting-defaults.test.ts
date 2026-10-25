@@ -36,7 +36,7 @@ describe("maintained recruiting defaults", () => {
 
   it.each(RECRUITING_DEFAULT_BOTS)("$name never names a vendor to the recruiter", (bot) => {
     expect(bot.instructions).toContain(
-      "Never name a vendor or tool (Instantly, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API, REST) in chat replies, cards or emails",
+      "Never name a vendor or tool (Autumn, Coresignal, FullEnrich, Instantly, Composio, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API, REST) in chat replies, cards, progress lines, questions or emails",
     );
     expect(bot.instructions).toContain(
       "the only exception is a connect-request card, which names the provider to connect",
