@@ -399,7 +399,8 @@ export type CrmSyncCampaign = {
 };
 export type CrmSyncLead = {
   crmLeadId: string;
-  crmCampaignId: string;
+  /** null when the source sequence no longer exists. */
+  crmCampaignId: string | null;
   crmCandidateId: string | null;
   status: number | null;
   interestStatus: number | null;
@@ -504,7 +505,8 @@ export async function listSyncedRecruitingSequenceStats(
     )[0]!;
     return {
       candidateId,
-      sequences: new Set(rows.map((row) => row.crmCampaignId)).size,
+      // A lead whose sequence was deleted still was one sequence.
+      sequences: new Set(rows.map((row) => row.crmCampaignId ?? row.crmLeadId)).size,
       opens: total(rows.map((row) => row.openCount)),
       replies: total(rows.map((row) => row.replyCount)),
       lastContactAt: latest(rows.map((row) => row.lastContactAt))?.toISOString() ?? null,

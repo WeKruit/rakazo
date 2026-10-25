@@ -88,7 +88,11 @@ function fakeCrm(serverId: string) {
       { id: "lead-2", campaignId: "camp-a", candidateId: person(2) as string | null, replies: 0 },
       { id: "lead-3", campaignId: "camp-a", candidateId: null as string | null, replies: 0 },
       { id: "lead-4", campaignId: "camp-unmapped", candidateId: null as string | null, replies: 0 },
+      // Its sequence was deleted at the source.
+      { id: "lead-5", campaignId: null as string | null, candidateId: person(3), replies: 0 },
     ],
+    /** People whose label matches an archived role: listed only when asked to include them. */
+    archived: [] as Contact[],
     failCampaigns: false,
     failLinks: null as string | null,
     reads: 0,
@@ -159,7 +163,9 @@ function fakeCrm(serverId: string) {
         throw new ORPCError("CONFLICT", { message: "Ambiguous role" });
       const rows = input.crmRoleId
         ? state.contacts.filter((row) => state.members[input.crmRoleId!]?.includes(row.candidateId))
-        : state.contacts;
+        : input.includeArchived
+          ? [...state.contacts, ...state.archived]
+          : state.contacts;
       const { slice, nextOffset } = page(rows, offset, limit);
       return {
         operation: "candidates",
@@ -399,7 +405,7 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       links: { seen: 3, created: 3 },
       messages: { seen: 1, created: 1 },
       campaigns: { seen: 3, created: 3 },
-      leads: { seen: 4, created: 4 },
+      leads: { seen: 5, created: 5 },
       skipped: [],
     });
     expect(dry.calls).toBeGreaterThan(5);
@@ -446,6 +452,7 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       { crmLeadId: "lead-2", crmCampaignId: "camp-a", crmCandidateId: person(2), replyCount: 0 },
       { crmLeadId: "lead-3", crmCampaignId: "camp-a", crmCandidateId: null, replyCount: 0 },
       { crmLeadId: "lead-4", crmCampaignId: "camp-unmapped", crmCandidateId: null, replyCount: 0 },
+      { crmLeadId: "lead-5", crmCampaignId: null, crmCandidateId: person(3), replyCount: 0 },
     ]);
 
     const scope = { mcpServerId: serverId, organizationId: ORG };
@@ -459,6 +466,17 @@ describePostgres("CRM sync (PostgreSQL)", () => {
         replies: 1,
         lastContactAt: "2026-10-04T00:00:00.000Z",
         lastReplyAt: "2026-10-05T00:00:00.000Z",
+        status: "active",
+        syncedAt: expect.any(String),
+      },
+      // Only a lead whose sequence was deleted.
+      {
+        candidateId: person(3),
+        sequences: 1,
+        opens: 2,
+        replies: 0,
+        lastContactAt: "2026-10-04T00:00:00.000Z",
+        lastReplyAt: null,
         status: "active",
         syncedAt: expect.any(String),
       },
@@ -480,7 +498,7 @@ describePostgres("CRM sync (PostgreSQL)", () => {
     const again = await runAll(actor, crm.read);
     expect(again).toMatchObject({
       campaigns: { created: 0, updated: 0, unchanged: 3 },
-      leads: { created: 0, updated: 0, unchanged: 4 },
+      leads: { created: 0, updated: 0, unchanged: 5 },
       roles: { seen: 2, created: 0, updated: 0, unchanged: 2, archived: 0 },
       contacts: { seen: 3, created: 0, updated: 0, unchanged: 3, archived: 0 },
       links: { created: 0, unchanged: 3, archived: 0 },
@@ -529,6 +547,22 @@ describePostgres("CRM sync (PostgreSQL)", () => {
     ).toBe(3);
   });
 
+  it("copies people hidden from the dashboard on archived roles, and leads without a sequence", async () => {
+    crm.state.archived = [contact(4, { roleSpecId: null })];
+    const result = await runAll(actor, crm.read);
+    expect(result).toMatchObject({ contacts: { created: 4 }, leads: { created: 5 } });
+    expect(
+      await prisma.recruitingCrmContact.findFirst({
+        where: { ...scoped(actor), crmCandidateId: person(4) },
+      }),
+    ).toMatchObject({ archivedAt: null });
+    expect(
+      await prisma.recruitingCrmLead.findFirst({
+        where: { ...scoped(actor), crmLeadId: "lead-5" },
+      }),
+    ).toMatchObject({ crmCampaignId: null, crmCandidateId: person(3) });
+  });
+
   it("finishes roles, contacts and mail when the stored campaigns cannot be read", async () => {
     crm.state.failCampaigns = true;
     const result = await runAll(actor, crm.read);
@@ -536,7 +570,8 @@ describePostgres("CRM sync (PostgreSQL)", () => {
       { organizationId: ORG, crmRoleId: null, step: "campaigns", reason: "Campaigns unavailable" },
     ]);
     expect(result).toMatchObject({ contacts: { created: 3 }, messages: { created: 1 } });
-    expect(await prisma.recruitingCrmLead.count({ where: scoped(actor) })).toBe(0);
+    // Only the leads without a sequence, which need no campaign list.
+    expect(await prisma.recruitingCrmLead.count({ where: scoped(actor) })).toBe(1);
   });
 
   it("keeps a campaign row when it leaves the CRM, and updates changed lead stats", async () => {

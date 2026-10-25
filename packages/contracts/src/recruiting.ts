@@ -2095,6 +2095,8 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     query: z.string().max(500).optional(),
     /** Exact stored CRM pipeline stage, e.g. "Interview". */
     stage: z.string().trim().min(1).max(200).optional(),
+    /** Also list people on archived roles; the full CRM copy needs every contact. */
+    includeArchived: z.literal(true).optional(),
     ...crmOffsetPage,
   }),
   z.object({
@@ -2156,7 +2158,8 @@ export const RecruitingCrmDataInputSchema = z.discriminatedUnion("operation", [
     operation: z.literal("campaignLeads"),
     ...crmBrowsePinned,
     ...crmBrowsePage,
-    campaignId: Id,
+    /** null reads the leads whose campaign no longer exists. */
+    campaignId: Id.nullable(),
     ...crmOffsetPage,
   }),
 ]);
@@ -2371,7 +2374,7 @@ export const RecruitingCrmDataOutputSchema = z.discriminatedUnion("operation", [
     operation: z.literal("campaignLeads"),
     source: CrmBrowseSource.extend({ organizationId: z.uuid() }),
     checkedAt: IsoDate,
-    campaignId: Id,
+    campaignId: Id.nullable(),
     items: z.array(
       z.strictObject({
         id: Id,
@@ -2491,7 +2494,7 @@ export const RecruitingCrmCampaignsReadSchema = z.object({
 });
 export const RecruitingCrmCampaignLeadsReadSchema = z.object({
   organization_id: z.uuid(),
-  campaign_id: Id,
+  campaign_id: Id.nullable(),
   leads: z.array(
     z.object({
       id: Id,

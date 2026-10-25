@@ -3494,6 +3494,7 @@ export async function getRecruitingCrmData(
           p_offset: offset,
           ...(input.query ? { p_q: input.query } : {}),
           ...(input.stage ? { p_stage: input.stage } : {}),
+          ...(input.includeArchived ? { p_include_archived: true } : {}),
           ...(selectedRole
             ? { p_client: selectedRole.clientLabel, p_role: selectedRole.roleLabel }
             : {}),
