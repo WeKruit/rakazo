@@ -405,3 +405,29 @@ describe("withSavedProfile", () => {
     expect(withSavedProfile(null, fields.slice(5))).toEqual(fields.slice(5));
   });
 });
+
+describe("research findings", () => {
+  it("hides provider names, links, bookkeeping and column names", () => {
+    const sections = candidateSections([
+      {
+        label: "Company logo url",
+        value: "https://crustdata-media.s3.amazonaws.com/logo.png",
+        evidence: "logo_url in cached company provider record",
+        sourceUrls: [],
+      },
+      { label: "Fit rationale", value: "Autumn: weak on ops", sourceUrls: [] },
+      { label: "review_rationale_zh", value: "未核实线索（Autumn 排名 #7）", sourceUrls: [] },
+      {
+        label: "Selection basis",
+        value: "Selected by existing Autumn rank order",
+        sourceUrls: ["https://app.autumn.ai/x", "https://example.test/p"],
+      },
+    ]);
+    const findings = sections.findings.map((field) => [field.label, field.value, field.sourceUrls]);
+    expect(findings).toEqual([
+      ["Fit rationale", "The search: weak on ops", []],
+      ["Review rationale", "未核实线索（人才搜索排名 #7）", []],
+      ["Selection basis", "Selected by existing search rank order", ["https://example.test/p"]],
+    ]);
+  });
+});
