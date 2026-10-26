@@ -158,7 +158,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email to its leads by activating it (also resumes a paused one). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
+    "Sends the campaign's first email to its leads by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
@@ -177,7 +177,7 @@ export const nativeInstantlyWrites = [
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
     false,
-    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Also returns candidate_key -> lead id mappings.",
+    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence; they replace the copy of a draft or paused campaign. hasEmail says whether the campaign has an email to send. Also returns candidate_key -> lead id mappings.",
   ),
   tool(
     "add_shortlist_leads",
@@ -204,6 +204,31 @@ export class InstantlyRestError extends Error {
   }
 }
 
+/** "HTTP 400: <provider message>", so the agent can correct its arguments. */
+function providerError(status: number, text: string) {
+  let message = text;
+  try {
+    const body = JSON.parse(text) as { message?: unknown; error?: unknown };
+    message = String(body.message ?? body.error ?? text);
+  } catch {}
+  message = message.replace(/\s+/g, " ").trim().slice(0, 300);
+  return message ? `HTTP ${status}: ${message}` : `HTTP ${status}`;
+}
+
+// The provider accepts only its own zone list; these common zones map to a listed zone with the
+// same offsets and daylight-saving rules.
+const PROVIDER_ZONE: Record<string, string> = {
+  "America/New_York": "America/Detroit",
+  "America/Toronto": "America/Detroit",
+  "America/Indiana/Indianapolis": "America/Detroit",
+  "US/Eastern": "America/Detroit",
+  "America/Denver": "America/Boise",
+  "US/Mountain": "America/Boise",
+  "America/Phoenix": "America/Creston",
+  "US/Central": "America/Chicago",
+};
+export const providerTimezone = (zone: string) => PROVIDER_ZONE[zone] ?? zone;
+
 export function instantlyRest(
   fetch: (url: URL, init: RequestInit) => Promise<Response>,
   key: string,
@@ -221,7 +246,8 @@ export function instantlyRest(
       signal,
     });
     const { text, truncated } = await readBoundedText(response, 1_000_000);
-    if (!response.ok) throw new InstantlyRestError(response.status);
+    if (!response.ok)
+      throw new InstantlyRestError(response.status, providerError(response.status, text));
     if (truncated) throw new Error("Instantly response exceeded its bound");
     const value: unknown = text ? JSON.parse(text) : {};
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -251,6 +277,31 @@ async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
   }
 }
 
+function sequences(steps: z.output<typeof Step>[]) {
+  return [
+    {
+      steps: steps.map((step) => ({
+        type: "email",
+        delay: step.delay_days,
+        delay_unit: "days",
+        variants: [{ subject: step.subject, body: step.body }],
+      })),
+    },
+  ];
+}
+/** The first step's first variant, or null when the campaign has no email yet. */
+function firstEmail(campaign: Record<string, unknown> | undefined) {
+  const list = Array.isArray(campaign?.sequences) ? campaign.sequences : [];
+  const steps = (list[0] as { steps?: unknown } | undefined)?.steps;
+  const step = Array.isArray(steps) ? (steps[0] as { variants?: unknown }) : undefined;
+  const variant = Array.isArray(step?.variants)
+    ? (step.variants[0] as { subject?: unknown; body?: unknown })
+    : undefined;
+  return typeof variant?.subject === "string" && typeof variant.body === "string"
+    ? { subject: variant.subject, body: variant.body }
+    : null;
+}
+
 function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>) {
   return {
     name,
@@ -261,24 +312,11 @@ function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>)
           timing: { from: "09:00", to: "17:00" },
           // ponytail: "1".."5" assumed Mon-Fri (docs do not define the day index); adjust in UI if off.
           days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
-          timezone: setup.timezone,
+          timezone: providerTimezone(setup.timezone),
         },
       ],
     },
-    ...(setup.steps
-      ? {
-          sequences: [
-            {
-              steps: setup.steps.map((step) => ({
-                type: "email",
-                delay: step.delay_days,
-                delay_unit: "days",
-                variants: [{ subject: step.subject, body: step.body }],
-              })),
-            },
-          ],
-        }
-      : {}),
+    ...(setup.steps ? { sequences: sequences(setup.steps) } : {}),
     email_list: [setup.eaccount],
     // Instantly has no per-lead stop; the campaign flag is the only native stop on reply.
     stop_on_reply: true,
@@ -374,6 +412,8 @@ export type InstantlyActivationDisplay = {
   recipientCount: number | null;
   stopOnReply: boolean | null;
   schedule: string | null;
+  /** The first email; null when the campaign has none, omitted when it could not be read. */
+  firstEmail?: { subject: string; body: string } | null;
 };
 export const EMPTY_ACTIVATION_DISPLAY: InstantlyActivationDisplay = {
   campaignName: null,
@@ -454,6 +494,7 @@ export async function describeCampaignActivation(
     recipientCount: items ? recipients.length : null,
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
     schedule: describeSchedule(campaign),
+    ...(campaign ? { firstEmail: firstEmail(campaign) } : {}),
   };
 }
 
@@ -557,8 +598,20 @@ async function ensureRoleCampaign(
           );
     if (campaign && !better) {
       const patched = campaign.stop_on_reply !== true;
-      if (patched) await rest("PATCH", `/campaigns/${mappedId}`, { stop_on_reply: true });
-      return { created: false, stopOnReplyPatched: patched, ...existing.binding };
+      // New copy goes onto a draft or paused campaign; an active one keeps what is sending.
+      const writeSteps = Boolean(input.steps) && ENROLLABLE.has(campaign.status as number);
+      if (patched || writeSteps)
+        await rest("PATCH", `/campaigns/${mappedId}`, {
+          ...(patched ? { stop_on_reply: true } : {}),
+          ...(writeSteps ? { sequences: sequences(input.steps!) } : {}),
+        });
+      return {
+        created: false,
+        stopOnReplyPatched: patched,
+        stepsSaved: writeSteps,
+        hasEmail: writeSteps || firstEmail(campaign) !== null,
+        ...existing.binding,
+      };
     }
     stale = existing.effect.id;
     getLogger().info("instantly.role_campaign.repaired", {
@@ -803,6 +856,7 @@ export async function runInstantlyWrite(
         stop_on_reply: campaign.stop_on_reply,
         email_list: campaign.email_list,
         campaign_schedule: campaign.campaign_schedule,
+        sequences: campaign.sequences,
       };
     }
     case "native_instantly_update_lead_interest":
@@ -815,6 +869,10 @@ export async function runInstantlyWrite(
             timezone: "America/Chicago",
           })
         ).campaignId;
+      if (!firstEmail(await rest("GET", `/campaigns/${campaignId}`)))
+        throw new Error(
+          "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
+        );
       return rest("POST", `/campaigns/${campaignId}/activate`);
     }
     case "native_instantly_pause_campaign":

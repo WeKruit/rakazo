@@ -16,6 +16,7 @@ import type {
   InstantlyActivationDisplay,
   InstantlyReplyDisplay,
 } from "./instantly-native-writes.js";
+import { htmlToPlainText } from "./keyless-http-web.js";
 import { nativeMemorySaveError } from "./memory-tools.js";
 
 const MAX_APPROVAL_SUMMARY_LENGTH = 500;
@@ -241,6 +242,11 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
       ? [`- and ${display.recipients.length - shown.length} more`]
       : []),
     `发送时间: ${unknown(display.schedule)}`,
+    ...(display.firstEmail === undefined
+      ? []
+      : display.firstEmail
+        ? [`主题: ${display.firstEmail.subject}`, "正文:", htmlToPlainText(display.firstEmail.body)]
+        : ["正文: 还没有邮件内容"]),
     ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
     "",
     "Confirm sending the first email to these recipients",

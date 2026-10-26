@@ -502,6 +502,27 @@ describe("buildApprovalAskBlock", () => {
     expect(`${block.text}\n${block.detail}`).not.toContain("Instantly");
   });
 
+  it("shows the first email on the activation card, or that there is none", () => {
+    const display = {
+      campaignName: "Founding Engineer",
+      status: "Draft",
+      mailbox: "team@example.test",
+      recipients: [{ name: "Ada Lovelace", email: "ada@example.test" }],
+      recipientCount: 1,
+      stopOnReply: true,
+      schedule: null,
+    };
+    const card = (firstEmail: { subject: string; body: string } | null) =>
+      buildApprovalAskBlock("e", "instantly__demo__activate_campaign", {}, [], {
+        oneTimeOnly: true,
+        instantlyActivation: { ...display, firstEmail },
+      }).detail;
+    expect(card({ subject: "Founding Engineer", body: "Hi Ada,<br/>Open to a chat?" })).toContain(
+      "主题: Founding Engineer\n正文:\nHi Ada,\nOpen to a chat?",
+    );
+    expect(card(null)).toContain("正文: 还没有邮件内容");
+  });
+
   it("shows a vendor-free reply card that sends only on confirmation", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",

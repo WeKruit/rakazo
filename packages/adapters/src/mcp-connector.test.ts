@@ -3462,7 +3462,12 @@ describe("local native Instantly campaign and lead tools", () => {
     const state = {
       key: "fixture-private-api-key",
       accounts: ["team@example.test"],
-      campaign: { id: CAMPAIGN, status: 0, stop_on_reply: true } as Record<string, unknown>,
+      campaign: {
+        id: CAMPAIGN,
+        status: 0,
+        stop_on_reply: true,
+        sequences: [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }],
+      } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
       campaigns: [] as Record<string, unknown>[],
       activeRoleId: null as string | null,
@@ -3698,6 +3703,7 @@ describe("local native Instantly campaign and lead tools", () => {
         body: { lead_email: "admin1@wekruit.com", interest_value: 1 },
       },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` },
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
     ]);
   });
@@ -3884,6 +3890,45 @@ describe("local native Instantly campaign and lead tools", () => {
       }),
     );
     expect(added).toMatchObject({ added: ["a"] });
+  });
+
+  it("never activates a campaign that has no email", async () => {
+    const f = fixture();
+    delete f.state.campaign.sequences;
+    const events = await f.run("activate_campaign", { campaign_id: CAMPAIGN });
+    expect(events[0]).toMatchObject({
+      type: "error",
+      message: expect.stringMatching(/no email yet/),
+    });
+    expect(f.state.requests.map((r) => r.path)).not.toContain(
+      `/api/v2/campaigns/${CAMPAIGN}/activate`,
+    );
+  });
+
+  it("saves new steps onto the role's existing draft and maps the zone the provider lists", async () => {
+    const f = fixture();
+    delete f.state.campaign.sequences;
+    const first = f.result(
+      await f.run("ensure_role_campaign", { role_id: "role-1", timezone: "America/New_York" }),
+    );
+    expect(first).toMatchObject({ created: true });
+    const created = f.state.requests.find(
+      (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
+    );
+    expect(JSON.stringify(created?.body)).toContain('"timezone":"America/Detroit"');
+    const steps = [{ subject: "Hi", body: "Hello", delay_days: 0 }];
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
+    expect(second).toMatchObject({ created: false, stepsSaved: true, hasEmail: true });
+    expect(f.state.requests.at(-1)).toMatchObject({
+      method: "PATCH",
+      path: `/api/v2/campaigns/${CAMPAIGN}`,
+      body: {
+        sequences: [{ steps: [{ type: "email", variants: [{ subject: "Hi", body: "Hello" }] }] }],
+      },
+    });
+    f.state.campaign.status = 1;
+    const active = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
+    expect(active).toMatchObject({ stepsSaved: false });
   });
 
   it("activate_campaign without campaign_id ensures and activates the role's own campaign", async () => {
