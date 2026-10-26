@@ -255,7 +255,11 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
   const people = new Map<string, PeopleSearchRow>();
   const found = listing
     ? objects(result).flatMap((record) =>
-        typeof record.text === "string" ? peopleFromListing(record.text) : [],
+        typeof record.text !== "string"
+          ? []
+          : record.text.trimStart().startsWith("{")
+            ? peopleFromResults(record.text)
+            : peopleFromListing(record.text),
       )
     : objects(result);
   for (const record of found) {
@@ -341,6 +345,43 @@ function peopleFromListing(text: string): Record_[] {
     });
   }
   return found;
+}
+
+/** People in a JSON search response ({results:[{url, entities:[{properties}]}]}). */
+function peopleFromResults(text: string): Record_[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const results = (parsed as { results?: unknown }).results;
+  if (!Array.isArray(results)) return [];
+  return results.flatMap((item: Record_) => {
+    const entity = Array.isArray(item?.entities) ? (item.entities[0] as Record_) : undefined;
+    const person = (entity?.properties ?? {}) as {
+      name?: unknown;
+      location?: unknown;
+      workHistory?: Array<{
+        title?: unknown;
+        company?: { name?: unknown };
+        dates?: { to?: unknown };
+      }>;
+    };
+    const jobs = Array.isArray(person.workHistory) ? person.workHistory : [];
+    const job = jobs.find((entry) => !entry?.dates?.to) ?? jobs[0];
+    const name = typeof person.name === "string" ? person.name : item?.title;
+    if (typeof name !== "string" || typeof item?.url !== "string") return [];
+    return [
+      {
+        full_name: name,
+        linkedin_url: item.url,
+        job_title: typeof job?.title === "string" ? job.title : null,
+        company_name: typeof job?.company?.name === "string" ? job.company.name : null,
+        location: typeof person.location === "string" ? person.location : null,
+      },
+    ];
+  });
 }
 
 function summary(profile: RecruitingSavedProfile) {

@@ -298,6 +298,45 @@ describe("peopleFromSearch", () => {
     ]);
   });
 
+  it("reads people from the advanced search's JSON results", () => {
+    const text = JSON.stringify({
+      results: [
+        {
+          url: "https://www.linkedin.com/in/cara-example",
+          title: "Cara Example",
+          highlights: ["Ran a 120-person distribution center"],
+          entities: [
+            {
+              type: "person",
+              properties: {
+                name: "Cara Example",
+                location: "Atlanta Metropolitan Area",
+                workHistory: [
+                  {
+                    title: "Warehouse Manager",
+                    company: { name: "Delta Freight" },
+                    dates: { to: null },
+                  },
+                  { title: "Supervisor", company: { name: "Old Co" }, dates: { to: "2020-01-01" } },
+                ],
+              },
+            },
+          ],
+        },
+        { url: "https://www.linkedin.com/company/acme", title: "Acme" },
+      ],
+    });
+    expect(peopleFromSearch({ content: [{ type: "text", text }] }, PLATFORM_SEARCH)).toEqual([
+      {
+        name: "Cara Example",
+        linkedin_url: "https://www.linkedin.com/in/cara-example",
+        current_title: "Warehouse Manager",
+        current_company: "Delta Freight",
+        location: "Atlanta Metropolitan Area",
+      },
+    ]);
+  });
+
   it("ignores connectors that are not profile-data providers", () => {
     expect(
       peopleFromSearch(

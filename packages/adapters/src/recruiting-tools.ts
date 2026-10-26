@@ -825,10 +825,24 @@ export async function saveRecruitingPeopleSearch(
   const rows: Array<{ rowIndex: number; sourceEffectId: string; row: Record<string, string> }> = [];
   const seen = new Set<string>();
   let truncated = false;
+  // A run that searches in waves saves each wave once: calls an earlier save already took are skipped.
+  const previous = await deps.prisma.externalEffect.findFirst({
+    where: {
+      id: { not: trusted.effectId },
+      runId: trusted.runId,
+      spaceId: trusted.actor.spaceId,
+      kind: "recruiting_research",
+      status: "completed",
+      request: { path: ["operation"], equals: "save_search" },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
   // Oldest call first, so the page keeps the order the searches returned people in.
   const calls = (await listRunToolResults(deps.prisma, trusted.actor, trusted.runId)).reverse();
   for (const call of calls) {
     if (!isPeopleSearchEndpoint(call.endpoint)) continue;
+    if (previous && call.createdAt <= previous.createdAt) continue;
     const people = peopleFromSearch(call.result, call.endpoint);
     if (!people.length) continue;
     sources.push({

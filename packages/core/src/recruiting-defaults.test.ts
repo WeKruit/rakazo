@@ -90,7 +90,7 @@ describe("maintained recruiting defaults", () => {
   it("Main asks clarifying questions one at a time", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain(
-      "Ask clarifying questions one at a time: the single most decision-affecting question first",
+      "Ask clarifying questions one at a time and back-to-back before any brief work",
     );
   });
 
@@ -100,8 +100,8 @@ describe("maintained recruiting defaults", () => {
       "Round feedback before the calibration is accepted goes into your next quick search",
     );
     expect(main.instructions).toContain("recruiting_research save_search");
-    expect(main.instructions).toContain("Deep check, started in parallel");
-    expect(main.instructions).toContain("Use that research task, not a new one, for scale");
+    expect(main.instructions).not.toContain("Deep check, started in parallel");
+    expect(main.instructions).toContain("never for a calibration round except that top-up");
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
@@ -129,7 +129,7 @@ describe("maintained recruiting defaults", () => {
     for (const { body } of RECRUITING_DEFAULT_SKILLS)
       expect(body).toContain("Never name a vendor or tool (Autumn");
     expect(intake).toContain("Calibration rounds are quick searches you run yourself");
-    expect(intake).toContain('query starting "category:people"');
+    expect(intake).toContain('web_search_advanced_exa call with category "people"');
     expect(intake).toContain("Always settle the language requirement");
     expect(intake).toContain("stays a preference, never a reject rule");
     expect(intake).toContain("rather than a matching title");
@@ -187,17 +187,18 @@ describe("maintained recruiting defaults", () => {
       );
       expect(bot.instructions).toContain("you do now and never promise for a later time");
       expect(bot.instructions).toContain(
-        "A turn never ends on a bare save or acknowledgement: after saving an answer, in the same turn ask the next single most decision-affecting question, or when none is missing present the brief for confirmation and say what happens next.",
+        "A turn never ends on a bare save or acknowledgement: after an answer, ask the next clarifying question at once, or when none is missing save the brief and run the calibration search in the same turn.",
       );
       expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
       expect(bot.instructions).toContain("no process narration");
+      expect(bot.instructions).toContain("fix exactly what the error names and call it again at once");
     },
   );
 
-  it("Main runs the first round itself once the brief is confirmed", () => {
+  it("Main runs the first round itself right after the last answer", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain(
-      "the moment it is confirmed, run the calibration quick search yourself in the same turn and present the 10 profiles",
+      "run the calibration quick search yourself in the same turn and present the 10 profiles",
     );
     expect(main.instructions).not.toContain("hand off to Sourcer in the same turn");
   });
@@ -223,7 +224,9 @@ describe("maintained recruiting defaults", () => {
 
   it("keeps calibration searches parallel and tops up a short search", () => {
     for (const part of [
-      "issued together as parallel tool calls in one step",
+      "issue four differently worded platform people searches together as parallel tool calls in one step",
+      'highlightsQuery "concrete evidence of: "',
+      "quotes, word for word, the part of that person's search highlights",
       "top up the same round with one research request on this role for only the missing number",
       "Never tell the recruiter about search quotas",
     ])
@@ -238,7 +241,9 @@ describe("maintained recruiting defaults", () => {
       "That request is the acceptance",
       "never ask them to confirm the round again",
       "Feedback about individual people alone is not acceptance",
-      "save_search, so new people appear in Results within a minute",
+      "waves of four differently worded web_search_advanced_exa people searches",
+      "until the role holds the target or a wave adds fewer than five new people",
+      "only when the people search stops short of the target",
       "everyone already returned excluded",
       "a draft only: no campaign activation, import or send",
     ])
@@ -252,13 +257,23 @@ describe("maintained recruiting defaults", () => {
     );
   });
 
+  it("asks every clarifying question up front with no tool work between them", () => {
+    expect(RECRUITING_INTAKE_FLOW).toContain(
+      "Between an answer and the next question make no tool calls, saves or drafts",
+    );
+    expect(RECRUITING_INTAKE_FLOW).toContain(
+      "never ask whether to proceed, save, confirm or search",
+    );
+    expect(RECRUITING_INTAKE_FLOW).not.toContain("together in one card");
+  });
+
   it("runs the first round before documents and weighs location first", () => {
     expect(RECRUITING_INTAKE_FLOW).toContain(
       "run the first calibration round before preparing any JD",
     );
     for (const part of [
-      "put the brief's priority location (city and metro) in every query",
-      "anyone outside it never makes the ten",
+      "each with the brief's priority location (city and metro) and must-haves",
+      "anyone outside it, or whose row shows no location, never makes the ten",
       "meets every hard requirement",
     ])
       expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);

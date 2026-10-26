@@ -370,7 +370,9 @@ describe("run budget guardrails", () => {
         blocks: [
           {
             kind: "text",
-            text: expect.stringContaining("10 saved candidate profiles. Next step: 收集校准反馈."),
+            text: expect.stringContaining(
+              "10 saved candidate profiles. Next step: 展示 10 人校准名单.",
+            ),
           },
         ],
       }),

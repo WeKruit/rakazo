@@ -39,6 +39,7 @@ export type TurnEndGuardDeps = {
     externalEffect: PrismaClient["externalEffect"];
     recruitingRoleRevision: PrismaClient["recruitingRoleRevision"];
     recruitingCandidate: PrismaClient["recruitingCandidate"];
+    recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
     recruitingResearchTask: PrismaClient["recruitingResearchTask"];
     run: Pick<PrismaClient["run"], "findFirst">;
   };
@@ -70,6 +71,44 @@ export type TurnEndGuardResult =
   | { action: "ended"; classification: TurnEndClass }
   | { action: "continued"; runId: string | null; stage: string; label: string; count: number }
   | { action: "capped"; stage: string; label: string; count: number };
+
+/**
+ * The recruiter reads the ten in chat, not only in the Results panel. When this run recorded the
+ * round but its reply did not list the people, post the list.
+ */
+async function listRoundIfMissing(
+  deps: TurnEndGuardDeps,
+  input: TurnEndGuardInput,
+  round: { effectId: string; candidateKeys: string[] },
+) {
+  const recorded = await deps.prisma.externalEffect.findFirst({
+    where: {
+      id: round.effectId,
+      runId: input.run.id,
+      kind: "recruiting_research",
+      status: "completed",
+    },
+    select: { id: true },
+  });
+  if (!recorded) return;
+  const rows = await deps.prisma.recruitingCandidateOccurrence.findMany({
+    where: { roleId: input.roleId, candidateKey: { in: round.candidateKeys } },
+    select: { candidateKey: true, name: true, title: true, company: true, location: true },
+    orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+  });
+  const latest = new Map<string, (typeof rows)[number]>();
+  for (const row of rows) if (!latest.has(row.candidateKey)) latest.set(row.candidateKey, row);
+  const said = input.blocks
+    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .join("\n");
+  const names = round.candidateKeys.flatMap((key) => latest.get(key)?.name ?? []);
+  if (names.filter((name) => said.includes(name)).length >= Math.min(8, names.length)) return;
+  const lines = round.candidateKeys.map((key, index) => {
+    const row = latest.get(key);
+    return `${index + 1}. ${[row?.name, row?.title, row?.company, row?.location].filter(Boolean).join(" · ")}`;
+  });
+  await input.postAssistant(`本轮 10 位人选：\n\n${lines.join("\n")}`);
+}
 
 /**
  * Turn-end guard for threads with an active recruiting role: a turn that ends with neither a
@@ -113,7 +152,10 @@ export async function guardRecruitingTurnEnd(
         where: { threadId: run.threadId, role: "user", createdAt: { gt: round.createdAt } },
         select: { id: true },
       });
-      if (!answered) return { action: "ended", classification: "question" };
+      if (!answered) {
+        await listRoundIfMissing(deps, input, round);
+        return { action: "ended", classification: "question" };
+      }
       const effect = await deps.prisma.externalEffect.findFirst({
         where: {
           id: round.effectId,
@@ -203,7 +245,7 @@ export async function guardRecruitingTurnEnd(
     reason,
     count,
   });
-  const text = `继续下一步：${step.label}。${step.prompt}`;
+  const text = `继续下一步：${step.label}。${step.prompt}（这是自动继续，不是招聘者的话，引用时用招聘者自己的消息。）`;
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
