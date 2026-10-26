@@ -5,6 +5,7 @@ import type {
   JobPublisher,
 } from "@rakazo/adapter-kit";
 import { recruitingResearchPollJob, runContinueJob } from "@rakazo/adapter-kit";
+import type { RunTrigger } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { classifyRecruitingResearchResult, mcpObject } from "./recruiting-research.js";
@@ -333,7 +334,7 @@ export async function pollRecruitingResearch(
         userId: run.userId,
         taskId: wakeTask.id,
         status: "queued",
-        trigger: "recruiting_research",
+        trigger: "recruiting_research" satisfies RunTrigger,
         clientNonce: nonce,
       },
     });
@@ -462,7 +463,7 @@ async function wakeForPartialRows(
         userId: run.userId,
         taskId: wakeTask.id,
         status: "queued",
-        trigger: "recruiting_research",
+        trigger: "recruiting_research" satisfies RunTrigger,
         clientNonce: `${prefix}${rows}`,
       },
     });

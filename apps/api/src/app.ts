@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { ORPCError, onError } from "@orpc/server";
+import { ORPCError, onError, ValidationError } from "@orpc/server";
 import { RPCHandler } from "@orpc/server/fetch";
 import type {
   AgentContextStrategy,
@@ -1153,14 +1153,6 @@ function sessionHeaders(request: Request) {
   return headers;
 }
 
-/**
- * An ORPCError is a decision the router made (BAD_REQUEST, UNAUTHORIZED, ...) and reaches the
- * caller intact. Everything else is flattened into an opaque "Internal server error", so
- * unless it is logged here the only record of what actually broke is gone.
- *
- * The cause chain matters as much as the message: undici and most SDKs report a bare
- * "fetch failed" and keep the host and errno one level down.
- */
 /** A missing or not-owned record is "not found" for the caller, never a server error. */
 export function notFoundForIsolation(error: unknown): unknown {
   if (!(error instanceof IsolationError)) return error;
@@ -1168,8 +1160,33 @@ export function notFoundForIsolation(error: unknown): unknown {
   return new ORPCError("NOT_FOUND", { message: "Resource not found" });
 }
 
+/**
+ * An ORPCError is a decision the router made (BAD_REQUEST, UNAUTHORIZED, ...) and reaches the
+ * caller intact. Everything else is flattened into an opaque "Internal server error", so
+ * unless it is logged here the only record of what actually broke is gone.
+ *
+ * The cause chain matters as much as the message: undici and most SDKs report a bare
+ * "fetch failed" and keep the host and errno one level down.
+ *
+ * A handler result that fails its output schema also becomes a 500. Its issue paths and
+ * messages are logged so the offending field can be found; the values are not, since they
+ * are user data.
+ */
 export function logUnexpectedRpcError(error: unknown, path: readonly string[]): void {
-  if (error instanceof ORPCError) return;
   const where = `rpc ${path.join("/")} failed`;
+  if (error instanceof ORPCError) {
+    if (error.cause instanceof ValidationError && error.status >= 500) {
+      getLogger().error(where, {
+        reason: error.message,
+        issues: error.cause.issues.slice(0, 20).map((issue) => {
+          const path = (issue.path ?? [])
+            .map((segment) => String(typeof segment === "object" ? segment.key : segment))
+            .join(".");
+          return `${path}: ${issue.message}`;
+        }),
+      });
+    }
+    return;
+  }
   getLogger().error(where, error);
 }

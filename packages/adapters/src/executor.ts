@@ -10471,7 +10471,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         }
         // Until the first round, later intake turns go straight to the people searches and carry
         // the job page the server already read, so the model never fetches it again.
-        const intakeTurnNote = async () => {
+        const intakeTurnNote = async (): Promise<{ page?: string } | undefined> => {
           if (!thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
           const [read, round] = await Promise.all([
             deps.prisma.event.findFirst({
@@ -10491,8 +10491,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const artifactId = (read?.payload as { artifact?: { artifactId?: unknown } } | null)
             ?.artifact?.artifactId;
           if (round) return undefined;
-          const searchFirst = `Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step. ${PLANNED_SEARCHES_NOTE}`;
-          if (typeof artifactId !== "string") return searchFirst;
+          if (typeof artifactId !== "string") return {};
           const { bytes } = await readActorArtifact(
             { prisma: deps.prisma, artifacts: deps.artifacts },
             { spaceId: run.spaceId, userId: run.userId },
@@ -10500,8 +10499,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const page = JSON.parse(Buffer.from(bytes).toString("utf8")) as { text?: unknown };
           return typeof page.text === "string" && page.text.trim()
-            ? `${searchFirst} The role's job page, already read and saved (never fetch it again):\n\n${page.text.slice(0, 24_000)}`
-            : searchFirst;
+            ? { page: page.text.slice(0, 24_000) }
+            : {};
         };
         // The searches planned on the last intake question run the moment it is answered, beside
         // the other setup, so the model's first step already has the people to pick from.
@@ -10548,14 +10547,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
             }),
           );
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search. If the answer changes the search, run four new people searches as usual.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for, or if fewer than ten of these people fit; then run four new, differently worded people searches.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
         // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
         // the server before the model's first step, so the first question needs no read or save step.
         // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
-        const [jobRole, intakeNote, intakeSkill, replyContext, plannedNote] = await ownTime(
+        const [jobRole, intake, intakeSkill, replyContext, plannedNote] = await ownTime(
           "turnNotes",
           Promise.all([
             startRoleFromJob(),
@@ -10578,6 +10577,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ]),
         );
         linkRole = jobRole;
+        // Once the planned searches ran, the pick note alone says what to do next.
+        const intakeNote =
+          intake &&
+          [
+            plannedNote
+              ? PLANNED_SEARCHES_NOTE
+              : `Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step. ${PLANNED_SEARCHES_NOTE}`,
+            intake.page &&
+              `The role's job page, already read and saved (never fetch it again):\n\n${intake.page}`,
+          ]
+            .filter(Boolean)
+            .join(" ");
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
