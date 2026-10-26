@@ -351,7 +351,7 @@ export function nextPlaybookStep(
             stage,
             label: "完成岗位信息",
             prompt:
-              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就在本轮下一步立刻发出校准人才搜索（每条回来自动出现在结果里），再保存 brief，然后选出 10 人（不等确认 brief，也不让招聘者确认）。",
+              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就在本轮下一步立刻发出校准人才搜索（每条回来自动出现在结果里），然后直接选出 10 人记录本轮，之后再保存 brief（不让招聘者确认）。已经有人保存在结果里时不要重新搜索，直接从中选。",
           };
     case "calibration_10": {
       const remaining = Math.max(0, CALIBRATION_TARGET - facts.savedCandidates);
@@ -360,7 +360,7 @@ export function nextPlaybookStep(
         label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
         prompt: remaining
           ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后记录本轮（名单会自动列在聊天里）。`
-          : `把这 10 位校准候选人记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单；面板已提供逐人反馈入口，不要另建逐人评分卡。${NEXT_STEP_CARD}允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。`,
+          : `不要重新搜索：从已保存的人里选 10 位记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单；面板已提供逐人反馈入口，不要另建逐人评分卡。${NEXT_STEP_CARD}允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。`,
       };
     }
     case "feedback":
