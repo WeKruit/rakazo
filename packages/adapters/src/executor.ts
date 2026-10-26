@@ -574,10 +574,6 @@ export function jobLinkIn(text: string): string | null {
   return null;
 }
 
-/**
- * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
- * 「新岗位：」. Short messages are instructions, not a JD.
- */
 /** The saved form of a LinkedIn candidate key ("linkedin:/in/<profile>") from a key or link. */
 export function savedCandidateKeyForm(key: string): string {
   let text = key.trim();
@@ -593,6 +589,15 @@ export function savedCandidateKeyForm(key: string): string {
   return profile ? `linkedin:/in/${profile}` : key;
 }
 
+/**
+ * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab") names the one saved key
+ * that continues it; an ambiguous or unknown key stays as given.
+ */
+export function continuedCandidateKey(key: string, savedKeys: readonly string[]): string {
+  const matches = savedKeys.filter((saved) => saved.startsWith(`${key}-`));
+  return matches.length === 1 ? (matches[0] as string) : key;
+}
+
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
 export function shortQuestion(question: string, max = 240): string {
   let text = question.trim();
@@ -604,6 +609,10 @@ export function shortQuestion(question: string, max = 240): string {
   return text;
 }
 
+/**
+ * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
+ * 「新岗位：」. Short messages are instructions, not a JD.
+ */
 export function pastedJobTitle(text: string): string | null {
   if (text.trim().length < 400) return null;
   const lines = text
@@ -4817,12 +4826,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
               ).map((row) => row.candidateKey),
             );
+            // A key cut short names the one saved person on this role whose key continues it.
+            const given: unknown[] = args.candidateKeys;
+            const cut = keys.filter(
+              (key, index): key is string =>
+                typeof key === "string" && !saved.has(key) && !saved.has(String(given[index])),
+            );
+            const continued = cut.length
+              ? await deps.prisma.recruitingCandidate.findMany({
+                  where: {
+                    roleId: thread.activeRecruitingRoleId,
+                    OR: cut.map((key) => ({ candidateKey: { startsWith: `${key}-` } })),
+                  },
+                  select: { candidateKey: true },
+                })
+              : [];
+            const continuedKeys = continued.map((row) => row.candidateKey);
             args = {
               ...args,
               candidateKeys: args.candidateKeys.map((key, index) =>
-                typeof key === "string" && !saved.has(key) && saved.has(String(keys[index]))
-                  ? keys[index]
-                  : key,
+                typeof key !== "string" || saved.has(key)
+                  ? key
+                  : saved.has(String(keys[index]))
+                    ? keys[index]
+                    : continuedCandidateKey(String(keys[index]), continuedKeys),
               ),
             };
           }
