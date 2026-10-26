@@ -5432,7 +5432,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   vague.length &&
                     `${vague.join(", ")} show only a country or a state, which never counts inside a city or metro location scope.`,
                   far.length &&
-                    `${far.join(", ")} ${far.length > 1 ? "are" : "is"} far from where the other picks are; check against the role's location scope.`,
+                    `${far.join(", ")} ${far.length > 1 ? "are" : "is"} not in the city where most picks are; check against the role's location scope (a nearby suburb can fit, a town outside the commute does not).`,
                   "Replace anyone outside the scope with people from the rows whose location is inside it and record the ten again. If they are all inside the scope, record the same ten again.",
                 ]
                   .filter(Boolean)

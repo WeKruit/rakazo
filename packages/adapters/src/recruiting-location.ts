@@ -14,9 +14,9 @@ export function isRegionOnlyLocation(location: string | null | undefined): boole
   return !location?.trim() || REGION_ONLY.test(location);
 }
 
-const COUNTRY_ONLY = new RegExp(`^(?:${COUNTRY})$`, "i");
+const NOT_A_CITY = new RegExp(`^(?:${COUNTRY}|${US_STATES}|[a-z]{2})$`, "i");
 
-/** The places a profile location names: city, metro or state, without the country. */
+/** The cities or metros a profile location names, without its state or country. */
 function places(location: string): string[] {
   return location
     .split(/,|--|\//)
@@ -27,26 +27,22 @@ function places(location: string): string[] {
         .trim()
         .toLowerCase(),
     )
-    .filter((part) => part && !COUNTRY_ONLY.test(part));
+    .filter((part) => part && !NOT_A_CITY.test(part));
 }
 
 /**
- * People in a picked group whose location shares no place with the places most of the group
- * names. It only points at a likely slip, such as one Greensboro profile among ten around Atlanta;
- * the model decides whether that person is within the role's commute.
+ * People in a picked group whose location names none of the cities a third or more of the group
+ * names. A shared state never counts, so one LaGrange or Greensboro profile among ten around
+ * Atlanta is pointed out; so is a suburb, once. The model decides who is within the role's commute.
  */
 export function locationOutliers(locations: ReadonlyMap<string, string>): string[] {
   const named = [...locations].map(([key, location]) => [key, new Set(places(location))] as const);
   const counts = new Map<string, number>();
   for (const [, set] of named)
     for (const place of set) counts.set(place, (counts.get(place) ?? 0) + 1);
-  const shared = new Set(
-    [...counts].filter(([, count]) => count * 2 >= named.length).map(([place]) => place),
-  );
+  const least = Math.max(2, Math.ceil(named.length / 3));
+  const shared = new Set([...counts].filter(([, count]) => count >= least).map(([place]) => place));
   if (!shared.size) return [];
-  // A city named next to a shared state ("Atlanta, Georgia") also counts as the group's place.
-  for (const [, set] of named)
-    if ([...set].some((place) => shared.has(place))) for (const place of set) shared.add(place);
   return named
     .filter(([, set]) => set.size && ![...set].some((place) => shared.has(place)))
     .map(([key]) => key);
