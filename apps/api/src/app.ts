@@ -608,6 +608,8 @@ export async function createApp(
         const started = performance.now();
         try {
           return await next();
+        } catch (error) {
+          throw notFoundForIsolation(error);
         } finally {
           enrichLogContext({ "rpc.handler.duration_ms": Math.round(performance.now() - started) });
         }
@@ -1159,6 +1161,13 @@ function sessionHeaders(request: Request) {
  * The cause chain matters as much as the message: undici and most SDKs report a bare
  * "fetch failed" and keep the host and errno one level down.
  */
+/** A missing or not-owned record is "not found" for the caller, never a server error. */
+export function notFoundForIsolation(error: unknown): unknown {
+  if (!(error instanceof IsolationError)) return error;
+  getLogger().warn("rpc.not_found", { at: error.stack?.split("\n")[1]?.trim() });
+  return new ORPCError("NOT_FOUND", { message: "Resource not found" });
+}
+
 export function logUnexpectedRpcError(error: unknown, path: readonly string[]): void {
   if (error instanceof ORPCError) return;
   const where = `rpc ${path.join("/")} failed`;

@@ -1,7 +1,8 @@
 import { ORPCError } from "@orpc/server";
+import { IsolationError } from "@rakazo/db";
 import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it } from "vitest";
-import { logUnexpectedRpcError } from "./app.js";
+import { logUnexpectedRpcError, notFoundForIsolation } from "./app.js";
 
 describe("logUnexpectedRpcError", () => {
   afterEach(() => {
@@ -38,5 +39,15 @@ describe("logUnexpectedRpcError", () => {
         cause: { message: "connect ECONNREFUSED 127.0.0.1:7091" },
       },
     });
+  });
+});
+
+describe("notFoundForIsolation", () => {
+  it("answers a missing record as not found and passes other errors through", () => {
+    const mapped = notFoundForIsolation(new IsolationError());
+    expect(mapped).toBeInstanceOf(ORPCError);
+    expect(mapped).toMatchObject({ code: "NOT_FOUND", status: 404 });
+    const other = new Error("boom");
+    expect(notFoundForIsolation(other)).toBe(other);
   });
 });

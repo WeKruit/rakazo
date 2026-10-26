@@ -590,18 +590,27 @@ export function savedCandidateKeyForm(key: string): string {
   return profile ? `linkedin:/in/${profile}` : key;
 }
 
+/** A key's last segment when it carries a digit: profile ids end in one ("1a2b3c4d", "2042"). */
+export function candidateKeyTail(key: string): string | undefined {
+  const tail = key.split(/[-/]/).pop() ?? "";
+  return tail.length >= 4 && /\d/.test(tail) ? tail : undefined;
+}
+
 /**
  * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab" or "linkedin:/in/jane-doe")
- * names the one saved key that continues it, preferring a continuation after "-". An ambiguous,
- * unknown or very short key stays as given.
+ * or rewritten from the name ("jonathan-doe-1a2b3c4d" for "jon-doe-1a2b3c4d") names the one saved
+ * key that continues it, preferring a continuation after "-", or else ends in the same profile id.
+ * An ambiguous, unknown or very short key stays as given.
  */
 export function continuedCandidateKey(key: string, savedKeys: readonly string[]): string {
   const one = (matches: readonly string[]) => (matches.length === 1 ? matches[0] : undefined);
+  const tail = candidateKeyTail(key);
   return (
     one(savedKeys.filter((saved) => saved.startsWith(`${key}-`))) ??
     (key.replace(/^linkedin:\/in\//, "").length >= 6
       ? one(savedKeys.filter((saved) => saved.startsWith(key)))
       : undefined) ??
+    (tail ? one(savedKeys.filter((saved) => saved !== key && saved.endsWith(tail))) : undefined) ??
     key
   );
 }
@@ -4834,7 +4843,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
               ).map((row) => row.candidateKey),
             );
-            // A key cut short names the one saved person on this role whose key continues it.
+            // A key cut short or rewritten names the one saved person on this role it points to.
             const given: unknown[] = args.candidateKeys;
             const cut = keys.filter(
               (key, index): key is string =>
@@ -4844,7 +4853,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? await deps.prisma.recruitingCandidate.findMany({
                   where: {
                     roleId: thread.activeRecruitingRoleId,
-                    OR: cut.map((key) => ({ candidateKey: { startsWith: key } })),
+                    OR: cut.flatMap((key) => {
+                      const tail = candidateKeyTail(key);
+                      return [
+                        { candidateKey: { startsWith: key } },
+                        ...(tail ? [{ candidateKey: { endsWith: tail } }] : []),
+                      ];
+                    }),
                   },
                   select: { candidateKey: true },
                 })
