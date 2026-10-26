@@ -30,6 +30,7 @@ import { oidcDiscovery } from "./oidc.js";
 
 export type { OidcConfig } from "./oidc.js";
 export { getOidcAccessToken, getOidcAccountStatus, oidcConfigFromEnv } from "./oidc.js";
+export { createOwnerVouchedAccount, OwnerAccountError } from "./owner-account.js";
 
 export interface AuthEnv {
   passwordAuth?: boolean;

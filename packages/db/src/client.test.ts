@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
+import { createLogger, createTestSink, installLogger, runWithLogContext } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -121,6 +121,31 @@ describe("pool wait log", () => {
       waited: 1,
       maxMs: 400,
     });
+  });
+
+  it("names the job and source line of sampled checkouts", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ release: () => undefined } as unknown as PoolClient), 100),
+        ) as never,
+    );
+    const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo", { poolMax: 2 });
+    const checkout = async () => {
+      const pending = pool.connect();
+      await vi.advanceTimersByTimeAsync(100);
+      await pending;
+    };
+    await runWithLogContext({ "job.type": "run.continue" }, async () => {
+      for (let i = 0; i < 10; i += 1) await checkout();
+    });
+    vi.setSystemTime(61_000);
+    await checkout();
+    const [wait] = sink.events.filter((event) => event.message === "db.pool.wait");
+    expect(wait?.callers).toMatch(/run\.continue db\/src\/client\.test\.ts:\d+ ×10/);
   });
 });
 

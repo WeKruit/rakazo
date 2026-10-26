@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { getLogger } from "@rakazo/logging";
+import { getLogContext, getLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { Pool } from "pg";
 import { PrismaClient } from "./generated/prisma/client.js";
@@ -17,6 +17,9 @@ const CONNECT_RETRY_ATTEMPTS = 8;
 const POOL_WAIT_MIN_MS = 50;
 /** db.pool.wait summarizes at most once per window, and only windows that waited. */
 const POOL_WAIT_REPORT_MS = 60_000;
+/** One checkout in this many records its caller for db.pool.wait; a stack per checkout costs too much. */
+const POOL_CALLER_SAMPLE = 10;
+const POOL_CALLERS_LOGGED = 8;
 
 export function createPool(connectionString: string, options: DbClientOptions = {}): Pool {
   const pool = new Pool({
@@ -110,9 +113,10 @@ function installConnectRetry(pool: Pool): void {
   function connect(callback: ConnectCallback): void;
   function connect(callback?: ConnectCallback): Promise<PoolClient> | undefined {
     const startedAt = Date.now();
+    const caller = sampleCaller();
     if (!callback)
       return retryOnTooManyConnections(() => originalConnect()).then((client) => {
-        acquired(startedAt);
+        acquired(startedAt, caller);
         return client;
       });
     const attempt = (n: number) => {
@@ -121,7 +125,7 @@ function installConnectRetry(pool: Pool): void {
           setTimeout(() => attempt(n + 1), Math.min(5_000, 200 * 2 ** n));
           return;
         }
-        if (!err) acquired(startedAt);
+        if (!err) acquired(startedAt, caller);
         callback(err, client, done);
       });
     };
@@ -131,22 +135,48 @@ function installConnectRetry(pool: Pool): void {
   pool.connect = connect as Pool["connect"];
 }
 
+let checkoutSeq = 0;
+
+/**
+ * For one checkout in POOL_CALLER_SAMPLE: the job or RPC it serves and the first app source line
+ * that asked for it (async frames included), such as `run.continue adapters/src/executor.ts:812`.
+ */
+function sampleCaller(): string | undefined {
+  checkoutSeq += 1;
+  if (checkoutSeq % POOL_CALLER_SAMPLE) return undefined;
+  const limit = Error.stackTraceLimit;
+  Error.stackTraceLimit = 40;
+  const stack = new Error().stack ?? "";
+  Error.stackTraceLimit = limit;
+  const frame = stack
+    .split("\n")
+    .slice(1)
+    .map((line) => /(?:packages|apps)\/([^/]+\/src\/[^:)\s]+:\d+)/.exec(line)?.[1])
+    .find((found) => found && !found.startsWith("db/src/client.ts"));
+  const context = getLogContext();
+  const work = context["job.type"] ?? context["rpc.procedure"] ?? "-";
+  return `${String(work)} ${frame ?? "?"}`;
+}
+
 /**
  * Counts checkouts that waited for a free connection and logs one `db.pool.wait` summary per
  * window that had any, so pool contention shows up in the logs instead of only as slow turns.
+ * `callers` lists the busiest sampled callers, each count scaled back to all checkouts.
  */
-function poolWaitReporter(pool: Pool): (startedAt: number) => void {
+function poolWaitReporter(pool: Pool): (startedAt: number, caller?: string) => void {
   let windowStart = Date.now();
   let checkouts = 0;
   let waited = 0;
   let totalMs = 0;
   let maxMs = 0;
   let maxQueued = 0;
-  return (startedAt) => {
+  let callers = new Map<string, number>();
+  return (startedAt, caller) => {
     const now = Date.now();
     const ms = now - startedAt;
     checkouts += 1;
     maxQueued = Math.max(maxQueued, pool.waitingCount);
+    if (caller) callers.set(caller, (callers.get(caller) ?? 0) + 1);
     if (ms >= POOL_WAIT_MIN_MS) {
       waited += 1;
       totalMs += ms;
@@ -162,9 +192,15 @@ function poolWaitReporter(pool: Pool): (startedAt: number) => void {
         totalMs,
         maxMs,
         maxQueued,
+        callers: [...callers]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, POOL_CALLERS_LOGGED)
+          .map(([name, count]) => `${name} ×${count * POOL_CALLER_SAMPLE}`)
+          .join("; "),
       });
     windowStart = now;
     checkouts = waited = totalMs = maxMs = maxQueued = 0;
+    callers = new Map();
   };
 }
 
