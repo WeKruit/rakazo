@@ -371,6 +371,16 @@ export const appContract = {
         }),
       )
       .output(DeploymentSettingsSchema),
+    /** The owner adds an allowlisted person directly when the deployment cannot send email. */
+    createAccount: oc
+      .input(
+        z.object({
+          email: z.string().email().max(320),
+          name: z.string().max(200).default(""),
+          password: z.string().min(12).max(128),
+        }),
+      )
+      .output(z.object({ userId: Id })),
   },
   /**
    * Deployment-owner product updates. When the Compose updater sidecar is reachable, these proxy

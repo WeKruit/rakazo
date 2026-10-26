@@ -132,7 +132,7 @@ import {
   verifyMcpInstall,
 } from "@rakazo/adapters";
 import type { Auth, OidcConfig } from "@rakazo/auth";
-import { getOidcAccountStatus } from "@rakazo/auth";
+import { createOwnerVouchedAccount, getOidcAccountStatus, OwnerAccountError } from "@rakazo/auth";
 import type {
   Actor,
   BoardEvent,
@@ -686,6 +686,8 @@ export interface RouterDeps {
     mcpAllowPrivateEndpoint?: boolean;
     firstPartyMcpUrl?: string;
     oidc?: Pick<OidcConfig, "issuer" | "clientId">;
+    signupsEnabled?: string;
+    signupAllowlist?: string;
   };
 }
 
@@ -1398,6 +1400,21 @@ export function createRouter(deps: RouterDeps) {
           },
         });
         return deploymentDto(deps.prisma, deps.env.sandboxProvider);
+      }),
+      createAccount: authed.deployment.createAccount.handler(async ({ context, input }) => {
+        if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
+        try {
+          return await createOwnerVouchedAccount(
+            deps.prisma,
+            { signupsEnabled: deps.env.signupsEnabled, signupAllowlist: deps.env.signupAllowlist },
+            input,
+          );
+        } catch (error) {
+          if (!(error instanceof OwnerAccountError)) throw error;
+          throw new ORPCError(error.reason === "exists" ? "CONFLICT" : "BAD_REQUEST", {
+            message: error.message,
+          });
+        }
       }),
     },
     updater: {

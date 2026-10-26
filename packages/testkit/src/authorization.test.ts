@@ -87,6 +87,10 @@ describeWithDatabase("API authorization and resource isolation", () => {
       ["me"],
       ["deployment/get"],
       ["deployment/update", { signupsEnabled: true }],
+      [
+        "deployment/createAccount",
+        { email: "nobody@example.test", password: "long-enough-password" },
+      ],
       ["updater/status"],
       ["updater/check", {}],
       ["updater/apply", {}],
@@ -1965,6 +1969,43 @@ describeWithDatabase("API authorization and resource isolation", () => {
       });
       expect(unverifiedSignup.status).toBe(400);
       expect(await unverifiedSignup.text()).toContain("Registration requires email delivery");
+
+      // Without email delivery the owner adds the allowlisted person directly.
+      const password = "owner-vouched-password";
+      await expectDenied(app, other, "deployment/createAccount", {
+        email: approvedEmail,
+        password,
+      });
+      expect(
+        (
+          await raw(app, owner, "deployment/createAccount", {
+            email: `not-approved-${stamp}@rakazo.test`,
+            password,
+          })
+        ).status,
+      ).toBe(400);
+      const created = await rpc<{ userId: string }>(app, owner, "deployment/createAccount", {
+        email: approvedEmail.toUpperCase(),
+        name: "Approved Person",
+        password,
+      });
+      expect(
+        (await raw(app, owner, "deployment/createAccount", { email: approvedEmail, password }))
+          .status,
+      ).toBe(409);
+      const signIn = await app.request("/api/auth/sign-in/email", {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: "http://127.0.0.1:5173" },
+        body: JSON.stringify({ email: approvedEmail, password }),
+      });
+      expect(signIn.status).toBe(200);
+      const person = await rpc<Actor>(app, sessionCookieHeader(signIn), "me");
+      expect(person.userId).toBe(created.userId);
+      expect(person.spaceId).not.toBe(ownerActor.spaceId);
+      expect(person.isDeploymentOwner).toBe(false);
+      expect(
+        await handles.prisma.user.findUniqueOrThrow({ where: { id: created.userId } }),
+      ).toMatchObject({ email: approvedEmail, emailVerified: true });
     } finally {
       await rpc(app, owner, "deployment/update", {
         signupsEnabled: true,
@@ -2129,6 +2170,7 @@ async function expectForbidden(app: App, cookie: string, procedure: string, body
 interface Actor {
   userId: string;
   spaceId: string;
+  isDeploymentOwner?: boolean;
 }
 
 interface ModelCredential {
