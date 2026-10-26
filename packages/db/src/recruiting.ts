@@ -4436,13 +4436,20 @@ export async function fillRecruitingRoleArgs(
     ...looseArray(saved?.sourceRefs),
   ].filter(looseRecord);
   const known = new Set(sources.map((source) => source.id));
-  const material = sources.filter(
-    (source) =>
-      source.kind === "original_material" &&
-      looseRecord(source.anchor) &&
-      source.anchor.kind === "artifact" &&
-      typeof source.quote === "string",
+  // The role's material: read pages first, then pasted messages, in the order the role lists them.
+  const quoted = sources.filter(
+    (source) => source.kind === "original_material" && typeof source.quote === "string",
   );
+  const onPage = (source: LooseRecord) =>
+    looseRecord(source.anchor) && source.anchor.kind === "artifact";
+  const material = [
+    ...new Map(
+      [...quoted.filter(onPage), ...quoted.filter((source) => !onPage(source))].map((source) => [
+        source.id,
+        source,
+      ]),
+    ).values(),
+  ];
   let humans: { id: string; text: string }[] | undefined;
   const humanMessages = async () => {
     humans ??= (
@@ -4465,8 +4472,12 @@ export async function fillRecruitingRoleArgs(
   const resolve = async (id: unknown, origin: unknown, value: unknown) => {
     if (typeof id !== "string" || known.has(id) || /^human-message:.+/.test(id)) return id;
     const fromMaterial = origin === "jd" || origin === "hm" || !/^human/i.test(id);
-    if (origin !== "user_instruction" && fromMaterial)
-      return material.length === 1 ? material[0]!.id : id;
+    if (origin !== "user_instruction" && fromMaterial) {
+      const text = typeof value === "string" ? value.trim() : "";
+      const holder =
+        (text && material.find((source) => String(source.quote).includes(text))) || material[0];
+      return holder ? holder.id : id;
+    }
     const messages = await humanMessages();
     const text = typeof value === "string" ? value.trim() : "";
     const holder = (text && messages.find((message) => message.text.includes(text))) || messages[0];

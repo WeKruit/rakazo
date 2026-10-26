@@ -66,6 +66,31 @@ describe("normalizeRecruitingRoleArgs", () => {
     });
   });
 
+  // 2026-10-26: an update nested brief, expectedRevision and definitionQuestions inside criteria.
+  it("moves call keys an update wrote inside criteria back to the call", () => {
+    const upsert = [{ id: "c1" }];
+    expect(
+      normalizeRecruitingRoleArgs(
+        {
+          operation: "update",
+          roleId: "r1",
+          criteria: { upsert, expectedRevision: 2, definitionQuestions: [], brief: { fields: [] } },
+        },
+        now,
+      ),
+    ).toEqual({
+      operation: "update",
+      roleId: "r1",
+      expectedRevision: 2,
+      definitionQuestions: [],
+      criteria: { upsert },
+      brief: { fields: [] },
+    });
+    expect(
+      normalizeRecruitingRoleArgs({ operation: "update", criteria: { expectedRevision: 1 } }, now),
+    ).toEqual({ operation: "update", expectedRevision: 1 });
+  });
+
   it("leaves a brief's omitted lists to the schema defaults and operations without a brief alone", () => {
     expect(
       normalizeRecruitingRoleArgs({ operation: "create", brief: { fields: [] } }, now),
