@@ -3567,11 +3567,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
       const setupMark = (name: string) => {
         setupMarks[`${name}Ms`] = Math.round(performance.now() - setupStartedAt);
       };
-      // How long one setup load took on its own, beside the joins that wait for it.
+      // Record each load's interval from pickup as well as its duration. Parallel durations
+      // cannot be summed or compared directly with cumulative setup milestones.
       const ownTime = <T>(name: string, pending: Promise<T>): Promise<T> => {
         const startedAt = performance.now();
+        setupMarks[`${name}StartMs`] = Math.round(startedAt - setupStartedAt);
         return pending.finally(() => {
-          setupMarks[`${name}OwnMs`] = Math.round(performance.now() - startedAt);
+          const endedAt = performance.now();
+          setupMarks[`${name}EndMs`] = Math.round(endedAt - setupStartedAt);
+          setupMarks[`${name}OwnMs`] = Math.round(endedAt - startedAt);
         });
       };
       if (!run) return;
@@ -3711,14 +3715,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const messagingChannelRun = isMessagingChannelRun(run.trigger, sourceBlocks);
         // Independent of the context load below; joined after it so its failure surfaces in order.
         const nativeSourcesPending = awaitLater(
-          messagingChannelRun || !previouslyClaimed
-            ? Promise.resolve(null)
-            : loadRunHumanSources(
-                deps.prisma,
-                { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
-                run,
-                { continuationOnly: true },
-              ),
+          ownTime(
+            "nativeSources",
+            messagingChannelRun || !previouslyClaimed
+              ? Promise.resolve(null)
+              : loadRunHumanSources(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+                  run,
+                  { continuationOnly: true },
+                ),
+          ),
         );
         const [
           bot,
@@ -3886,7 +3893,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           "discovery",
           deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
         );
-        const nativeSources = await ownTime("nativeSources", nativeSourcesPending());
+        const nativeSources = await nativeSourcesPending();
         if (
           nativeSources?.answeredAsks.length &&
           (thread.spaceId !== run.spaceId ||
@@ -4014,11 +4021,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? `Update from ${peerMessage.fromBotName}: ${peerMessage.text}`
             : DELEGATED_EMPTY_NOTICE
           : undefined;
-        const recallPromise =
+        const recallPromise = ownTime(
+          "recall",
           threadContext.includeSemanticRecall &&
-          semanticMemory &&
-          memoryScope &&
-          thread.historyCompactedUpToSeq != null
+            semanticMemory &&
+            memoryScope &&
+            thread.historyCompactedUpToSeq != null
             ? semanticMemory.recall(
                 {
                   query: task.prompt,
@@ -4029,12 +4037,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
                 context,
               )
-            : Promise.resolve(null);
-        const memoryContextPromise = messagingChannelRun
-          ? Promise.resolve({ text: undefined, documents: [] })
-          : loadAgentMemoryContext(deps.memory, bot.id, context, undefined, (text) =>
-              redactSecrets(text, runSecrets),
-            );
+            : Promise.resolve(null),
+        );
+        const memoryContextPromise = ownTime(
+          "memoryContext",
+          messagingChannelRun
+            ? Promise.resolve({ text: undefined, documents: [] })
+            : loadAgentMemoryContext(deps.memory, bot.id, context, undefined, (text) =>
+                redactSecrets(text, runSecrets),
+              ),
+        );
         // The run-start recruiting context needs only memory, so it overlaps tool discovery
         // and the other setup reads instead of starting after them. Joined after the model key.
         const recruitingContextStartedAt = performance.now();
@@ -4064,6 +4076,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
             : Promise.resolve(undefined),
         );
+        const discoveryJoinStartedAt = performance.now();
+        setupMark("discoveryJoinStart");
         const [
           discovered,
           currentTurnImages,
@@ -4077,35 +4091,51 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ] = await Promise.all([
           discoveredPromise,
           ownTime("turnImages", loadCurrentTurnImages(deps, turnBlocks, context)),
-          ownTime("memoryContext", memoryContextPromise),
-          messagingChannelRun
-            ? Promise.resolve("")
-            : loadAgentScratchpadContext(deps, {
-                spaceId: run.spaceId,
-                botId: bot.id,
-              }),
-          messagingChannelRun || !deps.ticketBoardEnabled
-            ? Promise.resolve(undefined)
-            : loadAgentTicketContext(deps, {
-                spaceId: run.spaceId,
-                text: task.prompt,
-              }),
-          ownTime("recall", recallPromise),
+          memoryContextPromise,
+          ownTime(
+            "scratchpadContext",
+            messagingChannelRun
+              ? Promise.resolve("")
+              : loadAgentScratchpadContext(deps, {
+                  spaceId: run.spaceId,
+                  botId: bot.id,
+                }),
+          ),
+          ownTime(
+            "ticketContext",
+            messagingChannelRun || !deps.ticketBoardEnabled
+              ? Promise.resolve(undefined)
+              : loadAgentTicketContext(deps, {
+                  spaceId: run.spaceId,
+                  text: task.prompt,
+                }),
+          ),
+          recallPromise,
           ownTime("stoppedNotice", stoppedPreviousRunNotice(deps.prisma, thread.runs?.[0])),
           // Both briefs are best-effort context: a read failure must not requeue the run.
-          previouslyClaimed
-            ? resumeBriefForRun(deps.prisma, run, runSecrets).catch((error) => {
-                getLogger().warn("resume brief unavailable", { runId, error: String(error) });
-                return undefined;
-              })
-            : undefined,
-          run.trigger === "routine"
-            ? routinePriorRunHistory(deps.prisma, run).catch((error) => {
-                getLogger().warn("routine prior run unavailable", { runId, error: String(error) });
-                return undefined;
-              })
-            : undefined,
+          ownTime(
+            "resumeBrief",
+            previouslyClaimed
+              ? resumeBriefForRun(deps.prisma, run, runSecrets).catch((error) => {
+                  getLogger().warn("resume brief unavailable", { runId, error: String(error) });
+                  return undefined;
+                })
+              : Promise.resolve(undefined),
+          ),
+          ownTime(
+            "routinePriorRun",
+            run.trigger === "routine"
+              ? routinePriorRunHistory(deps.prisma, run).catch((error) => {
+                  getLogger().warn("routine prior run unavailable", {
+                    runId,
+                    error: String(error),
+                  });
+                  return undefined;
+                })
+              : Promise.resolve(undefined),
+          ),
         ]);
+        setupMarks.discoveryJoinWaitMs = Math.round(performance.now() - discoveryJoinStartedAt);
         setupMark("discoveryJoin");
         let currentRecruitingContext: LoadedRecruitingRunContext | undefined;
         let memoryContext = loadedMemoryContext;
