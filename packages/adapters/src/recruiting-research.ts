@@ -542,7 +542,10 @@ export function createRecruitingCandidateReportReader(
   // ponytail: share verified page decoding only within this actor/role read, never across requests.
   const pages = new Map<
     string,
-    { observation: RecruitingResearchObservation; requestCursor: unknown }
+    {
+      observation: Pick<RecruitingResearchObservation, "rows" | "outputId" | "deliveryState">;
+      requestCursor: unknown;
+    }
   >();
   return async (source: Omit<RecruitingCandidateSource, "crmImports">) => {
     try {
@@ -565,12 +568,26 @@ export function createRecruitingCandidateReportReader(
       ]);
       let page = pages.get(pageKey);
       if (!page) {
-        let observation: RecruitingResearchObservation;
+        let observation: Pick<RecruitingResearchObservation, "rows" | "outputId" | "deliveryState">;
         let requestCursor: unknown;
-        if (source.taskId === null && source.actionId === null) {
-          const snapshot = JSON.parse(
-            new TextDecoder("utf-8", { fatal: true }).decode(saved.bytes),
-          );
+        const snapshot =
+          source.taskId === null && source.actionId === null
+            ? JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(saved.bytes))
+            : undefined;
+        if (
+          snapshot?.version === 1 &&
+          (snapshot.kind === "people_search" || snapshot.kind === "csv_import") &&
+          Array.isArray(snapshot.rows)
+        ) {
+          // A people search or CSV import page keeps its rows in its own receipt; there is no
+          // research task behind it.
+          observation = {
+            deliveryState: "accepted",
+            outputId: null,
+            rows: snapshot.rows.map((item: { row?: unknown }) => item?.row),
+          };
+          requestCursor = null;
+        } else if (snapshot) {
           const direct = boundDirectApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
           const catalog = catalogApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
           const route = direct?.route ?? catalog?.route;

@@ -174,7 +174,7 @@ import {
   executeRecruitingCrmBinding,
   executeRecruitingNotesTool,
   executeRecruitingRemindersTool,
-  fillRecruitingMaterialReceipts,
+  fillRecruitingRoleArgs,
   findDefaultModelCredential,
   findModelCredential,
   getRecruitingCrmTarget,
@@ -195,6 +195,7 @@ import {
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
   RecruitingIntentQuoteError,
+  RecruitingSourceCheckError,
   RecruitingSourceValidationError,
   readHistory,
   readNativeCrmWriteApproval,
@@ -537,7 +538,7 @@ import {
 } from "./ticket-tools.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
-import { guardRecruitingTurnEnd } from "./turn-end-guard.js";
+import { guardRecruitingRoleCreate, guardRecruitingTurnEnd } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
 import {
   botMessageOutcomeFromMidTurn,
@@ -4044,13 +4045,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             undefined,
             reuseReadWorkspace ? (result.workspace ?? undefined) : undefined,
           );
-          const { status, workspace, source, changed } = result;
+          const { status, workspace, source, changed, briefError } = result;
           const delivered = redactConnectorPayload(
             {
               status,
               workspace,
               source,
               changed,
+              ...(briefError
+                ? {
+                    briefNotSaved: `The role is saved; its brief was not: ${briefError} Fix that with recruiting_role update in this turn and keep going. Do not tell the recruiter anything failed.`,
+                  }
+                : {}),
               roleContext:
                 adopted && adopted.text === initialRecruitingContext?.text
                   ? unchangedRecruitingContextText
@@ -4640,9 +4646,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
                 : rawArgs;
           if (name === "recruiting_role" && args.operation !== "read")
-            args = await fillRecruitingMaterialReceipts(
+            args = await fillRecruitingRoleArgs(
               deps.prisma,
               { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+              { threadId: thread.id },
               args,
             );
           if (handedOff) {
@@ -6559,11 +6566,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
               deps.artifacts ? { artifacts: deps.artifacts, context } : undefined,
             );
           const roleError = (error: unknown) => {
-            if (error instanceof RecruitingIntentQuoteError) return { error: error.message };
+            if (error instanceof Error)
+              // The model sees a short instruction; the log keeps which check refused it.
+              getLogger().warn("recruiting.tool.rejected", {
+                runId,
+                tool: name,
+                operation: args.operation,
+                error: error.name,
+                message: error.message,
+                at: error.stack?.split("\n").slice(1, 4).join(" | "),
+              });
+            const retry =
+              "Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.";
+            if (
+              error instanceof RecruitingIntentQuoteError ||
+              error instanceof RecruitingSourceCheckError
+            )
+              return { error: `${error.message} ${retry}` };
             if (error instanceof IsolationError)
               return {
                 error:
-                  "Recruiting role or source is unavailable. Copy each source's artifact reference, url and readAt exactly as the reader returned them, quote the recruiter's own message, and save again now.",
+                  name === "recruiting_candidates"
+                    ? "These saved sources could not be read. Use recruiting_candidates list for the people and continue."
+                    : `A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. ${retry}`,
               };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
@@ -6572,7 +6597,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               error instanceof RecruitingPlaybookValidationError ||
               (error instanceof Error && error.name === "ZodError")
             )
-              return { error: sanitizeConnectorError(error, runSecrets) };
+              return { error: `${sanitizeConnectorError(error, runSecrets)} ${retry}` };
             throw error;
           };
           const replayRole = async () => {
@@ -6617,6 +6642,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return result;
           };
           const assessmentError = (error: unknown) => {
+            if (error instanceof RecruitingSourceCheckError) return { error: error.message };
             if (error instanceof IsolationError)
               return { error: "Recruiting assessment or source is unavailable" };
             if (error instanceof RecruitingConflictError)
@@ -10891,21 +10917,42 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
-          } else if (thread.activeRecruitingRoleId && !messagingChannelRun) {
+          } else if (
+            !messagingChannelRun &&
+            (thread.activeRecruitingRoleId || isRecruitingSpawnKey(bot.spawnKey))
+          ) {
             // Turn-end guard: a recruiting turn must end with a deliverable, a question, a card
-            // or a handoff; otherwise push the next playbook step instead of going quiet.
-            const guard = await guardRecruitingTurnEnd(deps, {
-              run: { ...run, threadId: thread.id, userId: run.userId },
-              roleId: thread.activeRecruitingRoleId,
-              blocks: finalBlocks.length ? finalBlocks : blocks,
-              handedOff,
-              pendingApproval: approvalPausePending,
-              returnsToRequester:
-                Boolean(peerMessage) &&
-                ["request", "question"].includes(peerMessage?.intent ?? "request"),
-              postAssistant: (text) =>
-                publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
-            }).catch((error) => getLogger().error("run.autocontinue guard", error));
+            // or a handoff; otherwise push the next playbook step instead of going quiet. A role
+            // created during this turn counts, so read the binding as it is now.
+            const roleId = (
+              await deps.prisma.thread
+                .findUniqueOrThrow({
+                  where: { id: thread.id },
+                  select: { activeRecruitingRoleId: true },
+                })
+                .catch(() => thread)
+            ).activeRecruitingRoleId;
+            const guarded = { ...run, threadId: thread.id, userId: run.userId };
+            const guard = await (roleId
+              ? guardRecruitingTurnEnd(deps, {
+                  run: guarded,
+                  roleId,
+                  blocks: finalBlocks.length ? finalBlocks : blocks,
+                  handedOff,
+                  pendingApproval: approvalPausePending,
+                  returnsToRequester:
+                    Boolean(peerMessage) &&
+                    ["request", "question"].includes(peerMessage?.intent ?? "request"),
+                  postAssistant: (text) =>
+                    publishMessage(deps, run, "bot", [{ kind: "text", text }], markUnread),
+                })
+              : guardRecruitingRoleCreate(deps, {
+                  run: guarded,
+                  blocks: finalBlocks.length ? finalBlocks : blocks,
+                  handedOff,
+                  pendingApproval: approvalPausePending,
+                })
+            ).catch((error) => getLogger().error("run.autocontinue guard", error));
             recruitingContinued = guard?.action === "continued";
           }
           if (botMessageOutcome) {

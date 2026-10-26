@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   autoContinueMax,
   countTrailingAutoContinues,
+  guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
 } from "./turn-end-guard.js";
 
@@ -507,5 +508,61 @@ describe("guardRecruitingTurnEnd", () => {
         postAssistant: accepted.postAssistant,
       }),
     ).resolves.toMatchObject({ stage: "scale" });
+  });
+});
+
+describe("guardRecruitingRoleCreate", () => {
+  function roleFixture(result: unknown, priorAutoContinues = 0) {
+    const sendUserMessage = vi.fn(async () => ({ messageId: "m-2", seq: 9, runId: "run-2" }));
+    const enqueue = vi.fn(async () => undefined);
+    const recent = Array.from({ length: priorAutoContinues }, (_, i) => ({
+      clientNonce: `autocontinue:run-0:${i + 1}`,
+    }));
+    recent.push({ clientNonce: "send:human" });
+    const deps = {
+      prisma: {
+        message: { findMany: vi.fn(async () => recent) },
+        externalEffect: { findFirst: vi.fn(async () => (result ? { result } : null)) },
+      },
+      events: { sendUserMessage },
+      jobs: { enqueue },
+    } as unknown as Parameters<typeof guardRecruitingRoleCreate>[0];
+    return { deps, sendUserMessage, enqueue };
+  }
+  // The 2026-10-26 03:39 link role: the create was refused and Main ended on an apology.
+  const apology: MessageBlock[] = [
+    { kind: "text", text: "岗位保存功能仍不可用，因此这份岗位尚未建立，也还不能开始找人。" },
+  ];
+  const input = { run, blocks: apology, handedOff: false, pendingApproval: false };
+
+  it("pushes one retry when a refused create left the conversation without a role", async () => {
+    const f = roleFixture({ error: 'Source "jd": locator must be "text" for a file.' });
+    const result = await guardRecruitingRoleCreate(f.deps, input);
+    expect(result).toMatchObject({ action: "continued", runId: "run-2" });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        internal: true,
+        clientNonce: "autocontinue:run-1:1",
+        prompt: expect.stringContaining("recruiting_role create"),
+      }),
+    );
+    expect(f.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("does not push after a saved create, a question, or a push it already made", async () => {
+    const refused = { error: "refused" };
+    expect(await guardRecruitingRoleCreate(roleFixture(null).deps, input)).toMatchObject({
+      action: "ended",
+    });
+    expect(
+      await guardRecruitingRoleCreate(roleFixture({ status: "saved" }).deps, input),
+    ).toMatchObject({ action: "ended" });
+    const asked = { ...input, blocks: [{ kind: "ask", text: "地点？", status: "pending" }] };
+    expect(
+      await guardRecruitingRoleCreate(roleFixture(refused).deps, asked as typeof input),
+    ).toMatchObject({ action: "ended", classification: "question" });
+    const again = roleFixture(refused, 1);
+    expect(await guardRecruitingRoleCreate(again.deps, input)).toMatchObject({ action: "ended" });
+    expect(again.sendUserMessage).not.toHaveBeenCalled();
   });
 });

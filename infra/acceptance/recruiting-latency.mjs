@@ -7,6 +7,7 @@
 // Usage:
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… node infra/acceptance/recruiting-latency.mjs
 //   Options: --jd <file> | --jd-text <text>   role description (default: a built-in test role)
+//            --jd-url <url>                   start the role from a job link, as a recruiter pastes one
 //            --group <id>                     measure an existing role chat instead of starting one
 //            --scale-now                      with --group: send the scale-out request right away
 //            --skip-scale                     stop after the first ten
@@ -35,9 +36,11 @@ const POLL_MS = 2_000;
 const SCALE_TEXT = `这 10 个方向可以，找 ${TARGET} 个类似的人`;
 const DEFAULT_JD =
   "新岗位：仓库运营经理（亚特兰大 Atlanta，现场办公）。要求：5年以上仓储或配送中心运营管理，带过50人以上的小时工团队，熟悉WMS和KPI管理。加分：会中文、电商或第三方物流背景。排除：猎头、学生。";
-const JD = option("--jd")
-  ? fs.readFileSync(option("--jd"), "utf8").trim()
-  : option("--jd-text", DEFAULT_JD);
+const JD = option("--jd-url")
+  ? `新岗位：${option("--jd-url")}`
+  : option("--jd")
+    ? fs.readFileSync(option("--jd"), "utf8").trim()
+    : option("--jd-text", DEFAULT_JD);
 const OUT = option("--out", `latency-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
 // Names a recruiter must never see. Matched case-insensitively on whole words.
 const VENDORS = [
@@ -132,7 +135,9 @@ async function signIn() {
     // First run for a dedicated test account. Signup policy (allowlist, mailbox proof) still applies.
     const created = await auth("sign-up/email", { email, password, name: "Latency test" });
     if (created.status >= 400)
-      fail(`Sign-up failed (${created.status}): ${created.body?.code ?? created.body?.message ?? ""}`);
+      fail(
+        `Sign-up failed (${created.status}): ${created.body?.code ?? created.body?.message ?? ""}`,
+      );
     if (created.body?.token === null)
       fail("Account created; open the verification email, then run again without --signup");
     result = created;
@@ -241,7 +246,12 @@ async function answer(groupId, { message, block }, value, label) {
   const key = `${message.id}:${block.text}`;
   if (handled.has(key)) return;
   handled.add(key);
-  await rpc("threads/answer", { groupId, runId: message.runId, messageId: message.id, answer: value });
+  await rpc("threads/answer", {
+    groupId,
+    runId: message.runId,
+    messageId: message.id,
+    answer: value,
+  });
   report.cards.push({ s: elapsed(), text: block.text.slice(0, 160), answered: label });
   log(`answered “${block.text.slice(0, 60)}” → ${label}`);
 }
@@ -268,7 +278,10 @@ async function handleCards(groupId, phase) {
     }
     if (block.approvalEffectId) {
       const label = block.actions?.find((action) => action.id === "allow")?.label ?? "";
-      if (/confirm requirements|确认要求|确认需求/i.test(label) || /brief|岗位要求/i.test(block.text)) {
+      if (
+        /confirm requirements|确认要求|确认需求/i.test(label) ||
+        /brief|岗位要求/i.test(block.text)
+      ) {
         mark("brief_card_shown");
         await answer(groupId, ask, "allow", label || "allow");
         mark("brief_confirmed");
@@ -280,7 +293,11 @@ async function handleCards(groupId, phase) {
       }
       handled.add(key);
       if (/confirm and send|确认发送/i.test(label)) {
-        report.cards.push({ s: elapsed(), text: block.text.slice(0, 160), answered: "left (send)" });
+        report.cards.push({
+          s: elapsed(),
+          text: block.text.slice(0, 160),
+          answered: "left (send)",
+        });
         log(`send card left unanswered: ${block.text.slice(0, 60)}`);
       } else violation("approval_card", `${label}: ${block.text.slice(0, 100)}`);
       waitingOnUntouched = true;
@@ -295,21 +312,32 @@ async function handleCards(groupId, phase) {
       if (phase !== "intake") {
         // After the first ten the next step is the scale-out message, not a card click.
         handled.add(key);
-        report.cards.push({ s: elapsed(), text: block.text.slice(0, 160), answered: `left (${labels})` });
+        report.cards.push({
+          s: elapsed(),
+          text: block.text.slice(0, 160),
+          answered: `left (${labels})`,
+        });
         waitingOnUntouched = true;
         continue;
       }
       mark("first_question");
-      const brief = block.actions.find((action) => /开始找人|confirm requirements/i.test(action.label));
+      const brief = block.actions.find((action) =>
+        /开始找人|confirm requirements/i.test(action.label),
+      );
       if (brief) {
         mark("brief_card_shown", { title: block.text.slice(0, 40), buttons: labels });
-        const go = brief ?? block.actions.find((action) => CONFIRM_CHOICE.test(action.label)) ?? block.actions[0];
+        const go =
+          brief ??
+          block.actions.find((action) => CONFIRM_CHOICE.test(action.label)) ??
+          block.actions[0];
         await answer(groupId, ask, go.id, go.label);
         mark("brief_confirmed");
         continue;
       }
       const pick =
-        block.actions.find((action) => DEFER_CHOICE.test(action.label) && /材料|文件|document/i.test(block.text)) ??
+        block.actions.find(
+          (action) => DEFER_CHOICE.test(action.label) && /材料|文件|document/i.test(block.text),
+        ) ??
         block.actions.find((action) => NEUTRAL_CHOICE.test(action.label)) ??
         block.actions.find((action) => CONFIRM_CHOICE.test(action.label)) ??
         block.actions[0];
@@ -340,16 +368,22 @@ async function readRound(groupId) {
     approvedAt: round.approvedAt,
     count: keys.length,
     repeats: repeats.length,
-    people: round.candidates.map((c) => [c.name, c.title, c.company, c.location].filter(Boolean).join(" · ")),
+    people: round.candidates.map((c) =>
+      [c.name, c.title, c.company, c.location].filter(Boolean).join(" · "),
+    ),
   });
-  log(`round ${round.round}: ${keys.length} people, ${repeats.length} repeated from earlier rounds`);
+  log(
+    `round ${round.round}: ${keys.length} people, ${repeats.length} repeated from earlier rounds`,
+  );
   if (repeats.length) violation("repeated_people", `round ${round.round}: ${repeats.length}`);
   return round;
 }
 async function readTotal(threadId) {
-  const result = await rpc("recruiting/roleCandidates", { groupId: report.groupId, threadId, limit: 1 }).catch(
-    () => null,
-  );
+  const result = await rpc("recruiting/roleCandidates", {
+    groupId: report.groupId,
+    threadId,
+    limit: 1,
+  }).catch(() => null);
   return result?.total ?? null;
 }
 function namesListedInChat(round) {
@@ -359,6 +393,88 @@ function namesListedInChat(round) {
 }
 
 // --- Run -------------------------------------------------------------------------------------
+// --- Save failures ---------------------------------------------------------------------------
+// Replays the chat's native events and fails the run on any recruiting tool error the agent did not
+// recover from with a later successful call of the same tool, and on any error that reads
+// as an outage. Counts every error class either way, so recovered retries still show up.
+const CHECKED_TOOLS = /^(recruiting_|artifact_read$)/;
+async function readEvents(groupId) {
+  const controller = new AbortController();
+  let idle = setTimeout(() => controller.abort(), 15_000);
+  const events = [];
+  try {
+    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
+      method: "POST",
+      headers: { ...headers(), accept: "text/event-stream" },
+      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // The replay arrives at once; a quiet stream means it has caught up with live events.
+      clearTimeout(idle);
+      idle = setTimeout(() => controller.abort(), 3_000);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          const data = JSON.parse(line.slice(5));
+          events.push(data.json ?? data);
+        } catch {}
+      }
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  } finally {
+    clearTimeout(idle);
+  }
+  return events;
+}
+function errorClass(error) {
+  if (/not an outage|could not be read/.test(error)) return error.split(/[.:]/)[0].slice(0, 80);
+  if (/unavailable/i.test(error)) return "unavailable";
+  if (/Validation failed|expected|Invalid/i.test(error)) return "schema";
+  return error.slice(0, 80);
+}
+async function checkToolErrors(groupId) {
+  const events = await readEvents(groupId);
+  const done = events.filter(
+    (event) =>
+      event.type === "agent.tool.completed" && CHECKED_TOOLS.test(event.payload?.name ?? ""),
+  );
+  const errors = [];
+  done.forEach((event, index) => {
+    const { name, outcome, error = "" } = event.payload;
+    if (outcome !== "error") return;
+    // A retry in the same run or in the follow-up run the server starts both count as recovery.
+    const recovered = done
+      .slice(index + 1)
+      .some((later) => later.payload.name === name && later.payload.outcome !== "error");
+    errors.push({
+      at: event.createdAt,
+      name,
+      class: errorClass(error),
+      recovered,
+      error: error.slice(0, 300),
+    });
+    if (/unavailable/i.test(error))
+      violation("tool_outage_error", `${name}: ${error.slice(0, 120)}`);
+    else if (!recovered) violation("tool_error_unrecovered", `${name}: ${error.slice(0, 120)}`);
+  });
+  const counts = {};
+  for (const item of errors)
+    counts[`${item.name} ${item.class}`] = (counts[`${item.name} ${item.class}`] ?? 0) + 1;
+  report.toolErrors = { calls: done.length, errors: errors.length, counts, items: errors };
+  log(`recruiting tool calls ${done.length}, errors ${errors.length} ${JSON.stringify(counts)}`);
+}
+
 async function main() {
   await signIn();
   // The API does not publish its source revision; the runner passes the released SHA.
@@ -413,7 +529,9 @@ async function main() {
       messages.some(
         (message) =>
           message.role === "user" &&
-          message.blocks.some((block) => block.kind === "text" && /^Confirm recruiting brief/.test(block.text)),
+          message.blocks.some(
+            (block) => block.kind === "text" && /^Confirm recruiting brief/.test(block.text),
+          ),
       )
     )
       mark("brief_confirmed");
@@ -467,8 +585,10 @@ async function main() {
     await sleep(POLL_MS);
   }
 
+  await checkToolErrors(groupId).catch((error) => log(`tool event read failed: ${error.message}`));
   const m = report.milestones;
-  const between = (from, to) => (m[from]?.s != null && m[to]?.s != null ? +(m[to].s - m[from].s).toFixed(1) : null);
+  const between = (from, to) =>
+    m[from]?.s != null && m[to]?.s != null ? +(m[to].s - m[from].s).toFixed(1) : null;
   report.latency = {
     jd_to_first_question_s: between("jd_sent", "first_question"),
     confirm_to_first10_saved_s: between("brief_confirmed", "first10_saved"),

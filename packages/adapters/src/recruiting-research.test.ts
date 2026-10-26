@@ -5,6 +5,7 @@ import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   buildRecruitingResearchRequest,
   classifyRecruitingResearchResult,
+  createRecruitingCandidateReportReader,
   projectRecruitingCandidateReport,
   readRecruitingResearchRequest,
   requireAutumnTaskOwnership,
@@ -1019,4 +1020,56 @@ describe("retained candidate report projection", () => {
       expect(() => projectRecruitingCandidateReport(row)).toThrow();
     },
   );
+});
+
+describe("candidate reports from saved people-search pages", () => {
+  // 2026-10-26 02:42: every sources read of a quick-search person failed, because the reader only
+  // knew research-task pages.
+  it("reads a people-search page's row from its own receipt", async () => {
+    const bytes = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        kind: "people_search",
+        request: { operation: "save_search", expectedRoleRevision: 3 },
+        sources: [{ effectId: "search-1", toolName: "web_search_exa", host: "search.example" }],
+        rows: [
+          {
+            rowIndex: 0,
+            sourceEffectId: "search-1",
+            row: { name: "Ada Park", linkedin_url: "https://www.linkedin.com/in/ada" },
+          },
+          {
+            rowIndex: 1,
+            sourceEffectId: "search-1",
+            row: { name: "Sam Reid", current_title: "Research Scientist" },
+          },
+        ],
+        truncated: false,
+      }),
+    );
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const row = { id: "page-artifact", hash } as never;
+    const read = createRecruitingCandidateReportReader(
+      { prisma: {} as never, artifacts: {} as never },
+      { spaceId: "s", userId: "u", email: "", isDeploymentOwner: false },
+      "role-1",
+      { artifacts: new Map([["page-artifact", { row, bytes }]]) },
+    );
+    const source = {
+      providerTaskId: null,
+      taskId: null,
+      actionId: null,
+      roleRevisionId: "rev-3",
+      effectId: "save-1",
+      rowIndex: 1,
+      artifactRef: { artifactId: "page-artifact", sha256: hash },
+      requestCursor: null,
+      outputId: null,
+      observedAt: "2026-10-26T02:40:37.000Z",
+    };
+    const { row: saved, report } = await read(source);
+    expect(saved).toEqual({ name: "Sam Reid", current_title: "Research Scientist" });
+    expect(report).toBeDefined();
+    await expect(read({ ...source, rowIndex: 5 })).rejects.toThrow();
+  });
 });

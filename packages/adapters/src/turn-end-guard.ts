@@ -263,3 +263,77 @@ export async function guardRecruitingTurnEnd(
     });
   return { action: "continued", runId: sent.runId ?? null, stage, label: step.label, count };
 }
+
+/**
+ * A turn that tried to create the role, was refused and ended without asking anything leaves
+ * no role, so the guard above never runs. Push one retry instead of stopping on an apology.
+ */
+export async function guardRecruitingRoleCreate(
+  deps: Pick<TurnEndGuardDeps, "events" | "jobs"> & {
+    prisma: Pick<PrismaClient, "message" | "externalEffect">;
+  },
+  input: Pick<TurnEndGuardInput, "blocks" | "handedOff" | "pendingApproval"> & {
+    run: TurnEndGuardInput["run"];
+  },
+): Promise<TurnEndGuardResult> {
+  const { run } = input;
+  const classification = classifyTurnEnd(
+    { blocks: input.blocks },
+    { handedOff: input.handedOff, pendingApproval: input.pendingApproval },
+  );
+  if (!GUARDED_TRIGGERS.has(run.trigger) || run.trigger === "bot_message")
+    return { action: "ended", classification: "none" };
+  if (classification === "question" || classification === "card" || classification === "handoff")
+    return { action: "ended", classification };
+  const refused = await deps.prisma.externalEffect.findFirst({
+    where: {
+      runId: run.id,
+      spaceId: run.spaceId,
+      kind: "recruiting_role",
+      status: "completed",
+      request: { path: ["operation"], equals: "create" },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { result: true },
+  });
+  const error = (refused?.result as { error?: unknown } | null)?.error;
+  if (typeof error !== "string") return { action: "ended", classification };
+  const recent = await deps.prisma.message.findMany({
+    where: {
+      threadId: run.threadId,
+      OR: [
+        { role: "user" },
+        { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
+      ],
+    },
+    orderBy: { seq: "desc" },
+    take: 2,
+    select: { clientNonce: true },
+  });
+  // One push per recruiter message.
+  if (countTrailingAutoContinues(recent) > 0) return { action: "ended", classification };
+  getLogger().info("run.autocontinue", { runId: run.id, stage: "intake", reason: "role_refused" });
+  const text = `继续：刚才保存岗位被拒，原因：${error.slice(0, 600)} 这不是故障。按原因改正后立即用 recruiting_role create 重新保存，然后继续下一步。（这是自动继续，不是招聘者的话，引用时用招聘者自己的消息。）`;
+  const sent = await deps.events.sendUserMessage({
+    spaceId: run.spaceId,
+    threadId: run.threadId,
+    botId: run.botId,
+    userId: run.userId,
+    blocks: [{ kind: "text", text }],
+    prompt: text,
+    trigger: "follow_up",
+    internal: true,
+    clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:1`,
+  });
+  if (sent.runId)
+    await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
+      getLogger().error("run.autocontinue enqueue", error);
+    });
+  return {
+    action: "continued",
+    runId: sent.runId ?? null,
+    stage: "intake",
+    label: "保存岗位",
+    count: 1,
+  };
+}

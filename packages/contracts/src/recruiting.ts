@@ -210,14 +210,19 @@ const SearchFilterEdit = z.strictObject({
   mode: z.enum(["include", "exclude", "prefer"]),
 });
 const SearchFilters = z
-  .array(SearchFilterEdit.extend({ origin: BriefOrigin, sourceRefIds: z.array(RecruitingId) }))
+  .array(
+    SearchFilterEdit.extend({
+      origin: BriefOrigin,
+      sourceRefIds: z.array(RecruitingId).default([]),
+    }),
+  )
   .refine(
     (filters) => new Set(filters.map((filter) => filter.id)).size === filters.length,
     "Search filter IDs must be unique",
   );
 
 export const RecruitingBriefDraftSchema = z.strictObject({
-  searchFilters: SearchFilters,
+  searchFilters: SearchFilters.default([]),
   fields: z.array(
     z.strictObject({
       key: Text,
@@ -230,19 +235,22 @@ export const RecruitingBriefDraftSchema = z.strictObject({
         .describe("True when this field changes who is searched for."),
       sourceRefIds: z
         .array(RecruitingId)
+        .default([])
         .describe(
-          "Known non-inferred fields require sourceRefIds naming exact read references with quotes. user_instruction must cite the actual human-message reference, using native current-turn messageId, readAt and text-block metadata; assign its local source ID before creating the role.",
+          "Leave empty: the server cites the recruiter's message that holds a user_instruction value and the role's material for a JD fact. Name a source ID only to cite a different reference.",
         ),
     }),
   ),
-  questions: z.array(
-    z.strictObject({
-      id: RecruitingId,
-      fieldKey: Text,
-      question: Text,
-      answeredBySourceRefId: RecruitingId.nullable(),
-    }),
-  ),
+  questions: z
+    .array(
+      z.strictObject({
+        id: RecruitingId,
+        fieldKey: Text,
+        question: Text,
+        answeredBySourceRefId: RecruitingId.nullable(),
+      }),
+    )
+    .default([]),
   rules: z
     .array(
       z.strictObject({
@@ -252,8 +260,9 @@ export const RecruitingBriefDraftSchema = z.strictObject({
         sourceRefIds: z.array(RecruitingId),
       }),
     )
+    .default([])
     .describe(
-      "One rule for every criterion, using its exact criterionId, origin, effect and sourceRefIds. An empty rules array is valid only when criteria is empty; inferred rules are flag-only and require a preferred criterion.",
+      "Leave empty: each criterion gets the rule its priority implies (hard rejects, preferred flags). List a rule only to differ from that; inferred rules are flag-only and require a preferred criterion.",
     ),
 });
 export type RecruitingBriefDraft = z.infer<typeof RecruitingBriefDraftSchema>;

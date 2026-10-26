@@ -66,9 +66,20 @@ import {
   recruitingResearchPollDelay,
 } from "./recruiting-research-poll.js";
 
+const BRIEF_KEYS = ["fields", "searchFilters", "questions", "rules"] as const;
+const ROLE_KEYS = [
+  "title",
+  "sourceRefs",
+  "criteria",
+  "preferences",
+  "definitionQuestions",
+] as const;
+
 /**
- * Repairs two harmless slips before validation: a read carries only its operation, and a read
- * human-message reference without readAt gets the call time (message reads have no receipt time).
+ * Repairs harmless slips before the schema check, so they never cost a rejected call and a
+ * regenerated brief: a read carries only its operation; a read human-message reference without
+ * readAt gets the call time (message reads have no receipt time); brief lists written next to
+ * the brief move into it, and role lists written inside it move out.
  */
 export function normalizeRecruitingRoleArgs(
   args: Record<string, unknown>,
@@ -86,7 +97,25 @@ export function normalizeRecruitingRoleArgs(
       ? { ...record, readAt: now }
       : record;
   };
-  return visit(args) as Record<string, unknown>;
+  const visited = visit(args) as Record<string, unknown>;
+  if (!["create", "update", "revise"].includes(String(visited.operation))) return visited;
+  const object = (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === "object" && !Array.isArray(value);
+  const outside = BRIEF_KEYS.filter((key) => Object.hasOwn(visited, key));
+  if (!object(visited.brief) && !outside.length) return visited;
+  const brief: Record<string, unknown> = object(visited.brief) ? { ...visited.brief } : {};
+  const result: Record<string, unknown> = { ...visited };
+  for (const key of outside) {
+    if (!Object.hasOwn(brief, key)) brief[key] = result[key];
+    delete result[key];
+  }
+  for (const key of ROLE_KEYS) {
+    if (!Object.hasOwn(brief, key)) continue;
+    if (!Object.hasOwn(result, key)) result[key] = brief[key];
+    delete brief[key];
+  }
+  delete brief.confirmation;
+  return { ...result, brief };
 }
 
 export async function executeRecruitingRoleTool(

@@ -256,6 +256,19 @@ export class RecruitingIntentQuoteError extends IsolationError {
   }
 }
 
+/**
+ * A source reference that is the actor's own but does not check out. Still an IsolationError
+ * for every caller; its message says what to change so the save can be repeated at once.
+ */
+export class RecruitingSourceCheckError extends IsolationError {
+  constructor(sourceRefId: string, problem: string) {
+    super(
+      `Source ${JSON.stringify(sourceRefId)}: ${problem} This is a fixable check, not an outage.`,
+    );
+    this.name = "RecruitingSourceCheckError";
+  }
+}
+
 export class RecruitingConflictError extends Error {
   constructor(message = "Recruiting revision changed") {
     super(message);
@@ -397,8 +410,12 @@ async function validateArtifact(
       where: { id: ref.artifactId, spaceId: actor.spaceId, userId: actor.userId },
     }),
   );
-  if (artifact.hash !== ref.sha256 || (!artifact.groupId && !artifact.botId))
-    throw new IsolationError();
+  if (!artifact.groupId && !artifact.botId) throw new IsolationError();
+  if (artifact.hash !== ref.sha256)
+    throw new RecruitingSourceCheckError(
+      ref.artifactId,
+      "sha256 is not this file's fingerprint; cite the file as the reader returned it.",
+    );
   const run = artifact.runId
     ? artifact.runId === context?.run?.id
       ? scoped(actor, context.run)
@@ -1775,6 +1792,8 @@ export type RecruitingRoleToolResult = {
   workspace: RoleSnapshot | null;
   source: RecruitingSourceRef | null;
   changed: boolean;
+  /** A new role was saved without its brief, which failed this check; fix it with an update. */
+  briefError?: string;
 };
 
 async function lockLiveRecruitingRun(tx: Tx, actor: Actor, runId: string, requireRunning = true) {
@@ -2972,6 +2991,7 @@ export async function executeRecruitingRoleMutation(
         throw new RecruitingConflictError();
     }
     let result: RecruitingRoleToolResult;
+    let briefError: string | undefined;
     if (input.intent.basis === "inferred")
       result = {
         status: "needs_clarification",
@@ -3005,18 +3025,34 @@ export async function executeRecruitingRoleMutation(
         definition.sourceRefs.push(
           ...(await citedHumanMessageSources(tx, run.threadId, definition)),
         );
+        const create = async (brief: typeof definition.brief) =>
+          createRoleInTransaction(
+            tx,
+            actor,
+            CreateRecruitingRoleInput.parse({
+              ...definition,
+              brief,
+              expectedRevision: 0,
+              sourceThreadId: run.threadId,
+            }),
+            artifacts,
+          );
+        // A new role is the anchor every later step needs. When only its brief fails a check
+        // (they run before any write), save the role without it and return what to fix.
         workspace =
           definitionInput.operation === "create"
-            ? await createRoleInTransaction(
-                tx,
-                actor,
-                CreateRecruitingRoleInput.parse({
-                  ...definition,
-                  expectedRevision: 0,
-                  sourceThreadId: run.threadId,
-                }),
-                artifacts,
-              )
+            ? await create(definition.brief).catch((error: unknown) => {
+                if (
+                  !definition.brief ||
+                  !(
+                    error instanceof RecruitingPlaybookValidationError ||
+                    (error instanceof Error && error.name === "ZodError")
+                  )
+                )
+                  throw error;
+                briefError = error.message;
+                return create(null);
+              })
             : await reviseRoleInTransaction(
                 tx,
                 actor,
@@ -3036,6 +3072,7 @@ export async function executeRecruitingRoleMutation(
         source: humanSource,
         changed:
           input.operation !== "bind" || current?.role.id !== (workspace?.role.id ?? undefined),
+        ...(briefError ? { briefError } : {}),
       };
     }
     const completed = await tx.externalEffect.updateMany({
@@ -3868,7 +3905,10 @@ async function validateReadSources(
       if (!message) throw new IsolationError();
       if (source.readState !== "read" || source.quote === undefined) continue;
       if (!isNativeHumanMessage(message) || source.kind === "provider_report")
-        throw new IsolationError();
+        throw new RecruitingSourceCheckError(
+          source.id,
+          "only a message the recruiter wrote can be cited, as original_material.",
+        );
       const blocks = MessageBlockSchema.array().parse(message.blocks);
       const locator = /^blocks\[(0|[1-9]\d*)\]\.text$/.exec(source.anchor.locator);
       const blockIndex =
@@ -3879,7 +3919,10 @@ async function validateReadSources(
             : -1;
       const block = blocks[blockIndex];
       if (block?.kind !== "text" || (selection && selection.kind !== "message_text"))
-        throw new IsolationError();
+        throw new RecruitingSourceCheckError(
+          source.id,
+          'locator must name a text block of that message, such as "blocks[0].text".',
+        );
       const start = selection?.start ?? block.text.indexOf(source.quote);
       if (start < 0) throw new RecruitingSourceValidationError(source.id, source.anchor.locator);
       assessmentSelection(
@@ -3896,7 +3939,11 @@ async function validateReadSources(
         });
         rows.set(artifact.id, artifact);
       }
-      if (artifact.hash !== source.anchor.artifact.sha256) throw new IsolationError();
+      if (artifact.hash !== source.anchor.artifact.sha256)
+        throw new RecruitingSourceCheckError(
+          source.id,
+          "sha256 is not this file's fingerprint; cite the file as the reader returned it.",
+        );
       if (source.readState !== "read" || source.quote === undefined) continue;
       let proof = provenance.get(artifact.id);
       if (!proof) {
@@ -3943,12 +3990,20 @@ async function validateReadSources(
         provenance.set(artifact.id, proof);
       }
       if (
-        (proof.providerArtifact && source.kind !== "provider_report") ||
-        (!proof.providerArtifact && proof.readReceipt && source.kind !== "original_material") ||
-        (!proof.providerArtifact &&
-          (source.kind === "provider_report" || (artifact.runId !== null && !proof.readReceipt)))
+        proof.providerArtifact
+          ? source.kind !== "provider_report"
+          : source.kind === "provider_report" ||
+            (proof.readReceipt !== null && source.kind !== "original_material")
       )
-        throw new IsolationError();
+        throw new RecruitingSourceCheckError(
+          source.id,
+          `kind must be ${proof.providerArtifact ? "provider_report for a research result" : "original_material for a page or file you read"}.`,
+        );
+      if (!proof.providerArtifact && artifact.runId !== null && !proof.readReceipt)
+        throw new RecruitingSourceCheckError(
+          source.id,
+          "this file has no read receipt; read the page with web_fetch and cite what it returned, or cite the recruiter's message.",
+        );
       if (proof.readReceipt) {
         if (!proof.payload) {
           const origin = await requireRun(tx, actor, artifact.runId!);
@@ -3962,7 +4017,10 @@ async function validateReadSources(
           proof.payload = payload;
         }
         if (source.url !== proof.payload.url || source.readAt !== proof.payload.readAt)
-          throw new IsolationError();
+          throw new RecruitingSourceCheckError(
+            source.id,
+            `url and readAt must be the reader's: ${JSON.stringify(proof.payload.url)} and ${JSON.stringify(proof.payload.readAt)}.`,
+          );
       }
       const bytes = artifacts.get(artifact.id);
       if (
@@ -3973,7 +4031,7 @@ async function validateReadSources(
         throw new IsolationError();
       // ponytail: role references attest only extracted text; other fields need typed selections.
       if (selection?.kind === "message_text" || (!selection && source.anchor.locator !== "text"))
-        throw new IsolationError();
+        throw new RecruitingSourceCheckError(source.id, 'locator must be "text" for a file.');
       const json = artifact.mimeType === "application/json" || artifact.mimeType.endsWith("+json");
       const pdf = artifact.mimeType === "application/pdf";
       const jsonPath =
@@ -3983,7 +4041,10 @@ async function validateReadSources(
             ? ["text"]
             : undefined;
       if (jsonPath ? !json : (!artifact.mimeType.startsWith("text/") && !pdf) || json)
-        throw new IsolationError();
+        throw new RecruitingSourceCheckError(
+          source.id,
+          "this file type has no quotable text; quote the page text or the recruiter's message.",
+        );
       if (pdf && !pdfTexts.has(artifact.hash)) {
         try {
           pdfTexts.set(artifact.hash, await extractPdfText(bytes));
@@ -4231,45 +4292,84 @@ export type RecruitingResearchArtifactInput = {
   clientNonce: string;
 };
 
+type LooseRecord = Record<string, unknown>;
+const looseRecord = (value: unknown): value is LooseRecord =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+const looseArray = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+
 /**
- * A web page reference carries the url and readAt of its native read receipt. Copy them from the
- * receipt so a reworded url or a reformatted time never fails a role save.
+ * Fill a role save from the server's own records before it is checked, so a value the model
+ * copied imperfectly never rejects the save. Ownership is unchanged: every artifact, message and
+ * role read here is scoped to the actor, and the save still runs every isolation check.
+ * - A file reference takes its fingerprint from the file row and its url and read time from the
+ *   native read receipt; a role reference without a selection reads the extracted text.
+ * - An update or revise acts on the conversation's current role.
+ * - A brief that cites a source id the save does not define cites the recruiter's message that
+ *   holds that value (else their latest message) for their own words, or the role's only
+ *   material for JD facts.
+ * - A criterion with no brief rule gets the rule its priority implies.
  */
-export async function fillRecruitingMaterialReceipts(
+export async function fillRecruitingRoleArgs(
   prisma: PrismaClient,
   actor: Actor,
-  args: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
+  context: { threadId: string },
+  args: LooseRecord,
+): Promise<LooseRecord> {
+  if (args.operation !== "create" && args.operation !== "update" && args.operation !== "revise")
+    return args;
   const ids = new Set<string>();
   const artifactOf = (value: unknown) => {
-    const anchor = (value as { anchor?: { kind?: unknown; artifact?: { artifactId?: unknown } } })
-      ?.anchor;
-    return anchor?.kind === "artifact" && typeof anchor.artifact?.artifactId === "string"
+    const anchor = looseRecord(value) ? value.anchor : undefined;
+    return looseRecord(anchor) &&
+      anchor.kind === "artifact" &&
+      looseRecord(anchor.artifact) &&
+      typeof anchor.artifact.artifactId === "string"
       ? anchor.artifact.artifactId
       : null;
   };
   const collect = (value: unknown): void => {
     if (Array.isArray(value)) value.forEach(collect);
-    else if (value && typeof value === "object") {
+    else if (looseRecord(value)) {
       const id = artifactOf(value);
       if (id) ids.add(id);
       Object.values(value).forEach(collect);
     }
   };
   collect(args);
-  if (!ids.size) return args;
-  const events = await prisma.event.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      type: "recruiting.material.read",
-      OR: [...ids].map((id) => ({ payload: { path: ["artifact", "artifactId"], equals: id } })),
-    },
-    select: { payload: true },
-  });
+  const [thread, files, events] = await Promise.all([
+    prisma.thread
+      .findUniqueOrThrow({
+        where: { id: context.threadId },
+        select: { spaceId: true, userId: true, activeRecruitingRoleId: true },
+      })
+      .then((row) => (row.spaceId === actor.spaceId && row.userId === actor.userId ? row : null)),
+    ids.size
+      ? prisma.artifact.findMany({
+          where: { id: { in: [...ids] }, spaceId: actor.spaceId, userId: actor.userId },
+          select: { id: true, hash: true },
+        })
+      : [],
+    ids.size
+      ? prisma.event.findMany({
+          where: {
+            spaceId: actor.spaceId,
+            type: "recruiting.material.read",
+            OR: [...ids].map((id) => ({
+              payload: { path: ["artifact", "artifactId"], equals: id },
+            })),
+          },
+          select: { payload: true },
+        })
+      : [],
+  ]);
+  const hashes = new Map(files.map((file) => [file.id, file.hash]));
   const receipts = new Map<string, { url: string; readAt: string }>();
   for (const event of events) {
     const payload = RecruitingMaterialReadPayloadSchema.safeParse(event.payload);
-    if (payload.success)
+    if (
+      payload.success &&
+      hashes.get(payload.data.artifact.artifactId) === payload.data.artifact.sha256
+    )
       receipts.set(payload.data.artifact.artifactId, {
         url: payload.data.url,
         readAt: payload.data.readAt,
@@ -4277,15 +4377,164 @@ export async function fillRecruitingMaterialReceipts(
   }
   const fill = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(fill);
-    if (!value || typeof value !== "object") return value;
+    if (!looseRecord(value)) return value;
     const record = Object.fromEntries(
       Object.entries(value).map(([key, item]) => [key, fill(item)]),
     );
     const id = artifactOf(value);
-    const receipt = id ? receipts.get(id) : undefined;
-    return receipt && record.kind === "original_material" ? { ...record, ...receipt } : record;
+    const hash = id ? hashes.get(id) : undefined;
+    if (!id || !hash || !looseRecord(record.anchor)) return record;
+    const anchor = record.anchor as LooseRecord;
+    const filled: LooseRecord = {
+      ...record,
+      anchor: {
+        ...anchor,
+        artifact: { ...(anchor.artifact as LooseRecord), sha256: hash },
+        ...(record.selection === undefined ? { locator: "text" } : {}),
+      },
+    };
+    const receipt = receipts.get(id);
+    return receipt && record.kind === "original_material" ? { ...filled, ...receipt } : filled;
   };
-  return fill(args) as Record<string, unknown>;
+  const filled = fill(args) as LooseRecord;
+  if (
+    (filled.operation === "update" || filled.operation === "revise") &&
+    thread?.activeRecruitingRoleId
+  )
+    filled.roleId = thread.activeRecruitingRoleId;
+  if (!looseRecord(filled.brief)) return filled;
+  // Brief citations and rules resolve against the sources this save (and, for an update, the
+  // current revision) defines.
+  const saved =
+    filled.operation === "update" && thread?.activeRecruitingRoleId
+      ? await prisma.recruitingRole
+          .findFirst({
+            where: {
+              id: thread.activeRecruitingRoleId,
+              spaceId: actor.spaceId,
+              userId: actor.userId,
+            },
+            select: { currentRevisionId: true },
+          })
+          .then((role) =>
+            role
+              ? prisma.recruitingRoleRevision.findUnique({
+                  where: { id: role.currentRevisionId },
+                  select: { sourceRefs: true, criteria: true },
+                })
+              : null,
+          )
+      : null;
+  const criteria = [
+    ...looseArray(filled.criteria),
+    ...(looseRecord(filled.criteria) ? looseArray(filled.criteria.upsert) : []),
+    ...looseArray(saved?.criteria),
+  ].filter(looseRecord);
+  const sources = [
+    ...looseArray(filled.sourceRefs),
+    ...criteria.flatMap((criterion) => looseArray(criterion.sourceRefs)),
+    ...looseArray(saved?.sourceRefs),
+  ].filter(looseRecord);
+  const known = new Set(sources.map((source) => source.id));
+  const material = sources.filter(
+    (source) =>
+      source.kind === "original_material" &&
+      looseRecord(source.anchor) &&
+      source.anchor.kind === "artifact" &&
+      typeof source.quote === "string",
+  );
+  let humans: { id: string; text: string }[] | undefined;
+  const humanMessages = async () => {
+    humans ??= (
+      await prisma.message.findMany({
+        where: { threadId: context.threadId, role: "user", botId: null },
+        include: humanMessageInclude,
+        orderBy: { seq: "desc" },
+        take: 50,
+      })
+    )
+      .filter(isNativeHumanMessage)
+      .map((message) => ({
+        id: message.id,
+        text: (message.blocks as { kind: string; text?: string }[])
+          .flatMap((block) => (block.kind === "text" && block.text ? [block.text] : []))
+          .join("\n"),
+      }));
+    return humans;
+  };
+  const resolve = async (id: unknown, origin: unknown, value: unknown) => {
+    if (typeof id !== "string" || known.has(id) || /^human-message:.+/.test(id)) return id;
+    const fromMaterial = origin === "jd" || origin === "hm" || !/^human/i.test(id);
+    if (origin !== "user_instruction" && fromMaterial)
+      return material.length === 1 ? material[0]!.id : id;
+    const messages = await humanMessages();
+    const text = typeof value === "string" ? value.trim() : "";
+    const holder = (text && messages.find((message) => message.text.includes(text))) || messages[0];
+    return holder ? `human-message:${holder.id}` : id;
+  };
+  const brief = { ...filled.brief } as LooseRecord;
+  for (const key of ["fields", "searchFilters", "rules"] as const) {
+    if (!Array.isArray(brief[key])) continue;
+    brief[key] = await Promise.all(
+      (brief[key] as unknown[]).map(async (item) => {
+        if (!looseRecord(item)) return item;
+        const value = item.value ?? item.statement;
+        const given = looseArray(item.sourceRefIds);
+        // A sourced fact without a citation cites what holds it; "human" and "jd" are placeholders
+        // that resolve() maps to the recruiter's message or the role's material.
+        const wanted =
+          given.length || item.origin === "inferred" || item.state === "missing"
+            ? given
+            : [item.origin === "user_instruction" ? "human" : "jd"];
+        const refs = await Promise.all(wanted.map((ref) => resolve(ref, item.origin, value)));
+        return {
+          ...item,
+          sourceRefIds: [...new Set(refs)].filter(
+            (ref) =>
+              given.includes(ref) ||
+              known.has(ref as string) ||
+              /^human-message:/.test(String(ref)),
+          ),
+        };
+      }),
+    );
+  }
+  if (Array.isArray(brief.questions))
+    brief.questions = await Promise.all(
+      brief.questions.map(async (question) =>
+        looseRecord(question) && typeof question.answeredBySourceRefId === "string"
+          ? {
+              ...question,
+              answeredBySourceRefId: await resolve(
+                question.answeredBySourceRefId,
+                "user_instruction",
+                undefined,
+              ),
+            }
+          : question,
+      ),
+    );
+  const rules = Array.isArray(brief.rules) ? brief.rules : [];
+  brief.rules = rules;
+  const ruled = new Set(rules.flatMap((rule) => (looseRecord(rule) ? [rule.criterionId] : [])));
+  const removed = new Set(looseRecord(filled.criteria) ? looseArray(filled.criteria.remove) : []);
+  for (const criterion of criteria) {
+    if (ruled.has(criterion.id) || removed.has(criterion.id)) continue;
+    const cited = looseArray(criterion.sourceRefs).find(
+      (source) => looseRecord(source) && typeof source.quote === "string",
+    ) as LooseRecord | undefined;
+    const source = cited ?? material[0];
+    if (typeof source?.id !== "string") continue;
+    ruled.add(criterion.id);
+    rules.push({
+      criterionId: criterion.id,
+      origin:
+        looseRecord(source.anchor) && source.anchor.kind === "message" ? "user_instruction" : "jd",
+      effect: criterion.priority === "hard" ? "reject" : "flag",
+      sourceRefIds: [source.id],
+    });
+  }
+  return { ...filled, brief };
 }
 
 /** Called only by the successful native reader, before returning source references to the model. */

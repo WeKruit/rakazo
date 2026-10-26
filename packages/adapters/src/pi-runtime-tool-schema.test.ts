@@ -319,9 +319,8 @@ describe("jsonSchemaParameters", () => {
     for (const guidance of [
       "One local ID identifies one exact full reference across the role and all criteria",
       "Full source reference objects, never source ID strings",
-      "Known non-inferred fields require sourceRefIds",
-      "user_instruction must cite the actual human-message reference",
-      "One rule for every criterion",
+      "the server cites the recruiter's message that holds a user_instruction value",
+      "each criterion gets the rule its priority implies",
     ])
       expect(JSON.stringify(wire)).toContain(guidance);
     expect(tool.description).toContain("Different quotes require different source IDs");

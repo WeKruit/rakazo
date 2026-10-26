@@ -109,12 +109,12 @@ export async function artifactReadFromTool(
     return { artifact: metadata, error: "This artifact format does not support text reading." };
   if (csv && mime !== "text/csv")
     return { artifact: metadata, error: "csv requires a text/csv artifact." };
+  // A JSON path on a file that is not JSON reads its text instead of costing a failed call.
+  const path = mime === "application/json" ? jsonPath : undefined;
   let text: string;
-  if (jsonPath !== undefined) {
-    if (mime !== "application/json")
-      return { artifact: metadata, error: "JSON string selection requires a JSON artifact." };
+  if (path !== undefined) {
     try {
-      text = readRecruitingJsonString(bytes, jsonPath);
+      text = readRecruitingJsonString(bytes, path);
     } catch {
       return { artifact: metadata, error: "Artifact path does not select a valid JSON string." };
     }
@@ -138,7 +138,7 @@ export async function artifactReadFromTool(
   const end = Math.min(offset + limit, points.length);
   return {
     artifact: metadata,
-    ...(jsonPath === undefined ? {} : { jsonPath }),
+    ...(path === undefined ? {} : { jsonPath: path }),
     text: points.slice(offset, end).join(""),
     offset,
     endOffset: end,
