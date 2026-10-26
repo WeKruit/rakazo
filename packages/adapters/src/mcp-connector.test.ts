@@ -2402,6 +2402,31 @@ describe("MCP connector session cache", () => {
     await connector.close();
   });
 
+  it("retries a remembered discovery failure on a refresh and serves runs from it", async () => {
+    const server = { failNext: true, initializations: 0 };
+    vi.stubGlobal("fetch", mcpFetch(server));
+    const prisma = { botMcpServer: { findMany: vi.fn().mockResolvedValue([ASSIGNMENT]) } };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    };
+
+    expect(await connector.discoverTools(context as never)).toEqual([]);
+    server.failNext = false;
+    // A run inside the failure TTL skips the server; the refresh lists it again.
+    expect(await connector.discoverTools(context as never)).toEqual([]);
+    const refreshed = await connector.discoverTools({
+      ...context,
+      operationId: DISCOVERY_REFRESH_OPERATION,
+    } as never);
+    expect(refreshed.length).toBeGreaterThan(0);
+    expect(await connector.discoverTools(context as never)).toEqual(refreshed);
+    await connector.close();
+  });
+
   it("leaves no discovery event when the failure happens outside a run", async () => {
     vi.stubGlobal("fetch", mcpFetch({ failNext: true, initializations: 0 }));
     const append = vi.fn().mockResolvedValue(undefined);
