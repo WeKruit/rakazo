@@ -1138,6 +1138,23 @@ describe("crews set up before the recruiting preset", () => {
     expect(f.presets).toHaveLength(0);
   });
 
+  it("does not wait for a turn paused on a question or approval card", async () => {
+    const f = legacy();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const main = f.bots.find((bot) => bot.id === "old-main")!;
+    main.instructions = "Older defaults";
+    f.presets[0]!.digest = "older catalog";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(f.tx.run.count).toHaveBeenCalledWith({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        status: { in: ["queued", "leased", "running"] },
+      },
+    });
+  });
+
   it("does not adopt a crew without the platform research service", async () => {
     const f = legacy();
     f.assignments.splice(0);
