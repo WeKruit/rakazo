@@ -339,7 +339,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P19. Keyless people-search fallback and its rate limit
 
-- **Owner:** dot (claimed 2026-10-26; local implementation and offline verification)
+- **Owner:** dot (implemented and verified offline 2026-10-26)
 - **Today:** the people search uses the deployment key when one is set and falls back to the
   keyless channel when it is not (`platformMcpCredential` in `mcp-connector.ts`). During the
   search-size measurement the keyless channel returned 429 "free MCP rate limit" after about 150
@@ -356,6 +356,30 @@ M one to two days. Risk covers quality, cost and the project rules.
 - **Expected savings:** none on the happy path. It prevents stalled or short scale-outs.
 - **Effort:** S.
 - **Measure:** count of 429 responses from people search in the logs. Rows per scale-out wave.
+
+- **Implemented:** a keyless credential load emits `people_search.keyless` once per process;
+  keyed connections do not warn. Only the built-in read-search tools retry typed HTTP 429 or an
+  explicitly failed rate-limit tool result. Backoff is 1 s then 2 s, at most three calls. Each
+  retry rechecks the current assignment and credentials; cancellation interrupts the wait.
+  Exhaustion returns a rate-limit error instead of empty results. Other providers, mutation tools,
+  non-429 failures and successful result text are not retried. Existing uncertain-outcome semantics
+  remain for unrelated failures. Logs contain no query or credential material.
+- **Reproducible local measurement:** fake-clock transport tests observed search calls at
+  0 / 1,000 / 3,000 ms for two 429s followed by success. Exhaustion made exactly three calls;
+  cancellation or revoked assignment during the first wait prevented a second dispatch.
+  These are deterministic offline results, not live API latency or throughput measurements.
+- **Validation (all from the repository root):**
+  - `node_modules/.bin/vitest run packages/adapters/src/mcp-connector.test.ts packages/adapters/src/mcp-people-search-rate-limit.test.ts packages/adapters/src/mcp-transport.test.ts packages/adapters/src/mcp-crm-scope.test.ts`:
+    exit 0, 310 tests across four files passed, including 19 new rate-limit cases.
+  - `node_modules/.bin/tsc --noEmit -p packages/adapters/tsconfig.json`: exit 0.
+  - `node_modules/.bin/biome check packages/adapters/src/mcp-connector.ts packages/adapters/src/mcp-people-search-rate-limit.test.ts`:
+    exit 0, both files clean. `git diff --check`: exit 0.
+  - One intermediate regression run failed (exit 1) because the test omitted the existing safe-fetch
+    network-error prefix. Corrected the expected existing behavior; the final suite above passed.
+- **Limitations:** the installed transport SDK does not preserve `Retry-After`; the bounded fixed
+  delays may be shorter than the provider's rate-limit window, in which case the caller receives
+  the explicit error. No live search, paid lookup, email, CRM sync, deployment or new resource was
+  used. No happy-path speedup claimed; production recovery still requires authorized future testing.
 
 ## 3. Ranked by expected effect on "last answer → ten"
 
