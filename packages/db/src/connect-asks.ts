@@ -11,7 +11,7 @@ export async function loadConnectServer(
 ) {
   const server = await db.mcpServer.findFirst({
     where: { id: serverId, spaceId: scope.spaceId, userId: scope.userId, enabled: true },
-    select: { id: true, name: true, secretId: true, transport: true },
+    select: { id: true, name: true, slug: true, secretId: true, transport: true },
   });
   if (!server) return null;
   const assignment = await db.botMcpServer.findFirst({
@@ -29,6 +29,7 @@ export async function loadConnectServer(
   return {
     id: server.id,
     name: server.name,
+    slug: server.slug,
     credential,
     assigned,
     connected: credential && assigned,
