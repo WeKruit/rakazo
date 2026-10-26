@@ -17,6 +17,8 @@ const fakeAgentState = vi.hoisted(() => ({
   lastSubagentResult: undefined as unknown,
   failPrompt: false,
   abortCalls: 0,
+  emitAssistantMessage: false,
+  levelAfterFirstMessage: undefined as string | undefined,
 }));
 
 type FakeAgentTool = {
@@ -27,8 +29,12 @@ type FakeAgentTool = {
 vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   Agent: class {
-    state = { errorMessage: undefined, messages: [] };
+    state: { errorMessage: undefined; messages: never[]; thinkingLevel?: string } = {
+      errorMessage: undefined,
+      messages: [],
+    };
     private readonly tools: FakeAgentTool[];
+    private listeners: Array<(event: unknown) => unknown> = [];
 
     constructor(options: {
       sessionId?: string;
@@ -40,15 +46,24 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
       };
     }) {
       this.tools = options.initialState.tools;
+      this.state.thinkingLevel = options.initialState.thinkingLevel;
       fakeAgentState.transforms.push(options.transformContext);
       fakeAgentState.sessionIds.push(options.sessionId);
       fakeAgentState.thinkingLevels.push(options.initialState.thinkingLevel);
       fakeAgentState.models.push(options.initialState.model);
     }
 
-    subscribe(_listener: unknown) {}
+    subscribe(listener: (event: unknown) => unknown) {
+      this.listeners.push(listener);
+    }
     async prompt() {
       if (fakeAgentState.failPrompt) throw new Error("prompt failed");
+      if (fakeAgentState.emitAssistantMessage) {
+        const message = { role: "assistant", content: [], timestamp: Date.now() };
+        for (const listener of this.listeners) await listener({ type: "message_end", message });
+        fakeAgentState.levelAfterFirstMessage = this.state.thinkingLevel;
+        return;
+      }
       const runSubagent = this.tools.find((tool) => tool.name === "run_subagent");
       fakeAgentState.lastSubagentResult = await runSubagent?.execute(
         "subagent-call",
@@ -183,6 +198,8 @@ describe("Pi agent thinking level", () => {
     fakeAgentState.subagentArgs = { name: "helper", task: "help" };
     fakeAgentState.lastSubagentResult = undefined;
     fakeAgentState.failPrompt = false;
+    fakeAgentState.emitAssistantMessage = false;
+    fakeAgentState.levelAfterFirstMessage = undefined;
     vi.unstubAllEnvs();
   });
 
@@ -192,6 +209,35 @@ describe("Pi agent thinking level", () => {
     const levels = await runWithModel("reasoning-model");
     expect(levels).toEqual(["medium", "medium"]);
     expect(levels.every((level) => level !== "off")).toBe(true);
+  });
+
+  it("thinks low for the first step only when asked, then at the run's level", async () => {
+    fakeAgentState.emitAssistantMessage = true;
+    const runtime = new PiAgentRuntime();
+    for await (const _event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "hello",
+        instructions: "",
+        history: [],
+        tools: builtinAgentTools,
+        model: { provider: "test", id: "reasoning-model", firstStepThinkingLevel: "low" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      {
+        operationId: "1",
+        traceId: "1",
+        spaceId: "w",
+        userId: "u",
+        signal: new AbortController().signal,
+      },
+    )) {
+      // Exhaust the runtime event stream so the run completes.
+    }
+    expect(fakeAgentState.thinkingLevels[0]).toBe("low");
+    expect(fakeAgentState.levelAfterFirstMessage).toBe("medium");
   });
 
   it("uses a stable provider session for each bot thread", async () => {

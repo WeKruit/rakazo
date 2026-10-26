@@ -452,6 +452,8 @@ export interface AgentRunModel {
   contextWindow?: number;
   /** Preferred thinking effort for reasoning models; clamped to the model’s supported set. */
   thinkingLevel?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null;
+  /** Thinking effort for the run's first model step only; later steps use thinkingLevel. */
+  firstStepThinkingLevel?: "low";
   /** In-process OAuth credential from the encrypted store for this run. */
   oauth?: {
     credential: AgentModelOAuthCredential;

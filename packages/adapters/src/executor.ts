@@ -663,7 +663,7 @@ export function shortQuestion(question: string, max = 240): string {
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
-  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Leave plannedSearches out only when you already know another question must follow this one.";
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Leave plannedSearches out only when you already know another question must follow this one.";
 
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
@@ -10589,7 +10589,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
             }),
           );
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for, or if fewer than ten of these people fit. When fewer than ten fit, in one step call recruiting_research show_picks with the ones that do (best first) together with four new, differently worded people searches, so the recruiter sees them at once; then record the full ten with calibration_round, starting with those same people in the same order.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts), meeting every hard requirement its row can show and not currently at the hiring company. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches and record the ten from all the rows. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
@@ -10902,6 +10902,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         if (runModel === configuredRunModel) {
           runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
         }
+        // With the planned people in hand, the first step only shows the clearest few, at low
+        // thinking; the rest of the pick keeps the bot's full thinking.
+        if (plannedNote) runModel = { ...runModel, firstStepThinkingLevel: "low" };
 
         try {
           setupMark("runtimeStart");
