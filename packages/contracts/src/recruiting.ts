@@ -1102,7 +1102,14 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
     candidateKeys: z
       .array(RecruitingId)
       .length(RECRUITING_CALIBRATION_ROUND_SIZE)
-      .refine((keys) => new Set(keys).size === keys.length, "Candidate keys must be unique"),
+      .superRefine((keys, ctx) => {
+        const repeated = keys.filter((key, index) => keys.indexOf(key) !== index);
+        if (repeated.length)
+          ctx.addIssue({
+            code: "custom",
+            message: `Each person appears once in a round. Repeated: ${[...new Set(repeated)].join(", ")}. Replace each repeat with another saved person's exact candidateKey.`,
+          });
+      }),
   }),
   // Shows the round's first good fits in chat while more searches run; records nothing.
   z.strictObject({
