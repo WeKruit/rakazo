@@ -5,6 +5,7 @@ const fakeAgentState = vi.hoisted(() => ({
   options: ["Berlin", "Seoul", "Toronto"],
   question: "Which city should I use?",
   form: undefined as Record<string, unknown> | undefined,
+  result: undefined as unknown,
   tools: [] as Array<{
     name: string;
     execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
@@ -27,7 +28,7 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
     async prompt() {
       const askUser = this.tools.find((tool) => tool.name === "ask_user");
       if (!askUser) throw new Error("ask_user tool missing");
-      await askUser.execute("call-choice-1", {
+      fakeAgentState.result = await askUser.execute("call-choice-1", {
         question: fakeAgentState.question,
         ...(fakeAgentState.form
           ? { requestedSchema: fakeAgentState.form }
@@ -168,5 +169,14 @@ describe("Pi choice asks", () => {
       for await (const event of runtime.run(runRequest, runContext)) events.push(event);
     }).rejects.toThrow("Ask one question at a time");
     expect(events.some((event) => event.type === "ask")).toBe(false);
+  });
+
+  it("answers a question the conversation already answered instead of asking again", async () => {
+    const runtime = new PiAgentRuntime();
+    const events: AgentRuntimeEvent[] = [];
+    const request = { ...runRequest, beforeAsk: async () => '"Which city?" → "Seoul"' };
+    for await (const event of runtime.run(request, runContext)) events.push(event);
+    expect(events.some((event) => event.type === "ask")).toBe(false);
+    expect(JSON.stringify(fakeAgentState.result)).toContain("Already answered");
   });
 });

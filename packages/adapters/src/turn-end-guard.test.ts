@@ -1,6 +1,7 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import {
+  answeredAsk,
   autoContinueMax,
   countTrailingAutoContinues,
   guardRecruitingRoleCreate,
@@ -609,5 +610,30 @@ describe("intakeAnswers", () => {
       { key: "地点？", value: "Redwood City 现场" },
       { key: "语言要求？", value: "英语必需，中文不要求" },
     ]);
+  });
+});
+
+describe("answeredAsk", () => {
+  const answers = [
+    {
+      key: "这个岗位的语言要求如何设定？建议以英语为必需。",
+      value: "英语工作沟通必需，中文不要求",
+    },
+    { key: "Where must candidates be based?", value: "Redwood City, on site" },
+  ];
+
+  it("finds a question asked again with or without its suggestion", () => {
+    expect(answeredAsk("这个岗位的语言要求如何设定？", answers)?.value).toBe(
+      "英语工作沟通必需，中文不要求",
+    );
+    expect(answeredAsk("where must candidates be based? Options below.", answers)?.value).toBe(
+      "Redwood City, on site",
+    );
+  });
+
+  it("leaves a different question alone", () => {
+    expect(answeredAsk("这个岗位的地点要求如何设定？", answers)).toBeUndefined();
+    expect(answeredAsk("这个岗位的语言要求怎么定？", answers)).toBeUndefined();
+    expect(answeredAsk("Why?", answers)).toBeUndefined();
   });
 });

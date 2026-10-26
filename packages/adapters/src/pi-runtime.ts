@@ -1652,7 +1652,17 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                 "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
               );
             const { question } = parsed.data;
-            await host.request.beforeAsk?.();
+            const known = await host.request.beforeAsk?.(question);
+            if (known)
+              return {
+                content: [
+                  {
+                    type: "text",
+                    text: `Already answered in this conversation: ${known}\nUse this answer and continue; never ask it again.`,
+                  },
+                ],
+                details: args,
+              };
             // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
             if ((question.match(/\?/g)?.length ?? 0) > 1 || /(^|\n)\s*2[.)]\s/.test(question))
               throw new Error(
