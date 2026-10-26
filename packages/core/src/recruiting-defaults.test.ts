@@ -87,12 +87,11 @@ describe("maintained recruiting defaults", () => {
     );
   });
 
-  it("Main asks all open brief questions in one card", () => {
+  it("Main asks clarifying questions one at a time", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain(
-      "Ask all open brief questions together in one card, never one per turn",
+      "Ask clarifying questions one at a time: the single most decision-affecting question first",
     );
-    expect(main.instructions).not.toContain("one at a time");
   });
 
   it("runs calibration rounds as quick searches and keeps Autumn for scale", () => {
@@ -188,7 +187,7 @@ describe("maintained recruiting defaults", () => {
       );
       expect(bot.instructions).toContain("you do now and never promise for a later time");
       expect(bot.instructions).toContain(
-        "A turn never ends on a bare save or acknowledgement: after saving the answers, in the same turn present the brief and say what happens next",
+        "A turn never ends on a bare save or acknowledgement: after saving an answer, in the same turn ask the next single most decision-affecting question, or when none is missing present the brief for confirmation and say what happens next.",
       );
       expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
       expect(bot.instructions).toContain("no process narration");
