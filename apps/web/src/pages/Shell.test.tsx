@@ -4636,6 +4636,11 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     wrote: true,
   });
   receive("Connector log", "effect.recorded", { tool: "mcp_execute_tool", logId: "log-1" });
+  receive("People search saved", "effect.recorded", {
+    tool: "recruiting_research",
+    status: "saved",
+    candidateRows: [],
+  });
   receive("Candidate feedback saved", "thread.message.created", {
     role: "user",
     blocks: [{ kind: "text", text: "Not a fit", recruitingFeedback: { roleId: "role" } }],
@@ -4663,6 +4668,7 @@ it("refreshes persisted recruiting changes while ignoring ongoing catalog and so
     "Reply outcome",
     "Connector write",
     "Catalog email send",
+    "People search saved",
     "Candidate feedback saved",
     "Research output recorded",
     "Saved on another page",

@@ -87,6 +87,7 @@ import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { observedPiStream } from "./pi-usage.js";
 import { RECRUITING_PRESENTATION_INSTRUCTION } from "./recruiting-context.js";
+import { normalizeRecruitingRoleArgs } from "./recruiting-tools.js";
 import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
@@ -1519,6 +1520,9 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             : { recruitingFeedback: raw.recruitingFeedback }),
         };
       }
+      // Repair slips before the schema check so they never reject a regenerated brief.
+      if (tool.name === "recruiting_role")
+        return normalizeRecruitingRoleArgs(raw, new Date().toISOString());
       if (tool.name === "request_takeover") {
         return { reason: String(raw.reason ?? "I need you on the screen.") };
       }

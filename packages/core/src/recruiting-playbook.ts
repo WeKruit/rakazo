@@ -342,13 +342,13 @@ export function nextPlaybookStep(
         ? {
             stage,
             label: "开始校准搜寻",
-            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（web_search_advanced_exa 四条人才搜索 → recruiting_research save_search → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
+            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（同一步发出 web_search_advanced_exa 四条人才搜索，每条回来自动存进结果 → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
           }
         : {
             stage,
             label: "完成岗位信息",
             prompt:
-              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就直接保存岗位标题与 brief，并在本轮开始校准搜寻。",
+              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就在本轮下一步立刻发出校准人才搜索（每条回来自动出现在结果里），再保存并确认 brief，然后选出 10 人。",
           };
     case "calibration_10": {
       const remaining = Math.max(0, CALIBRATION_TARGET - facts.savedCandidates);

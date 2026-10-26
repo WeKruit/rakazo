@@ -916,6 +916,132 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).rejects.toThrow("Resource not found");
     expect(await prisma.recruitingRole.count({ where: { spaceId } })).toBe(before);
   });
+  // 2026-10-26: a role from a sent link failed on the model's copy of its page reference, and a
+  // brief that failed one check kept the whole role from being saved.
+  it("fills a link role's page reference from its records and saves the role when only its brief fails", async () => {
+    const f = await roleMutationFixture("create");
+    if (f.input.operation !== "create") throw new Error("fixture is not a create");
+    const page = f.input.sourceRefs[0]!;
+    if (page.anchor.kind !== "artifact") throw new Error("fixture page is a file");
+    const copied = {
+      ...page,
+      url: `${page.url}/`,
+      readAt: "2026-10-16T00:00:00.000Z",
+      anchor: {
+        kind: "artifact",
+        artifact: { ...page.anchor.artifact, sha256: "b".repeat(64) },
+        locator: "page",
+      },
+    };
+    const input = await recruiting.fillRecruitingRoleArgs(
+      prisma,
+      actor,
+      { threadId: f.thread.id },
+      {
+        ...f.input,
+        sourceRefs: [copied],
+        criteria: [{ ...f.input.criteria[0]!, sourceRefs: [copied] }],
+        brief: {
+          fields: [
+            {
+              key: "location",
+              value: null,
+              origin: "jd",
+              state: "known",
+              sourceRefIds: ["role-material"],
+            },
+          ],
+          searchFilters: [],
+          questions: [],
+          rules: [],
+        },
+      },
+    );
+    expect(input.sourceRefs).toEqual([page]);
+    expect((input.brief as { rules: unknown[] }).rules).toEqual([
+      { criterionId: "experience", origin: "jd", effect: "reject", sourceRefIds: [page.id] },
+    ]);
+    await prisma.externalEffect.update({
+      where: { id: f.context.effectId },
+      data: { request: input as Prisma.InputJsonValue },
+    });
+    const saved = await recruiting.executeRecruitingRoleMutation(
+      prisma,
+      actor,
+      { ...f.context, effectRequest: input },
+      input as recruiting.RecruitingRoleMutationInput,
+      f.reader,
+    );
+    expect(saved).toMatchObject({
+      status: "saved",
+      briefError: "Known brief facts require a value.",
+    });
+    expect(saved.workspace?.revision.brief).toBeNull();
+    expect(saved.workspace?.revision.sourceRefs).toContainEqual(page);
+  });
+
+  it("names the check a page reference failed and still refuses a file outside the account", async () => {
+    const f = await roleMutationFixture("create");
+    if (f.input.operation !== "create") throw new Error("fixture is not a create");
+    const page = f.input.sourceRefs[0]!;
+    if (page.anchor.kind !== "artifact") throw new Error("fixture page is a file");
+    const stale = {
+      ...f.input,
+      sourceRefs: [
+        {
+          ...page,
+          anchor: { ...page.anchor, artifact: { ...page.anchor.artifact, sha256: "b".repeat(64) } },
+        },
+      ],
+      criteria: [],
+    } as recruiting.RecruitingRoleMutationInput;
+    await prisma.externalEffect.update({
+      where: { id: f.context.effectId },
+      data: { request: stale as Prisma.InputJsonValue },
+    });
+    await expect(
+      recruiting.executeRecruitingRoleMutation(
+        prisma,
+        actor,
+        { ...f.context, effectRequest: stale },
+        stale,
+        f.reader,
+      ),
+    ).rejects.toThrow(/sha256 is not this file's fingerprint/);
+    const foreign = await recruiting.fillRecruitingRoleArgs(
+      prisma,
+      actor,
+      { threadId: f.thread.id },
+      {
+        ...f.input,
+        sourceRefs: [
+          {
+            ...page,
+            anchor: {
+              ...page.anchor,
+              artifact: { artifactId: "someone-else", sha256: "c".repeat(64) },
+            },
+          },
+        ],
+        criteria: [],
+      },
+    );
+    expect(JSON.stringify(foreign)).toContain("c".repeat(64));
+    await prisma.externalEffect.update({
+      where: { id: f.context.effectId },
+      data: { request: foreign as Prisma.InputJsonValue },
+    });
+    const refused = recruiting.executeRecruitingRoleMutation(
+      prisma,
+      actor,
+      { ...f.context, effectRequest: foreign },
+      foreign as recruiting.RecruitingRoleMutationInput,
+      f.reader,
+    );
+    await expect(refused).rejects.toThrow(IsolationError);
+    await expect(refused).rejects.not.toBeInstanceOf(recruiting.RecruitingSourceCheckError);
+  });
+
   it("checks exact Artifact owner, space, chat association and hash before persisting references", async () => {
     const artifactSource = (id: string, sha256 = hash): RecruitingSourceRef => ({
       ...source(),
@@ -925,12 +1051,19 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       artifactSource(otherArtifactId),
       artifactSource(unrelatedArtifactId),
       artifactSource(wrongChatArtifactId),
-      artifactSource(artifactId, "b".repeat(64)),
     ]) {
       await expect(recruiting.createRecruitingRole(prisma, actor, roleInput(ref))).rejects.toThrow(
         "Resource not found",
       );
     }
+    // The actor's own file with a wrong fingerprint is refused with the check to fix.
+    await expect(
+      recruiting.createRecruitingRole(
+        prisma,
+        actor,
+        roleInput(artifactSource(artifactId, "b".repeat(64))),
+      ),
+    ).rejects.toThrow(recruiting.RecruitingSourceCheckError);
     const created = await recruiting.createRecruitingRole(
       prisma,
       actor,
@@ -3021,7 +3154,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     });
     await expect(
       recruiting.listRecruitingResearch(prisma, actor, { roleId: firstRoleId }),
-    ).rejects.toThrow("Resource not found");
+    ).rejects.toThrow(IsolationError);
     // The native relation itself rejects a missing referenced exact Artifact version.
     await expect(
       prisma.recruitingResearchAction.update({

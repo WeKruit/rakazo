@@ -210,11 +210,14 @@ describe("native saved artifact reading", () => {
     }
     expect(combined).toBe(original);
     expect(extract).toHaveBeenCalledWith(Buffer.from("%PDF-1.4\nsynthetic converter input"));
-    extract.mockClear();
-    expect(
-      await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id, jsonPath: ["text"] }),
-    ).toHaveProperty("error");
-    expect(extract).not.toHaveBeenCalled();
+    // A JSON path on a PDF reads its text instead of failing the call.
+    const pathed = await artifactReadFromTool(f.deps, actor, {
+      artifactId: f.row.id,
+      jsonPath: ["text"],
+      limit: 1000,
+    });
+    expect(pathed).toMatchObject({ text: original });
+    expect(pathed).not.toHaveProperty("jsonPath");
     extract.mockRejectedValueOnce(new Error("/private/path secret-value"));
     const failed = await artifactReadFromTool(f.deps, actor, { artifactId: f.row.id });
     expect(failed).toHaveProperty("error", "PDF text could not be read or verified.");
@@ -282,16 +285,21 @@ describe("native saved artifact reading", () => {
       expect(result).not.toHaveProperty("text");
       expect(JSON.stringify(result)).not.toContain("private");
     }
-    for (const source of ["not JSON", '{"text":"evidence"}']) {
-      const invalid = fixture(source);
-      invalid.row.mimeType = source === "not JSON" ? "application/json" : "text/plain";
-      expect(
-        await artifactReadFromTool(invalid.deps, actor, {
-          artifactId: invalid.row.id,
-          jsonPath: ["text"],
-        }),
-      ).toHaveProperty("error");
-    }
+    const invalid = fixture("not JSON");
+    invalid.row.mimeType = "application/json";
+    expect(
+      await artifactReadFromTool(invalid.deps, actor, {
+        artifactId: invalid.row.id,
+        jsonPath: ["text"],
+      }),
+    ).toHaveProperty("error");
+    const plain = fixture('{"text":"evidence"}');
+    expect(
+      await artifactReadFromTool(plain.deps, actor, {
+        artifactId: plain.row.id,
+        jsonPath: ["text"],
+      }),
+    ).toMatchObject({ text: '{"text":"evidence"}' });
   });
   it("authorizes both actor dimensions before touching blob storage", async () => {
     const f = fixture();

@@ -338,11 +338,10 @@ describe("recruiting contracts", () => {
     }
   });
 
-  it("requires an explicit sourcing filter list and admits only neutral human filter edits", () => {
+  it("defaults omitted brief lists and admits only neutral human filter edits", () => {
     const brief = { fields: [], questions: [], rules: [], searchFilters: [] };
     expect(contracts.RecruitingBriefDraftSchema.parse(brief)).toEqual(brief);
-    const { searchFilters: _filters, ...missing } = brief;
-    expect(contracts.RecruitingBriefDraftSchema.safeParse(missing).success).toBe(false);
+    expect(contracts.RecruitingBriefDraftSchema.parse({ fields: [] })).toEqual(brief);
     const filter = {
       id: "region",
       statement: "Search the UK",

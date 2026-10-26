@@ -36,11 +36,20 @@ function call(effectId: string, minute: number, name: string) {
   };
 }
 
-function deps(previousSave: Date | null) {
+type Save = { createdAt: Date; idempotencyKey: string; result: unknown };
+
+const updateMany = vi.fn(async (..._args: unknown[]) => ({ count: 1 }));
+
+function deps(previousSave: Date | null, autoSaves: Save[] = []) {
+  const saves: Save[] = [
+    ...(previousSave ? [{ createdAt: previousSave, idempotencyKey: "explicit", result: {} }] : []),
+    ...autoSaves,
+  ];
   return {
     prisma: {
       externalEffect: {
-        findFirst: vi.fn(async () => (previousSave ? { createdAt: previousSave } : null)),
+        findMany: vi.fn(async () => saves),
+        updateMany,
       },
     },
     artifacts: { put: vi.fn(async () => ({ id: "artifact-1" })) },
@@ -50,6 +59,7 @@ function deps(previousSave: Date | null) {
 describe("saveRecruitingPeopleSearch", () => {
   beforeEach(() => {
     db.saveRecruitingCandidatePeopleSearch.mockClear();
+    updateMany.mockClear();
     // Newest first, as the run's tool results are listed.
     db.listRunToolResults.mockResolvedValue([
       call("search-2", 5, "second"),
@@ -77,5 +87,52 @@ describe("saveRecruitingPeopleSearch", () => {
       context,
     );
     expect(saved()).toEqual(["second"]);
+  });
+
+  it("saves just the one search that returned when the server saves it as it returns", async () => {
+    await saveRecruitingPeopleSearch(deps(null), trusted, {} as never, context, "search-2");
+    expect(saved()).toEqual(["second"]);
+  });
+
+  const autoSave = (search: string, minute: number, key: string): Save => ({
+    createdAt: new Date(2026, 9, 26, 3, minute),
+    idempotencyKey: `people-search-autosave:${search}`,
+    result: { candidateRows: [{ candidateKey: key, alreadyInPool: false, name: key }] },
+  });
+
+  it("returns the rows already saved as searches returned instead of saving them again", async () => {
+    const result = await saveRecruitingPeopleSearch(
+      deps(null, [autoSave("search-1", 2, "first"), autoSave("search-2", 6, "second")]),
+      trusted,
+      {} as never,
+      context,
+    );
+    expect(db.saveRecruitingCandidatePeopleSearch).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      status: "saved",
+      newPeople: 2,
+      candidateRows: [{ candidateKey: "first" }, { candidateKey: "second" }],
+    });
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "save-2", status: "executing" } }),
+    );
+  });
+
+  it("saves only the searches the server did not save yet and lists both", async () => {
+    db.saveRecruitingCandidatePeopleSearch.mockResolvedValueOnce({
+      status: "saved",
+      candidateRows: [{ candidateKey: "second", alreadyInPool: false }],
+    } as never);
+    const result = await saveRecruitingPeopleSearch(
+      deps(null, [autoSave("search-1", 2, "first")]),
+      trusted,
+      {} as never,
+      context,
+    );
+    expect(saved()).toEqual(["second"]);
+    expect(result).toMatchObject({
+      newPeople: 2,
+      candidateRows: [{ candidateKey: "first" }, { candidateKey: "second" }],
+    });
   });
 });

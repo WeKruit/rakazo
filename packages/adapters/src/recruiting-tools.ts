@@ -51,6 +51,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
+import { completeExternalEffect } from "./approval-effect.js";
 import { readActorArtifact } from "./artifact-read.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { isPeopleSearchEndpoint, peopleFromSearch } from "./recruiting-profiles.js";
@@ -66,9 +67,20 @@ import {
   recruitingResearchPollDelay,
 } from "./recruiting-research-poll.js";
 
+const BRIEF_KEYS = ["fields", "searchFilters", "questions", "rules"] as const;
+const ROLE_KEYS = [
+  "title",
+  "sourceRefs",
+  "criteria",
+  "preferences",
+  "definitionQuestions",
+] as const;
+
 /**
- * Repairs two harmless slips before validation: a read carries only its operation, and a read
- * human-message reference without readAt gets the call time (message reads have no receipt time).
+ * Repairs harmless slips before the schema check, so they never cost a rejected call and a
+ * regenerated brief: a read carries only its operation; a read human-message reference without
+ * readAt gets the call time (message reads have no receipt time); brief lists written next to
+ * the brief move into it, and role lists written inside it move out.
  */
 export function normalizeRecruitingRoleArgs(
   args: Record<string, unknown>,
@@ -86,7 +98,25 @@ export function normalizeRecruitingRoleArgs(
       ? { ...record, readAt: now }
       : record;
   };
-  return visit(args) as Record<string, unknown>;
+  const visited = visit(args) as Record<string, unknown>;
+  if (!["create", "update", "revise"].includes(String(visited.operation))) return visited;
+  const object = (value: unknown): value is Record<string, unknown> =>
+    !!value && typeof value === "object" && !Array.isArray(value);
+  const outside = BRIEF_KEYS.filter((key) => Object.hasOwn(visited, key));
+  if (!object(visited.brief) && !outside.length) return visited;
+  const brief: Record<string, unknown> = object(visited.brief) ? { ...visited.brief } : {};
+  const result: Record<string, unknown> = { ...visited };
+  for (const key of outside) {
+    if (!Object.hasOwn(brief, key)) brief[key] = result[key];
+    delete result[key];
+  }
+  for (const key of ROLE_KEYS) {
+    if (!Object.hasOwn(brief, key)) continue;
+    if (!Object.hasOwn(result, key)) result[key] = brief[key];
+    delete brief[key];
+  }
+  delete brief.confirmation;
+  return { ...result, brief };
 }
 
 export async function executeRecruitingRoleTool(
@@ -803,7 +833,29 @@ export class RecruitingPeopleSearchError extends Error {}
 
 const PEOPLE_SEARCH_PAGE_LIMIT = 100;
 
-/** Save the people this run's profile-data searches returned as one unassessed candidate page. */
+/** Idempotency prefix of the save the server makes the moment one people search returns. */
+export const PEOPLE_SEARCH_AUTOSAVE_KEY = "people-search-autosave:";
+
+type SavedSearchRow = { candidateKey: string; alreadyInPool: boolean } & Record<string, unknown>;
+
+function savedRows(result: unknown): SavedSearchRow[] {
+  const rows =
+    result && typeof result === "object" && !Array.isArray(result)
+      ? (result as { candidateRows?: unknown }).candidateRows
+      : undefined;
+  return Array.isArray(rows)
+    ? rows.filter(
+        (row): row is SavedSearchRow =>
+          Boolean(row) && typeof (row as { candidateKey?: unknown }).candidateKey === "string",
+      )
+    : [];
+}
+
+/**
+ * Save the people this run's profile-data searches returned as one unassessed candidate page.
+ * With `onlyEffectId` it saves just that one search, which is how each search reaches Results
+ * the moment it returns. A later save_search then returns those already-saved rows too.
+ */
 export async function saveRecruitingPeopleSearch(
   deps: ResearchDeps,
   trusted: ResearchActor & {
@@ -814,6 +866,7 @@ export async function saveRecruitingPeopleSearch(
   },
   input: Extract<RecruitingResearchToolInput, { operation: "save_search" }>,
   context: AdapterContext,
+  onlyEffectId?: string,
 ) {
   if (
     context.runId !== trusted.runId ||
@@ -825,22 +878,43 @@ export async function saveRecruitingPeopleSearch(
   const rows: Array<{ rowIndex: number; sourceEffectId: string; row: Record<string, string> }> = [];
   const seen = new Set<string>();
   let truncated = false;
-  // A run that searches in waves saves each wave once: calls an earlier save already took are skipped.
-  const previous = await deps.prisma.externalEffect.findFirst({
-    where: {
-      id: { not: trusted.effectId },
-      runId: trusted.runId,
-      spaceId: trusted.actor.spaceId,
-      kind: "recruiting_research",
-      status: "completed",
-      request: { path: ["operation"], equals: "save_search" },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { createdAt: true },
-  });
+  const saves = onlyEffectId
+    ? []
+    : await deps.prisma.externalEffect.findMany({
+        where: {
+          id: { not: trusted.effectId },
+          runId: trusted.runId,
+          spaceId: trusted.actor.spaceId,
+          kind: "recruiting_research",
+          status: "completed",
+          request: { path: ["operation"], equals: "save_search" },
+        },
+        orderBy: { createdAt: "asc" },
+        select: { createdAt: true, idempotencyKey: true, result: true },
+      });
+  // A run that searches in waves saves each wave once: calls an earlier save already took are
+  // skipped, and searches the server saved as they returned are reused instead of saved again.
+  const previous = saves
+    .filter((save) => !save.idempotencyKey.startsWith(PEOPLE_SEARCH_AUTOSAVE_KEY))
+    .at(-1);
+  const autoSaved = saves.filter(
+    (save) =>
+      save.idempotencyKey.startsWith(PEOPLE_SEARCH_AUTOSAVE_KEY) &&
+      (!previous || save.createdAt > previous.createdAt),
+  );
+  const autoSavedCalls = new Set(
+    autoSaved
+      .filter((save) => savedRows(save.result).length)
+      .map((save) => save.idempotencyKey.slice(PEOPLE_SEARCH_AUTOSAVE_KEY.length).split(":")[0]),
+  );
+  const reused = new Map<string, SavedSearchRow>();
+  for (const save of autoSaved)
+    for (const row of savedRows(save.result))
+      if (!reused.has(row.candidateKey)) reused.set(row.candidateKey, row);
   // Oldest call first, so the page keeps the order the searches returned people in.
   const calls = (await listRunToolResults(deps.prisma, trusted.actor, trusted.runId)).reverse();
   for (const call of calls) {
+    if (onlyEffectId ? call.effectId !== onlyEffectId : autoSavedCalls.has(call.effectId)) continue;
     if (!isPeopleSearchEndpoint(call.endpoint)) continue;
     if (previous && call.createdAt <= previous.createdAt) continue;
     const people = peopleFromSearch(call.result, call.endpoint);
@@ -860,6 +934,19 @@ export async function saveRecruitingPeopleSearch(
       rows.push({ rowIndex: rows.length, sourceEffectId: call.effectId, row: { ...person } });
     }
   }
+  if (!rows.length && reused.size) {
+    const candidateRows = [...reused.values()];
+    const result = {
+      status: "saved",
+      newPeople: candidateRows.filter((row) => !row.alreadyInPool).length,
+      candidateRows,
+    };
+    if (
+      !(await completeExternalEffect(deps.prisma, trusted.effectId, "executing", result as never))
+    )
+      throw new IsolationError();
+    return result;
+  }
   if (!rows.length)
     throw new RecruitingPeopleSearchError(
       "No people with a name and LinkedIn profile came back from a profile-data search in this run. Run the people search with the connected profile-data connector first, then save.",
@@ -872,17 +959,31 @@ export async function saveRecruitingPeopleSearch(
   const hash = createHash("sha256").update(bytes).digest("hex");
   const name = `recruiting-people-search-${hash}.json`;
   const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
-  return saveRecruitingCandidatePeopleSearch(deps.prisma, trusted.actor, trusted, input, {
-    ...captured,
-    outputArtifact: {
-      name,
-      mimeType: "application/json",
-      size: bytes.byteLength,
-      hash,
-      storageKey: stored.id,
-      clientNonce: `recruiting-people-search:${trusted.effectId}`,
+  const saved = await saveRecruitingCandidatePeopleSearch(
+    deps.prisma,
+    trusted.actor,
+    trusted,
+    input,
+    {
+      ...captured,
+      outputArtifact: {
+        name,
+        mimeType: "application/json",
+        size: bytes.byteLength,
+        hash,
+        storageKey: stored.id,
+        clientNonce: `recruiting-people-search:${trusted.effectId}`,
+      },
     },
-  });
+  );
+  if (!reused.size) return saved;
+  const fresh = savedRows(saved).filter((row) => !reused.has(row.candidateKey));
+  const candidateRows = [...reused.values(), ...fresh];
+  return {
+    ...(saved as Record<string, unknown>),
+    newPeople: candidateRows.filter((row) => !row.alreadyInPool).length,
+    candidateRows,
+  };
 }
 
 export async function completeRecruitingResearchCall(

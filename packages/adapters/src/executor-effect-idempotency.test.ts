@@ -2102,8 +2102,8 @@ describe("native recruiting role effect delivery", () => {
       const result = {
         error:
           kind === "quote"
-            ? failure.message
-            : "Recruiting role or source is unavailable. Copy each source's artifact reference, url and readAt exactly as the reader returned them, quote the recruiter's own message, and save again now.",
+            ? `${failure.message} Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.`
+            : "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.",
       };
       expect(f.results).toEqual([result]);
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
@@ -2212,7 +2212,7 @@ describe("native recruiting role effect delivery", () => {
     await f.run();
     expect(f.results.at(-1)).toEqual({
       error:
-        "Recruiting role or source is unavailable. Copy each source's artifact reference, url and readAt exactly as the reader returned them, quote the recruiter's own message, and save again now.",
+        "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.",
     });
     expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });
