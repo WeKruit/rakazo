@@ -523,8 +523,12 @@ export interface AgentRunRequest {
     route?: ConnectorRoute,
     observer?: AgentToolExecutionObserver,
   ) => Promise<unknown>;
-  /** Awaited before a question card pauses the run, so work the run started finishes first. */
-  beforeAsk?: () => Promise<void>;
+  /**
+   * Awaited before a question card pauses the run, so work the run started finishes first.
+   * Returns the user's earlier answer when the conversation already answered this question;
+   * the run then continues with it instead of asking again.
+   */
+  beforeAsk?: (question: string) => Promise<string | undefined>;
   /** Called after a tool returns; implementations must not persist raw result contents. */
   onToolCompleted?: (completion: AgentToolCompletion) => Promise<void> | void;
   /**

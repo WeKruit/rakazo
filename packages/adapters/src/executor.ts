@@ -547,6 +547,7 @@ import {
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
 import {
+  answeredAsk,
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
   intakeAnswers,
@@ -10753,8 +10754,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     resolveConnectedModel(run, provider, modelId, (values) =>
                       runSecrets.push(...values),
                     ),
-              beforeAsk: async () => {
+              beforeAsk: async (question) => {
                 await briefSaving;
+                // A run that recorded a round asks the next-step choice, which is asked anew each round.
+                if (await nextStepCardAfterRound()) return undefined;
+                const messages = await deps.prisma.message.findMany({
+                  where: { threadId: thread.id },
+                  orderBy: { seq: "asc" },
+                  select: { role: true, blocks: true },
+                });
+                const nextStep = [true, false].map((zh) => recruitingNextStepCard(zh).text);
+                const known = answeredAsk(
+                  question,
+                  intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
+                );
+                return known && `"${known.key}" → "${known.value}"`;
               },
               onToolCompleted: async (completion) => {
                 await toolCalledAudit(completion.executionId).settled;

@@ -95,6 +95,24 @@ export function intakeAnswers(messages: readonly { role: string; blocks: unknown
   }
   return [...answers].map(([key, value]) => ({ key, value }));
 }
+/** A question's topic: its first sentence without spaces or punctuation. */
+function askTopic(text: string) {
+  return (text.trim().split(/[？?。\n]/)[0] ?? "").replace(/[\s\p{P}]/gu, "").toLowerCase();
+}
+/**
+ * The earlier answer to a question this conversation already asked: same first sentence, or one
+ * first sentence contains the other. Wording that differs further is not treated as a repeat.
+ */
+export function answeredAsk(question: string, answers: readonly { key: string; value: string }[]) {
+  const topic = askTopic(question);
+  if (topic.length < 4) return undefined;
+  return answers.findLast(({ key }) => {
+    const asked = askTopic(key);
+    if (asked === topic) return true;
+    const [short, long] = asked.length < topic.length ? [asked, topic] : [topic, asked];
+    return short.length >= 8 && long.includes(short);
+  });
+}
 /**
  * The ten of a recorded round as the chat lists them: name, title, company, location and the
  * profile passage the people search returned for each, read from this run's saved searches.
