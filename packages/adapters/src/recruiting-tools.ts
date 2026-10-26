@@ -98,10 +98,20 @@ export function normalizeRecruitingRoleArgs(
       ? { ...record, readAt: now }
       : record;
   };
-  const visited = visit(args) as Record<string, unknown>;
+  let visited = visit(args) as Record<string, unknown>;
   if (!["create", "update", "revise"].includes(String(visited.operation))) return visited;
   const object = (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === "object" && !Array.isArray(value);
+  // An update's criteria hold only upsert/remove; other keys written there belong to the call.
+  if (visited.operation === "update" && object(visited.criteria)) {
+    const { upsert, remove, ...stray } = visited.criteria;
+    const criteria = {
+      ...(upsert === undefined ? {} : { upsert }),
+      ...(remove === undefined ? {} : { remove }),
+    };
+    const { criteria: _criteria, ...rest } = visited;
+    visited = { ...stray, ...rest, ...(Object.keys(criteria).length ? { criteria } : {}) };
+  }
   const outside = BRIEF_KEYS.filter((key) => Object.hasOwn(visited, key));
   if (!object(visited.brief) && !outside.length) return visited;
   const brief: Record<string, unknown> = object(visited.brief) ? { ...visited.brief } : {};
