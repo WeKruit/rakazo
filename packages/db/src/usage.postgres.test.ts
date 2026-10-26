@@ -11,7 +11,7 @@ describePostgres("usage ledger (PostgreSQL)", () => {
   const suffix = `${process.pid}-${Date.now()}`;
   const userId = `usage-owner-${suffix}`;
   const spaceId = `usage-space-${suffix}`;
-  const actor = { userId, spaceId, isDeploymentOwner: false };
+  const actor = { userId, spaceId };
   let prisma: PrismaClient;
   let close: () => Promise<void>;
   let runId: string;
@@ -98,7 +98,7 @@ describePostgres("usage ledger (PostgreSQL)", () => {
     ).id;
     const role = await db.createRecruitingRole(
       prisma,
-      { ...actor, email: "owner@x.test" },
+      { ...actor, email: "owner@x.test", isDeploymentOwner: false },
       {
         sourceThreadId: threadId,
         expectedRevision: 0,
@@ -214,7 +214,22 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       { round: null, scale: true, credits: 0, calls: 1, tokens: 0 },
     ]);
 
-    const owner = await db.summarizeUsageCosts(prisma, { ...actor, isDeploymentOwner: true });
+    // An unverified operator-domain mailbox stays on credits only.
+    await prisma.user.update({
+      where: { id: userId },
+      data: { email: `${userId}@wekruit.com`, emailVerified: false },
+    });
+    expect((await db.summarizeUsageCosts(prisma, actor)).total.estimatedUsd).toBeUndefined();
+    await prisma.user.update({
+      where: { id: userId },
+      data: { email: `${userId}@notwekruit.com`, emailVerified: true },
+    });
+    expect((await db.summarizeUsageCosts(prisma, actor)).accounts).toBeUndefined();
+    await prisma.user.update({
+      where: { id: userId },
+      data: { email: `${userId}@WeKruit.com`, emailVerified: true },
+    });
+    const owner = await db.summarizeUsageCosts(prisma, actor);
     expect(owner.total.estimatedUsd).toBeCloseTo(1.28, 2);
     expect(owner.services).toEqual(
       expect.arrayContaining([

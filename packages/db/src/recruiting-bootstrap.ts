@@ -42,6 +42,9 @@ const RECRUITING_SERVICES = [
   },
 ];
 
+/** The operator's staff domain: verified mailboxes here see dollar spend for every account. */
+export const RECRUITING_OPERATOR_EMAIL_DOMAIN = "wekruit.com";
+
 /**
  * Plan list prices of the platform services by slug, used only for the deployment owner's
  * spend estimate. The research plan is US$850 a month for 100,000 credits; people search
