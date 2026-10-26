@@ -1433,10 +1433,7 @@ describe.each([
         expect.objectContaining({
           blocks: [
             expect.objectContaining({
-              actions: [
-                { id: "allow", label: "Allow once" },
-                { id: "deny", label: "Deny" },
-              ],
+              actions: operation === "reply_to_email" ? sendActions : onceActions,
             }),
           ],
         }),
@@ -1450,6 +1447,93 @@ describe.each([
       );
     });
   }
+});
+
+const sendActions = [
+  { id: "allow", label: "Confirm and send" },
+  { id: "always", label: "Send when I say send" },
+  { id: "deny", label: "Cancel" },
+];
+const onceActions = [
+  { id: "allow", label: "Allow once" },
+  { id: "deny", label: "Deny" },
+];
+
+describe("recruiter-instructed email send", () => {
+  async function instructedSend(
+    shown: string,
+    instruction = "可以，发吧",
+    rules: ActionApprovalRule[] = [],
+  ) {
+    const f = fixture({
+      name: "reply_to_email",
+      rules,
+      readOnly: false,
+      route: {
+        connectorId: "mcp",
+        resourceId: "resource-1",
+        resourceRevision: 1,
+        toolName: "reply_to_email",
+      },
+      inputSchema: { type: "object" },
+    });
+    Object.assign(await f.prisma.run.findUnique(), { sourceMessageId: "human-1" });
+    Object.assign(f.prisma.message, {
+      findUnique: vi.fn(async () => ({ seq: 1 })),
+      findFirst: vi.fn(async ({ where }: { where: { id?: string; role?: string } }) =>
+        where.id === "human-1"
+          ? {
+              id: "human-1",
+              role: "user",
+              botId: null,
+              clientNonce: null,
+              externalTranscriptFor: null,
+              createdAt: new Date("2026-10-26T00:00:00Z"),
+              blocks: [{ kind: "text", text: instruction }],
+            }
+          : where.role === "bot"
+            ? { blocks: [{ kind: "text", text: shown }] }
+            : null,
+      ),
+    });
+    f.setCalls([{ args: replyArgs, executionId: "reply" }]);
+    await f.run();
+    return f;
+  }
+
+  it("sends without a card when the recruiter says send after seeing the exact text", async () => {
+    const f = await instructedSend("草稿：\n> Public synthetic draft.");
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.execute).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the card when the exact text was never shown", async () => {
+    const f = await instructedSend("我会回复他周二可以。");
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+  });
+
+  it("sends on the recruiter's word when they chose send when I say send", async () => {
+    const f = await instructedSend("我会回复他周二可以。", "发吧", [
+      { effect: "always_allow", matchKind: "tool", matchValue: "reply_to_email" },
+    ]);
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.execute).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the card for a send the recruiter did not ask for, even with that choice saved", async () => {
+    const f = await instructedSend("草稿：Public synthetic draft.", "看起来不错", [
+      { effect: "always_allow", matchKind: "tool", matchValue: "reply_to_email" },
+    ]);
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the card when the recruiter did not say send", async () => {
+    const f = await instructedSend("草稿：Public synthetic draft.", "先不要发");
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+  });
 });
 
 describe.each([false, true])("verified CRM approval target, catalog=%s", (catalog) => {
@@ -1986,10 +2070,7 @@ describe.each([false, true])("native outbound draft approval, catalog=%s", (cata
         blocks: [
           expect.objectContaining({
             detail: expect.stringContaining(args.body_text),
-            actions: [
-              { id: "allow", label: "Allow once" },
-              { id: "deny", label: "Deny" },
-            ],
+            actions: sendActions,
           }),
         ],
       }),
@@ -2659,10 +2740,7 @@ describe("candidate-linked native reply", () => {
           expect.objectContaining({
             approvalEffectId: "candidate-reply",
             detail: expect.stringContaining(replyArgs.body_text),
-            actions: [
-              { id: "allow", label: "Allow once" },
-              { id: "deny", label: "Deny" },
-            ],
+            actions: sendActions,
           }),
         ],
       }),

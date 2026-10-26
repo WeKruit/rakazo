@@ -62,6 +62,7 @@ function approvalActionLabel(
     return t`Always allow this tool`;
   if (id === "deny" && fallback === "Deny") return t`Deny`;
   if (id === "allow" && fallback === "Confirm and send") return t`Confirm and send`;
+  if (id === "always" && fallback === "Send when I say send") return t`Send when I say send`;
   if (id === "deny" && fallback === "Cancel") return t`Cancel`;
   if (id === "allow" && fallback === "Looks good, start searching")
     return t`Looks good, start searching`;

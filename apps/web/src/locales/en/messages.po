@@ -7302,6 +7302,10 @@ msgstr "Send to"
 msgid "Send totals are not available from these records."
 msgstr "Send totals are not available from these records."
 
+#: src/components/AskCard.tsx
+msgid "Send when I say send"
+msgstr "Send when I say send"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "Send with Enter"
