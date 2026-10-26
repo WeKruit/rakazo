@@ -4402,9 +4402,6 @@ export async function fillRecruitingRoleArgs(
     thread?.activeRecruitingRoleId
   )
     filled.roleId = thread.activeRecruitingRoleId;
-  if (!looseRecord(filled.brief)) return filled;
-  // Brief citations and rules resolve against the sources this save (and, for an update, the
-  // current revision) defines.
   const saved =
     filled.operation === "update" && thread?.activeRecruitingRoleId
       ? await prisma.recruitingRole
@@ -4425,6 +4422,44 @@ export async function fillRecruitingRoleArgs(
               : null,
           )
       : null;
+  // One source ID names one reference. A reused ID on a different reference (another quote) gets
+  // a fresh ID instead of failing the save; citations by the old ID keep the first reference.
+  const byId = new Map<string, string>();
+  for (const source of [
+    ...looseArray(saved?.sourceRefs),
+    ...looseArray(saved?.criteria).flatMap((criterion) =>
+      looseRecord(criterion) ? looseArray(criterion.sourceRefs) : [],
+    ),
+  ])
+    if (looseRecord(source) && typeof source.id === "string")
+      byId.set(source.id, stableJsonValue(source));
+  const distinct = (references: unknown) =>
+    Array.isArray(references)
+      ? references.map((source) => {
+          if (!looseRecord(source) || typeof source.id !== "string") return source;
+          const value = stableJsonValue(source);
+          let id = source.id;
+          for (let n = 2; byId.has(id) && byId.get(id) !== value; n++) id = `${source.id}-${n}`;
+          byId.set(id, value);
+          return id === source.id ? source : { ...source, id };
+        })
+      : references;
+  filled.sourceRefs = distinct(filled.sourceRefs);
+  if (filled.sourceRefs === undefined) delete filled.sourceRefs;
+  const criterionList = looseRecord(filled.criteria)
+    ? looseArray(filled.criteria.upsert)
+    : looseArray(filled.criteria);
+  const deduped = criterionList.map((criterion) =>
+    looseRecord(criterion)
+      ? { ...criterion, sourceRefs: distinct(criterion.sourceRefs) }
+      : criterion,
+  );
+  if (Array.isArray(filled.criteria)) filled.criteria = deduped;
+  else if (looseRecord(filled.criteria) && Array.isArray(filled.criteria.upsert))
+    filled.criteria = { ...filled.criteria, upsert: deduped };
+  if (!looseRecord(filled.brief)) return filled;
+  // Brief citations and rules resolve against the sources this save (and, for an update, the
+  // current revision) defines.
   const criteria = [
     ...looseArray(filled.criteria),
     ...(looseRecord(filled.criteria) ? looseArray(filled.criteria.upsert) : []),

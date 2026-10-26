@@ -224,4 +224,41 @@ describe("fillRecruitingRoleArgs", () => {
       (typed.brief as { fields: { sourceRefIds: string[] }[] }).fields[0]!.sourceRefIds,
     ).toEqual(["human-message:m1"]);
   });
+
+  // 2026-10-26: an update reused a saved source ID for a different quote and was rejected.
+  it("gives a reused source ID on a different reference a fresh ID", async () => {
+    const saved = { ...jd, id: "jd-quote-role", quote: "Build simulation" };
+    const db = prisma({ activeRoleId: "role-1" }) as unknown as {
+      recruitingRole: { findFirst: ReturnType<typeof vi.fn> };
+      recruitingRoleRevision: { findUnique: ReturnType<typeof vi.fn> };
+    };
+    db.recruitingRole.findFirst.mockResolvedValue({ currentRevisionId: "rev-1" });
+    const savedFilled = (
+      await fillRecruitingRoleArgs(db as never, actor, context, {
+        operation: "create",
+        sourceRefs: [saved],
+        criteria: [],
+      })
+    ).sourceRefs as unknown[];
+    db.recruitingRoleRevision.findUnique.mockResolvedValue({
+      sourceRefs: savedFilled,
+      criteria: [],
+    });
+    const other = { ...saved, quote: "Own sim-to-real evaluation" };
+    const filled = await fillRecruitingRoleArgs(db as never, actor, context, {
+      operation: "update",
+      roleId: "role-1",
+      criteria: {
+        upsert: [criterion("ownership", "hard", [other]), criterion("sim", "hard", [saved])],
+      },
+    });
+    const upsert = (
+      filled.criteria as { upsert: { sourceRefs: { id: string; quote: string }[] }[] }
+    ).upsert;
+    expect(upsert.map((item) => item.sourceRefs[0]!.id)).toEqual([
+      "jd-quote-role-2",
+      "jd-quote-role",
+    ]);
+    expect(upsert[0]!.sourceRefs[0]!.quote).toBe(other.quote);
+  });
 });

@@ -45,6 +45,7 @@ import {
   pastedJobTitle,
   resumeBriefForRun,
   selectBuiltinToolsForRun,
+  shortQuestion,
   toolArgsSummary,
 } from "./executor.js";
 import {
@@ -5939,6 +5940,16 @@ describe("native recruiting assessment effect delivery", () => {
       intent: { basis: "direct", quote: text.trim() },
     });
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role");
+  });
+
+  it("fits a long question card by dropping leading context, keeping the question", () => {
+    const question = `${"背景说明很长。".repeat(40)}候选人需要三项都具备吗？`;
+    const short = shortQuestion(question);
+    expect(short.length).toBeLessThanOrEqual(240);
+    expect(short.startsWith("背景说明很长。")).toBe(true);
+    expect(short.endsWith("候选人需要三项都具备吗？")).toBe(true);
+    expect(shortQuestion("short?")).toBe("short?");
+    expect(shortQuestion("x".repeat(300))).toHaveLength(240);
   });
 
   it("titles a pasted JD from its first line and ignores short messages", () => {
