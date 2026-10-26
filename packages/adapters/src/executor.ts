@@ -165,6 +165,7 @@ import {
   createThreadMessageInTransaction,
   effectiveMemoryScope,
   executeNativeRecruitingShortlist,
+  confirmRecruitingBrief,
   executeRecruitingApproval,
   executeRecruitingCrmBinding,
   executeRecruitingNotesTool,
@@ -5493,6 +5494,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ? "Calibration rounds never use an approval card. The round is recorded: list the ten in chat and end with the next-step question. When the recruiter asks for more people or presses accept on the round panel, record it with recruiting_feedback target round operation approve and their exact words, then start the scale-out."
                       : "Calibration rounds never use an approval card. Record the ten with recruiting_research calibration_round, list them in chat and end with the next-step question.",
                 };
+              }
+              if (call.data.stage === "brief") {
+                // A complete brief is confirmed by the recruiter's own answers: record it the way
+                // the web control does, without a card, and go straight to the first round. The
+                // recruiter can still change the brief afterwards.
+                try {
+                  if (!deps.artifacts) throw new IsolationError();
+                  const saved = await confirmRecruitingBrief(
+                    deps.prisma,
+                    researchActor.actor,
+                    {
+                      threadId: thread.id,
+                      roleId: call.data.roleId,
+                      expectedRevision: call.data.expectedRoleRevision,
+                    },
+                    { artifacts: deps.artifacts, context },
+                  );
+                  return {
+                    confirmed: true,
+                    roleId: saved.role.id,
+                    expectedRoleRevision: saved.role.revision,
+                    next: recruitingBriefConfirmedNextStep(saved.role.revision),
+                  };
+                } catch (error) {
+                  return { error: sanitizeConnectorError(error, runSecrets) };
+                }
               }
             }
             const parsed = (
