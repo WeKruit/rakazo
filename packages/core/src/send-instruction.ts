@@ -37,27 +37,25 @@ export function sendBodyText(args: Record<string, unknown>): string | null {
   return null;
 }
 
-const RECIPIENT_KEYS = [
-  "to",
-  "recipient_email",
-  "cc",
-  "bcc",
-  "extra_recipients",
-  "cc_address_email_list",
-  "bcc_address_email_list",
-];
+// The sending account is the recruiter's own connected mailbox, not a recipient.
+const SENDER_KEYS = new Set(["eaccount", "from", "from_email", "sender"]);
 
 const EMAIL_ADDRESS = /[a-z0-9._%+-]+@[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}/gi;
 
-/** Every address a send tool's arguments name as a recipient, lowercased. */
+/**
+ * Every address anywhere in a send tool's arguments, lowercased, except the sending account.
+ * Scanning all fields fails closed for recipient keys a tool names differently.
+ */
 export function sendRecipients(args: Record<string, unknown>): string[] {
   const found = new Set<string>();
   const collect = (value: unknown) => {
     if (typeof value === "string")
       for (const match of value.match(EMAIL_ADDRESS) ?? []) found.add(match.toLowerCase());
     else if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === "object")
+      for (const [key, nested] of Object.entries(value)) if (!SENDER_KEYS.has(key)) collect(nested);
   };
-  for (const key of RECIPIENT_KEYS) collect(args[key]);
+  collect(args);
   return [...found];
 }
 

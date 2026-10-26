@@ -83,6 +83,9 @@ describe("recruiter-instructed sends", () => {
       { to: "someone-else@attacker.test" },
       // A shorter address hidden inside a shown one is still a different recipient.
       { to: "lex@example.test" },
+      // Recipient fields a tool names differently still count.
+      { to: "alex@example.test", forward_to: "relay@attacker.test" },
+      { recipients: [{ email: "alex@example.test" }, { email: "x@attacker.test" }] },
     ])
       expect(
         recruiterInstructedSend({
@@ -101,7 +104,8 @@ describe("recruiter-instructed sends", () => {
         cc: "b@example.test; c@example.test",
         bcc_address_email_list: "d@example.test",
         extra_recipients: ["e@example.test"],
-        subject: "f@example.test",
+        subject: "Re: f@example.test",
+        eaccount: "recruiter@example.test",
       }).sort(),
     ).toEqual([
       "a@example.test",
@@ -109,6 +113,7 @@ describe("recruiter-instructed sends", () => {
       "c@example.test",
       "d@example.test",
       "e@example.test",
+      "f@example.test",
     ]);
     expect(
       recipientsShownToRecruiter({ instruction: "发吧", shownBefore: null, recipients: [] }),
