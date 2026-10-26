@@ -3705,6 +3705,11 @@ describe("local native Instantly campaign and lead tools", () => {
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` },
       { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
+      {
+        method: "POST",
+        path: "/api/v2/leads/list",
+        body: { campaign: CAMPAIGN, limit: 100 },
+      },
     ]);
   });
 
@@ -4006,7 +4011,8 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(events[0]).toMatchObject({ type: "result" });
     const paths = f.state.requests.map((r) => `${r.method} ${r.path}`);
     expect(paths).toContain("POST /api/v2/campaigns");
-    expect(paths.at(-1)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
+    expect(paths.at(-2)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
+    expect(f.result(events)).toMatchObject({ activated: true, campaignId: CAMPAIGN });
   });
 
   it("picks the default mailbox: last used on this connection, else the first connected", async () => {
