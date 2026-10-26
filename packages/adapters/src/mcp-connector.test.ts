@@ -3926,9 +3926,39 @@ describe("local native Instantly campaign and lead tools", () => {
         sequences: [{ steps: [{ type: "email", variants: [{ subject: "Hi", body: "Hello" }] }] }],
       },
     });
-    f.state.campaign.status = 1;
-    const active = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
-    expect(active).toMatchObject({ stepsSaved: false });
+    // Saved copy is shown, never replaced.
+    f.state.campaign.sequences = [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }];
+    const writes = f.state.requests.length;
+    const again = f.result(
+      await f.run("ensure_role_campaign", {
+        role_id: "role-1",
+        steps: [{ subject: "New", body: "Other", delay_days: 0 }],
+      }),
+    );
+    expect(again).toMatchObject({
+      stepsSaved: false,
+      hasEmail: true,
+      currentEmail: { subject: "Hi", body: "Hello" },
+    });
+    expect(f.state.requests.slice(writes).some((r) => r.method === "PATCH")).toBe(false);
+  });
+
+  it("never writes copy onto an adopted campaign", async () => {
+    const f = fixture();
+    delete f.state.campaign.sequences;
+    f.state.campaigns = [
+      { id: "adopted", name: "Founding Engineer", status: 0, timestamp_created: "2026-01-01" },
+    ];
+    const adopted = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(adopted).toMatchObject({ adopted: true, created: false });
+    const steps = [{ subject: "Hi", body: "Hello", delay_days: 0 }];
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
+    expect(second).toMatchObject({ stepsSaved: false });
+    expect(
+      f.state.requests.some(
+        (r) => r.method === "PATCH" && JSON.stringify(r.body).includes("sequences"),
+      ),
+    ).toBe(false);
   });
 
   it("activate_campaign without campaign_id ensures and activates the role's own campaign", async () => {
