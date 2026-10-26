@@ -3905,6 +3905,25 @@ describe("local native Instantly campaign and lead tools", () => {
     );
   });
 
+  it("reports a body the provider saved blank and rewrites it on the next save", async () => {
+    const f = fixture();
+    const blank = [{ steps: [{ variants: [{ subject: "Hi", body: "<br /><br />" }] }] }];
+    f.state.campaign.sequences = blank;
+    const steps = [{ subject: "Hi", body: "Q&A", delay_days: 0 }];
+    const first = await f.run("ensure_role_campaign", { role_id: "role-1", steps });
+    expect(first[0]).toMatchObject({ type: "error", message: expect.stringMatching(/blank body/) });
+    const retry = f.result(
+      await f.run("ensure_role_campaign", {
+        role_id: "role-1",
+        steps: [{ subject: "Hi", body: "Q and A", delay_days: 0 }],
+      }),
+    );
+    expect(retry).toMatchObject({ created: false, stepsSaved: true, hasEmail: true });
+    expect(
+      f.state.requests.filter((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
+    ).toHaveLength(1);
+  });
+
   it("saves new steps onto the role's existing draft and maps the zone the provider lists", async () => {
     const f = fixture();
     delete f.state.campaign.sequences;
@@ -3919,7 +3938,7 @@ describe("local native Instantly campaign and lead tools", () => {
     const steps = [{ subject: "Hi", body: "Hello", delay_days: 0 }];
     const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
     expect(second).toMatchObject({ created: false, stepsSaved: true, hasEmail: true });
-    expect(f.state.requests.at(-1)).toMatchObject({
+    expect(f.state.requests.findLast((r) => r.method === "PATCH")).toMatchObject({
       method: "PATCH",
       path: `/api/v2/campaigns/${CAMPAIGN}`,
       body: {
