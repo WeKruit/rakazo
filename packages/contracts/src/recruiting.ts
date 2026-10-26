@@ -224,7 +224,10 @@ export const RecruitingBriefDraftSchema = z.strictObject({
       value: Text.nullable(),
       origin: BriefOrigin,
       state: z.enum(["known", "missing", "conflict"]),
-      consequential: z.boolean(),
+      consequential: z
+        .boolean()
+        .default(false)
+        .describe("True when this field changes who is searched for."),
       sourceRefIds: z
         .array(RecruitingId)
         .describe(

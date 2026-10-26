@@ -363,7 +363,8 @@ export function nextPlaybookStep(
         : {
             stage,
             label: "完成岗位信息",
-            prompt: "从已有材料整理岗位标题与 brief 并保存；缺少的关键信息一次性问清。",
+            prompt:
+              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就直接保存岗位标题与 brief，并在本轮开始校准搜寻。",
           };
     case "calibration_10": {
       const remaining = Math.max(0, CALIBRATION_TARGET - facts.savedCandidates);

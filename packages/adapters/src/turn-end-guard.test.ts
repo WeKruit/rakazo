@@ -99,6 +99,17 @@ function fixture(
       recruitingCandidate: {
         count: vi.fn(async () => options.savedCandidates ?? options.savedRows ?? 0),
       },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () =>
+          (options.round?.candidateKeys ?? []).map((candidateKey, index) => ({
+            candidateKey,
+            name: `Person ${index}`,
+            title: "Warehouse Manager",
+            company: "Example Co",
+            location: "Atlanta",
+          })),
+        ),
+      },
     },
     events: { sendUserMessage },
     jobs: { enqueue },
@@ -205,6 +216,26 @@ describe("guardRecruitingTurnEnd", () => {
         ],
       }),
     ).toEqual({ action: "ended", classification: "question" });
+  });
+
+  it("lists the ten in chat when the turn that recorded them did not", async () => {
+    const f = fixture({ stage: "feedback", round: shownRound, completedRoundEffect: true });
+    const input = {
+      run,
+      roleId: "role-1",
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    };
+    await guardRecruitingTurnEnd(f.deps, { ...input, blocks: statusNote });
+    expect(f.postAssistant).toHaveBeenCalledOnce();
+    expect(f.postAssistant).toHaveBeenCalledWith(
+      expect.stringContaining("10. Person 9 · Warehouse Manager · Example Co · Atlanta"),
+    );
+    f.postAssistant.mockClear();
+    const listed = Array.from({ length: 10 }, (_, i) => `Person ${i}`).join("\n");
+    await guardRecruitingTurnEnd(f.deps, { ...input, blocks: [{ kind: "text", text: listed }] });
+    expect(f.postAssistant).not.toHaveBeenCalled();
   });
 
   it.each([
