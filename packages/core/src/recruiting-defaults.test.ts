@@ -258,6 +258,10 @@ describe("maintained recruiting defaults", () => {
     expect(sourcer?.instructions).toContain(
       "hand it to Outreach only after the research is started, as your last call",
     );
+    // Quick-search rounds leave no research task: the scale-out starts one without asking.
+    expect(sourcer?.instructions).toContain(
+      "as the role's first research request without asking anyone",
+    );
     for (const part of ["That request is the acceptance"])
       expect(RECRUITING_SCALE_START).toContain(part);
     for (const bot of RECRUITING_DEFAULT_BOTS) {
