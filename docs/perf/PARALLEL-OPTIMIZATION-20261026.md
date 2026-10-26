@@ -57,8 +57,9 @@ Setup detail from production logs (fast route, ms; each `*OwnMs` is one load on 
 
 nativeSources, recall, stoppedNotice and turnImages were 0 in every run. Two readings:
 
-- `discoveryJoin` is 2–3 times the sum of the loads it waits for, so most of it is uncovered
-  waiting, not the loads themselves.
+- Correction from P16 inspection: `discoveryJoinMs` is cumulative from pickup, while the
+  `*OwnMs` values measure individual, overlapping loads. Their sum does not establish uncovered
+  waiting. Use the new join interval and each load's start/end offsets to identify the critical path.
 - Lease, context and discovery spiked together when two runs shared one worker, which points to
   contention on the worker's database pool (4 connections).
 - On later turns `recruitingContextOwnMs` (1.35–2.2 s) is the largest single setup piece.
@@ -274,15 +275,40 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P16. Find the uncovered wait in discoveryJoin
 
-- **Owner:** dot (claimed 2026-10-26; local implementation and offline verification) (pairs with P9)
-- **Serial today:** `discoveryJoinMs` (0.9–2.2 s) is 2–3 times the sum of the `*OwnMs` loads it
-  joins, so something it waits on is not timed: pool acquisition, a sequential await before the
-  join, or an untimed load.
-- **Change:** time every promise in the join with `ownTime`, then remove or overlap the untimed one.
-- **Expected savings:** 0.5–1.3 s per turn, on every turn.
-- **Risk:** none for the measuring step.
-- **Effort:** S.
-- **Measure:** the sum of `*OwnMs` should explain `discoveryJoinMs` within ~100 ms.
+- **Owner:** dot (implemented and verified offline 2026-10-26; pairs with P9)
+- **Finding:** `discoveryJoinMs` is a cumulative pickup-to-join milestone, not the duration of
+  discovery or of the join itself. The earlier comparison with the sum of overlapping `*OwnMs`
+  did not demonstrate 0.5–1.3 s of uncovered waiting. MCP server catalog reads and all nine join
+  members already run in parallel; no additional serial wait was proven safe to remove.
+- **Change:** retain the cumulative mark; add `discoveryJoinStartMs` and `discoveryJoinWaitMs`.
+  All nine join members now have `*StartMs`, `*EndMs` and `*OwnMs`, including the previously
+  untimed scratchpad, tickets, resume brief and routine history. Native human sources, memory
+  and recall are timed at launch rather than when joined. No context or authorization cache added.
+- **Reproducible local measurement:** the fake-clock executor test injects 200 ms of prior
+  context loading, 30 ms of discovery and 60 ms of scratchpad loading. Observed offsets are
+  discovery 200–230 ms and scratchpad 200–260 ms; `discoveryJoinMs=260`,
+  `discoveryJoinStartMs=200`, `discoveryJoinWaitMs=60`. This proves that the wait is the slowest
+  overlapping load, not their sum, and distinguishes it from earlier setup. These are synthetic
+  offline measurements, not production latency or a measured speedup.
+- **Validation (repository-root commands unless noted):**
+  - `node_modules/.bin/vitest run packages/adapters/src/executor-recent-turn-images.test.ts`:
+    exit 0, 24 tests passed (includes the fixed-clock measurement and interval coverage).
+  - `node_modules/.bin/vitest run packages/adapters/src/executor*.test.ts`:
+    exit 0, 675 tests across 13 files passed.
+  - `node_modules/.bin/tsc --noEmit -p packages/adapters/tsconfig.json`: initially exit 1 because
+    the pre-existing generated Prisma client lacked current schema models. Regenerated locally
+    with `node_modules/.bin/prisma generate` from `packages/db` (exit 0; no migration).
+    Rerun exit 0 after generation.
+  - `pnpm exec biome check packages/adapters/src/executor.ts`: initial exit 1 because the
+    environment's global pnpm attempted an unavailable automatic install. Used existing local
+    binaries instead. Initial direct Biome check found formatting (exit 1); applied the formatter.
+  - `node_modules/.bin/biome check packages/adapters/src/executor.ts packages/adapters/src/executor-recent-turn-images.test.ts`:
+    final exit 0, both files clean. `git diff --check`: exit 0.
+- **Limitations / next measurement:** no deployment, external searches or role writes. No
+  production time saved claimed. On an approved future release, compare `discoveryJoinWaitMs`
+  with the latest join-member end offset minus `discoveryJoinStartMs` (within rounding/scheduling
+  overhead), and inspect the
+  earlier setup milestones separately. A pool contention diagnosis still needs P15 measurements.
 
 ### P17. recruitingContext on later turns
 
@@ -337,7 +363,8 @@ M one to two days. Risk covers quality, cost and the project rules.
 2. P6 shorter pick output: 4–10 s to all ten.
 3. P2 search plan drafted during questions: 3–5 s.
 4. P3 speculative searches: 9–14 s, needs the user's decision.
-5. P17 + P16 recruiting context and the uncovered setup wait: 1.5–2.8 s per answer turn.
+5. P17 recruiting context: estimated 1–1.5 s per answer turn. P16 now supplies corrected timing;
+   its earlier savings estimate was not established by the cumulative milestone.
 6. P18 needless save_search: ~2 s when it happens.
 7. P4 + P5 search tail and save off the path: 1.5–4 s together.
 
