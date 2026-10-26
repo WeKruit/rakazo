@@ -807,6 +807,10 @@ async function main() {
         settledSince ??= Date.now();
         if (Date.now() - settledSince > 45_000) {
           mark("scale_settled", { total: lastTotal });
+          // Work that stops on a question before the target is a stall a recruiter has to notice.
+          const open = pendingAsks();
+          if (lastTotal < TARGET && open.length)
+            violation("scale_waits_on_card", open.at(-1).block.text.slice(0, 120));
           break;
         }
       } else settledSince = null;
