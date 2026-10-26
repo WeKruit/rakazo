@@ -594,10 +594,12 @@ async function newAccountScope(b, bResources) {
   });
   for (const view of ["inbox", "contacts", "interview"]) {
     const mail = await b.rpc("recruiting/correspondence", { ...target, view });
+    // `connections` lists the account's own mail connections; only messages and people count.
     const rows = ok(mail)
-      ? Object.values(mail.data)
-          .filter(Array.isArray)
-          .reduce((sum, list) => sum + list.length, 0)
+      ? ["emails", "events", "contacts"].reduce(
+          (sum, key) => sum + (mail.data[key]?.length ?? 0),
+          0,
+        )
       : 0;
     record({
       name: `B's own ${view} holds no one else's mail`,
