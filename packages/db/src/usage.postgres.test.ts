@@ -242,6 +242,54 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       }),
     ).toBe(1);
 
+    // Two readings landing at once claim the window between them and the last one only once.
+    const researchCredits = () =>
+      prisma.usageRecord.aggregate({
+        where: { spaceId, unit: "credits", provider: "autumn" },
+        _sum: { quantity: true },
+      });
+    const beforeConcurrent = (await researchCredits())._sum.quantity ?? 0;
+    // The first reading's transaction stays open while the second one completes.
+    const reading = async () => {
+      const effect = await prisma.externalEffect.create({
+        data: {
+          spaceId,
+          runId,
+          kind: "connector",
+          idempotencyKey: `usage:${suffix}:${seq++}`,
+          status: "executing",
+          request: [
+            "__rakazoCatalogTool",
+            "credits_execute_tool",
+            {},
+            { connectorId: "mcp", resourceId: researchServerId, toolName: "credits" },
+          ],
+        },
+      });
+      return (tx: Pick<PrismaClient, "externalEffect">) =>
+        tx.externalEffect.update({
+          where: { id: effect.id },
+          data: {
+            status: "completed",
+            result: { structuredContent: { credits_used: 1200, credits_remaining: 98_800 } },
+          },
+        });
+    };
+    const [first, second] = await Promise.all([reading(), reading()]);
+    let firstDone!: () => void;
+    const firstWritten = new Promise<void>((resolve) => {
+      firstDone = resolve;
+    });
+    await Promise.all([
+      prisma.$transaction(async (tx) => {
+        await first(tx);
+        firstDone();
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }),
+      firstWritten.then(() => second(prisma)),
+    ]);
+    expect(((await researchCredits())._sum.quantity ?? 0) - beforeConcurrent).toBe(50);
+
     // Contact enrichment also reports only a remaining balance; a drop is spend, a top-up is not.
     await connectorCall(enrichServerId, "get_credits", new Date(), {
       content: [{ type: "text", text: JSON.stringify({ credits: 1102 }) }],
@@ -258,12 +306,12 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       priceTokens: (provider, model, tokens) =>
         provider === "openai-codex" && model === "gpt-test" && tokens.input === 100 ? 0.5 : null,
     });
-    // 150 research credits, 26 enrichment credits, 2 searches and the model call at list price.
-    expect(owner.total.credits).toBe(176);
-    expect(owner.total.estimatedUsd).toBeCloseTo(150 * 0.0085 + 26 * 0.058 + 2 * 0.007 + 0.5, 2);
+    // 200 research credits, 26 enrichment credits, 2 searches and the model call at list price.
+    expect(owner.total.credits).toBe(226);
+    expect(owner.total.estimatedUsd).toBeCloseTo(200 * 0.0085 + 26 * 0.058 + 2 * 0.007 + 0.5, 2);
     expect(owner.services).toEqual(
       expect.arrayContaining([
-        { service: "autumn", unit: "credits", quantity: 150, estimatedUsd: 1.28, priced: true },
+        { service: "autumn", unit: "credits", quantity: 200, estimatedUsd: 1.7, priced: true },
         { service: "fullenrich", unit: "credits", quantity: 26, estimatedUsd: 1.51, priced: true },
         { service: "people-search", unit: "calls", quantity: 2, estimatedUsd: 0.01, priced: true },
         {
@@ -276,8 +324,8 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       ]),
     );
     expect(owner.accounts?.find((account) => account.userId === userId)).toMatchObject({
-      credits: 176,
-      estimatedUsd: 3.3,
+      credits: 226,
+      estimatedUsd: 3.72,
     });
     // Without a known model price the tokens stay visible as unpriced, never silently free.
     const unpriced = await db.summarizeUsageCosts(prisma, actor);
