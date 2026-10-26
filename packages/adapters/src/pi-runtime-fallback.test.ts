@@ -2031,6 +2031,55 @@ describe("Pi runtime ordered model fallback", () => {
     }
   });
 
+  it("gives the retry of a silent step a longer wait for its first item", async () => {
+    vi.useFakeTimers();
+    try {
+      const codex = {
+        ...primary,
+        provider: "openai-codex",
+        api: "openai-codex-responses" as const,
+      };
+      providerState.models.set(`${codex.provider}/${codex.id}`, codex);
+      let calls = 0;
+      providerState.stream.mockImplementation(
+        (
+          target: Model<"openai-completions">,
+          _ctx: unknown,
+          options: {
+            signal: AbortSignal;
+            onResponse: (response: Response, model: Model<"openai-completions">) => void;
+          },
+        ) => {
+          calls += 1;
+          const result = new AssistantMessageEventStream();
+          options.onResponse(new Response(null, { status: 200 }), target);
+          // The retry is only slow: its first item comes after the first attempt's bound.
+          if (calls > 1)
+            setTimeout(() => {
+              const done = message(target, [{ type: "text", text: "slow but fine" }], "stop");
+              result.push({ type: "text_start", contentIndex: 0, partial: done });
+              result.push({ type: "done", reason: "stop", message: done });
+              result.end(done);
+            }, MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS + 10_000);
+          options.signal.addEventListener("abort", () => {
+            const failure = message(target, [], "aborted", "aborted");
+            result.push({ type: "error", reason: "aborted", error: failure });
+            result.end(failure);
+          });
+          return result;
+        },
+      );
+      const input = request();
+      input.model.provider = codex.provider;
+      const pending = run(input);
+      await vi.advanceTimersByTimeAsync(MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS * 2 + 10_000 + 1);
+      expect(await pending).toContainEqual({ type: "text", text: "slow but fine" });
+      expect(providerState.stream).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("retries once when the provider reports the stalled stream in its own words", async () => {
     providerState.stream.mockImplementation((target: Model<"openai-completions">) =>
       providerState.stream.mock.calls.length > 1
