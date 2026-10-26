@@ -245,9 +245,13 @@ describe("maintained recruiting defaults", () => {
       "Feedback about individual people alone is not acceptance",
       "waves of four differently worded web_search_advanced_exa people searches",
       "until the role holds the target or a wave adds fewer than five new people",
-      "only when the people search stops short of the target",
+      "when the people search stopped short of the target",
       "everyone already returned excluded",
       "a draft only: no campaign activation, import or send",
+      // A handoff ends the coordinator's turn: the searches and the update come first.
+      "tell the recruiter in two or three lines with message_user",
+      "end the turn with exactly one handoff, last",
+      "who then hands the email draft to the outreach teammate",
     ])
       expect(RECRUITING_SCALE_START).toContain(part);
     for (const bot of RECRUITING_DEFAULT_BOTS) {

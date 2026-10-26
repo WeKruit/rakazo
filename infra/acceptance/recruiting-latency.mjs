@@ -11,6 +11,9 @@
 //            --group <id>                     measure an existing role chat instead of starting one
 //            --scale-now                      with --group: send the scale-out request right away
 //            --skip-scale                     stop after the first ten
+//            --feedback [text]                after the first ten, give feedback on two of them and
+//                                             wait for the next round before scaling ("auto" or no
+//                                             text uses a built-in comment naming the first two)
 //            --target <n>                     scale target (default 100)
 //            --timeout-min <n>                overall limit (default 60)
 //            --out <file>                     JSON report path (default ./latency-<time>.json)
@@ -37,6 +40,13 @@ const TARGET = Number(option("--target", "100"));
 const TIMEOUT_MS = Number(option("--timeout-min", "60")) * 60_000;
 const POLL_MS = 2_000;
 const SCALE_TEXT = `这 10 个方向可以，找 ${TARGET} 个类似的人`;
+const FEEDBACK_RAW = flag("--feedback") ? option("--feedback", "auto") : null;
+const FEEDBACK = FEEDBACK_RAW?.startsWith("--") ? "auto" : FEEDBACK_RAW;
+const feedbackText = (round) => {
+  if (FEEDBACK !== "auto") return FEEDBACK;
+  const [first, second] = round.candidates.map((c) => c.name).filter(Boolean);
+  return `${first} 和 ${second} 不太合适，他们没有直接带过现场小时工团队。多找在仓库或配送中心直接管过 50 人以上一线团队的人，其他人的方向可以。`;
+};
 const DEFAULT_JD =
   "新岗位：仓库运营经理（亚特兰大 Atlanta，现场办公）。要求：5年以上仓储或配送中心运营管理，带过50人以上的小时工团队，熟悉WMS和KPI管理。加分：会中文、电商或第三方物流背景。排除：猎头、学生。";
 const JD = option("--jd-url")
@@ -243,7 +253,8 @@ function formAnswer(schema) {
   }
   return { action: "accept", content };
 }
-const NEUTRAL_CHOICE = /(按 ?JD|都可以|不限|没有|无所谓|default|any|either|按你|你来定|保持)/i;
+const NEUTRAL_CHOICE =
+  /(按 ?JD|都可以|不限|优先|不作要求|不要求|没有|无所谓|default|any|either|按你|你来定|保持)/i;
 const CONFIRM_CHOICE = /(确认|开始|可以|没问题|对|是|继续|confirm|start|yes|ok)/i;
 const DEFER_CHOICE = /(稍后|以后|先不|跳过|暂不|later|skip|not now)/i;
 
@@ -373,6 +384,7 @@ async function readRound(groupId) {
     approvedAt: round.approvedAt,
     count: keys.length,
     repeats: repeats.length,
+    ...placeQuality(round.candidates),
     people: round.candidates.map((c) =>
       [c.name, c.title, c.company, c.location].filter(Boolean).join(" · "),
     ),
@@ -382,6 +394,70 @@ async function readRound(groupId) {
   );
   if (repeats.length) violation("repeated_people", `round ${round.round}: ${repeats.length}`);
   return round;
+}
+async function sendScale(groupId, threadId) {
+  const before = threadId ? await readTotal(threadId) : null;
+  report.candidateTotals.push({ s: elapsed(), total: before });
+  log(`role has ${before} people before the scale-out request`);
+  // Let the previous turn settle so the request is its own user message.
+  await sleep(3_000);
+  await rpc("threads/send", { groupId, text: SCALE_TEXT });
+  mark("scale_sent", { before });
+  return "scale";
+}
+function placeQuality(people) {
+  const outside = AREA ? people.filter((p) => !AREA.test(p.location ?? "")) : [];
+  const staff = HIRING_COMPANY
+    ? people.filter((p) => (p.company ?? "").toLowerCase().includes(HIRING_COMPANY))
+    : [];
+  return {
+    ...(AREA
+      ? { outsideArea: outside.map((p) => `${p.name} · ${p.location || "no location"}`) }
+      : {}),
+    ...(HIRING_COMPANY ? { hiringCompanyStaff: staff.map((p) => `${p.name} · ${p.company}`) } : {}),
+  };
+}
+// Reads the whole role list once and checks that every person appears once, by LinkedIn profile.
+async function checkPool(threadId) {
+  const rows = [];
+  let cursor;
+  do {
+    const page = await rpc("recruiting/roleCandidates", {
+      groupId: report.groupId,
+      threadId,
+      limit: 100,
+      ...(cursor ? { cursor } : {}),
+    });
+    rows.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor && rows.length < 2_000);
+  const identity = (url) =>
+    /linkedin\.com\/in\/([^/?#\s]+)/i.exec(url ?? "")?.[1]?.toLowerCase() ?? null;
+  const byProfile = new Map();
+  for (const row of rows) {
+    const key = identity(row.linkedinUrl);
+    if (key) byProfile.set(key, [...(byProfile.get(key) ?? []), row.name]);
+  }
+  const duplicates = [...byProfile].filter(([, names]) => names.length > 1);
+  const outside = AREA ? rows.filter((row) => !AREA.test(row.location ?? "")) : [];
+  report.pool = {
+    total: rows.length,
+    withProfile: [...byProfile.values()].flat().length,
+    uniqueProfiles: byProfile.size,
+    duplicates: duplicates.map(([key, names]) => `${names.join(" / ")} · in/${key}`),
+    ...(AREA
+      ? {
+          inArea: rows.length - outside.length,
+          outsideArea: outside.map((row) => `${row.name} · ${row.location || "no location"}`),
+        }
+      : {}),
+  };
+  for (const item of report.pool.duplicates) violation("duplicate_person", item);
+  if (AREA && report.pool.inArea < TARGET)
+    violation("too_few_in_area", `${report.pool.inArea} of ${rows.length} in the role's area`);
+  log(
+    `pool: ${rows.length} people, ${byProfile.size} unique profiles, ${duplicates.length} duplicated${AREA ? `, ${rows.length - outside.length} in area` : ""}`,
+  );
 }
 async function readTotal(threadId) {
   const result = await rpc("recruiting/roleCandidates", {
@@ -628,17 +704,13 @@ async function main() {
   let phase = "intake";
   if (option("--group") && flag("--scale-now")) {
     await readMessages(groupId);
-    const before = messages[0]?.threadId ? await readTotal(messages[0].threadId) : null;
-    report.candidateTotals.push({ s: elapsed(), total: before });
-    log(`role has ${before} people before the scale-out request`);
-    await rpc("threads/send", { groupId, text: SCALE_TEXT });
-    mark("scale_sent", { before });
-    phase = "scale";
+    phase = await sendScale(groupId, messages[0]?.threadId ?? null);
   }
   let firstRound = null;
   let threadId = null;
   let lastTotal = -1;
   let idleSince = Date.now();
+  let settledSince = null;
   while (Date.now() - started < TIMEOUT_MS) {
     await readMessages(groupId).catch((error) => log(`read failed: ${error.message}`));
     threadId ??= messages[0]?.threadId ?? null;
@@ -666,19 +738,41 @@ async function main() {
       const shown = namesListedInChat(firstRound);
       if (shown.listed >= Math.min(8, shown.of)) {
         mark("first10_in_chat", shown);
-        if (flag("--skip-scale")) break;
-        // Let the round's turn settle so the scale request is its own user message.
-        await sleep(3_000);
-        await rpc("threads/send", { groupId, text: SCALE_TEXT });
-        mark("scale_sent");
-        phase = "scale";
+        if (FEEDBACK) {
+          await sleep(3_000);
+          const text = feedbackText(firstRound);
+          report.feedback = { text };
+          await rpc("threads/send", { groupId, text });
+          mark("feedback_sent");
+          phase = "feedback";
+        } else {
+          if (flag("--skip-scale")) break;
+          phase = await sendScale(groupId, threadId);
+        }
       } else if (Date.now() - Date.parse(report.milestones.first10_saved.at) > 120_000) {
         violation("ten_not_in_chat", `${shown.listed}/${shown.of} names in chat after 2 min`);
         report.milestones.first10_in_chat = { s: null, ...shown };
         if (flag("--skip-scale")) break;
-        await rpc("threads/send", { groupId, text: SCALE_TEXT });
-        mark("scale_sent");
-        phase = "scale";
+        phase = await sendScale(groupId, threadId);
+      }
+    }
+    if (phase === "feedback") {
+      const next = round && round.round > firstRound.round ? round : null;
+      const shown = next ? namesListedInChat(next) : null;
+      if (next && next.candidates.length)
+        mark("feedback_round_saved", { round: next.round, people: next.candidates.length });
+      const waited = Date.now() - Date.parse(report.milestones.feedback_sent.at);
+      const ready = shown && shown.of >= 10 && shown.listed >= Math.min(8, shown.of);
+      if (ready || waited > 10 * 60_000) {
+        if (ready) mark("feedback_round_in_chat", shown);
+        else
+          violation(
+            "no_feedback_round",
+            next ? `${shown.listed}/${shown.of} in chat after 10 min` : "no new round after 10 min",
+          );
+        report.feedback.round = next ? report.rounds.find((r) => r.round === next.round) : null;
+        if (flag("--skip-scale")) break;
+        phase = await sendScale(groupId, threadId);
       }
     }
     if (phase === "scale" && threadId) {
@@ -690,10 +784,35 @@ async function main() {
         log(`role has ${total} people`);
         for (const step of [25, 50, 75])
           if (total >= (TARGET * step) / 100) mark(`reached_${step}pct`, { total });
-        if (total >= TARGET) {
-          mark("target_reached", { total });
+        if (total >= TARGET) mark("target_reached", { total });
+      }
+      // People saved before the request can already exceed the target, so the run also waits for
+      // the reply to the request and for the role's work to finish before it reads the pool.
+      const sentAt = Date.parse(report.milestones.scale_sent.at);
+      // A next-step card from the round's own turn can land just after the request: only text counts.
+      const replied = messages.some(
+        (message) =>
+          message.role === "bot" &&
+          Date.parse(message.createdAt) > sentAt &&
+          message.blocks.some((block) => block.kind === "text" && block.text.trim()),
+      );
+      if (replied) mark("scale_replied");
+      const busy = await rpc("threads/get", { groupId })
+        .then(
+          (snapshot) =>
+            (snapshot.activeRuns ?? []).length > 0 || snapshot.run?.status === "running",
+        )
+        .catch(() => true);
+      if (!busy && replied) {
+        settledSince ??= Date.now();
+        if (Date.now() - settledSince > 45_000) {
+          mark("scale_settled", { total: lastTotal });
           break;
         }
+      } else settledSince = null;
+      if (report.milestones.target_reached && Date.now() - sentAt > 30 * 60_000) {
+        log("still working 30 min after the request with the target reached; reading the pool now");
+        break;
       }
       if (Date.now() - idleSince > 20 * 60_000) {
         violation("stalled", `no new people for 20 min at ${lastTotal}`);
@@ -704,6 +823,8 @@ async function main() {
     await sleep(POLL_MS);
   }
 
+  if (threadId && phase === "scale")
+    await checkPool(threadId).catch((error) => log(`pool read failed: ${error.message}`));
   const events = await readEvents(groupId).catch((error) => {
     log(`event read failed: ${error.message}`);
     return null;
@@ -724,14 +845,17 @@ async function main() {
     confirm_to_first10_saved_s: between("brief_confirmed", "first10_saved"),
     confirm_to_first10_in_chat_s: between("brief_confirmed", "first10_in_chat"),
     jd_to_first10_in_chat_s: between("jd_sent", "first10_in_chat"),
+    feedback_to_round_in_chat_s: between("feedback_sent", "feedback_round_in_chat"),
     scale_to_25pct_s: between("scale_sent", "reached_25pct"),
     scale_to_target_s: between("scale_sent", "target_reached"),
+    scale_to_reply_s: between("scale_sent", "scale_replied"),
+    scale_to_settled_s: between("scale_sent", "scale_settled"),
     jd_to_target_s: between("jd_sent", "target_reached"),
   };
   if (!m.first_question && !m.first10_saved)
     violation("no_reply", "the recruiter saw no question and no people");
   report.result =
-    !m.first10_saved || (!flag("--skip-scale") && !m.target_reached)
+    (!option("--group") && !m.first10_saved) || (!flag("--skip-scale") && !m.target_reached)
       ? "incomplete"
       : report.violations.length
         ? "completed_with_violations"
