@@ -576,6 +576,8 @@ function measureFirstTen(events, round) {
   };
   if (!allShown) violation("ten_not_in_chat", `${names.length} names never all in chat`);
   if (!result.tenRecordedBeforeCard) violation("card_before_ten", "next-step card came first");
+  if (result.questions && !result.plannedSearches)
+    violation("no_planned_searches", "the last question carried no planned searches");
   if (result.plannedSearches && result.modelSearchesAfterAnswer)
     violation("searched_again", `${result.modelSearchesAfterAnswer} searches after planned rows`);
   for (const item of result.regionOnly) violation("region_only_location", item);
@@ -705,6 +707,8 @@ async function main() {
   });
   if (events) {
     checkToolErrors(events);
+    for (const event of events.filter((e) => e.type === "run.failed"))
+      violation("run_failed", `${event.createdAt} ${event.payload?.error ?? ""}`.trim());
     if (firstRound) measureFirstTen(events, firstRound);
   }
   const m = report.milestones;
@@ -719,6 +723,8 @@ async function main() {
     scale_to_target_s: between("scale_sent", "target_reached"),
     jd_to_target_s: between("jd_sent", "target_reached"),
   };
+  if (!m.first_question && !m.first10_saved)
+    violation("no_reply", "the recruiter saw no question and no people");
   report.result =
     !m.first10_saved || (!flag("--skip-scale") && !m.target_reached)
       ? "incomplete"

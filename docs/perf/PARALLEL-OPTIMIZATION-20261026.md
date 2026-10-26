@@ -509,7 +509,7 @@ the questions neutrally, stops at the first ten and archives each copy.
 
 ```
 RAKAZO_URL=<deployment> RAKAZO_EMAIL=<test account> RAKAZO_PASSWORD=<…> RAKAZO_RELEASE_SHA=<sha> \
-  node infra/acceptance/first10-suite.mjs --link <live metro-Atlanta job posting> --link-company <its company>
+  node infra/acceptance/first10-suite.mjs --repeat 5 --link <live metro-Atlanta job posting> --link-company <its company>
 ```
 
 Times come from the chat's own event times, not from polling:
@@ -527,7 +527,16 @@ It also reports, per case:
 - current staff of the hiring company;
 - recruiting tool retries.
 
-It writes `summary.md` plus one JSON report per case. Use a live posting: a closed link
+`--repeat <n>` runs each case n times, interleaved (long, short, link, long, …). The suite then
+reports p50, p90 and max for each milestone. Use 5 or more runs for a p90 worth reading.
+
+The suite writes:
+
+- `summary.md`;
+- `report.html`, a self-contained page with a strip chart per milestone and every run;
+- one JSON report per run.
+
+`--from <dir>` rebuilds both summaries from an earlier run without starting new roles. Use a live posting: a closed link
 redirects to the company's job board, and the run then measures some other role.
 
 First run on 7a8c6b74 (2026-10-26 18:10 UTC):
@@ -537,3 +546,23 @@ First run on 7a8c6b74 (2026-10-26 18:10 UTC):
 | Long text | 6.6 s | 10.5 s | 14.6 s | no | yes | 10/10 | 0 | 0 |
 | Short text | 4.9 s | 9.7 s | 13.5 s | no | yes | 10/10 | 0 | 0 |
 | Link | 9.2 s | 10.8 s | 19.5 s | no | yes | 10/10 | 0 | 1 (refused key, list kept) |
+
+Five runs per case on 7a8c6b74 (2026-10-26 18:15 UTC, 15 runs, p50 / p90 / max):
+
+| JD | Passed | Q1 | First people in chat | All ten |
+|---|---|---|---|---|
+| Long text | 4/5 | 5.5 / 6.1 / 6.3 s | 9.9 / 11.2 / 11.4 s | 15.2 / 16.7 / 16.9 s |
+| Short text | 3/5 | 4.9 / 5.8 / 6.0 s | 10.9 / 20.5 / 26.2 s | 15.0 / 32.3 / 32.7 s |
+| Link | 4/5 | 7.0 / 13.1 / 15.6 s | 10.4 / 11.1 / 11.3 s | 14.7 / 15.2 / 15.3 s |
+
+What the tail shows:
+
+- **Short text, runs 4 and 5 (26–33 s):** the model searched again after the answer. Run 4 had
+  three planned searches and the model still ran four more. Run 5's question carried no planned
+  searches, so the model ran four itself.
+- **Link, run 5:** the first model step hung. The run failed after 4 minutes on the stream idle
+  timeout. The recruiter saw no question, no error and no retry.
+- **One country-only pick** (short text, run 2: "United States").
+- **One Hoschton pick:** the town is in Jackson County, inside the Atlanta metro, and is now in the
+  area list.
+
