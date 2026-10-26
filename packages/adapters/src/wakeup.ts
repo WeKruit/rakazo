@@ -166,7 +166,10 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
     const runner = await run({
       pgPool: this.pgPool,
       concurrency: this.options.concurrency ?? 4,
-      pollInterval: this.options.pollInterval ?? 500,
+      // New jobs arrive at once through graphile's LISTEN; polling only picks up scheduled jobs
+      // and missed notifications. Every idle slot polls on its own, so 500 ms with 10 slots was
+      // 20 checkouts a second from a pool of 5.
+      pollInterval: this.options.pollInterval ?? 2_000,
       noHandleSignals: this.options.noHandleSignals,
       taskList,
     });
