@@ -445,7 +445,7 @@ export function syncRecruitingCrmLeads(
   });
 }
 
-const sequenceStatus = (code: number | null) =>
+export const sequenceStatus = (code: number | null) =>
   code === null
     ? null
     : code === 0
@@ -481,22 +481,26 @@ const total = (values: (number | null)[]) =>
     ? values.reduce<number>((sum, value) => sum + Math.max(0, value ?? 0), 0)
     : null;
 
-/** Saved per-person sequence numbers across every synced sequence, for the listed people. */
-export async function listSyncedRecruitingSequenceStats(
-  prisma: PrismaClient,
-  actor: Actor,
-  scope: CrmSyncScope,
-  candidateIds: string[],
-) {
-  const leads = await prisma.recruitingCrmLead.findMany({
-    where: { ...owned(actor, scope), archivedAt: null, crmCandidateId: { in: candidateIds } },
-    orderBy: { crmLeadId: "asc" },
-  });
-  const byCandidate = new Map<string, typeof leads>();
+export type SequenceLead = {
+  crmLeadId: string;
+  crmCampaignId: string | null;
+  crmCandidateId: string | null;
+  status: number | null;
+  openCount: number | null;
+  replyCount: number | null;
+  lastContactAt: Date | null;
+  lastReplyAt: Date | null;
+  syncedAt: Date;
+};
+
+/** Per-person sequence numbers across every sequence, from that person's leads. */
+export function sequenceStatsFromLeads(leads: SequenceLead[]) {
+  const byCandidate = new Map<string, SequenceLead[]>();
   for (const lead of leads) {
-    const rows = byCandidate.get(lead.crmCandidateId!) ?? [];
+    if (!lead.crmCandidateId) continue;
+    const rows = byCandidate.get(lead.crmCandidateId) ?? [];
     rows.push(lead);
-    byCandidate.set(lead.crmCandidateId!, rows);
+    byCandidate.set(lead.crmCandidateId, rows);
   }
   return [...byCandidate].map(([candidateId, rows]) => {
     // The person's current state is the one in the sequence that contacted them last.
@@ -515,6 +519,20 @@ export async function listSyncedRecruitingSequenceStats(
       syncedAt: latest(rows.map((row) => row.syncedAt))!.toISOString(),
     };
   });
+}
+
+/** Saved per-person sequence numbers across every synced sequence, for the listed people. */
+export async function listSyncedRecruitingSequenceStats(
+  prisma: PrismaClient,
+  actor: Actor,
+  scope: CrmSyncScope,
+  candidateIds: string[],
+) {
+  const leads = await prisma.recruitingCrmLead.findMany({
+    where: { ...owned(actor, scope), archivedAt: null, crmCandidateId: { in: candidateIds } },
+    orderBy: { crmLeadId: "asc" },
+  });
+  return sequenceStatsFromLeads(leads);
 }
 
 /** Saved sequences with no role, with how many people each reached, opened and replied. */

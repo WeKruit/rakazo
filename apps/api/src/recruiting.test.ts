@@ -4833,6 +4833,74 @@ describe("live CRM browser reads", () => {
     );
   });
 
+  it("reads people's sequence numbers and no-role sequences live from the CRM", async () => {
+    const f = browserFixture();
+    f.assignment.allowedTools.push("list_crm_campaigns");
+    const lead = {
+      id: "lead-a",
+      campaign_id: "seq-a",
+      candidate_id: candidateId,
+      status: 1,
+      interest_status: null,
+      email_open_count: 2,
+      email_reply_count: 1,
+      timestamp_last_contact: "2026-10-20T00:00:00Z",
+      timestamp_last_reply: "2026-10-21T00:00:00Z",
+      synced_at: "2026-10-25T00:00:00Z",
+    };
+    const pinned = { serverId: "crm", serverRevision: 3, organizationId: org };
+    f.results.list_crm_campaigns = {
+      organization_id: org,
+      leads: [lead, { ...lead, id: "lead-b", campaign_id: null, email_open_count: 1 }],
+    };
+    const stats = await api.getRecruitingCrmData(f.deps, actor, target, {
+      operation: "sequenceStats",
+      ...pinned,
+      candidateIds: [candidateId],
+    });
+    expect(stats).toMatchObject({
+      operation: "sequenceStats",
+      items: [{ candidateId, sequences: 2, opens: 3, replies: 2, status: "active" }],
+    });
+    expect(f.execute.mock.calls.at(-1)?.[0].route?.toolName).toBe("list_crm_campaigns");
+    f.results.list_crm_campaigns = {
+      organization_id: org,
+      campaigns: [
+        {
+          id: "seq-a",
+          name: "Old sequence",
+          status: 1,
+          role_spec_id: null,
+          client_id: null,
+          timestamp_created: null,
+          timestamp_updated: "2026-10-01T00:00:00Z",
+          synced_at: "2026-10-25T00:00:00Z",
+          people: 4,
+          opened: 2,
+          replied: 1,
+          last_contact_at: "2026-10-20T00:00:00Z",
+        },
+      ],
+    };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "unassignedSequences",
+        ...pinned,
+      }),
+    ).resolves.toMatchObject({
+      items: [{ id: "seq-a", name: "Old sequence", status: "active", people: 4, replied: 1 }],
+    });
+    // Another organization's rows are never accepted.
+    f.results.list_crm_campaigns = { organization_id: clientId, leads: [] };
+    await expect(
+      api.getRecruitingCrmData(f.deps, actor, target, {
+        operation: "sequenceStats",
+        ...pinned,
+        candidateIds: [candidateId],
+      }),
+    ).rejects.toMatchObject({ code: "SERVICE_UNAVAILABLE" });
+  });
+
   it("does not substitute live candidates when the projection has not been synced", async () => {
     const f = browserFixture();
     vi.mocked(db.listSyncedRecruitingCrmRoleContacts).mockResolvedValue(null);

@@ -35,6 +35,8 @@ import type {
 import {
   RecruitingCorrespondenceSchema,
   RecruitingCrmCampaignLeadsReadSchema,
+  RecruitingCrmPersonLeadsReadSchema,
+  RecruitingCrmUnassignedReadSchema,
   RecruitingCrmCampaignsReadSchema,
   RecruitingCrmCandidatesReadSchema,
   RecruitingCrmClientsReadSchema,
@@ -3312,19 +3314,71 @@ export async function getRecruitingCrmData(
         page.next_offset,
       );
     }
-    if (input.operation === "sequenceStats" || input.operation === "unassignedSequences") {
-      // Saved rows have exactly the authorization boundary of the CRM read that filled them.
-      const scope = { mcpServerId: server.id, organizationId: input.organizationId };
+    if (input.operation === "sequenceStats") {
+      const candidateIds = [...new Set(input.candidateIds)];
+      const page = parse(
+        RecruitingCrmPersonLeadsReadSchema,
+        await read(server, "list_crm_campaigns", {
+          p_org: input.organizationId,
+          p_view: "person_leads",
+          p_candidates: candidateIds,
+        }),
+      );
+      if (
+        page.organization_id !== input.organizationId ||
+        page.leads.some((row) => !candidateIds.includes(row.candidate_id)) ||
+        new Set(page.leads.map((row) => row.id)).size !== page.leads.length
+      )
+        throw unavailable();
       await sourceFence(server, "list_crm_campaigns");
-      const items =
-        input.operation === "sequenceStats"
-          ? await recruiting.listSyncedRecruitingSequenceStats(deps.prisma, actor, scope, [
-              ...new Set(input.candidateIds),
-            ])
-          : await recruiting.listSyncedRecruitingUnassignedSequences(deps.prisma, actor, scope);
-      invalidateFences();
+      return finish({
+        operation: "sequenceStats",
+        items: recruiting.sequenceStatsFromLeads(
+          page.leads.map((row) => ({
+            crmLeadId: row.id,
+            crmCampaignId: row.campaign_id,
+            crmCandidateId: row.candidate_id,
+            status: row.status,
+            openCount: row.email_open_count,
+            replyCount: row.email_reply_count,
+            lastContactAt: row.timestamp_last_contact ? new Date(row.timestamp_last_contact) : null,
+            lastReplyAt: row.timestamp_last_reply ? new Date(row.timestamp_last_reply) : null,
+            syncedAt: new Date(row.synced_at),
+          })),
+        ),
+      });
+    }
+    if (input.operation === "unassignedSequences") {
+      const page = parse(
+        RecruitingCrmUnassignedReadSchema,
+        await read(server, "list_crm_campaigns", {
+          p_org: input.organizationId,
+          p_view: "unassigned",
+        }),
+      );
+      if (
+        page.organization_id !== input.organizationId ||
+        new Set(page.campaigns.map((row) => row.id)).size !== page.campaigns.length
+      )
+        throw unavailable();
       await sourceFence(server, "list_crm_campaigns");
-      return finish({ operation: input.operation, items });
+      const updated = (row: (typeof page.campaigns)[number]) =>
+        Date.parse(row.timestamp_updated ?? "") || 0;
+      return finish({
+        operation: "unassignedSequences",
+        items: [...page.campaigns]
+          .sort((a, b) => updated(b) - updated(a) || (a.id < b.id ? -1 : 1))
+          .map((row) => ({
+            id: row.id,
+            name: row.name,
+            status: recruiting.sequenceStatus(row.status),
+            people: row.people,
+            opened: row.opened,
+            replied: row.replied,
+            lastContactAt: row.last_contact_at,
+            syncedAt: row.synced_at,
+          })),
+      });
     }
     if (input.operation === "campaigns" || input.operation === "campaignLeads") {
       const offset = pageOffset(input);
@@ -3890,23 +3944,17 @@ export async function getRecruitingRoleCandidates(
     async crm(binding) {
       const rows: RoleCandidatesCrmRow[] = [];
       try {
-        // The full sync owns refreshes. Browse the saved projection without live candidate scans.
+        // Read the role's people live from the CRM, so replies and status are current.
         for (let offset: number | null = 0; offset !== null; ) {
-          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(
-            deps,
-            actor,
-            target,
-            {
-              operation: "candidates",
-              serverId: binding.mcpServerId,
-              serverRevision: binding.serverRevision,
-              organizationId: binding.organizationId,
-              crmRoleId: binding.crmRoleId,
-              limit: 50,
-              offset,
-            },
-            { source: "projection" },
-          );
+          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(deps, actor, target, {
+            operation: "candidates",
+            serverId: binding.mcpServerId,
+            serverRevision: binding.serverRevision,
+            organizationId: binding.organizationId,
+            crmRoleId: binding.crmRoleId,
+            limit: 50,
+            offset,
+          });
           if (page.operation !== "candidates") throw new IsolationError();
           for (const item of page.items)
             rows.push({

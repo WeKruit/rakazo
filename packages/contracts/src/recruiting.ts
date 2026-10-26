@@ -2512,6 +2512,25 @@ export const RecruitingCrmCampaignLeadsReadSchema = z.object({
   offset: z.number().int().nonnegative(),
   next_offset: z.number().int().nonnegative().nullable(),
 });
+const CrmStoredLead = RecruitingCrmCampaignLeadsReadSchema.shape.leads.element;
+/** Every stored lead of the listed people, across campaigns. */
+export const RecruitingCrmPersonLeadsReadSchema = z.object({
+  organization_id: z.uuid(),
+  leads: z.array(CrmStoredLead.extend({ campaign_id: Id.nullable(), candidate_id: z.uuid() })),
+});
+/** Campaigns with no role, each with its people, opened, replied and last contact. */
+export const RecruitingCrmUnassignedReadSchema = z.object({
+  organization_id: z.uuid(),
+  campaigns: z.array(
+    RecruitingCrmCampaignsReadSchema.shape.campaigns.element.extend({
+      role_spec_id: z.null(),
+      people: z.number().int().nonnegative(),
+      opened: z.number().int().nonnegative(),
+      replied: z.number().int().nonnegative(),
+      last_contact_at: CrmStoredTime,
+    }),
+  ),
+});
 export const RecruitingCrmRoleMailReadSchema = z.object({
   version: z.literal(2),
   candidate_id: z.uuid().nullable().optional(),
