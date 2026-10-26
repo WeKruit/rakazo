@@ -5869,6 +5869,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
               );
             })());
+          // The card offers "send when I say send" unless the recruiter's own rule requires
+          // approval for this send.
+          const offerSendPreference =
+            Boolean(sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation)) &&
+            !(
+              await Promise.all(
+                [policyToolName, name].map(async (toolName) =>
+                  resolveActionApprovalDetail({
+                    toolName,
+                    readOnly: false,
+                    rules: await loadApprovalRules(),
+                  }),
+                ),
+              )
+            ).some((resolved) => resolved.source === "require_approval");
           const requiresExplicitApproval =
             !recruiterSaidSend &&
             toolRequiresExplicitApproval(
@@ -7217,9 +7232,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? "Allow this exact reply once after current CRM and conversation checks."
                   : reviewReason,
                 oneTimeOnly: requiresExplicitApproval,
-                sendPreference: Boolean(
-                  sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation),
-                ),
+                sendPreference: offerSendPreference,
                 crmOperation,
                 recruiting: recruitingApproval,
                 crmImportTarget: crmImportSelection?.target,
