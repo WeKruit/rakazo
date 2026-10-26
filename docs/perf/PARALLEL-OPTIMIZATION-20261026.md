@@ -382,8 +382,8 @@ pages is fewer queries the model has to write and fewer calls against the rate l
 pricing page lists more than 25 results per request as an Enterprise plan feature, so 50/100 must be
 confirmed on the production key before relying on it.
 
-This run used the keyless channel, so actual spend was $0; at list price it would have been about
-$12 for the completed runs. The US$150 budget is untouched.
+This run used the keyless channel, so actual spend was $0; at list price all runs together would have
+cost under $25. The US$150 budget is untouched.
 
 ### Answer
 
