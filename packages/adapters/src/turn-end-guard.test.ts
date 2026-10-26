@@ -222,19 +222,18 @@ describe("guardRecruitingTurnEnd", () => {
 
   it("lists the ten with the profile passage each saved search returned", async () => {
     const keys = Array.from({ length: 10 }, (_, i) => `person-${i}`);
+    const searches = vi.fn(async () => [
+      {
+        result: {
+          candidateRows: [
+            { candidateKey: "person-0", name: "Person 0", snippet: "Built warehouse ops" },
+          ],
+        },
+      },
+    ]);
     const text = await recruitingRoundListText(
       {
-        externalEffect: {
-          findMany: vi.fn(async () => [
-            {
-              result: {
-                candidateRows: [
-                  { candidateKey: "person-0", name: "Person 0", snippet: "Built warehouse ops" },
-                ],
-              },
-            },
-          ]),
-        },
+        externalEffect: { findMany: searches },
         recruitingCandidateOccurrence: {
           findMany: vi.fn(async () =>
             keys.map((candidateKey, i) => ({
@@ -247,7 +246,12 @@ describe("guardRecruitingTurnEnd", () => {
           ),
         },
       } as never,
-      { runId: "run-1", spaceId: "space-1", roleId: "role-1", candidateKeys: keys },
+      { threadId: "thread-1", spaceId: "space-1", roleId: "role-1", candidateKeys: keys },
+    );
+    expect(searches).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ run: { threadId: "thread-1" } }),
+      }),
     );
     expect(text).toContain(
       "1. **Person 0** · Warehouse Manager · Example Co · Atlanta\n   > Built warehouse ops",

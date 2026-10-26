@@ -7541,7 +7541,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     context,
                     applied.effect.id,
                   );
-                  const people = (saved as { candidateRows?: unknown }).candidateRows;
+                  // Compact rows keep a 25-person search inside one tool result, so the pick
+                  // never needs a follow-up read of the clipped output.
+                  const rows = (saved as { candidateRows?: unknown }).candidateRows;
+                  const people = Array.isArray(rows)
+                    ? rows.map((row: Record<string, unknown>) => ({
+                        ...row,
+                        snippet:
+                          typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
+                      }))
+                    : rows;
                   return {
                     savedToResults: true,
                     people,
@@ -8254,7 +8263,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       {
                         kind: "text",
                         text: await recruitingRoundListText(deps.prisma, {
-                          runId,
+                          threadId: run.threadId,
                           spaceId: run.spaceId,
                           roleId: recorded.roleId,
                           candidateKeys: recorded.candidateKeys as string[],
