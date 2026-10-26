@@ -1649,7 +1649,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             const parsed = AskUserInputSchema.safeParse(args);
             if (!parsed.success)
               throw new Error(
-                "ask_user requires two to four unique, non-empty options or a valid requestedSchema",
+                "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
               );
             const { question } = parsed.data;
             // ponytail: "?" count and numbered lines; a form (requestedSchema) may still hold several fields.
