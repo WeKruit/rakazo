@@ -319,6 +319,7 @@ export function observedPiStream(
         callId,
         provider: model.provider,
         model: model.id,
+        thinkingLevel: options?.reasoning ?? "off",
         operationKind: attribution.operationKind,
       });
       try {
