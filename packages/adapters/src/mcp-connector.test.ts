@@ -10,6 +10,7 @@ import {
   allowlistDrift,
   DISCOVERY_CACHE_TTL_MS,
   DISCOVERY_FAILURE_TTL_MS,
+  DISCOVERY_REFRESH_OPERATION,
   firstPartyMcpUrl,
   loadMcpCredentialRecord,
   McpConnector,
@@ -3984,6 +3985,23 @@ describe("MCP discovery tool-list cache", () => {
     } finally {
       await f.connector.close();
       installLogger(previousLogger);
+    }
+  });
+
+  it("lists again for a refresh discovery even while the cached list is fresh", async () => {
+    const f = fixture();
+    try {
+      await f.connector.discoverTools(f.context);
+      await f.connector.discoverTools({
+        ...(f.context as object),
+        operationId: DISCOVERY_REFRESH_OPERATION,
+      } as never);
+      expect(f.state.lists).toBe(2);
+      // The refreshed list serves the next run from the cache.
+      await f.connector.discoverTools(f.context);
+      expect(f.state.lists).toBe(2);
+    } finally {
+      await f.connector.close();
     }
   });
 

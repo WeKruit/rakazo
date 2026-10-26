@@ -512,6 +512,8 @@ export async function loadMcpCredentialRecord(
 export const DISCOVERY_CACHE_TTL_MS = 10 * 60_000;
 /** How long a worker skips a server whose discovery just failed, instead of reconnecting every run. */
 export const DISCOVERY_FAILURE_TTL_MS = 2 * 60_000;
+/** Discovery with this operation id lists every server again, refreshing the cache for runs. */
+export const DISCOVERY_REFRESH_OPERATION = "discovery.prewarm";
 
 export class McpConnector implements ConnectorProvider {
   private readonly sessions = new Map<string, SessionEntry>();
@@ -1680,7 +1682,8 @@ export class McpConnector implements ConnectorProvider {
     const version = this.discoveryVersion(server);
     const startedAt = performance.now();
     const session = await this.sessionFor(server, context);
-    const cached = this.toolCatalog.get(key);
+    const cached =
+      context.operationId === DISCOVERY_REFRESH_OPERATION ? undefined : this.toolCatalog.get(key);
     if (cached?.version === version && Date.now() - cached.at < DISCOVERY_CACHE_TTL_MS) {
       getLogger().info("discovery.cache", {
         hit: true,
