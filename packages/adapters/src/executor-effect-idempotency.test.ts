@@ -5963,6 +5963,23 @@ describe("native recruiting assessment effect delivery", () => {
     expect(continuedCandidateKey("linkedin:/in/alex", saved)).toBe("linkedin:/in/alex");
   });
 
+  it("maps a key rewritten from the name to the one saved key with the same profile id", () => {
+    const saved = [
+      "linkedin:/in/jon-doe-1a2b3c4d",
+      "linkedin:/in/saml2042",
+      "linkedin:/in/ana-1990",
+      "linkedin:/in/bo-1990",
+    ];
+    expect(continuedCandidateKey("linkedin:/in/jonathan-doe-1a2b3c4d", saved)).toBe(
+      "linkedin:/in/jon-doe-1a2b3c4d",
+    );
+    expect(continuedCandidateKey("linkedin:/in/sam-lee-2042", saved)).toBe(
+      "linkedin:/in/saml2042",
+    );
+    // Two saved people end in the same digits: ambiguous, left for the model to correct.
+    expect(continuedCandidateKey("linkedin:/in/ann-1990", saved)).toBe("linkedin:/in/ann-1990");
+  });
+
   it("fits a long question card by dropping leading context, keeping the question", () => {
     const question = `${"背景说明很长。".repeat(40)}候选人需要三项都具备吗？`;
     const short = shortQuestion(question);

@@ -590,13 +590,23 @@ export function savedCandidateKeyForm(key: string): string {
   return profile ? `linkedin:/in/${profile}` : key;
 }
 
+/** A key's last segment when it carries a digit: profile ids end in one ("1a2b3c4d", "2042"). */
+export function candidateKeyTail(key: string): string | undefined {
+  const tail = key.split(/[-/]/).pop() ?? "";
+  return tail.length >= 4 && /\d/.test(tail) ? tail : undefined;
+}
+
 /**
- * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab") names the one saved key
- * that continues it; an ambiguous or unknown key stays as given.
+ * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab") or rewritten from the
+ * name ("jonathan-doe-1a2b3c4d" for "jon-doe-1a2b3c4d") names the one saved key that
+ * continues it or ends in the same id; an ambiguous or unknown key stays as given.
  */
 export function continuedCandidateKey(key: string, savedKeys: readonly string[]): string {
-  const matches = savedKeys.filter((saved) => saved.startsWith(`${key}-`));
-  return matches.length === 1 ? (matches[0] as string) : key;
+  const continued = savedKeys.filter((saved) => saved.startsWith(`${key}-`));
+  if (continued.length === 1) return continued[0] as string;
+  const tail = candidateKeyTail(key);
+  const sameId = tail ? savedKeys.filter((saved) => saved !== key && saved.endsWith(tail)) : [];
+  return sameId.length === 1 ? (sameId[0] as string) : key;
 }
 
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
@@ -4827,7 +4837,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
               ).map((row) => row.candidateKey),
             );
-            // A key cut short names the one saved person on this role whose key continues it.
+            // A key cut short or rewritten names the one saved person on this role it points to.
             const given: unknown[] = args.candidateKeys;
             const cut = keys.filter(
               (key, index): key is string =>
@@ -4837,7 +4847,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? await deps.prisma.recruitingCandidate.findMany({
                   where: {
                     roleId: thread.activeRecruitingRoleId,
-                    OR: cut.map((key) => ({ candidateKey: { startsWith: `${key}-` } })),
+                    OR: cut.flatMap((key) => {
+                      const tail = candidateKeyTail(key);
+                      return [
+                        { candidateKey: { startsWith: `${key}-` } },
+                        ...(tail ? [{ candidateKey: { endsWith: tail } }] : []),
+                      ];
+                    }),
                   },
                   select: { candidateKey: true },
                 })
