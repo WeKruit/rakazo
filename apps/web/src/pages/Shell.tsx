@@ -557,6 +557,7 @@ export function eventChangesRecruitingPanel(
     (event.type.startsWith("recruiting.") &&
       event.type !== "recruiting.context.adopted" &&
       event.type !== "recruiting.material.read" &&
+      event.type !== "recruiting.searches.planned" &&
       !(event.type === "recruiting.read" && event.payload.phase === "bound")) ||
     event.type === "memory.revised" ||
     event.type === "thread.cleared" ||

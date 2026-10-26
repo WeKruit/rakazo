@@ -1544,6 +1544,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           // do not coerce to [] (that used to look like a valid empty list upstream).
           ...(options === undefined ? {} : { options }),
           ...(raw.requestedSchema === undefined ? {} : { requestedSchema: raw.requestedSchema }),
+          ...(raw.plannedSearches === undefined ? {} : { plannedSearches: raw.plannedSearches }),
         };
       }
       if (tool.name === "request_secret") {
@@ -1681,10 +1682,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             const options = "options" in parsed.data ? parsed.data.options : undefined;
             const requestedSchema =
               "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
+            const { plannedSearches } = parsed.data;
             host.pausePending = true;
             host.queue.push({
               type: "ask",
               text: question,
+              ...(plannedSearches ? { plannedSearches } : {}),
               ...(requestedSchema
                 ? { requestedSchema }
                 : {
