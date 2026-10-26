@@ -192,6 +192,7 @@ describe("Pi model stream timing", () => {
         callId,
         provider: model.provider,
         model: model.id,
+        thinkingLevel: "off",
         operationKind: "answer",
       },
       {
