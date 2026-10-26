@@ -667,10 +667,10 @@ export function shortQuestion(question: string, max = 240): string {
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
-  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow.";
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
 const PLANNED_SEARCHES_MISSING =
-  "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches.";
+  "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches, or with plannedSearches: [] when the recruiter said not to look for people outside their own list.";
 
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
@@ -11232,7 +11232,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 if (known) return `"${known.key}" → "${known.value}"`;
                 // Any intake answer may be the last one, and the first people come from the searches
                 // planned with it; without four of them the answer turn waits on its own searches.
-                if ((firstRoundPending || linkRole) && (plannedSearches?.length ?? 0) < 4)
+                // An explicit [] is the recruiter's own-list-only instruction.
+                if (
+                  (firstRoundPending || linkRole) &&
+                  (plannedSearches === undefined ||
+                    (plannedSearches.length > 0 && plannedSearches.length < 4))
+                )
                   return { instead: PLANNED_SEARCHES_MISSING };
                 return undefined;
               },

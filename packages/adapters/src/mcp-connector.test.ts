@@ -3905,6 +3905,23 @@ describe("local native Instantly campaign and lead tools", () => {
     );
   });
 
+  it("sends a plain body as HTML with & encoded and line breaks kept", async () => {
+    const f = fixture();
+    delete f.state.campaign.sequences;
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.campaign.sequences = undefined;
+    await f
+      .run("ensure_role_campaign", {
+        role_id: "role-1",
+        steps: [{ subject: "Hi", body: "Hi Ada,\n\nQ&A <30 min>\nThanks", delay_days: 0 }],
+      })
+      .catch(() => undefined);
+    const patch = f.state.requests.findLast((r) => r.method === "PATCH");
+    expect(JSON.stringify(patch?.body)).toContain(
+      "<p>Hi Ada,</p><p>Q&amp;A &lt;30 min&gt;<br />Thanks</p>",
+    );
+  });
+
   it("reports a body the provider saved blank and rewrites it on the next save", async () => {
     const f = fixture();
     const blank = [{ steps: [{ variants: [{ subject: "Hi", body: "<br /><br />" }] }] }];
@@ -3942,7 +3959,9 @@ describe("local native Instantly campaign and lead tools", () => {
       method: "PATCH",
       path: `/api/v2/campaigns/${CAMPAIGN}`,
       body: {
-        sequences: [{ steps: [{ type: "email", variants: [{ subject: "Hi", body: "Hello" }] }] }],
+        sequences: [
+          { steps: [{ type: "email", variants: [{ subject: "Hi", body: "<p>Hello</p>" }] }] },
+        ],
       },
     });
     // Saved copy is shown, never replaced.

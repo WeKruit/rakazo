@@ -55,7 +55,10 @@ function fixture({
 describe("request_connection", () => {
   it("returns connected without a card when credentialed and assigned to this bot", async () => {
     const f = fixture({ secretId: "secret-1" });
-    expect(await requestConnection(f.db, scope, args, f.pause)).toEqual({ status: "connected" });
+    expect(await requestConnection(f.db, scope, args, f.pause)).toMatchObject({
+      status: "connected",
+      message: expect.stringContaining("already connected"),
+    });
     expect(f.pause).not.toHaveBeenCalled();
     expect(f.prisma.mcpServer.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -150,7 +153,7 @@ describe("request_connection", () => {
         { provider: "instantly", reason: "Read replies." },
         f.pause,
       ),
-    ).toEqual({ status: "connected" });
+    ).toMatchObject({ status: "connected", message: expect.stringContaining("already connected") });
     expect(f.prisma.mcpServer.create).not.toHaveBeenCalled();
     expect(f.pause).not.toHaveBeenCalled();
   });
