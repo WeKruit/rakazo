@@ -596,6 +596,8 @@ export async function createApp(
       mcpAllowPrivateEndpoint: env.mcpAllowPrivateEndpoint,
       firstPartyMcpUrl: env.firstPartyMcpUrl,
       oidc: env.oidc ? { issuer: env.oidc.issuer, clientId: env.oidc.clientId } : undefined,
+      signupsEnabled: env.signupsEnabled,
+      signupAllowlist: env.signupAllowlist,
     },
   });
   const rpc = new RPCHandler(router, {
