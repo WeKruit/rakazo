@@ -187,7 +187,7 @@ describe("maintained recruiting defaults", () => {
       );
       expect(bot.instructions).toContain("you do now and never promise for a later time");
       expect(bot.instructions).toContain(
-        "A turn never ends on a bare save or acknowledgement: after an answer, ask the next clarifying question at once, or when none is missing save the brief and run the calibration search in the same turn.",
+        "A turn never ends on a bare save or acknowledgement: after an answer, ask the next clarifying question at once, or when none is missing run the calibration search in the same turn.",
       );
       expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
       expect(bot.instructions).toContain("no process narration");

@@ -549,6 +549,7 @@ import { textContentArg } from "./tool-text.js";
 import {
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
+  intakeAnswers,
   recruitingRoundListText,
 } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
@@ -4694,19 +4695,52 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // Set before the first model step when a job link is saved as the thread's role.
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
-        // The brief is saved after the round; the next-step card waits for it once, in its own
-        // step, so a save issued beside the card is never cut off by the pause.
-        let briefAsked = false;
-        const briefBeforeNextStepCard = async () => {
-          if (briefAsked || !thread.activeRecruitingRoleId || !(await nextStepCardAfterRound()))
-            return undefined;
+        // After the ten are shown the server saves the brief from the recruiter's intake answers;
+        // the next-step card waits for that save, so the pause never cuts it off.
+        let briefSaving: Promise<unknown> | undefined;
+        const saveBriefAfterRound = async (roleId: string) => {
+          const quote = currentTurnMessage?.blocks.flatMap((block) =>
+            block.kind === "text" && block.text.trim() ? [block.text] : [],
+          )[0];
           const role = await deps.prisma.recruitingRole.findFirst({
-            where: { id: thread.activeRecruitingRoleId, spaceId: run.spaceId },
-            select: { currentRevision: { select: { brief: true } } },
+            where: { id: roleId, spaceId: run.spaceId, userId: run.userId },
+            select: {
+              revision: true,
+              currentRevision: { select: { brief: true } },
+              revisions: { where: { revision: 1 }, select: { createdAt: true } },
+            },
           });
-          if (!role || role.currentRevision?.brief) return undefined;
-          briefAsked = true;
-          return "The ten are shown but the brief is not saved yet. Save it now with one recruiting_role update as the only call in this step (from the JD and the recruiter's answers; when it is refused, fix what the error names once), then show the next-step card in the following step.";
+          if (!quote || !role || role.currentRevision?.brief) return;
+          const messages = await deps.prisma.message.findMany({
+            where: {
+              threadId: thread.id,
+              ...(role.revisions[0] ? { createdAt: { gte: role.revisions[0].createdAt } } : {}),
+            },
+            orderBy: { seq: "asc" },
+            select: { role: true, blocks: true },
+          });
+          const answers = intakeAnswers(messages);
+          const saved = (await applyTool(
+            "recruiting_role",
+            {
+              operation: "update",
+              roleId,
+              expectedRevision: role.revision,
+              intent: { basis: "direct", quote },
+              brief: {
+                fields: answers.map(({ key, value }) => ({
+                  key,
+                  value,
+                  origin: "user_instruction",
+                  state: "known",
+                  consequential: true,
+                })),
+              },
+            },
+            `${runId}:brief-after-round`,
+          )) as { error?: unknown } | null;
+          if (saved?.error)
+            getLogger().warn("brief not saved after the round", { error: saved.error });
         };
         // After this run records a round, its only card is the next-step choice.
         const nextStepCardAfterRound = async () => {
@@ -8390,6 +8424,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // passage the search returned; the turn then ends on the next-step choice.
                 const recorded = round as { roleId?: unknown; candidateKeys?: unknown } | null;
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
+                  briefSaving ??= saveBriefAfterRound(recorded.roleId).catch((error) =>
+                    getLogger().warn("brief not saved after the round", { error: String(error) }),
+                  );
                   await publishMessage(
                     deps,
                     run,
@@ -10193,9 +10230,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
         // the server before the model's first step, so the first question needs no read or save step.
         linkRole = await startRoleFromJob();
-        // Until the first round, later intake turns carry the job page the server already read,
-        // so the model never fetches it again before searching.
-        const savedJobPage = async () => {
+        // Until the first round, later intake turns go straight to the people searches and carry
+        // the job page the server already read, so the model never fetches it again.
+        const intakeTurnNote = async () => {
           if (linkRole || !thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
           const [read, round] = await Promise.all([
             deps.prisma.event.findFirst({
@@ -10214,7 +10251,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ]);
           const artifactId = (read?.payload as { artifact?: { artifactId?: unknown } } | null)
             ?.artifact?.artifactId;
-          if (round || typeof artifactId !== "string") return undefined;
+          if (round) return undefined;
+          const searchFirst =
+            "Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step.";
+          if (typeof artifactId !== "string") return searchFirst;
           const { bytes } = await readActorArtifact(
             { prisma: deps.prisma, artifacts: deps.artifacts },
             { spaceId: run.spaceId, userId: run.userId },
@@ -10222,10 +10262,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           );
           const page = JSON.parse(Buffer.from(bytes).toString("utf8")) as { text?: unknown };
           return typeof page.text === "string" && page.text.trim()
-            ? `The role's job page, already read and saved (never fetch it again, and never search connectors or tools before the people searches):\n\n${page.text.slice(0, 24_000)}`
-            : undefined;
+            ? `${searchFirst} The role's job page, already read and saved (never fetch it again):\n\n${page.text.slice(0, 24_000)}`
+            : searchFirst;
         };
-        const jobPageNote = await savedJobPage().catch((error) => {
+        const intakeNote = await intakeTurnNote().catch((error) => {
           getLogger().warn("saved job page not loaded", { error: String(error) });
           return undefined;
         });
@@ -10251,7 +10291,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : basePrompt,
           intakeSkillNote,
           linkRole?.note,
-          jobPageNote,
+          intakeNote,
           takeoverResume?.promptNote,
           approvalContinuation,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
@@ -10669,7 +10709,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     resolveConnectedModel(run, provider, modelId, (values) =>
                       runSecrets.push(...values),
                     ),
-              beforeAsk: briefBeforeNextStepCard,
+              beforeAsk: async () => {
+                await briefSaving;
+              },
               onToolCompleted: async (completion) => {
                 await toolCalledAudit(completion.executionId).settled;
                 toolCalledAudits.delete(completion.executionId);
