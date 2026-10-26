@@ -3,6 +3,7 @@ import type {
   Actor,
   RecruitingSchedulingPlan,
   RecruitingSchedulingPlanInput,
+  RecruitingSchedulingPrepareInput,
 } from "@rakazo/contracts";
 import {
   RecruitingCrmImportArgsSchema,
@@ -605,6 +606,100 @@ export async function createRecruitingSchedulingPlan(
         },
       }),
     );
+  });
+}
+/**
+ * The agent's way to draft a plan: it names the candidate email it read and the time it picked,
+ * and the saved mail and availability reads of this conversation supply the exact references.
+ * The plan is then verified exactly like one drafted from the workbench.
+ */
+export async function prepareRecruitingSchedulingPlan(
+  prisma: PrismaClient,
+  actor: Actor,
+  input: RecruitingSchedulingPrepareInput & { threadId: string },
+) {
+  const workspace = await scope(prisma, actor, input.threadId);
+  const rows = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      status: "completed",
+      run: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        threadId: input.threadId,
+        initialRecruitingRoleRevisionId: workspace.role.currentRevisionId,
+      },
+    },
+    include: { run: true },
+    orderBy: { createdAt: "desc" },
+    take: LIMIT,
+  });
+  const start = Date.parse(input.start);
+  let mail: (typeof rows)[number] | undefined;
+  let slot: ReturnType<typeof slots>[number] | undefined;
+  for (const row of rows) {
+    try {
+      const native = call(row.request);
+      if (
+        !mail &&
+        row.run.sourceMessageId &&
+        ["get_email", "native_instantly_get_email"].includes(native.route.toolName) &&
+        native.args.id === input.emailId
+      ) {
+        successful(row);
+        mail = row;
+      } else if (!slot && native.route.toolName === "get_availability")
+        slot = slots(row).find(
+          (value) =>
+            Date.parse(value.start) === start &&
+            value.lengthInMinutes === input.lengthInMinutes &&
+            (input.eventTypeId === undefined || value.eventTypeId === input.eventTypeId),
+        );
+    } catch (error) {
+      if (!(error instanceof IsolationError)) throw error;
+    }
+    if (mail && slot) break;
+  }
+  if (!mail)
+    throw new IsolationError(
+      "Read the candidate's email (get_email with this id) in this conversation first",
+    );
+  if (!slot)
+    throw new IsolationError(
+      "No calendar availability read in this conversation offers that start and length; read availability (format range, duration) first",
+    );
+  const native = call(mail.request);
+  const email = successful(mail);
+  const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+  const sender = text(email.from_address_email);
+  if (!sender) throw new IsolationError("The email has no sender");
+  return createRecruitingSchedulingPlan(prisma, actor, {
+    threadId: input.threadId,
+    roleId: workspace.role.id,
+    expectedRoleRevision: workspace.role.revision,
+    originalEmail: {
+      threadId: input.threadId,
+      roleId: workspace.role.id,
+      emailId: `${native.route.resourceId}:${input.emailId}`,
+      sourceId: native.route.resourceId,
+      providerMessageId: input.emailId,
+      providerThreadId: text(email.thread_id),
+      campaignId: text(email.campaign_id),
+      eaccount: text(email.eaccount),
+      savedRead: {
+        messageId: mail.run.sourceMessageId!,
+        linkedRunId: mail.runId,
+        effectId: mail.id,
+      },
+      sourceName: "",
+      sender,
+      subject: text(email.subject) ?? "",
+      date: null,
+      snippet: false,
+    },
+    candidate: { ...input.candidate, email: sender },
+    interviewer: input.interviewer,
+    calendar: slot,
   });
 }
 export async function loadVerifiedRecruitingSchedulingPlan(

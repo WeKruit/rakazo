@@ -196,6 +196,7 @@ import {
   prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
+  prepareRecruitingSchedulingPlan,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
   RecruitingIntentQuoteError,
@@ -5261,6 +5262,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchActor.actor,
                   input.plan,
                 );
+              }
+              if (input.operation === "prepare") {
+                const { operation: _operation, ...prepare } = input;
+                return await prepareRecruitingSchedulingPlan(deps.prisma, researchActor.actor, {
+                  ...prepare,
+                  threadId: thread.id,
+                });
               }
               const plan = await loadVerifiedRecruitingSchedulingPlan(
                 deps.prisma,

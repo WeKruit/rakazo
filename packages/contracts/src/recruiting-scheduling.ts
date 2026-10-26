@@ -58,10 +58,30 @@ export const RecruitingSchedulingPlanSchema = RecruitingSchedulingPlanInputSchem
   confirmationEffectId: Id.nullable(),
 });
 export type RecruitingSchedulingPlan = z.infer<typeof RecruitingSchedulingPlanSchema>;
+/**
+ * The agent drafts a plan from a candidate email it read and a time from an availability read in
+ * the same conversation; the server takes the exact references from those saved reads.
+ */
+export const RecruitingSchedulingPrepareInputSchema = z.strictObject({
+  emailId: Id.max(1600).describe("Provider id of the candidate's email you read with get_email."),
+  candidate: z.strictObject({
+    candidateKey: Id.describe("The candidate's saved candidateKey in this role."),
+    name: Participant.shape.name,
+    timeZone: SchedulingTimeZoneSchema,
+  }),
+  interviewer: Participant,
+  start: z.iso.datetime().describe("Start of a slot returned by your availability read."),
+  lengthInMinutes: z.number().int().positive(),
+  eventTypeId: z.number().int().positive().optional(),
+});
+export type RecruitingSchedulingPrepareInput = z.infer<
+  typeof RecruitingSchedulingPrepareInputSchema
+>;
 /** This wrapper selects an existing plan; only native action approval grants dispatch. */
 export const RecruitingSchedulingToolInputSchema = z.discriminatedUnion("operation", [
   z.strictObject({ operation: z.literal("read"), planId: Id }),
   z.strictObject({ operation: z.literal("draft"), plan: RecruitingSchedulingPlanInputSchema }),
+  RecruitingSchedulingPrepareInputSchema.extend({ operation: z.literal("prepare") }),
   z.strictObject({
     operation: z.literal("book"),
     planId: Id,
