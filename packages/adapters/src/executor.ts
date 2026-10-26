@@ -5495,6 +5495,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       : "Calibration rounds never use an approval card. Record the ten with recruiting_research calibration_round, list them in chat and end with the next-step question.",
                 };
               }
+              if (call.data.stage === "documents") {
+                // Role documents are work the recruiter asked for, not a decision: no card.
+                return {
+                  error:
+                    "Role documents never use an approval card. Present the named files in chat in one line and continue; the recruiter asks for changes in their own words.",
+                };
+              }
               if (call.data.stage === "brief") {
                 // A complete brief is confirmed by the recruiter's own answers: record it the way
                 // the web control does, without a card, and go straight to the first round. The
