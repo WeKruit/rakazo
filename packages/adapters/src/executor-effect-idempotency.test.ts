@@ -40,6 +40,7 @@ import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
 import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
+  continuedCandidateKey,
   createRunExecutor,
   jobLinkIn,
   pastedJobTitle,
@@ -5951,6 +5952,15 @@ describe("native recruiting assessment effect delivery", () => {
       "/in/stevenfeng7",
     ])
       expect(savedCandidateKeyForm(key)).toBe("linkedin:/in/stevenfeng7");
+  });
+
+  it("completes a candidate key cut short only when one saved key continues it", () => {
+    const saved = ["linkedin:/in/dmitry-s-4b2a1", "linkedin:/in/jane-d-1", "linkedin:/in/jane-d-2"];
+    expect(continuedCandidateKey("linkedin:/in/dmitry-s", saved)).toBe(
+      "linkedin:/in/dmitry-s-4b2a1",
+    );
+    expect(continuedCandidateKey("linkedin:/in/jane-d", saved)).toBe("linkedin:/in/jane-d");
+    expect(continuedCandidateKey("linkedin:/in/alex", saved)).toBe("linkedin:/in/alex");
   });
 
   it("fits a long question card by dropping leading context, keeping the question", () => {
