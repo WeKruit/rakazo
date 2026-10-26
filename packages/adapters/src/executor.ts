@@ -7933,6 +7933,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 instantlyActivation = campaignId
                   ? await describeCampaignActivation(read, campaignId, eaccount)
                   : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
+              // A send card is only for something that would send: an email and its recipients.
+              const unsendable =
+                instantlyActivation?.firstEmail === null
+                  ? "This campaign has no email yet; save it with ensure_role_campaign steps, then activate again."
+                  : instantlyActivation?.recipientCount === 0
+                    ? "This campaign has no recipients yet. Shortlist the people the recruiter named (recruiting_candidates), add them with add_shortlist_leads, then activate again."
+                    : null;
+              if (unsendable) {
+                const result = { error: unsendable };
+                return (await completeEffect(deps, applied!.effect.id, "intended", result))
+                  ? result
+                  : uncertainEffectResult(name);
+              }
             }
             if (replySelection)
               approvalArgs = {

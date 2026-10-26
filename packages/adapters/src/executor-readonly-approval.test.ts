@@ -1325,6 +1325,24 @@ describe("native Instantly activation card", () => {
   const card = (f: ReturnType<typeof fixture>) =>
     (f.pauseRunForInput.mock.calls[0]![0] as { blocks: { detail?: string }[] }).blocks.at(-1)!;
 
+  it("refuses a send card for a campaign with no recipients", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults: {
+        ...connectorResults,
+        native_instantly_list_leads: {
+          structuredContent: { source: "local_native_instantly_rest", result: { items: [] } },
+        },
+      },
+      inputSchema,
+    });
+    f.setCalls([{ args: { campaign_id: "c-1" }, executionId: "activate" }]);
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("no recipients") });
+  });
+
   it("shows campaign name, status, lead count and sender read before the card", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",

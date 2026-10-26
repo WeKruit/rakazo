@@ -279,16 +279,33 @@ async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
 }
 
 /**
- * The provider stores a body containing a bare "&" as blank, so a body is sent as HTML with
- * "&" encoded; plain text keeps its line breaks.
+ * The provider stores a body containing "&" as blank, even an encoded entity, so "&" and the
+ * characters that would need one are sent as their full-width forms; plain text becomes HTML
+ * paragraphs.
  */
+const ENTITY: Record<string, string> = {
+  amp: "＆",
+  lt: "＜",
+  gt: "＞",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+const WIDE: Record<string, string> = { "&": "＆", "<": "＜", ">": "＞" };
 function bodyHtml(body: string) {
-  if (/<[a-z][^>]*>/i.test(body)) return body.replace(/&(?![a-z]+;|#\d+;|#x[\da-f]+;)/gi, "&amp;");
+  if (/<[a-z][^>]*>/i.test(body))
+    return body
+      .replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (entity, dec, hex, name) => {
+        if (name) return ENTITY[String(name).toLowerCase()] ?? entity;
+        const char = String.fromCodePoint(Number.parseInt(dec ?? hex, dec ? 10 : 16));
+        return WIDE[char] ?? char;
+      })
+      .replace(/&/g, "＆");
   return body
     .replace(/\r\n?/g, "\n")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
+    .replace(/&/g, "＆")
+    .replace(/</g, "＜")
+    .replace(/>/g, "＞")
     .split(/\n{2,}/)
     .map((paragraph) => `<p>${paragraph.replace(/\n/g, "<br />")}</p>`)
     .join("");
@@ -301,7 +318,7 @@ function sequences(steps: z.output<typeof Step>[]) {
         type: "email",
         delay: step.delay_days,
         delay_unit: "days",
-        variants: [{ subject: step.subject, body: bodyHtml(step.body) }],
+        variants: [{ subject: step.subject.replace(/&/g, "＆"), body: bodyHtml(step.body) }],
       })),
     },
   ];
