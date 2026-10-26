@@ -155,7 +155,7 @@ async function usageGroups(
 }
 
 /** Only a verified mailbox at the operator's domain sees money and other accounts' spend. */
-async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, userId: string) {
+export async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { email: true, emailVerified: true },
