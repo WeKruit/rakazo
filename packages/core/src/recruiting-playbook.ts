@@ -411,6 +411,41 @@ const CARD_BLOCKS = new Set(["approval", "mcp_approval", "connect", "app_connect
 const QUESTION_RE = /[?？]\s*$/;
 // A list of ≥3 bullets or numbered rows reads as a delivered list, not a status note.
 const LIST_ROW_RE = /^\s*(?:[-*•]|\d+[.)、])\s+\S/gm;
+// Work promised for later in this chat: "我会…", "接下来…", "预计 3 点前…", "恢复后…", "I'll…".
+const PROMISE_RE =
+  /我(?:会|将|马上|这就|随后|稍后|再)|接下来|稍后|稍等|请稍候|预计.{0,40}?(?:前|内|完成|给出|展示|汇报)|\bETA\b[^。.]{0,24}\d|恢复后|\bI(?:'|’)ll\b|\bI will\b|\bI(?:'|’)m going to\b|\blet me\b|\bnext,? I\b/i;
+// The recruiter's own move ends the turn: "你确认后我会发送" waits on them, not on the agent.
+const WAITS_ON_RECRUITER_RE =
+  /(?:你|您)(?:确认|回复|同意|决定|选择|提供|补充|批准|点击)|请(?:你|您)?确认|确认后|取决于|once you|after you|when you|if you|depends on|after confirmation/i;
+// "我会把薪资作为偏好" says how a requirement is treated, not work still to do.
+const TREATMENT_RE = /我会把.{0,40}?(?:作为|当作|视为|按|列为|保留为)/;
+
+/**
+ * The final sentence when it promises more work in this chat, else undefined. A turn that ends
+ * on a promise has not done the work; whether something is really still running (a search
+ * whose wake brings results, a handoff) is for the caller to check.
+ */
+export function turnEndPromise(text: string): string | undefined {
+  const sentences = text
+    .trim()
+    .split(/(?<=[。！!；;\n]|[.](?=\s|$))/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+  const last = sentences.at(-1);
+  if (!last || QUESTION_RE.test(last)) return undefined;
+  if (!PROMISE_RE.test(last) || WAITS_ON_RECRUITER_RE.test(last) || TREATMENT_RE.test(last))
+    return undefined;
+  return last;
+}
+
+/** The final turn's prose, joined. */
+export function turnEndText(blocks: readonly TurnEndBlock[]): string {
+  return blocks
+    .filter((block) => block.kind === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n")
+    .trim();
+}
 
 /**
  * How the final assistant turn ended, from the persisted blocks plus what the run did.
@@ -441,15 +476,13 @@ export function classifyTurnEnd(
     return "question";
   if (blocks.some((block) => CARD_BLOCKS.has(block.kind))) return "card";
   if (events.requireBlockingInput) return "none";
+  const text = turnEndText(blocks);
+  // Ending on "I'll do it next" leaves the work undone, whatever else the turn saved.
+  if (turnEndPromise(text)) return "none";
   if ((events.savedRows ?? 0) >= (events.deliverableRows ?? 1)) return "deliverable";
   const requiresSavedRows = (events.deliverableRows ?? 1) > 1;
   if (!requiresSavedRows && blocks.some((block) => DELIVERABLE_BLOCKS.has(block.kind)))
     return "deliverable";
-  const text = blocks
-    .filter((block) => block.kind === "text" && typeof block.text === "string")
-    .map((block) => block.text as string)
-    .join("\n")
-    .trim();
   if (!text) return "none";
   if (QUESTION_RE.test(text)) return "question";
   if (!requiresSavedRows && (text.match(LIST_ROW_RE)?.length ?? 0) >= 3) return "deliverable";
