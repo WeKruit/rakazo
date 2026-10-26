@@ -10728,7 +10728,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
             )
               throw new Error(`Fast model ${fast.provider}/${fast.id} is not in the catalog`);
-            runModel = { ...fast, routed: "fast", routeReason: turnModel.reason };
+            runModel = {
+              ...fast,
+              thinkingLevel: turnModel.thinkingLevel ?? fast.thinkingLevel,
+              routed: "fast",
+              routeReason: turnModel.reason,
+            };
             runFallbackModels = [
               { provider: runModelProvider, id: runModelId },
               ...runFallbackModels,
