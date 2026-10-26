@@ -83,6 +83,39 @@ const completed = {
 };
 
 describe("pollRecruitingResearch", () => {
+  it("records the credits of research started directly, once per increase", async () => {
+    const f = fixture({
+      provider: { structuredContent: { ...working.structuredContent, credits_used: 12 } },
+    });
+    const ledger = {
+      count: vi.fn(async () => 0),
+      aggregate: vi.fn(async () => ({ _sum: { quantity: 5 } })),
+      createMany: vi.fn(async () => ({ count: 1 })),
+    };
+    Object.assign(f.prisma, {
+      recruitingResearchAction: { count: ledger.count },
+      usageRecord: { aggregate: ledger.aggregate, createMany: ledger.createMany },
+      mcpServer: { findFirst: vi.fn(async () => ({ slug: "research-source" })) },
+    });
+    await pollRecruitingResearch(f.deps, { taskId: "task" });
+    expect(ledger.createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [
+        expect.objectContaining({
+          unit: "credits",
+          quantity: 7,
+          operationId: "task",
+          callId: "credits:task:12",
+          provider: "research-source",
+        }),
+      ],
+      skipDuplicates: true,
+    });
+    ledger.count.mockResolvedValueOnce(1);
+    ledger.createMany.mockClear();
+    await pollRecruitingResearch(f.deps, { taskId: "task" });
+    expect(ledger.createMany).not.toHaveBeenCalled();
+  });
+
   it("probes with a free status read only and re-polls while the provider is working", async () => {
     const f = fixture({ provider: working });
     await pollRecruitingResearch(f.deps, { taskId: "task" });

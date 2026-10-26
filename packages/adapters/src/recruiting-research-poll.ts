@@ -217,6 +217,7 @@ export async function pollRecruitingResearch(
       providerTaskId: true,
       mcpServerId: true,
       serverRevision: true,
+      createdByRunId: true,
       role: { select: { spaceId: true, userId: true } },
       createdByRun: { select: { spaceId: true, userId: true, botId: true, threadId: true } },
     },
@@ -273,6 +274,8 @@ export async function pollRecruitingResearch(
         operation: "status",
         providerTaskId: task.providerTaskId,
       });
+  if (observation?.deliveryState === "accepted")
+    await recordDirectResearchCredits(deps.prisma, task, observation.usage);
   const terminal = observation?.deliveryState === "accepted" && observation.done === true;
   if (!terminal && observation?.deliveryState === "accepted") {
     const rows = progressRows(result);
@@ -340,6 +343,58 @@ export async function pollRecruitingResearch(
   // The existing run reconciler recovers a queued wake after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(wakeRunId)).catch(() => {
     getLogger().warn("recruiting research wake deferred to reconciliation");
+  });
+}
+
+/**
+ * Research started directly has no research action, so the ledger trigger on actions never sees
+ * its credits. The provider reports a running total; record each increase, as that trigger does.
+ */
+async function recordDirectResearchCredits(
+  prisma: PrismaClient,
+  task: {
+    id: string;
+    roleId: string;
+    mcpServerId: string;
+    role: { spaceId: string; userId: string };
+    createdByRun: { botId: string };
+    createdByRunId: string;
+  },
+  usage: ReturnType<typeof classifyRecruitingResearchResult>["usage"],
+): Promise<void> {
+  const total = usage?.find((item) => item.unit === "credits" && item.scope === "task")?.amount;
+  if (typeof total !== "number") return;
+  if (await prisma.recruitingResearchAction.count({ where: { taskId: task.id } })) return;
+  const recorded = await prisma.usageRecord.aggregate({
+    where: { unit: "credits", operationId: task.id },
+    _sum: { quantity: true },
+  });
+  const increase = total - (recorded._sum.quantity ?? 0);
+  if (increase <= 0) return;
+  const server = await prisma.mcpServer.findFirst({
+    where: { id: task.mcpServerId },
+    select: { slug: true },
+  });
+  await prisma.usageRecord.createMany({
+    data: [
+      {
+        spaceId: task.role.spaceId,
+        userId: task.role.userId,
+        botId: task.createdByRun.botId,
+        runId: task.createdByRunId,
+        parentRunId: task.createdByRunId,
+        roleId: task.roleId,
+        provider: server?.slug ?? "research",
+        model: "research",
+        unit: "credits",
+        quantity: increase,
+        usageSource: "provider_receipt",
+        callId: `credits:${task.id}:${total}`,
+        operationId: task.id,
+        operationKind: "retrieval",
+      },
+    ],
+    skipDuplicates: true,
   });
 }
 
