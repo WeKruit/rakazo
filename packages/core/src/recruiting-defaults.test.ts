@@ -243,6 +243,9 @@ describe("maintained recruiting defaults", () => {
       "That request is the acceptance",
       "never ask them to confirm the round again",
       "Feedback about individual people alone is not acceptance",
+      // "A and B don't fit, find more who led 50+" read as acceptance on a live run.
+      "even when it also says to find more of a kind",
+      "Acceptance carries no correction.",
       "waves of four differently worded web_search_advanced_exa people searches",
       "until the role holds the target or a wave adds fewer than five new people",
       "when the people search stopped short of the target",
