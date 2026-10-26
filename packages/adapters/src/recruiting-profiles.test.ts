@@ -287,6 +287,7 @@ describe("peopleFromSearch", () => {
         current_title: "Sort Center Manager",
         current_company: "Acme Parcel",
         location: "Edison, New Jersey, United States",
+        snippet: "Sort Center Manager at Acme Parcel Edison, New Jersey, United States (US)",
       },
       {
         name: "Ben Sample",
@@ -294,6 +295,7 @@ describe("peopleFromSearch", () => {
         current_title: "Area Manager",
         current_company: "Gamma Fulfillment",
         location: "Newark, NJ",
+        snippet: "Operations leader Newark, NJ (US)",
       },
     ]);
   });
@@ -333,6 +335,7 @@ describe("peopleFromSearch", () => {
         current_title: "Warehouse Manager",
         current_company: "Delta Freight",
         location: "Atlanta Metropolitan Area",
+        snippet: "Ran a 120-person distribution center",
       },
     ]);
   });

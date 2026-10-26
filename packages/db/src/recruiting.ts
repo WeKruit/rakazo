@@ -7721,6 +7721,7 @@ export async function saveRecruitingCandidatePeopleSearch(
               title: saved.current_title ?? null,
               company: saved.current_company ?? null,
               location: saved.location ?? null,
+              snippet: saved.snippet ?? null,
             };
           }),
           truncated: captured.truncated,
