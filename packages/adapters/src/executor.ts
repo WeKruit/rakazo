@@ -10281,7 +10281,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({ ...body, background: RECRUITING_RESEARCH_DIRECT_NOTICE });
             }
             const finished = await finish(result);
-            return (await savePeopleSearchAsItReturns(finished)) ?? finished;
+            // The save sits between the search and the model's pick, so its cost is logged apart.
+            const saveStartedAt = performance.now();
+            const saved = await savePeopleSearchAsItReturns(finished);
+            if (saved)
+              getLogger().info("people_search.autosave", {
+                runId,
+                durationMs: Math.round(performance.now() - saveStartedAt),
+                people: Array.isArray(saved.people) ? saved.people.length : 0,
+              });
+            return saved ?? finished;
           }
           return finish({ error: `unknown tool ${name}` });
         };
