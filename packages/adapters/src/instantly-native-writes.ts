@@ -937,7 +937,19 @@ export async function runInstantlyWrite(
         throw new Error(
           "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
         );
-      return rest("POST", `/campaigns/${campaignId}/activate`);
+      const campaign = await rest("POST", `/campaigns/${campaignId}/activate`);
+      const leads = await rest("POST", "/leads/list", { campaign: campaignId, limit: 100 });
+      // The provider echoes the campaign, whose email_list is the sending mailbox, not recipients.
+      return {
+        activated: true,
+        campaignId,
+        sendingMailbox: Array.isArray(campaign.email_list) ? campaign.email_list : [],
+        recipients: (Array.isArray(leads.items) ? leads.items : []).flatMap((lead) =>
+          typeof (lead as { email?: unknown }).email === "string"
+            ? [(lead as { email: string }).email]
+            : [],
+        ),
+      };
     }
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
