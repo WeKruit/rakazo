@@ -10409,13 +10409,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return undefined;
           }
         }
-        // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
-        // the server before the model's first step, so the first question needs no read or save step.
-        linkRole = await startRoleFromJob();
         // Until the first round, later intake turns go straight to the people searches and carry
         // the job page the server already read, so the model never fetches it again.
         const intakeTurnNote = async () => {
-          if (linkRole || !thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
+          if (!thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
           const [read, round] = await Promise.all([
             deps.prisma.event.findFirst({
               where: {
@@ -10447,23 +10444,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? `${searchFirst} The role's job page, already read and saved (never fetch it again):\n\n${page.text.slice(0, 24_000)}`
             : searchFirst;
         };
-        const intakeNote = await intakeTurnNote().catch((error) => {
-          getLogger().warn("saved job page not loaded", { error: String(error) });
-          return undefined;
-        });
+        // These loads are independent, so they run together. The job role only starts on a thread
+        // with no role and the intake note only on one with a role, so at most one does work.
+        // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
+        // the server before the model's first step, so the first question needs no read or save step.
         // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
-        const intakeSkill = tools.some((tool) => tool.name === "recruiting_role")
-          ? await skillReadFromTool(
-              deps.prisma,
-              { spaceId: run.spaceId, userId: run.userId },
-              { name: RECRUITING_INTAKE_SKILL_NAME },
-            ).catch(() => null)
-          : null;
+        const [jobRole, intakeNote, intakeSkill, replyContext] = await ownTime(
+          "turnNotes",
+          Promise.all([
+            startRoleFromJob(),
+            intakeTurnNote().catch((error) => {
+              getLogger().warn("saved job page not loaded", { error: String(error) });
+              return undefined;
+            }),
+            tools.some((tool) => tool.name === "recruiting_role")
+              ? skillReadFromTool(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId },
+                  { name: RECRUITING_INTAKE_SKILL_NAME },
+                ).catch(() => null)
+              : null,
+            loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
+          ]),
+        );
+        linkRole = jobRole;
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
             : undefined;
-        const replyContext = await loadReplyContext(deps.prisma, thread.id, run.sourceMessageId);
         const prompt = [
           replyContext,
           nativeSources?.currentAnswer
