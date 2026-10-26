@@ -3238,3 +3238,28 @@ it("derives the thinking summary from the last tool category only", () => {
   expect(thinkingSummary("recruiting_candidates")).toBe("Reviewing candidates");
   expect(thinkingSummary("unknown_tool")).toBe("Thinking");
 });
+
+it("passes tool-call arguments parsed so far to the run while the model writes them", async () => {
+  providerState.stream.mockImplementation((target: Model<"openai-completions">) => {
+    const response = message(target, [{ type: "text", text: "Done." }], "stop");
+    const result = new AssistantMessageEventStream();
+    const call = {
+      type: "toolCall" as const,
+      id: "call-1",
+      name: "picks",
+      arguments: { keys: ["a"] },
+    };
+    const partial = { ...response, content: [call] };
+    void (async () => {
+      result.push({ type: "start", partial });
+      result.push({ type: "toolcall_delta", contentIndex: 0, delta: '"a"', partial });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      result.push({ type: "done", reason: "stop", message: response });
+      result.end(response);
+    })();
+    return result;
+  });
+  const deltas: unknown[] = [];
+  await run({ ...request(), onToolCallDelta: (call) => deltas.push(call) });
+  expect(deltas).toEqual([{ id: "call-1", name: "picks", args: { keys: ["a"] } }]);
+});

@@ -26,6 +26,16 @@ describe("chooseTurnModel", () => {
       reason: "clarifying_answer",
     });
   });
+  it("routes a pasted JD that starts a recruiting role fast", () => {
+    expect(
+      chooseTurnModel({
+        ...base,
+        trigger: "follow_up",
+        userText: "x".repeat(3000),
+        recruitingIntake: true,
+      }),
+    ).toMatchObject({ routed: "fast", reason: "recruiting_intake" });
+  });
   it("routes status/fyi peer wakes fast", () => {
     expect(
       chooseTurnModel({ ...base, trigger: "bot_message", peerIntent: "status" }),

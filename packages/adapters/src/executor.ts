@@ -615,6 +615,32 @@ export function continuedCandidateKey(key: string, savedKeys: readonly string[])
   );
 }
 
+/** A name as a profile slug: "Zimu Gong" → "zimu-gong". */
+function nameSlug(name: string) {
+  return name
+    .normalize("NFKD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, "-")
+    .replace(/^-|-$/g, "");
+}
+
+/**
+ * A key the model spelled from the person's name ("linkedin:/in/zimu-gong-2042") names the one
+ * saved person on the role whose name gives that slug; an ambiguous or unknown key stays as given.
+ */
+export function namedCandidateKey(
+  key: string,
+  rows: readonly { name: string | null; candidateKey: string }[],
+): string {
+  const slug = (key.split("/").pop() ?? "").replace(/-[^-]*\d[^-]*$/, "");
+  if (!slug.includes("-")) return key;
+  const matches = new Set(
+    rows.filter((row) => row.name && nameSlug(row.name) === slug).map((row) => row.candidateKey),
+  );
+  return matches.size === 1 ? ([...matches][0] as string) : key;
+}
+
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
 export function shortQuestion(question: string, max = 240): string {
   let text = question.trim();
@@ -3528,6 +3554,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
       const setupMark = (name: string) => {
         setupMarks[`${name}Ms`] = Math.round(performance.now() - setupStartedAt);
       };
+      // How long one setup load took on its own, beside the joins that wait for it.
+      const ownTime = <T>(name: string, pending: Promise<T>): Promise<T> => {
+        const startedAt = performance.now();
+        return pending.finally(() => {
+          setupMarks[`${name}OwnMs`] = Math.round(performance.now() - startedAt);
+        });
+      };
       if (!run) return;
       const previouslyClaimed = run.leaseFence > 0;
       // Only an answer queues a waiting ask; a redelivered wake must leave its card pending.
@@ -3836,10 +3869,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         });
 
         setupMark("runStarted");
-        const discoveredPromise = deps.connector
-          ? deps.connector.discoverTools(context)
-          : Promise.resolve([]);
-        const nativeSources = await nativeSourcesPending();
+        const discoveredPromise = ownTime(
+          "discovery",
+          deps.connector ? deps.connector.discoverTools(context) : Promise.resolve([]),
+        );
+        const nativeSources = await ownTime("nativeSources", nativeSourcesPending());
         if (
           nativeSources?.answeredAsks.length &&
           (thread.spaceId !== run.spaceId ||
@@ -4029,8 +4063,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           routinePriorRun,
         ] = await Promise.all([
           discoveredPromise,
-          loadCurrentTurnImages(deps, turnBlocks, context),
-          memoryContextPromise,
+          ownTime("turnImages", loadCurrentTurnImages(deps, turnBlocks, context)),
+          ownTime("memoryContext", memoryContextPromise),
           messagingChannelRun
             ? Promise.resolve("")
             : loadAgentScratchpadContext(deps, {
@@ -4043,8 +4077,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 spaceId: run.spaceId,
                 text: task.prompt,
               }),
-          recallPromise,
-          stoppedPreviousRunNotice(deps.prisma, thread.runs?.[0]),
+          ownTime("recall", recallPromise),
+          ownTime("stoppedNotice", stoppedPreviousRunNotice(deps.prisma, thread.runs?.[0])),
           // Both briefs are best-effort context: a read failure must not requeue the run.
           previouslyClaimed
             ? resumeBriefForRun(deps.prisma, run, runSecrets).catch((error) => {
@@ -4418,8 +4452,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? agentConnectionTools.filter((tool) => !disabledBuiltinTools.has(tool.name))
             : []),
         ];
+        // Before a role's first round the people search is already listed and the turn ends on
+        // the next-step card, so the tool catalog would only cost a lookup step.
+        const firstRoundPending =
+          Boolean(thread.activeRecruitingRoleId) &&
+          discovered.some((tool) => tool.name.endsWith("web_search_advanced_exa")) &&
+          !(await deps.prisma.recruitingCalibrationRound.findFirst({
+            where: { roleId: thread.activeRecruitingRoleId ?? "", role: { spaceId: run.spaceId } },
+            select: { id: true },
+          }));
         const exposedConnectorTools = discovered.filter(
-          (tool) => !builtinAgentTools.some((builtin) => builtin.name === tool.name),
+          (tool) =>
+            !builtinAgentTools.some((builtin) => builtin.name === tool.name) &&
+            !(firstRoundPending && /_(search_tools|load_tool|execute_tool)$/.test(tool.name)),
         );
         const connectorTools = new Map(
           exposedConnectorTools.map((tool) => [tool.name, tool] as const),
@@ -4724,6 +4769,75 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // After the ten are shown the server saves the brief from the recruiter's intake answers;
         // the next-step card waits for that save, so the pause never cuts it off.
         let briefSaving: Promise<unknown> | undefined;
+        // The round's people go into chat one by one while the model is still naming them; the
+        // recorded round then replaces that message with the final list.
+        let roundStream:
+          | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
+          | undefined;
+        const showRoundList = async (text: string) => {
+          const messageId = roundStream?.messageId;
+          if (!messageId) {
+            const message = await publishMessage(deps, run, "bot", [{ kind: "text", text }]);
+            if (roundStream && message) roundStream.messageId = message.id;
+            return;
+          }
+          const blocks: MessageBlock[] = [{ kind: "text", text }];
+          await deps.prisma.message.update({
+            where: { id: messageId },
+            data: { blocks: blocks as Prisma.InputJsonValue },
+          });
+          await deps.events.append({
+            spaceId: run.spaceId,
+            threadId: thread.id,
+            botId: bot.id,
+            runId,
+            type: "thread.message.updated",
+            payload: { messageId, role: "bot", blocks },
+          });
+        };
+        const streamRoundPicks = (call: {
+          id: string;
+          name: string;
+          args: Record<string, unknown>;
+        }) => {
+          const roleId = thread.activeRecruitingRoleId;
+          if (
+            !roleId ||
+            !call.name.endsWith("recruiting_research") ||
+            call.args.operation !== "calibration_round" ||
+            !Array.isArray(call.args.candidateKeys)
+          )
+            return;
+          // The last key may still be cut mid-word.
+          const named = call.args.candidateKeys
+            .slice(0, -1)
+            .filter((key): key is string => typeof key === "string")
+            .map(savedCandidateKeyForm);
+          if (roundStream?.callId !== call.id)
+            roundStream = {
+              callId: call.id,
+              shown: 0,
+              messageId: roundStream?.messageId,
+              posting: roundStream?.posting ?? Promise.resolve(),
+            };
+          const stream = roundStream;
+          if (named.length <= stream.shown) return;
+          stream.shown = named.length;
+          stream.posting = stream.posting
+            .then(async () => {
+              const text = await recruitingRoundListText(deps.prisma, {
+                threadId: run.threadId,
+                spaceId: run.spaceId,
+                roleId,
+                candidateKeys: named,
+                knownOnly: true,
+              });
+              if (text) await showRoundList(text);
+            })
+            .catch((error) =>
+              getLogger().warn("round picks not streamed", { error: String(error) }),
+            );
+        };
         const saveBriefAfterRound = async (roleId: string) => {
           const quote = currentTurnMessage?.blocks.flatMap((block) =>
             block.kind === "text" && block.text.trim() ? [block.text] : [],
@@ -4865,14 +4979,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
               : [];
             const continuedKeys = continued.map((row) => row.candidateKey);
+            const mapped = args.candidateKeys.map((key, index) =>
+              typeof key !== "string" || saved.has(key)
+                ? key
+                : saved.has(String(keys[index]))
+                  ? keys[index]
+                  : continuedCandidateKey(String(keys[index]), continuedKeys),
+            );
+            // A key spelled from the person's name ("zimu-gong" for "zim-gong") names the one
+            // saved person on this role with that name.
+            const unmatched = mapped.filter(
+              (key): key is string =>
+                typeof key === "string" && !saved.has(key) && !continuedKeys.includes(key),
+            );
+            const named = unmatched.length
+              ? await deps.prisma.recruitingCandidateOccurrence.findMany({
+                  where: { roleId: thread.activeRecruitingRoleId, name: { not: null } },
+                  select: { name: true, candidateKey: true },
+                  distinct: ["candidateKey"],
+                })
+              : [];
             args = {
               ...args,
-              candidateKeys: args.candidateKeys.map((key, index) =>
-                typeof key !== "string" || saved.has(key)
-                  ? key
-                  : saved.has(String(keys[index]))
-                    ? keys[index]
-                    : continuedCandidateKey(String(keys[index]), continuedKeys),
+              candidateKeys: mapped.map((key) =>
+                typeof key === "string" && unmatched.includes(key)
+                  ? namedCandidateKey(key, named)
+                  : key,
               ),
             };
           }
@@ -4897,23 +5029,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               };
             if (typeof args.question === "string")
               args = { ...args, question: shortQuestion(args.question) };
-          }
-          if (
-            name.endsWith("_search_tools") &&
-            thread.activeRecruitingRoleId &&
-            tools.some((tool) => tool.name.endsWith("web_search_advanced_exa"))
-          ) {
-            // Before the first round the people search is already in the tool list: a catalog
-            // lookup there only delays the search.
-            const round = await deps.prisma.recruitingCalibrationRound.findFirst({
-              where: { roleId: thread.activeRecruitingRoleId, role: { spaceId: run.spaceId } },
-              select: { id: true },
-            });
-            if (!round)
-              return {
-                error:
-                  "No tool lookup before the first round: the people search (web_search_advanced_exa) is already available. Ask the next clarifying question, or issue the four people searches now as parallel calls in one step.",
-              };
           }
           if (handedOff) {
             return {
@@ -8494,23 +8609,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   briefSaving ??= saveBriefAfterRound(recorded.roleId).catch((error) =>
                     getLogger().warn("brief not saved after the round", { error: String(error) }),
                   );
-                  await publishMessage(
-                    deps,
-                    run,
-                    "bot",
-                    [
-                      {
-                        kind: "text",
-                        text: await recruitingRoundListText(deps.prisma, {
-                          threadId: run.threadId,
-                          spaceId: run.spaceId,
-                          roleId: recorded.roleId,
-                          candidateKeys: recorded.candidateKeys as string[],
-                        }),
-                      },
-                    ],
-                    undefined,
-                    `recruiting-round-list:${applied.effect.id}`,
+                  const text = await recruitingRoundListText(deps.prisma, {
+                    threadId: run.threadId,
+                    spaceId: run.spaceId,
+                    roleId: recorded.roleId,
+                    candidateKeys: recorded.candidateKeys as string[],
+                  });
+                  await roundStream?.posting;
+                  await (roundStream?.messageId
+                    ? showRoundList(text)
+                    : publishMessage(
+                        deps,
+                        run,
+                        "bot",
+                        [{ kind: "text", text }],
+                        undefined,
+                        `recruiting-round-list:${applied.effect.id}`,
+                      )
                   ).catch((error) =>
                     getLogger().warn("round list not posted", { error: String(error) }),
                   );
@@ -10570,6 +10685,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 (turnBlocks?.some((block) => block.kind !== "text") ?? false) ||
                 (currentTurnImages?.length ?? 0) > 0,
               pendingToolLoop: Boolean(approvalContinuation) || Boolean(takeoverResume?.checkpoint),
+              recruitingIntake: Boolean(linkRole) || firstRoundPending,
             });
         let runModel = configuredRunModel;
         let runFallbackModels = fallbackModels.map(({ provider, modelId }) => ({
@@ -10776,6 +10892,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     resolveConnectedModel(run, provider, modelId, (values) =>
                       runSecrets.push(...values),
                     ),
+              onToolCallDelta: streamRoundPicks,
               beforeAsk: async (question) => {
                 await briefSaving;
                 // A run that recorded a round asks the next-step choice, which is asked anew each round.

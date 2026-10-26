@@ -618,6 +618,16 @@ export class PiAgentRuntime implements AgentRuntime {
           }
           if (
             event.type === "message_update" &&
+            event.assistantMessageEvent.type === "toolcall_delta" &&
+            request.onToolCallDelta
+          ) {
+            const block =
+              event.assistantMessageEvent.partial.content[event.assistantMessageEvent.contentIndex];
+            if (block?.type === "toolCall")
+              request.onToolCallDelta({ id: block.id, name: block.name, args: block.arguments });
+          }
+          if (
+            event.type === "message_update" &&
             event.assistantMessageEvent.type === "text_delta"
           ) {
             const delta = event.assistantMessageEvent.delta;

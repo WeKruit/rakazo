@@ -121,7 +121,14 @@ export async function recruitingRoundListText(
   prisma: Pick<PrismaClient, "externalEffect"> & {
     recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
   },
-  input: { threadId: string; spaceId: string; roleId: string; candidateKeys: readonly string[] },
+  input: {
+    threadId: string;
+    spaceId: string;
+    roleId: string;
+    candidateKeys: readonly string[];
+    /** Leave out keys that name no saved person (a list still being written). */
+    knownOnly?: boolean;
+  },
 ) {
   // Any saved search in this conversation: the round is often recorded by a later run.
   const [searches, occurrences] = await Promise.all([
@@ -158,7 +165,11 @@ export async function recruitingRoundListText(
       if (typeof row.candidateKey === "string" && row.snippet)
         people.set(row.candidateKey, { ...people.get(row.candidateKey), ...row });
   }
-  const lines = input.candidateKeys.map((key, index) => {
+  const keys = input.knownOnly
+    ? input.candidateKeys.filter((key) => people.has(key))
+    : input.candidateKeys;
+  if (input.knownOnly && !keys.length) return "";
+  const lines = keys.map((key, index) => {
     const person = people.get(key);
     const head = [
       person?.name ? `**${person.name}**` : null,

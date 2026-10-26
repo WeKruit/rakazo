@@ -13,6 +13,8 @@ export interface TurnModelInput {
   hasAttachments: boolean;
   /** Approved-effect continuation or a resumed checkpoint: a tool loop is still open. */
   pendingToolLoop: boolean;
+  /** A recruiting role before its first round: clarifying questions and the people searches. */
+  recruitingIntake?: boolean;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -40,6 +42,7 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
 
   if (input.pendingToolLoop) return { ...configured, reason: "pending_tool_loop" };
   if (input.answersQuestion) return { ...fast, reason: "clarifying_answer" };
+  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake" };
   if (input.peerIntent === "status" || input.peerIntent === "fyi")
     return { ...fast, reason: "status_turn" };
   if (input.trigger !== "user" && input.trigger !== "messaging")

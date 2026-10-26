@@ -43,6 +43,7 @@ import {
   continuedCandidateKey,
   createRunExecutor,
   jobLinkIn,
+  namedCandidateKey,
   pastedJobTitle,
   resumeBriefForRun,
   savedCandidateKeyForm,
@@ -5972,6 +5973,21 @@ describe("native recruiting assessment effect delivery", () => {
     ).toBe("linkedin:/in/dmitry-s");
   });
 
+  it("maps a key spelled from the name to the one saved person with that name", () => {
+    const rows = [
+      { name: "Zimu Gong", candidateKey: "linkedin:/in/zim-gong" },
+      { name: "Sam Lee", candidateKey: "linkedin:/in/saml2042" },
+      { name: "Ana Ruiz", candidateKey: "linkedin:/in/ana-r-1" },
+      { name: "Ana Ruiz", candidateKey: "linkedin:/in/ana-r-2" },
+      { name: null, candidateKey: "linkedin:/in/x" },
+    ];
+    expect(namedCandidateKey("linkedin:/in/zimu-gong", rows)).toBe("linkedin:/in/zim-gong");
+    expect(namedCandidateKey("linkedin:/in/sam-lee-2042", rows)).toBe("linkedin:/in/saml2042");
+    // Two saved people share the name, or the key is one word: left as given.
+    expect(namedCandidateKey("linkedin:/in/ana-ruiz", rows)).toBe("linkedin:/in/ana-ruiz");
+    expect(namedCandidateKey("linkedin:/in/sam", rows)).toBe("linkedin:/in/sam");
+  });
+
   it("maps a key rewritten from the name to the one saved key with the same profile id", () => {
     const saved = [
       "linkedin:/in/jon-doe-1a2b3c4d",
@@ -5982,9 +5998,7 @@ describe("native recruiting assessment effect delivery", () => {
     expect(continuedCandidateKey("linkedin:/in/jonathan-doe-1a2b3c4d", saved)).toBe(
       "linkedin:/in/jon-doe-1a2b3c4d",
     );
-    expect(continuedCandidateKey("linkedin:/in/sam-lee-2042", saved)).toBe(
-      "linkedin:/in/saml2042",
-    );
+    expect(continuedCandidateKey("linkedin:/in/sam-lee-2042", saved)).toBe("linkedin:/in/saml2042");
     // Two saved people end in the same digits: ambiguous, left for the model to correct.
     expect(continuedCandidateKey("linkedin:/in/ann-1990", saved)).toBe("linkedin:/in/ann-1990");
   });
