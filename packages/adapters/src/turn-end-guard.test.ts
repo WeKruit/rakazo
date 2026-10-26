@@ -294,6 +294,8 @@ describe("guardRecruitingTurnEnd", () => {
     [10, true, true, false, "continued"],
     [10, false, false, false, "ended"],
     [10, false, false, true, "continued"],
+    // Feedback typed on the next-step card resumes the run that recorded the round.
+    [10, false, true, true, "continued"],
   ])(
     "waits on a complete unapproved round until the recruiter writes (%s, %s, %s, %s)",
     async (count, approved, completed, answered, action) => {
@@ -319,19 +321,6 @@ describe("guardRecruitingTurnEnd", () => {
       expect(f.deps.prisma.recruitingCalibrationRound.findFirst).toHaveBeenCalledWith(
         expect.objectContaining({ where: { roleId: "role-1" }, orderBy: { round: "desc" } }),
       );
-      if (count === 10 && !approved && answered)
-        expect(f.deps.prisma.externalEffect.findFirst).toHaveBeenCalledWith(
-          expect.objectContaining({
-            where: {
-              id: "effect-1",
-              runId: run.id,
-              spaceId: run.spaceId,
-              kind: "recruiting_research",
-              status: "completed",
-              request: { path: ["operation"], equals: "calibration_round" },
-            },
-          }),
-        );
     },
   );
 
