@@ -82,7 +82,12 @@ async function listRoundIfMissing(
   round: { effectId: string; candidateKeys: string[] },
 ) {
   const recorded = await deps.prisma.externalEffect.findFirst({
-    where: { id: round.effectId, runId: input.run.id, kind: "recruiting_research", status: "completed" },
+    where: {
+      id: round.effectId,
+      runId: input.run.id,
+      kind: "recruiting_research",
+      status: "completed",
+    },
     select: { id: true },
   });
   if (!recorded) return;
