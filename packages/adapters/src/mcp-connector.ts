@@ -510,8 +510,11 @@ export async function loadMcpCredentialRecord(
 
 /** How long a worker reuses a server's discovered tool list before listing it again. */
 export const DISCOVERY_CACHE_TTL_MS = 10 * 60_000;
-/** How long a worker skips a server whose discovery just failed, instead of reconnecting every run. */
-export const DISCOVERY_FAILURE_TTL_MS = 2 * 60_000;
+/**
+ * How long a worker skips a server whose discovery just failed, instead of reconnecting every run.
+ * Longer than the prewarm cadence, which retries it in the background.
+ */
+export const DISCOVERY_FAILURE_TTL_MS = DISCOVERY_CACHE_TTL_MS;
 /** Discovery with this operation id lists every server again, refreshing the cache for runs. */
 export const DISCOVERY_REFRESH_OPERATION = "discovery.prewarm";
 
@@ -630,6 +633,9 @@ export class McpConnector implements ConnectorProvider {
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
         const startedAt = Date.now();
         const failureKey = this.sessionKey(assignment.server, context);
+        // The prewarm retries a remembered failure; success then serves the next run.
+        if (context.operationId === DISCOVERY_REFRESH_OPERATION)
+          this.discoveryFailures.delete(failureKey);
         const failed = this.discoveryFailures.get(failureKey);
         if (failed) {
           if (
