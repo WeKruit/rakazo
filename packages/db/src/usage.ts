@@ -2,7 +2,10 @@ import type { AgentRuntimeEvent, UsageOperationKind } from "@rakazo/adapter-kit"
 import type { UsageAmounts, UsageCosts } from "@rakazo/contracts";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
-import { RECRUITING_SERVICE_UNIT_PRICES_USD } from "./recruiting-bootstrap.js";
+import {
+  RECRUITING_OPERATOR_EMAIL_DOMAIN,
+  RECRUITING_SERVICE_UNIT_PRICES_USD,
+} from "./recruiting-bootstrap.js";
 
 type UsageEvent = Extract<AgentRuntimeEvent, { type: "usage" }>;
 export interface UsageAttribution {
@@ -151,16 +154,28 @@ async function usageGroups(
     GROUP BY 1, 2, 3, 4, 5, 6`;
 }
 
+/** Only a verified mailbox at the operator's domain sees money and other accounts' spend. */
+async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, userId: string) {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { email: true, emailVerified: true },
+  });
+  return (
+    user?.emailVerified === true &&
+    user.email.trim().toLowerCase().endsWith(`@${RECRUITING_OPERATOR_EMAIL_DOMAIN}`)
+  );
+}
+
 /**
- * Spend of one account (space + user), or of every account for the deployment owner's view.
- * Recruiters get neutral units only; service names and estimated dollars are owner detail.
+ * Spend of one account (space + user) in credits, searches and tokens. Operator staff also get
+ * estimated dollars, service names and every account's spend.
  */
 export async function summarizeUsageCosts(
   prisma: Pick<PrismaClient, "$queryRaw" | "recruitingRole" | "user">,
-  actor: { spaceId: string; userId: string; isDeploymentOwner: boolean },
+  actor: { spaceId: string; userId: string },
   now = new Date(),
 ): Promise<UsageCosts> {
-  const owner = actor.isDeploymentOwner;
+  const owner = await seesOperatorSpend(prisma, actor.userId);
   const groups = await usageGroups(prisma, actor);
   const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const daysStart =
