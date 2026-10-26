@@ -777,7 +777,7 @@ async function main() {
     if (phase === "feedback") {
       const next = round && round.round > firstRound.round ? round : null;
       const shown = next ? namesListedInChat(next) : null;
-      if (next && next.candidates.length)
+      if (next?.candidates.length)
         mark("feedback_round_saved", { round: next.round, people: next.candidates.length });
       const waited = Date.now() - Date.parse(report.milestones.feedback_sent.at);
       const ready = shown && shown.of >= 10 && shown.listed >= Math.min(8, shown.of);
