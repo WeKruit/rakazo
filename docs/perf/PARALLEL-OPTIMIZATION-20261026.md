@@ -70,7 +70,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P1. Lower thinking for intake turns (model choice per step)
 
-- **Owner:** _unclaimed_
+- **Owner:** shipped in #203 (low thinking level on intake turns); quality check pending the live test
 - **Serial today:** step C. Fast routing swaps only the model id and keeps the bot's configured
   thinking level (`executor.ts`, `{ ...configuredRunModel, id: turnModel.model.id }`), so an intake
   step that only writes four search queries can think as long as a heavy turn.
@@ -85,7 +85,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P2. Write the search plan during the question turns
 
-- **Owner:** _unclaimed_
+- **Owner:** shipped in #203 (`plannedSearches` on the last question, run when it is answered); live timing pending
 - **Serial today:** the model plans the searches only after the last answer (step C), although by
   the last question it already knows the title, location and most must-haves.
 - **Change:** when the model asks a question, it also keeps a short draft of the four query
@@ -147,7 +147,9 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P6. Shorter pick output
 
-- **Owner:** _unclaimed_
+- **Owner:** no change needed: `calibration_round` already takes only the ten keys and the server
+  renders each person. The 12–21 s between the first person and all ten still needs the event
+  replay to explain.
 - **Serial today:** step G, 12–21 s, dominated by the model writing ten fit lines.
 - **Change:** ask for one short fit line per person (the passage already shows the evidence), and
   let the server render name, title, company and location from the saved row so the model writes
