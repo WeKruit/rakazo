@@ -1919,3 +1919,16 @@ describe("recruiting brief drafts", () => {
     expect(show(Array.from({ length: 10 }, (_, index) => `linkedin:/in/p${index}`))).toBe(false);
   });
 });
+
+describe("calibration round keys", () => {
+  it("names a repeated person so one retry fixes the round", () => {
+    const keys = Array.from({ length: 9 }, (_, index) => `linkedin:/in/p${index}`);
+    const result = contracts.RecruitingResearchToolInputSchema.safeParse({
+      operation: "calibration_round",
+      expectedRoleRevision: 1,
+      candidateKeys: [...keys, "linkedin:/in/p3"],
+    });
+    expect(result.success).toBe(false);
+    expect(result.error?.issues[0]?.message).toContain("Repeated: linkedin:/in/p3");
+  });
+});

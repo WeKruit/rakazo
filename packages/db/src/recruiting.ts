@@ -11874,6 +11874,7 @@ export async function saveRecruitingCalibrationRound(
             orderBy: { candidateKey: "asc" },
             take: 6,
           });
+          if (near.length === 1) return `${key} (use ${near[0]?.candidateKey})`;
           if (near.length >= 2 && near.length <= 5)
             return `${key} (saved keys starting with it: ${near.map((row) => row.candidateKey).join(", ")})`;
           // A key spelled from a name several saved people share: choose by profile, never by name.
@@ -11889,13 +11890,23 @@ export async function saveRecruitingCalibrationRound(
                 take: 6,
               })
             : [];
+          if (namesakes.length === 1) return `${key} (use ${namesakes[0]?.candidateKey})`;
           return namesakes.length >= 2
             ? `${key} (saved people with this name, choose by profile: ${namesakes.map((row) => row.candidateKey).join(", ")})`
             : key;
         }),
       );
+      // The exact keys to pick from, so one retry is enough instead of guessing keys from names.
+      const others = await tx.recruitingCandidateOccurrence.findMany({
+        where: { roleId: role.id, candidateKey: { notIn: [...known] } },
+        select: { candidateKey: true, name: true },
+        distinct: ["candidateKey"],
+        orderBy: { candidateKey: "asc" },
+        take: 20,
+      });
+      const choices = others.map((row) => `${row.name ?? "?"} = ${row.candidateKey}`).join("; ");
       throw new RecruitingCalibrationRoundError(
-        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${notes.join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).`,
+        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${notes.join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).${choices ? ` Saved people not yet in this round: ${choices}.` : ""}`,
       );
     }
     const previous = await tx.recruitingCalibrationRound.findFirst({
@@ -12044,7 +12055,9 @@ async function approveLatestCalibrationRound(
     orderBy: { round: "desc" },
   });
   if (!latest)
-    throw new RecruitingCalibrationRoundError("No calibration round has been shown yet.");
+    throw new RecruitingCalibrationRoundError(
+      "No calibration round has been recorded for this role yet, so there is nothing to accept. Record the ten first (recruiting_research operation calibration_round with ten exact candidateKeys of saved people; recruiting_candidates list returns them), then call this again with the recruiter's words.",
+    );
   if (round !== null && latest.round !== round)
     throw new RecruitingConflictError("A newer calibration round replaced this one");
   if (latest.approvedAt)

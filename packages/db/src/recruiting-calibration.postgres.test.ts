@@ -209,6 +209,14 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await expect(recordRound([...keys("first").slice(0, 9), "sam-lee"])).rejects.toThrow(
       "sam-lee (saved people with this name, choose by profile: slee-1, slee-2)",
     );
+    // One saved person carries the name: the error names the key to use, and lists the
+    // saved people still free, so one retry is enough.
+    await savePage(["jp-1"], ["Jp Azevedo"]);
+    const named = recordRound([...keys("first").slice(0, 9), "linkedin:/in/jp azevedo"]);
+    await expect(named).rejects.toThrow("linkedin:/in/jp azevedo (use jp-1)");
+    await expect(
+      recordRound([...keys("first").slice(0, 9), "linkedin:/in/jp azevedo"]),
+    ).rejects.toThrow(/Saved people not yet in this round: .*Jp Azevedo = jp-1/);
     expect(
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,
     ).toBe("feedback");
