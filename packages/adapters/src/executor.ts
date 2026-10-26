@@ -4826,6 +4826,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let briefSaving: Promise<unknown> | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
+        // show_picks put the first people in chat; the turn owes the recorded ten.
+        let firstPicksShown = false;
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
@@ -5138,9 +5140,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             stream.shown = Math.max(stream.shown, keys.length);
             stream.posting = stream.posting.then(() => showRoundList(text));
             await stream.posting;
+            firstPicksShown = true;
             return {
               shown: keys.length,
-              next: "These people are in chat now. Once the new searches return, record the full ten with calibration_round, starting with these same people in the same order.",
+              next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have; search again only if fewer than ten of all those rows fit, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten.",
             };
           }
           const candidateOperation =
@@ -10589,7 +10592,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
             }),
           );
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts), meeting every hard requirement its row can show and not currently at the hiring company. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches and record the ten from all the rows. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts), meeting every hard requirement its row can show and not currently at the hiring company. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
@@ -11092,6 +11095,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await briefSaving;
                 // A run that recorded a round asks the next-step choice, which is asked anew each round.
                 if (await nextStepCardAfterRound()) return undefined;
+                if (firstPicksShown)
+                  return {
+                    instead:
+                      "Not asked: the ten are not recorded yet. Record them now with calibration_round, starting with the people already shown in chat in the same order; then end on the next-step card.",
+                  };
                 const messages = await deps.prisma.message.findMany({
                   where: { threadId: thread.id },
                   orderBy: { seq: "asc" },

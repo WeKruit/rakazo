@@ -196,4 +196,16 @@ describe("Pi choice asks", () => {
     expect(events.some((event) => event.type === "ask")).toBe(false);
     expect(JSON.stringify(fakeAgentState.result)).toContain("Already answered");
   });
+
+  it("returns the run's own reason instead of a card the run may not ask yet", async () => {
+    const runtime = new PiAgentRuntime();
+    const events: AgentRuntimeEvent[] = [];
+    const request = {
+      ...runRequest,
+      beforeAsk: async () => ({ instead: "Not asked: record the ten first." }),
+    };
+    for await (const event of runtime.run(request, runContext)) events.push(event);
+    expect(events.some((event) => event.type === "ask")).toBe(false);
+    expect(JSON.stringify(fakeAgentState.result)).toContain("Not asked: record the ten first.");
+  });
 });
