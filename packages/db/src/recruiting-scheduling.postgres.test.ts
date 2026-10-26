@@ -9,6 +9,7 @@ import {
   bindRecruitingSchedulingOperation,
   createRecruitingSchedulingPlan,
   loadVerifiedRecruitingSchedulingPlan,
+  prepareRecruitingSchedulingPlan,
 } from "./recruiting-scheduling.js";
 
 const url = process.env.DATABASE_URL;
@@ -264,6 +265,51 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
       ).toBe(before);
     },
   );
+  it("prepares a plan from the conversation's own mail and availability reads", async () => {
+    const plan = await prepareRecruitingSchedulingPlan(prisma, actor, {
+      threadId: input.threadId,
+      emailId: "original-email",
+      candidate: {
+        candidateKey: "candidate@example.test",
+        name: "Candidate",
+        timeZone: "America/New_York",
+      },
+      interviewer: input.interviewer,
+      start: "2026-11-01T06:30:00.000Z",
+      lengthInMinutes: 30,
+    });
+    expect(plan.calendar).toEqual(input.calendar);
+    expect(plan.candidate.email).toBe("candidate@example.test");
+    expect(plan.originalEmail.savedRead).toEqual(input.originalEmail.savedRead);
+    await expect(
+      prepareRecruitingSchedulingPlan(prisma, actor, {
+        threadId: input.threadId,
+        emailId: "original-email",
+        candidate: {
+          candidateKey: "candidate@example.test",
+          name: "Candidate",
+          timeZone: "America/New_York",
+        },
+        interviewer: input.interviewer,
+        start: "2026-11-01T08:00:00Z",
+        lengthInMinutes: 30,
+      }),
+    ).rejects.toThrow(/availability/);
+    await expect(
+      prepareRecruitingSchedulingPlan(prisma, actor, {
+        threadId: input.threadId,
+        emailId: "never-read",
+        candidate: {
+          candidateKey: "candidate@example.test",
+          name: "Candidate",
+          timeZone: "America/New_York",
+        },
+        interviewer: input.interviewer,
+        start: "2026-11-01T06:30:00Z",
+        lengthInMinutes: 30,
+      }),
+    ).rejects.toThrow(/get_email/);
+  });
   it("claims one booking across different runs and preserves the same binding on retry", async () => {
     const plan = await createRecruitingSchedulingPlan(prisma, actor, input);
     const args = {
@@ -838,7 +884,8 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         eaccount: "recruiter@example.test",
         from_address_email: input.candidate.email,
         campaign_id: campaignId,
-        lead: leadId,
+        lead: input.candidate.email.toUpperCase(),
+        lead_id: leadId,
       },
     );
     const linked = {

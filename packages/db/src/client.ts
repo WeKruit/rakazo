@@ -1,4 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
+import { getLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { Pool } from "pg";
 import { PrismaClient } from "./generated/prisma/client.js";
@@ -12,6 +13,10 @@ export interface DbClientOptions {
 
 const DEFAULT_POOL_MAX = 4;
 const CONNECT_RETRY_ATTEMPTS = 8;
+/** A checkout slower than this counts as waiting for the pool. */
+const POOL_WAIT_MIN_MS = 50;
+/** db.pool.wait summarizes at most once per window, and only windows that waited. */
+const POOL_WAIT_REPORT_MS = 60_000;
 
 export function createPool(connectionString: string, options: DbClientOptions = {}): Pool {
   const pool = new Pool({
@@ -99,17 +104,24 @@ function installConnectRetry(pool: Pool): void {
     (): Promise<PoolClient>;
     (callback: ConnectCallback): void;
   };
+  const acquired = poolWaitReporter(pool);
 
   function connect(): Promise<PoolClient>;
   function connect(callback: ConnectCallback): void;
   function connect(callback?: ConnectCallback): Promise<PoolClient> | undefined {
-    if (!callback) return retryOnTooManyConnections(() => originalConnect());
+    const startedAt = Date.now();
+    if (!callback)
+      return retryOnTooManyConnections(() => originalConnect()).then((client) => {
+        acquired(startedAt);
+        return client;
+      });
     const attempt = (n: number) => {
       originalConnect((err, client, done) => {
         if (err && isTooManyDatabaseConnections(err) && n < CONNECT_RETRY_ATTEMPTS - 1) {
           setTimeout(() => attempt(n + 1), Math.min(5_000, 200 * 2 ** n));
           return;
         }
+        if (!err) acquired(startedAt);
         callback(err, client, done);
       });
     };
@@ -117,6 +129,43 @@ function installConnectRetry(pool: Pool): void {
   }
 
   pool.connect = connect as Pool["connect"];
+}
+
+/**
+ * Counts checkouts that waited for a free connection and logs one `db.pool.wait` summary per
+ * window that had any, so pool contention shows up in the logs instead of only as slow turns.
+ */
+function poolWaitReporter(pool: Pool): (startedAt: number) => void {
+  let windowStart = Date.now();
+  let checkouts = 0;
+  let waited = 0;
+  let totalMs = 0;
+  let maxMs = 0;
+  let maxQueued = 0;
+  return (startedAt) => {
+    const now = Date.now();
+    const ms = now - startedAt;
+    checkouts += 1;
+    maxQueued = Math.max(maxQueued, pool.waitingCount);
+    if (ms >= POOL_WAIT_MIN_MS) {
+      waited += 1;
+      totalMs += ms;
+      maxMs = Math.max(maxMs, ms);
+    }
+    if (now - windowStart < POOL_WAIT_REPORT_MS) return;
+    if (waited)
+      getLogger().info("db.pool.wait", {
+        pool: pool.options.application_name,
+        max: pool.options.max,
+        checkouts,
+        waited,
+        totalMs,
+        maxMs,
+        maxQueued,
+      });
+    windowStart = now;
+    checkouts = waited = totalMs = maxMs = maxQueued = 0;
+  };
 }
 
 export function parsePositiveInteger(value: string | undefined, fallback: number): number {

@@ -5069,6 +5069,10 @@ msgstr "没有待办任务。"
 msgid "No outreach files loaded"
 msgstr "未加载邮件文件"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "No price"
+msgstr "未定价"
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "未找到提供方。"

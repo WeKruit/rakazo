@@ -26,6 +26,11 @@ RELEASE_PROFILE = release_profile(os.environ)
 APP_NAME = os.environ.get("MODAL_APP_NAME", "rakazo-recruiting")
 SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")
 VOLUME_NAME = os.environ.get("MODAL_VOLUME_NAME", f"{APP_NAME}-files")
+# Per-service database pool and worker slots; the budget is explained where the services start.
+SERVICE_ENV = {
+    "api": {"DB_POOL_MAX": "6"},
+    "worker": {"DB_POOL_MAX": "5", "GRAPHILE_WORKER_CONCURRENCY": "10"},
+}
 
 app = modal.App(APP_NAME)
 
@@ -154,10 +159,14 @@ class Recruiting:
         ]
         for package, command in services:
             phase(f"{package}.spawn")
-            # A pool of 4 queued page loads. The session-mode pooler admits 15 clients in total,
-            # shared with the worker (DB_POOL_MAX), migrations and other services, so the API
-            # gets 6.
-            service_env = {**env, "DB_POOL_MAX": "6"} if package == "api" else env
+            # The session-mode pooler admits 15 clients in total: API 6 + worker 5 + one realtime
+            # LISTEN client each = 13, two spare. Migrations finish before the services start.
+            # The worker's pool also holds graphile's LISTEN client and the reconciler's advisory
+            # lock for its lifetime, so 5 leaves 3 for chat turns (4 left 2, and two concurrent
+            # chats queued behind each other). Each job slot holds a whole run, mostly waiting
+            # on the model, so 10 slots keep long research runs from queueing a recruiter's turn;
+            # background runs also queue behind it when every slot is busy.
+            service_env = {**env, **SERVICE_ENV.get(package, {})}
             self.processes.append(subprocess.Popen(
                 command, cwd=f"/app/apps/{package}", env=service_env, start_new_session=True,
             ))

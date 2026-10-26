@@ -314,7 +314,22 @@ it("shows spend per role and round, with dollars and services only for the owner
             ...usage,
             total: priced,
             month: priced,
-            services: [{ service: "people-search", unit: "calls", quantity: 2 }],
+            services: [
+              {
+                service: "people-search",
+                unit: "calls",
+                quantity: 2,
+                estimatedUsd: 0.01,
+                priced: true,
+              },
+              {
+                service: "custom/model",
+                unit: "tokens",
+                quantity: 10,
+                estimatedUsd: 0,
+                priced: false,
+              },
+            ],
             accounts: [{ userId: "user-1", email: "owner@example.test", ...priced }],
           }}
         />,
@@ -324,6 +339,9 @@ it("shows spend per role and round, with dollars and services only for the owner
     expect(container.textContent).toContain("$1.28");
     expect(container.querySelector('[data-testid="usage-services"]')?.textContent).toContain(
       "people-search",
+    );
+    expect(container.querySelector('[data-testid="usage-services"]')?.textContent).toContain(
+      "No price",
     );
     expect(container.textContent).toContain("owner@example.test");
   } finally {

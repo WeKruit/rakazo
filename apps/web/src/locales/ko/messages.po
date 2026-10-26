@@ -5069,6 +5069,10 @@ msgstr ""
 msgid "No outreach files loaded"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "No price"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "검색된 AI 서비스가 없습니다."

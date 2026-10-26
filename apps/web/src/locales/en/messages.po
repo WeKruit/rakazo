@@ -5069,6 +5069,10 @@ msgstr "No open tasks."
 msgid "No outreach files loaded"
 msgstr "No outreach files loaded"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "No price"
+msgstr "No price"
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "No providers found."

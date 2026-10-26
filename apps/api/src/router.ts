@@ -66,6 +66,7 @@ import {
   displayBotWorkspacePath,
   enqueueTakeoverContinuation,
   ensureComputerWorkspaceLayout,
+  estimateCatalogTokenCostUsd,
   expireComputerControl,
   forgetBotSecret,
   hasActiveComputerControl,
@@ -231,6 +232,7 @@ import {
   SpaceLimitError,
   SpaceNotEmptyError,
   SpaceNotFoundError,
+  seesOperatorSpend,
   selectSpaceModelPreference,
   selectSpaceVoicePreference,
   summarizeUsageCosts,
@@ -6517,11 +6519,14 @@ export function createRouter(deps: RouterDeps) {
     },
     usage: {
       list: authed.usage.list.handler(async ({ context }) => {
-        const rows = await deps.prisma.usageRecord.findMany({
-          where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-        });
+        const [rows, staff] = await Promise.all([
+          deps.prisma.usageRecord.findMany({
+            where: { spaceId: context.actor.spaceId, userId: context.actor.userId, unit: "tokens" },
+            orderBy: { createdAt: "desc" },
+            take: 100,
+          }),
+          seesOperatorSpend(deps.prisma, context.actor.userId),
+        ]);
         return rows.map((row) => ({
           id: row.id,
           botId: row.botId,
@@ -6535,9 +6540,10 @@ export function createRouter(deps: RouterDeps) {
           cacheWrite1hTokens: row.cacheWrite1hTokens,
           reasoningTokens: row.reasoningTokens,
           totalTokens: row.totalTokens,
-          costUsd: row.costUsd,
-          costSource: row.costSource,
-          pricingVersion: row.pricingVersion,
+          // Recruiters see tokens; dollar amounts are operator detail, as in usage.costs.
+          costUsd: staff ? row.costUsd : null,
+          costSource: staff ? row.costSource : null,
+          pricingVersion: staff ? row.pricingVersion : null,
           usageSource: row.usageSource,
           callId: row.callId,
           operationId: row.operationId,
@@ -6572,7 +6578,9 @@ export function createRouter(deps: RouterDeps) {
         };
       }),
       costs: authed.usage.costs.handler(({ context }) =>
-        summarizeUsageCosts(deps.prisma, context.actor),
+        summarizeUsageCosts(deps.prisma, context.actor, {
+          priceTokens: estimateCatalogTokenCostUsd,
+        }),
       ),
     },
     export: {

@@ -552,8 +552,26 @@ function checkToolErrors(events) {
   const counts = {};
   for (const item of errors)
     counts[`${item.name} ${item.class}`] = (counts[`${item.name} ${item.class}`] ?? 0) + 1;
-  report.toolErrors = { calls: done.length, errors: errors.length, counts, items: errors };
+  // Every tool, including connector discovery: the error rate a release is compared on.
+  const all = { calls: 0, errors: 0, byTool: {}, items: [] };
+  for (const event of events) {
+    if (event.type !== "agent.tool.completed" || event.payload?.outcome === "paused") continue;
+    all.byTool[event.payload.name] ??= { calls: 0, errors: 0 };
+    const tool = all.byTool[event.payload.name];
+    tool.calls += 1;
+    all.calls += 1;
+    if (event.payload.outcome !== "error") continue;
+    tool.errors += 1;
+    all.errors += 1;
+    all.items.push({
+      at: event.createdAt,
+      name: event.payload.name,
+      error: String(event.payload.error ?? "").slice(0, 300),
+    });
+  }
+  report.toolErrors = { calls: done.length, errors: errors.length, counts, items: errors, all };
   log(`recruiting tool calls ${done.length}, errors ${errors.length} ${JSON.stringify(counts)}`);
+  log(`all tool calls ${all.calls}, errors ${all.errors}`);
 }
 
 // --- First ten, timed by the server ----------------------------------------------------------

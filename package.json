@@ -21,6 +21,7 @@
     "test:compose-smoke": "bash infra/compose/run-smokes.sh",
     "test:integration": "tsx packages/testkit/src/cli/harness.ts --integration",
     "test:e2e": "tsx packages/testkit/src/cli/harness.ts --e2e",
+    "test:isolation": "tsx packages/testkit/src/cli/account-isolation.ts",
     "test:mobile-screenshots": "pnpm --filter @rakazo/db generate && tsx packages/testkit/src/cli/mobile-screenshots.ts",
     "ios:screenshots": "pnpm --filter @rakazo/db generate && tsx packages/testkit/src/cli/ios-app-screenshots.ts",
     "test:topology": "tsx packages/testkit/src/cli/topology.ts",

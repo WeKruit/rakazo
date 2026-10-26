@@ -73,6 +73,7 @@ export async function recordUsage(
 type UsageGroup = {
   unit: string;
   provider: string;
+  model: string;
   roleId: string | null;
   day: Date;
   round: number | null;
@@ -80,7 +81,21 @@ type UsageGroup = {
   quantity: number | null;
   tokens: bigint | number | null;
   costUsd: number | null;
+  /** Token buckets of rows that carry no recorded cost, priced at read time. */
+  unpricedInput: bigint | number | null;
+  unpricedOutput: bigint | number | null;
+  unpricedCacheRead: bigint | number | null;
+  unpricedCacheWrite: bigint | number | null;
 };
+
+/** List-price USD for measured tokens of one model, or null when the model has no known price. */
+export type TokenPricer = (
+  provider: string,
+  model: string,
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number },
+) => number | null;
+
+type PricedGroup = UsageGroup & { usd: number; priced: boolean };
 
 const DAY_MS = 86_400_000;
 
@@ -88,17 +103,33 @@ function amounts(): UsageAmounts {
   return { credits: 0, calls: 0, tokens: 0, estimatedUsd: 0 };
 }
 
-function add(into: UsageAmounts, group: UsageGroup) {
+function price(group: UsageGroup, priceTokens?: TokenPricer): PricedGroup {
+  const quantity = Number(group.quantity ?? 0);
+  if (group.unit !== "tokens") {
+    const unit = RECRUITING_SERVICE_UNIT_PRICES_USD[group.provider]?.[group.unit as "credits"];
+    return { ...group, usd: quantity * (unit ?? 0), priced: unit !== undefined };
+  }
+  const unpriced = {
+    input: Number(group.unpricedInput ?? 0),
+    output: Number(group.unpricedOutput ?? 0),
+    cacheRead: Number(group.unpricedCacheRead ?? 0),
+    cacheWrite: Number(group.unpricedCacheWrite ?? 0),
+  };
+  const needsPrice = Object.values(unpriced).some((value) => value > 0);
+  const estimate = needsPrice ? (priceTokens?.(group.provider, group.model, unpriced) ?? null) : 0;
+  return {
+    ...group,
+    usd: Number(group.costUsd ?? 0) + (estimate ?? 0),
+    priced: estimate !== null,
+  };
+}
+
+function add(into: UsageAmounts, group: PricedGroup) {
   const quantity = Number(group.quantity ?? 0);
   if (group.unit === "credits") into.credits += quantity;
   else if (group.unit === "calls") into.calls += quantity;
   else into.tokens += Number(group.tokens ?? 0);
-  const price =
-    group.unit === "tokens"
-      ? undefined
-      : RECRUITING_SERVICE_UNIT_PRICES_USD[group.provider]?.[group.unit as "credits" | "calls"];
-  into.estimatedUsd! +=
-    group.unit === "tokens" ? Number(group.costUsd ?? 0) : quantity * (price ?? 0);
+  into.estimatedUsd! += group.usd;
 }
 
 function finish(value: UsageAmounts, owner: boolean): UsageAmounts {
@@ -115,18 +146,33 @@ function finish(value: UsageAmounts, owner: boolean): UsageAmounts {
     : rounded;
 }
 
+/** Balance readings are inputs to attribution, not spend. */
+const SPEND_UNITS = Prisma.sql`u."unit" IN ('tokens', 'credits', 'calls')`;
+
+const TOKEN_SUMS = Prisma.sql`
+      SUM(u."quantity") AS "quantity",
+      SUM(CASE WHEN u."unit" = 'tokens' THEN COALESCE(u."totalTokens",
+        COALESCE(u."inputTokens", 0) + COALESCE(u."outputTokens", 0)
+        + COALESCE(u."cacheReadTokens", 0) + COALESCE(u."cacheWriteTokens", 0)) END) AS "tokens",
+      SUM(u."costUsd") AS "costUsd",
+      SUM(CASE WHEN u."unit" = 'tokens' AND u."costUsd" IS NULL THEN u."inputTokens" END) AS "unpricedInput",
+      SUM(CASE WHEN u."unit" = 'tokens' AND u."costUsd" IS NULL THEN u."outputTokens" END) AS "unpricedOutput",
+      SUM(CASE WHEN u."unit" = 'tokens' AND u."costUsd" IS NULL THEN u."cacheReadTokens" END) AS "unpricedCacheRead",
+      SUM(CASE WHEN u."unit" = 'tokens' AND u."costUsd" IS NULL THEN u."cacheWriteTokens" END) AS "unpricedCacheWrite"`;
+
 async function usageGroups(
   prisma: Pick<PrismaClient, "$queryRaw">,
   scope: { spaceId: string; userId: string } | null,
 ): Promise<UsageGroup[]> {
   const where = scope
-    ? Prisma.sql`WHERE u."spaceId" = ${scope.spaceId} AND u."userId" = ${scope.userId}`
-    : Prisma.empty;
+    ? Prisma.sql`WHERE ${SPEND_UNITS} AND u."spaceId" = ${scope.spaceId} AND u."userId" = ${scope.userId}`
+    : Prisma.sql`WHERE ${SPEND_UNITS}`;
   // A row belongs to the first calibration round recorded at or after it (the round its work
   // prepared); after the last round it belongs to the next one, or to scaling once approved.
   return prisma.$queryRaw<UsageGroup[]>`
     SELECT
-      u."unit", u."provider", u."roleId",
+      u."unit", u."provider", CASE WHEN u."unit" = 'tokens' THEN u."model" ELSE '' END AS "model",
+      u."roleId",
       date_trunc('day', u."createdAt") AS "day",
       CASE
         WHEN u."roleId" IS NULL THEN NULL
@@ -136,11 +182,7 @@ async function usageGroups(
       END AS "round",
       (u."roleId" IS NOT NULL AND nxt."round" IS NULL AND last."approvedAt" IS NOT NULL
         AND u."createdAt" >= last."approvedAt") AS "scale",
-      SUM(u."quantity") AS "quantity",
-      SUM(CASE WHEN u."unit" = 'tokens' THEN COALESCE(u."totalTokens",
-        COALESCE(u."inputTokens", 0) + COALESCE(u."outputTokens", 0)
-        + COALESCE(u."cacheReadTokens", 0) + COALESCE(u."cacheWriteTokens", 0)) END) AS "tokens",
-      SUM(u."costUsd") AS "costUsd"
+      ${TOKEN_SUMS}
     FROM "usage_records" u
     LEFT JOIN LATERAL (
       SELECT MIN(c."round") AS "round" FROM "recruiting_calibration_rounds" c
@@ -151,11 +193,11 @@ async function usageGroups(
       WHERE c."roleId" = u."roleId" ORDER BY c."round" DESC LIMIT 1
     ) last ON TRUE
     ${where}
-    GROUP BY 1, 2, 3, 4, 5, 6`;
+    GROUP BY 1, 2, 3, 4, 5, 6, 7`;
 }
 
 /** Only a verified mailbox at the operator's domain sees money and other accounts' spend. */
-async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, userId: string) {
+export async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, userId: string) {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { email: true, emailVerified: true },
@@ -173,10 +215,13 @@ async function seesOperatorSpend(prisma: Pick<PrismaClient, "user">, userId: str
 export async function summarizeUsageCosts(
   prisma: Pick<PrismaClient, "$queryRaw" | "recruitingRole" | "user">,
   actor: { spaceId: string; userId: string },
-  now = new Date(),
+  options: { now?: Date; priceTokens?: TokenPricer } = {},
 ): Promise<UsageCosts> {
+  const now = options.now ?? new Date();
   const owner = await seesOperatorSpend(prisma, actor.userId);
-  const groups = await usageGroups(prisma, actor);
+  const groups = (await usageGroups(prisma, actor)).map((group) =>
+    price(group, options.priceTokens),
+  );
   const monthStart = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
   const daysStart =
     Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()) - 29 * DAY_MS;
@@ -184,7 +229,10 @@ export async function summarizeUsageCosts(
   const month = amounts();
   const days = new Map<string, UsageAmounts>();
   const roles = new Map<string, { sum: UsageAmounts; rounds: Map<string, UsageAmounts> }>();
-  const services = new Map<string, { service: string; unit: string; quantity: number }>();
+  const services = new Map<
+    string,
+    { service: string; unit: string; quantity: number; estimatedUsd: number; priced: boolean }
+  >();
   for (const group of groups) {
     const at = group.day.getTime();
     add(total, group);
@@ -204,14 +252,19 @@ export async function summarizeUsageCosts(
       role.rounds.set(key, round);
       roles.set(group.roleId, role);
     }
-    const serviceKey = `${group.unit}:${group.provider}`;
+    const name = group.unit === "tokens" ? `${group.provider}/${group.model}` : group.provider;
+    const serviceKey = `${group.unit}:${name}`;
     const service = services.get(serviceKey) ?? {
-      service: group.provider,
+      service: name,
       unit: group.unit,
       quantity: 0,
+      estimatedUsd: 0,
+      priced: true,
     };
     service.quantity +=
       group.unit === "tokens" ? Number(group.tokens ?? 0) : Number(group.quantity ?? 0);
+    service.estimatedUsd += group.usd;
+    service.priced &&= group.priced;
     services.set(serviceKey, service);
   }
   const titles = new Map(
@@ -246,35 +299,31 @@ export async function summarizeUsageCosts(
       .sort((a, b) => b.credits - a.credits || b.tokens - a.tokens),
   };
   if (!owner) return result;
-  result.services = [...services.values()].sort(
-    (a, b) => a.unit.localeCompare(b.unit) || b.quantity - a.quantity,
-  );
-  result.accounts = await summarizeAccounts(prisma);
+  result.services = [...services.values()]
+    .map((service) => ({
+      ...service,
+      estimatedUsd: Math.round((service.estimatedUsd + Number.EPSILON) * 100) / 100,
+    }))
+    .sort((a, b) => b.estimatedUsd - a.estimatedUsd || b.quantity - a.quantity);
+  result.accounts = await summarizeAccounts(prisma, options.priceTokens);
   return result;
 }
 
-async function summarizeAccounts(prisma: Pick<PrismaClient, "$queryRaw" | "user">) {
-  const rows = await prisma.$queryRaw<
-    Array<{
-      userId: string;
-      unit: string;
-      provider: string;
-      quantity: number | null;
-      tokens: bigint | null;
-      costUsd: number | null;
-    }>
-  >`
-    SELECT u."userId", u."unit", u."provider", SUM(u."quantity") AS "quantity",
-      SUM(CASE WHEN u."unit" = 'tokens' THEN COALESCE(u."totalTokens",
-        COALESCE(u."inputTokens", 0) + COALESCE(u."outputTokens", 0)
-        + COALESCE(u."cacheReadTokens", 0) + COALESCE(u."cacheWriteTokens", 0)) END) AS "tokens",
-      SUM(u."costUsd") AS "costUsd"
+async function summarizeAccounts(
+  prisma: Pick<PrismaClient, "$queryRaw" | "user">,
+  priceTokens?: TokenPricer,
+) {
+  const rows = await prisma.$queryRaw<Array<UsageGroup & { userId: string }>>`
+    SELECT u."userId", u."unit", u."provider",
+      CASE WHEN u."unit" = 'tokens' THEN u."model" ELSE '' END AS "model",
+      ${TOKEN_SUMS}
     FROM "usage_records" u
-    GROUP BY 1, 2, 3`;
+    WHERE ${SPEND_UNITS}
+    GROUP BY 1, 2, 3, 4`;
   const byUser = new Map<string, UsageAmounts>();
   for (const row of rows) {
     const value = byUser.get(row.userId) ?? amounts();
-    add(value, { ...row, roleId: null, day: new Date(0), round: null, scale: false });
+    add(value, price(row, priceTokens));
     byUser.set(row.userId, value);
   }
   const emails = new Map(
