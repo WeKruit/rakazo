@@ -1087,14 +1087,11 @@ describe("crews set up before the recruiting preset", () => {
     );
     Object.assign(f.tx, {
       agentSkill: {
-        findMany: vi.fn(async () => [...skills]),
-        deleteMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => {
-          for (const id of where.id.in)
-            skills.splice(
-              skills.findIndex((s) => s.id === id),
-              1,
-            );
-          return { count: where.id.in.length };
+        deleteMany: vi.fn(async ({ where }: { where: { name: { in: string[] } } }) => {
+          const names = where.name.in.map((name) => name.toLowerCase());
+          for (let i = skills.length - 1; i >= 0; i--)
+            if (names.includes(skills[i]!.name.toLowerCase())) skills.splice(i, 1);
+          return { count: 1 };
         }),
       },
     });
@@ -1118,38 +1115,19 @@ describe("crews set up before the recruiting preset", () => {
     expect(main.name).toBe("Main");
     expect(main.disabledBuiltinTools).toContain("request_secret");
     expect(f.skills.map((skill) => skill.name)).toEqual(["My own notes"]);
-    const backups = (f.presets[0]!.config as { backups: Array<Record<string, string>> }).backups;
-    expect(backups).toContainEqual(
-      expect.objectContaining({
-        kind: "bot",
-        botId: "old-main",
-        field: "instructions",
-        value: "Old Main instructions",
-      }),
-    );
-    expect(backups).toContainEqual(
-      expect.objectContaining({
-        kind: "skill",
-        name: "Recruitment intake and handoff",
-        content: "Old intake",
-      }),
-    );
-    expect(f.presets[0]).toMatchObject({ version: "legacy" });
+    expect(f.presets[0]).toMatchObject({ version: "legacy", config: { legacy: true } });
   });
 
-  it("is idempotent and keeps later edits by the recruiter", async () => {
+  it("is idempotent and applies later default changes", async () => {
     const f = legacy();
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     const main = f.bots.find((bot) => bot.id === "old-main")!;
-    main.instructions = "My own edit";
+    main.instructions = "Edited";
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
-    expect(main.instructions).toBe("My own edit");
+    expect(main.instructions).toBe("Edited");
     f.presets[0]!.digest = "older catalog";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(main.instructions).toBe("My own edit");
-    expect(f.bots.find((bot) => bot.id === "old-sourcer")!.instructions).toMatch(
-      /^You are Sourcer/,
-    );
+    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
   });
 
   it("upgrades on sign-in too, and waits while a run is active", async () => {

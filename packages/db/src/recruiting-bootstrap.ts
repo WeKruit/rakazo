@@ -212,26 +212,18 @@ async function savePreset(
   });
 }
 
-/** Crews set up before the managed preset: kept, but brought up to the same defaults. */
+/** Crews set up before the managed preset get the same defaults as new accounts. */
 const LEGACY_PRESET_VERSION = "legacy";
 const LEGACY_BOT_FIELDS = ["title", "description", "instructions"] as const;
-type LegacyBackup =
-  | { kind: "bot"; botId: string; field: string; value: string; at: string }
-  | { kind: "skill"; name: string; description: string; content: string; at: string };
-type LegacyPreset = {
-  legacy: true;
-  bots: Record<string, Record<string, string>>;
-  backups: LegacyBackup[];
-};
 const legacyDigest = (firstPartyMcpUrl?: string) =>
   digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS]);
 
 /**
  * Adopt a crew set up before the managed preset (bots named after the default roles, with Main
- * and Sourcer on the platform research service) so the account works like a new one: refresh
- * the role instructions and remove user copies of the built-in recruiting skills, keeping every
- * replaced value in the install record. A later catalog change refreshes only fields nobody has
- * edited since. Returns null when the Space has no such crew.
+ * and Sourcer on the platform research service) so the account works like a new one: replace
+ * the role instructions with the current defaults and remove user copies of the built-in
+ * recruiting skills, again whenever the defaults change. Returns null when the Space has no such
+ * crew.
  */
 async function adoptLegacyCrew(
   tx: Prisma.TransactionClient,
@@ -280,69 +272,31 @@ async function adoptLegacyCrew(
   // Never change instructions under a running turn; the next sign-in retries.
   if (await tx.run.count({ where: { ...scope, status: { in: [...ACTIVE_RUN_STATUSES] } } }))
     return result;
-  const prior = installed ? (installed.config as unknown as LegacyPreset) : null;
-  const config: LegacyPreset = {
-    legacy: true,
-    bots: structuredClone(prior?.bots ?? {}),
-    backups: [...(prior?.backups ?? [])],
-  };
-  const at = new Date().toISOString();
   for (const { role, bot } of crew) {
-    config.bots[bot.id] ??= {};
-    const written = config.bots[bot.id]!;
-    const data: Partial<Record<(typeof LEGACY_BOT_FIELDS)[number], string>> = {};
-    for (const field of LEGACY_BOT_FIELDS) {
-      const current = bot[field] ?? "";
-      if (current === role[field]) {
-        written[field] = digest(role[field]);
-        continue;
-      }
-      // After adoption, a field the recruiter edited since is theirs.
-      if (prior && written[field] !== digest(current)) continue;
-      config.backups.push({ kind: "bot", botId: bot.id, field, value: current, at });
-      data[field] = role[field];
-      written[field] = digest(role[field]);
-    }
+    const data: Record<string, string | string[]> = Object.fromEntries(
+      LEGACY_BOT_FIELDS.filter((field) => bot[field] !== role[field]).map((field) => [
+        field,
+        role[field],
+      ]),
+    );
     const missing = RECRUITING_DISABLED_BUILTIN_TOOLS.filter(
       (name) => !bot.disabledBuiltinTools.includes(name),
     );
-    if (!Object.keys(data).length && !missing.length) continue;
+    if (missing.length) data.disabledBuiltinTools = [...bot.disabledBuiltinTools, ...missing];
+    if (!Object.keys(data).length) continue;
     const changed = await tx.bot.updateMany({
       where: { id: bot.id, ...scope, archivedAt: null, updatedAt: bot.updatedAt },
-      data: {
-        ...data,
-        ...(missing.length
-          ? { disabledBuiltinTools: [...bot.disabledBuiltinTools, ...missing] }
-          : {}),
-      },
+      data,
     });
     if (changed.count !== 1)
       throw new IsolationError("A recruiting assistant changed during the upgrade");
   }
-  if (!prior) {
-    // User copies made before the built-in skills existed shadow them; the backups keep them.
-    const names = new Set(RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name.toLowerCase()));
-    const copies = (await tx.agentSkill.findMany({ where: { ...scope, source: "user" } })).filter(
-      (skill) => names.has(skill.name.trim().toLowerCase()),
-    );
-    for (const skill of copies)
-      config.backups.push({
-        kind: "skill",
-        name: skill.name,
-        description: skill.description,
-        content: skill.content,
-        at,
-      });
-    if (copies.length)
-      await tx.agentSkill.deleteMany({
-        where: { ...scope, source: "user", id: { in: copies.map((skill) => skill.id) } },
-      });
-  }
-  const record = {
-    version: LEGACY_PRESET_VERSION,
-    digest: target,
-    config: config as unknown as Prisma.InputJsonValue,
-  };
+  // User copies of the built-in recruiting skills would shadow the maintained ones.
+  const names = RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name);
+  await tx.agentSkill.deleteMany({
+    where: { ...scope, source: "user", name: { in: names, mode: "insensitive" } },
+  });
+  const record = { version: LEGACY_PRESET_VERSION, digest: target, config: { legacy: true } };
   if (installed) await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
   else
     await tx.capabilityInstall.create({
