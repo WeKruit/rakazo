@@ -16,12 +16,33 @@ import {
   executeNativeRecruitingCandidateDecision,
   readRecruitingFeedbackContext,
 } from "@rakazo/db";
+import type { ZodError } from "zod";
 
 export class RecruitingFeedbackValidationError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "RecruitingFeedbackValidationError";
   }
+}
+
+/**
+ * A rejected recruiting_feedback call in plain words: what was not saved, each field that failed
+ * and which target and operation fit which feedback, instead of the raw schema report.
+ */
+export function recruitingFeedbackInputError(error: ZodError): string {
+  const fields = error.issues.flatMap((issue) => {
+    const nested = (issue as { errors?: { message: string; path: PropertyKey[] }[][] }).errors;
+    const issues = issue.code === "invalid_union" && nested?.length ? nested.flat() : [issue];
+    return issues.map((item) => {
+      const path = [...issue.path, ...(item === issue ? [] : item.path)].map(String).join(".");
+      return `${path || "input"}: ${item.message}`;
+    });
+  });
+  return [
+    "Not recorded: nothing was saved, so never tell the recruiter it was recorded.",
+    `${[...new Set(fields)].join("; ")}.`,
+    'Fix these and call recruiting_feedback again. Targets: "round" with operation "scope" for feedback or a new direction for the next round, or "approve" only when the recruiter accepts the round; "candidate" with operation "review" and the keys of the people they named; "role" with operation "revise" for changed requirements.',
+  ].join(" ");
 }
 
 export type RecruitingFeedbackResult = {
@@ -75,7 +96,10 @@ export async function executeRecruitingFeedback(
     };
   },
 ): Promise<RecruitingFeedbackResult> {
-  const feedback = RecruitingFeedbackInputSchema.parse(untrusted);
+  const parsed = RecruitingFeedbackInputSchema.safeParse(untrusted);
+  if (!parsed.success)
+    throw new RecruitingFeedbackValidationError(recruitingFeedbackInputError(parsed.error));
+  const feedback = parsed.data;
   const { actor, runId, sourceMessageId } = trusted;
   const botId = context.botId;
   if (

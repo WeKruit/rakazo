@@ -1548,6 +1548,19 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       // Repair slips before the schema check so they never reject a regenerated brief.
       if (tool.name === "recruiting_role")
         return normalizeRecruitingRoleArgs(raw, new Date().toISOString());
+      // The server fills sources and names the people; an empty list reaches it for a precise error.
+      if (tool.name === "recruiting_feedback" && raw.target !== "preference") {
+        const { candidateKeys, ...rest } = raw;
+        return {
+          ...rest,
+          sourceRefs: Array.isArray(raw.sourceRefs) ? raw.sourceRefs : [],
+          ...(typeof candidateKeys === "string"
+            ? { candidateKeys: [candidateKeys] }
+            : Array.isArray(candidateKeys) && candidateKeys.length
+              ? { candidateKeys }
+              : {}),
+        };
+      }
       if (tool.name === "request_takeover") {
         return { reason: String(raw.reason ?? "I need you on the screen.") };
       }

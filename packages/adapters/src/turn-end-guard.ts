@@ -224,6 +224,71 @@ async function handedInStage(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run
 }
 
 /**
+ * A turn whose last recruiting_feedback call was rejected left the recruiter's feedback unsaved,
+ * whatever its reply said. Push one retry with the reason, once per recruiter message.
+ */
+async function unsavedFeedback(
+  deps: TurnEndGuardDeps,
+  input: TurnEndGuardInput,
+): Promise<TurnEndGuardResult | undefined> {
+  const { run } = input;
+  const last = await deps.prisma.externalEffect.findFirst({
+    where: { runId: run.id, spaceId: run.spaceId, kind: "recruiting_feedback" },
+    orderBy: { createdAt: "desc" },
+    select: { result: true },
+  });
+  const error = (last?.result as { error?: unknown } | null)?.error;
+  if (typeof error !== "string") return undefined;
+  const classification = classifyTurnEnd(
+    { blocks: input.blocks },
+    { handedOff: input.handedOff, pendingApproval: input.pendingApproval },
+  );
+  if (classification === "card" || classification === "handoff") return undefined;
+  const recent = await deps.prisma.message.findMany({
+    where: {
+      threadId: run.threadId,
+      OR: [
+        { role: "user" },
+        { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
+      ],
+    },
+    orderBy: { seq: "desc" },
+    take: 2,
+    select: { clientNonce: true },
+  });
+  if (countTrailingAutoContinues(recent) > 0) return undefined;
+  getLogger().info("run.autocontinue", {
+    runId: run.id,
+    roleId: input.roleId,
+    stage: "feedback",
+    reason: "feedback_refused",
+  });
+  const text = `继续：刚才保存招聘者的反馈没有成功，这条反馈还没有记下。原因：${error.slice(0, 600)} 按原因改正后立即用 recruiting_feedback 重新保存，成功后接着做下一步；保存成功之前不要说已记录。${AUTO_NOTE}`;
+  const sent = await deps.events.sendUserMessage({
+    spaceId: run.spaceId,
+    threadId: run.threadId,
+    botId: run.botId,
+    userId: run.userId,
+    blocks: [{ kind: "text", text }],
+    prompt: text,
+    trigger: "follow_up",
+    internal: true,
+    clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:1`,
+  });
+  if (sent.runId)
+    await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
+      getLogger().error("run.autocontinue enqueue", error);
+    });
+  return {
+    action: "continued",
+    runId: sent.runId ?? null,
+    stage: "feedback",
+    label: "保存反馈",
+    count: 1,
+  };
+}
+
+/**
  * Turn-end guard for threads with an active recruiting role: a turn that ends with neither a
  * deliverable, a question, a card nor a handoff is pushed into the next playbook step instead
  * of stopping at "saved, not started yet".
@@ -240,6 +305,8 @@ export async function guardRecruitingTurnEnd(
     (run.trigger === "bot_message" && input.returnsToRequester)
   )
     return { action: "ended", classification: "none" };
+  const unsaved = await unsavedFeedback(deps, input);
+  if (unsaved) return unsaved;
   const savedRows = await deps.prisma.recruitingCandidatePage.aggregate({
     where: { roleId: input.roleId, effect: { runId: run.id } },
     _sum: { rowCount: true },

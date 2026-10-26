@@ -37,6 +37,8 @@ function fixture(
     brief?: unknown;
     /** Blocks of the message that started the run. */
     source?: MessageBlock[];
+    /** The run's last recruiting_feedback call was rejected with this error. */
+    feedbackError?: string;
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -78,7 +80,9 @@ function fixture(
         findFirst: vi.fn(async (args: { where: { kind?: string } }) =>
           args.where.kind === "recruiting_research" && options.completedRoundEffect
             ? { id: "effect-1" }
-            : null,
+            : args.where.kind === "recruiting_feedback" && options.feedbackError
+              ? { result: { error: options.feedbackError } }
+              : null,
         ),
       },
       recruitingResearchTask: {
@@ -519,6 +523,38 @@ describe("guardRecruitingTurnEnd", () => {
     });
     expect(result).toEqual({ action: "ended", classification: "none" });
     expect(f.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("retries a rejected feedback save once instead of ending on 已记录", async () => {
+    const claimed: MessageBlock[] = [
+      { kind: "text", text: "已记录这轮反馈，下一轮会多找带过大团队的人。" },
+    ];
+    const input = {
+      run,
+      roleId: "role-1",
+      blocks: claimed,
+      handedOff: false,
+      pendingApproval: false,
+    };
+    const failed = fixture({ stage: "feedback", feedbackError: "Not recorded: operation" });
+    await expect(
+      guardRecruitingTurnEnd(failed.deps, { ...input, postAssistant: failed.postAssistant }),
+    ).resolves.toMatchObject({ action: "continued", label: "保存反馈" });
+    expect(failed.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringMatching(/没有成功[\s\S]*Not recorded: operation[\s\S]*不要说已记录/),
+      }),
+    );
+    // One retry per recruiter message.
+    const again = fixture({
+      stage: "feedback",
+      feedbackError: "Not recorded: operation",
+      priorAutoContinues: 1,
+    });
+    await guardRecruitingTurnEnd(again.deps, { ...input, postAssistant: again.postAssistant });
+    expect(again.sendUserMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("没有成功") }),
+    );
   });
 
   it("leaves the next step to the coordinator once a handed-in task is done", async () => {
