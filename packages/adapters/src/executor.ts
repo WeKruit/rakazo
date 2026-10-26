@@ -443,6 +443,7 @@ import type { RecruitingFeedbackResult } from "./recruiting-feedback.js";
 import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
+  recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
 import { isRegionOnlyLocation, locationOutliers } from "./recruiting-location.js";
 import {
@@ -620,6 +621,177 @@ export function continuedCandidateKey(key: string, savedKeys: readonly string[])
   );
 }
 
+/**
+ * The saved keys a model's candidate keys name on a role: a profile link, a key cut short or
+ * spelled from the person's name still names the one saved person; anything else stays as given.
+ */
+async function savedRoleCandidateKeys(
+  prisma: PrismaClient,
+  roleId: string,
+  given: readonly unknown[],
+): Promise<unknown[]> {
+  const keys = given.map((key) => (typeof key === "string" ? savedCandidateKeyForm(key) : key));
+  const saved = new Set(
+    (
+      await prisma.recruitingCandidate.findMany({
+        where: {
+          roleId: roleId,
+          candidateKey: {
+            in: [...given, ...keys].filter((key): key is string => typeof key === "string"),
+          },
+        },
+        select: { candidateKey: true },
+      })
+    ).map((row) => row.candidateKey),
+  );
+  // A key cut short or rewritten names the one saved person on this role it points to.
+  const cut = keys.filter(
+    (key, index): key is string =>
+      typeof key === "string" && !saved.has(key) && !saved.has(String(given[index])),
+  );
+  const continued = cut.length
+    ? await prisma.recruitingCandidate.findMany({
+        where: {
+          roleId: roleId,
+          OR: cut.flatMap((key) => {
+            const tail = candidateKeyTail(key);
+            return [
+              { candidateKey: { startsWith: key } },
+              ...(tail ? [{ candidateKey: { endsWith: tail } }] : []),
+            ];
+          }),
+        },
+        select: { candidateKey: true },
+      })
+    : [];
+  const continuedKeys = continued.map((row) => row.candidateKey);
+  const mapped = given.map((key, index) =>
+    typeof key !== "string" || saved.has(key)
+      ? key
+      : saved.has(String(keys[index]))
+        ? keys[index]
+        : continuedCandidateKey(String(keys[index]), continuedKeys),
+  );
+  // A key spelled from the person's name ("zimu-gong" for "zim-gong") names the one
+  // saved person on this role with that name.
+  const unmatched = mapped.filter(
+    (key): key is string =>
+      typeof key === "string" && !saved.has(key) && !continuedKeys.includes(key),
+  );
+  const named = unmatched.length
+    ? await prisma.recruitingCandidateOccurrence.findMany({
+        where: { roleId: roleId, name: { not: null } },
+        select: { name: true, candidateKey: true },
+        distinct: ["candidateKey"],
+      })
+    : [];
+  return mapped.map((key) =>
+    typeof key === "string" && unmatched.includes(key) ? namedCandidateKey(key, named) : key,
+  );
+}
+
+/** How a failed feedback save opens, so the agent never reports it as recorded. */
+const FEEDBACK_NOT_SAVED =
+  "Not recorded: nothing was saved, so never tell the recruiter it was recorded. Fix the call and call recruiting_feedback again.";
+
+/** Round feedback words that mean the round's direction, not its acceptance. */
+const ROUND_DIRECTION_OPERATIONS = new Set([
+  "review",
+  "feedback",
+  "comment",
+  "revise",
+  "direction",
+  "adjust",
+  "note",
+]);
+
+/**
+ * Fills the recruiting_feedback fields the server knows for the conversation's role (role,
+ * revision, an empty source list, a summary from the quote), reads a round's "review" as its
+ * direction and resolves the people named by key, link or name. When a named person is not saved
+ * on the role, the error lists the latest round's people with their keys.
+ */
+export async function filledRecruitingFeedbackArgs(
+  prisma: Pick<PrismaClient, "recruitingRole" | "recruitingCalibrationRound"> & {
+    recruitingCandidate: Pick<PrismaClient["recruitingCandidate"], "findMany">;
+    recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
+  },
+  roleId: string,
+  args: Record<string, unknown>,
+): Promise<{ args: Record<string, unknown>; error?: string }> {
+  const filled: Record<string, unknown> = { ...args };
+  if (typeof filled.roleId !== "string" || !filled.roleId.trim()) filled.roleId = roleId;
+  if (typeof filled.expectedRoleRevision !== "number" && filled.roleId === roleId) {
+    const role = await prisma.recruitingRole.findUnique({
+      where: { id: roleId },
+      select: { revision: true },
+    });
+    if (role) filled.expectedRoleRevision = role.revision;
+  }
+  if (!Array.isArray(filled.sourceRefs)) filled.sourceRefs = [];
+  const intent = filled.intent as { quote?: unknown } | undefined;
+  if (
+    (typeof filled.summary !== "string" || !filled.summary.trim()) &&
+    typeof intent?.quote === "string"
+  )
+    filled.summary = intent.quote;
+  if (
+    filled.target === "round" &&
+    typeof filled.operation === "string" &&
+    ROUND_DIRECTION_OPERATIONS.has(filled.operation.trim().toLowerCase())
+  )
+    filled.operation = "scope";
+  if (filled.target !== "candidate") return { args: filled };
+  const given = Array.isArray(filled.candidateKeys) ? filled.candidateKeys : [];
+  const keys = given.length
+    ? await savedRoleCandidateKeys(prisma as PrismaClient, roleId, given)
+    : [];
+  const strings = keys.filter((key): key is string => typeof key === "string");
+  const saved = new Set(
+    strings.length
+      ? (
+          await prisma.recruitingCandidate.findMany({
+            where: { roleId, candidateKey: { in: strings } },
+            select: { candidateKey: true },
+          })
+        ).map((row) => row.candidateKey)
+      : [],
+  );
+  const unknown = given.filter((_, index) => !saved.has(keys[index] as string));
+  if (keys.length && !unknown.length)
+    return { args: { ...filled, candidateKeys: [...new Set(strings)] } };
+  const round = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId },
+    orderBy: { round: "desc" },
+    select: { candidateKeys: true },
+  });
+  const names = round
+    ? new Map(
+        (
+          await prisma.recruitingCandidateOccurrence.findMany({
+            where: { roleId, candidateKey: { in: round.candidateKeys }, name: { not: null } },
+            select: { name: true, candidateKey: true },
+            distinct: ["candidateKey"],
+          })
+        ).map((row) => [row.candidateKey, row.name]),
+      )
+    : new Map<string, string | null>();
+  const people = (round?.candidateKeys ?? []).map((key) => `${names.get(key) ?? "?"} = ${key}`);
+  return {
+    args: filled,
+    error: [
+      FEEDBACK_NOT_SAVED,
+      unknown.length
+        ? `No saved person on this role matches ${unknown.map((key) => JSON.stringify(key)).join(", ")}.`
+        : "candidateKeys must name at least one person.",
+      people.length ? `People in the latest round: ${people.join("; ")}.` : "",
+      'Use the keys of the people the recruiter named, or for feedback about the round as a whole use target "round" with operation "scope".',
+    ]
+      .filter(Boolean)
+      .join(" "),
+  };
+}
+
 /** A name as a profile slug: "Zimu Gong" → "zimu-gong". */
 function nameSlug(name: string) {
   return name
@@ -638,7 +810,8 @@ export function namedCandidateKey(
   key: string,
   rows: readonly { name: string | null; candidateKey: string }[],
 ): string {
-  const slug = (key.split("/").pop() ?? "").replace(/-[^-]*\d[^-]*$/, "");
+  // A plain name ("Jane Doe") reads as its slug too.
+  const slug = nameSlug((key.split("/").pop() ?? "").replace(/-[^-]*\d[^-]*$/, ""));
   if (!slug.includes("-")) return key;
   const named = (exact: boolean) =>
     new Set(
@@ -5065,74 +5238,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             // A key copied as a profile link or without its "/in/" prefix still names the saved
             // person, so the round records on the first call.
-            const keys = args.candidateKeys.map((key) =>
-              typeof key === "string" ? savedCandidateKeyForm(key) : key,
-            );
-            const saved = new Set(
-              (
-                await deps.prisma.recruitingCandidate.findMany({
-                  where: {
-                    roleId: thread.activeRecruitingRoleId,
-                    candidateKey: {
-                      in: [...args.candidateKeys, ...keys].filter(
-                        (key): key is string => typeof key === "string",
-                      ),
-                    },
-                  },
-                  select: { candidateKey: true },
-                })
-              ).map((row) => row.candidateKey),
-            );
-            // A key cut short or rewritten names the one saved person on this role it points to.
-            const given: unknown[] = args.candidateKeys;
-            const cut = keys.filter(
-              (key, index): key is string =>
-                typeof key === "string" && !saved.has(key) && !saved.has(String(given[index])),
-            );
-            const continued = cut.length
-              ? await deps.prisma.recruitingCandidate.findMany({
-                  where: {
-                    roleId: thread.activeRecruitingRoleId,
-                    OR: cut.flatMap((key) => {
-                      const tail = candidateKeyTail(key);
-                      return [
-                        { candidateKey: { startsWith: key } },
-                        ...(tail ? [{ candidateKey: { endsWith: tail } }] : []),
-                      ];
-                    }),
-                  },
-                  select: { candidateKey: true },
-                })
-              : [];
-            const continuedKeys = continued.map((row) => row.candidateKey);
-            const mapped = args.candidateKeys.map((key, index) =>
-              typeof key !== "string" || saved.has(key)
-                ? key
-                : saved.has(String(keys[index]))
-                  ? keys[index]
-                  : continuedCandidateKey(String(keys[index]), continuedKeys),
-            );
-            // A key spelled from the person's name ("zimu-gong" for "zim-gong") names the one
-            // saved person on this role with that name.
-            const unmatched = mapped.filter(
-              (key): key is string =>
-                typeof key === "string" && !saved.has(key) && !continuedKeys.includes(key),
-            );
-            const named = unmatched.length
-              ? await deps.prisma.recruitingCandidateOccurrence.findMany({
-                  where: { roleId: thread.activeRecruitingRoleId, name: { not: null } },
-                  select: { name: true, candidateKey: true },
-                  distinct: ["candidateKey"],
-                })
-              : [];
             args = {
               ...args,
-              candidateKeys: mapped.map((key) =>
-                typeof key === "string" && unmatched.includes(key)
-                  ? namedCandidateKey(key, named)
-                  : key,
+              candidateKeys: await savedRoleCandidateKeys(
+                deps.prisma,
+                thread.activeRecruitingRoleId,
+                args.candidateKeys,
               ),
             };
+          }
+          // The server fills what it knows about the thread's role and names a person the recruiter
+          // mentioned by their saved key, so feedback saves on the first call.
+          let feedbackArgsError: string | undefined;
+          if (
+            name === "recruiting_feedback" &&
+            args.target !== "preference" &&
+            thread.activeRecruitingRoleId
+          ) {
+            const filled = await filledRecruitingFeedbackArgs(
+              deps.prisma,
+              thread.activeRecruitingRoleId,
+              args,
+            );
+            args = filled.args;
+            feedbackArgsError = filled.error;
           }
           if (name === "recruiting_assess" && args.operation === "ask") {
             // Clarifying questions come before the search: once this turn shows the ten, it
@@ -5261,11 +5390,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             name === "recruiting_feedback" &&
             args.target === "candidate" &&
             ["hold", "pass", "resume"].includes(String(args.operation));
+          if (candidateOperation && feedbackArgsError) return { error: feedbackArgsError };
           const decisionInput = candidateOperation
             ? RecruitingFeedbackInputSchema.safeParse(args)
             : undefined;
           if (decisionInput && !decisionInput.success)
-            return { error: sanitizeConnectorError(decisionInput.error, runSecrets) };
+            return { error: recruitingFeedbackInputError(decisionInput.error) };
           if (decisionInput?.success && decisionInput.data.intent.basis === "inferred") {
             // An inferred decision needs clarification, before it can become an approval-ready action.
             return { status: "needs_clarification" };
@@ -8681,6 +8811,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }, finish);
           }
           if (name === "recruiting_feedback" || guardedMemory) {
+            if (feedbackArgsError) return finish({ error: feedbackArgsError });
             if (guardedMemory) {
               const invalid =
                 name === "save_memory"
@@ -8748,7 +8879,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return candidateDecision ? delivered : finish(delivered);
             } catch (error) {
               if (error instanceof IsolationError)
-                return finish({ error: "Recruiting feedback or source is unavailable" });
+                return finish({
+                  error: `${FEEDBACK_NOT_SAVED} The quote must be the recruiter's exact words from their message, roleId the conversation's current role, and candidateKeys saved people on it.`,
+                });
               if (error instanceof RecruitingConflictError)
                 return finish({ error: error.message, code: "CONFLICT" });
               if (
@@ -8770,10 +8903,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   currentRevision: current.documents[0]?.revision ?? 0,
                 });
               }
+              if (error instanceof Error && error.name === "ZodError")
+                return finish({
+                  error: recruitingFeedbackInputError(
+                    error as Parameters<typeof recruitingFeedbackInputError>[0],
+                  ),
+                });
               if (
                 error instanceof RecruitingFeedbackValidationError ||
-                error instanceof RecruitingCalibrationRoundError ||
-                (error instanceof Error && error.name === "ZodError")
+                error instanceof RecruitingCalibrationRoundError
               )
                 return finish({ error: sanitizeConnectorError(error, runSecrets) });
               throw error;
