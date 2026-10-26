@@ -838,7 +838,8 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
         eaccount: "recruiter@example.test",
         from_address_email: input.candidate.email,
         campaign_id: campaignId,
-        lead: leadId,
+        lead: input.candidate.email.toUpperCase(),
+        lead_id: leadId,
       },
     );
     const linked = {

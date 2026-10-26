@@ -393,7 +393,10 @@ async function verify(
           value.campaignId !== email.campaign_id ||
           typeof lead?.leadId !== "string" ||
           lead.email !== input.candidate.email ||
-          (email.lead !== undefined && email.lead !== lead.leadId) ||
+          // The provider's `lead` is the lead's address and `lead_id` its id.
+          (email.lead_id != null && email.lead_id !== lead.leadId) ||
+          (typeof email.lead === "string" &&
+            email.lead.toLowerCase() !== String(lead.email).toLowerCase()) ||
           (typeof value.eaccount === "string" && value.eaccount !== email.eaccount)
         )
           throw new IsolationError("An exact saved campaign/contact identity is required");
