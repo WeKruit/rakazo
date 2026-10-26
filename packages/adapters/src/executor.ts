@@ -10763,6 +10763,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (usage.cacheWriteTokens ?? 0);
           };
           let firstModelEventMs: number | null = null;
+          // Logged for a turn that ends with a question too, not only a completed one.
+          const logRunTiming = (outcome: "completed" | "waiting_input") =>
+            getLogger().info("run.timing", {
+              runId,
+              outcome,
+              sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
+              firstModelEventMs,
+              runtimeMs: Date.now() - runtimeStartedAt,
+              modelCalls: promptCache.calls,
+              promptSize: promptCache.promptTokens,
+              cachedPromptSize: promptCache.cachedTokens,
+              promptCacheHitRate: promptCache.promptTokens
+                ? Math.round((promptCache.cachedTokens / promptCache.promptTokens) * 1000) / 1000
+                : null,
+            });
           let runToolCalls = 0;
           // Pi runs a tool the moment it queues the "tool" event, so a fast tool's completion
           // audit raced ahead of the "called" audit this loop appends after flushing narration.
@@ -11196,6 +11211,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 offeredActions: event.actions,
               });
               if (!paused) return;
+              logRunTiming("waiting_input");
               await notifyRun(deps, run, {
                 kind: "help",
                 title: `${bot.name} needs an answer`,
@@ -11597,18 +11613,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             timing: runTiming,
           });
           if (!completed) return;
-          getLogger().info("run.timing", {
-            runId,
-            sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
-            firstModelEventMs,
-            runtimeMs: Date.now() - runtimeStartedAt,
-            modelCalls: promptCache.calls,
-            promptSize: promptCache.promptTokens,
-            cachedPromptSize: promptCache.cachedTokens,
-            promptCacheHitRate: promptCache.promptTokens
-              ? Math.round((promptCache.cachedTokens / promptCache.promptTokens) * 1000) / 1000
-              : null,
-          });
+          logRunTiming("completed");
           let recruitingContinued = false;
           if (completed.continuationRunId) {
             await deps.jobs
