@@ -130,6 +130,14 @@ describe("lazy tool catalog", () => {
     expect(search?.description).not.toContain("Send mail");
   });
 
+  it("matches a query that lists several words or tool names", () => {
+    const entries = catalogEntries(multiGroupTools());
+    const result = searchCatalog(entries, { group: "gmail", query: "send mail, read draft" });
+    const names = "tools" in result ? result.tools.map((tool) => tool.name) : [];
+    expect(names.slice(0, 2).sort()).toEqual(["mcp__gmail__read", "mcp__gmail__send"]);
+    expect(searchCatalog(entries, { query: "nothing here at all" })).toEqual({ tools: [] });
+  });
+
   it("returns an empty catalog as an empty tool list", () => {
     expect(catalogEntries([])).toEqual([]);
     expect(searchCatalog([], { query: "anything" })).toEqual({ tools: [] });
