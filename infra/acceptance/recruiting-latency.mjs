@@ -437,9 +437,11 @@ async function readEvents(groupId) {
   }
   return events;
 }
+// Fixable rejections end with "This is not an outage: never tell the recruiter that saving is unavailable."
+const outage = (error) => /unavailable/i.test(error.replace(/This is not an outage.*$/s, ""));
 function errorClass(error) {
   if (/not an outage|could not be read/.test(error)) return error.split(/[.:]/)[0].slice(0, 80);
-  if (/unavailable/i.test(error)) return "unavailable";
+  if (outage(error)) return "unavailable";
   if (/Validation failed|expected|Invalid/i.test(error)) return "schema";
   return error.slice(0, 80);
 }
@@ -464,7 +466,7 @@ async function checkToolErrors(groupId) {
       recovered,
       error: error.slice(0, 300),
     });
-    if (/unavailable/i.test(error))
+    if (outage(error))
       violation("tool_outage_error", `${name}: ${error.slice(0, 120)}`);
     else if (!recovered) violation("tool_error_unrecovered", `${name}: ${error.slice(0, 120)}`);
   });
