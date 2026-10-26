@@ -3905,7 +3905,7 @@ describe("local native Instantly campaign and lead tools", () => {
     );
   });
 
-  it("sends a plain body as HTML with & encoded and line breaks kept", async () => {
+  it("sends a plain body as HTML with & replaced and line breaks kept", async () => {
     const f = fixture();
     delete f.state.campaign.sequences;
     await f.run("ensure_role_campaign", { role_id: "role-1" });
@@ -3918,7 +3918,7 @@ describe("local native Instantly campaign and lead tools", () => {
       .catch(() => undefined);
     const patch = f.state.requests.findLast((r) => r.method === "PATCH");
     expect(JSON.stringify(patch?.body)).toContain(
-      "<p>Hi Ada,</p><p>Q&amp;A &lt;30 min&gt;<br />Thanks</p>",
+      "<p>Hi Ada,</p><p>Q＆A ＜30 min＞<br />Thanks</p>",
     );
   });
 
