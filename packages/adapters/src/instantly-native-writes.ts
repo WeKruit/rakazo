@@ -4,6 +4,7 @@ import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
+import { htmlToPlainText } from "./keyless-http-web.js";
 
 /**
  * Local REST-backed Instantly campaign/lead tools (official v2 API, https://developer.instantly.ai).
@@ -289,7 +290,7 @@ function sequences(steps: z.output<typeof Step>[]) {
     },
   ];
 }
-/** The first step's first variant, or null when the campaign has no email yet. */
+/** The first step's first variant, or null when the campaign has no email with visible text yet. */
 function firstEmail(campaign: Record<string, unknown> | undefined) {
   const list = Array.isArray(campaign?.sequences) ? campaign.sequences : [];
   const steps = (list[0] as { steps?: unknown } | undefined)?.steps;
@@ -297,7 +298,9 @@ function firstEmail(campaign: Record<string, unknown> | undefined) {
   const variant = Array.isArray(step?.variants)
     ? (step.variants[0] as { subject?: unknown; body?: unknown })
     : undefined;
-  return typeof variant?.subject === "string" && typeof variant.body === "string"
+  return typeof variant?.subject === "string" &&
+    typeof variant.body === "string" &&
+    htmlToPlainText(variant.body).trim() !== ""
     ? { subject: variant.subject, body: variant.body }
     : null;
 }
@@ -327,6 +330,14 @@ function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>)
 async function createCampaign(rest: InstantlyRest, input: z.output<typeof CreateCampaignInput>) {
   await requireOwnMailbox(rest, input.eaccount);
   return rest("POST", "/campaigns", campaignBody(input.name, input));
+}
+
+/** The provider can store a body as blank (it drops one containing "&"), so read it back. */
+async function requireSavedEmail(rest: InstantlyRest, campaignId: unknown) {
+  if (firstEmail(await rest("GET", `/campaigns/${String(campaignId)}`))) return;
+  throw new Error(
+    'The mail service saved the email with a blank body (it drops a body containing "&"); write the body without "&" and save the steps again',
+  );
 }
 
 type RoleBinding = {
@@ -613,6 +624,7 @@ async function ensureRoleCampaign(
           ...(patched ? { stop_on_reply: true } : {}),
           ...(writeSteps ? { sequences: sequences(input.steps!) } : {}),
         });
+      if (writeSteps) await requireSavedEmail(rest, mappedId);
       return {
         ...existing.binding,
         created: false,
@@ -663,6 +675,8 @@ async function ensureRoleCampaign(
       data: { result: binding as unknown as Prisma.InputJsonValue },
     });
   else await recordBinding(prisma, context, key, role.id, serverId, binding);
+  // Checked after binding, so a retry writes onto this campaign instead of adopting it.
+  if (!adopt && input.steps) await requireSavedEmail(rest, campaign.id);
   return { created: !adopt, adopted: Boolean(adopt), ...binding };
 }
 
