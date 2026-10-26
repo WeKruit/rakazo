@@ -254,6 +254,12 @@ describe("maintained recruiting defaults", () => {
       "who then hands the email draft to the outreach teammate",
     ])
       expect(RECRUITING_SCALE_START).toContain(part);
+    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer");
+    expect(sourcer?.instructions).toContain(
+      "hand it to Outreach only after the research is started, as your last call",
+    );
+    for (const part of ["That request is the acceptance"])
+      expect(RECRUITING_SCALE_START).toContain(part);
     for (const bot of RECRUITING_DEFAULT_BOTS) {
       expect(bot.instructions).toContain(RECRUITING_SCALE_START);
       expect(bot.instructions).toContain(RECRUITING_ROUND_NEXT_STEP);
