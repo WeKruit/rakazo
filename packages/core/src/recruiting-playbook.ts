@@ -367,7 +367,7 @@ export function nextPlaybookStep(
       return {
         stage,
         label: "收集校准反馈",
-        prompt: `先看用户最新一条消息：如果是要找更多或类似的人、扩大搜索或直接开始（例如「找 100 个」「直接找」「不用再确认」，或在下一步卡片上选了找更多），这就是接受本轮：立刻用 recruiting_feedback（target round，operation approve，引用原话）记录，然后按规模化规则在本轮开始扩大搜索，不要再跑校准轮，也不要再要求确认。否则把本轮全部意见合进下一次快速搜索（同一 brief 加上反馈，换一种说法搜索，排除这个岗位已返回过的所有人），save_search 保存后选 10 位全新的人记录为下一轮并说明变化。${NEXT_STEP_CARD}只对个别人的评价不算接受；没有新反馈时不要重复追问。`,
+        prompt: `${facts.hasBrief ? "" : "brief 还没保存：先用一次 recruiting_role update 把 JD 和招聘者的回答存成 brief（失败就按错误改一次再存，不要重新搜索）。"}先看用户最新一条消息：如果是要找更多或类似的人、扩大搜索或直接开始（例如「找 100 个」「直接找」「不用再确认」，或在下一步卡片上选了找更多），这就是接受本轮：立刻用 recruiting_feedback（target round，operation approve，引用原话）记录，然后按规模化规则在本轮开始扩大搜索，不要再跑校准轮，也不要再要求确认。否则把本轮全部意见合进下一次快速搜索（同一 brief 加上反馈，换一种说法搜索，排除这个岗位已返回过的所有人），save_search 保存后选 10 位全新的人记录为下一轮并说明变化。${NEXT_STEP_CARD}只对个别人的评价不算接受；没有新反馈时不要重复追问。`,
       };
     case "scale":
       return {

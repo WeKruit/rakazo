@@ -80,13 +80,14 @@ export async function recruitingRoundListText(
   prisma: Pick<PrismaClient, "externalEffect"> & {
     recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
   },
-  input: { runId: string; spaceId: string; roleId: string; candidateKeys: readonly string[] },
+  input: { threadId: string; spaceId: string; roleId: string; candidateKeys: readonly string[] },
 ) {
+  // Any saved search in this conversation: the round is often recorded by a later run.
   const [searches, occurrences] = await Promise.all([
     prisma.externalEffect.findMany({
       where: {
-        runId: input.runId,
         spaceId: input.spaceId,
+        run: { threadId: input.threadId },
         kind: "recruiting_research",
         status: "completed",
         request: { path: ["operation"], equals: "save_search" },
