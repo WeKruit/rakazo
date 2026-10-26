@@ -920,7 +920,16 @@ export const UsageCostsSchema = z.object({
     }),
   ),
   services: z
-    .array(z.object({ service: z.string(), unit: z.string(), quantity: z.number() }))
+    .array(
+      z.object({
+        service: z.string(),
+        unit: z.string(),
+        quantity: z.number(),
+        estimatedUsd: z.number().nonnegative(),
+        /** False when some of this spend has no known price and counts as zero. */
+        priced: z.boolean(),
+      }),
+    )
     .optional(),
   accounts: z
     .array(UsageAmountsSchema.extend({ userId: z.string(), email: z.string().nullable() }))

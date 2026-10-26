@@ -20,10 +20,16 @@ describePostgres("usage ledger (PostgreSQL)", () => {
   let taskId: string;
   let searchServerId: string;
   let researchServerId: string;
+  let enrichServerId: string;
   let seq = 0;
   let action: Record<string, string>;
 
-  async function connectorCall(serverId: string, toolName: string, at: Date) {
+  async function connectorCall(
+    serverId: string,
+    toolName: string,
+    at: Date,
+    result?: Record<string, unknown>,
+  ) {
     const effect = await prisma.externalEffect.create({
       data: {
         spaceId,
@@ -42,7 +48,7 @@ describePostgres("usage ledger (PostgreSQL)", () => {
     });
     await prisma.externalEffect.update({
       where: { id: effect.id },
-      data: { status: "completed", updatedAt: at },
+      data: { status: "completed", updatedAt: at, ...(result ? { result } : {}) },
     });
     return effect;
   }
@@ -124,6 +130,7 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       });
     searchServerId = (await server("people-search")).id;
     researchServerId = (await server("autumn")).id;
+    enrichServerId = (await server("fullenrich")).id;
     taskId = (
       await prisma.recruitingResearchTask.create({
         data: { roleId, mcpServerId: researchServerId, serverRevision: 1, createdByRunId: runId },
@@ -229,17 +236,47 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       where: { id: userId },
       data: { email: `${userId}@WeKruit.com`, emailVerified: true },
     });
-    const owner = await db.summarizeUsageCosts(prisma, actor);
-    expect(owner.total.estimatedUsd).toBeCloseTo(1.28, 2);
+    // An enrichment job reports its credits once finished; reading it again is not new spend.
+    const finished = {
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ id: "job-1", status: "FINISHED", cost: { credits: 14 } }),
+        },
+      ],
+    };
+    await connectorCall(enrichServerId, "get_enrichment_results", new Date(), finished);
+    await connectorCall(enrichServerId, "get_enrichment_results", new Date(), finished);
+
+    const owner = await db.summarizeUsageCosts(prisma, actor, {
+      priceTokens: (provider, model, tokens) =>
+        provider === "openai-codex" && model === "gpt-test" && tokens.input === 100 ? 0.5 : null,
+    });
+    // 150 research credits, 14 enrichment credits, 2 searches and the model call at list price.
+    expect(owner.total.credits).toBe(164);
+    expect(owner.total.estimatedUsd).toBeCloseTo(150 * 0.0085 + 14 * 0.058 + 2 * 0.007 + 0.5, 2);
     expect(owner.services).toEqual(
       expect.arrayContaining([
-        { service: "autumn", unit: "credits", quantity: 150 },
-        { service: "people-search", unit: "calls", quantity: 2 },
+        { service: "autumn", unit: "credits", quantity: 150, estimatedUsd: 1.28, priced: true },
+        { service: "fullenrich", unit: "credits", quantity: 14, estimatedUsd: 0.81, priced: true },
+        { service: "people-search", unit: "calls", quantity: 2, estimatedUsd: 0.01, priced: true },
+        {
+          service: "openai-codex/gpt-test",
+          unit: "tokens",
+          quantity: 120,
+          estimatedUsd: 0.5,
+          priced: true,
+        },
       ]),
     );
     expect(owner.accounts?.find((account) => account.userId === userId)).toMatchObject({
-      credits: 150,
-      estimatedUsd: 1.28,
+      credits: 164,
+      estimatedUsd: 2.6,
     });
+    // Without a known model price the tokens stay visible as unpriced, never silently free.
+    const unpriced = await db.summarizeUsageCosts(prisma, actor);
+    expect(unpriced.services).toContainEqual(
+      expect.objectContaining({ service: "openai-codex/gpt-test", priced: false }),
+    );
   });
 });

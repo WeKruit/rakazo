@@ -66,6 +66,7 @@ import {
   displayBotWorkspacePath,
   enqueueTakeoverContinuation,
   ensureComputerWorkspaceLayout,
+  estimateCatalogTokenCostUsd,
   expireComputerControl,
   forgetBotSecret,
   hasActiveComputerControl,
@@ -6572,7 +6573,9 @@ export function createRouter(deps: RouterDeps) {
         };
       }),
       costs: authed.usage.costs.handler(({ context }) =>
-        summarizeUsageCosts(deps.prisma, context.actor),
+        summarizeUsageCosts(deps.prisma, context.actor, {
+          priceTokens: estimateCatalogTokenCostUsd,
+        }),
       ),
     },
     export: {

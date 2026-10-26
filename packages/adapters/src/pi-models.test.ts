@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   catalogModelLabel,
   catalogProviderProbeBaseUrl,
+  estimateCatalogTokenCostUsd,
   listPiCatalog,
   probeCatalogProviderModels,
   scriptedCatalogEntry,
@@ -234,5 +235,17 @@ describe("catalogModelLabel", () => {
     ["latest", "latest", "latest"],
   ])("labels %s / %s as %s", (id, name, expected) => {
     expect(catalogModelLabel(id, name, providerModelIds)).toBe(expected);
+  });
+});
+
+describe("estimateCatalogTokenCostUsd", () => {
+  it("prices subscription model tokens at the catalog list price", () => {
+    const tokens = { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0 };
+    expect(estimateCatalogTokenCostUsd("openai-codex", "gpt-6.1-sol", tokens)).toBeCloseTo(3, 6);
+    expect(estimateCatalogTokenCostUsd("openai-codex", "openai/gpt-6-luna", tokens)).toBeCloseTo(
+      0.15,
+      6,
+    );
+    expect(estimateCatalogTokenCostUsd("openai-codex", "no-such-model", tokens)).toBeNull();
   });
 });
