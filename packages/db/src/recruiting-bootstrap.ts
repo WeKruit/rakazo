@@ -225,6 +225,7 @@ async function savePreset(
 
 /** Crews set up before the managed preset get the same defaults as new accounts. */
 const LEGACY_PRESET_VERSION = "legacy";
+const TURN_IN_FLIGHT_STATUSES = ["queued", "leased", "running"] as const;
 const LEGACY_BOT_FIELDS = ["title", "description", "instructions"] as const;
 const legacyDigest = (firstPartyMcpUrl?: string) =>
   digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS]);
@@ -280,8 +281,10 @@ async function adoptLegacyCrew(
 
   const target = legacyDigest(options.firstPartyMcpUrl);
   if (installed?.digest === target) return result;
-  // Never change instructions under a running turn; the next sign-in retries.
-  if (await tx.run.count({ where: { ...scope, status: { in: [...ACTIVE_RUN_STATUSES] } } }))
+  // Never change instructions under a running turn; the next sign-in retries. A turn paused on a
+  // question or approval card starts its next step with fresh instructions, so it does not wait:
+  // most recruiters always have a card open somewhere, and their crew never got new defaults.
+  if (await tx.run.count({ where: { ...scope, status: { in: [...TURN_IN_FLIGHT_STATUSES] } } }))
     return result;
   for (const { role, bot } of crew) {
     const data: Record<string, string | string[]> = Object.fromEntries(
