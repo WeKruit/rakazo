@@ -5942,7 +5942,7 @@ describe("native recruiting assessment effect delivery", () => {
       sourceRefs: [],
       intent: { basis: "direct", quote: text.trim() },
     });
-    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role");
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create, rename or update a role");
   });
 
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {
@@ -5983,6 +5983,9 @@ describe("native recruiting assessment effect delivery", () => {
     ];
     expect(namedCandidateKey("linkedin:/in/zimu-gong", rows)).toBe("linkedin:/in/zim-gong");
     expect(namedCandidateKey("linkedin:/in/sam-lee-2042", rows)).toBe("linkedin:/in/saml2042");
+    expect(namedCandidateKey("linkedin:/in/sam-lee-placeholder", rows)).toBe(
+      "linkedin:/in/saml2042",
+    );
     // Two saved people share the name, or the key is one word: left as given.
     expect(namedCandidateKey("linkedin:/in/ana-ruiz", rows)).toBe("linkedin:/in/ana-ruiz");
     expect(namedCandidateKey("linkedin:/in/sam", rows)).toBe("linkedin:/in/sam");

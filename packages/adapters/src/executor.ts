@@ -636,9 +636,17 @@ export function namedCandidateKey(
 ): string {
   const slug = (key.split("/").pop() ?? "").replace(/-[^-]*\d[^-]*$/, "");
   if (!slug.includes("-")) return key;
-  const matches = new Set(
-    rows.filter((row) => row.name && nameSlug(row.name) === slug).map((row) => row.candidateKey),
-  );
+  const named = (exact: boolean) =>
+    new Set(
+      rows
+        .filter((row) => {
+          const name = row.name ? nameSlug(row.name) : "";
+          // A made-up suffix after the full name ("kevin-williams-placeholder") still names them.
+          return name.includes("-") && (exact ? slug === name : slug.startsWith(`${name}-`));
+        })
+        .map((row) => row.candidateKey),
+    );
+  const matches = named(true).size ? named(true) : named(false);
   return matches.size === 1 ? ([...matches][0] as string) : key;
 }
 
@@ -4856,10 +4864,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .slice(0, -1)
             .filter((key): key is string => typeof key === "string")
             .map(savedCandidateKeyForm);
+          // A retry after a refused key keeps the people already shown until it lists more.
           if (roundStream?.callId !== call.id)
             roundStream = {
               callId: call.id,
-              shown: 0,
+              shown: roundStream?.shown ?? 0,
               messageId: roundStream?.messageId,
               posting: roundStream?.posting ?? Promise.resolve(),
             };
@@ -10420,7 +10429,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const title = pastedJobTitle(pasted.text)!;
               return {
                 saving: create(title, []),
-                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet; rename it in your brief update if that title is wrong. Do not create a role. ${ask}`,
+                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask}`,
               };
             }
             const url = jobLinkIn(block.text)!;
@@ -10538,7 +10547,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
             }),
           );
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for, or if fewer than ten of these people fit; then run four new, differently worded people searches.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for, or if fewer than ten of these people fit; then run four new, differently worded people searches.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
