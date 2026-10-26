@@ -1900,7 +1900,7 @@ describe("recruiting brief drafts", () => {
   });
 
   it("does not require consequential in the tool schema the model fills", () => {
-    const schema = z.toJSONSchema(contracts.RecruitingBriefDraftSchema, { io: "input" }) as {
+    const schema = z.toJSONSchema(contracts.RecruitingBriefDraftSchema, { io: "input" }) as unknown as {
       properties: { fields: { items: { required: string[] } } };
     };
     expect(schema.properties.fields.items.required).not.toContain("consequential");
