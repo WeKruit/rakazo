@@ -4848,6 +4848,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (typeof args.question === "string")
               args = { ...args, question: shortQuestion(args.question) };
           }
+          if (
+            name.endsWith("_search_tools") &&
+            thread.activeRecruitingRoleId &&
+            tools.some((tool) => tool.name.endsWith("web_search_advanced_exa"))
+          ) {
+            // Before the first round the people search is already in the tool list: a catalog
+            // lookup there only delays the search.
+            const round = await deps.prisma.recruitingCalibrationRound.findFirst({
+              where: { roleId: thread.activeRecruitingRoleId, role: { spaceId: run.spaceId } },
+              select: { id: true },
+            });
+            if (!round)
+              return {
+                error:
+                  "No tool lookup before the first round: the people search (web_search_advanced_exa) is already available. Ask the next clarifying question, or issue the four people searches now as parallel calls in one step.",
+              };
+          }
           if (handedOff) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",
