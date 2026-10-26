@@ -36,10 +36,10 @@ describe("chooseTurnModel", () => {
       }),
     ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "low" });
   });
-  it("keeps an answer to an intake question on the low thinking level", () => {
-    expect(
-      chooseTurnModel({ ...base, answersQuestion: true, recruitingIntake: true }),
-    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "low" });
+  it("keeps the bot's thinking level for an intake answer, which picks the people", () => {
+    const choice = chooseTurnModel({ ...base, answersQuestion: true, recruitingIntake: true });
+    expect(choice).toMatchObject({ routed: "fast", reason: "clarifying_answer" });
+    expect(choice.thinkingLevel).toBeUndefined();
   });
   it("routes status/fyi peer wakes fast", () => {
     expect(

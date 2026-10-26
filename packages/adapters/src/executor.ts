@@ -655,7 +655,7 @@ export function shortQuestion(question: string, max = 240): string {
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
-  "When you ask your last clarifying question (nothing else is left to ask before the people searches), also pass plannedSearches on that ask_user call: the four people-search queries you will run, written as you would write them for the search. They run the moment the recruiter answers, and you get their people rows with the answer. Never pass plannedSearches on a question that another question will follow.";
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Leave plannedSearches out only when you already know another question must follow this one.";
 
 /**
  * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
