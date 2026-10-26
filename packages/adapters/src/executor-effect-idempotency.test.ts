@@ -2104,8 +2104,8 @@ describe("native recruiting role effect delivery", () => {
       const result = {
         error:
           kind === "quote"
-            ? `${failure.message} Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.`
-            : "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.",
+            ? `${failure.message} Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).`
+            : "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).",
       };
       expect(f.results).toEqual([result]);
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
@@ -2214,7 +2214,7 @@ describe("native recruiting role effect delivery", () => {
     await f.run();
     expect(f.results.at(-1)).toEqual({
       error:
-        "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.",
+        "A role, message or file this call names is not part of this conversation. Read the role with recruiting_role read, cite only references this conversation's tools returned, and save again. Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).",
     });
     expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });

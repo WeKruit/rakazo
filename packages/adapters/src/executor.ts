@@ -6617,7 +6617,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 at: error.stack?.split("\n").slice(1, 4).join(" | "),
               });
             const retry =
-              "Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable.";
+              "Fix it and call the tool again in this turn. This is not an outage: never tell the recruiter that saving is unavailable, and never run people searches again because a save failed (the people already returned stay saved).";
             if (
               error instanceof RecruitingIntentQuoteError ||
               error instanceof RecruitingSourceCheckError
@@ -7545,6 +7545,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   return {
                     savedToResults: true,
                     people,
+                    expectedRoleRevision: role.revision,
                     next: RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
                   };
                 } catch (error) {
@@ -9999,7 +10000,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             });
           const ask =
-            "Ask the first clarifying question now (or, when nothing needs clarifying, issue the calibration searches now).";
+            "The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now).";
           try {
             if (pasted) {
               const title = pastedJobTitle(pasted.text)!;
