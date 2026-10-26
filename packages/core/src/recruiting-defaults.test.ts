@@ -198,7 +198,7 @@ describe("maintained recruiting defaults", () => {
   it("Main runs the first round itself right after the last answer", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain(
-      "run the calibration quick search yourself in the same turn and present the 10 profiles",
+      "run the calibration quick search yourself and save it with save_search first, then save the brief",
     );
     expect(main.instructions).not.toContain("hand off to Sourcer in the same turn");
   });
@@ -254,6 +254,15 @@ describe("maintained recruiting defaults", () => {
     }
     expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
       "nobody already returned for this role is ever shown again",
+    );
+  });
+
+  it("asks the first question before a full save and shows people before the brief is saved", () => {
+    expect(RECRUITING_INTAKE_FLOW).toContain(
+      "ask the first clarifying question together with one small recruiting_role create",
+    );
+    expect(RECRUITING_INTAKE_FLOW).toContain(
+      "then save them with save_search so people appear in Results at once, then save the brief",
     );
   });
 
