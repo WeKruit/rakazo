@@ -285,6 +285,8 @@ describe("maintained recruiting defaults", () => {
     for (const part of [
       "each with the brief's priority location (city and metro) and must-haves",
       "anyone outside it, or whose row shows no location, never makes the ten",
+      "a row showing only a country or a state is no location",
+      "not currently working at the hiring company itself",
       "meets every hard requirement",
     ])
       expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);
