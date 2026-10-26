@@ -15,7 +15,7 @@ describe("isRegionOnlyLocation", () => {
 });
 
 describe("locationOutliers", () => {
-  it("points at the one profile far from where the rest of the group is", () => {
+  it("points at everyone outside the group's city, suburbs included, never by shared state", () => {
     const people = new Map([
       ["a", "Atlanta, Georgia, United States"],
       ["b", "Marietta, Georgia, United States"],
@@ -26,7 +26,18 @@ describe("locationOutliers", () => {
       ["g", "McDonough, Georgia, United States"],
       ["h", "Greensboro--Winston-Salem--High Point Area"],
     ]);
-    expect(locationOutliers(people)).toEqual(["h"]);
+    expect(locationOutliers(people)).toEqual(["b", "d", "f", "g", "h"]);
+  });
+
+  it("does not count a shared state as the same place", () => {
+    const people = new Map([
+      ["a", "Atlanta, Georgia, United States"],
+      ["b", "Atlanta, GA"],
+      ["c", "Greater Atlanta Area"],
+      ["d", "LaGrange, Georgia, United States"],
+      ["e", "Atlanta Metropolitan Area"],
+    ]);
+    expect(locationOutliers(people)).toEqual(["d"]);
   });
 
   it("names no one when the group has no common place", () => {
