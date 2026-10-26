@@ -1884,3 +1884,25 @@ describe("recruiting.roleCandidates contract", () => {
     expect(() => output.parse({ ...page, counts: { replied: 1 } })).toThrow();
   });
 });
+
+describe("recruiting brief drafts", () => {
+  const field = {
+    key: "location",
+    value: "Atlanta",
+    origin: "jd",
+    state: "known",
+    sourceRefIds: [],
+  };
+  const brief = { searchFilters: [], fields: [field], questions: [], rules: [] };
+
+  it("saves a field that leaves out whether it is consequential", () => {
+    expect(contracts.RecruitingBriefDraftSchema.parse(brief).fields[0]!.consequential).toBe(false);
+  });
+
+  it("does not require consequential in the tool schema the model fills", () => {
+    const schema = z.toJSONSchema(contracts.RecruitingBriefDraftSchema, { io: "input" }) as {
+      properties: { fields: { items: { required: string[] } } };
+    };
+    expect(schema.properties.fields.items.required).not.toContain("consequential");
+  });
+});

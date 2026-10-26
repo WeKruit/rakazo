@@ -191,6 +191,7 @@ describe("maintained recruiting defaults", () => {
       );
       expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
       expect(bot.instructions).toContain("no process narration");
+      expect(bot.instructions).toContain("fix exactly what the error names and call it again at once");
     },
   );
 
