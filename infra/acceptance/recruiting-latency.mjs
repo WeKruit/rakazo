@@ -23,6 +23,8 @@
 //   RAKAZO_TOKEN may replace email/password (a session token sent as a bearer credential).
 //   --signup creates the test account on first use (the deployment's signup policy applies).
 //   RAKAZO_RELEASE_SHA labels the report with the live release.
+//   RAKAZO_ORIGIN sets the Origin header (default RAKAZO_URL), e.g. the public domain when
+//   RAKAZO_URL is the direct backend address.
 // Node 20+, no dependencies. Prints no credentials.
 
 import fs from "node:fs";
@@ -35,6 +37,8 @@ const option = (name, fallback) => {
 };
 
 const BASE = (process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
+// The Origin a browser on the public domain sends; auth refuses requests from untrusted origins.
+const ORIGIN = (process.env.RAKAZO_ORIGIN ?? BASE).replace(/\/$/, "");
 if (!BASE) fail("Set RAKAZO_URL");
 const TARGET = Number(option("--target", "100"));
 const TIMEOUT_MS = Number(option("--timeout-min", "60")) * 60_000;
@@ -126,7 +130,7 @@ function remember(response) {
   cookie = [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
 }
 function headers() {
-  const result = { "content-type": "application/json", origin: BASE };
+  const result = { "content-type": "application/json", origin: ORIGIN };
   if (cookie) result.cookie = cookie;
   else if (bearer) result.authorization = `Bearer ${bearer}`;
   return result;
