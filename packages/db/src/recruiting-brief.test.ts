@@ -1669,7 +1669,6 @@ describe("native brief approval bridge", () => {
     "run-space",
     "run-thread",
     "bot",
-    "missing-salary",
     "quote",
     "agent-source",
     "missing-proof",
@@ -1693,7 +1692,6 @@ describe("native brief approval bridge", () => {
     if (boundary === "run-space") f.run.spaceId = "different-space";
     if (boundary === "run-thread") f.run.threadId = "different-thread";
     if (boundary === "bot") f.run.botId = "different-bot";
-    if (boundary === "missing-salary") f.revisions[0]!.brief.fields.splice(0, 1);
     if (boundary === "quote") f.revisions[0]!.sourceRefs[0]!.quote = "Invented quote";
     if (boundary === "agent-source")
       f.humanMessages.set("jd-message", {

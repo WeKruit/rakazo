@@ -87,7 +87,7 @@ export function validateRecruitingBrief(
 export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
   const pending = brief.fields.filter(
     (field) =>
-      (field.consequential || ["salary_range", "location"].includes(field.key)) &&
+      (field.consequential || field.key === "location") &&
       (field.state !== "known" || field.origin === "inferred"),
   );
   const questions = pending.map((field) => ({
@@ -104,22 +104,6 @@ export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
             ? "Is a company deck available?"
             : "Please clarify the unresolved role detail."),
   }));
-  if (!brief.fields.some((field) => field.key === "salary_range"))
-    questions.unshift({
-      fieldKey: "salary_range",
-      question: "What salary range may be stated in outreach?",
-    });
-  else {
-    const salary = brief.fields.find((field) => field.key === "salary_range")!;
-    if (
-      (salary.state !== "known" || salary.origin === "inferred") &&
-      !questions.some((question) => question.fieldKey === salary.key)
-    )
-      questions.unshift({
-        fieldKey: salary.key,
-        question: "What salary range may be stated in outreach?",
-      });
-  }
   if (!brief.fields.some((field) => field.key === "location"))
     questions.push({
       fieldKey: "location",
