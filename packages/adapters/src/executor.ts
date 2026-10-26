@@ -198,6 +198,7 @@ import {
   prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
   prepareRecruitingCrmBinding,
+  prepareRecruitingSchedulingPlan,
   RecruitingCalibrationRoundError,
   RecruitingConflictError,
   RecruitingIntentQuoteError,
@@ -5001,9 +5002,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
+          // import_csv still names its role, so it gets the thread's role instead.
           let args =
             name === "recruiting_research" && Object.hasOwn(rawArgs, "roleId")
-              ? Object.fromEntries(Object.entries(rawArgs).filter(([key]) => key !== "roleId"))
+              ? Object.fromEntries(
+                  Object.entries(rawArgs).flatMap(([key, value]) =>
+                    key !== "roleId"
+                      ? [[key, value]]
+                      : rawArgs.operation === "import_csv"
+                        ? [[key, thread.activeRecruitingRoleId ?? value]]
+                        : [],
+                  ),
+                )
               : name === "recruiting_role"
                 ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
                 : rawArgs;
@@ -5308,6 +5318,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   researchActor.actor,
                   input.plan,
                 );
+              }
+              if (input.operation === "prepare") {
+                const { operation: _operation, ...prepare } = input;
+                return await prepareRecruitingSchedulingPlan(deps.prisma, researchActor.actor, {
+                  ...prepare,
+                  threadId: thread.id,
+                });
               }
               const plan = await loadVerifiedRecruitingSchedulingPlan(
                 deps.prisma,
