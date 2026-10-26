@@ -108,6 +108,8 @@ describe("account preferences", () => {
         findMany: vi.fn(async (input) =>
           input.select || input.where.archivedAt !== null ? [] : [bot],
         ),
+        // A crew without Main and Sourcer is not a recruiting workspace to upgrade.
+        count: vi.fn().mockResolvedValue(0),
       },
       chatGroup: { findMany: vi.fn().mockResolvedValue([]) },
       botSection: { findMany: vi.fn().mockResolvedValue([]) },
