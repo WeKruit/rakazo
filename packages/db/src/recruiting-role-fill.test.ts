@@ -261,4 +261,25 @@ describe("fillRecruitingRoleArgs", () => {
     ]);
     expect(upsert[0]!.sourceRefs[0]!.quote).toBe(other.quote);
   });
+
+  // 2026-10-26: an intake update asked a brief question about a field it had not defined.
+  it("moves a question on a near-miss field key to that field and drops one on a missing field", async () => {
+    const filled = await fillRecruitingRoleArgs(prisma(), actor, context, {
+      operation: "create",
+      sourceRefs: [jd],
+      criteria: [],
+      brief: {
+        fields: [
+          { key: "location", value: null, origin: "jd", state: "missing", sourceRefIds: [] },
+        ],
+        questions: [
+          { id: "q1", fieldKey: "Locations", question: "Where?", answeredBySourceRefId: null },
+          { id: "q2", fieldKey: "salary_range", question: "Pay?", answeredBySourceRefId: null },
+        ],
+      },
+    });
+    expect((filled.brief as { questions: unknown[] }).questions).toEqual([
+      { id: "q1", fieldKey: "location", question: "Where?", answeredBySourceRefId: null },
+    ]);
+  });
 });

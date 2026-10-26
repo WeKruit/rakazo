@@ -4545,6 +4545,23 @@ export async function fillRecruitingRoleArgs(
       }),
     );
   }
+  // A question must ask about a field of this brief: one on a near-miss key ("Locations",
+  // "work-location") moves to that field, and one on a field the brief lacks is dropped.
+  if (Array.isArray(brief.questions) && Array.isArray(brief.fields)) {
+    const loose = (key: unknown) =>
+      String(key)
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "")
+        .replace(/s$/, "");
+    const keys = brief.fields.flatMap((field) =>
+      looseRecord(field) && typeof field.key === "string" ? [field.key] : [],
+    );
+    brief.questions = brief.questions.flatMap((question) => {
+      if (!looseRecord(question) || keys.includes(question.fieldKey as string)) return [question];
+      const key = keys.find((candidate) => loose(candidate) === loose(question.fieldKey));
+      return key ? [{ ...question, fieldKey: key }] : [];
+    });
+  }
   if (Array.isArray(brief.questions))
     brief.questions = await Promise.all(
       brief.questions.map(async (question) =>
