@@ -6019,6 +6019,15 @@ describe("native recruiting assessment effect delivery", () => {
     expect(pastedJobTitle(`# Senior Analyst\n${body}`)).toBe("Senior Analyst");
     expect(pastedJobTitle(`职位：仓储经理\n${body}`)).toBe("仓储经理");
     expect(pastedJobTitle("find me ten people")).toBeNull();
+    expect(
+      pastedJobTitle(
+        "新岗位：仓库运营经理（亚特兰大 Atlanta，现场办公）。要求：5年以上仓储或配送中心运营管理，带过50人以上的小时工团队。",
+      ),
+    ).toBe("仓库运营经理（亚特兰大 Atlanta，现场办公）");
+    expect(pastedJobTitle("岗位：仓库经理")).toBeNull();
+    expect(
+      pastedJobTitle("帮我把这个岗位的要求改一下：现场办公改成远程，不要求中文，其他不变。"),
+    ).toBeNull();
   });
 
   it("finds job links but not profile links", () => {
