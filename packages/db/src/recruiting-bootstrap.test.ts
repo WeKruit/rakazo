@@ -217,6 +217,7 @@ function fixture() {
   const prisma = {
     $transaction: vi.fn(async (callback) => callback(tx)),
     capabilityInstall: tx.capabilityInstall,
+    bot: tx.bot,
   } as unknown as PrismaClient;
   return {
     prisma,
@@ -1021,5 +1022,150 @@ describe("managed first-party recruiting CRM installation", () => {
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     expect(f.servers).toHaveLength(3);
     expect(f.presets[0]).toEqual(before);
+  });
+});
+
+describe("crews set up before the recruiting preset", () => {
+  const options = { sandboxKind: "fake" };
+  const AUTUMN = "https://api.autumn.ai/mcp";
+  function legacy() {
+    const f = fixture();
+    const updated = new Date("2026-10-01T00:00:00Z");
+    for (const name of ["Main", "Sourcer", "Outreach", "Scheduling"])
+      f.bots.push({
+        id: `old-${name.toLowerCase()}`,
+        spawnKey: name === "Main" ? "onboarding:first" : "",
+        name,
+        title: "",
+        description: "",
+        instructions: `Old ${name} instructions`,
+        disabledBuiltinTools: [],
+        archivedAt: null,
+        updatedAt: updated,
+      } as BotRow);
+    f.servers.push({
+      id: "old-autumn",
+      slug: "autumn",
+      endpoint: AUTUMN,
+      transport: "streamable_http",
+      enabled: true,
+      revision: 1,
+      args: [],
+      headers: {},
+      env: {},
+      command: null,
+    });
+    f.assignments.push(
+      {
+        id: "a1",
+        botId: "old-main",
+        serverId: "old-autumn",
+        allowAllTools: false,
+        allowedTools: [],
+      },
+      {
+        id: "a2",
+        botId: "old-sourcer",
+        serverId: "old-autumn",
+        allowAllTools: false,
+        allowedTools: [],
+      },
+    );
+    const skills = [
+      {
+        id: "s1",
+        name: "Recruitment intake and handoff",
+        description: "old",
+        content: "Old intake",
+        source: "user",
+      },
+      { id: "s2", name: "My own notes", description: "mine", content: "Keep", source: "user" },
+    ];
+    const roleGroup = { id: "old-role", members: [{ botId: "old-main" }] };
+    (f.tx.chatGroup.findFirst as ReturnType<typeof vi.fn>).mockImplementation(
+      async ({ where }: { where: { id?: string } }) => (where.id ? null : roleGroup),
+    );
+    Object.assign(f.tx, {
+      agentSkill: {
+        findMany: vi.fn(async () => [...skills]),
+        deleteMany: vi.fn(async ({ where }: { where: { id: { in: string[] } } }) => {
+          for (const id of where.id.in)
+            skills.splice(
+              skills.findIndex((s) => s.id === id),
+              1,
+            );
+          return { count: where.id.in.length };
+        }),
+      },
+    });
+    f.tx.bot.updateMany.mockImplementation(async ({ where, data }) => {
+      const bot = f.bots.find((row) => row.id === where.id) as BotRow & { updatedAt: Date };
+      if (!bot || bot.updatedAt !== where.updatedAt) return { count: 0 };
+      Object.assign(bot, data, { updatedAt: new Date() });
+      return { count: 1 };
+    });
+    (f.tx.chatGroup as unknown as { count: unknown }).count = vi.fn(async () => 0);
+    return { ...f, skills };
+  }
+
+  it("returns the existing crew instead of failing, and brings it to the defaults", async () => {
+    const f = legacy();
+    const result = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(result).toEqual({ botId: "old-main", groupId: "old-role" });
+    expect(native.bot).not.toHaveBeenCalled();
+    const main = f.bots.find((bot) => bot.id === "old-main")!;
+    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(main.name).toBe("Main");
+    expect(main.disabledBuiltinTools).toContain("request_secret");
+    expect(f.skills.map((skill) => skill.name)).toEqual(["My own notes"]);
+    const backups = (f.presets[0]!.config as { backups: Array<Record<string, string>> }).backups;
+    expect(backups).toContainEqual(
+      expect.objectContaining({
+        kind: "bot",
+        botId: "old-main",
+        field: "instructions",
+        value: "Old Main instructions",
+      }),
+    );
+    expect(backups).toContainEqual(
+      expect.objectContaining({
+        kind: "skill",
+        name: "Recruitment intake and handoff",
+        content: "Old intake",
+      }),
+    );
+    expect(f.presets[0]).toMatchObject({ version: "legacy" });
+  });
+
+  it("is idempotent and keeps later edits by the recruiter", async () => {
+    const f = legacy();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const main = f.bots.find((bot) => bot.id === "old-main")!;
+    main.instructions = "My own edit";
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(main.instructions).toBe("My own edit");
+    f.presets[0]!.digest = "older catalog";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(main.instructions).toBe("My own edit");
+    expect(f.bots.find((bot) => bot.id === "old-sourcer")!.instructions).toMatch(
+      /^You are Sourcer/,
+    );
+  });
+
+  it("upgrades on sign-in too, and waits while a run is active", async () => {
+    const f = legacy();
+    f.busy();
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.bots.find((bot) => bot.id === "old-main")!.instructions).toBe("Old Main instructions");
+    expect(f.presets).toHaveLength(0);
+  });
+
+  it("does not adopt a crew without the platform research service", async () => {
+    const f = legacy();
+    f.assignments.splice(0);
+    await expect(recruiting.ensureRecruitingWorkspace(f.prisma, actor, options)).rejects.toThrow(
+      "already has conversations",
+    );
+    expect(f.bots.find((bot) => bot.id === "old-main")!.instructions).toBe("Old Main instructions");
   });
 });

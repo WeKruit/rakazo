@@ -4,6 +4,7 @@ import { BOT_COLORS, GROUP_MEMBER_MAX } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
   RECRUITING_DEFAULT_BOTS,
+  RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
 } from "@rakazo/core";
 import type { Bot, BotMcpServer, CapabilityInstall, McpServer, PrismaClient } from "./client.js";
@@ -209,6 +210,145 @@ async function savePreset(
       config: config ?? { managed: false },
     },
   });
+}
+
+/** Crews set up before the managed preset: kept, but brought up to the same defaults. */
+const LEGACY_PRESET_VERSION = "legacy";
+const LEGACY_BOT_FIELDS = ["title", "description", "instructions"] as const;
+type LegacyBackup =
+  | { kind: "bot"; botId: string; field: string; value: string; at: string }
+  | { kind: "skill"; name: string; description: string; content: string; at: string };
+type LegacyPreset = {
+  legacy: true;
+  bots: Record<string, Record<string, string>>;
+  backups: LegacyBackup[];
+};
+const legacyDigest = (firstPartyMcpUrl?: string) =>
+  digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS]);
+
+/**
+ * Adopt a crew set up before the managed preset (bots named after the default roles, with Main
+ * and Sourcer on the platform research service) so the account works like a new one: refresh
+ * the role instructions and remove user copies of the built-in recruiting skills, keeping every
+ * replaced value in the install record. A later catalog change refreshes only fields nobody has
+ * edited since. Returns null when the Space has no such crew.
+ */
+async function adoptLegacyCrew(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  installed: CapabilityInstall | null,
+  options: { firstPartyMcpUrl?: string },
+): Promise<{ botId: string; groupId: string } | null> {
+  const scope = { spaceId: actor.spaceId, userId: actor.userId };
+  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
+  const bots = (await tx.bot.findMany({ where: { ...scope, archivedAt: null } })).filter(
+    (bot) => !bot.archivedAt && !bot.spawnKey?.startsWith("recruiting:"),
+  );
+  const crew = RECRUITING_DEFAULT_BOTS.flatMap((role) => {
+    const bot = bots.find((item) => item.name === role.name);
+    return bot ? [{ role, bot }] : [];
+  });
+  const main = crew.find((item) => item.role.key === "main")?.bot;
+  const sourcer = crew.find((item) => item.role.key === "sourcer")?.bot;
+  if (!main || !sourcer) return null;
+  const servers = await tx.mcpServer.findMany({
+    where: scope,
+    include: { assignments: { where: scope } },
+  });
+  const onResearch = (botId: string) =>
+    servers.some(
+      (server) =>
+        server.endpoint === research.endpoint &&
+        server.assignments.some((assignment) => assignment.botId === botId),
+    );
+  if (!onResearch(main.id) || !onResearch(sourcer.id)) return null;
+
+  const group =
+    (await tx.chatGroup.findFirst({
+      where: { ...scope, archivedAt: null, members: { some: { botId: main.id } } },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true },
+    })) ??
+    (await createGroupInTransaction(tx, actor, {
+      name: "Recruiting",
+      botIds: crew.map((item) => item.bot.id),
+    }));
+  const result = { botId: main.id, groupId: group.id };
+
+  const target = legacyDigest(options.firstPartyMcpUrl);
+  if (installed?.digest === target) return result;
+  // Never change instructions under a running turn; the next sign-in retries.
+  if (await tx.run.count({ where: { ...scope, status: { in: [...ACTIVE_RUN_STATUSES] } } }))
+    return result;
+  const prior = installed ? (installed.config as unknown as LegacyPreset) : null;
+  const config: LegacyPreset = {
+    legacy: true,
+    bots: structuredClone(prior?.bots ?? {}),
+    backups: [...(prior?.backups ?? [])],
+  };
+  const at = new Date().toISOString();
+  for (const { role, bot } of crew) {
+    config.bots[bot.id] ??= {};
+    const written = config.bots[bot.id]!;
+    const data: Partial<Record<(typeof LEGACY_BOT_FIELDS)[number], string>> = {};
+    for (const field of LEGACY_BOT_FIELDS) {
+      const current = bot[field] ?? "";
+      if (current === role[field]) {
+        written[field] = digest(role[field]);
+        continue;
+      }
+      // After adoption, a field the recruiter edited since is theirs.
+      if (prior && written[field] !== digest(current)) continue;
+      config.backups.push({ kind: "bot", botId: bot.id, field, value: current, at });
+      data[field] = role[field];
+      written[field] = digest(role[field]);
+    }
+    const missing = RECRUITING_DISABLED_BUILTIN_TOOLS.filter(
+      (name) => !bot.disabledBuiltinTools.includes(name),
+    );
+    if (!Object.keys(data).length && !missing.length) continue;
+    const changed = await tx.bot.updateMany({
+      where: { id: bot.id, ...scope, archivedAt: null, updatedAt: bot.updatedAt },
+      data: {
+        ...data,
+        ...(missing.length
+          ? { disabledBuiltinTools: [...bot.disabledBuiltinTools, ...missing] }
+          : {}),
+      },
+    });
+    if (changed.count !== 1)
+      throw new IsolationError("A recruiting assistant changed during the upgrade");
+  }
+  if (!prior) {
+    // User copies made before the built-in skills existed shadow them; the backups keep them.
+    const names = new Set(RECRUITING_DEFAULT_SKILLS.map((skill) => skill.name.toLowerCase()));
+    const copies = (await tx.agentSkill.findMany({ where: { ...scope, source: "user" } })).filter(
+      (skill) => names.has(skill.name.trim().toLowerCase()),
+    );
+    for (const skill of copies)
+      config.backups.push({
+        kind: "skill",
+        name: skill.name,
+        description: skill.description,
+        content: skill.content,
+        at,
+      });
+    if (copies.length)
+      await tx.agentSkill.deleteMany({
+        where: { ...scope, source: "user", id: { in: copies.map((skill) => skill.id) } },
+      });
+  }
+  const record = {
+    version: LEGACY_PRESET_VERSION,
+    digest: target,
+    config: config as unknown as Prisma.InputJsonValue,
+  };
+  if (installed) await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
+  else
+    await tx.capabilityInstall.create({
+      data: { ...presetWhere(actor), name: "Recruiting defaults", ...record },
+    });
+  return result;
 }
 
 async function recruitingComputerKind(
@@ -476,15 +616,29 @@ async function upgradeInTransaction(
   });
 }
 
-/** Upgrade existing managed defaults only; never create/adopt a returning user's workspace. */
+/**
+ * Upgrade existing managed defaults, and bring a crew set up before the preset to the same
+ * defaults; never create a returning user's workspace.
+ */
 export async function upgradeRecruitingWorkspace(
   prisma: PrismaClient,
   actor: Actor,
   options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<void> {
   const installed = await prisma.capabilityInstall.findFirst({ where: presetWhere(actor) });
-  if (
-    !installed ||
+  if (!installed) {
+    const crew = await prisma.bot.count({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        archivedAt: null,
+        name: { in: ["Main", "Sourcer"] },
+      },
+    });
+    if (crew < 2) return;
+  } else if (installed.version === LEGACY_PRESET_VERSION) {
+    if (installed.digest === legacyDigest(options.firstPartyMcpUrl)) return;
+  } else if (
     installed.version === "unmanaged" ||
     installed.digest === catalogDigest(options.firstPartyMcpUrl)
   )
@@ -493,7 +647,6 @@ export async function upgradeRecruitingWorkspace(
     async (tx) => {
       await lockSpaceForContentCreation(tx, actor);
       const current = await tx.capabilityInstall.findFirst({ where: presetWhere(actor) });
-      if (!current) return;
       const personal = await tx.space.findFirst({
         where: {
           id: actor.spaceId,
@@ -507,7 +660,11 @@ export async function upgradeRecruitingWorkspace(
         select: { id: true },
       });
       if (!personal) return;
-      await upgradeInTransaction(tx, actor, current, options);
+      if (!current || current.version === LEGACY_PRESET_VERSION) {
+        const home = `recruiting-${digest([actor.spaceId, actor.userId])}`;
+        const managed = await tx.chatGroup.count({ where: { id: home } });
+        if (!managed) await adoptLegacyCrew(tx, actor, current, options);
+      } else await upgradeInTransaction(tx, actor, current, options);
     },
     {
       isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted,
@@ -563,6 +720,10 @@ export async function ensureRecruitingWorkspace(
         tx.chatGroup.count({ where: { spaceId: actor.spaceId, userId: actor.userId } }),
       ]);
       const installed = await tx.capabilityInstall.findFirst({ where: presetWhere(actor) });
+      if (!existing && (!installed || installed.version === LEGACY_PRESET_VERSION)) {
+        const legacy = await adoptLegacyCrew(tx, actor, installed, options);
+        if (legacy) return legacy;
+      }
       if (!existing && installed)
         throw new IsolationError(
           "The recruiting workspace was removed; use your existing conversations",
