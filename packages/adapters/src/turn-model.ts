@@ -22,6 +22,8 @@ export interface TurnModelChoice {
   model: { provider: string; id: string };
   routed: "fast" | "configured";
   reason: string;
+  /** Overrides the bot's thinking level on the fast model. */
+  thinkingLevel?: "low";
 }
 
 /**
@@ -41,8 +43,10 @@ export function chooseTurnModel(input: TurnModelInput): TurnModelChoice {
   const fast = { model: { provider: fastProvider, id: fastId }, routed: "fast" as const };
 
   if (input.pendingToolLoop) return { ...configured, reason: "pending_tool_loop" };
+  // Intake asks one question at a time, writes four searches and picks from saved rows:
+  // a low thinking level keeps each of those steps to a few seconds.
+  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake", thinkingLevel: "low" };
   if (input.answersQuestion) return { ...fast, reason: "clarifying_answer" };
-  if (input.recruitingIntake) return { ...fast, reason: "recruiting_intake" };
   if (input.peerIntent === "status" || input.peerIntent === "fyi")
     return { ...fast, reason: "status_turn" };
   if (input.trigger !== "user" && input.trigger !== "messaging")

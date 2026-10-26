@@ -119,6 +119,7 @@ const SELF_CONTAINED_EVENT_TYPES = new Set([
   "recruiting.material.read",
   "recruiting.assessment.saved",
   "recruiting.question.asked",
+  "recruiting.searches.planned",
 ]);
 // The reducer does not fold reactions yet; a read keeps them correct.
 SELF_CONTAINED_EVENT_TYPES.delete("thread.message.reaction");

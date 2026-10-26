@@ -34,7 +34,12 @@ describe("chooseTurnModel", () => {
         userText: "x".repeat(3000),
         recruitingIntake: true,
       }),
-    ).toMatchObject({ routed: "fast", reason: "recruiting_intake" });
+    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "low" });
+  });
+  it("keeps an answer to an intake question on the low thinking level", () => {
+    expect(
+      chooseTurnModel({ ...base, answersQuestion: true, recruitingIntake: true }),
+    ).toMatchObject({ routed: "fast", reason: "recruiting_intake", thinkingLevel: "low" });
   });
   it("routes status/fyi peer wakes fast", () => {
     expect(

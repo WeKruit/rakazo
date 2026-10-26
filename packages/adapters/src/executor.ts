@@ -67,6 +67,7 @@ import {
   RecruitingResearchToolInputSchema,
   type RecruitingSchedulingPlan,
   RecruitingSchedulingToolInputSchema,
+  RecruitingSearchesPlannedPayloadSchema,
   RecruitingShortlistToolInputSchema,
   RetainedRecruitingApprovalRequestSchema,
 } from "@rakazo/contracts";
@@ -651,6 +652,10 @@ export function shortQuestion(question: string, max = 240): string {
   }
   return text;
 }
+
+/** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
+const PLANNED_SEARCHES_NOTE =
+  "When you ask your last clarifying question (nothing else is left to ask before the people searches), also pass plannedSearches on that ask_user call: the four people-search queries you will run, written as you would write them for the search. They run the moment the recruiter answers, and you get their people rows with the answer. Never pass plannedSearches on a question that another question will follow.";
 
 /**
  * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
@@ -10281,7 +10286,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({ ...body, background: RECRUITING_RESEARCH_DIRECT_NOTICE });
             }
             const finished = await finish(result);
-            return (await savePeopleSearchAsItReturns(finished)) ?? finished;
+            // The save sits between the search and the model's pick, so its cost is logged apart.
+            const saveStartedAt = performance.now();
+            const saved = await savePeopleSearchAsItReturns(finished);
+            if (saved)
+              getLogger().info("people_search.autosave", {
+                runId,
+                durationMs: Math.round(performance.now() - saveStartedAt),
+                people: Array.isArray(saved.people) ? saved.people.length : 0,
+              });
+            return saved ?? finished;
           }
           return finish({ error: `unknown tool ${name}` });
         };
@@ -10362,8 +10376,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const ask =
-            "The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now).";
+          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
           try {
             if (pasted) {
               const title = pastedJobTitle(pasted.text)!;
@@ -10409,13 +10422,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return undefined;
           }
         }
-        // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
-        // the server before the model's first step, so the first question needs no read or save step.
-        linkRole = await startRoleFromJob();
         // Until the first round, later intake turns go straight to the people searches and carry
         // the job page the server already read, so the model never fetches it again.
         const intakeTurnNote = async () => {
-          if (linkRole || !thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
+          if (!thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
           const [read, round] = await Promise.all([
             deps.prisma.event.findFirst({
               where: {
@@ -10434,8 +10444,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const artifactId = (read?.payload as { artifact?: { artifactId?: unknown } } | null)
             ?.artifact?.artifactId;
           if (round) return undefined;
-          const searchFirst =
-            "Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step.";
+          const searchFirst = `Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step. ${PLANNED_SEARCHES_NOTE}`;
           if (typeof artifactId !== "string") return searchFirst;
           const { bytes } = await readActorArtifact(
             { prisma: deps.prisma, artifacts: deps.artifacts },
@@ -10447,23 +10456,85 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? `${searchFirst} The role's job page, already read and saved (never fetch it again):\n\n${page.text.slice(0, 24_000)}`
             : searchFirst;
         };
-        const intakeNote = await intakeTurnNote().catch((error) => {
-          getLogger().warn("saved job page not loaded", { error: String(error) });
-          return undefined;
-        });
+        // The searches planned on the last intake question run the moment it is answered, beside
+        // the other setup, so the model's first step already has the people to pick from.
+        const plannedSearchNote = async () => {
+          const searchTool = [...connectorTools.keys()].find((name) =>
+            name.endsWith("web_search_advanced_exa"),
+          );
+          if (!nativeSources?.currentAnswer || !firstRoundPending || !searchTool) return undefined;
+          const plan = await deps.prisma.event.findFirst({
+            where: {
+              threadId: thread.id,
+              spaceId: run.spaceId,
+              runId,
+              type: "recruiting.searches.planned",
+            },
+            orderBy: { seq: "desc" },
+            select: { id: true, seq: true, payload: true },
+          });
+          const planned = RecruitingSearchesPlannedPayloadSchema.safeParse(plan?.payload);
+          // Only a plan made on the question just answered: one from an earlier question already ran.
+          const answeredBefore = nativeSources.answeredAsks
+            .filter((turn) => turn.answer.id !== nativeSources.currentAnswer?.id)
+            .map((turn) => turn.receiptSeq);
+          if (!plan || !planned.success || plan.seq <= Math.max(0, ...answeredBefore))
+            return undefined;
+          const searches = await Promise.all(
+            planned.data.queries.map(async (query, index) => {
+              const result = await applyTool(
+                searchTool,
+                {
+                  query,
+                  category: "people",
+                  numResults: 25,
+                  enableHighlights: true,
+                  highlightsMaxCharacters: 900,
+                  highlightsQuery: `concrete evidence of: ${query}`,
+                },
+                `${runId}:planned-search:${plan.id}:${index}`,
+              ).catch((error) => ({ error: String(error) }));
+              const people =
+                result && typeof result === "object" && "people" in result
+                  ? (result as { people: unknown }).people
+                  : result;
+              return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
+            }),
+          );
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search. If the answer changes the search, run four new people searches as usual.\n\n${searches.join("\n\n")}`;
+        };
+        // These loads are independent, so they run together. The job role only starts on a thread
+        // with no role and the intake note only on one with a role, so at most one does work.
+        // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
+        // the server before the model's first step, so the first question needs no read or save step.
         // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
-        const intakeSkill = tools.some((tool) => tool.name === "recruiting_role")
-          ? await skillReadFromTool(
-              deps.prisma,
-              { spaceId: run.spaceId, userId: run.userId },
-              { name: RECRUITING_INTAKE_SKILL_NAME },
-            ).catch(() => null)
-          : null;
+        const [jobRole, intakeNote, intakeSkill, replyContext, plannedNote] = await ownTime(
+          "turnNotes",
+          Promise.all([
+            startRoleFromJob(),
+            intakeTurnNote().catch((error) => {
+              getLogger().warn("saved job page not loaded", { error: String(error) });
+              return undefined;
+            }),
+            tools.some((tool) => tool.name === "recruiting_role")
+              ? skillReadFromTool(
+                  deps.prisma,
+                  { spaceId: run.spaceId, userId: run.userId },
+                  { name: RECRUITING_INTAKE_SKILL_NAME },
+                ).catch(() => null)
+              : null,
+            loadReplyContext(deps.prisma, thread.id, run.sourceMessageId),
+            plannedSearchNote().catch((error) => {
+              getLogger().warn("planned people searches not run", { error: String(error) });
+              return undefined;
+            }),
+          ]),
+        );
+        linkRole = jobRole;
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
             : undefined;
-        const replyContext = await loadReplyContext(deps.prisma, thread.id, run.sourceMessageId);
         const prompt = [
           replyContext,
           nativeSources?.currentAnswer
@@ -10474,6 +10545,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           intakeSkillNote,
           linkRole?.note,
           intakeNote,
+          plannedNote,
           takeoverResume?.promptNote,
           approvalContinuation,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
@@ -10711,7 +10783,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               )
             )
               throw new Error(`Fast model ${fast.provider}/${fast.id} is not in the catalog`);
-            runModel = { ...fast, routed: "fast", routeReason: turnModel.reason };
+            runModel = {
+              ...fast,
+              thinkingLevel: turnModel.thinkingLevel ?? fast.thinkingLevel,
+              routed: "fast",
+              routeReason: turnModel.reason,
+            };
             runFallbackModels = [
               { provider: runModelProvider, id: runModelId },
               ...runFallbackModels,
@@ -10746,6 +10823,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
               (usage.cacheWriteTokens ?? 0);
           };
           let firstModelEventMs: number | null = null;
+          // Logged for a turn that ends with a question too, not only a completed one.
+          const logRunTiming = (outcome: "completed" | "waiting_input") =>
+            getLogger().info("run.timing", {
+              runId,
+              outcome,
+              sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
+              firstModelEventMs,
+              runtimeMs: Date.now() - runtimeStartedAt,
+              modelCalls: promptCache.calls,
+              promptSize: promptCache.promptTokens,
+              cachedPromptSize: promptCache.cachedTokens,
+              promptCacheHitRate: promptCache.promptTokens
+                ? Math.round((promptCache.cachedTokens / promptCache.promptTokens) * 1000) / 1000
+                : null,
+            });
           let runToolCalls = 0;
           // Pi runs a tool the moment it queues the "tool" event, so a fast tool's completion
           // audit raced ahead of the "called" audit this loop appends after flushing narration.
@@ -11157,6 +11249,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
+              if (event.plannedSearches?.length && (firstRoundPending || linkRole))
+                await deps.events
+                  .append({
+                    spaceId: run.spaceId,
+                    threadId: thread.id,
+                    botId: bot.id,
+                    runId,
+                    type: "recruiting.searches.planned",
+                    payload: {
+                      queries: event.plannedSearches.map((query) =>
+                        redactSecrets(query, runSecrets),
+                      ),
+                    },
+                  })
+                  .catch((error) =>
+                    getLogger().warn("planned people searches not saved", {
+                      error: String(error),
+                    }),
+                  );
               const paused = await deps.events.pauseRunForInput({
                 spaceId: run.spaceId,
                 threadId: run.threadId,
@@ -11179,6 +11290,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 offeredActions: event.actions,
               });
               if (!paused) return;
+              logRunTiming("waiting_input");
               await notifyRun(deps, run, {
                 kind: "help",
                 title: `${bot.name} needs an answer`,
@@ -11580,18 +11692,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             timing: runTiming,
           });
           if (!completed) return;
-          getLogger().info("run.timing", {
-            runId,
-            sinceRunCreatedMs: run.createdAt ? Date.now() - run.createdAt.getTime() : null,
-            firstModelEventMs,
-            runtimeMs: Date.now() - runtimeStartedAt,
-            modelCalls: promptCache.calls,
-            promptSize: promptCache.promptTokens,
-            cachedPromptSize: promptCache.cachedTokens,
-            promptCacheHitRate: promptCache.promptTokens
-              ? Math.round((promptCache.cachedTokens / promptCache.promptTokens) * 1000) / 1000
-              : null,
-          });
+          logRunTiming("completed");
           let recruitingContinued = false;
           if (completed.continuationRunId) {
             await deps.jobs

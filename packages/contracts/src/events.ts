@@ -72,6 +72,7 @@ export const ProductEventType = z.enum([
   "recruiting.material.read",
   "recruiting.assessment.saved",
   "recruiting.question.asked",
+  "recruiting.searches.planned",
   "recruiting.profile.viewed",
   /** Liveness only: never persisted, never applied to a snapshot, always seq 0. */
   "heartbeat",
@@ -239,7 +240,14 @@ export function parseAskFormResponse(
   return { action: "accept", content: AskFormContent.parse(content) };
 }
 
-const askQuestion = { question: z.string().min(1).max(240) };
+/** People-search queries planned on the last recruiting question, run the moment it is answered. */
+export const PlannedPeopleSearchesSchema = z.array(z.string().trim().min(3).max(300)).min(1).max(4);
+const askQuestion = {
+  question: z.string().min(1).max(240),
+  plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
+    "Recruiting intake only, on the last clarifying question before the people searches: the four people-search queries you will run. They run the moment the recruiter answers.",
+  ),
+};
 export const AskUserInputSchema = z.union([
   z.strictObject({
     ...askQuestion,
@@ -618,6 +626,10 @@ export const RecruitingMaterialReadPayloadSchema = z.strictObject({
 });
 export type RecruitingMaterialReadPayload = z.infer<typeof RecruitingMaterialReadPayloadSchema>;
 
+export const RecruitingSearchesPlannedPayloadSchema = z.strictObject({
+  queries: PlannedPeopleSearchesSchema,
+});
+
 export const RecruitingAssessmentSavedPayloadSchema = z.strictObject({
   roleId: RecruitingId,
   roleRevisionId: RecruitingId,
@@ -710,17 +722,19 @@ export const ProductEventSchema = z
                       ? RecruitingAssessmentSavedPayloadSchema
                       : event.type === "recruiting.question.asked"
                         ? RecruitingQuestionAskedPayloadSchema
-                        : event.type === "thread.choice"
-                          ? NativeAskAnswerPayloadSchema
-                          : event.type === "effect.approval.answered"
-                            ? EffectApprovalAnsweredPayloadSchema
-                            : event.type === "run.requeued"
-                              ? RunRequeuedPayloadSchema
-                              : event.type === "run.completed"
-                                ? RunCompletedPayloadSchema
-                                : event.type === "thread.progress"
-                                  ? ThreadProgressPayloadSchema
-                                  : null;
+                        : event.type === "recruiting.searches.planned"
+                          ? RecruitingSearchesPlannedPayloadSchema
+                          : event.type === "thread.choice"
+                            ? NativeAskAnswerPayloadSchema
+                            : event.type === "effect.approval.answered"
+                              ? EffectApprovalAnsweredPayloadSchema
+                              : event.type === "run.requeued"
+                                ? RunRequeuedPayloadSchema
+                                : event.type === "run.completed"
+                                  ? RunCompletedPayloadSchema
+                                  : event.type === "thread.progress"
+                                    ? ThreadProgressPayloadSchema
+                                    : null;
     if (!schema) return;
     const parsed = schema.safeParse(event.payload);
     if (!parsed.success) {

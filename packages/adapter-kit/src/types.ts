@@ -620,6 +620,8 @@ export type AgentRuntimeEvent =
       detail?: string;
       actions?: Array<{ id: string; label: string }>;
       requestedSchema?: AskRequestedSchema;
+      /** People-search queries planned on the last recruiting intake question. */
+      plannedSearches?: string[];
     }
   | { type: "takeover"; reason: string }
   | ({

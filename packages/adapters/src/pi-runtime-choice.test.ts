@@ -5,6 +5,7 @@ const fakeAgentState = vi.hoisted(() => ({
   options: ["Berlin", "Seoul", "Toronto"],
   question: "Which city should I use?",
   form: undefined as Record<string, unknown> | undefined,
+  plannedSearches: undefined as string[] | undefined,
   result: undefined as unknown,
   tools: [] as Array<{
     name: string;
@@ -30,6 +31,9 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
       if (!askUser) throw new Error("ask_user tool missing");
       fakeAgentState.result = await askUser.execute("call-choice-1", {
         question: fakeAgentState.question,
+        ...(fakeAgentState.plannedSearches
+          ? { plannedSearches: fakeAgentState.plannedSearches }
+          : {}),
         ...(fakeAgentState.form
           ? { requestedSchema: fakeAgentState.form }
           : { options: fakeAgentState.options }),
@@ -105,7 +109,20 @@ describe("Pi choice asks", () => {
     fakeAgentState.tools = [];
     fakeAgentState.options = ["Berlin", "Seoul", "Toronto"];
     fakeAgentState.form = undefined;
+    fakeAgentState.plannedSearches = undefined;
     fakeAgentState.question = "Which city should I use?";
+  });
+
+  it("carries the searches planned on the last intake question to the ask", async () => {
+    fakeAgentState.plannedSearches = ["warehouse supervisor Newark NJ", "sort lead Edison NJ"];
+    const events: AgentRuntimeEvent[] = [];
+    for await (const event of new PiAgentRuntime().run(runRequest, runContext)) events.push(event);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "ask",
+        plannedSearches: ["warehouse supervisor Newark NJ", "sort lead Edison NJ"],
+      }),
+    );
   });
 
   it("emits the standard multi-field schema on the native ask and pauses", async () => {
