@@ -229,3 +229,30 @@ export const scriptedCatalogEntry: PiCatalogEntry = {
   auth: "api-key",
   subscription: false,
 };
+
+let pricingModels: ReturnType<typeof builtinModels> | undefined;
+
+/**
+ * List-price USD for measured tokens from the model catalog, used when a usage row carries no
+ * cost (for example a subscription sign-in). Null when the model has no known price.
+ */
+export function estimateCatalogTokenCostUsd(
+  provider: string,
+  modelId: string,
+  tokens: { input: number; output: number; cacheRead: number; cacheWrite: number },
+): number | null {
+  pricingModels ??= supplementPiModels(builtinModels());
+  const model =
+    pricingModels.getModel(provider, modelId) ??
+    pricingModels.getModel(provider, modelId.split("/").pop() ?? modelId);
+  const cost = model?.cost;
+  if (!cost || !Object.values(cost).some((rate) => typeof rate === "number" && rate > 0))
+    return null;
+  return (
+    (tokens.input * cost.input +
+      tokens.output * cost.output +
+      tokens.cacheRead * cost.cacheRead +
+      tokens.cacheWrite * cost.cacheWrite) /
+    1_000_000
+  );
+}

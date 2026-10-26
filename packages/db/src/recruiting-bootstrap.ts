@@ -46,15 +46,18 @@ const RECRUITING_SERVICES = [
 export const RECRUITING_OPERATOR_EMAIL_DOMAIN = "wekruit.com";
 
 /**
- * Plan list prices of the platform services by slug, used only for the deployment owner's
- * spend estimate. The research plan is US$850 a month for 100,000 credits; people search
- * runs on a free tier. Model calls carry their own cost on each usage row.
+ * List prices of the platform services by slug, for the operator's spend estimate only.
+ * Research: US$850 a month for 100,000 credits. Contact enrichment: the entry monthly plan,
+ * US$29 for 500 credits (charged only for found data). People search: US$7 per 1,000
+ * searches with contents. Model tokens are priced from the model catalog instead.
  */
 export const RECRUITING_SERVICE_UNIT_PRICES_USD: Readonly<
   Record<string, { credits?: number; calls?: number }>
 > = {
-  autumn: { credits: 850 / 100_000 },
-  "people-search": { calls: 0 },
+  autumn: { credits: 850 / 100_000, calls: 0 },
+  fullenrich: { credits: 29 / 500, calls: 0 },
+  "people-search": { calls: 7 / 1000 },
+  "recruiting-crm": { calls: 0 },
 };
 
 const CRM_READ_TOOLS = [

@@ -411,8 +411,11 @@ export function UsageSettingsPanel({
                     >
                       <td className="py-1.5 pr-3 text-foreground">{service.service}</td>
                       <td className="py-1.5 pr-3 text-muted-foreground">{service.unit}</td>
-                      <td className="py-1.5 text-right tabular-nums text-foreground/80">
+                      <td className="py-1.5 pr-3 text-right tabular-nums text-foreground/80">
                         {formatUsageNumber(service.quantity)}
+                      </td>
+                      <td className="py-1.5 text-right tabular-nums text-foreground">
+                        {service.priced ? formatUsd(service.estimatedUsd) : t`No price`}
                       </td>
                     </tr>
                   ))}

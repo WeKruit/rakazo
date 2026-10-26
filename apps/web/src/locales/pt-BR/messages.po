@@ -5069,6 +5069,10 @@ msgstr ""
 msgid "No outreach files loaded"
 msgstr ""
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "No price"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
 msgstr "Nenhum provedor encontrado"
