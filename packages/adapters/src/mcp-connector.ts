@@ -298,6 +298,65 @@ type PendingSession = {
   ref?: string;
 };
 
+/**
+ * Local mail tools for an assigned official mail server. They call the REST API with the same
+ * connection, so they stay available when the remote server cannot list its own tools.
+ */
+function localInstantlyTools(
+  assignment: {
+    serverId: string;
+    allowAllTools: boolean;
+    allowedTools: unknown;
+    server: McpServer;
+  },
+  listed: readonly { name: string }[],
+): ConnectorTool[] {
+  if (
+    assignment.server.transport !== "streamable_http" ||
+    assignment.server.endpoint !== INSTANTLY_MCP ||
+    !["get_email", "list_emails"].every(
+      (name) =>
+        assignment.allowAllTools ||
+        (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(name)),
+    )
+  )
+    return [];
+  const route = (toolName: string) => ({
+    connectorId: "mcp",
+    resourceId: assignment.serverId,
+    resourceRevision: assignment.server.revision,
+    toolName,
+    catalogGroup: assignment.server.slug,
+  });
+  const tools: ConnectorTool[] = [];
+  for (const local of nativeInstantlyReads) {
+    if (listed.some((tool) => [local.name, local.toolName].includes(tool.name))) {
+      getLogger().warn(
+        `Instantly remote ${local.name} tool conflicts with the local integration; local tool withheld`,
+      );
+      continue;
+    }
+    tools.push({
+      name: `instantly__${assignment.server.slug}__${local.name}`,
+      description: local.description,
+      inputSchema: local.inputSchema,
+      readOnly: true,
+      route: route(local.toolName),
+    });
+  }
+  for (const local of nativeInstantlyWrites) {
+    if (listed.some((tool) => tool.name === local.toolName)) continue;
+    tools.push({
+      name: `instantly__${assignment.server.slug}__${local.name}`,
+      description: local.description,
+      inputSchema: local.inputSchema,
+      readOnly: local.readOnly,
+      route: route(local.toolName),
+    });
+  }
+  return tools;
+}
+
 /** Runtime MCP connector. Authorization is re-checked against the bot assignment on every call. */
 /**
  * Stale allowlist entries are filtered out below with no error. Discovery already has the
@@ -582,7 +641,7 @@ export class McpConnector implements ConnectorProvider {
                 untilMs: failed.until,
               });
             }
-            return [];
+            return localInstantlyTools(assignment, []);
           }
           this.discoveryFailures.delete(failureKey);
         }
@@ -609,53 +668,7 @@ export class McpConnector implements ConnectorProvider {
             }));
           if (assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
             for (const tool of remoteTools) directTools.add(tool);
-          if (
-            assignment.server.transport === "streamable_http" &&
-            assignment.server.endpoint === INSTANTLY_MCP &&
-            ["get_email", "list_emails"].every(
-              (name) =>
-                assignment.allowAllTools ||
-                (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(name)),
-            )
-          ) {
-            for (const local of nativeInstantlyReads) {
-              if (listed.tools.some((tool) => [local.name, local.toolName].includes(tool.name))) {
-                getLogger().warn(
-                  `Instantly remote ${local.name} tool conflicts with the local integration; local tool withheld`,
-                );
-                continue;
-              }
-              remoteTools.push({
-                name: `instantly__${assignment.server.slug}__${local.name}`,
-                description: local.description,
-                inputSchema: local.inputSchema,
-                readOnly: true,
-                route: {
-                  connectorId: "mcp",
-                  resourceId: assignment.serverId,
-                  resourceRevision: assignment.server.revision,
-                  toolName: local.toolName,
-                  catalogGroup: assignment.server.slug,
-                },
-              });
-            }
-            for (const local of nativeInstantlyWrites) {
-              if (listed.tools.some((tool) => tool.name === local.toolName)) continue;
-              remoteTools.push({
-                name: `instantly__${assignment.server.slug}__${local.name}`,
-                description: local.description,
-                inputSchema: local.inputSchema,
-                readOnly: local.readOnly,
-                route: {
-                  connectorId: "mcp",
-                  resourceId: assignment.serverId,
-                  resourceRevision: assignment.server.revision,
-                  toolName: local.toolName,
-                  catalogGroup: assignment.server.slug,
-                },
-              });
-            }
-          }
+          remoteTools.push(...localInstantlyTools(assignment, listed.tools));
           return remoteTools;
         } catch (error) {
           // A single unavailable server must not hide tools from other connectors.
@@ -680,7 +693,8 @@ export class McpConnector implements ConnectorProvider {
             startedAt,
             material ? oauthMaterialSecrets(material) : [],
           );
-          return [];
+          // The local mail tools call the REST API directly, so a remote outage keeps them.
+          return localInstantlyTools(assignment, []);
         }
       }),
     );
@@ -1352,14 +1366,24 @@ export class McpConnector implements ConnectorProvider {
           throw new IsolationError();
       };
       phase = "native catalog";
-      const session = await this.sessionFor(credential.server, context);
-      const listed = await session.listTools({ signal: context.signal });
+      // Only thread history needs the remote server (for its anchor). The other reads use REST
+      // alone, so an unreachable remote server, which also cannot offer a conflicting tool,
+      // does not block them.
+      const remote = await this.sessionFor(credential.server, context)
+        .then(async (session) => ({
+          session,
+          listed: await session.listTools({ signal: context.signal }),
+        }))
+        .catch((error: unknown) => {
+          if (historyInput || context.signal?.aborted) throw error;
+          return undefined;
+        });
       const local = nativeInstantlyReads.find((tool) => tool.toolName === call.route!.toolName)!;
-      if (listed.tools.some((tool) => [local.name, local.toolName].includes(tool.name)))
+      if (remote?.listed.tools.some((tool) => [local.name, local.toolName].includes(tool.name)))
         throw new Error("Remote tool conflicts with the local integration; rediscover tools");
       phase = "native anchor";
       const rawAnchor = historyInput
-        ? await session.callTool(
+        ? await remote!.session.callTool(
             "get_email",
             { id: historyInput.anchor_id },
             { signal: context.signal },

@@ -285,6 +285,36 @@ describe("local native Instantly thread history", () => {
     };
     return { connector, context, state, server, assignment, prisma, secrets, rest, collect };
   }
+  it("keeps the local mail tools when the remote server cannot list its tools", async () => {
+    const f = fixture();
+    const inner = globalThis.fetch;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) =>
+        new URL(logicalHref(input, init)).origin === "https://mcp.instantly.ai"
+          ? new Response("<!DOCTYPE html>", { status: 500 })
+          : inner(input, init),
+      ),
+    );
+    try {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const names = (await f.connector.discoverTools(f.context as never)).map(
+          (tool) => tool.name,
+        );
+        expect(names).toContain("instantly__demo__search_contact_emails");
+        expect(names).toContain("instantly__demo__activate_campaign");
+        expect(names.some((name) => name.startsWith("mcp__"))).toBe(false);
+      }
+      expect(
+        await f.collect(
+          { email: anchor.from_address_email },
+          { ...route, toolName: "native_instantly_search_contact_emails" },
+        ),
+      ).toMatchObject([{ type: "result" }]);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it("discovers a separate read-only local tool and retains exact native anchor, REST page and controls", async () => {
     const f = fixture();
     try {

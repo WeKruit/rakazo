@@ -200,6 +200,58 @@ export function secureFetch(
   return result;
 }
 
+/** JSON-RPC methods that change nothing at the provider, so a repeat is harmless. */
+const REPEATABLE_MCP_METHODS = new Set([
+  "initialize",
+  "notifications/initialized",
+  "ping",
+  "tools/list",
+]);
+const GATEWAY_RETRY_DELAYS_MS = [500, 1_500, 3_000];
+
+/**
+ * A hosting gateway in front of some providers (Instantly) intermittently answers 502/503/504
+ * with an HTML page without reaching the server. Repeat only the handshake and tool listing,
+ * never a tool call: a call that may have reached the provider must not run twice.
+ */
+export function withGatewayRetry(
+  fetchImpl: typeof fetch,
+  delaysMs: readonly number[] = GATEWAY_RETRY_DELAYS_MS,
+): typeof fetch {
+  return async (input: Request | URL | string, init?: RequestInit): Promise<Response> => {
+    let response = await fetchImpl(input, init);
+    if (!repeatableMcpRequest(input, init)) return response;
+    for (const delay of delaysMs) {
+      if (![502, 503, 504].includes(response.status)) return response;
+      await response.body?.cancel().catch(() => undefined);
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      init?.signal?.throwIfAborted();
+      response = await fetchImpl(input, init);
+    }
+    return response;
+  };
+}
+
+function repeatableMcpRequest(input: Request | URL | string, init?: RequestInit): boolean {
+  if (input instanceof Request || typeof init?.body !== "string") return false;
+  if ((init.method ?? "GET").toUpperCase() !== "POST") return false;
+  try {
+    const parsed: unknown = JSON.parse(init.body);
+    const messages = Array.isArray(parsed) ? parsed : [parsed];
+    return (
+      messages.length > 0 &&
+      messages.every(
+        (message) =>
+          typeof message === "object" &&
+          message !== null &&
+          REPEATABLE_MCP_METHODS.has(String((message as { method?: unknown }).method)),
+      )
+    );
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Some providers (Brex) advertise OAuth discovery and registration hosts that
  * are not publicly routable, while mirroring the same well-known documents on
@@ -294,7 +346,7 @@ export class McpSession {
       options.network,
     );
     this.remoteFetch = safeFetch;
-    const resourceFetch = withEndpointOriginFallback(url.origin, safeFetch);
+    const resourceFetch = withGatewayRetry(withEndpointOriginFallback(url.origin, safeFetch));
     const runtimeAuth =
       options.runtimeAuth ??
       (options.authProvider && "runtimeAuth" in options.authProvider
