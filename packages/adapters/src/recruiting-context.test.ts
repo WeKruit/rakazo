@@ -274,8 +274,9 @@ describe("recruiting run context", () => {
         const projected = JSON.parse(
           loaded.manifest.roleText.match(/<recruiting_role>\n([\s\S]*)\n<\/recruiting_role>/)![1]!,
         );
+        // Salary is asked only when the brief marks it as changing who is searched for.
         expect(projected.derivedClarifications).toEqual(
-          salary === "ready"
+          salary !== "missing"
             ? []
             : [
                 {

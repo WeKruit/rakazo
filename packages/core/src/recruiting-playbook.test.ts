@@ -531,3 +531,24 @@ describe("classifyTurnEnd", () => {
     expect(classifyTurnEnd(text("名单：\n1. 张三\n2. 李四\n3. 王五"))).toBe("deliverable");
   });
 });
+
+describe("clarifications before the search", () => {
+  it("never asks for a salary the search does not need", () => {
+    const brief: RecruitingBriefDraft = {
+      searchFilters: [],
+      fields: [
+        {
+          key: "location",
+          value: "Chicago, on-site",
+          origin: "jd",
+          state: "known",
+          consequential: true,
+          sourceRefIds: ["jd"],
+        },
+      ],
+      questions: [],
+      rules: [],
+    };
+    expect(recruitingBriefClarifications(brief)).toEqual([]);
+  });
+});

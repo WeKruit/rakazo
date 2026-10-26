@@ -2100,7 +2100,10 @@ describe("native recruiting role effect delivery", () => {
       f.setCalls([{ name: "recruiting_role", args, executionId: `source-${kind}` }]);
       await f.run();
       const result = {
-        error: kind === "quote" ? failure.message : "Recruiting role or source is unavailable",
+        error:
+          kind === "quote"
+            ? failure.message
+            : "Recruiting role or source is unavailable. Copy each source's artifact reference, url and readAt exactly as the reader returned them, quote the recruiter's own message, and save again now.",
       };
       expect(f.results).toEqual([result]);
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
@@ -2207,7 +2210,10 @@ describe("native recruiting role effect delivery", () => {
     expect(f.effects[0]?.result).toEqual(receipt);
     vi.mocked(executeRecruitingRoleTool).mockRejectedValueOnce(new IsolationError());
     await f.run();
-    expect(f.results.at(-1)).toEqual({ error: "Recruiting role or source is unavailable" });
+    expect(f.results.at(-1)).toEqual({
+      error:
+        "Recruiting role or source is unavailable. Copy each source's artifact reference, url and readAt exactly as the reader returned them, quote the recruiter's own message, and save again now.",
+    });
     expect(f.effects[0]).toMatchObject({ status: "completed", result: receipt });
   });
 

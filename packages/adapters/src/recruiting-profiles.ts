@@ -242,7 +242,31 @@ export type PeopleSearchRow = {
   current_title?: string;
   current_company?: string;
   location?: string;
+  /** A short passage of the profile the search matched, so the pick can quote the work. */
+  snippet?: string;
 };
+
+const SNIPPET_LENGTH = 300;
+
+/** Plain profile prose: no headings, links or counters, cut to a short passage. */
+function snippetOf(text: string): string | undefined {
+  const prose = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(
+      (line) =>
+        line &&
+        line !== "---" &&
+        !line.startsWith("#") &&
+        !/^(Title|URL|Published|Author|Highlights):/.test(line) &&
+        !/connections|followers/.test(line),
+    )
+    .join(" ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+  return prose ? prose.slice(0, SNIPPET_LENGTH) : undefined;
+}
 
 /**
  * People in a profile-data connector's search or fetch result, one per LinkedIn profile, in
@@ -280,6 +304,7 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     if (title) row.current_title = title.slice(0, 300);
     if (company) row.current_company = company.slice(0, 200);
     if (location) row.location = location.slice(0, 200);
+    if (typeof record.snippet === "string") row.snippet = record.snippet;
     people.set(key, row);
   }
   return [...people.values()];
@@ -342,6 +367,7 @@ function peopleFromListing(text: string): Record_[] {
       job_title: job?.title ?? headline,
       company_name: job?.company ?? null,
       location: location?.replace(/\s*\([A-Z]{2}\)$/, "") ?? null,
+      snippet: snippetOf(entry.split(/^# .+$/m)[1] ?? ""),
     });
   }
   return found;
@@ -372,6 +398,11 @@ function peopleFromResults(text: string): Record_[] {
     const job = jobs.find((entry) => !entry?.dates?.to) ?? jobs[0];
     const name = typeof person.name === "string" ? person.name : item?.title;
     if (typeof name !== "string" || typeof item?.url !== "string") return [];
+    const highlights = Array.isArray(item.highlights)
+      ? item.highlights.filter((part): part is string => typeof part === "string").join(" … ")
+      : typeof item.text === "string"
+        ? item.text
+        : "";
     return [
       {
         full_name: name,
@@ -379,6 +410,7 @@ function peopleFromResults(text: string): Record_[] {
         job_title: typeof job?.title === "string" ? job.title : null,
         company_name: typeof job?.company?.name === "string" ? job.company.name : null,
         location: typeof person.location === "string" ? person.location : null,
+        snippet: snippetOf(highlights),
       },
     ];
   });

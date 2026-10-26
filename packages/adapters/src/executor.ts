@@ -174,6 +174,7 @@ import {
   executeRecruitingCrmBinding,
   executeRecruitingNotesTool,
   executeRecruitingRemindersTool,
+  fillRecruitingMaterialReceipts,
   findDefaultModelCredential,
   findModelCredential,
   getRecruitingCrmTarget,
@@ -4638,6 +4639,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : name === "recruiting_role"
                 ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
                 : rawArgs;
+          if (name === "recruiting_role" && args.operation !== "read")
+            args = await fillRecruitingMaterialReceipts(
+              deps.prisma,
+              { spaceId: run.spaceId, userId: run.userId, email: "", isDeploymentOwner: false },
+              args,
+            );
           if (handedOff) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",
@@ -6554,7 +6561,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const roleError = (error: unknown) => {
             if (error instanceof RecruitingIntentQuoteError) return { error: error.message };
             if (error instanceof IsolationError)
-              return { error: "Recruiting role or source is unavailable" };
+              return {
+                error:
+                  "Recruiting role or source is unavailable. Copy each source's artifact reference, url and readAt exactly as the reader returned them, quote the recruiter's own message, and save again now.",
+              };
             if (error instanceof RecruitingConflictError)
               return { error: error.message, code: "CONFLICT" };
             if (

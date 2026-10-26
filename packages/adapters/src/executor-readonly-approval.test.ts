@@ -584,7 +584,12 @@ describe("native saved candidate reads", () => {
     ]);
     await f.run();
     expect(candidateReads).not.toHaveBeenCalled();
-    expect(f.results).toEqual([{ error: "Recruiting role or source is unavailable" }]);
+    expect(f.results).toEqual([
+      {
+        error:
+          "Recruiting role or source is unavailable. Copy each source's artifact reference, url and readAt exactly as the reader returned them, quote the recruiter's own message, and save again now.",
+      },
+    ]);
     expect(f.effects).toEqual([]);
   });
 

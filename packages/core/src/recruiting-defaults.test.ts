@@ -226,7 +226,7 @@ describe("maintained recruiting defaults", () => {
     for (const part of [
       "issue four differently worded platform people searches together as parallel tool calls in one step",
       'highlightsQuery "concrete evidence of: "',
-      "quotes, word for word, the part of that person's search highlights",
+      "quotes, word for word, the part of that person's snippet in the saved rows",
       "top up the same round with one research request on this role for only the missing number",
       "Never tell the recruiter about search quotas",
     ])
