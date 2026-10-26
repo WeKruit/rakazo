@@ -87,6 +87,8 @@ async function runWithModel(
     /** Resolves tool discovery only when called; setup steps that run alongside it are observable. */
     discoverTools?: () => Promise<[]>;
     onEventFindFirst?: () => void;
+    loadTask?: () => Promise<void>;
+    loadScratchpad?: () => Promise<[]>;
     /** The thread's active recruiting role; enables the run-start recruiting context. */
     recruitingRoleId?: string;
     savedRecruitingCandidates?: number;
@@ -198,7 +200,12 @@ async function runWithModel(
     recruitingRoleRevision: { findUnique: vi.fn(async () => ({ brief: null })) },
     recruitingCandidate: { count: vi.fn(async () => options.savedRecruitingCandidates ?? 0) },
     recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
-    task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt: "Look again" })) },
+    task: {
+      findUniqueOrThrow: vi.fn(async () => {
+        await options.loadTask?.();
+        return { id: run.taskId, prompt: "Look again" };
+      }),
+    },
     usageRecord: { create: vi.fn(async () => ({})), createMany: vi.fn(async () => ({ count: 1 })) },
     computer: { updateMany: vi.fn(async () => ({ count: 1 })) },
     connection: { findMany: vi.fn(async () => []) },
@@ -228,7 +235,7 @@ async function runWithModel(
     agentSecret: { findMany: vi.fn(async () => []) },
     botSecret: { findMany: vi.fn(async () => []) },
     agentSkill: { findMany: vi.fn(async () => []) },
-    scratchpadItem: { findMany: vi.fn(async () => []) },
+    scratchpadItem: { findMany: vi.fn(async () => options.loadScratchpad?.() ?? []) },
     externalEffect: { findMany: vi.fn(async () => []) },
     artifact: {
       findMany: vi.fn(async () => [
@@ -426,8 +433,68 @@ describe("recent turn images follow model vision", () => {
     expect(marks.every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
     expect(marks).toEqual([...marks].sort((a, b) => a - b));
     expect(setup[0]!.computerMs).toBeUndefined();
-    // Overlapping steps also report their own duration.
+    // Every member of the discovery join reports its interval, even when skipped.
+    for (const name of [
+      "discovery",
+      "nativeSources",
+      "turnImages",
+      "memoryContext",
+      "scratchpadContext",
+      "ticketContext",
+      "recall",
+      "stoppedNotice",
+      "resumeBrief",
+      "routinePriorRun",
+    ]) {
+      const start = setup[0]![`${name}StartMs`] as number;
+      const end = setup[0]![`${name}EndMs`] as number;
+      const own = setup[0]![`${name}OwnMs`] as number;
+      expect([start, end, own].every((value) => Number.isInteger(value) && value >= 0)).toBe(true);
+      expect(end).toBeGreaterThanOrEqual(start);
+      // Each value is rounded separately to whole milliseconds.
+      expect(Math.abs(end - start - own)).toBeLessThanOrEqual(1);
+    }
     expect(Number.isInteger(setup[0]!.modelKeyOwnMs)).toBe(true);
+  });
+
+  it("separates the cumulative setup mark from the actual parallel discovery join wait", async () => {
+    const previous = getLogger();
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "setup-timing-check", sinks: [sink] }));
+    vi.useFakeTimers({ toFake: ["performance", "setTimeout", "clearTimeout"] });
+    const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+    try {
+      const pending = runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+        // Earlier setup is not time spent waiting at the discovery join.
+        loadTask: () => delay(200),
+        discoverTools: async () => {
+          await delay(30);
+          return [];
+        },
+        loadScratchpad: async () => {
+          await delay(60);
+          return [];
+        },
+      });
+      await vi.advanceTimersByTimeAsync(260);
+      await pending;
+      const setup = sink.events.find((event) => event.message === "run.setup.timing");
+      expect(setup).toMatchObject({
+        contextLoadMs: 200,
+        discoveryStartMs: 200,
+        discoveryEndMs: 230,
+        discoveryOwnMs: 30,
+        scratchpadContextStartMs: 200,
+        scratchpadContextEndMs: 260,
+        scratchpadContextOwnMs: 60,
+        discoveryJoinStartMs: 200,
+        discoveryJoinWaitMs: 60,
+        discoveryJoinMs: 260,
+      });
+    } finally {
+      vi.useRealTimers();
+      installLogger(previous);
+    }
   });
 
   it("logs first model output time and prompt cache use when the run completes", async () => {

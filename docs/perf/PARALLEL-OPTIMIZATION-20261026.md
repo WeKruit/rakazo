@@ -57,8 +57,9 @@ Setup detail from production logs (fast route, ms; each `*OwnMs` is one load on 
 
 nativeSources, recall, stoppedNotice and turnImages were 0 in every run. Two readings:
 
-- `discoveryJoin` is 2–3 times the sum of the loads it waits for, so most of it is uncovered
-  waiting, not the loads themselves.
+- Correction from P16 inspection: `discoveryJoinMs` is cumulative from pickup, while the
+  `*OwnMs` values measure individual, overlapping loads. Their sum does not establish uncovered
+  waiting. Use the new join interval and each load's start/end offsets to identify the critical path.
 - Lease, context and discovery spiked together when two runs shared one worker, which points to
   contention on the worker's database pool (4 connections).
 - On later turns `recruitingContextOwnMs` (1.35–2.2 s) is the largest single setup piece.
@@ -70,7 +71,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P1. Lower thinking for intake turns (model choice per step)
 
-- **Owner:** _unclaimed_
+- **Owner:** shipped in #203 (low thinking level on intake turns); quality check pending the live test
 - **Serial today:** step C. Fast routing swaps only the model id and keeps the bot's configured
   thinking level (`executor.ts`, `{ ...configuredRunModel, id: turnModel.model.id }`), so an intake
   step that only writes four search queries can think as long as a heavy turn.
@@ -85,7 +86,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P2. Write the search plan during the question turns
 
-- **Owner:** _unclaimed_
+- **Owner:** shipped in #203 (`plannedSearches` on the last question, run when it is answered); live timing pending
 - **Serial today:** the model plans the searches only after the last answer (step C), although by
   the last question it already knows the title, location and most must-haves.
 - **Change:** when the model asks a question, it also keeps a short draft of the four query
@@ -147,7 +148,9 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P6. Shorter pick output
 
-- **Owner:** _unclaimed_
+- **Owner:** no change needed: `calibration_round` already takes only the ten keys and the server
+  renders each person. The 12–21 s between the first person and all ten still needs the event
+  replay to explain.
 - **Serial today:** step G, 12–21 s, dominated by the model writing ten fit lines.
 - **Change:** ask for one short fit line per person (the passage already shows the evidence), and
   let the server render name, title, company and location from the saved row so the model writes
@@ -272,15 +275,40 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P16. Find the uncovered wait in discoveryJoin
 
-- **Owner:** _unclaimed_ (pairs with P9)
-- **Serial today:** `discoveryJoinMs` (0.9–2.2 s) is 2–3 times the sum of the `*OwnMs` loads it
-  joins, so something it waits on is not timed: pool acquisition, a sequential await before the
-  join, or an untimed load.
-- **Change:** time every promise in the join with `ownTime`, then remove or overlap the untimed one.
-- **Expected savings:** 0.5–1.3 s per turn, on every turn.
-- **Risk:** none for the measuring step.
-- **Effort:** S.
-- **Measure:** the sum of `*OwnMs` should explain `discoveryJoinMs` within ~100 ms.
+- **Owner:** dot (implemented and verified offline 2026-10-26; pairs with P9)
+- **Finding:** `discoveryJoinMs` is a cumulative pickup-to-join milestone, not the duration of
+  discovery or of the join itself. The earlier comparison with the sum of overlapping `*OwnMs`
+  did not demonstrate 0.5–1.3 s of uncovered waiting. MCP server catalog reads and all nine join
+  members already run in parallel; no additional serial wait was proven safe to remove.
+- **Change:** retain the cumulative mark; add `discoveryJoinStartMs` and `discoveryJoinWaitMs`.
+  All nine join members now have `*StartMs`, `*EndMs` and `*OwnMs`, including the previously
+  untimed scratchpad, tickets, resume brief and routine history. Native human sources, memory
+  and recall are timed at launch rather than when joined. No context or authorization cache added.
+- **Reproducible local measurement:** the fake-clock executor test injects 200 ms of prior
+  context loading, 30 ms of discovery and 60 ms of scratchpad loading. Observed offsets are
+  discovery 200–230 ms and scratchpad 200–260 ms; `discoveryJoinMs=260`,
+  `discoveryJoinStartMs=200`, `discoveryJoinWaitMs=60`. This proves that the wait is the slowest
+  overlapping load, not their sum, and distinguishes it from earlier setup. These are synthetic
+  offline measurements, not production latency or a measured speedup.
+- **Validation (repository-root commands unless noted):**
+  - `node_modules/.bin/vitest run packages/adapters/src/executor-recent-turn-images.test.ts`:
+    exit 0, 24 tests passed (includes the fixed-clock measurement and interval coverage).
+  - `node_modules/.bin/vitest run packages/adapters/src/executor*.test.ts`:
+    exit 0, 675 tests across 13 files passed.
+  - `node_modules/.bin/tsc --noEmit -p packages/adapters/tsconfig.json`: initially exit 1 because
+    the pre-existing generated Prisma client lacked current schema models. Regenerated locally
+    with `node_modules/.bin/prisma generate` from `packages/db` (exit 0; no migration).
+    Rerun exit 0 after generation.
+  - `pnpm exec biome check packages/adapters/src/executor.ts`: initial exit 1 because the
+    environment's global pnpm attempted an unavailable automatic install. Used existing local
+    binaries instead. Initial direct Biome check found formatting (exit 1); applied the formatter.
+  - `node_modules/.bin/biome check packages/adapters/src/executor.ts packages/adapters/src/executor-recent-turn-images.test.ts`:
+    final exit 0, both files clean. `git diff --check`: exit 0.
+- **Limitations / next measurement:** no deployment, external searches or role writes. No
+  production time saved claimed. On an approved future release, compare `discoveryJoinWaitMs`
+  with the latest join-member end offset minus `discoveryJoinStartMs` (within rounding/scheduling
+  overhead), and inspect the
+  earlier setup milestones separately. A pool contention diagnosis still needs P15 measurements.
 
 ### P17. recruitingContext on later turns
 
@@ -311,7 +339,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P19. Keyless people-search fallback and its rate limit
 
-- **Owner:** _unclaimed_
+- **Owner:** dot (implemented and verified offline 2026-10-26)
 - **Today:** the people search uses the deployment key when one is set and falls back to the
   keyless channel when it is not (`platformMcpCredential` in `mcp-connector.ts`). During the
   search-size measurement the keyless channel returned 429 "free MCP rate limit" after about 150
@@ -329,13 +357,38 @@ M one to two days. Risk covers quality, cost and the project rules.
 - **Effort:** S.
 - **Measure:** count of 429 responses from people search in the logs. Rows per scale-out wave.
 
+- **Implemented:** a keyless credential load emits `people_search.keyless` once per process;
+  keyed connections do not warn. Only the built-in read-search tools retry typed HTTP 429 or an
+  explicitly failed rate-limit tool result. Backoff is 1 s then 2 s, at most three calls. Each
+  retry rechecks the current assignment and credentials; cancellation interrupts the wait.
+  Exhaustion returns a rate-limit error instead of empty results. Other providers, mutation tools,
+  non-429 failures and successful result text are not retried. Existing uncertain-outcome semantics
+  remain for unrelated failures. Logs contain no query or credential material.
+- **Reproducible local measurement:** fake-clock transport tests observed search calls at
+  0 / 1,000 / 3,000 ms for two 429s followed by success. Exhaustion made exactly three calls;
+  cancellation or revoked assignment during the first wait prevented a second dispatch.
+  These are deterministic offline results, not live API latency or throughput measurements.
+- **Validation (all from the repository root):**
+  - `node_modules/.bin/vitest run packages/adapters/src/mcp-connector.test.ts packages/adapters/src/mcp-people-search-rate-limit.test.ts packages/adapters/src/mcp-transport.test.ts packages/adapters/src/mcp-crm-scope.test.ts`:
+    exit 0, 310 tests across four files passed, including 19 new rate-limit cases.
+  - `node_modules/.bin/tsc --noEmit -p packages/adapters/tsconfig.json`: exit 0.
+  - `node_modules/.bin/biome check packages/adapters/src/mcp-connector.ts packages/adapters/src/mcp-people-search-rate-limit.test.ts`:
+    exit 0, both files clean. `git diff --check`: exit 0.
+  - One intermediate regression run failed (exit 1) because the test omitted the existing safe-fetch
+    network-error prefix. Corrected the expected existing behavior; the final suite above passed.
+- **Limitations:** the installed transport SDK does not preserve `Retry-After`; the bounded fixed
+  delays may be shorter than the provider's rate-limit window, in which case the caller receives
+  the explicit error. No live search, paid lookup, email, CRM sync, deployment or new resource was
+  used. No happy-path speedup claimed; production recovery still requires authorized future testing.
+
 ## 3. Ranked by expected effect on "last answer → ten"
 
 1. P1 thinking level for intake turns: 3–6 s.
 2. P6 shorter pick output: 4–10 s to all ten.
 3. P2 search plan drafted during questions: 3–5 s.
 4. P3 speculative searches: 9–14 s, needs the user's decision.
-5. P17 + P16 recruiting context and the uncovered setup wait: 1.5–2.8 s per answer turn.
+5. P17 recruiting context: estimated 1–1.5 s per answer turn. P16 now supplies corrected timing;
+   its earlier savings estimate was not established by the cumulative milestone.
 6. P18 needless save_search: ~2 s when it happens.
 7. P4 + P5 search tail and save off the path: 1.5–4 s together.
 

@@ -1,3 +1,4 @@
+import { SdkHttpError } from "@modelcontextprotocol/client";
 import type {
   AdapterContext,
   ConnectorCall,
@@ -15,7 +16,7 @@ import {
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
 } from "@rakazo/contracts";
-import { boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
+import { abortableDelay, boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
@@ -471,6 +472,30 @@ const directTools = new WeakSet<ConnectorTool>();
 export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
   "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
 
+let warnedKeylessPeopleSearch = false;
+const PEOPLE_SEARCH_RETRY_DELAYS_MS = [1_000, 2_000];
+
+class PeopleSearchRateLimitError extends Error {
+  constructor() {
+    super("People search is rate-limited (HTTP 429); retry later.");
+  }
+}
+
+function peopleSearchRateLimited(result: Awaited<ReturnType<McpSession["callTool"]>>): boolean {
+  // A successful search may quote arbitrary page text, including HTTP errors. Only interpret
+  // a failed tool result as a provider error, never a person's profile or a search snippet.
+  if (!result.isError) return false;
+  const body = mcpObject(result);
+  if (body?.status === 429 || body?.statusCode === 429) return true;
+  return result.content.some(
+    (part) =>
+      part.type === "text" &&
+      /\bHTTP\s*429\b|\bstatus(?:\s+code)?\s*[:=]?\s*429\b|\b429\s*[:-]?\s*(?:too many requests|rate limit)|\bfree MCP rate limit\b/i.test(
+        part.text,
+      ),
+  );
+}
+
 /** Connection readiness only; never return deployment credentials to product clients. */
 export function hasPlatformMcpCredential(
   server: Pick<McpServer, "secretId" | "transport" | "endpoint">,
@@ -496,6 +521,10 @@ export async function loadMcpCredentialRecord(
   const deploymentKey = platformService?.key;
   if (platformService && !deploymentKey && !platformService.keyless)
     throw new Error(`${platformService.label} is not configured on this server`);
+  if (platformService?.keyless && !deploymentKey && !warnedKeylessPeopleSearch) {
+    warnedKeylessPeopleSearch = true;
+    getLogger().warn("people_search.keyless", { rateLimit: "shared free tier" });
+  }
   const plaintext = secret
     ? await secrets.load(secret.ciphertext, { recordId: secret.id, signal: context.signal })
     : deploymentKey
@@ -805,6 +834,10 @@ export class McpConnector implements ConnectorProvider {
         call.route,
         call.route.toolName,
       );
+      const peopleSearch =
+        assignment.server.transport === "streamable_http" &&
+        assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
+        ["web_search_exa", "web_search_advanced_exa"].includes(call.route.toolName);
       await requireAutumnTaskOwnership(
         this.prisma,
         context,
@@ -831,7 +864,7 @@ export class McpConnector implements ConnectorProvider {
           ? await this.crmBinding(context, assignment.server)
           : null;
       sessionKey = this.sessionKey(assignment.server, context);
-      const session = await this.sessionFor(assignment.server, context);
+      let session = await this.sessionFor(assignment.server, context);
       material = this.sessions.get(sessionKey)?.material;
       context.signal.throwIfAborted();
       const emailScope =
@@ -929,9 +962,36 @@ export class McpConnector implements ConnectorProvider {
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
       }
       callStarted = true;
-      const result = await session.callTool(call.route.toolName, args, {
-        signal: context.signal,
-      });
+      let result: Awaited<ReturnType<McpSession["callTool"]>>;
+      for (let attempt = 0; ; attempt += 1) {
+        context.signal.throwIfAborted();
+        try {
+          result = await session.callTool(call.route.toolName, args, { signal: context.signal });
+          if (!peopleSearch || !peopleSearchRateLimited(result)) break;
+        } catch (error) {
+          if (!peopleSearch || !(error instanceof SdkHttpError) || error.status !== 429)
+            throw error;
+        }
+        context.signal.throwIfAborted();
+        const retryMs = PEOPLE_SEARCH_RETRY_DELAYS_MS[attempt];
+        getLogger().warn("people_search.rate_limited", {
+          attempt: attempt + 1,
+          retryMs: retryMs ?? 0,
+          exhausted: retryMs === undefined,
+        });
+        if (retryMs === undefined) throw new PeopleSearchRateLimitError();
+        await abortableDelay(retryMs, context.signal);
+        context.signal.throwIfAborted();
+        // A backoff is not authorization to use a tool that was disabled while waiting.
+        const current = await requireMcpToolAssignment(
+          this.prisma,
+          context,
+          call.route,
+          call.route.toolName,
+        );
+        session = await this.sessionFor(current.server, context);
+        material = this.sessions.get(sessionKey)?.material;
+      }
       if (crmTarget) {
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
         if (
@@ -989,13 +1049,17 @@ export class McpConnector implements ConnectorProvider {
       const secrets = material ? oauthMaterialSecrets(material) : [];
       yield { type: "result", data: redactConnectorPayload(result, secrets) };
     } catch (error) {
-      // A thrown call means the transport or auth broke; drop the session so the next call reconnects.
+      // A known rate limit leaves the session healthy. Other thrown calls keep the existing
+      // reconnect and uncertain-outcome handling for transport or authentication failures.
       const secrets = material ? oauthMaterialSecrets(material) : [];
-      if (sessionKey) await this.evict(sessionKey);
+      if (sessionKey && !(error instanceof PeopleSearchRateLimitError))
+        await this.evict(sessionKey);
       yield {
         type: "error",
         message: sanitizeConnectorError(error, secrets),
-        ...(callStarted ? { outcome: "uncertain" as const } : {}),
+        ...(callStarted && !(error instanceof PeopleSearchRateLimitError)
+          ? { outcome: "uncertain" as const }
+          : {}),
       };
     }
   }
