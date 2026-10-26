@@ -14,7 +14,36 @@ Project rules every item must keep:
 - No dead code and no versioned copies: change the path directly.
 - Never test inside real customer roles; use copies and archive them.
 
-## 1. Where the time goes today
+## Status at end of day (live on 7a8c6b74)
+
+Shipped to production today, each retested live with three copies (long pasted JD, short pasted
+JD, job link):
+
+| PR | Change |
+|---|---|
+| #203 | Parallel turn-note loads; autosave and waiting-turn timing logs; low thinking on the intake turn; `plannedSearches` on clarifying questions, run by the server the moment the last one is answered |
+| #205 | The pick keeps the bot's full thinking (low thinking let an out-of-area person in); a short JD with a role lead-in starts the role on the server |
+| #206 | P16 join timing and P19 people-search 429 backoff (dot's commits from #204) |
+| #207 | The link answer turn picks from the planned rows instead of re-searching; pick rules exclude country/state-only rows, towns beyond the commute area and the hiring company's current staff |
+| #209 | A refused round keeps the people already shown; a key made of a name plus a made-up suffix resolves to that person; a pasted JD no longer leads to a second role |
+| #210 | Display-only `show_picks`; each planned search waits at most 6 s |
+| #211 | The answer turn's first step runs at low thinking and shows the 2–4 clearest fits; the rest runs at full thinking; planned queries never name the hiring company (47 of 100 link rows had been its own staff) |
+| #212 | No question card before the ten are recorded once first picks are shown; the `show_picks` reply no longer invites new searches |
+
+Final live numbers, from the recruiter's last answer:
+
+| JD | Q1 | First people in chat | All ten |
+|---|---|---|---|
+| Long text | 14.0 s | 10.3 s | 22.5 s (one refused key, list kept) |
+| Short text | 5.9 s | 9.4 s | 13.3 s |
+| Link | 8.3 s | 10.4 s | 14.6 s |
+
+No run searched again, every round was recorded before the next-step card, all 30 people were in
+metro Atlanta and the link run had no hiring-company staff. The long run's 14 s Q1 was the model's
+own step (8.4 s from context to question against 1.5–2.5 s on earlier runs, with setup unchanged at
+3 s), so it is model variance, not a server wait.
+
+## 1. Where the time goes today (morning baseline)
 
 Live numbers on the current build:
 
