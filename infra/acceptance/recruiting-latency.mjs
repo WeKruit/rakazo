@@ -14,6 +14,9 @@
 //            --target <n>                     scale target (default 100)
 //            --timeout-min <n>                overall limit (default 60)
 //            --out <file>                     JSON report path (default ./latency-<time>.json)
+//            --area <regex>                   locations the role accepts; others are flagged
+//            --hiring-company <name>          flag people who work there now
+//            --archive                        archive the test role when the run ends
 //   RAKAZO_TOKEN may replace email/password (a session token sent as a bearer credential).
 //   --signup creates the test account on first use (the deployment's signup policy applies).
 //   RAKAZO_RELEASE_SHA labels the report with the live release.
@@ -42,6 +45,8 @@ const JD = option("--jd-url")
     ? fs.readFileSync(option("--jd"), "utf8").trim()
     : option("--jd-text", DEFAULT_JD);
 const OUT = option("--out", `latency-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+const AREA = option("--area") ? new RegExp(option("--area"), "i") : null;
+const HIRING_COMPANY = option("--hiring-company")?.toLowerCase() ?? null;
 // Names a recruiter must never see. Matched case-insensitively on whole words.
 const VENDORS = [
   "autumn",
@@ -445,8 +450,7 @@ function errorClass(error) {
   if (/Validation failed|expected|Invalid/i.test(error)) return "schema";
   return error.slice(0, 80);
 }
-async function checkToolErrors(groupId) {
-  const events = await readEvents(groupId);
+function checkToolErrors(events) {
   const done = events.filter(
     (event) =>
       event.type === "agent.tool.completed" && CHECKED_TOOLS.test(event.payload?.name ?? ""),
@@ -474,6 +478,113 @@ async function checkToolErrors(groupId) {
     counts[`${item.name} ${item.class}`] = (counts[`${item.name} ${item.class}`] ?? 0) + 1;
   report.toolErrors = { calls: done.length, errors: errors.length, counts, items: errors };
   log(`recruiting tool calls ${done.length}, errors ${errors.length} ${JSON.stringify(counts)}`);
+}
+
+// --- First ten, timed by the server ----------------------------------------------------------
+// Uses the chat's own event times, so polling does not blur the numbers. Times count from the
+// recruiter's last answer before the round (or from the JD when nothing was asked).
+const US_STATES =
+  "alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming";
+const REGION_ONLY = new RegExp(
+  `^\\s*((${US_STATES})(,\\s*(united states|usa|us))?|united states|usa|us)\\s*$`,
+  "i",
+);
+const SEARCH_TOOL = /search/i;
+const NOT_A_PEOPLE_SEARCH = /^(connectors_search_tools|recruiting_)/;
+function blockText(blocks = []) {
+  return blocks
+    .map((block) => (block.kind === "text" ? block.text : block.kind === "ask" ? block.text : ""))
+    .join("\n");
+}
+function measureFirstTen(events, round) {
+  const at = (event) => Date.parse(event.createdAt);
+  const seconds = (from, to) =>
+    from != null && to != null ? Math.round((to - from) / 100) / 10 : null;
+  const jd = messages.find((message) => message.role === "user");
+  const jdAt = jd ? Date.parse(jd.createdAt) : null;
+  const roundAt = events
+    .filter((e) => e.type === "effect.recorded" && e.payload?.round === round.round)
+    .map(at)[0];
+  const users = events.filter(
+    (e) =>
+      e.type === "thread.message.created" &&
+      e.payload?.role === "user" &&
+      e.payload.messageId !== jd?.id &&
+      at(e) > jdAt &&
+      at(e) < roundAt,
+  );
+  const answerAt = users.length ? at(users.at(-1)) : jdAt;
+  const bot = events.filter(
+    (e) => /^thread\.message\.(created|updated)$/.test(e.type) && e.payload?.role === "bot",
+  );
+  const asks = bot.filter(
+    (e) => e.type === "thread.message.created" && e.payload.blocks?.some((b) => b.kind === "ask"),
+  );
+  const names = round.candidates.map((c) => c.name).filter(Boolean);
+  const shownAt = (count) =>
+    bot
+      .filter((e) => at(e) > answerAt)
+      .find((e) => {
+        const text = blockText(e.payload.blocks);
+        return names.filter((name) => text.includes(name)).length >= count;
+      });
+  const firstShown = shownAt(1);
+  const allShown = shownAt(names.length);
+  const allTenAt = allShown ? Math.max(at(allShown), roundAt) : null;
+  const cardAfter = asks.find((e) => at(e) > answerAt);
+  const planned = events.filter(
+    (e) => e.type === "recruiting.searches.planned" && at(e) <= answerAt,
+  );
+  const afterAnswer = (e) => at(e) > answerAt && at(e) <= roundAt;
+  const searchesRun = events.filter(
+    (e) =>
+      e.type === "effect.recorded" && e.payload?.source?.kind === "people_search" && afterAnswer(e),
+  ).length;
+  const modelSearches = events.filter(
+    (e) =>
+      e.type === "agent.tool.called" &&
+      SEARCH_TOOL.test(e.payload?.name ?? "") &&
+      !NOT_A_PEOPLE_SEARCH.test(e.payload.name) &&
+      afterAnswer(e),
+  ).length;
+  const people = round.candidates.map((c) => ({
+    name: c.name,
+    company: c.company ?? "",
+    location: c.location ?? "",
+  }));
+  const regionOnly = people.filter((p) => !p.location || REGION_ONLY.test(p.location));
+  const outsideArea = AREA ? people.filter((p) => !AREA.test(p.location)) : [];
+  const hiringStaff = HIRING_COMPANY
+    ? people.filter((p) => p.company.toLowerCase().includes(HIRING_COMPANY))
+    : [];
+  const result = {
+    from: users.length ? "last_answer" : "jd",
+    questions: asks.filter((e) => at(e) < roundAt).length,
+    firstQuestionS: seconds(jdAt, asks[0] && at(asks[0]) < roundAt ? at(asks[0]) : null),
+    firstPeopleInChatS: seconds(answerAt, firstShown && at(firstShown)),
+    tenRecordedS: seconds(answerAt, roundAt),
+    allTenS: seconds(answerAt, allTenAt),
+    plannedSearches: planned.at(-1)?.payload?.queries?.length ?? 0,
+    searchesAfterAnswer: searchesRun,
+    modelSearchesAfterAnswer: modelSearches,
+    tenRecordedBeforeCard: !cardAfter || roundAt <= at(cardAfter),
+    people: people.length,
+    inArea: AREA ? people.length - outsideArea.length : null,
+    regionOnly: regionOnly.map((p) => `${p.name} · ${p.location || "no location"}`),
+    outsideArea: outsideArea.map((p) => `${p.name} · ${p.location}`),
+    hiringCompanyStaff: hiringStaff.map((p) => `${p.name} · ${p.company}`),
+  };
+  if (!allShown) violation("ten_not_in_chat", `${names.length} names never all in chat`);
+  if (!result.tenRecordedBeforeCard) violation("card_before_ten", "next-step card came first");
+  if (result.plannedSearches && result.modelSearchesAfterAnswer)
+    violation("searched_again", `${result.modelSearchesAfterAnswer} searches after planned rows`);
+  for (const item of result.regionOnly) violation("region_only_location", item);
+  for (const item of result.outsideArea) violation("outside_area", item);
+  for (const item of result.hiringCompanyStaff) violation("hiring_company_staff", item);
+  report.first10 = result;
+  log(
+    `first ten: Q1 ${result.firstQuestionS}s, first people ${result.firstPeopleInChatS}s, all ten ${result.allTenS}s (from ${result.from})`,
+  );
 }
 
 const TEST_MARK = "测试副本 · ";
@@ -538,14 +649,14 @@ async function main() {
       )
     )
       mark("brief_confirmed");
-    await handleCards(groupId, phase).catch((error) => log(`card failed: ${error.message}`));
+    // Read the round first: once ten are recorded, the next-step card is left for the recruiter.
     const round = await readRound(groupId);
-
     if (phase === "intake" && round && round.candidates.length >= 10) {
       firstRound = round;
       mark("first10_saved", { round: round.round });
       phase = "presented";
     }
+    await handleCards(groupId, phase).catch((error) => log(`card failed: ${error.message}`));
     if (phase === "presented") {
       const shown = namesListedInChat(firstRound);
       if (shown.listed >= Math.min(8, shown.of)) {
@@ -588,7 +699,14 @@ async function main() {
     await sleep(POLL_MS);
   }
 
-  await checkToolErrors(groupId).catch((error) => log(`tool event read failed: ${error.message}`));
+  const events = await readEvents(groupId).catch((error) => {
+    log(`event read failed: ${error.message}`);
+    return null;
+  });
+  if (events) {
+    checkToolErrors(events);
+    if (firstRound) measureFirstTen(events, firstRound);
+  }
   const m = report.milestones;
   const between = (from, to) =>
     m[from]?.s != null && m[to]?.s != null ? +(m[to].s - m[from].s).toFixed(1) : null;
@@ -612,6 +730,7 @@ async function main() {
     const { name } = await rpc("groups/get", { groupId });
     if (!name.startsWith(TEST_MARK))
       await rpc("groups/update", { groupId, name: `${TEST_MARK}${name}`.slice(0, 80) });
+    if (flag("--archive")) await rpc("groups/archive", { groupId });
   }
   report.finishedAt = new Date().toISOString();
   save();

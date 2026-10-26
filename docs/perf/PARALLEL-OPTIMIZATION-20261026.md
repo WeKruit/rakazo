@@ -499,3 +499,41 @@ All of these are one model step instead of several waves, which is where the tim
   and messages, which gives every milestone in section 1.
 - The headless latency harness in `infra/acceptance/recruiting-latency.mjs` runs text and link JDs
   end to end; run it once per change set, never during another session's test.
+
+### Rerunning the first-ten numbers on a new release
+
+`infra/acceptance/first10-suite.mjs` reproduces the end-of-day table for any release. It starts
+three new test copies one after another (long pasted JD from
+`infra/acceptance/fixtures/first10-long-jd.txt`, short pasted JD, and a job link you pass), answers
+the questions neutrally, stops at the first ten and archives each copy.
+
+```
+RAKAZO_URL=<deployment> RAKAZO_EMAIL=<test account> RAKAZO_PASSWORD=<…> RAKAZO_RELEASE_SHA=<sha> \
+  node infra/acceptance/first10-suite.mjs --link <live metro-Atlanta job posting> --link-company <its company>
+```
+
+Times come from the chat's own event times, not from polling:
+
+- **Q1:** JD sent → first question card.
+- **First people in chat:** recruiter's last answer → first bot message naming someone from the round.
+- **All ten:** last answer → the round is recorded and all ten names are in chat.
+
+It also reports, per case:
+
+- whether the model searched again after the planned rows;
+- whether the ten were recorded before the next-step card;
+- how many people are in metro Atlanta (others are listed);
+- country/state-only locations;
+- current staff of the hiring company;
+- recruiting tool retries.
+
+It writes `summary.md` plus one JSON report per case. Use a live posting: a closed link
+redirects to the company's job board, and the run then measures some other role.
+
+First run on 7a8c6b74 (2026-10-26 18:10 UTC):
+
+| JD | Q1 | First people in chat | All ten | Searched again | Ten before card | In area | Hiring-company staff | Tool retries |
+|---|---|---|---|---|---|---|---|---|
+| Long text | 6.6 s | 10.5 s | 14.6 s | no | yes | 10/10 | 0 | 0 |
+| Short text | 4.9 s | 9.7 s | 13.5 s | no | yes | 10/10 | 0 | 0 |
+| Link | 9.2 s | 10.8 s | 19.5 s | no | yes | 10/10 | 0 | 1 (refused key, list kept) |
