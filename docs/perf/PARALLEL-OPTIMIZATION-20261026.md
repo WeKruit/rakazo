@@ -323,7 +323,96 @@ Scale-out (P12) is the largest absolute saving, 30–50 s, on the 100-person pat
 
 ## 4. Adaptive search size: many queries first, bigger pages for scale-out
 
-_Measurement running; results land here in the next commit._
+Two proposals from the user:
+
+- **A.** First round: many small searches at once, so the first 2–4 people appear almost at once;
+  the rest of the ten from normal batches. Scale-out: the first 7–8 people from single fast
+  lookups, the rest from large batches.
+- **B.** Scale-out (100/200): ask each search for many more results, because small pages may waste
+  spend re-finding the same people.
+
+### What was measured (2026-10-26)
+
+People search with highlights (300 chars), the same call shape as production, through the keyless
+search channel. Four role copies outside any customer role: a New Jersey sort supervisor, an
+Atlanta warehouse operations manager, a Phoenix quality manager and a Bay Area data infrastructure
+engineer. Sixteen differently worded queries per role, at 10, 25, 50 and 100 results per query,
+four in flight at a time. The keyless channel rate-limited midway through the Phoenix runs, so only
+New Jersey and Atlanta are complete and used below. A separate run timed sizes 1, 5, 10 and 25 on
+eight fresh queries, one at a time, in random size order.
+
+**Latency does not depend on size.**
+
+| Results per query | Median | Range |
+|---|---|---|
+| 1 | 2.1 s | 0.4–5.0 s |
+| 5 | 1.7 s | 0.5–3.7 s |
+| 10 | 1.5 s | 0.6–2.9 s |
+| 25 | 2.7 s | 1.6–3.7 s |
+| 50 (in the 16-query runs) | 2.2–2.3 s | p90 3.0–3.4 s |
+| 100 (in the 16-query runs) | 2.9 s | p90 3.5–5.1 s |
+
+The spread within one size (0.4–5 s) is far larger than the difference between sizes. A one-person
+search is not faster than a ten-person search.
+
+**Unique people as queries accumulate** (New Jersey / Atlanta):
+
+| Queries | 10 each | 25 each | 50 each | 100 each |
+|---|---|---|---|---|
+| 1 | 10 / 10 | 24 / 24 | 48 / 47 | 98 / 94 |
+| 2 | 20 / 19 | 48 / 46 | 95 / 88 | 174 / 176 |
+| 3 | 28 / 29 | 69 / 70 | 136 / 134 | 241 / 264 |
+| 4 | 37 / 36 | 92 / 91 | 179 / 169 | 324 / 323 |
+| 6 | 52 / 56 | 128 / 136 | 254 / 257 | 442 / 479 |
+| 8 | 71 / 75 | 173 / 181 | 339 / 336 | 582 / 611 |
+| 16 | 137 / 148 | 326 / 349 | 604 / 627 | 1008 / 958 |
+| Duplicate share over 16 | 14% / 8% | 19% / 13% | 25% / 22% | 37% / 32% |
+| Queries to 100 unique | 12 / 11 | 5 / 5 | 3 / 3 | 2 / 2 |
+| Queries to 200 unique | >16 | 10 / 9 | 5 / 5 | 3 / 3 |
+
+Location in scope stayed flat with depth (New Jersey 69–75%, Atlanta 93%). A rough title-and-duty
+keyword check fell slightly with depth (New Jersey 46% → 43%, Atlanta 74% → 68%): results 51–100
+of a query are a little weaker but still usable.
+
+**Cost per 100 unique people** at list price ($0.007 per search up to 10 results, $0.001 per
+additional result, $0.001 per highlighted page): 10 each ≈ $0.19, 25 each ≈ $0.22, 50 each ≈ $0.25,
+100 each ≈ $0.32. Bigger pages cost slightly more per unique person, not less, because the long
+tails of different queries overlap more; the difference is cents per role. The real gain of big
+pages is fewer queries the model has to write and fewer calls against the rate limit. The provider's
+pricing page lists more than 25 results per request as an Enterprise plan feature, so 50/100 must be
+confirmed on the production key before relying on it.
+
+This run used the keyless channel, so actual spend was $0; at list price it would have been about
+$12 for the completed runs. The US$150 budget is untouched.
+
+### Answer
+
+- **A, tiny searches for the first people: no.** A one-person search is not faster (median 2.1 s
+  vs 1.5 s for ten), and the first person in chat waits on the model's 9–10 s of thinking before
+  any search goes out, then on its pick. Tiny searches only help if they go out earlier, which is
+  P2: queries the model drafts during the questions are sent the moment the last answer arrives,
+  as normal 25-result searches. Their rows show in Results as they land; the model still picks the
+  ten. Expected: Results rows ~3 s after the last answer instead of ~13 s; first person in chat
+  ~8–12 s instead of 19–22 s (P1 + P2 + P6 together).
+- **A for scale-out: no.** Scale-out has no first-person wait: each search already saves to
+  Results 2–3 s after it is sent.
+- **B, bigger pages for scale-out: yes**, if the production key allows more than 25. Settings:
+
+| Step | Today | Recommended |
+|---|---|---|
+| First round (ten) | 4 × 25, ~64–70 unique | keep 4 × 25 |
+| Scale to 100 | waves of 4 × 25, one model step each | one step of 4 × 50 (~170–180 unique, ~$0.40) |
+| Scale to 200 | 3+ waves | one step of 4 × 100 (~320 unique, ~$0.80) or 6 × 50 (~255, ~$0.60) |
+| If the key caps at 25 | | one step of 8 × 25 (~175 unique) for 100, 12–16 × 25 for 200 |
+
+All of these are one model step instead of several waves, which is where the time goes (P12).
+
+### PR item
+
+- [ ] Confirm the production key's maximum results per request.
+- [ ] Scale-out instructions: one step of 4 × 50 for 100, 4 × 100 for 200 (or 8/12–16 × 25 if capped).
+- [ ] P2 answer-time dispatch of drafted searches.
+- [ ] Live test on a role copy: accept → 100 and → 200 in Results, unique count, cost.
 
 ## 5. How to measure
 
