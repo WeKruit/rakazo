@@ -35,8 +35,6 @@ import type {
 import {
   RecruitingCorrespondenceSchema,
   RecruitingCrmCampaignLeadsReadSchema,
-  RecruitingCrmPersonLeadsReadSchema,
-  RecruitingCrmUnassignedReadSchema,
   RecruitingCrmCampaignsReadSchema,
   RecruitingCrmCandidatesReadSchema,
   RecruitingCrmClientsReadSchema,
@@ -48,11 +46,13 @@ import {
   RecruitingCrmMailReadSchema,
   RecruitingCrmMembershipRowsSchema,
   RecruitingCrmMessagesReadSchema,
+  RecruitingCrmPersonLeadsReadSchema,
   RecruitingCrmPresenceReadSchema,
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
   RecruitingCrmRoleReadSchema,
   RecruitingCrmRoleReferenceSchema,
+  RecruitingCrmUnassignedReadSchema,
   RecruitingNativeCorrespondenceSchema,
 } from "@rakazo/contracts";
 import {
