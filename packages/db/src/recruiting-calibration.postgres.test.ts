@@ -200,6 +200,10 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await savePage([...keys("first"), "spare-0", "spare-1"]);
     const first = await recordRound(keys("first"));
     expect(first).toMatchObject({ status: "saved", round: 1 });
+    // A key cut short that several saved people continue names them for the retry.
+    await expect(recordRound([...keys("first").slice(0, 9), "spare-"])).rejects.toThrow(
+      "spare- (saved keys starting with it: spare-0, spare-1)",
+    );
     expect(
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,
     ).toBe("feedback");

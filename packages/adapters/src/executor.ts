@@ -597,16 +597,22 @@ export function candidateKeyTail(key: string): string | undefined {
 }
 
 /**
- * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab") or rewritten from the
- * name ("jonathan-doe-1a2b3c4d" for "jon-doe-1a2b3c4d") names the one saved key that
- * continues it or ends in the same id; an ambiguous or unknown key stays as given.
+ * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab" or "linkedin:/in/jane-doe")
+ * or rewritten from the name ("jonathan-doe-1a2b3c4d" for "jon-doe-1a2b3c4d") names the one saved
+ * key that continues it, preferring a continuation after "-", or else ends in the same profile id.
+ * An ambiguous, unknown or very short key stays as given.
  */
 export function continuedCandidateKey(key: string, savedKeys: readonly string[]): string {
-  const continued = savedKeys.filter((saved) => saved.startsWith(`${key}-`));
-  if (continued.length === 1) return continued[0] as string;
+  const one = (matches: readonly string[]) => (matches.length === 1 ? matches[0] : undefined);
   const tail = candidateKeyTail(key);
-  const sameId = tail ? savedKeys.filter((saved) => saved !== key && saved.endsWith(tail)) : [];
-  return sameId.length === 1 ? (sameId[0] as string) : key;
+  return (
+    one(savedKeys.filter((saved) => saved.startsWith(`${key}-`))) ??
+    (key.replace(/^linkedin:\/in\//, "").length >= 6
+      ? one(savedKeys.filter((saved) => saved.startsWith(key)))
+      : undefined) ??
+    (tail ? one(savedKeys.filter((saved) => saved !== key && saved.endsWith(tail))) : undefined) ??
+    key
+  );
 }
 
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
@@ -4850,7 +4856,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     OR: cut.flatMap((key) => {
                       const tail = candidateKeyTail(key);
                       return [
-                        { candidateKey: { startsWith: `${key}-` } },
+                        { candidateKey: { startsWith: key } },
                         ...(tail ? [{ candidateKey: { endsWith: tail } }] : []),
                       ];
                     }),

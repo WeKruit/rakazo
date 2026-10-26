@@ -5961,6 +5961,15 @@ describe("native recruiting assessment effect delivery", () => {
     );
     expect(continuedCandidateKey("linkedin:/in/jane-d", saved)).toBe("linkedin:/in/jane-d");
     expect(continuedCandidateKey("linkedin:/in/alex", saved)).toBe("linkedin:/in/alex");
+    // A cut inside the name also completes when one saved key continues it.
+    const named = ["linkedin:/in/dmitry-shapovalov", "linkedin:/in/alexander-k"];
+    expect(continuedCandidateKey("linkedin:/in/dmitry-s", named)).toBe(
+      "linkedin:/in/dmitry-shapovalov",
+    );
+    expect(continuedCandidateKey("linkedin:/in/alex", named)).toBe("linkedin:/in/alex");
+    expect(
+      continuedCandidateKey("linkedin:/in/dmitry-s", [...named, "linkedin:/in/dmitry-smirnov"]),
+    ).toBe("linkedin:/in/dmitry-s");
   });
 
   it("maps a key rewritten from the name to the one saved key with the same profile id", () => {
