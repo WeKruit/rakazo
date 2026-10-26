@@ -8227,7 +8227,6 @@ it("shows sourced brief prose and unresolved confirmation questions in Role and 
     (item) => item.textContent === "Role definition",
   )!.parentElement!;
   expect([...definition.querySelectorAll("p")].map((item) => item.textContent)).toEqual([
-    "What salary range may be stated in outreach?",
     brief.questions[0]!.question,
     brief.questions[1]!.question,
     "What location or remote work scope applies?",
@@ -8433,7 +8432,7 @@ it("renders saved compound requirements with the same nested groups in Role and 
   expect(api.editCriteria).not.toHaveBeenCalled();
 });
 
-it("shows the required salary question beside disabled confirmation when saved questions are empty", async () => {
+it("never asks for a salary the search does not need when saved questions are empty", async () => {
   api.getWorkspace.mockResolvedValue({
     role,
     revision: {
@@ -8462,10 +8461,8 @@ it("shows the required salary question beside disabled confirmation when saved q
   const confirm = [...view.container.querySelectorAll("button")].find(
     (button) => button.textContent === "Confirm brief",
   )!;
-  expect(confirm.disabled).toBe(true);
-  expect(confirm.parentElement!.textContent).toContain(
-    "What salary range may be stated in outreach?",
-  );
+  expect(confirm.disabled).toBe(false);
+  expect(view.container.textContent).not.toContain("What salary range may be stated in outreach?");
   expect(view.container.textContent).not.toContain("salary_range");
   expect(api.confirmBrief).not.toHaveBeenCalled();
 });

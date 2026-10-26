@@ -200,7 +200,7 @@ describe("maintained recruiting defaults", () => {
   it("Main runs the first round itself right after the last answer", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain(
-      "issue the calibration quick searches yourself in the same step as the brief update",
+      "issue the calibration quick searches yourself as your very next step, before any read or save",
     );
     expect(main.instructions).not.toContain("hand off to Sourcer in the same turn");
   });
@@ -264,7 +264,7 @@ describe("maintained recruiting defaults", () => {
       "ask the first clarifying question together with one small recruiting_role create",
     );
     expect(RECRUITING_INTAKE_FLOW).toContain(
-      "issue the calibration people searches together with the one recruiting_role update that saves the brief",
+      "first issue the calibration people searches as your very next step, before any read or save",
     );
   });
 
