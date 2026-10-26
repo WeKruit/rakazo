@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { RunSchema } from "./domain.js";
+import { RunSchema, ThreadSnapshotSchema } from "./domain.js";
 import {
   RoutineHistorySchema,
   RUN_TRIGGERS,
@@ -44,6 +44,38 @@ describe("run triggers", () => {
         }).trigger,
       ).toBe(trigger);
     }
+  });
+
+  it("returns a conversation whose latest run is a research wake-up", () => {
+    // A group snapshot whose newest terminal run was a recruiting research wake-up failed
+    // output validation, so threads.get answered 500 and the conversation would not open.
+    const run = {
+      id: "run-1",
+      botId: "bot-1",
+      threadId: "thread-1",
+      taskId: "task-1",
+      status: "failed",
+      trigger: "recruiting_research",
+      routineId: null,
+      modelProvider: null,
+      modelId: null,
+      error: "Run failed",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:01:00.000Z",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    };
+    const snapshot = {
+      groupId: "group-1",
+      groupName: "Quality manager",
+      members: [{ botId: "bot-1", name: "Main", color: "blue" }],
+      threadId: "thread-1",
+      cursor: 10,
+      messages: [],
+      olderCursor: null,
+      run,
+      activeRuns: [{ ...run, status: "waiting_input", error: null, completedAt: null }],
+    };
+    expect(ThreadSnapshotSchema.safeParse(snapshot).success).toBe(true);
   });
 
   it("includes the ticket trigger and rejects unknown ones", () => {
