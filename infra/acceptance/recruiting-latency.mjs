@@ -301,7 +301,7 @@ async function handleCards(groupId, phase) {
       }
       mark("first_question");
       const brief = block.actions.find((action) => /开始找人|confirm requirements/i.test(action.label));
-      if (brief || /岗位要求/.test(block.text)) {
+      if (brief) {
         mark("brief_card_shown", { title: block.text.slice(0, 40), buttons: labels });
         const go = brief ?? block.actions.find((action) => CONFIRM_CHOICE.test(action.label)) ?? block.actions[0];
         await answer(groupId, ask, go.id, go.label);
@@ -408,6 +408,15 @@ async function main() {
     await readMessages(groupId).catch((error) => log(`read failed: ${error.message}`));
     threadId ??= messages[0]?.threadId ?? null;
     scanText();
+    // With no requirements card, the server's own confirmation record marks the brief confirmed.
+    if (
+      messages.some(
+        (message) =>
+          message.role === "user" &&
+          message.blocks.some((block) => block.kind === "text" && /^Confirm recruiting brief/.test(block.text)),
+      )
+    )
+      mark("brief_confirmed");
     await handleCards(groupId, phase).catch((error) => log(`card failed: ${error.message}`));
     const round = await readRound(groupId);
 
@@ -464,6 +473,7 @@ async function main() {
     jd_to_first_question_s: between("jd_sent", "first_question"),
     confirm_to_first10_saved_s: between("brief_confirmed", "first10_saved"),
     confirm_to_first10_in_chat_s: between("brief_confirmed", "first10_in_chat"),
+    jd_to_first10_in_chat_s: between("jd_sent", "first10_in_chat"),
     scale_to_25pct_s: between("scale_sent", "reached_25pct"),
     scale_to_target_s: between("scale_sent", "target_reached"),
     jd_to_target_s: between("jd_sent", "target_reached"),
