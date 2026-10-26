@@ -309,6 +309,23 @@ M one to two days. Risk covers quality, cost and the project rules.
 - **Effort:** S.
 - **Measure:** count of `save_search` calls per round in the event replay.
 
+### P19. Keyless people-search fallback and its rate limit
+
+- **Owner:** _unclaimed_
+- **Today:** the people search uses the deployment key when one is set and falls back to the
+  keyless channel when it is not (`platformMcpCredential` in `mcp-connector.ts`). During the
+  search-size measurement the keyless channel returned 429 "free MCP rate limit" after about 150
+  calls in roughly six minutes, and later calls came back empty.
+- **Risk:** if a deployment runs without the key, a few users scaling to 100/200 at once (5–16
+  searches each) hit that limit. Rows then stop arriving and the round looks short for no visible
+  reason.
+- **Change:** confirm the production key is set. Log a warning once per process when people search
+  runs keyless. Treat a 429 from the search as rate-limited, back off and retry, rather than as an
+  empty result.
+- **Expected savings:** none on the happy path. It prevents stalled or short scale-outs.
+- **Effort:** S.
+- **Measure:** count of 429 responses from people search in the logs. Rows per scale-out wave.
+
 ## 3. Ranked by expected effect on "last answer → ten"
 
 1. P1 thinking level for intake turns: 3–6 s.
