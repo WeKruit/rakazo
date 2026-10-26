@@ -316,10 +316,13 @@ M one to two days. Risk covers quality, cost and the project rules.
   keyless channel when it is not (`platformMcpCredential` in `mcp-connector.ts`). During the
   search-size measurement the keyless channel returned 429 "free MCP rate limit" after about 150
   calls in roughly six minutes, and later calls came back empty.
+- **Production (checked 2026-10-26):** the deployment key is set and sent with every people
+  search, so production does not use the keyless channel today. The item covers self-hosted
+  deployments and a key that is removed or expires.
 - **Risk:** if a deployment runs without the key, a few users scaling to 100/200 at once (5–16
   searches each) hit that limit. Rows then stop arriving and the round looks short for no visible
   reason.
-- **Change:** confirm the production key is set. Log a warning once per process when people search
+- **Change:** log a warning once per process when people search
   runs keyless. Treat a 429 from the search as rate-limited, back off and retry, rather than as an
   empty result.
 - **Expected savings:** none on the happy path. It prevents stalled or short scale-outs.
@@ -391,16 +394,18 @@ Location in scope stayed flat with depth (New Jersey 69–75%, Atlanta 93%). A r
 keyword check fell slightly with depth (New Jersey 46% → 43%, Atlanta 74% → 68%): results 51–100
 of a query are a little weaker but still usable.
 
-**Cost per 100 unique people** at list price ($0.007 per search up to 10 results, $0.001 per
-additional result, $0.001 per highlighted page): 10 each ≈ $0.19, 25 each ≈ $0.22, 50 each ≈ $0.25,
-100 each ≈ $0.32. Bigger pages cost slightly more per unique person, not less, because the long
-tails of different queries overlap more; the difference is cents per role. The real gain of big
-pages is fewer queries the model has to write and fewer calls against the rate limit. The provider's
-pricing page lists more than 25 results per request as an Enterprise plan feature, so 50/100 must be
-confirmed on the production key before relying on it.
+**Production key, checked 2026-10-26 (read-only probe, key not printed):** a people search with 50
+results returned HTTP 200 with exactly 50 results and was billed $0.047; one with 100 returned
+HTTP 200 and was billed $0.096. The key is not capped at 25, and the bill is about $0.001 per
+result returned, highlights included.
 
-This run used the keyless channel, so actual spend was $0; at list price all runs together would have
-cost under $25. The US$150 budget is untouched.
+**Cost per 100 unique people** at that rate: 10 each ≈ $0.11, 25 each ≈ $0.11, 50 each ≈ $0.12,
+100 each ≈ $0.16. Bigger pages cost slightly more per unique person, not less, because the long
+tails of different queries overlap more; the difference is a few cents per role. The real gain of
+big pages is fewer queries the model has to write and fewer calls against the rate limit.
+
+The measurement used the keyless channel ($0). The production probe cost about $0.24. The US$150
+budget is essentially untouched.
 
 ### Answer
 
@@ -413,21 +418,20 @@ cost under $25. The US$150 budget is untouched.
   ~8–12 s instead of 19–22 s (P1 + P2 + P6 together).
 - **A for scale-out: no.** Scale-out has no first-person wait: each search already saves to
   Results 2–3 s after it is sent.
-- **B, bigger pages for scale-out: yes**, if the production key allows more than 25. Settings:
+- **B, bigger pages for scale-out: yes.** The production key returns 50 and 100. Settings:
 
 | Step | Today | Recommended |
 |---|---|---|
 | First round (ten) | 4 × 25, ~64–70 unique | keep 4 × 25 |
-| Scale to 100 | waves of 4 × 25, one model step each | one step of 4 × 50 (~170–180 unique, ~$0.40) |
-| Scale to 200 | 3+ waves | one step of 4 × 100 (~320 unique, ~$0.80) or 6 × 50 (~255, ~$0.60) |
-| If the key caps at 25 | | one step of 8 × 25 (~175 unique) for 100, 12–16 × 25 for 200 |
+| Scale to 100 | waves of 4 × 25, one model step each | one step of 4 × 50 (~170–180 unique, ~$0.19) |
+| Scale to 200 | 3+ waves | one step of 4 × 100 (~320 unique, ~$0.38) or 6 × 50 (~255, ~$0.28) |
 
 All of these are one model step instead of several waves, which is where the time goes (P12).
 
 ### PR item
 
-- [ ] Confirm the production key's maximum results per request.
-- [ ] Scale-out instructions: one step of 4 × 50 for 100, 4 × 100 for 200 (or 8/12–16 × 25 if capped).
+- [x] Confirm the production key's maximum results per request (50 and 100 work).
+- [ ] Scale-out instructions: one step of 4 × 50 for 100, 4 × 100 for 200.
 - [ ] P2 answer-time dispatch of drafted searches.
 - [ ] Live test on a role copy: accept → 100 and → 200 in Results, unique count, cost.
 
