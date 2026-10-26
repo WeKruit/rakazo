@@ -261,7 +261,7 @@ describe("maintained recruiting defaults", () => {
 
   it("asks the first question before a full save and shows people before the brief is saved", () => {
     expect(RECRUITING_INTAKE_FLOW).toContain(
-      "ask the first clarifying question together with one small recruiting_role create",
+      "asks the first clarifying question (ask it first) together with one small recruiting_role create",
     );
     expect(RECRUITING_INTAKE_FLOW).toContain(
       "first issue the calibration people searches as your very next step, before any read or save",
