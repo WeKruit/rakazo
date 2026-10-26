@@ -245,7 +245,7 @@ export const PlannedPeopleSearchesSchema = z.array(z.string().trim().min(3).max(
 const askQuestion = {
   question: z.string().min(1).max(240),
   plannedSearches: PlannedPeopleSearchesSchema.optional().describe(
-    "Recruiting intake only, on the last clarifying question before the people searches: the four people-search queries you will run. They run the moment the recruiter answers.",
+    "Recruiting intake only, on a clarifying question before the first round: the four people-search queries you would run if this answer were the last one needed. They run the moment the recruiter answers.",
   ),
 };
 export const AskUserInputSchema = z.union([

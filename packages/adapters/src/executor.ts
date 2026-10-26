@@ -655,21 +655,29 @@ export function shortQuestion(question: string, max = 240): string {
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
-  "When you ask your last clarifying question (nothing else is left to ask before the people searches), also pass plannedSearches on that ask_user call: the four people-search queries you will run, written as you would write them for the search. They run the moment the recruiter answers, and you get their people rows with the answer. Never pass plannedSearches on a question that another question will follow.";
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Leave plannedSearches out only when you already know another question must follow this one.";
+
+/** A short message that opens with a role lead-in, such as 「新岗位：仓库经理（Atlanta）。要求：…」. */
+const ROLE_LEAD_IN =
+  /^(?:新岗位|岗位|职位|招聘|new role|job title|job|role|position|hiring)\s*[:：]/i;
 
 /**
  * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
- * 「新岗位：」. Short messages are instructions, not a JD.
+ * 「新岗位：」. Short messages are instructions, not a JD, unless they open with a role lead-in.
  */
 export function pastedJobTitle(text: string): string | null {
-  if (text.trim().length < 400) return null;
-  const lines = text
+  const trimmed = text.trim();
+  const ledIn = ROLE_LEAD_IN.test(trimmed);
+  if (trimmed.length < (ledIn ? 60 : 400)) return null;
+  const lines = trimmed
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
   const first = lines[0] ?? "";
   const after = first.replace(/^[^:：]*[:：]\s*/, "");
-  const title = (/[:：]\s*$/.test(first) ? lines[1] : after || first) ?? "";
+  const line = (/[:：]\s*$/.test(first) ? lines[1] : after || first) ?? "";
+  // A one-line JD runs on after the title: keep its first sentence.
+  const title = ledIn ? (line.split(/[。；;]|\.\s/)[0] ?? "") : line;
   return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
 }
 
