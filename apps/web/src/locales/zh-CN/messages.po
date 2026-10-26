@@ -7302,6 +7302,10 @@ msgstr "发送给"
 msgid "Send totals are not available from these records."
 msgstr "这些记录无法提供发送总数。"
 
+#: src/components/AskCard.tsx
+msgid "Send when I say send"
+msgstr "以后我说发就直接发"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "按 Enter 发送"

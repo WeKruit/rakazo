@@ -39,6 +39,8 @@ export function buildApprovalAskBlock(
   options?: {
     reviewReason?: string;
     oneTimeOnly?: boolean;
+    /** An email send: offer the recruiter's "send when I say send" preference. */
+    sendPreference?: boolean;
     crmOperation?: CrmApprovalOperation;
     recruiting?: RecruitingApprovalDisplay;
     crmImportTarget?: RecruitingCrmTarget;
@@ -182,8 +184,13 @@ export function buildApprovalAskBlock(
         : safeDetail,
     status: "pending",
     // A real send is confirmed each time; it is never "always allowed".
-    actions:
-      options?.instantlyActivation || options?.instantlyReply
+    actions: options?.sendPreference
+      ? [
+          { id: "allow", label: "Confirm and send" },
+          { id: "always", label: "Send when I say send" },
+          { id: "deny", label: "Cancel" },
+        ]
+      : options?.instantlyActivation || options?.instantlyReply
         ? [
             { id: "allow", label: "Confirm and send" },
             { id: "deny", label: "Cancel" },

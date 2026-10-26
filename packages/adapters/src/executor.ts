@@ -115,13 +115,16 @@ import {
   oneTimeMcpWriteEndpoint,
   planActionGate,
   promptInvokesSkill,
+  RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
+  recruiterAskedToSend,
   recruiterConnectBlock,
+  recruiterInstructedSend,
   recruitingBriefConfirmedNextStep,
   redactSecrets,
   renderBotDirectory,
@@ -129,6 +132,7 @@ import {
   runBudgetExceeded,
   runBudgetStopText,
   sandboxCommandTimeoutMs,
+  sendBodyText,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   truncatedPlainText,
@@ -160,12 +164,12 @@ import {
   claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
+  confirmRecruitingBrief,
   createRecruitingSchedulingPlan,
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
   executeNativeRecruitingShortlist,
-  confirmRecruitingBrief,
   executeRecruitingApproval,
   executeRecruitingCrmBinding,
   executeRecruitingNotesTool,
@@ -173,6 +177,7 @@ import {
   findDefaultModelCredential,
   findModelCredential,
   getRecruitingCrmTarget,
+  humanMessageInclude,
   InvalidSpaceNameError,
   IsolationError,
   isNativeHumanMessage,
@@ -5817,12 +5822,61 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   )
                 ).server
               : undefined;
-          const requiresExplicitApproval = toolRequiresExplicitApproval(
-            policyToolName,
-            connectorCall.route,
-            args,
-            nativeMcpWriteServer?.endpoint,
-          );
+          // An email the recruiter explicitly told us to send, with text they wrote or were just
+          // shown, goes out without a second card. Everything else keeps its one-time card.
+          const sendOperation =
+            connectorCall.route?.connectorId === "mcp"
+              ? connectorCall.route.toolName
+              : connectorCall.route?.connectorId === "composio"
+                ? connectorCall.route.toolName.toUpperCase()
+                : undefined;
+          const recruiterSaidSend =
+            !nextApprovedTool &&
+            run.trigger === "user" &&
+            Boolean(sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation)) &&
+            (await (async () => {
+              if (!recruitingSourceMessageId) return false;
+              const source = await deps.prisma.message.findFirst({
+                where: { id: recruitingSourceMessageId, threadId: thread.id },
+                include: humanMessageInclude,
+              });
+              if (!source || !isNativeHumanMessage(source)) return false;
+              const text = (blocks: unknown) =>
+                MessageBlockSchema.array()
+                  .safeParse(blocks)
+                  .data?.flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                  .join("\n") ?? "";
+              const shown = await deps.prisma.message.findFirst({
+                where: { threadId: thread.id, role: "bot", createdAt: { lt: source.createdAt } },
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+                select: { blocks: true },
+              });
+              const instruction = text(source.blocks);
+              if (!recruiterAskedToSend(instruction)) return false;
+              // The recruiter's saved choice "send when I say send" (the card's always option).
+              const rules = await loadApprovalRules();
+              const sendsDirectly = [policyToolName, name].some(
+                (toolName) =>
+                  resolveActionApprovalDetail({ toolName, readOnly: false, rules }).source ===
+                  "always_allow",
+              );
+              return (
+                sendsDirectly ||
+                recruiterInstructedSend({
+                  instruction,
+                  shownBefore: shown ? text(shown.blocks) : null,
+                  body: sendBodyText(args),
+                })
+              );
+            })());
+          const requiresExplicitApproval =
+            !recruiterSaidSend &&
+            toolRequiresExplicitApproval(
+              policyToolName,
+              connectorCall.route,
+              args,
+              nativeMcpWriteServer?.endpoint,
+            );
           // Declared effect of the operation this call dispatches (installed API method and
           // flag). Install config is immutable per route resource, so it cannot drift before
           // execute; a catalog call uses the tool it was just resolved to. Known one-time
@@ -5998,12 +6052,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : false));
           const plan = requiresMandatoryApproval
             ? "ask"
-            : planActionGate({
-                resolved: approvalResolved,
-                consequential: requiresApprovalByDefault,
-                autoReviewEnabled: autoReviewPref,
-                checkerConfigured,
-              });
+            : recruiterSaidSend
+              ? approvalResolved.decision === "ask"
+                ? "ask"
+                : "allow"
+              : planActionGate({
+                  resolved: approvalResolved,
+                  consequential: requiresApprovalByDefault,
+                  autoReviewEnabled: autoReviewPref,
+                  checkerConfigured,
+                });
           let reviewReason: string | undefined;
           let gateDecision: "ask" | "allow" = plan === "ask" ? "ask" : "allow";
           const needsApprovalEarly = plan === "ask" || plan === "judge";
@@ -7159,6 +7217,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ? "Allow this exact reply once after current CRM and conversation checks."
                   : reviewReason,
                 oneTimeOnly: requiresExplicitApproval,
+                sendPreference: Boolean(
+                  sendOperation && RECRUITER_INSTRUCTED_SEND_TOOLS.has(sendOperation),
+                ),
                 crmOperation,
                 recruiting: recruitingApproval,
                 crmImportTarget: crmImportSelection?.target,
