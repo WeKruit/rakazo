@@ -4757,12 +4757,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : []),
         ];
         // Before a role's first round the people search is already listed and the turn ends on
-        // the next-step card, so the tool catalog would only cost a lookup step.
+        // the next-step card, so the tool catalog would only cost a lookup step. A role built from
+        // the recruiter's own list may never have a round, so it keeps the catalog.
         const firstRoundPending =
           Boolean(thread.activeRecruitingRoleId) &&
           discovered.some((tool) => tool.name.endsWith("web_search_advanced_exa")) &&
           !(await deps.prisma.recruitingCalibrationRound.findFirst({
             where: { roleId: thread.activeRecruitingRoleId ?? "", role: { spaceId: run.spaceId } },
+            select: { id: true },
+          })) &&
+          !(await deps.prisma.externalEffect.findFirst({
+            where: {
+              spaceId: run.spaceId,
+              kind: "recruiting_research",
+              status: "completed",
+              AND: [
+                { request: { path: ["operation"], equals: "import_csv" } },
+                { request: { path: ["roleId"], equals: thread.activeRecruitingRoleId ?? "" } },
+              ],
+            },
             select: { id: true },
           }));
         const exposedConnectorTools = discovered.filter(
