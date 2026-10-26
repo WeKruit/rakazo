@@ -11,6 +11,20 @@ import { makeWorkerUtils, type Runner, run, type WorkerUtils } from "graphile-wo
 import type { Pool } from "pg";
 import { recordHistoryCompactAttemptsExhausted } from "./history-compaction.js";
 
+/**
+ * Run triggers that no person is waiting on. Their runs queue behind a recruiter's turn when every
+ * worker slot is busy; graphile runs lower priority numbers first.
+ */
+const BACKGROUND_TRIGGERS = [
+  "bot_message",
+  "routine",
+  "webhook",
+  "tickets",
+  "recruiting_research",
+  "cloud_agent",
+];
+const BACKGROUND_PRIORITY = 10;
+
 // Share the caller's pg.Pool instead of opening a separate connectionString-based
 // pool per graphile-worker component: three independent pools per worker process
 // (Prisma + publisher + runner) triples the connection footprint against Postgres'
@@ -26,12 +40,26 @@ export class GraphileJobPublisher implements JobPublisher {
     // replace resets attempts and run_at. unsafe_dedupe leaves both, so an
     // exhausted row would stay queued forever. Dedupe only while attempts remain.
     const jobKeyMode = await this.keepExistingMode(utils, job);
+    const priority = await this.priority(utils, job);
     await utils.addJob(job.name, wrapJobPayload(job.payload), {
       runAt: job.availableAt,
       jobKey: job.replaceKey,
       maxAttempts: job.maxAttempts,
       ...(jobKeyMode ? { jobKeyMode } : {}),
+      ...(priority ? { priority } : {}),
     });
+  }
+
+  private async priority(utils: WorkerUtils, job: BackgroundJob): Promise<number> {
+    if (job.name !== "run.continue") return 0;
+    const background = await utils.withPgClient(async (client) => {
+      const found = await client.query(
+        'select 1 from runs where id = $1 and "trigger" = any($2::text[])',
+        [job.payload.runId, BACKGROUND_TRIGGERS],
+      );
+      return (found.rowCount ?? 0) > 0;
+    });
+    return background ? BACKGROUND_PRIORITY : 0;
   }
 
   async cancel(key: string): Promise<void> {

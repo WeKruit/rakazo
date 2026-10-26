@@ -4,6 +4,7 @@ import {
   HISTORY_COMPACT_MAX_ATTEMPTS,
   historyCompactJob,
   messagingDeliverJob,
+  runContinueJob,
 } from "@rakazo/adapter-kit";
 import { createLogger, createTestSink, installLogger, wrapJobPayload } from "@rakazo/logging";
 import type { Runner } from "graphile-worker";
@@ -107,6 +108,27 @@ describe("GraphileJobPublisher.enqueue", () => {
     await publisher.enqueue(messagingDeliverJob("run-1"));
     const options = addJob.mock.calls[0]?.[2] as { maxAttempts?: number } | undefined;
     expect(options?.maxAttempts).toBeUndefined();
+    await publisher.close();
+  });
+
+  it("queues a background run behind a recruiter's turn", async () => {
+    const addJob = vi.fn(async (..._args: unknown[]) => undefined);
+    const query = vi.fn(async (_sql: string, params?: readonly unknown[]) => ({
+      rowCount: params?.[0] === "run-routine" ? 1 : 0,
+      rows: [],
+    }));
+    vi.mocked(makeWorkerUtils).mockResolvedValue({
+      addJob,
+      withPgClient: async (callback: (client: { query: typeof query }) => Promise<unknown>) =>
+        callback({ query }),
+      release: vi.fn(async () => undefined),
+    } as never);
+    const publisher = new GraphileJobPublisher({} as Pool);
+    await publisher.enqueue(runContinueJob("run-routine"));
+    await publisher.enqueue(runContinueJob("run-user"));
+    const priorities = addJob.mock.calls.map((call) => (call[2] as { priority?: number }).priority);
+    expect(priorities).toEqual([10, undefined]);
+    expect(query.mock.calls[0]?.[1]).toEqual(["run-routine", expect.arrayContaining(["routine"])]);
     await publisher.close();
   });
 
