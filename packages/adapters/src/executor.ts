@@ -128,6 +128,7 @@ import {
   recruiterConnectBlock,
   recruiterInstructedSend,
   recruitingBriefConfirmedNextStep,
+  recruitingNextStepCard,
   redactSecrets,
   renderBotDirectory,
   resolveActionApprovalDetail,
@@ -4678,6 +4679,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // Set before the first model step when a job link is saved as the thread's role.
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
+        // After this run records a round, its only card is the next-step choice.
+        const nextStepCardAfterRound = async () => {
+          if (!thread.activeRecruitingRoleId) return undefined;
+          const [round] = await deps.prisma.externalEffect.findMany({
+            where: {
+              runId,
+              spaceId: run.spaceId,
+              kind: "recruiting_research",
+              status: "completed",
+              request: { path: ["operation"], equals: "calibration_round" },
+            },
+            select: { id: true },
+            take: 1,
+          });
+          if (!round) return undefined;
+          const human = await deps.prisma.message.findFirst({
+            where: { threadId: thread.id, role: "user" },
+            orderBy: { seq: "desc" },
+            select: { blocks: true },
+          });
+          return recruitingNextStepCard(
+            /\p{Script=Han}/u.test(JSON.stringify(human?.blocks ?? "")),
+          );
+        };
         const applyTool = async (
           name: string,
           rawArgs: Record<string, unknown>,
@@ -10802,6 +10827,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             } else if (event.type === "ask") {
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
+              if (!event.requestedSchema) {
+                const card = await nextStepCardAfterRound();
+                if (card) {
+                  event.text = card.text;
+                  event.detail = undefined;
+                  event.actions = card.options.map((label, index) => ({
+                    id: `choice-${index + 1}`,
+                    label,
+                  }));
+                }
+              }
               // Schema keys and enum values are identities: reject secrets rather than redact them.
               if (
                 event.requestedSchema &&
