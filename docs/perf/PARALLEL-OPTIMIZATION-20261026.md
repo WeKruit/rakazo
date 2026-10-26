@@ -274,7 +274,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P16. Find the uncovered wait in discoveryJoin
 
-- **Owner:** _unclaimed_ (pairs with P9)
+- **Owner:** dot (claimed 2026-10-26; local implementation and offline verification) (pairs with P9)
 - **Serial today:** `discoveryJoinMs` (0.9–2.2 s) is 2–3 times the sum of the `*OwnMs` loads it
   joins, so something it waits on is not timed: pool acquisition, a sequential await before the
   join, or an untimed load.
@@ -313,7 +313,7 @@ M one to two days. Risk covers quality, cost and the project rules.
 
 ### P19. Keyless people-search fallback and its rate limit
 
-- **Owner:** _unclaimed_
+- **Owner:** dot (claimed 2026-10-26; local implementation and offline verification)
 - **Today:** the people search uses the deployment key when one is set and falls back to the
   keyless channel when it is not (`platformMcpCredential` in `mcp-connector.ts`). During the
   search-size measurement the keyless channel returned 429 "free MCP rate limit" after about 150
