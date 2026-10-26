@@ -185,4 +185,43 @@ describe("fillRecruitingRoleArgs", () => {
       { criterionId: "sim", origin: "jd", effect: "reject", sourceRefIds: ["jd"] },
     ]);
   });
+
+  // 2026-10-26: roles with several page excerpts, or a JD pasted as a message, left JD facts uncited.
+  it("cites the matching excerpt among several, and a pasted JD message, for an uncited JD fact", async () => {
+    const title = { ...jd, id: "jd-title" };
+    const duties = { ...jd, id: "jd-duties", quote: "Own sim-to-real evaluation" };
+    const field = (value: string) => ({
+      key: "core_duties",
+      value,
+      origin: "jd",
+      state: "known",
+      consequential: false,
+      sourceRefIds: [],
+    });
+    const brief = (value: string) => ({ fields: [field(value)] });
+    const paged = await fillRecruitingRoleArgs(prisma(), actor, context, {
+      operation: "create",
+      sourceRefs: [title, duties],
+      criteria: [],
+      brief: brief("sim-to-real"),
+    });
+    expect(
+      (paged.brief as { fields: { sourceRefIds: string[] }[] }).fields[0]!.sourceRefIds,
+    ).toEqual(["jd-duties"]);
+    const pasted = {
+      id: "human-message:m1",
+      kind: "original_material",
+      quote: "Research Scientist, Simulation",
+      anchor: { kind: "message", messageId: "m1" },
+    };
+    const typed = await fillRecruitingRoleArgs(prisma({ events: [] }), actor, context, {
+      operation: "create",
+      sourceRefs: [pasted],
+      criteria: [],
+      brief: brief("Simulation research"),
+    });
+    expect(
+      (typed.brief as { fields: { sourceRefIds: string[] }[] }).fields[0]!.sourceRefIds,
+    ).toEqual(["human-message:m1"]);
+  });
 });
