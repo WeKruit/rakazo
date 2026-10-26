@@ -130,6 +130,14 @@ describe("sourced recruiting intake", () => {
       "location",
     ]);
   });
+  // 2026-10-26: a known "locations" field kept the brief from ever being confirmable.
+  it("accepts a known location field under another location key", () => {
+    const draft = brief();
+    draft.fields = draft.fields.map((field) =>
+      field.key === "location" ? { ...field, key: "locations" } : field,
+    );
+    expect(recruitingBriefClarifications(draft)).toEqual([]);
+  });
   it("phrases missing known brief fields without exposing internal keys", () => {
     const draft = brief();
     draft.fields[0] = { ...draft.fields[0]!, state: "missing", value: null };

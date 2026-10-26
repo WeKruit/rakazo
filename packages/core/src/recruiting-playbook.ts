@@ -84,10 +84,13 @@ export function validateRecruitingBrief(
 }
 
 /** No mandatory questionnaire. Reuse sourced answers and ask only about material uncertainty. */
+// The model names the work-location field freely (location, locations, work_location, …).
+const isLocationKey = (key: string) => /location/i.test(key);
+
 export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
   const pending = brief.fields.filter(
     (field) =>
-      (field.consequential || field.key === "location") &&
+      (field.consequential || isLocationKey(field.key)) &&
       (field.state !== "known" || field.origin === "inferred"),
   );
   const questions = pending.map((field) => ({
@@ -98,13 +101,13 @@ export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
       )?.question ??
       (field.key === "salary_range"
         ? "What salary range may be stated in outreach?"
-        : field.key === "location"
+        : isLocationKey(field.key)
           ? "What location or remote work scope applies?"
           : field.key === "company_deck"
             ? "Is a company deck available?"
             : "Please clarify the unresolved role detail."),
   }));
-  if (!brief.fields.some((field) => field.key === "location"))
+  if (!brief.fields.some((field) => isLocationKey(field.key)))
     questions.push({
       fieldKey: "location",
       question: "What location or remote work scope applies?",
