@@ -248,6 +248,30 @@ describePostgres("usage ledger (PostgreSQL)", () => {
     await connectorCall(enrichServerId, "get_enrichment_results", new Date(), finished);
     await connectorCall(enrichServerId, "get_enrichment_results", new Date(), finished);
 
+    // Odd provider bodies never fail the connector write and never count as credits.
+    for (const body of [
+      {
+        content: [{ type: "text", text: JSON.stringify({ id: "job-2", cost: { credits: "12" } }) }],
+      },
+      {
+        content: [
+          { type: "text", text: JSON.stringify({ id: "job-3", cost: { credits: { n: 1 } } }) },
+        ],
+      },
+      { content: [{ type: "text", text: "{not json" }] },
+      { structuredContent: { id: "job-4", cost: "free" } },
+    ]) {
+      const odd = await connectorCall(enrichServerId, "get_enrichment_results", new Date(), body);
+      expect(
+        await prisma.externalEffect.findUniqueOrThrow({ where: { id: odd.id } }),
+      ).toMatchObject({ status: "completed" });
+    }
+    expect(
+      await prisma.usageRecord.count({
+        where: { spaceId, unit: "credits", provider: "fullenrich" },
+      }),
+    ).toBe(1);
+
     const owner = await db.summarizeUsageCosts(prisma, actor, {
       priceTokens: (provider, model, tokens) =>
         provider === "openai-codex" && model === "gpt-test" && tokens.input === 100 ? 0.5 : null,
