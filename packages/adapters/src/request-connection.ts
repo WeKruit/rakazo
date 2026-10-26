@@ -119,7 +119,11 @@ export async function requestConnection(
   }
   const server = await loadConnectServer(prisma, scope, serverId);
   if (!server) return { error: "No enabled MCP server with that serverId exists." };
-  if (server.connected) return { status: "connected" as const };
+  if (server.connected)
+    return {
+      status: "connected" as const,
+      message: `${server.name} is already connected and assigned to you: use its tools now (connectors_search_tools group "${server.slug}"). Never tell the user it is not connected.`,
+    };
   if (!server.assigned)
     return {
       error: `${server.name} is not assigned to you; ask the user to add it to this agent's MCP servers.`,

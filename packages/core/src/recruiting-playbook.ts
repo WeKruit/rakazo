@@ -345,7 +345,7 @@ export function nextPlaybookStep(
         ? {
             stage,
             label: "开始校准搜寻",
-            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（同一步发出 web_search_advanced_exa 四条人才搜索，每条回来自动存进结果 → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
+            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（同一步发出 web_search_advanced_exa 四条人才搜索，每条回来自动存进结果 → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。招聘者说过不要去外部找人、只用自己的名单时，不要搜索：只用已导入的人，如实说明人数，不要凑满 10 人。`,
           }
         : {
             stage,
@@ -359,7 +359,7 @@ export function nextPlaybookStep(
         stage,
         label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
         prompt: remaining
-          ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后记录本轮（名单会自动列在聊天里）。`
+          ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后记录本轮（名单会自动列在聊天里）。招聘者说过不要去外部找人、只用自己的名单时，不要搜索：只用已导入的人，如实说明人数，不要凑满 10 人。`
           : `不要重新搜索：从已保存的人里选 10 位记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单；面板已提供逐人反馈入口，不要另建逐人评分卡。${NEXT_STEP_CARD}允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。`,
       };
     }

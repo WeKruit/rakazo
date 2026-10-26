@@ -278,6 +278,22 @@ async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
   }
 }
 
+/**
+ * The provider stores a body containing a bare "&" as blank, so a body is sent as HTML with
+ * "&" encoded; plain text keeps its line breaks.
+ */
+function bodyHtml(body: string) {
+  if (/<[a-z][^>]*>/i.test(body)) return body.replace(/&(?![a-z]+;|#\d+;|#x[\da-f]+;)/gi, "&amp;");
+  return body
+    .replace(/\r\n?/g, "\n")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .split(/\n{2,}/)
+    .map((paragraph) => `<p>${paragraph.replace(/\n/g, "<br />")}</p>`)
+    .join("");
+}
+
 function sequences(steps: z.output<typeof Step>[]) {
   return [
     {
@@ -285,7 +301,7 @@ function sequences(steps: z.output<typeof Step>[]) {
         type: "email",
         delay: step.delay_days,
         delay_unit: "days",
-        variants: [{ subject: step.subject, body: step.body }],
+        variants: [{ subject: step.subject, body: bodyHtml(step.body) }],
       })),
     },
   ];
@@ -336,7 +352,7 @@ async function createCampaign(rest: InstantlyRest, input: z.output<typeof Create
 async function requireSavedEmail(rest: InstantlyRest, campaignId: unknown) {
   if (firstEmail(await rest("GET", `/campaigns/${String(campaignId)}`))) return;
   throw new Error(
-    'The mail service saved the email with a blank body (it drops a body containing "&"); write the body without "&" and save the steps again',
+    "The mail service saved the email with a blank body; rewrite the body in plain words and save the steps again",
   );
 }
 

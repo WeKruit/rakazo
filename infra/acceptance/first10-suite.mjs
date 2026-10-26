@@ -13,6 +13,7 @@
 //            --repeat <n>            runs per case (default 1; use 5+ for a meaningful p90)
 //            --out <dir>             reports directory (default ./first10-<time>)
 //            --from <dir>            rebuild summary.md and report.html from an earlier run, no new runs
+// RAKAZO_ORIGIN (optional) is passed through to each run as its Origin header.
 // Runs the cases one after another, never in parallel, and never during another live test.
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every case passes.
 
