@@ -7,6 +7,7 @@ import { hasPendingUserMessage } from "./thread-reducer.js";
  * arguments or ids. null means nothing to add: idle, or the reply text is streaming.
  */
 export type ThreadTailPhase =
+  | "retrying"
   | "compacting"
   | "working"
   | "needs_input"
@@ -25,13 +26,13 @@ export function threadTailPhase(
   const last = thread.messages.at(-1);
   const liveTail = (runId: string) =>
     thread.messages.find((message) => message.id === `progress:${runId}`)?.blocks.at(-1);
-  if (
+  const runningPhase = (phase: "compacting" | "retrying") =>
     runs.some((run) => {
       const tail = liveTail(run.id);
-      return run.status === "running" && tail?.kind === "progress" && tail.phase === "compacting";
-    })
-  )
-    return "compacting";
+      return run.status === "running" && tail?.kind === "progress" && tail.phase === phase;
+    });
+  if (runningPhase("retrying")) return "retrying";
+  if (runningPhase("compacting")) return "compacting";
   // The user just answered or asked something; that outranks the earlier pause.
   if (options.sending || hasPendingUserMessage(thread))
     return statuses.has("running") ? "working" : "starting";

@@ -398,7 +398,7 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     activity: z.literal(true).optional(),
     pendingToolNames: z.array(z.string()).optional(),
     /** Set while the runtime compacts context; cleared by the next progress update. */
-    phase: z.enum(["compacting", "thinking"]).optional(),
+    phase: z.enum(["compacting", "thinking", "retrying"]).optional(),
     /** User-safe label for the thinking phase; never raw reasoning. */
     summary: z.string().max(80).optional(),
     at: z.string().optional(),

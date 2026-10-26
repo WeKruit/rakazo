@@ -32,6 +32,23 @@ describe("thread tail phase", () => {
     ).toBe("compacting");
   });
 
+  it("says the reply is reconnecting while a silent model call is retried", () => {
+    expect(
+      threadTailPhase(
+        thread(
+          [{ id: "run", status: "running" }],
+          [
+            {
+              id: "progress:run",
+              runId: "run",
+              blocks: [{ kind: "progress", text: "", activity: true, phase: "retrying" }],
+            },
+          ],
+        ),
+      ),
+    ).toBe("retrying");
+  });
+
   it("asks for an answer only when no open ask card already does", () => {
     const waiting = [{ id: "run", status: "waiting_input" }];
     expect(threadTailPhase(thread(waiting))).toBe("needs_input");

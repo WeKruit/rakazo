@@ -611,7 +611,7 @@ export type AgentRuntimeEvent =
       /** Provider-generated tool status rather than assistant-authored narration. */
       activity?: true;
       /** Runtime phase behind an empty activity line, e.g. native context compaction. */
-      phase?: "compacting" | "thinking";
+      phase?: "compacting" | "thinking" | "retrying";
       /** ≤8-word user-safe label for a thinking phase; never raw reasoning. */
       summary?: string;
       /** ≤200-char user-safe thinking line: sanitized reasoning summary or last tool intent. */

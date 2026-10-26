@@ -6140,6 +6140,10 @@ msgstr "Reconnect OAuth"
 msgid "Reconnecting"
 msgstr "Reconnecting"
 
+#: src/lib/roster-status.ts
+msgid "Reconnecting…"
+msgstr "Reconnecting…"
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Recorded event"
 msgstr "Recorded event"

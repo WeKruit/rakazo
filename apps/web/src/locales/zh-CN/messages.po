@@ -6140,6 +6140,10 @@ msgstr "重新连接 OAuth"
 msgid "Reconnecting"
 msgstr "正在重新连接"
 
+#: src/lib/roster-status.ts
+msgid "Reconnecting…"
+msgstr "正在重新连接…"
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Recorded event"
 msgstr "已记录的事件"

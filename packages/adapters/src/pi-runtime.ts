@@ -75,10 +75,11 @@ import {
   clipContentWithFullOutput,
   clipToolResultText,
   clipWithFullOutput,
+  MODEL_ERROR_BODY_TIMEOUT_MS,
+  MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
   MODEL_STREAM_TOTAL_TIMEOUT_MS,
-  modelStreamFirstOutputTimeoutMs,
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
@@ -392,7 +393,7 @@ export class PiAgentRuntime implements AgentRuntime {
           stepThinkingLevel: () => (firstStep ? request.model.firstStepThinkingLevel : undefined),
           attempted: new Set<string>(),
           nextIndex: 0,
-          stream: (target, ctx, options, firstOutputTimeoutMs) =>
+          stream: (target, ctx, options) =>
             reliableModelStream(
               target.models,
               target.model,
@@ -420,7 +421,6 @@ export class PiAgentRuntime implements AgentRuntime {
                   },
                 ),
               target.config.cacheCapabilities?.retentionMode,
-              firstOutputTimeoutMs,
             ),
           onSwitch: async (target) => {
             await request.onModelChange?.(target.config.provider, target.config.id);
@@ -447,7 +447,9 @@ export class PiAgentRuntime implements AgentRuntime {
               type: "progress",
               text: `Provider unavailable. Switched to backup model ${target.config.id}.`,
             });
+            queue.push(RETRYING_PROGRESS);
           },
+          onRetry: () => queue.push(RETRYING_PROGRESS),
         };
         agent = new Agent({
           sessionId: conversationSessionId(request.threadId, request.botId),
@@ -1935,7 +1937,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     nextIndex: 0,
     onSwitch: async () => undefined,
     isProviderFailure: (message) => providerFailures.has(message.content),
-    stream: (target, ctx, options, firstOutputTimeoutMs) =>
+    stream: (target, ctx, options) =>
       reliableModelStream(
         target.models,
         target.model,
@@ -1971,7 +1973,6 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
             },
           ),
         requestModel.cacheCapabilities?.retentionMode,
-        firstOutputTimeoutMs,
       ),
   };
   const nestedTools = toAgentTools(childDefs, nestedHost);
@@ -2904,8 +2905,9 @@ interface FallbackStreamState {
     target: RuntimeModelTarget,
     context: TranscriptContext,
     options: ModelsSimpleStreamOptions | undefined,
-    firstOutputTimeoutMs?: number,
   ): AssistantMessageEventStream;
+  /** The current step is being retried after its stream went silent. */
+  onRetry?(): void;
 }
 
 function errorFacts(value: unknown) {
@@ -3179,7 +3181,6 @@ function fallbackAwareModelStream(
   const run = async () => {
     let buffered: AssistantMessageEvent[] = [];
     let retries = 0;
-    let attempts = 0;
     let retriedSilentStream = false;
     let firstRetryableError: Extract<AssistantMessageEvent, { type: "error" }> | undefined;
     while (!signalAborted()) {
@@ -3200,13 +3201,10 @@ function fallbackAwareModelStream(
             )
           : "off";
         const reasoning = thinkingLevel === "off" ? undefined : thinkingLevel;
-        // Only the first attempt gets the tight first-output bound; any retry or backup gets the
-        // full idle bound, so a slow but healthy step is not cut short twice.
         stream = state.stream(
           target,
           context,
           state.request.fallbackModels?.length ? { ...options, apiKey, reasoning } : options,
-          attempts++ === 0 ? modelStreamFirstOutputTimeoutMs(thinkingLevel) : undefined,
         );
       } catch (error) {
         finishWithThrownError(target, error);
@@ -3238,9 +3236,10 @@ function fallbackAwareModelStream(
               // A stream that opened and then went silent is retried once on a fresh connection.
               if (
                 !retriedSilentStream &&
-                event.error.errorMessage === CODEX_STREAM_IDLE_TIMEOUT_MESSAGE
+                event.error.errorMessage?.includes(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE)
               ) {
                 retriedSilentStream = true;
+                state.onRetry?.();
                 buffered = [];
                 restart = true;
                 break;
@@ -3365,6 +3364,14 @@ export function isCodexModel(model: Pick<Model<Api>, "api" | "provider">): boole
   return model.provider === "openai-codex" || model.api === "openai-codex-responses";
 }
 
+/** Tells the person the reply is being retried, without naming a model or provider. */
+const RETRYING_PROGRESS: AgentRuntimeEvent = {
+  type: "progress",
+  text: "",
+  activity: true,
+  phase: "retrying",
+};
+
 /** Abort reason recorded when a Codex stream goes silent past the idle bound. */
 export const CODEX_STREAM_IDLE_TIMEOUT_MESSAGE = "Codex stream idle timeout";
 /** How long a stream may take to end on its own after the watchdog aborts it. */
@@ -3406,7 +3413,7 @@ export function codexStreamIdleWatchdog(
   upstream: AbortSignal | undefined,
   idleTimeoutMs: number = MODEL_STREAM_IDLE_TIMEOUT_MS,
   totalTimeoutMs: number = MODEL_STREAM_TOTAL_TIMEOUT_MS,
-  firstOutputTimeoutMs?: number,
+  firstEventTimeoutMs: number = MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
 ): StreamIdleWatchdog {
   const controller = new AbortController();
   let timedOut = false;
@@ -3456,7 +3463,7 @@ export function codexStreamIdleWatchdog(
     disposed = true;
     if (timer !== undefined) clearTimeout(timer);
     if (capTimer !== undefined) clearTimeout(capTimer);
-    if (firstOutputTimer !== undefined) clearTimeout(firstOutputTimer);
+    if (firstEventTimer !== undefined) clearTimeout(firstEventTimer);
     if (graceTimer !== undefined) clearTimeout(graceTimer);
     endGrace?.();
     timer = undefined;
@@ -3470,9 +3477,9 @@ export function codexStreamIdleWatchdog(
   // A stream that keeps sending events but never finishes is bounded by one overall cap,
   // started when the first successful response arrives.
   let capTimer: ReturnType<typeof setTimeout> | undefined;
-  // Optional tighter bound from the first successful response until the step shows any output.
-  let firstOutputTimer: ReturnType<typeof setTimeout> | undefined;
-  let outputSeen = false;
+  // Tighter bound from the first successful response until the stream reports its first item.
+  let firstEventTimer: ReturnType<typeof setTimeout> | undefined;
+  let itemSeen = false;
   const ping = () => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
@@ -3480,16 +3487,16 @@ export function codexStreamIdleWatchdog(
     if (capTimer === undefined && !disposed && !controller.signal.aborted) {
       capTimer = setTimeout(fire, totalTimeoutMs);
       capTimer.unref?.();
-      if (firstOutputTimeoutMs !== undefined && !outputSeen) {
-        firstOutputTimer = setTimeout(fire, firstOutputTimeoutMs);
-        firstOutputTimer.unref?.();
+      if (!itemSeen) {
+        firstEventTimer = setTimeout(fire, firstEventTimeoutMs);
+        firstEventTimer.unref?.();
       }
     }
   };
-  const sawOutput = () => {
-    outputSeen = true;
-    if (firstOutputTimer !== undefined) clearTimeout(firstOutputTimer);
-    firstOutputTimer = undefined;
+  const sawItem = () => {
+    itemSeen = true;
+    if (firstEventTimer !== undefined) clearTimeout(firstEventTimer);
+    firstEventTimer = undefined;
   };
 
   const describeTimeout = (message: AssistantMessage): AssistantMessage =>
@@ -3546,7 +3553,8 @@ export function codexStreamIdleWatchdog(
               if (next.done) return;
               const event = next.value;
               if ("partial" in event && event.partial) partial = event.partial;
-              if (!outputSeen && eventHasPartialOutput(event)) sawOutput();
+              // pi reports "start" as soon as headers land; anything after it comes from the model.
+              if (!itemSeen && event.type !== "start") sawItem();
               ping();
               yield rewrite(event);
             }
@@ -3637,16 +3645,8 @@ export function reliableModelStream(
   accessToken?: string | (() => string | undefined),
   runStream?: (options: ModelsSimpleStreamOptions) => AssistantMessageEventStream,
   cacheRetention?: ModelsSimpleStreamOptions["cacheRetention"],
-  firstOutputTimeoutMs?: number,
 ): AssistantMessageEventStream {
-  const watchdog = isCodexModel(model)
-    ? codexStreamIdleWatchdog(
-        options?.signal,
-        MODEL_STREAM_IDLE_TIMEOUT_MS,
-        MODEL_STREAM_TOTAL_TIMEOUT_MS,
-        firstOutputTimeoutMs,
-      )
-    : undefined;
+  const watchdog = isCodexModel(model) ? codexStreamIdleWatchdog(options?.signal) : undefined;
   try {
     const preparedOptions = reliableStreamOptions(
       model,
@@ -3654,7 +3654,7 @@ export function reliableModelStream(
         ? {
             ...options,
             signal: watchdog.signal,
-            fetch: codexRequestFetch(options?.fetch, MODEL_STREAM_IDLE_TIMEOUT_MS),
+            fetch: codexRequestFetch(options?.fetch, MODEL_ERROR_BODY_TIMEOUT_MS),
             // Only a 2xx arms the shared watchdog. Error bodies are bounded by
             // the fetch wrapper, and a caller-supplied hook still sees every status.
             onResponse: (response, requestModel) => {
