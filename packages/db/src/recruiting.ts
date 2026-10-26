@@ -4231,6 +4231,63 @@ export type RecruitingResearchArtifactInput = {
   clientNonce: string;
 };
 
+/**
+ * A web page reference carries the url and readAt of its native read receipt. Copy them from the
+ * receipt so a reworded url or a reformatted time never fails a role save.
+ */
+export async function fillRecruitingMaterialReceipts(
+  prisma: PrismaClient,
+  actor: Actor,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const ids = new Set<string>();
+  const artifactOf = (value: unknown) => {
+    const anchor = (value as { anchor?: { kind?: unknown; artifact?: { artifactId?: unknown } } })
+      ?.anchor;
+    return anchor?.kind === "artifact" && typeof anchor.artifact?.artifactId === "string"
+      ? anchor.artifact.artifactId
+      : null;
+  };
+  const collect = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(collect);
+    else if (value && typeof value === "object") {
+      const id = artifactOf(value);
+      if (id) ids.add(id);
+      Object.values(value).forEach(collect);
+    }
+  };
+  collect(args);
+  if (!ids.size) return args;
+  const events = await prisma.event.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      type: "recruiting.material.read",
+      OR: [...ids].map((id) => ({ payload: { path: ["artifact", "artifactId"], equals: id } })),
+    },
+    select: { payload: true },
+  });
+  const receipts = new Map<string, { url: string; readAt: string }>();
+  for (const event of events) {
+    const payload = RecruitingMaterialReadPayloadSchema.safeParse(event.payload);
+    if (payload.success)
+      receipts.set(payload.data.artifact.artifactId, {
+        url: payload.data.url,
+        readAt: payload.data.readAt,
+      });
+  }
+  const fill = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(fill);
+    if (!value || typeof value !== "object") return value;
+    const record = Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, fill(item)]),
+    );
+    const id = artifactOf(value);
+    const receipt = id ? receipts.get(id) : undefined;
+    return receipt && record.kind === "original_material" ? { ...record, ...receipt } : record;
+  };
+  return fill(args) as Record<string, unknown>;
+}
+
 /** Called only by the successful native reader, before returning source references to the model. */
 export async function recordRecruitingWebMaterial(
   prisma: PrismaClient,
