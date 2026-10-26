@@ -5,6 +5,7 @@ import {
   countTrailingAutoContinues,
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
+  recruitingRoundListText,
 } from "./turn-end-guard.js";
 
 const run = {
@@ -219,24 +220,39 @@ describe("guardRecruitingTurnEnd", () => {
     ).toEqual({ action: "ended", classification: "question" });
   });
 
-  it("lists the ten in chat when the turn that recorded them did not", async () => {
-    const f = fixture({ stage: "feedback", round: shownRound, completedRoundEffect: true });
-    const input = {
-      run,
-      roleId: "role-1",
-      handedOff: false,
-      pendingApproval: false,
-      postAssistant: f.postAssistant,
-    };
-    await guardRecruitingTurnEnd(f.deps, { ...input, blocks: statusNote });
-    expect(f.postAssistant).toHaveBeenCalledOnce();
-    expect(f.postAssistant).toHaveBeenCalledWith(
-      expect.stringContaining("10. Person 9 · Warehouse Manager · Example Co · Atlanta"),
+  it("lists the ten with the profile passage each saved search returned", async () => {
+    const keys = Array.from({ length: 10 }, (_, i) => `person-${i}`);
+    const text = await recruitingRoundListText(
+      {
+        externalEffect: {
+          findMany: vi.fn(async () => [
+            {
+              result: {
+                candidateRows: [
+                  { candidateKey: "person-0", name: "Person 0", snippet: "Built warehouse ops" },
+                ],
+              },
+            },
+          ]),
+        },
+        recruitingCandidateOccurrence: {
+          findMany: vi.fn(async () =>
+            keys.map((candidateKey, i) => ({
+              candidateKey,
+              name: `Person ${i}`,
+              title: "Warehouse Manager",
+              company: "Example Co",
+              location: "Atlanta",
+            })),
+          ),
+        },
+      } as never,
+      { runId: "run-1", spaceId: "space-1", roleId: "role-1", candidateKeys: keys },
     );
-    f.postAssistant.mockClear();
-    const listed = Array.from({ length: 10 }, (_, i) => `Person ${i}`).join("\n");
-    await guardRecruitingTurnEnd(f.deps, { ...input, blocks: [{ kind: "text", text: listed }] });
-    expect(f.postAssistant).not.toHaveBeenCalled();
+    expect(text).toContain(
+      "1. **Person 0** · Warehouse Manager · Example Co · Atlanta\n   > Built warehouse ops",
+    );
+    expect(text).toContain("10. **Person 9** · Warehouse Manager · Example Co · Atlanta");
   });
 
   it.each([

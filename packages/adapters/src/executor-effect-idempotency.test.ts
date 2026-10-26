@@ -42,6 +42,7 @@ import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
   createRunExecutor,
   jobLinkIn,
+  pastedJobTitle,
   resumeBriefForRun,
   selectBuiltinToolsForRun,
   toolArgsSummary,
@@ -5902,6 +5903,7 @@ describe("native recruiting assessment effect delivery", () => {
           anchor: { kind: "artifact", artifact: receipt.artifact, locator: "text" },
           readAt: receipt.readAt,
           url: receipt.url,
+          quote: "Build simulation for robots.",
         },
       ],
       intent: { basis: "direct", quote: text },
@@ -5909,6 +5911,42 @@ describe("native recruiting assessment effect delivery", () => {
     const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
     expect(prompt).toContain("Build simulation for robots.");
     expect(prompt).toContain("do not create a role");
+  });
+
+  it("saves a pasted JD as the role before the model's first step", async () => {
+    const f = fixture("pasted-jd-role");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    const text = `Job title: Simulation Scientist\n\n${"Build simulation for robots. ".repeat(20)}`;
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "pasted-jd-role",
+        blocks: [{ kind: "text", text }],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    f.setCalls([]);
+    await f.run();
+    expect(f.web.fetch).not.toHaveBeenCalled();
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      operation: "create",
+      title: "Simulation Scientist",
+      brief: null,
+      sourceRefs: [],
+      intent: { basis: "direct", quote: text.trim() },
+    });
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role");
+  });
+
+  it("titles a pasted JD from its first line and ignores short messages", () => {
+    const body = "x".repeat(400);
+    expect(pastedJobTitle(`Job title:\n**Field Engineer**\n${body}`)).toBe("Field Engineer");
+    expect(pastedJobTitle(`# Senior Analyst\n${body}`)).toBe("Senior Analyst");
+    expect(pastedJobTitle(`职位：仓储经理\n${body}`)).toBe("仓储经理");
+    expect(pastedJobTitle("find me ten people")).toBeNull();
   });
 
   it("finds job links but not profile links", () => {

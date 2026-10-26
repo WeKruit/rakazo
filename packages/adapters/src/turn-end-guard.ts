@@ -73,41 +73,63 @@ export type TurnEndGuardResult =
   | { action: "capped"; stage: string; label: string; count: number };
 
 /**
- * The recruiter reads the ten in chat, not only in the Results panel. When this run recorded the
- * round but its reply did not list the people, post the list.
+ * The ten of a recorded round as the chat lists them: name, title, company, location and the
+ * profile passage the people search returned for each, read from this run's saved searches.
  */
-async function listRoundIfMissing(
-  deps: TurnEndGuardDeps,
-  input: TurnEndGuardInput,
-  round: { effectId: string; candidateKeys: string[] },
+export async function recruitingRoundListText(
+  prisma: Pick<PrismaClient, "externalEffect"> & {
+    recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
+  },
+  input: { runId: string; spaceId: string; roleId: string; candidateKeys: readonly string[] },
 ) {
-  const recorded = await deps.prisma.externalEffect.findFirst({
-    where: {
-      id: round.effectId,
-      runId: input.run.id,
-      kind: "recruiting_research",
-      status: "completed",
-    },
-    select: { id: true },
+  const [searches, occurrences] = await Promise.all([
+    prisma.externalEffect.findMany({
+      where: {
+        runId: input.runId,
+        spaceId: input.spaceId,
+        kind: "recruiting_research",
+        status: "completed",
+        request: { path: ["operation"], equals: "save_search" },
+      },
+      select: { result: true },
+    }),
+    prisma.recruitingCandidateOccurrence.findMany({
+      where: { roleId: input.roleId, candidateKey: { in: [...input.candidateKeys] } },
+      select: { candidateKey: true, name: true, title: true, company: true, location: true },
+      orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
+    }),
+  ]);
+  type Person = {
+    name?: string | null;
+    title?: string | null;
+    company?: string | null;
+    location?: string | null;
+    snippet?: string | null;
+  };
+  const people = new Map<string, Person>();
+  for (const row of occurrences)
+    if (!people.has(row.candidateKey)) people.set(row.candidateKey, row);
+  for (const search of searches) {
+    const rows = (search.result as { candidateRows?: unknown } | null)?.candidateRows;
+    if (!Array.isArray(rows)) continue;
+    for (const row of rows as Array<Person & { candidateKey?: unknown }>)
+      if (typeof row.candidateKey === "string" && row.snippet)
+        people.set(row.candidateKey, { ...people.get(row.candidateKey), ...row });
+  }
+  const lines = input.candidateKeys.map((key, index) => {
+    const person = people.get(key);
+    const head = [
+      person?.name ? `**${person.name}**` : null,
+      person?.title,
+      person?.company,
+      person?.location,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const passage = person?.snippet?.trim();
+    return `${index + 1}. ${head}${passage ? `\n   > ${passage.length > 220 ? `${passage.slice(0, 220)}…` : passage}` : ""}`;
   });
-  if (!recorded) return;
-  const rows = await deps.prisma.recruitingCandidateOccurrence.findMany({
-    where: { roleId: input.roleId, candidateKey: { in: round.candidateKeys } },
-    select: { candidateKey: true, name: true, title: true, company: true, location: true },
-    orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
-  });
-  const latest = new Map<string, (typeof rows)[number]>();
-  for (const row of rows) if (!latest.has(row.candidateKey)) latest.set(row.candidateKey, row);
-  const said = input.blocks
-    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-    .join("\n");
-  const names = round.candidateKeys.flatMap((key) => latest.get(key)?.name ?? []);
-  if (names.filter((name) => said.includes(name)).length >= Math.min(8, names.length)) return;
-  const lines = round.candidateKeys.map((key, index) => {
-    const row = latest.get(key);
-    return `${index + 1}. ${[row?.name, row?.title, row?.company, row?.location].filter(Boolean).join(" · ")}`;
-  });
-  await input.postAssistant(`本轮 10 位人选：\n\n${lines.join("\n")}`);
+  return `本轮 10 位人选：\n\n${lines.join("\n")}`;
 }
 
 /**
@@ -152,10 +174,7 @@ export async function guardRecruitingTurnEnd(
         where: { threadId: run.threadId, role: "user", createdAt: { gt: round.createdAt } },
         select: { id: true },
       });
-      if (!answered) {
-        await listRoundIfMissing(deps, input, round);
-        return { action: "ended", classification: "question" };
-      }
+      if (!answered) return { action: "ended", classification: "question" };
       const effect = await deps.prisma.externalEffect.findFirst({
         where: {
           id: round.effectId,

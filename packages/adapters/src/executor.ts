@@ -118,6 +118,7 @@ import {
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_INTAKE_SKILL_NAME,
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
@@ -544,7 +545,11 @@ import {
 } from "./ticket-tools.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
-import { guardRecruitingRoleCreate, guardRecruitingTurnEnd } from "./turn-end-guard.js";
+import {
+  guardRecruitingRoleCreate,
+  guardRecruitingTurnEnd,
+  recruitingRoundListText,
+} from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
 import {
   botMessageOutcomeFromMidTurn,
@@ -565,6 +570,22 @@ export function jobLinkIn(text: string): string | null {
     if (url && !/(^|\.)linkedin\.com$/i.test(url.hostname)) return url.href;
   }
   return null;
+}
+
+/**
+ * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
+ * 「新岗位：」. Short messages are instructions, not a JD.
+ */
+export function pastedJobTitle(text: string): string | null {
+  if (text.trim().length < 400) return null;
+  const lines = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const first = lines[0] ?? "";
+  const after = first.replace(/^[^:：]*[:：]\s*/, "");
+  const title = (/[:：]\s*$/.test(first) ? lines[1] : after || first) ?? "";
+  return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
@@ -4655,7 +4676,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ) => {
           context.signal.throwIfAborted();
           // The model's first tools run once the role from a job link is saved.
-          if (!executionId.startsWith(`${runId}:job-link`)) await linkRole?.saving;
+          if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
           let args =
@@ -8220,7 +8241,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   researchInput.data,
                 );
-                // The round is shown now; the turn ends on the next-step choice.
+                // The ten go into chat as soon as the round is recorded, each with the profile
+                // passage the search returned; the turn then ends on the next-step choice.
+                const recorded = round as { roleId?: unknown; candidateKeys?: unknown } | null;
+                if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
+                  await publishMessage(
+                    deps,
+                    run,
+                    "bot",
+                    [
+                      {
+                        kind: "text",
+                        text: await recruitingRoundListText(deps.prisma, {
+                          runId,
+                          spaceId: run.spaceId,
+                          roleId: recorded.roleId,
+                          candidateKeys: recorded.candidateKeys as string[],
+                        }),
+                      },
+                    ],
+                    undefined,
+                    `recruiting-round-list:${applied.effect.id}`,
+                  ).catch((error) =>
+                    getLogger().warn("round list not posted", { error: String(error) }),
+                  );
+                }
                 return round && typeof round === "object" && !Array.isArray(round)
                   ? { ...round, next: RECRUITING_ROUND_NEXT_STEP }
                   : round;
@@ -9917,7 +9962,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           (request) => redactSecrets(JSON.stringify(request), runSecrets),
           { exposedToolNames: new Set(tools.map((tool) => tool.name)) },
         );
-        async function startRoleFromJobLink() {
+        async function startRoleFromJob() {
           if (
             thread.activeRecruitingRoleId ||
             nativeSources?.currentAnswer ||
@@ -9927,13 +9972,43 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !tools.some((tool) => tool.name === "web_fetch")
           )
             return undefined;
-          const block = currentTurnMessage.blocks.find(
-            (item): item is Extract<MessageBlock, { kind: "text" }> =>
-              item.kind === "text" && jobLinkIn(item.text) !== null,
+          const texts = currentTurnMessage.blocks.filter(
+            (item): item is Extract<MessageBlock, { kind: "text" }> => item.kind === "text",
           );
-          const url = block ? jobLinkIn(block.text) : null;
-          if (!block || !url) return undefined;
+          const linked = texts.find((item) => jobLinkIn(item.text) !== null);
+          const pasted = linked ? undefined : texts.find((item) => pastedJobTitle(item.text));
+          const block = linked ?? pasted;
+          if (!block) return undefined;
+          const create = (title: string, sourceRefs: unknown[]) =>
+            applyTool(
+              "recruiting_role",
+              {
+                operation: "create",
+                title,
+                brief: null,
+                sourceRefs,
+                criteria: [],
+                preferences: [],
+                definitionQuestions: [],
+                intent: { basis: "direct", quote: block.text.trim() },
+              },
+              `${runId}:job-role`,
+            ).catch((error) => {
+              getLogger().warn("role from the recruiter's job not saved", {
+                error: String(error),
+              });
+            });
+          const ask =
+            "Ask the first clarifying question now (or, when nothing needs clarifying, issue the calibration searches now).";
           try {
+            if (pasted) {
+              const title = pastedJobTitle(pasted.text)!;
+              return {
+                saving: create(title, []),
+                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet; rename it in your brief update if that title is wrong. Do not create a role. ${ask}`,
+              };
+            }
+            const url = jobLinkIn(block.text)!;
             const read = (await applyTool(
               "web_fetch",
               { url, maxChars: 24_000 },
@@ -9951,43 +10026,40 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (!material || typeof read.text !== "string" || !read.text.trim()) return undefined;
             const title =
               (typeof read.title === "string" && read.title.trim().slice(0, 200)) || material.url;
-            const saving = applyTool(
-              "recruiting_role",
-              {
-                operation: "create",
-                title,
-                brief: null,
-                sourceRefs: [
-                  {
-                    id: "job-link",
-                    kind: "original_material",
-                    anchor: { kind: "artifact", artifact: material.artifact, locator: "text" },
-                    readState: "read",
-                    readAt: material.readAt,
-                    url: material.url,
-                  },
-                ],
-                criteria: [],
-                preferences: [],
-                definitionQuestions: [],
-                intent: { basis: "direct", quote: block.text.trim() },
-              },
-              `${runId}:job-link-role`,
-            ).catch((error) => {
-              getLogger().warn("role from job link not saved", { error: String(error) });
-            });
             return {
-              saving,
-              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\nAsk the first clarifying question now (or, when nothing needs clarifying, issue the calibration searches now).`,
+              saving: create(title, [
+                {
+                  id: "job-link",
+                  kind: "original_material",
+                  anchor: { kind: "artifact", artifact: material.artifact, locator: "text" },
+                  readState: "read",
+                  readAt: material.readAt,
+                  url: material.url,
+                  quote: read.text.trim().slice(0, 300).trim(),
+                },
+              ]),
+              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask}`,
             };
           } catch (error) {
             getLogger().warn("job link not read before the first step", { error: String(error) });
             return undefined;
           }
         }
-        // A recruiter's job link on a thread with no role is read and saved as a new role by the
-        // server before the model's first step, so the first question needs no read or save step.
-        linkRole = await startRoleFromJobLink();
+        // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
+        // the server before the model's first step, so the first question needs no read or save step.
+        linkRole = await startRoleFromJob();
+        // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
+        const intakeSkill = tools.some((tool) => tool.name === "recruiting_role")
+          ? await skillReadFromTool(
+              deps.prisma,
+              { spaceId: run.spaceId, userId: run.userId },
+              { name: RECRUITING_INTAKE_SKILL_NAME },
+            ).catch(() => null)
+          : null;
+        const intakeSkillNote =
+          typeof intakeSkill?.content === "string"
+            ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
+            : undefined;
         const replyContext = await loadReplyContext(deps.prisma, thread.id, run.sourceMessageId);
         const prompt = [
           replyContext,
@@ -9996,6 +10068,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .filter(Boolean)
                 .join("\n\n")
             : basePrompt,
+          intakeSkillNote,
           linkRole?.note,
           takeoverResume?.promptNote,
           approvalContinuation,

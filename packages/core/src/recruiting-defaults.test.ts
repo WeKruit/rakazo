@@ -228,7 +228,7 @@ describe("maintained recruiting defaults", () => {
     for (const part of [
       "issue four differently worded platform people searches together as parallel tool calls in one step",
       'highlightsQuery "concrete evidence of: "',
-      "quotes, word for word, the part of that person's snippet in the saved rows",
+      "which lists them in chat with their profile passages",
       "top up the same round with one research request on this role for only the missing number",
       "Never tell the recruiter about search quotas",
     ])
@@ -238,7 +238,7 @@ describe("maintained recruiting defaults", () => {
   it("offers the next step after every round and starts scale on the recruiter's request", () => {
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("找 100 个类似的人");
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("ask_user");
-    expect(RECRUITING_ROUND_NEXT_STEP).toContain("table of the ten");
+    expect(RECRUITING_ROUND_NEXT_STEP).toContain("never list them again");
     for (const part of [
       "That request is the acceptance",
       "never ask them to confirm the round again",
