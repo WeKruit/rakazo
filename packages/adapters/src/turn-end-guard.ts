@@ -266,18 +266,9 @@ export async function guardRecruitingTurnEnd(
         select: { id: true },
       });
       if (!answered) return { action: "ended", classification: "question" };
-      const effect = await deps.prisma.externalEffect.findFirst({
-        where: {
-          id: round.effectId,
-          runId: run.id,
-          spaceId: run.spaceId,
-          kind: "recruiting_research",
-          status: "completed",
-          request: { path: ["operation"], equals: "calibration_round" },
-        },
-        select: { id: true },
-      });
-      if (effect) return { action: "ended", classification: "question" };
+      // The recruiter's message after the round reached this run (an answer to its next-step card
+      // resumes it; anything left unread would have started a continuation instead of this
+      // guard), so a turn that ends here without a new round or a scale-out left it unanswered.
       // One push per recruiter message: a second one only re-presents the same round.
       const latest = await deps.prisma.message.findFirst({
         where: {
