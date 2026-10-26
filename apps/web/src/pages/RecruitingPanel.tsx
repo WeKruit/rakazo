@@ -101,7 +101,7 @@ import { useRecruitingDetail } from "./recruiting/detail";
 import { quickOutput } from "./recruiting/quickOutput";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
-import { TabLoading, tabCacheSlot, useKeyedRead } from "./recruiting/shared";
+import { TabLoading, tabCacheSlot, useArrivals, useKeyedRead } from "./recruiting/shared";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 
 export type CrmBrowseSelection = Pick<
@@ -3797,6 +3797,11 @@ function RecruitingWorkspace({
   const candidateClose = useRef<HTMLButtonElement>(null);
   const candidateHandoff = useRef<(() => void) | null>(null);
   const [candidatePage, setCandidatePage] = useState<ListRecruitingCandidatesOutput | null>(null);
+  const candidateKeys = useMemo(
+    () => candidatePage?.items.map((item) => item.candidateKey),
+    [candidatePage],
+  );
+  const arrival = useArrivals(candidateKeys);
   function setCandidateFilters(
     update: (current: RecruitingPanelState["filters"]) => RecruitingPanelState["filters"],
   ) {
@@ -5850,7 +5855,7 @@ function RecruitingWorkspace({
                         className={presentation === "workspace" ? "hire-card-grid" : "grid gap-2"}
                       >
                         {candidatePage.items.map((candidate) => (
-                          <li key={candidate.candidateKey}>
+                          <li key={candidate.candidateKey} {...arrival(candidate.candidateKey)}>
                             {presentation === "workspace" ? (
                               <SourcingCandidateCard
                                 candidate={candidate}
@@ -6000,7 +6005,11 @@ function RecruitingWorkspace({
                           </thead>
                           <tbody>
                             {candidatePage.items.map((candidate) => (
-                              <tr key={candidate.candidateKey} className="border-b border-border">
+                              <tr
+                                key={candidate.candidateKey}
+                                style={arrival(candidate.candidateKey).style}
+                                className={`border-b border-border ${arrival(candidate.candidateKey).className ?? ""}`}
+                              >
                                 <th scope="row" className="min-w-32 py-2 pe-3">
                                   <Button
                                     ref={

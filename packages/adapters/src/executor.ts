@@ -119,6 +119,7 @@ import {
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
   RECRUITING_ROUND_NEXT_STEP,
+  RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
@@ -437,7 +438,11 @@ import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
 } from "./recruiting-feedback.js";
-import { executeRecruitingProfilesTool, RecruitingProfileError } from "./recruiting-profiles.js";
+import {
+  executeRecruitingProfilesTool,
+  isPeopleSearchEndpoint,
+  RecruitingProfileError,
+} from "./recruiting-profiles.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
 import { mcpObject } from "./recruiting-research.js";
 import {
@@ -458,6 +463,7 @@ import {
   executeRecruitingRoleTool,
   importRecruitingCandidateCsv,
   normalizeRecruitingRoleArgs,
+  PEOPLE_SEARCH_AUTOSAVE_KEY,
   prepareRecruitingResearchTool,
   RecruitingCandidateOutputError,
   RecruitingCsvImportError,
@@ -7438,6 +7444,87 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : Promise.resolve(true);
           const finish = async (result: unknown) =>
             (await persistEffectResult(result)) ? result : uncertainEffectResult(name);
+          // A people search reaches Results the moment it returns: the server saves it as its
+          // own page and the agent gets the saved rows, so no save step sits before the panel.
+          const savePeopleSearchAsItReturns = async (returned: unknown) => {
+            const route = connectorCall.route;
+            if (
+              !applied ||
+              !deps.artifacts ||
+              route?.connectorId !== "mcp" ||
+              !route.resourceId ||
+              (returned !== null && typeof returned === "object" && "error" in returned)
+            )
+              return null;
+            try {
+              const [server, current] = await Promise.all([
+                deps.prisma.mcpServer.findFirst({
+                  where: { id: route.resourceId, spaceId: run.spaceId, userId: run.userId },
+                  select: { endpoint: true },
+                }),
+                deps.prisma.thread.findUnique({
+                  where: { id: thread.id },
+                  select: { activeRecruitingRoleId: true },
+                }),
+              ]);
+              const roleId = current?.activeRecruitingRoleId;
+              if (!server?.endpoint || !isPeopleSearchEndpoint(server.endpoint) || !roleId)
+                return null;
+              // A brief saved in the same step moves the revision; one retry reads the new one.
+              for (const attempt of ["", ":2"]) {
+                const role = await deps.prisma.recruitingRole.findFirst({
+                  where: { id: roleId, spaceId: run.spaceId, userId: run.userId, archivedAt: null },
+                  select: { revision: true },
+                });
+                if (!role) return null;
+                const request = {
+                  operation: "save_search" as const,
+                  expectedRoleRevision: role.revision,
+                };
+                const saving = await recordEffect(
+                  deps,
+                  run,
+                  "recruiting_research",
+                  `${PEOPLE_SEARCH_AUTOSAVE_KEY}${applied.effect.id}${attempt}`,
+                  request,
+                  undefined,
+                  undefined,
+                  true,
+                );
+                if (saving.duplicate || !(await claimIntendedEffect(deps.prisma, saving.effect.id)))
+                  return null;
+                try {
+                  const saved = await saveRecruitingPeopleSearch(
+                    { prisma: deps.prisma, artifacts: deps.artifacts },
+                    {
+                      ...researchActor,
+                      leaseOwner: workerId,
+                      leaseFence: fence,
+                      effectId: saving.effect.id,
+                      effectRequest: saving.effect.request,
+                    },
+                    request,
+                    context,
+                    applied.effect.id,
+                  );
+                  const people = (saved as { candidateRows?: unknown }).candidateRows;
+                  return {
+                    savedToResults: true,
+                    people,
+                    next: RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
+                  };
+                } catch (error) {
+                  await completeEffect(deps, saving.effect.id, "executing", {
+                    error: error instanceof Error ? error.message : String(error),
+                  });
+                  if (!(error instanceof RecruitingConflictError)) throw error;
+                }
+              }
+            } catch (error) {
+              getLogger().warn("people search not saved as it returned", { error: String(error) });
+            }
+            return null;
+          };
           const registerRunSecrets = (values: string[]) => {
             const additions = values.filter((value) => !runSecrets.includes(value));
             if (additions.length === 0) return;
@@ -9771,7 +9858,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : { providerResult: result };
               return finish({ ...body, background: RECRUITING_RESEARCH_DIRECT_NOTICE });
             }
-            return finish(result);
+            const finished = await finish(result);
+            return (await savePeopleSearchAsItReturns(finished)) ?? finished;
           }
           return finish({ error: `unknown tool ${name}` });
         };

@@ -99,7 +99,7 @@ describe("maintained recruiting defaults", () => {
     expect(main.instructions).toContain(
       "Round feedback before the calibration is accepted goes into your next quick search",
     );
-    expect(main.instructions).toContain("recruiting_research save_search");
+    expect(main.instructions).toContain("each search is saved to Results the moment it returns");
     expect(main.instructions).not.toContain("Deep check, started in parallel");
     expect(main.instructions).toContain("never for a calibration round except that top-up");
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
@@ -191,14 +191,16 @@ describe("maintained recruiting defaults", () => {
       );
       expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
       expect(bot.instructions).toContain("no process narration");
-      expect(bot.instructions).toContain("fix exactly what the error names and call it again at once");
+      expect(bot.instructions).toContain(
+        "fix exactly what the error names and call it again at once",
+      );
     },
   );
 
   it("Main runs the first round itself right after the last answer", () => {
     const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
     expect(main.instructions).toContain(
-      "run the calibration quick search yourself and save it with save_search first, then save the brief",
+      "issue the calibration quick searches yourself in the same step as the brief update",
     );
     expect(main.instructions).not.toContain("hand off to Sourcer in the same turn");
   });
@@ -262,7 +264,7 @@ describe("maintained recruiting defaults", () => {
       "ask the first clarifying question together with one small recruiting_role create",
     );
     expect(RECRUITING_INTAKE_FLOW).toContain(
-      "then save them with save_search so people appear in Results at once, then save the brief",
+      "issue the calibration people searches together with the one recruiting_role update that saves the brief",
     );
   });
 

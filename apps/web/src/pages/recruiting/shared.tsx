@@ -436,3 +436,26 @@ export function TabHeader({ title, children }: { title: ReactNode; children?: Re
     </header>
   );
 }
+
+/** Fades in rows that join a list after it first rendered, one after another in list order. */
+const ARRIVAL_CLASS =
+  "motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 fill-mode-backwards";
+
+export function useArrivals(keys: readonly string[] | undefined) {
+  const seen = useRef<Set<string> | null>(null);
+  const delays = new Map<string, number>();
+  if (seen.current && keys) {
+    let next = 0;
+    for (const key of keys)
+      if (!seen.current.has(key)) delays.set(key, Math.min(next++ * 80, 2000));
+  }
+  useEffect(() => {
+    if (keys) seen.current = new Set([...(seen.current ?? []), ...keys]);
+  }, [keys]);
+  return (key: string) => {
+    const delay = delays.get(key);
+    return delay === undefined
+      ? {}
+      : { className: ARRIVAL_CLASS, style: { animationDelay: `${delay}ms` } };
+  };
+}

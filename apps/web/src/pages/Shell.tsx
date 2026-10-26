@@ -506,9 +506,10 @@ export function eventChangesRecruitingPanel(
     );
   if (event.type === "effect.recorded") {
     const result = event.payload.result;
-    // A calibration round was recorded or accepted.
+    // A calibration round was recorded or accepted, or a people search was saved.
     if (
-      (event.payload.tool === "recruiting_research" && "round" in event.payload) ||
+      (event.payload.tool === "recruiting_research" &&
+        ("round" in event.payload || event.payload.status === "saved")) ||
       (event.payload.tool === "recruiting_feedback" &&
         result &&
         typeof result === "object" &&

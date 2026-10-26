@@ -167,7 +167,7 @@ export async function requireQuickSearchBeforeResearch(
   const calls = await listRunToolResults(prisma, { ...scope } as Actor, context.runId);
   if (calls.some((call) => isPeopleSearchEndpoint(call.endpoint))) return;
   throw new IsolationError(
-    "Calibration rounds use the built-in people search, not a research task: call web_search_advanced_exa yourself (four searches in one step), then recruiting_research save_search and calibration_round, in this turn. If you do not have the people search, hand the round back to Main. Research starts after a round is accepted, or to top up a short people search in the same run.",
+    "Calibration rounds use the built-in people search, not a research task: call web_search_advanced_exa yourself (four searches in one step; each saves itself to Results), then calibration_round, in this turn. If you do not have the people search, hand the round back to Main. Research starts after a round is accepted, or to top up a short people search in the same run.",
   );
 }
 
