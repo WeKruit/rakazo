@@ -16,7 +16,8 @@
 //   Without RAKAZO_B_PASSWORD, B's password is derived from A's (HMAC), so no second secret is kept.
 //   Options: --groups <n>   how many of A's recent role chats to probe (default 8)
 //            --out <file>   JSON report (default ./isolation-<time>.json)
-//   RAKAZO_RELEASE_SHA labels the report with the live release. RAKAZO_OPERATOR_DOMAIN (default
+//   RAKAZO_RELEASE_SHA labels the report with the live release. RAKAZO_ORIGIN sets the Origin
+//   header (default RAKAZO_URL), e.g. the public domain when RAKAZO_URL is the direct backend. RAKAZO_OPERATOR_DOMAIN (default
 //   wekruit.com) is the staff domain whose verified accounts see dollar spend.
 // Node 20+, no dependencies. Prints no credentials or record contents, only ids and status codes.
 // Exit code 0 only when nothing leaked.
@@ -30,6 +31,8 @@ const option = (name, fallback) => {
   return index >= 0 && args[index + 1] !== undefined ? args[index + 1] : fallback;
 };
 const BASE = (process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
+// The Origin a browser on the public domain sends; auth refuses requests from untrusted origins.
+const ORIGIN = (process.env.RAKAZO_ORIGIN ?? BASE).replace(/\/$/, "");
 const A_EMAIL = process.env.RAKAZO_EMAIL;
 const A_PASSWORD = process.env.RAKAZO_PASSWORD;
 const B_EMAIL = process.env.RAKAZO_B_EMAIL;
@@ -75,7 +78,7 @@ function session(label) {
   let cookie = "";
   const headers = () => ({
     "content-type": "application/json",
-    origin: BASE,
+    origin: ORIGIN,
     ...(cookie ? { cookie } : {}),
   });
   async function post(path, body) {
