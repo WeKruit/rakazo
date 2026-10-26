@@ -47,7 +47,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
   }
 
   /** One saved provider page of people, observed now. */
-  async function savePage(keys: string[]) {
+  async function savePage(keys: string[], names?: string[]) {
     const effect = await prisma.externalEffect.create({
       data: {
         spaceId,
@@ -80,7 +80,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
         rowIndex,
         roleId,
         candidateKey,
-        name: `Person ${candidateKey}`,
+        name: names?.[rowIndex] ?? `Person ${candidateKey}`,
         title: "Warehouse operations manager",
         linkedinUrl: `https://www.linkedin.com/in/${candidateKey}`,
         issues: [],
@@ -203,6 +203,11 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     // A key cut short that several saved people continue names them for the retry.
     await expect(recordRound([...keys("first").slice(0, 9), "spare-"])).rejects.toThrow(
       "spare- (saved keys starting with it: spare-0, spare-1)",
+    );
+    // Two saved people share the name the key was spelled from: they are told apart by profile.
+    await savePage(["slee-1", "slee-2"], ["Sam Lee", "Sam Lee"]);
+    await expect(recordRound([...keys("first").slice(0, 9), "sam-lee"])).rejects.toThrow(
+      "sam-lee (saved people with this name, choose by profile: slee-1, slee-2)",
     );
     expect(
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,

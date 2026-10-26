@@ -11874,8 +11874,23 @@ export async function saveRecruitingCalibrationRound(
             orderBy: { candidateKey: "asc" },
             take: 6,
           });
-          return near.length >= 2 && near.length <= 5
-            ? `${key} (saved keys starting with it: ${near.map((row) => row.candidateKey).join(", ")})`
+          if (near.length >= 2 && near.length <= 5)
+            return `${key} (saved keys starting with it: ${near.map((row) => row.candidateKey).join(", ")})`;
+          // A key spelled from a name several saved people share: choose by profile, never by name.
+          const name = (key.split("/").pop() ?? "")
+            .replace(/-[^-]*\d[^-]*$/, "")
+            .replace(/-/g, " ");
+          const namesakes = name.includes(" ")
+            ? await tx.recruitingCandidateOccurrence.findMany({
+                where: { roleId: role.id, name: { equals: name, mode: "insensitive" } },
+                select: { candidateKey: true },
+                distinct: ["candidateKey"],
+                orderBy: { candidateKey: "asc" },
+                take: 6,
+              })
+            : [];
+          return namesakes.length >= 2
+            ? `${key} (saved people with this name, choose by profile: ${namesakes.map((row) => row.candidateKey).join(", ")})`
             : key;
         }),
       );
