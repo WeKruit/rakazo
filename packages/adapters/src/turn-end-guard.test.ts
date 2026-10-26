@@ -383,6 +383,70 @@ describe("guardRecruitingTurnEnd", () => {
     expect(result).toEqual({ action: "ended", classification: "deliverable" });
   });
 
+  // 2026-10-26 02:18 live ending: a blocked turn promised work for "after recovery" and stopped.
+  const promised: MessageBlock[] = [
+    { kind: "text", text: "恢复后我会先提交完整简报供确认，再立即搜索并列出10位候选人。" },
+  ];
+
+  it("pushes a turn that ended on a promise, quoting it, even with no playbook step", async () => {
+    const f = fixture({ stage: "interview" });
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run,
+      roleId: "role-1",
+      blocks: promised,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+      max: 3,
+    });
+    expect(result).toMatchObject({ action: "continued", count: 1 });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("「恢复后我会先提交完整简报") }),
+    );
+    // Without a promise, a stage the recruiter owns still ends quietly.
+    const quiet = fixture({ stage: "interview" });
+    expect(
+      await guardRecruitingTurnEnd(quiet.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: quiet.postAssistant,
+      }),
+    ).toMatchObject({ action: "ended" });
+  });
+
+  it("makes the last push before the cap end on a result or one concrete question", async () => {
+    const f = fixture({ priorAutoContinues: 2 });
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run,
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+      max: 3,
+    });
+    expect(result).toMatchObject({ action: "continued", count: 3 });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("ask_user") }),
+    );
+    const early = fixture({ priorAutoContinues: 0 });
+    await guardRecruitingTurnEnd(early.deps, {
+      run,
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: early.postAssistant,
+      max: 3,
+    });
+    expect(early.sendUserMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("最后一次") }),
+    );
+  });
+
   it("posts a final message once the cap is reached", async () => {
     const f = fixture({ priorAutoContinues: 3 });
     const result = await guardRecruitingTurnEnd(f.deps, {
@@ -593,6 +657,27 @@ describe("guardRecruitingRoleCreate", () => {
       }),
     );
     expect(f.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("pushes once when a conversation without a role ended on a promise", async () => {
+    const f = roleFixture(null);
+    const result = await guardRecruitingRoleCreate(f.deps, {
+      ...input,
+      blocks: [{ kind: "text", text: "我会在修复保存问题后继续。" }],
+    });
+    expect(result).toMatchObject({ action: "continued", runId: "run-2" });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining("「我会在修复保存问题后继续。」"),
+      }),
+    );
+    const again = roleFixture(null, 1);
+    expect(
+      await guardRecruitingRoleCreate(again.deps, {
+        ...input,
+        blocks: [{ kind: "text", text: "我会在修复保存问题后继续。" }],
+      }),
+    ).toMatchObject({ action: "ended" });
   });
 
   it("does not push after a saved create, a question, or a push it already made", async () => {

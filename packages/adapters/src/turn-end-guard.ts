@@ -1,6 +1,6 @@
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { classifyTurnEnd, type TurnEndClass } from "@rakazo/core";
+import { classifyTurnEnd, type TurnEndClass, turnEndPromise, turnEndText } from "@rakazo/core";
 import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
@@ -185,6 +185,31 @@ export async function recruitingRoundListText(
   return `本轮 10 位人选：\n\n${lines.join("\n")}`;
 }
 
+const PROMISE_LABEL = "完成上一条说要做的事";
+const AUTO_NOTE = "（这是自动继续，不是招聘者的话，引用时用招聘者自己的消息。）";
+
+/**
+ * The internal follow-up a pushed turn starts from. A turn that ended on a promise is told so,
+ * and the last push before the cap must end on a result or one concrete question, so the
+ * recruiter never sees a turn that just stops.
+ */
+export function continuationText(input: {
+  step?: { label: string; prompt: string };
+  promise?: string;
+  last?: boolean;
+}) {
+  const parts = [
+    input.promise
+      ? `你上一条以「${input.promise.slice(0, 160)}」结束，但这一轮没有去做，后台也没有在跑的工作。现在就做，不要再许诺时间。`
+      : "",
+    input.step ? `继续下一步：${input.step.label}。${input.step.prompt}` : "",
+    input.last
+      ? "这是最后一次自动继续：本轮要交付结果；确实做不到（工具失败或缺信息），先换一种做法再试一次，仍不行就用一张问题卡（ask_user）问招聘者一个具体决定，说清卡在哪并给出可选做法。不要只汇报状态，也不要说之后再做。"
+      : "",
+  ];
+  return `${parts.filter(Boolean).join("")}${AUTO_NOTE}`;
+}
+
 /**
  * Turn-end guard for threads with an active recruiting role: a turn that ends with neither a
  * deliverable, a question, a card nor a handoff is pushed into the next playbook step instead
@@ -272,13 +297,15 @@ export async function guardRecruitingTurnEnd(
     },
   );
   if (classification !== "none") return { action: "ended", classification };
-  if (!playbook?.step) return { action: "ended", classification };
+  const promise = turnEndPromise(turnEndText(input.blocks));
+  if (!playbook?.step && !promise) return { action: "ended", classification };
   // Waiting on a running search is not a stall: its wake brings the results.
   if (await recruitingResearchInFlight(deps.prisma, input.roleId)) {
     getLogger().info("run.autocontinue.waiting_research", { runId: run.id, roleId: input.roleId });
     return { action: "ended", classification };
   }
-  const { stage, step } = playbook;
+  const stage = playbook?.stage ?? "intake";
+  const step = playbook?.step ?? { label: PROMISE_LABEL, prompt: "" };
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: run.threadId,
@@ -292,7 +319,11 @@ export async function guardRecruitingTurnEnd(
     select: { clientNonce: true },
   });
   const count = countTrailingAutoContinues(recent) + 1;
-  const reason = step.label.includes("待确认问题") ? "open_clarifications" : "no_deliverable";
+  const reason = promise
+    ? "promise"
+    : step.label.includes("待确认问题")
+      ? "open_clarifications"
+      : "no_deliverable";
   if (count > max) {
     getLogger().warn("run.autocontinue.capped", {
       runId: run.id,
@@ -302,7 +333,7 @@ export async function guardRecruitingTurnEnd(
       count: count - 1,
     });
     // Saved results are a real outcome even when this step is not finished yet.
-    const saved = Math.max(playbook.savedCandidates ?? 0, savedRows._sum.rowCount ?? 0);
+    const saved = Math.max(playbook?.savedCandidates ?? 0, savedRows._sum.rowCount ?? 0);
     await input.postAssistant(
       saved > 0
         ? `我先停在这里：已保存 ${saved} 位候选人，「${step.label}」还没完成。回复一句「继续」我就接着做。`
@@ -317,7 +348,11 @@ export async function guardRecruitingTurnEnd(
     reason,
     count,
   });
-  const text = `继续下一步：${step.label}。${step.prompt}（这是自动继续，不是招聘者的话，引用时用招聘者自己的消息。）`;
+  const text = continuationText({
+    step: playbook?.step ? step : undefined,
+    promise,
+    last: count === max,
+  });
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
@@ -369,7 +404,8 @@ export async function guardRecruitingRoleCreate(
     select: { result: true },
   });
   const error = (refused?.result as { error?: unknown } | null)?.error;
-  if (typeof error !== "string") return { action: "ended", classification };
+  const promise = classification === "none" ? turnEndPromise(turnEndText(input.blocks)) : undefined;
+  if (typeof error !== "string" && !promise) return { action: "ended", classification };
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: run.threadId,
@@ -384,8 +420,15 @@ export async function guardRecruitingRoleCreate(
   });
   // One push per recruiter message.
   if (countTrailingAutoContinues(recent) > 0) return { action: "ended", classification };
-  getLogger().info("run.autocontinue", { runId: run.id, stage: "intake", reason: "role_refused" });
-  const text = `继续：刚才保存岗位被拒，原因：${error.slice(0, 600)} 这不是故障。按原因改正后立即用 recruiting_role create 重新保存，然后继续下一步。（这是自动继续，不是招聘者的话，引用时用招聘者自己的消息。）`;
+  getLogger().info("run.autocontinue", {
+    runId: run.id,
+    stage: "intake",
+    reason: typeof error === "string" ? "role_refused" : "promise",
+  });
+  const text =
+    typeof error === "string"
+      ? `继续：刚才保存岗位被拒，原因：${error.slice(0, 600)} 这不是故障。按原因改正后立即用 recruiting_role create 重新保存，然后继续下一步。${AUTO_NOTE}`
+      : continuationText({ promise, last: true });
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
@@ -405,7 +448,7 @@ export async function guardRecruitingRoleCreate(
     action: "continued",
     runId: sent.runId ?? null,
     stage: "intake",
-    label: "保存岗位",
+    label: typeof error === "string" ? "保存岗位" : PROMISE_LABEL,
     count: 1,
   };
 }

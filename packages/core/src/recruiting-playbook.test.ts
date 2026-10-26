@@ -15,6 +15,7 @@ import {
   recruitingOutboundDisposition,
   requireRecruitingBriefConfirmation,
   requireRecruitingPlaybookGate,
+  turnEndPromise,
   validateRecruitingBrief,
 } from "./recruiting-playbook.js";
 
@@ -537,6 +538,37 @@ describe("classifyTurnEnd", () => {
     expect(classifyTurnEnd(text("saved"), { savedRows: 3, deliverableRows: 10 })).toBe("none");
     expect(classifyTurnEnd({ blocks: [{ kind: "candidate" }] })).toBe("deliverable");
     expect(classifyTurnEnd(text("名单：\n1. 张三\n2. 李四\n3. 王五"))).toBe("deliverable");
+  });
+});
+
+// Endings seen in live role threads on 2026-10-25/26, where the turn stopped after promising.
+describe("turnEndPromise", () => {
+  it.each([
+    "岗位保存恢复后，我会把这项语言要求和 JD 一起纳入岗位简报，再继续搜索。",
+    "恢复后我会先提交完整简报供确认，再立即搜索并列出10位候选人。",
+    "我会在修复保存问题后继续。",
+    "预计 10 月 25 日 2:00 AM PT 前展示名单，或说明入口的实际阻碍。",
+    "已取消本轮地区偏好。预计本批结果或阻碍汇报：ETA 2:35 AM PT。",
+    "Saved the brief. I'll start the search next.",
+  ])("finds the promise in %s", (ending) => {
+    expect(turnEndPromise(ending)).toBeTruthy();
+  });
+
+  it.each([
+    "已保存 10 位候选人。",
+    "接下来你希望怎么做？",
+    "你确认后我会发送第一封邮件。",
+    "Handoff ETA after confirmation: 12:10 PM PT.",
+    "我会把薪资作为偏好，而非硬性淘汰条件。",
+    "我会继续搜索，稍后补进结果。\n\n已保存 60 人，累计 114 人。",
+  ])("leaves %s alone", (ending) => {
+    expect(turnEndPromise(ending)).toBeUndefined();
+  });
+
+  it("does not count saved rows as delivered when the turn ends on a promise", () => {
+    const promised = { blocks: [{ kind: "text", text: "已保存 12 人。我马上整理名单。" }] };
+    expect(classifyTurnEnd(promised, { savedRows: 12 })).toBe("none");
+    expect(classifyTurnEnd(promised, { savedRows: 12, handedOff: true })).toBe("handoff");
   });
 });
 

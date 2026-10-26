@@ -197,6 +197,17 @@ describe("Pi choice asks", () => {
     expect(JSON.stringify(fakeAgentState.result)).toContain("Already answered");
   });
 
+  it("gives the run's question check the planned searches", async () => {
+    fakeAgentState.plannedSearches = ["warehouse supervisor Newark NJ", "sort lead Edison NJ"];
+    const beforeAsk = vi.fn(async () => undefined);
+    const runtime = new PiAgentRuntime();
+    for await (const _event of runtime.run({ ...runRequest, beforeAsk }, runContext));
+    expect(beforeAsk).toHaveBeenCalledWith("Which city should I use?", [
+      "warehouse supervisor Newark NJ",
+      "sort lead Edison NJ",
+    ]);
+  });
+
   it("returns the run's own reason instead of a card the run may not ask yet", async () => {
     const runtime = new PiAgentRuntime();
     const events: AgentRuntimeEvent[] = [];
