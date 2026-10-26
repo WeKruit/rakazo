@@ -33,7 +33,7 @@ let lastExecutorEvents:
   | undefined;
 const VISION_MODEL = "openai/gpt-4o";
 
-function historyMessages(): Array<{
+type HistoryMessage = {
   id: string;
   threadId: string;
   seq: number;
@@ -43,7 +43,9 @@ function historyMessages(): Array<{
   replyToMessageId: null;
   replyQuote: null;
   replyTo: null;
-}> {
+};
+
+function historyMessages(extra: HistoryMessage[] = []): HistoryMessage[] {
   return [
     {
       id: "current",
@@ -67,6 +69,7 @@ function historyMessages(): Array<{
       replyQuote: null,
       replyTo: null,
     },
+    ...extra,
   ];
 }
 
@@ -92,6 +95,8 @@ async function runWithModel(
     /** The thread's active recruiting role; enables the run-start recruiting context. */
     recruitingRoleId?: string;
     savedRecruitingCandidates?: number;
+    /** Starts the run from this thread message, which is added to the history. */
+    sourceMessage?: HistoryMessage;
   } = {},
 ) {
   const run = {
@@ -104,6 +109,7 @@ async function runWithModel(
     status: "queued",
     trigger: options.trigger ?? "user",
     routineId: options.trigger === "routine" ? "routine-1" : null,
+    sourceMessageId: options.sourceMessage?.id ?? null,
     leaseFence: 0,
   };
   const get = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
@@ -179,7 +185,9 @@ async function runWithModel(
     },
     message: {
       findMany: vi.fn(async (args: { where?: { threadId?: string } }) =>
-        args.where?.threadId ? historyMessages() : [],
+        args.where?.threadId
+          ? historyMessages(options.sourceMessage ? [options.sourceMessage] : [])
+          : [],
       ),
       findUnique: vi.fn(async () => null),
       findFirst: vi.fn(async () =>
@@ -282,6 +290,46 @@ async function runWithModel(
   if (!request) throw new Error("runtime was not called");
   return { request, get, prisma, run, finalizeRun };
 }
+
+describe("handed-in stage", () => {
+  const handoff = (toBotId: string) => ({
+    id: "handoff-1",
+    threadId: "thread-1",
+    seq: 3,
+    role: "bot",
+    runId: "run-0",
+    blocks: [
+      {
+        kind: "handoff" as const,
+        fromBotId: "bot-main",
+        toBotId,
+        text: "Find 100 similar people",
+        hop: 1,
+      },
+    ],
+    replyToMessageId: null,
+    replyQuote: null,
+    replyTo: null,
+  });
+
+  it("opens with a quick line at low thinking when a teammate hands this bot the stage", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-1"),
+    });
+    expect(request.model.firstStepThinkingLevel).toBe("low");
+    expect(request.prompt).toContain("Begin your first step with one short sentence");
+  });
+
+  it("keeps full thinking for a handoff addressed to another bot", async () => {
+    const { request } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: handoff("bot-2"),
+    });
+    expect(request.model.firstStepThinkingLevel).toBeUndefined();
+    expect(request.prompt).not.toContain("Begin your first step with one short sentence");
+  });
+});
 
 describe("stopped previous run", () => {
   it("tells the next run the user stopped the last one, after its last tool", async () => {

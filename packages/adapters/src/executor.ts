@@ -838,6 +838,13 @@ export function shortQuestion(question: string, max = 240): string {
   return text;
 }
 
+/**
+ * A handed-in stage used to stay silent for 20-200 s while the specialist read context and ran
+ * slow tools. Its first step runs at low thinking and opens with one line the recruiter sees.
+ */
+const HANDOFF_OPENING_NOTE =
+  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in the language they write in, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history.";
+
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
@@ -10856,6 +10863,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
         // the server before the model's first step, so the first question needs no read or save step.
         // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
+        const handedIn =
+          run.trigger === "follow_up" &&
+          Boolean(run.sourceMessageId) &&
+          historyMessages
+            .find((message) => message.id === run.sourceMessageId)
+            ?.blocks.some((block) => block.kind === "handoff" && block.toBotId === bot.id) === true;
         const [jobRole, intake, intakeSkill, replyContext, plannedNote] = await ownTime(
           "turnNotes",
           Promise.all([
@@ -10906,6 +10919,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           linkRole?.note,
           intakeNote,
           plannedNote,
+          handedIn ? HANDOFF_OPENING_NOTE : undefined,
           takeoverResume?.promptNote,
           approvalContinuation,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
@@ -11163,8 +11177,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           runModel = { ...configuredRunModel, routed: "configured", routeReason: turnModel.reason };
         }
         // With the planned people in hand, the first step only shows the clearest few, at low
-        // thinking; the rest of the pick keeps the bot's full thinking.
-        if (plannedNote) runModel = { ...runModel, firstStepThinkingLevel: "low" };
+        // thinking; the rest of the pick keeps the bot's full thinking. A handed-in stage's first
+        // step only says what it is doing and starts its reads, so it runs at low thinking too.
+        if (plannedNote || handedIn) runModel = { ...runModel, firstStepThinkingLevel: "low" };
 
         try {
           setupMark("runtimeStart");
