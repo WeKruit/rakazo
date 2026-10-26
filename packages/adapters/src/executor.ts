@@ -792,6 +792,47 @@ export async function filledRecruitingFeedbackArgs(
   };
 }
 
+/**
+ * The next round needs the recruiter's feedback on the last one saved first: later rounds, the
+ * scale-out and the research provider read it from the saved record, not from the chat.
+ */
+export async function unsavedRoundFeedback(
+  prisma: Pick<PrismaClient, "recruitingCalibrationRound" | "message" | "externalEffect">,
+  input: { roleId: string; threadId: string; spaceId: string },
+): Promise<string | undefined> {
+  const previous = await prisma.recruitingCalibrationRound.findFirst({
+    where: { roleId: input.roleId },
+    orderBy: { round: "desc" },
+    select: { round: true, createdAt: true, approvedAt: true },
+  });
+  if (!previous || previous.approvedAt) return undefined;
+  const wrote = await prisma.message.findFirst({
+    where: { threadId: input.threadId, role: "user", createdAt: { gt: previous.createdAt } },
+    select: { id: true },
+  });
+  if (!wrote) return undefined;
+  const saved = await prisma.externalEffect.findFirst({
+    where: {
+      spaceId: input.spaceId,
+      kind: "recruiting_feedback",
+      status: "completed",
+      createdAt: { gt: previous.createdAt },
+      AND: [
+        { request: { path: ["roleId"], equals: input.roleId } },
+        {
+          OR: [
+            { result: { path: ["status"], equals: "recorded" } },
+            { result: { path: ["status"], equals: "already_recorded" } },
+          ],
+        },
+      ],
+    },
+    select: { id: true },
+  });
+  if (saved) return undefined;
+  return `Not recorded: the recruiter's feedback on round ${previous.round} is not saved yet, and later rounds, the scale-out and the research provider read it only from the saved record. Save it first with recruiting_feedback and their exact words: target "candidate" operation "review" with the keys of the people they turned down or praised, and target "round" operation "scope" for any change in who to look for. Then record this round again with the same ten.`;
+}
+
 /** A name as a profile slug: "Zimu Gong" → "zimu-gong". */
 function nameSlug(name: string) {
   return name
@@ -5360,6 +5401,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             researchInput?.data?.operation === "calibration_round" &&
             thread.activeRecruitingRoleId
           ) {
+            const unsaved = await unsavedRoundFeedback(deps.prisma, {
+              roleId: thread.activeRecruitingRoleId,
+              threadId: run.threadId,
+              spaceId: run.spaceId,
+            });
+            if (unsaved) return { error: unsaved };
             const { regionOnly, outliers } = await locationSlips(
               thread.activeRecruitingRoleId,
               researchInput.data.candidateKeys,
