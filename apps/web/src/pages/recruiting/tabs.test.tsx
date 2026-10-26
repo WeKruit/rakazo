@@ -1276,7 +1276,8 @@ it.each([
         title: "Candidate-specific appointment",
         kind: "event",
         status: "confirmed",
-        start: checkedAt,
+        // Upcoming whenever the test runs; a fixed date ages out of the interview window.
+        start: new Date(Date.now() + 86_400_000).toISOString(),
         end: null,
         timeZone: "UTC",
         attendees: [attendee],

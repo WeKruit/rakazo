@@ -41,6 +41,7 @@ import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lif
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
   createRunExecutor,
+  jobLinkIn,
   resumeBriefForRun,
   selectBuiltinToolsForRun,
   toolArgsSummary,
@@ -5856,6 +5857,66 @@ describe("native recruiting assessment effect delivery", () => {
     await f.run();
     expect(retainRecruitingWebMaterial).toHaveBeenCalledTimes(2);
     expect(f.results[2]).toEqual({ error: "not available" });
+  });
+
+  it("reads a job link and saves it as the role before the model's first step", async () => {
+    const f = fixture("job-link-role");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    const receipt = {
+      artifact: { artifactId: "read-1", sha256: "b".repeat(64) },
+      url: "https://jobs.example.org/role-1",
+      readAt: "2026-10-26T00:00:00.000Z",
+    };
+    vi.mocked(retainRecruitingWebMaterial).mockResolvedValue(receipt);
+    f.web.fetch.mockResolvedValueOnce({
+      url: receipt.url,
+      title: "Simulation Scientist",
+      text: "Build simulation for robots.",
+      truncated: false,
+    });
+    const text = "New role: https://jobs.example.org/role-1 please find people";
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "job-link-role",
+        blocks: [{ kind: "text", text }],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    f.setCalls([]);
+    await f.run();
+    expect(f.web.fetch).toHaveBeenCalledWith(
+      expect.objectContaining({ url: receipt.url }),
+      expect.anything(),
+    );
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      operation: "create",
+      title: "Simulation Scientist",
+      brief: null,
+      sourceRefs: [
+        {
+          kind: "original_material",
+          anchor: { kind: "artifact", artifact: receipt.artifact, locator: "text" },
+          readAt: receipt.readAt,
+          url: receipt.url,
+        },
+      ],
+      intent: { basis: "direct", quote: text },
+    });
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("Build simulation for robots.");
+    expect(prompt).toContain("do not create a role");
+  });
+
+  it("finds job links but not profile links", () => {
+    expect(jobLinkIn("JD: https://jobs.ashbyhq.com/dyna/942cd530。谢谢")).toBe(
+      "https://jobs.ashbyhq.com/dyna/942cd530",
+    );
+    expect(jobLinkIn("see https://www.linkedin.com/in/someone")).toBeNull();
+    expect(jobLinkIn("no link here")).toBeNull();
   });
 
   it("clears retained recruiting context when steering removes the selected role", async () => {

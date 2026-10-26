@@ -558,6 +558,15 @@ import {
 import { createWebProvider } from "./web-provider-factory.js";
 import { webFetchFromTool, webSearchFromTool } from "./web-tools.js";
 
+/** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
+export function jobLinkIn(text: string): string | null {
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"'()，。、]+/g)) {
+    const url = URL.parse(match[0].replace(/[.,;:!?]+$/, ""));
+    if (url && !/(^|\.)linkedin\.com$/i.test(url.hostname)) return url.href;
+  }
+  return null;
+}
+
 const NO_RECRUITING_ROLE_CONTEXT =
   "No recruiting role is selected. Earlier role snapshots do not apply. Use recruiting_role to create or explicitly select a role before recruiting work.";
 
@@ -4635,6 +4644,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           return occurrence;
         };
 
+        // Set before the first model step when a job link is saved as the thread's role.
+        let linkRole: { saving: Promise<unknown>; note: string } | undefined;
         const applyTool = async (
           name: string,
           rawArgs: Record<string, unknown>,
@@ -4643,6 +4654,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          // The model's first tools run once the role from a job link is saved.
+          if (!executionId.startsWith(`${runId}:job-link`)) await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
           // instead of costing a rejected call and a retry.
           let args =
@@ -9904,6 +9917,77 @@ export function createRunExecutor(deps: ExecutorDeps) {
           (request) => redactSecrets(JSON.stringify(request), runSecrets),
           { exposedToolNames: new Set(tools.map((tool) => tool.name)) },
         );
+        async function startRoleFromJobLink() {
+          if (
+            thread.activeRecruitingRoleId ||
+            nativeSources?.currentAnswer ||
+            currentTurnMessage?.role !== "user" ||
+            !deps.artifacts ||
+            !tools.some((tool) => tool.name === "recruiting_role") ||
+            !tools.some((tool) => tool.name === "web_fetch")
+          )
+            return undefined;
+          const block = currentTurnMessage.blocks.find(
+            (item): item is Extract<MessageBlock, { kind: "text" }> =>
+              item.kind === "text" && jobLinkIn(item.text) !== null,
+          );
+          const url = block ? jobLinkIn(block.text) : null;
+          if (!block || !url) return undefined;
+          try {
+            const read = (await applyTool(
+              "web_fetch",
+              { url, maxChars: 24_000 },
+              `${runId}:job-link`,
+            )) as {
+              title?: unknown;
+              text?: unknown;
+              sourceMaterial?: {
+                artifact: { artifactId: string; sha256: string };
+                url: string;
+                readAt: string;
+              };
+            };
+            const material = read?.sourceMaterial;
+            if (!material || typeof read.text !== "string" || !read.text.trim()) return undefined;
+            const title =
+              (typeof read.title === "string" && read.title.trim().slice(0, 200)) || material.url;
+            const saving = applyTool(
+              "recruiting_role",
+              {
+                operation: "create",
+                title,
+                brief: null,
+                sourceRefs: [
+                  {
+                    id: "job-link",
+                    kind: "original_material",
+                    anchor: { kind: "artifact", artifact: material.artifact, locator: "text" },
+                    readState: "read",
+                    readAt: material.readAt,
+                    url: material.url,
+                  },
+                ],
+                criteria: [],
+                preferences: [],
+                definitionQuestions: [],
+                intent: { basis: "direct", quote: block.text.trim() },
+              },
+              `${runId}:job-link-role`,
+            ).catch((error) => {
+              getLogger().warn("role from job link not saved", { error: String(error) });
+            });
+            return {
+              saving,
+              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\nAsk the first clarifying question now (or, when nothing needs clarifying, issue the calibration searches now).`,
+            };
+          } catch (error) {
+            getLogger().warn("job link not read before the first step", { error: String(error) });
+            return undefined;
+          }
+        }
+        // A recruiter's job link on a thread with no role is read and saved as a new role by the
+        // server before the model's first step, so the first question needs no read or save step.
+        linkRole = await startRoleFromJobLink();
         const replyContext = await loadReplyContext(deps.prisma, thread.id, run.sourceMessageId);
         const prompt = [
           replyContext,
@@ -9912,6 +9996,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .filter(Boolean)
                 .join("\n\n")
             : basePrompt,
+          linkRole?.note,
           takeoverResume?.promptNote,
           approvalContinuation,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
@@ -10856,6 +10941,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
           }
 
+          await linkRole?.saving;
           runComputer.throwIfFailed();
           if (approvalPausePending || !leaseValid) return;
           approvedEffectReplays.assertDrained();
