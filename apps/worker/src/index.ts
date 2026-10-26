@@ -213,7 +213,7 @@ async function main() {
   const connector = stack.destination;
   await connector.start();
   integrationSettings.warmDirectories();
-  void prewarmToolDiscovery(prisma, connector, shutdown.signal).catch((error) =>
+  void prewarmToolDiscovery(prisma, stack.connector, shutdown.signal).catch((error) =>
     logger.warn("discovery.prewarm failed", { error: String(error) }),
   );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
