@@ -261,6 +261,30 @@ describe("guardRecruitingTurnEnd", () => {
     expect(text).toContain("10. **Person 9** · Warehouse Manager · Example Co · Atlanta");
   });
 
+  it("lists only the saved people of a list still being written", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "person-1", name: "Person 1" }]),
+      },
+    } as never;
+    const input = { threadId: "thread-1", spaceId: "space-1", roleId: "role-1" };
+    expect(
+      await recruitingRoundListText(prisma, {
+        ...input,
+        candidateKeys: ["person-x", "person-1"],
+        knownOnly: true,
+      }),
+    ).toContain("1. **Person 1**");
+    expect(
+      await recruitingRoundListText(prisma, {
+        ...input,
+        candidateKeys: ["person-x"],
+        knownOnly: true,
+      }),
+    ).toBe("");
+  });
+
   it.each([
     [10, false, true, false, "ended"],
     [9, false, true, false, "continued"],

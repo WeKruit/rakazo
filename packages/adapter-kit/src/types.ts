@@ -529,6 +529,8 @@ export interface AgentRunRequest {
    * the run then continues with it instead of asking again.
    */
   beforeAsk?: (question: string) => Promise<string | undefined>;
+  /** The arguments of a tool call parsed so far while the model is still writing them. */
+  onToolCallDelta?: (call: { id: string; name: string; args: Record<string, unknown> }) => void;
   /** Called after a tool returns; implementations must not persist raw result contents. */
   onToolCompleted?: (completion: AgentToolCompletion) => Promise<void> | void;
   /**
