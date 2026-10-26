@@ -20,6 +20,11 @@ export const CODEX_STREAM_HEADERS_TIMEOUT_MS = 30_000;
  * headers is dead: it is aborted and retried instead of waiting out the full idle bound.
  */
 export const MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS = 30_000;
+/**
+ * The retry after a first-event timeout waits longer, so a stream that was only slow (a large
+ * prompt on a busy backend) still completes on its second attempt instead of failing twice.
+ */
+export const MODEL_STREAM_RETRY_FIRST_EVENT_TIMEOUT_MS = 90_000;
 /** A provider error body is a few hundred bytes; one still unread after this is a stalled connection. */
 export const MODEL_ERROR_BODY_TIMEOUT_MS = 15_000;
 /** One model response, even one that keeps streaming, ends within this; a lease is 5 minutes. */

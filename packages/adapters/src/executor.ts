@@ -444,7 +444,7 @@ import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
 } from "./recruiting-feedback.js";
-import { isRegionOnlyLocation } from "./recruiting-location.js";
+import { isRegionOnlyLocation, locationOutliers } from "./recruiting-location.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -4856,24 +4856,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // recorded round then replaces that message with the final list.
         // show_picks put the first people in chat; the turn owes the recorded ten.
         let firstPicksShown = false;
-        // People whose region-only location the run already asked about once.
-        const regionOnlyAsked = new Set<string>();
-        /** Saved people of the role whose every saved location names only a country or a state. */
-        const regionOnlyPeople = async (roleId: string, keys: readonly string[]) => {
+        // People whose location the run already asked the model about once.
+        const locationAsked = new Set<string>();
+        /**
+         * Picked people whose saved location names only a country or a state, and those whose
+         * location shares no place with where the rest of the picks are.
+         */
+        const locationSlips = async (roleId: string, keys: readonly string[]) => {
           const rows = await deps.prisma.recruitingCandidateOccurrence.findMany({
             where: { roleId, candidateKey: { in: [...keys] } },
             select: { candidateKey: true, name: true, location: true },
           });
-          const people = new Map<string, string>();
+          const regionOnly = new Map<string, string>();
+          const located = new Map<string, string>();
+          const labels = new Map<string, string>();
           for (const key of keys) {
             const seen = rows.filter((row) => row.candidateKey === key);
-            if (seen.length && seen.every((row) => isRegionOnlyLocation(row.location)))
-              people.set(
-                key,
-                `${seen.find((row) => row.name)?.name ?? key} (${seen.find((row) => row.location?.trim())?.location?.trim() || "no location"})`,
-              );
+            if (!seen.length) continue;
+            const location = seen.find((row) => !isRegionOnlyLocation(row.location))?.location;
+            const shown = seen.find((row) => row.location?.trim())?.location?.trim();
+            labels.set(
+              key,
+              `${seen.find((row) => row.name)?.name ?? key} (${shown || "no location"})`,
+            );
+            if (location) located.set(key, location);
+            else regionOnly.set(key, labels.get(key) as string);
           }
-          return people;
+          const outliers = new Map(
+            locationOutliers(located).map((key) => [key, labels.get(key) as string]),
+          );
+          return { regionOnly, outliers };
         };
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
@@ -5181,7 +5193,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
             // Someone whose profile shows only a country or a state is left out of the first
             // picks rather than costing a step; the round itself asks about them.
-            const regionOnly = await regionOnlyPeople(roleId, picked);
+            const { regionOnly } = await locationSlips(roleId, picked);
             const keys = picked.filter((key) => !regionOnly.has(key));
             if (!keys.length)
               return {
@@ -5219,17 +5231,29 @@ export function createRunExecutor(deps: ExecutorDeps) {
             researchInput?.data?.operation === "calibration_round" &&
             thread.activeRecruitingRoleId
           ) {
-            const regionOnly = await regionOnlyPeople(
+            const { regionOnly, outliers } = await locationSlips(
               thread.activeRecruitingRoleId,
               researchInput.data.candidateKeys,
             );
-            // Asked once per person: a role that accepts a whole country or state records them
-            // when the same people come back.
-            const unasked = [...regionOnly.keys()].filter((key) => !regionOnlyAsked.has(key));
-            if (unasked.length) {
-              for (const key of unasked) regionOnlyAsked.add(key);
+            // Asked once per person: when the same people come back the model has decided they fit
+            // (a role open to a whole country or state, or a real commute), and they are recorded.
+            const unasked = (people: Map<string, string>) =>
+              [...people].filter(([key]) => !locationAsked.has(key)).map(([, label]) => label);
+            const vague = unasked(regionOnly);
+            const far = unasked(outliers);
+            if (vague.length || far.length) {
+              for (const key of [...regionOnly.keys(), ...outliers.keys()]) locationAsked.add(key);
               return {
-                error: `Not recorded: ${unasked.map((key) => regionOnly.get(key)).join(", ")} show only a country or a state, which never counts inside a city or metro location scope. Replace them with people from the rows whose location is inside the scope and record the ten again. Only if this role accepts anyone in that whole country or state, record the same ten again.`,
+                error: [
+                  "Not recorded.",
+                  vague.length &&
+                    `${vague.join(", ")} show only a country or a state, which never counts inside a city or metro location scope.`,
+                  far.length &&
+                    `${far.join(", ")} ${far.length > 1 ? "are" : "is"} far from where the other picks are; check against the role's location scope.`,
+                  "Replace anyone outside the scope with people from the rows whose location is inside it and record the ten again. If they are all inside the scope, record the same ten again.",
+                ]
+                  .filter(Boolean)
+                  .join(" "),
               };
             }
           }

@@ -78,6 +78,7 @@ import {
   MODEL_ERROR_BODY_TIMEOUT_MS,
   MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
+  MODEL_STREAM_RETRY_FIRST_EVENT_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
   MODEL_STREAM_TOTAL_TIMEOUT_MS,
   modelStreamMaxRetries,
@@ -393,7 +394,7 @@ export class PiAgentRuntime implements AgentRuntime {
           stepThinkingLevel: () => (firstStep ? request.model.firstStepThinkingLevel : undefined),
           attempted: new Set<string>(),
           nextIndex: 0,
-          stream: (target, ctx, options) =>
+          stream: (target, ctx, options, firstEventTimeoutMs) =>
             reliableModelStream(
               target.models,
               target.model,
@@ -421,6 +422,7 @@ export class PiAgentRuntime implements AgentRuntime {
                   },
                 ),
               target.config.cacheCapabilities?.retentionMode,
+              firstEventTimeoutMs,
             ),
           onSwitch: async (target) => {
             await request.onModelChange?.(target.config.provider, target.config.id);
@@ -1937,7 +1939,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     nextIndex: 0,
     onSwitch: async () => undefined,
     isProviderFailure: (message) => providerFailures.has(message.content),
-    stream: (target, ctx, options) =>
+    stream: (target, ctx, options, firstEventTimeoutMs) =>
       reliableModelStream(
         target.models,
         target.model,
@@ -1973,6 +1975,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
             },
           ),
         requestModel.cacheCapabilities?.retentionMode,
+        firstEventTimeoutMs,
       ),
   };
   const nestedTools = toAgentTools(childDefs, nestedHost);
@@ -2905,6 +2908,7 @@ interface FallbackStreamState {
     target: RuntimeModelTarget,
     context: TranscriptContext,
     options: ModelsSimpleStreamOptions | undefined,
+    firstEventTimeoutMs?: number,
   ): AssistantMessageEventStream;
   /** The current step is being retried after its stream went silent. */
   onRetry?(): void;
@@ -3182,6 +3186,8 @@ function fallbackAwareModelStream(
     let buffered: AssistantMessageEvent[] = [];
     let retries = 0;
     let retriedSilentStream = false;
+    // After a stalled stream, the next attempt (same model or backup) waits longer for its first item.
+    let stalled = false;
     let firstRetryableError: Extract<AssistantMessageEvent, { type: "error" }> | undefined;
     while (!signalAborted()) {
       const target = state.getActive();
@@ -3205,6 +3211,7 @@ function fallbackAwareModelStream(
           target,
           context,
           state.request.fallbackModels?.length ? { ...options, apiKey, reasoning } : options,
+          stalled ? MODEL_STREAM_RETRY_FIRST_EVENT_TIMEOUT_MS : undefined,
         );
       } catch (error) {
         finishWithThrownError(target, error);
@@ -3223,6 +3230,9 @@ function fallbackAwareModelStream(
               state.isProviderFailure(event.error) &&
               isRetryableProviderUnavailable(event.error)
             ) {
+              stalled ||= Boolean(
+                event.error.errorMessage?.includes(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE),
+              );
               const next = await resolveNext(target);
               if (failIfAborted(target)) return;
               if (next) {
@@ -3645,8 +3655,16 @@ export function reliableModelStream(
   accessToken?: string | (() => string | undefined),
   runStream?: (options: ModelsSimpleStreamOptions) => AssistantMessageEventStream,
   cacheRetention?: ModelsSimpleStreamOptions["cacheRetention"],
+  firstEventTimeoutMs: number = MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
 ): AssistantMessageEventStream {
-  const watchdog = isCodexModel(model) ? codexStreamIdleWatchdog(options?.signal) : undefined;
+  const watchdog = isCodexModel(model)
+    ? codexStreamIdleWatchdog(
+        options?.signal,
+        MODEL_STREAM_IDLE_TIMEOUT_MS,
+        MODEL_STREAM_TOTAL_TIMEOUT_MS,
+        firstEventTimeoutMs,
+      )
+    : undefined;
   try {
     const preparedOptions = reliableStreamOptions(
       model,
