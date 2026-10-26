@@ -49,7 +49,8 @@ export const RECRUITING_OPERATOR_EMAIL_DOMAIN = "wekruit.com";
  * List prices of the platform services by slug, for the operator's spend estimate only.
  * Research: US$850 a month for 100,000 credits. Contact enrichment: the entry monthly plan,
  * US$29 for 500 credits (charged only for found data). People search: US$7 per 1,000
- * searches with contents. Model tokens are priced from the model catalog instead.
+ * searches with contents. Outreach mail, calendar and mailbox connectors are flat-rate or free.
+ * Model tokens are priced from the model catalog instead.
  */
 export const RECRUITING_SERVICE_UNIT_PRICES_USD: Readonly<
   Record<string, { credits?: number; calls?: number }>
@@ -58,6 +59,10 @@ export const RECRUITING_SERVICE_UNIT_PRICES_USD: Readonly<
   fullenrich: { credits: 29 / 500, calls: 0 },
   "people-search": { calls: 7 / 1000 },
   "recruiting-crm": { calls: 0 },
+  // Flat subscriptions or free APIs: calls add no per-use cost.
+  instantly: { calls: 0 },
+  "cal-com": { calls: 0 },
+  gmail: { calls: 0 },
 };
 
 const CRM_READ_TOOLS = [

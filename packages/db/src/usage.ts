@@ -146,6 +146,9 @@ function finish(value: UsageAmounts, owner: boolean): UsageAmounts {
     : rounded;
 }
 
+/** Balance readings are inputs to attribution, not spend. */
+const SPEND_UNITS = Prisma.sql`u."unit" IN ('tokens', 'credits', 'calls')`;
+
 const TOKEN_SUMS = Prisma.sql`
       SUM(u."quantity") AS "quantity",
       SUM(CASE WHEN u."unit" = 'tokens' THEN COALESCE(u."totalTokens",
@@ -162,8 +165,8 @@ async function usageGroups(
   scope: { spaceId: string; userId: string } | null,
 ): Promise<UsageGroup[]> {
   const where = scope
-    ? Prisma.sql`WHERE u."spaceId" = ${scope.spaceId} AND u."userId" = ${scope.userId}`
-    : Prisma.empty;
+    ? Prisma.sql`WHERE ${SPEND_UNITS} AND u."spaceId" = ${scope.spaceId} AND u."userId" = ${scope.userId}`
+    : Prisma.sql`WHERE ${SPEND_UNITS}`;
   // A row belongs to the first calibration round recorded at or after it (the round its work
   // prepared); after the last round it belongs to the next one, or to scaling once approved.
   return prisma.$queryRaw<UsageGroup[]>`
@@ -315,6 +318,7 @@ async function summarizeAccounts(
       CASE WHEN u."unit" = 'tokens' THEN u."model" ELSE '' END AS "model",
       ${TOKEN_SUMS}
     FROM "usage_records" u
+    WHERE ${SPEND_UNITS}
     GROUP BY 1, 2, 3, 4`;
   const byUser = new Map<string, UsageAmounts>();
   for (const row of rows) {

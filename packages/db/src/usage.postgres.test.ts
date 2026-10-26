@@ -17,12 +17,10 @@ describePostgres("usage ledger (PostgreSQL)", () => {
   let runId: string;
   let botId: string;
   let roleId: string;
-  let taskId: string;
   let searchServerId: string;
   let researchServerId: string;
   let enrichServerId: string;
   let seq = 0;
-  let action: Record<string, string>;
 
   async function connectorCall(
     serverId: string,
@@ -48,21 +46,14 @@ describePostgres("usage ledger (PostgreSQL)", () => {
     });
     await prisma.externalEffect.update({
       where: { id: effect.id },
-      data: { status: "completed", updatedAt: at, ...(result ? { result } : {}) },
+      data: { status: "completed", updatedAt: at, ...(result ? { result: result as never } : {}) },
     });
     return effect;
   }
 
-  async function creditsReading(total: number) {
-    return prisma.recruitingResearchAction.create({
-      data: {
-        ...action,
-        taskId,
-        runId,
-        clientNonce: `usage:${suffix}:${seq++}`,
-        kind: "continue",
-        usage: [{ scope: "task", unit: "credits", amount: total }],
-      } as never,
+  async function balance(used: number, at: Date) {
+    return connectorCall(researchServerId, "credits", at, {
+      structuredContent: { credits_used: used, credits_remaining: 100_000 - used, plan: "pmf" },
     });
   }
 
@@ -131,33 +122,6 @@ describePostgres("usage ledger (PostgreSQL)", () => {
     searchServerId = (await server("people-search")).id;
     researchServerId = (await server("autumn")).id;
     enrichServerId = (await server("fullenrich")).id;
-    taskId = (
-      await prisma.recruitingResearchTask.create({
-        data: { roleId, mcpServerId: researchServerId, serverRevision: 1, createdByRunId: runId },
-      })
-    ).id;
-    const artifact = await prisma.artifact.create({
-      data: {
-        spaceId,
-        userId,
-        name: "request.json",
-        mimeType: "application/json",
-        size: 2,
-        hash: "a".repeat(64),
-        storageKey: `usage-${suffix}`,
-      },
-    });
-    const current = await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } });
-    action = {
-      roleRevisionId: current.currentRevisionId,
-      sourceMessageId: message.id,
-      requestArtifactId: artifact.id,
-      requestArtifactHash: artifact.hash,
-      contextArtifactId: artifact.id,
-      contextArtifactHash: artifact.hash,
-      receiptArtifactId: artifact.id,
-      receiptArtifactHash: artifact.hash,
-    };
   });
 
   afterAll(async () => {
@@ -180,14 +144,20 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       { spaceId, userId, botId, runId },
     );
     await connectorCall(searchServerId, "web_search_exa", before);
-    await creditsReading(60);
+    const ago = (seconds: number) => new Date(Date.now() - seconds * 1000);
+    // Research spend is only reported as an account-wide running total.
+    await balance(1000, ago(55));
+    await connectorCall(researchServerId, "research", ago(50));
+    await balance(1060, ago(45));
     // A repeated reading of the same running total is not new spend.
-    await creditsReading(60);
+    await balance(1060, ago(44));
     const round = await prisma.recruitingCalibrationRound.create({
       data: { roleId, round: 1, candidateKeys: [], effectId: `round-${suffix}` },
     });
     await new Promise((resolve) => setTimeout(resolve, 10));
-    await creditsReading(150);
+    await connectorCall(researchServerId, "get_task", new Date());
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await balance(1150, new Date());
     await new Promise((resolve) => setTimeout(resolve, 10));
     await prisma.recruitingCalibrationRound.update({
       where: { id: round.id },
@@ -207,17 +177,17 @@ describePostgres("usage ledger (PostgreSQL)", () => {
     expect(rows.filter((row) => row.unit === "credits").map((row) => row.quantity)).toEqual([
       60, 90,
     ]);
-    expect(rows.filter((row) => row.unit === "calls")).toHaveLength(2);
+    expect(rows.filter((row) => row.unit === "calls")).toHaveLength(8);
 
     const costs = await db.summarizeUsageCosts(prisma, actor);
-    expect(costs.total).toEqual({ credits: 150, calls: 2, tokens: 120 });
+    expect(costs.total).toEqual({ credits: 150, calls: 8, tokens: 120 });
     expect(costs.month.estimatedUsd).toBeUndefined();
     expect(costs.services).toBeUndefined();
     const [role] = costs.roles;
     expect(role).toMatchObject({ roleId, title: "Quality manager", credits: 150 });
     expect(role!.rounds).toEqual([
-      { round: 1, scale: false, credits: 60, calls: 1, tokens: 120 },
-      { round: 2, scale: false, credits: 90, calls: 0, tokens: 0 },
+      { round: 1, scale: false, credits: 60, calls: 5, tokens: 120 },
+      { round: 2, scale: false, credits: 90, calls: 2, tokens: 0 },
       { round: null, scale: true, credits: 0, calls: 1, tokens: 0 },
     ]);
 
@@ -272,17 +242,29 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       }),
     ).toBe(1);
 
+    // Contact enrichment also reports only a remaining balance; a drop is spend, a top-up is not.
+    await connectorCall(enrichServerId, "get_credits", new Date(), {
+      content: [{ type: "text", text: JSON.stringify({ credits: 1102 }) }],
+    });
+    await connectorCall(enrichServerId, "enrich_bulk", new Date());
+    await connectorCall(enrichServerId, "get_credits", new Date(), {
+      content: [{ type: "text", text: JSON.stringify({ credits: 1090 }) }],
+    });
+    await connectorCall(enrichServerId, "get_credits", new Date(), {
+      content: [{ type: "text", text: JSON.stringify({ credits: 5000 }) }],
+    });
+
     const owner = await db.summarizeUsageCosts(prisma, actor, {
       priceTokens: (provider, model, tokens) =>
         provider === "openai-codex" && model === "gpt-test" && tokens.input === 100 ? 0.5 : null,
     });
-    // 150 research credits, 14 enrichment credits, 2 searches and the model call at list price.
-    expect(owner.total.credits).toBe(164);
-    expect(owner.total.estimatedUsd).toBeCloseTo(150 * 0.0085 + 14 * 0.058 + 2 * 0.007 + 0.5, 2);
+    // 150 research credits, 26 enrichment credits, 2 searches and the model call at list price.
+    expect(owner.total.credits).toBe(176);
+    expect(owner.total.estimatedUsd).toBeCloseTo(150 * 0.0085 + 26 * 0.058 + 2 * 0.007 + 0.5, 2);
     expect(owner.services).toEqual(
       expect.arrayContaining([
         { service: "autumn", unit: "credits", quantity: 150, estimatedUsd: 1.28, priced: true },
-        { service: "fullenrich", unit: "credits", quantity: 14, estimatedUsd: 0.81, priced: true },
+        { service: "fullenrich", unit: "credits", quantity: 26, estimatedUsd: 1.51, priced: true },
         { service: "people-search", unit: "calls", quantity: 2, estimatedUsd: 0.01, priced: true },
         {
           service: "openai-codex/gpt-test",
@@ -294,8 +276,8 @@ describePostgres("usage ledger (PostgreSQL)", () => {
       ]),
     );
     expect(owner.accounts?.find((account) => account.userId === userId)).toMatchObject({
-      credits: 164,
-      estimatedUsd: 2.6,
+      credits: 176,
+      estimatedUsd: 3.3,
     });
     // Without a known model price the tokens stay visible as unpriced, never silently free.
     const unpriced = await db.summarizeUsageCosts(prisma, actor);
