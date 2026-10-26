@@ -1,5 +1,7 @@
 import { EventEmitter } from "node:events";
+import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import type { PoolClient } from "pg";
+import { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDb,
@@ -69,6 +71,56 @@ describe("createDb", () => {
     const { pool } = createDb("postgres://rakazo:rakazo@127.0.0.1:9/rakazo");
     pools.push(pool);
     expect(pool.options.max).toBe(4);
+  });
+});
+
+describe("pool wait log", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    installLogger(createLogger({ service: "rakazo-test", level: "off", sinks: [] }));
+  });
+
+  it("summarizes slow checkouts once per minute and stays quiet when nothing waited", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
+    let delay = 0;
+    vi.spyOn(Pool.prototype, "connect").mockImplementation(
+      () =>
+        new Promise((resolve) =>
+          setTimeout(() => resolve({ release: () => undefined } as unknown as PoolClient), delay),
+        ) as never,
+    );
+    const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo", {
+      poolMax: 2,
+      applicationName: "rakazo-worker",
+    });
+    const checkout = async () => {
+      const pending = pool.connect();
+      await vi.advanceTimersByTimeAsync(delay);
+      await pending;
+    };
+
+    await checkout();
+    vi.setSystemTime(61_000);
+    await checkout();
+    expect(sink.events.filter((event) => event.message === "db.pool.wait")).toEqual([]);
+
+    delay = 400;
+    await checkout();
+    delay = 0;
+    vi.setSystemTime(130_000);
+    await checkout();
+    const waits = sink.events.filter((event) => event.message === "db.pool.wait");
+    expect(waits).toHaveLength(1);
+    expect(waits[0]).toMatchObject({
+      pool: "rakazo-worker",
+      max: 2,
+      checkouts: 2,
+      waited: 1,
+      maxMs: 400,
+    });
   });
 });
 
