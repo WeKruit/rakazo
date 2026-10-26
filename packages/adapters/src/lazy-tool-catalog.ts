@@ -194,9 +194,11 @@ export function searchCatalog(
   const limit = Number.isFinite(requested)
     ? Math.max(1, Math.min(TOOL_SEARCH_LIMIT, Math.trunc(requested)))
     : TOOL_SEARCH_LIMIT;
+  // The whole query first; only when nothing matches it, its words one by one.
+  const score = scoped.some((entry) => termScore(entry, query) < 4) ? termScore : termsScore;
   return {
     tools: scoped
-      .map((entry) => ({ entry, score: catalogScore(entry, query) }))
+      .map((entry) => ({ entry, score: score(entry, query) }))
       .filter(({ score }) => score < 4)
       .sort(
         (left, right) =>
@@ -383,8 +385,7 @@ function listNames(entries: CatalogEntry[]): string[] {
   );
 }
 
-function catalogScore(entry: CatalogEntry, query: string): number {
-  if (!query) return 0;
+function termScore(entry: CatalogEntry, query: string): number {
   const name = entry.tool.name.toLowerCase();
   const shortName = catalogShortName(entry).toLowerCase();
   const description = entry.tool.description.toLowerCase();
@@ -394,4 +395,16 @@ function catalogScore(entry: CatalogEntry, query: string): number {
   if (name.includes(query) || shortName.includes(query) || group.includes(query)) return 2;
   if (description.includes(query)) return 3;
   return 4;
+}
+
+/**
+ * Its words or tool names one by one (agents list several in one query), ranked by how many
+ * match and how well. 4 means no match.
+ */
+function termsScore(entry: CatalogEntry, query: string): number {
+  const terms = [...new Set(query.split(/[\s,;|/]+/).filter((term) => term.length >= 3))];
+  if (terms.length < 2) return 4;
+  const scores = terms.map((term) => termScore(entry, term)).filter((score) => score < 4);
+  if (!scores.length) return 4;
+  return Math.min(3.9, Math.min(...scores) + (1 - scores.length / terms.length) * 0.9);
 }
