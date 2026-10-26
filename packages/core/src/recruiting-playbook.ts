@@ -84,10 +84,13 @@ export function validateRecruitingBrief(
 }
 
 /** No mandatory questionnaire. Reuse sourced answers and ask only about material uncertainty. */
+// The model names the work-location field freely (location, locations, work_location, …).
+const isLocationKey = (key: string) => /location/i.test(key);
+
 export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
   const pending = brief.fields.filter(
     (field) =>
-      (field.consequential || field.key === "location") &&
+      (field.consequential || isLocationKey(field.key)) &&
       (field.state !== "known" || field.origin === "inferred"),
   );
   const questions = pending.map((field) => ({
@@ -98,13 +101,13 @@ export function recruitingBriefClarifications(brief: RecruitingBriefDraft) {
       )?.question ??
       (field.key === "salary_range"
         ? "What salary range may be stated in outreach?"
-        : field.key === "location"
+        : isLocationKey(field.key)
           ? "What location or remote work scope applies?"
           : field.key === "company_deck"
             ? "Is a company deck available?"
             : "Please clarify the unresolved role detail."),
   }));
-  if (!brief.fields.some((field) => field.key === "location"))
+  if (!brief.fields.some((field) => isLocationKey(field.key)))
     questions.push({
       fieldKey: "location",
       question: "What location or remote work scope applies?",
@@ -348,7 +351,7 @@ export function nextPlaybookStep(
             stage,
             label: "完成岗位信息",
             prompt:
-              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就在本轮下一步立刻发出校准人才搜索（每条回来自动出现在结果里），再保存并确认 brief，然后选出 10 人。",
+              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就在本轮下一步立刻发出校准人才搜索（每条回来自动出现在结果里），再保存 brief，然后选出 10 人（不等确认 brief，也不让招聘者确认）。",
           };
     case "calibration_10": {
       const remaining = Math.max(0, CALIBRATION_TARGET - facts.savedCandidates);
@@ -356,7 +359,7 @@ export function nextPlaybookStep(
         stage,
         label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
         prompt: remaining
-          ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后直接列出名单。`
+          ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后记录本轮（名单会自动列在聊天里）。`
           : `把这 10 位校准候选人记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单；面板已提供逐人反馈入口，不要另建逐人评分卡。${NEXT_STEP_CARD}允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。`,
       };
     }
