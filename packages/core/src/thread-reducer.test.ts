@@ -154,6 +154,16 @@ describe("shared thread reducer", () => {
     expect(writing.messages[0]?.blocks).toEqual([{ kind: "progress", text: "Done" }]);
   });
 
+  it("keeps the reconnecting mark on the live bubble until the next update", () => {
+    const retrying = reduceThreadEvent(
+      base,
+      event(11, "thread.progress", { text: "", activity: true, phase: "retrying" }),
+    );
+    expect(retrying.messages[0]?.blocks).toEqual([
+      { kind: "progress", text: "", activity: true, phase: "retrying" },
+    ]);
+  });
+
   it("asks for a full read only after events the reducer cannot fold", () => {
     for (const type of ["thread.progress", "run.completed", "usage.recorded", "recruiting.changed"])
       expect(eventNeedsSnapshotRead({ type })).toBe(false);

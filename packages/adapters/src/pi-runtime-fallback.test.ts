@@ -68,13 +68,14 @@ import { toolCompletionAuditPayload } from "./executor.js";
 import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import {
+  CODEX_STREAM_IDLE_TIMEOUT_MESSAGE,
   isRetryableProviderUnavailable,
   keepInterruptedAssistantMessage,
   PiAgentRuntime,
   thinkingSummary,
 } from "./pi-runtime.js";
 import {
-  MODEL_STREAM_FIRST_OUTPUT_TIMEOUT_MS,
+  MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
 } from "./pi-runtime-limits.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
@@ -2012,14 +2013,36 @@ describe("Pi runtime ordered model fallback", () => {
       const input = request();
       input.model.provider = codex.provider;
       const pending = run(input);
-      await vi.advanceTimersByTimeAsync(MODEL_STREAM_FIRST_OUTPUT_TIMEOUT_MS - 1);
+      await vi.advanceTimersByTimeAsync(MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS - 1);
       expect(providerState.stream).toHaveBeenCalledTimes(1);
       await vi.advanceTimersByTimeAsync(2);
-      expect(await pending).toContainEqual({ type: "text", text: "recovered" });
+      const events = await pending;
+      expect(events).toContainEqual({ type: "text", text: "recovered" });
+      // The person sees that the reply is reconnecting, with no model or provider named.
+      expect(events).toContainEqual({
+        type: "progress",
+        text: "",
+        activity: true,
+        phase: "retrying",
+      });
       expect(providerState.stream).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("retries once when the provider reports the stalled stream in its own words", async () => {
+    providerState.stream.mockImplementation((target: Model<"openai-completions">) =>
+      providerState.stream.mock.calls.length > 1
+        ? stream(target, message(target, [{ type: "text", text: "recovered" }], "stop"))
+        : stream(
+            target,
+            message(target, [], "error", `Codex error: ${CODEX_STREAM_IDLE_TIMEOUT_MESSAGE}`),
+          ),
+    );
+    const events = await run(request());
+    expect(events).toContainEqual({ type: "text", text: "recovered" });
+    expect(providerState.stream).toHaveBeenCalledTimes(2);
   });
 
   it("records streamed content when the provider iterator throws after output", async () => {

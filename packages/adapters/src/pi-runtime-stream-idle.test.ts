@@ -15,9 +15,11 @@ import {
 } from "./pi-runtime.js";
 import {
   CODEX_STREAM_HEADERS_TIMEOUT_MS,
+  MODEL_ERROR_BODY_TIMEOUT_MS,
+  MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
-  modelStreamFirstOutputTimeoutMs,
+  MODEL_STREAM_TOTAL_TIMEOUT_MS,
 } from "./pi-runtime-limits.js";
 
 function assistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
@@ -94,7 +96,7 @@ describe("Codex stream idle watchdog", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it("fails a first attempt that streams no output within the first-output bound", async () => {
+  it("fails a stream that reports nothing after its headers within the first-event bound", async () => {
     vi.useFakeTimers();
     const watchdog = codexStreamIdleWatchdog(undefined, 10_000, 60_000, 3_000);
     const inner = new AssistantMessageEventStream();
@@ -103,30 +105,15 @@ describe("Codex stream idle watchdog", () => {
     const first = iterator.next();
     inner.push({ type: "start", partial: assistantMessage({ content: [] }) });
     await first;
-    for (let elapsed = 0; elapsed < 2_400; elapsed += 800) {
-      await vi.advanceTimersByTimeAsync(800);
-      const next = iterator.next();
-      inner.push({
-        type: "thinking_start",
-        contentIndex: 0,
-        partial: assistantMessage({ content: [] }),
-      });
-      await next;
-    }
+    await vi.advanceTimersByTimeAsync(2_999);
     expect(watchdog.signal.aborted).toBe(false);
-    await vi.advanceTimersByTimeAsync(600);
+    await vi.advanceTimersByTimeAsync(1);
     expect(watchdog.signal.aborted).toBe(true);
     expect((watchdog.signal.reason as Error).message).toBe(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE);
     watchdog.dispose();
   });
 
-  it("bounds the first output only for light and medium reasoning", () => {
-    expect(modelStreamFirstOutputTimeoutMs("low")).toBe(30_000);
-    expect(modelStreamFirstOutputTimeoutMs("medium")).toBe(60_000);
-    expect(modelStreamFirstOutputTimeoutMs("high")).toBeUndefined();
-  });
-
-  it("drops the first-output bound once the step shows output", async () => {
+  it("keeps only the idle bound once the model reports its first item", async () => {
     vi.useFakeTimers();
     const watchdog = codexStreamIdleWatchdog(undefined, 10_000, 60_000, 3_000);
     const inner = new AssistantMessageEventStream();
@@ -135,24 +122,29 @@ describe("Codex stream idle watchdog", () => {
     const first = iterator.next();
     inner.push({ type: "start", partial: assistantMessage({ content: [] }) });
     await first;
-    const delta = iterator.next();
+    const item = iterator.next();
+    // Long reasoning reports its item at once and then may stay quiet for a while.
     inner.push({
-      type: "thinking_delta",
+      type: "thinking_start",
       contentIndex: 0,
-      delta: "Reading the role",
-      partial: assistantMessage({ content: [{ type: "thinking", thinking: "Reading the role" }] }),
+      partial: assistantMessage({ content: [] }),
     });
-    await delta;
-    await vi.advanceTimersByTimeAsync(9_000);
+    await item;
+    await vi.advanceTimersByTimeAsync(9_999);
     expect(watchdog.signal.aborted).toBe(false);
-    await vi.advanceTimersByTimeAsync(1_000);
+    await vi.advanceTimersByTimeAsync(1);
     expect(watchdog.signal.aborted).toBe(true);
     watchdog.dispose();
   });
 
   it("aborts the composed signal after the idle bound and relabels the terminal error", async () => {
     vi.useFakeTimers();
-    const watchdog = codexStreamIdleWatchdog(undefined);
+    const watchdog = codexStreamIdleWatchdog(
+      undefined,
+      MODEL_STREAM_IDLE_TIMEOUT_MS,
+      MODEL_STREAM_TOTAL_TIMEOUT_MS,
+      MODEL_STREAM_IDLE_TIMEOUT_MS * 10,
+    );
     const inner = new AssistantMessageEventStream();
     const stream = watchdog.wrap(inner);
     const iterator = stream[Symbol.asyncIterator]();
@@ -209,7 +201,7 @@ describe("Codex stream idle watchdog", () => {
     // Headers landed — pi's onResponse seam pings the watchdog — but the body
     // then stays silent: the idle bound applies from here.
     watchdog.ping();
-    await vi.advanceTimersByTimeAsync(MODEL_STREAM_IDLE_TIMEOUT_MS - 1);
+    await vi.advanceTimersByTimeAsync(MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS - 1);
     expect(watchdog.signal.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(watchdog.signal.aborted).toBe(true);
@@ -255,7 +247,12 @@ describe("Codex stream idle watchdog", () => {
 
   it("re-arms on every delivered event so a busy stream never aborts", async () => {
     vi.useFakeTimers();
-    const watchdog = codexStreamIdleWatchdog(undefined);
+    const watchdog = codexStreamIdleWatchdog(
+      undefined,
+      MODEL_STREAM_IDLE_TIMEOUT_MS,
+      MODEL_STREAM_TOTAL_TIMEOUT_MS,
+      MODEL_STREAM_IDLE_TIMEOUT_MS * 10,
+    );
     const inner = new AssistantMessageEventStream();
     const stream = watchdog.wrap(inner);
     const iterator = stream[Symbol.asyncIterator]();
@@ -421,7 +418,7 @@ describe("reliableModelStream idle gating", () => {
     // then stays silent aborts at the idle bound.
     await guardedOptions?.onResponse?.({ status: 200, headers: {} }, codexModel);
     expect(onResponse).toHaveBeenCalledWith({ status: 200, headers: {} }, codexModel);
-    await vi.advanceTimersByTimeAsync(MODEL_STREAM_IDLE_TIMEOUT_MS - 1);
+    await vi.advanceTimersByTimeAsync(MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS - 1);
     expect(guardedOptions?.signal?.aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(guardedOptions?.signal?.aborted).toBe(true);
@@ -468,7 +465,7 @@ describe("reliableModelStream idle gating", () => {
         return { error };
       },
     );
-    await vi.advanceTimersByTimeAsync(MODEL_STREAM_IDLE_TIMEOUT_MS - 1);
+    await vi.advanceTimersByTimeAsync(MODEL_ERROR_BODY_TIMEOUT_MS - 1);
     expect(settled).toBe(false);
     expect(guardedOptions?.signal?.aborted).toBe(false);
 

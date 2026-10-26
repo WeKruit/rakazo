@@ -271,8 +271,13 @@ export function reduceLiveMessageBlocks(
     for (const name of pendingToolNames) next = appendToolCallSegment(next, name);
     return next;
   }
-  const compacting = update.type === "progress" && update.payload?.phase === "compacting";
-  if (!tailText && !compacting) return [...segments];
+  // Runtime phases with no text of their own still show until the next progress update.
+  const phase =
+    update.type === "progress" &&
+    (update.payload?.phase === "compacting" || update.payload?.phase === "retrying")
+      ? update.payload.phase
+      : undefined;
+  if (!tailText && !phase) return [...segments];
   return [
     ...segments,
     {
@@ -280,7 +285,7 @@ export function reduceLiveMessageBlocks(
       text: tailText,
       ...(activity ? { activity: true as const } : {}),
       ...(pendingToolNames.length > 0 ? { pendingToolNames } : {}),
-      ...(compacting ? { phase: "compacting" as const } : {}),
+      ...(phase ? { phase } : {}),
     },
   ];
 }

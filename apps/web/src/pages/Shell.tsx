@@ -7980,7 +7980,10 @@ const Transcript = memo(function Transcript({
         ) ? (
           showToolActivity && isRunPhase(tailPhase) && workingBots.length ? (
             <ActiveBotGlyph bots={workingBots} label={workingLabel} />
-          ) : tailPhase === "working" || tailPhase === "starting" || tailPhase === "compacting" ? (
+          ) : tailPhase === "working" ||
+            tailPhase === "starting" ||
+            tailPhase === "compacting" ||
+            tailPhase === "retrying" ? (
             <LiveWork
               session={
                 workSession?.endedAt

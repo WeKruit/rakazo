@@ -48,6 +48,8 @@ export function threadTailLabel(phase: ThreadTailPhase | null): string | null {
   switch (phase) {
     case "compacting":
       return t`Compacting…`;
+    case "retrying":
+      return t`Reconnecting…`;
     case "needs_input":
       return t`Needs an answer`;
     case "needs_takeover":
