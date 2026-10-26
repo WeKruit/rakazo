@@ -175,9 +175,13 @@ function stageAfter(role: { playbookStage?: string }, next: RecruitingPlaybookSt
 const CALIBRATION_FEEDBACK_THRESHOLD = 10;
 
 /** After candidates are saved: ten or more saved people move the role into the feedback loop. */
+/** Saved people reach the feedback stage only once a calibration round has shown ten of them. */
 async function advanceStageAfterSave(tx: Tx, roleId: string) {
-  const saved = await tx.recruitingCandidate.count({ where: { roleId } });
-  if (saved >= CALIBRATION_FEEDBACK_THRESHOLD)
+  const [saved, round] = await Promise.all([
+    tx.recruitingCandidate.count({ where: { roleId } }),
+    tx.recruitingCalibrationRound.findFirst({ where: { roleId }, select: { id: true } }),
+  ]);
+  if (round && saved >= CALIBRATION_FEEDBACK_THRESHOLD)
     await advanceRecruitingPlaybookStage(tx, roleId, "feedback");
 }
 
@@ -201,7 +205,7 @@ export async function readRecruitingPlaybookStep(
     select: { title: true, playbookStage: true, currentRevisionId: true, archivedAt: true },
   });
   if (!role || role.archivedAt) return null;
-  const [revision, savedCandidates, acceptedRound] = await Promise.all([
+  const [revision, savedCandidates, acceptedRound, anyRound] = await Promise.all([
     tx.recruitingRoleRevision.findUnique({
       where: { id: role.currentRevisionId },
       select: { brief: true },
@@ -211,6 +215,7 @@ export async function readRecruitingPlaybookStep(
       where: { roleId, approvedAt: { not: null } },
       select: { id: true },
     }),
+    tx.recruitingCalibrationRound.findFirst({ where: { roleId }, select: { id: true } }),
   ]);
   const brief = revision?.brief ? RecruitingBriefDraftSchema.safeParse(revision.brief) : null;
   // The stored stage only moves forward from writes made after it shipped. A role that already
@@ -220,8 +225,10 @@ export async function readRecruitingPlaybookStep(
   const confirmed = (revision?.brief as { confirmation?: unknown } | null)?.confirmation;
   if (confirmed && typeof confirmed === "object")
     stage = laterPlaybookStage(stage, "calibration_10");
+  // Saved people mean the brief was searched; feedback starts only once a round showed ten.
   if (savedCandidates >= CALIBRATION_FEEDBACK_THRESHOLD)
-    stage = laterPlaybookStage(stage, "feedback");
+    stage = laterPlaybookStage(stage, anyRound ? "feedback" : "calibration_10");
+  if (stage === "feedback" && !anyRound) stage = "calibration_10";
   if (acceptedRound) stage = laterPlaybookStage(stage, "scale");
   const openClarifications = brief?.success ? recruitingBriefClarifications(brief.data).length : 0;
   return {

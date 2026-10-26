@@ -106,6 +106,12 @@ function fixture(
   return { deps, sendUserMessage, enqueue, postAssistant };
 }
 
+/** A recorded round of ten the recruiter has answered. */
+const shownRound = {
+  effectId: "effect-1",
+  candidateKeys: Array.from({ length: 10 }, (_, i) => `person-${i}`),
+  approvedAt: null,
+};
 const statusNote: MessageBlock[] = [
   { kind: "text", text: "已将公司暂用名保存为 X。尚未启动搜寻。" },
 ];
@@ -161,7 +167,13 @@ describe("guardRecruitingTurnEnd", () => {
   );
 
   it("does not treat feedback-stage saves or a prose question as a delivered review", async () => {
-    const f = fixture({ stage: "feedback", savedRows: 1, savedCandidates: 10 });
+    const f = fixture({
+      stage: "feedback",
+      savedRows: 1,
+      savedCandidates: 10,
+      round: shownRound,
+      roundAnswered: true,
+    });
     const base = {
       run,
       roleId: "role-1",
@@ -415,7 +427,12 @@ describe("guardRecruitingTurnEnd", () => {
 
   it("never sends a role that already has saved people back to a fresh search", async () => {
     // Roles created before the stage column existed still read "intake".
-    const f = fixture({ stage: "intake", savedCandidates: 49 });
+    const f = fixture({
+      stage: "intake",
+      savedCandidates: 49,
+      round: shownRound,
+      roundAnswered: true,
+    });
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
       roleId: "role-1",
@@ -425,7 +442,29 @@ describe("guardRecruitingTurnEnd", () => {
       postAssistant: f.postAssistant,
     });
     expect(result).toMatchObject({ action: "continued", stage: "feedback", label: "收集校准反馈" });
+  });
 
+  it("presents the first ten from saved people before asking for feedback", async () => {
+    // Saves used to move a role to feedback before any round was shown.
+    for (const stage of ["intake", "feedback"]) {
+      const f = fixture({ stage, savedRows: 62, savedCandidates: 62 });
+      const result = await guardRecruitingTurnEnd(f.deps, {
+        run,
+        roleId: "role-1",
+        blocks: statusNote,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: f.postAssistant,
+      });
+      expect(result).toMatchObject({
+        action: "continued",
+        stage: "calibration_10",
+        label: "展示 10 人校准名单",
+      });
+    }
+  });
+
+  it("scales a role whose round was accepted", async () => {
     const accepted = fixture({ stage: "intake", savedCandidates: 49, acceptedRound: true });
     await expect(
       guardRecruitingTurnEnd(accepted.deps, {

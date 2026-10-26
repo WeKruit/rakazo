@@ -72,6 +72,7 @@ function fixture() {
       })),
     },
     bot: { findFirst: vi.fn(async () => actor) },
+    recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
     recruitingCandidate: {
       findUnique: vi.fn(async () => candidate),
       updateMany: vi.fn(async () => ({ count: 1 })),
@@ -1176,6 +1177,7 @@ function observationFixture(rows: readonly unknown[] | undefined) {
       findUnique: vi.fn(async () => null),
       create: vi.fn(async ({ data }) => data),
     },
+    recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
     recruitingCandidate: {
       ...f.tx.recruitingCandidate,
       createMany: vi.fn(async () => ({ count: 1 })),
@@ -1405,6 +1407,7 @@ function crmFixture(additionalRows: readonly unknown[] = []) {
   const tx = {
     ...f.tx,
     $queryRaw: vi.fn(async () => [{ id: "thread" }]),
+    recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
     recruitingCandidate: {
       ...f.tx.recruitingCandidate,
       findUnique: vi.fn(async () => ({
