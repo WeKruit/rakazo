@@ -11864,8 +11864,23 @@ export async function saveRecruitingCalibrationRound(
     });
     if (saved.length !== keys.length) {
       const known = new Set(saved.map((row) => row.candidateKey));
+      const missing = keys.filter((key) => !known.has(key));
+      // A key cut short that several saved people continue: name them so the retry picks one.
+      const notes = await Promise.all(
+        missing.map(async (key) => {
+          const near = await tx.recruitingCandidate.findMany({
+            where: { roleId: role.id, candidateKey: { startsWith: key } },
+            select: { candidateKey: true },
+            orderBy: { candidateKey: "asc" },
+            take: 6,
+          });
+          return near.length >= 2 && near.length <= 5
+            ? `${key} (saved keys starting with it: ${near.map((row) => row.candidateKey).join(", ")})`
+            : key;
+        }),
+      );
       throw new RecruitingCalibrationRoundError(
-        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${keys.filter((key) => !known.has(key)).join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).`,
+        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${notes.join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).`,
       );
     }
     const previous = await tx.recruitingCalibrationRound.findFirst({
