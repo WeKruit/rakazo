@@ -11862,10 +11862,12 @@ export async function saveRecruitingCalibrationRound(
       where: { roleId: role.id, candidateKey: { in: [...keys] } },
       select: { candidateKey: true },
     });
-    if (saved.length !== keys.length)
+    if (saved.length !== keys.length) {
+      const known = new Set(saved.map((row) => row.candidateKey));
       throw new RecruitingCalibrationRoundError(
-        "Every person in a calibration round must be a saved candidate of this role. Save the returned results first, then use their exact candidateKeys.",
+        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${keys.filter((key) => !known.has(key)).join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).`,
       );
+    }
     const previous = await tx.recruitingCalibrationRound.findFirst({
       where: { roleId: role.id },
       orderBy: { round: "desc" },

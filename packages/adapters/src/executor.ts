@@ -577,6 +577,21 @@ export function jobLinkIn(text: string): string | null {
  * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
  * 「新岗位：」. Short messages are instructions, not a JD.
  */
+/** The saved form of a LinkedIn candidate key ("linkedin:/in/<profile>") from a key or link. */
+export function savedCandidateKeyForm(key: string): string {
+  let text = key.trim();
+  try {
+    text = decodeURIComponent(text);
+  } catch {}
+  const profile = text
+    .replace(/^linkedin:/i, "")
+    .replace(/^https?:\/\/([a-z]+\.)?linkedin\.com/i, "")
+    .replace(/^\/?in\//i, "")
+    .replace(/[/?#].*$/, "")
+    .toLowerCase();
+  return profile ? `linkedin:/in/${profile}` : key;
+}
+
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
 export function shortQuestion(question: string, max = 240): string {
   let text = question.trim();
@@ -4679,6 +4694,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // Set before the first model step when a job link is saved as the thread's role.
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
+        // The brief is saved after the round; the next-step card waits for it once, in its own
+        // step, so a save issued beside the card is never cut off by the pause.
+        let briefAsked = false;
+        const briefBeforeNextStepCard = async () => {
+          if (briefAsked || !thread.activeRecruitingRoleId || !(await nextStepCardAfterRound()))
+            return undefined;
+          const role = await deps.prisma.recruitingRole.findFirst({
+            where: { id: thread.activeRecruitingRoleId, spaceId: run.spaceId },
+            select: { currentRevision: { select: { brief: true } } },
+          });
+          if (!role || role.currentRevision?.brief) return undefined;
+          briefAsked = true;
+          return "The ten are shown but the brief is not saved yet. Save it now with one recruiting_role update as the only call in this step (from the JD and the recruiter's answers; when it is refused, fix what the error names once), then show the next-step card in the following step.";
+        };
         // After this run records a round, its only card is the next-step choice.
         const nextStepCardAfterRound = async () => {
           if (!thread.activeRecruitingRoleId) return undefined;
@@ -4728,6 +4757,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
               { threadId: thread.id },
               args,
             );
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            Array.isArray(args.candidateKeys) &&
+            thread.activeRecruitingRoleId
+          ) {
+            // A key copied as a profile link or without its "/in/" prefix still names the saved
+            // person, so the round records on the first call.
+            const keys = args.candidateKeys.map((key) =>
+              typeof key === "string" ? savedCandidateKeyForm(key) : key,
+            );
+            const saved = new Set(
+              (
+                await deps.prisma.recruitingCandidate.findMany({
+                  where: {
+                    roleId: thread.activeRecruitingRoleId,
+                    candidateKey: {
+                      in: [...args.candidateKeys, ...keys].filter(
+                        (key): key is string => typeof key === "string",
+                      ),
+                    },
+                  },
+                  select: { candidateKey: true },
+                })
+              ).map((row) => row.candidateKey),
+            );
+            args = {
+              ...args,
+              candidateKeys: args.candidateKeys.map((key, index) =>
+                typeof key === "string" && !saved.has(key) && saved.has(String(keys[index]))
+                  ? keys[index]
+                  : key,
+              ),
+            };
+          }
           if (name === "recruiting_assess" && args.operation === "ask") {
             // Clarifying questions come before the search: once this turn shows the ten, it
             // ends on the next-step card instead of another question.
@@ -10605,6 +10669,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     resolveConnectedModel(run, provider, modelId, (values) =>
                       runSecrets.push(...values),
                     ),
+              beforeAsk: briefBeforeNextStepCard,
               onToolCompleted: async (completion) => {
                 await toolCalledAudit(completion.executionId).settled;
                 toolCalledAudits.delete(completion.executionId);

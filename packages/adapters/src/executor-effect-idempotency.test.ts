@@ -44,6 +44,7 @@ import {
   jobLinkIn,
   pastedJobTitle,
   resumeBriefForRun,
+  savedCandidateKeyForm,
   selectBuiltinToolsForRun,
   shortQuestion,
   toolArgsSummary,
@@ -5940,6 +5941,16 @@ describe("native recruiting assessment effect delivery", () => {
       intent: { basis: "direct", quote: text.trim() },
     });
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create a role");
+  });
+
+  it("reads a candidate key copied as a link or without its prefix as the saved key", () => {
+    for (const key of [
+      "linkedin:/in/stevenfeng7",
+      "linkedin:stevenfeng7",
+      "https://www.linkedin.com/in/StevenFeng7/",
+      "/in/stevenfeng7",
+    ])
+      expect(savedCandidateKeyForm(key)).toBe("linkedin:/in/stevenfeng7");
   });
 
   it("fits a long question card by dropping leading context, keeping the question", () => {
