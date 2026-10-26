@@ -17,6 +17,7 @@ import {
   CODEX_STREAM_HEADERS_TIMEOUT_MS,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
+  modelStreamFirstOutputTimeoutMs,
 } from "./pi-runtime-limits.js";
 
 function assistantMessage(overrides: Partial<AssistantMessage> = {}): AssistantMessage {
@@ -91,6 +92,62 @@ describe("Codex stream idle watchdog", () => {
     expect((watchdog.signal.reason as Error).message).toBe(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE);
     watchdog.dispose();
     expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("fails a first attempt that streams no output within the first-output bound", async () => {
+    vi.useFakeTimers();
+    const watchdog = codexStreamIdleWatchdog(undefined, 10_000, 60_000, 3_000);
+    const inner = new AssistantMessageEventStream();
+    const stream = watchdog.wrap(inner);
+    const iterator = stream[Symbol.asyncIterator]();
+    const first = iterator.next();
+    inner.push({ type: "start", partial: assistantMessage({ content: [] }) });
+    await first;
+    for (let elapsed = 0; elapsed < 2_400; elapsed += 800) {
+      await vi.advanceTimersByTimeAsync(800);
+      const next = iterator.next();
+      inner.push({
+        type: "thinking_start",
+        contentIndex: 0,
+        partial: assistantMessage({ content: [] }),
+      });
+      await next;
+    }
+    expect(watchdog.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(600);
+    expect(watchdog.signal.aborted).toBe(true);
+    expect((watchdog.signal.reason as Error).message).toBe(CODEX_STREAM_IDLE_TIMEOUT_MESSAGE);
+    watchdog.dispose();
+  });
+
+  it("bounds the first output only for light and medium reasoning", () => {
+    expect(modelStreamFirstOutputTimeoutMs("low")).toBe(30_000);
+    expect(modelStreamFirstOutputTimeoutMs("medium")).toBe(60_000);
+    expect(modelStreamFirstOutputTimeoutMs("high")).toBeUndefined();
+  });
+
+  it("drops the first-output bound once the step shows output", async () => {
+    vi.useFakeTimers();
+    const watchdog = codexStreamIdleWatchdog(undefined, 10_000, 60_000, 3_000);
+    const inner = new AssistantMessageEventStream();
+    const stream = watchdog.wrap(inner);
+    const iterator = stream[Symbol.asyncIterator]();
+    const first = iterator.next();
+    inner.push({ type: "start", partial: assistantMessage({ content: [] }) });
+    await first;
+    const delta = iterator.next();
+    inner.push({
+      type: "thinking_delta",
+      contentIndex: 0,
+      delta: "Reading the role",
+      partial: assistantMessage({ content: [{ type: "thinking", thinking: "Reading the role" }] }),
+    });
+    await delta;
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(watchdog.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(watchdog.signal.aborted).toBe(true);
+    watchdog.dispose();
   });
 
   it("aborts the composed signal after the idle bound and relabels the terminal error", async () => {

@@ -73,7 +73,10 @@ import {
   PiAgentRuntime,
   thinkingSummary,
 } from "./pi-runtime.js";
-import { MODEL_STREAM_IDLE_TIMEOUT_MS } from "./pi-runtime-limits.js";
+import {
+  MODEL_STREAM_FIRST_OUTPUT_TIMEOUT_MS,
+  MODEL_STREAM_IDLE_TIMEOUT_MS,
+} from "./pi-runtime-limits.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
 import { createRuntimeContextPolicy } from "./runtime-context.js";
 
@@ -1967,6 +1970,51 @@ describe("Pi runtime ordered model fallback", () => {
       input.model.provider = codex.provider;
       const pending = run(input);
       await vi.advanceTimersByTimeAsync(MODEL_STREAM_IDLE_TIMEOUT_MS + 1);
+      expect(await pending).toContainEqual({ type: "text", text: "recovered" });
+      expect(providerState.stream).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries a silent Codex first step once on the same model when there is no backup", async () => {
+    vi.useFakeTimers();
+    try {
+      const codex = {
+        ...primary,
+        provider: "openai-codex",
+        api: "openai-codex-responses" as const,
+      };
+      providerState.models.set(`${codex.provider}/${codex.id}`, codex);
+      let calls = 0;
+      providerState.stream.mockImplementation(
+        (
+          target: Model<"openai-completions">,
+          _ctx: unknown,
+          options: {
+            signal: AbortSignal;
+            onResponse: (response: Response, model: Model<"openai-completions">) => void;
+          },
+        ) => {
+          calls += 1;
+          if (calls > 1)
+            return stream(target, message(target, [{ type: "text", text: "recovered" }], "stop"));
+          const result = new AssistantMessageEventStream();
+          options.onResponse(new Response(null, { status: 200 }), target);
+          options.signal.addEventListener("abort", () => {
+            const failure = message(target, [], "aborted", "aborted");
+            result.push({ type: "error", reason: "aborted", error: failure });
+            result.end(failure);
+          });
+          return result;
+        },
+      );
+      const input = request();
+      input.model.provider = codex.provider;
+      const pending = run(input);
+      await vi.advanceTimersByTimeAsync(MODEL_STREAM_FIRST_OUTPUT_TIMEOUT_MS - 1);
+      expect(providerState.stream).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2);
       expect(await pending).toContainEqual({ type: "text", text: "recovered" });
       expect(providerState.stream).toHaveBeenCalledTimes(2);
     } finally {

@@ -514,6 +514,8 @@ function measureFirstTen(events, round) {
       at(e) < roundAt,
   );
   const answerAt = users.length ? at(users.at(-1)) : jdAt;
+  // Time the recruiter waited before the agent even started, separate from the agent's own time.
+  const runStart = events.find((e) => e.type === "run.started" && at(e) >= answerAt);
   const bot = events.filter(
     (e) => /^thread\.message\.(created|updated)$/.test(e.type) && e.payload?.role === "bot",
   );
@@ -564,6 +566,7 @@ function measureFirstTen(events, round) {
     firstPeopleInChatS: seconds(answerAt, firstShown && at(firstShown)),
     tenRecordedS: seconds(answerAt, roundAt),
     allTenS: seconds(answerAt, allTenAt),
+    runStartWaitS: seconds(answerAt, runStart && at(runStart)),
     plannedSearches: planned.at(-1)?.payload?.queries?.length ?? 0,
     searchesAfterAnswer: searchesRun,
     modelSearchesAfterAnswer: modelSearches,
@@ -706,6 +709,8 @@ async function main() {
     return null;
   });
   if (events) {
+    // The role is archived below and its events can no longer be read, so keep them for diagnosis.
+    fs.writeFileSync(OUT.replace(/(\.json)?$/, ".events.json"), JSON.stringify(events));
     checkToolErrors(events);
     for (const event of events.filter((e) => e.type === "run.failed"))
       violation("run_failed", `${event.createdAt} ${event.payload?.error ?? ""}`.trim());

@@ -14,6 +14,19 @@ export const MODEL_STREAM_IDLE_TIMEOUT_MS = 120_000;
  * instead of holding the recruiter for minutes.
  */
 export const CODEX_STREAM_HEADERS_TIMEOUT_MS = 30_000;
+/**
+ * A light-reasoning step shows reasoning, text or a tool call within seconds of its headers, so a
+ * first attempt still silent this long is treated as hung and retried on a fresh connection. The
+ * retry gets the full idle bound, so a slow but healthy step still completes. Deeper reasoning may
+ * think longer before its first summary and keeps only the idle bound.
+ */
+export const MODEL_STREAM_FIRST_OUTPUT_TIMEOUT_MS = 30_000;
+export function modelStreamFirstOutputTimeoutMs(thinkingLevel: string): number | undefined {
+  if (["off", "minimal", "low"].includes(thinkingLevel))
+    return MODEL_STREAM_FIRST_OUTPUT_TIMEOUT_MS;
+  if (thinkingLevel === "medium") return MODEL_STREAM_FIRST_OUTPUT_TIMEOUT_MS * 2;
+  return undefined;
+}
 /** One model response, even one that keeps streaming, ends within this; a lease is 5 minutes. */
 export const MODEL_STREAM_TOTAL_TIMEOUT_MS = 240_000;
 export const DEFAULT_MODEL_STREAM_MAX_RETRIES = 1;
