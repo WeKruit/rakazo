@@ -5,6 +5,7 @@ import {
   countTrailingAutoContinues,
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
+  intakeAnswers,
   recruitingRoundListText,
 } from "./turn-end-guard.js";
 
@@ -584,5 +585,29 @@ describe("guardRecruitingRoleCreate", () => {
     const again = roleFixture(refused, 1);
     expect(await guardRecruitingRoleCreate(again.deps, input)).toMatchObject({ action: "ended" });
     expect(again.sendUserMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe("intakeAnswers", () => {
+  const ask = (text: string) => ({ role: "bot", blocks: [{ kind: "ask", text }] });
+  const say = (role: string, text: string) => ({ role, blocks: [{ kind: "text", text }] });
+
+  it("pairs each question card with the recruiter's answer and skips the JD itself", () => {
+    expect(
+      intakeAnswers([
+        say("user", "Research Scientist, Simulation — full JD"),
+        ask("语言要求？"),
+        say("user", "英语必需"),
+        say("bot", "本轮 10 位人选"),
+        say("user", "找 100 个"),
+        ask("地点？"),
+        say("user", "Redwood City 现场"),
+        ask("语言要求？"),
+        say("user", " 英语必需，中文不要求 "),
+      ]),
+    ).toEqual([
+      { key: "地点？", value: "Redwood City 现场" },
+      { key: "语言要求？", value: "英语必需，中文不要求" },
+    ]);
   });
 });

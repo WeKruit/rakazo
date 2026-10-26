@@ -523,8 +523,8 @@ export interface AgentRunRequest {
     route?: ConnectorRoute,
     observer?: AgentToolExecutionObserver,
   ) => Promise<unknown>;
-  /** Checked before a question card pauses the run; a returned instruction refuses the card. */
-  beforeAsk?: () => Promise<string | undefined>;
+  /** Awaited before a question card pauses the run, so work the run started finishes first. */
+  beforeAsk?: () => Promise<void>;
   /** Called after a tool returns; implementations must not persist raw result contents. */
   onToolCompleted?: (completion: AgentToolCompletion) => Promise<void> | void;
   /**

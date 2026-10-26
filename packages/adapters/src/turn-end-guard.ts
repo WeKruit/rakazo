@@ -72,6 +72,29 @@ export type TurnEndGuardResult =
   | { action: "continued"; runId: string | null; stage: string; label: string; count: number }
   | { action: "capped"; stage: string; label: string; count: number };
 
+/** The recruiter's answers to the bot's question cards, keyed by question; a later answer wins. */
+export function intakeAnswers(messages: readonly { role: string; blocks: unknown }[]) {
+  const answers = new Map<string, string>();
+  let question: string | undefined;
+  for (const message of messages) {
+    const blocks = message.blocks as MessageBlock[];
+    if (message.role !== "user") {
+      const ask = blocks.find((block) => block.kind === "ask");
+      question = ask?.kind === "ask" ? ask.text.trim().slice(0, 200) : undefined;
+      continue;
+    }
+    const answer = blocks
+      .flatMap((block) => (block.kind === "text" ? [block.text.trim()] : []))
+      .filter(Boolean)
+      .join("\n");
+    if (question && answer) {
+      answers.delete(question);
+      answers.set(question, answer);
+    }
+    question = undefined;
+  }
+  return [...answers].map(([key, value]) => ({ key, value }));
+}
 /**
  * The ten of a recorded round as the chat lists them: name, title, company, location and the
  * profile passage the people search returned for each, read from this run's saved searches.
