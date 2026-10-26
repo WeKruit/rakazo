@@ -591,12 +591,19 @@ export function savedCandidateKeyForm(key: string): string {
 }
 
 /**
- * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab") names the one saved key
- * that continues it; an ambiguous or unknown key stays as given.
+ * A key cut short ("linkedin:/in/jane-d" for "linkedin:/in/jane-d-12ab" or "linkedin:/in/jane-doe")
+ * names the one saved key that continues it, preferring a continuation after "-". An ambiguous,
+ * unknown or very short key stays as given.
  */
 export function continuedCandidateKey(key: string, savedKeys: readonly string[]): string {
-  const matches = savedKeys.filter((saved) => saved.startsWith(`${key}-`));
-  return matches.length === 1 ? (matches[0] as string) : key;
+  const one = (matches: readonly string[]) => (matches.length === 1 ? matches[0] : undefined);
+  return (
+    one(savedKeys.filter((saved) => saved.startsWith(`${key}-`))) ??
+    (key.replace(/^linkedin:\/in\//, "").length >= 6
+      ? one(savedKeys.filter((saved) => saved.startsWith(key)))
+      : undefined) ??
+    key
+  );
 }
 
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
@@ -4837,7 +4844,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ? await deps.prisma.recruitingCandidate.findMany({
                   where: {
                     roleId: thread.activeRecruitingRoleId,
-                    OR: cut.map((key) => ({ candidateKey: { startsWith: `${key}-` } })),
+                    OR: cut.map((key) => ({ candidateKey: { startsWith: key } })),
                   },
                   select: { candidateKey: true },
                 })
