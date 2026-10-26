@@ -1152,6 +1152,7 @@ model UsageRecord {
   @@index([spaceId, userId, createdAt])
   @@index([spaceId, userId, unit, createdAt])
   @@index([roleId, createdAt])
+  @@index([unit, provider, createdAt])
   @@map("usage_records")
 }
 
