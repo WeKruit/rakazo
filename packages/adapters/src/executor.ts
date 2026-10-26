@@ -665,6 +665,10 @@ export function shortQuestion(question: string, max = 240): string {
 const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Leave plannedSearches out only when you already know another question must follow this one.";
 
+/** How long the answer turn waits for each planned search before picking without it. */
+const PLANNED_SEARCH_WAIT_MS = 6_000;
+const PLANNED_SEARCH_LATE = Symbol("planned search still running");
+
 /** A short message that opens with a role lead-in, such as 「新岗位：仓库经理（Atlanta）。要求：…」. */
 const ROLE_LEAD_IN =
   /^(?:新岗位|岗位|职位|招聘|new role|job title|job|role|position|hiring)\s*[:：]/i;
@@ -5111,6 +5115,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : undefined;
           if (researchInput && !researchInput.success)
             return { error: sanitizeConnectorError(researchInput.error, runSecrets) };
+          if (researchInput?.data?.operation === "show_picks") {
+            // Display only: the first good fits go into the round's chat list while more searches
+            // run; calibration_round records the ten and replaces the list.
+            const roleId = thread.activeRecruitingRoleId;
+            if (!roleId) return { error: "This conversation has no active role." };
+            const keys = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
+            const text = await recruitingRoundListText(deps.prisma, {
+              threadId: run.threadId,
+              spaceId: run.spaceId,
+              roleId,
+              candidateKeys: keys,
+              knownOnly: true,
+            });
+            if (!text)
+              return {
+                error:
+                  "None of these is a saved person of this role. Use the exact candidateKeys from the people rows.",
+              };
+            roundStream ??= { callId: executionId, shown: 0, posting: Promise.resolve() };
+            const stream = roundStream;
+            stream.shown = Math.max(stream.shown, keys.length);
+            stream.posting = stream.posting.then(() => showRoundList(text));
+            await stream.posting;
+            return {
+              shown: keys.length,
+              next: "These people are in chat now. Once the new searches return, record the full ten with calibration_round, starting with these same people in the same order.",
+            };
+          }
           const candidateOperation =
             name === "recruiting_feedback" &&
             args.target === "candidate" &&
@@ -10528,7 +10560,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return undefined;
           const searches = await Promise.all(
             planned.data.queries.map(async (query, index) => {
-              const result = await applyTool(
+              const pending = applyTool(
                 searchTool,
                 {
                   query,
@@ -10540,6 +10572,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
                 `${runId}:planned-search:${plan.id}:${index}`,
               ).catch((error) => ({ error: String(error) }));
+              // One slow search must not hold the pick: it keeps saving to Results on its own.
+              let timer: ReturnType<typeof setTimeout> | undefined;
+              const result = await Promise.race([
+                pending,
+                new Promise<typeof PLANNED_SEARCH_LATE>((resolve) => {
+                  timer = setTimeout(() => resolve(PLANNED_SEARCH_LATE), PLANNED_SEARCH_WAIT_MS);
+                }),
+              ]).finally(() => clearTimeout(timer));
+              if (result === PLANNED_SEARCH_LATE)
+                return `Search ${index + 1} "${query}": still running; its people are saved to Results when it returns, so pick from the other searches.`;
               const people =
                 result && typeof result === "object" && "people" in result
                   ? (result as { people: unknown }).people
@@ -10547,7 +10589,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
             }),
           );
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for, or if fewer than ten of these people fit; then run four new, differently worded people searches.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. If the answer does not change who you are looking for, pick the ten from these rows now and record them with calibration_round, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for, or if fewer than ten of these people fit. When fewer than ten fit, in one step call recruiting_research show_picks with the ones that do (best first) together with four new, differently worded people searches, so the recruiter sees them at once; then record the full ten with calibration_round, starting with those same people in the same order.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.

@@ -1906,4 +1906,16 @@ describe("recruiting brief drafts", () => {
     };
     expect(schema.properties.fields.items.required).not.toContain("consequential");
   });
+
+  it("shows one to nine first picks without recording a round", () => {
+    const show = (candidateKeys: string[]) =>
+      contracts.RecruitingResearchToolInputSchema.safeParse({
+        operation: "show_picks",
+        candidateKeys,
+      }).success;
+    expect(show(["linkedin:/in/a"])).toBe(true);
+    expect(show([])).toBe(false);
+    expect(show(["linkedin:/in/a", "linkedin:/in/a"])).toBe(false);
+    expect(show(Array.from({ length: 10 }, (_, index) => `linkedin:/in/p${index}`))).toBe(false);
+  });
 });
