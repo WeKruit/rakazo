@@ -35,6 +35,8 @@ function fixture(
     wokenNonces?: string[];
     acceptedRound?: boolean;
     brief?: unknown;
+    /** Blocks of the message that started the run. */
+    source?: MessageBlock[];
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -53,6 +55,7 @@ function fixture(
     prisma: {
       message: {
         findMany: vi.fn(async () => recent),
+        findUnique: vi.fn(async () => (options.source ? { blocks: options.source } : null)),
         findFirst: vi.fn(async () =>
           options.roundAnswered
             ? { id: "feedback", clientNonce: options.latestNonce ?? null }
@@ -527,6 +530,53 @@ describe("guardRecruitingTurnEnd", () => {
     });
     expect(result).toEqual({ action: "ended", classification: "none" });
     expect(f.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("leaves the next step to the coordinator once a handed-in task is done", async () => {
+    const handoff: MessageBlock[] = [
+      { kind: "handoff", fromBotId: "main", toBotId: "bot-1", text: "Draft the email sequence." },
+    ];
+    const handedIn = { ...run, trigger: "follow_up", sourceMessageId: "handoff-1" };
+    const draft: MessageBlock[] = [{ kind: "text", text: "邮件序列草稿已完成，仅为草稿。" }];
+    const done = fixture({ stage: "scale", savedCandidates: 232, source: handoff });
+    await expect(
+      guardRecruitingTurnEnd(done.deps, {
+        run: handedIn,
+        roleId: "role-1",
+        blocks: draft,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: done.postAssistant,
+      }),
+    ).resolves.toMatchObject({ action: "ended" });
+    expect(done.sendUserMessage).not.toHaveBeenCalled();
+
+    // A promise it did not keep is still pushed, without the role's next step.
+    const promisedFix = fixture({ stage: "scale", savedCandidates: 232, source: handoff });
+    await guardRecruitingTurnEnd(promisedFix.deps, {
+      run: handedIn,
+      roleId: "role-1",
+      blocks: promised,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: promisedFix.postAssistant,
+    });
+    expect(promisedFix.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.not.stringContaining("规模化搜寻") }),
+    );
+
+    // The coordinator's own continuation still gets the step.
+    const own = fixture({ stage: "scale", savedCandidates: 232 });
+    await expect(
+      guardRecruitingTurnEnd(own.deps, {
+        run: { ...run, trigger: "follow_up", sourceMessageId: "nudge-1" },
+        roleId: "role-1",
+        blocks: draft,
+        handedOff: false,
+        pendingApproval: false,
+        postAssistant: own.postAssistant,
+      }),
+    ).resolves.toMatchObject({ action: "continued", stage: "scale" });
   });
 
   it("does not push while a search round is still running", async () => {

@@ -245,10 +245,24 @@ describe("maintained recruiting defaults", () => {
       "Feedback about individual people alone is not acceptance",
       "waves of four differently worded web_search_advanced_exa people searches",
       "until the role holds the target or a wave adds fewer than five new people",
-      "only when the people search stops short of the target",
+      "when the people search stopped short of the target",
       "everyone already returned excluded",
       "a draft only: no campaign activation, import or send",
+      // A handoff ends the coordinator's turn: the searches and the update come first.
+      "tell the recruiter in two or three lines with message_user",
+      "end the turn with exactly one handoff, last",
+      "who then hands the email draft to the outreach teammate",
     ])
+      expect(RECRUITING_SCALE_START).toContain(part);
+    const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer");
+    expect(sourcer?.instructions).toContain(
+      "hand it to Outreach only after the research is started, as your last call",
+    );
+    // Quick-search rounds leave no research task: the scale-out starts one without asking.
+    expect(sourcer?.instructions).toContain(
+      "as the role's first research request without asking anyone",
+    );
+    for (const part of ["That request is the acceptance"])
       expect(RECRUITING_SCALE_START).toContain(part);
     for (const bot of RECRUITING_DEFAULT_BOTS) {
       expect(bot.instructions).toContain(RECRUITING_SCALE_START);

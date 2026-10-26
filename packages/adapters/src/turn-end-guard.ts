@@ -55,6 +55,8 @@ export type TurnEndGuardInput = {
     botId: string;
     userId: string;
     trigger: string;
+    /** The message that started the run: a teammate's handoff when the stage was handed to it. */
+    sourceMessageId?: string | null;
   };
   roleId: string;
   blocks: readonly MessageBlock[];
@@ -210,6 +212,17 @@ export function continuationText(input: {
   return `${parts.filter(Boolean).join("")}${AUTO_NOTE}`;
 }
 
+/** True when the run was started by a teammate's handoff to this bot. */
+async function handedInStage(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
+  if (!run.sourceMessageId || run.trigger !== "follow_up") return false;
+  const source = await deps.prisma.message.findUnique({
+    where: { id: run.sourceMessageId },
+    select: { blocks: true },
+  });
+  const blocks = (source?.blocks ?? []) as MessageBlock[];
+  return blocks.some((block) => block.kind === "handoff" && block.toBotId === run.botId);
+}
+
 /**
  * Turn-end guard for threads with an active recruiting role: a turn that ends with neither a
  * deliverable, a question, a card nor a handoff is pushed into the next playbook step instead
@@ -298,14 +311,18 @@ export async function guardRecruitingTurnEnd(
   );
   if (classification !== "none") return { action: "ended", classification };
   const promise = turnEndPromise(turnEndText(input.blocks));
-  if (!playbook?.step && !promise) return { action: "ended", classification };
+  // A teammate handed this bot one task (an email draft, a deeper search). Finishing that task
+  // ends its turn; the role's next step stays with the coordinator, so only a promise is pushed.
+  const handedIn = await handedInStage(deps, run);
+  const nextStep = handedIn ? undefined : (playbook?.step ?? undefined);
+  if (!nextStep && !promise) return { action: "ended", classification };
   // Waiting on a running search is not a stall: its wake brings the results.
   if (await recruitingResearchInFlight(deps.prisma, input.roleId)) {
     getLogger().info("run.autocontinue.waiting_research", { runId: run.id, roleId: input.roleId });
     return { action: "ended", classification };
   }
   const stage = playbook?.stage ?? "intake";
-  const step = playbook?.step ?? { label: PROMISE_LABEL, prompt: "" };
+  const step = nextStep ?? { label: PROMISE_LABEL, prompt: "" };
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: run.threadId,
@@ -349,7 +366,7 @@ export async function guardRecruitingTurnEnd(
     count,
   });
   const text = continuationText({
-    step: playbook?.step ? step : undefined,
+    step: nextStep,
     promise,
     last: count === max,
   });
