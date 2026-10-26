@@ -2868,75 +2868,16 @@ describe("native recruiting package approval", () => {
     f.setCalls([{ args, executionId: "approval-1" }]);
     return f;
   }
-  it("shows verified files and a one-time card despite always-allow and auto review", async () => {
+  it("never opens an approval card for role documents", async () => {
     const f = approvalFixture();
     await f.run();
-    expect(recruitingApproval.prepare).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ spaceId: "space-1", userId: "user-1" }),
-      expect.objectContaining({
-        runId: "run-1",
-        threadId: "thread-1",
-        botId: "bot-1",
-        leaseOwner: "worker-1",
-      }),
-      args,
-      expect.objectContaining({ artifacts: expect.anything() }),
+    expect((f.results.at(-1) as { error: string }).error).toContain(
+      "Role documents never use an approval card",
     );
-    expect(f.pauseRunForInput).toHaveBeenCalledWith(
-      expect.objectContaining({
-        blocks: [
-          file,
-          expect.objectContaining({
-            kind: "ask",
-            approvalEffectId: f.effects[0]!.id,
-            actions: [
-              expect.objectContaining({ id: "allow" }),
-              expect.objectContaining({ id: "deny" }),
-            ],
-          }),
-        ],
-      }),
-    );
-    expect(f.effects[0]!.request).toEqual(args);
-    expect(recruitingApproval.execute).not.toHaveBeenCalled();
-    expect(reviewMock).not.toHaveBeenCalled();
-  });
-  it("rejects an unavailable package without creating a misleading approval card", async () => {
-    const { RecruitingConflictError } = await import("@rakazo/db");
-    const conflict = new RecruitingConflictError();
-    recruitingApproval.prepare.mockRejectedValue(conflict);
-    const f = approvalFixture();
-    await f.run();
+    expect(f.effects).toHaveLength(0);
     expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(recruitingApproval.prepare).not.toHaveBeenCalled();
     expect(recruitingApproval.execute).not.toHaveBeenCalled();
-    expect(f.results.at(-1)).toEqual({ error: conflict.message, code: "CONFLICT" });
-  });
-  it("resumes the original approved payload once and retains its immutable receipt", async () => {
-    const f = approvalFixture();
-    await f.run();
-    f.effects[0]!.status = "approved";
-    const result = { status: "approved", stage: "documents", approvalEffectId: f.effects[0]!.id };
-    recruitingApproval.execute.mockImplementation(async () => {
-      Object.assign(f.effects[0]!, { status: "completed", result });
-      return result;
-    });
-    f.setCalls([{ args: { ...args, expectedRoleRevision: 99 }, executionId: "approval-2" }]);
-    await f.run();
-    expect(recruitingApproval.execute).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ effectId: f.effects[0]!.id, effectRequest: args }),
-      args,
-      expect.anything(),
-    );
-    expect(f.results.at(-1)).toEqual(result);
-    expect(f.effects).toHaveLength(1);
-    f.setCalls([{ args, executionId: "approval-3" }]);
-    await f.run();
-    expect(recruitingApproval.execute).toHaveBeenCalledOnce();
-    expect(f.pauseRunForInput).toHaveBeenCalledOnce();
-    expect(f.results.at(-1)).toEqual(result);
   });
   it("never opens an approval card for a calibration round", async () => {
     const keys = Array.from({ length: 10 }, (_, index) => `linkedin:example-${index}`);

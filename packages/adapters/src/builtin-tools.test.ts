@@ -53,8 +53,7 @@ describe("native recruiting approval tool", () => {
       z.toJSONSchema(RecruitingApprovalToolCallSchema, { io: "input" }),
     );
     expect(tool?.readOnly).not.toBe(true);
-    expect(tool?.description).toMatch(/one-time human confirmation/i);
-    expect(tool?.description).toMatch(/exact current package/i);
+    expect(tool?.description).toContain("a documents call is refused");
     expect(tool?.description).toMatch(/never self-approve/i);
     expect(
       RecruitingApprovalToolCallSchema.parse({
