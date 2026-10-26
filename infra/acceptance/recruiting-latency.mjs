@@ -466,8 +466,7 @@ async function checkToolErrors(groupId) {
       recovered,
       error: error.slice(0, 300),
     });
-    if (outage(error))
-      violation("tool_outage_error", `${name}: ${error.slice(0, 120)}`);
+    if (outage(error)) violation("tool_outage_error", `${name}: ${error.slice(0, 120)}`);
     else if (!recovered) violation("tool_error_unrecovered", `${name}: ${error.slice(0, 120)}`);
   });
   const counts = {};
@@ -476,6 +475,8 @@ async function checkToolErrors(groupId) {
   report.toolErrors = { calls: done.length, errors: errors.length, counts, items: errors };
   log(`recruiting tool calls ${done.length}, errors ${errors.length} ${JSON.stringify(counts)}`);
 }
+
+const TEST_MARK = "测试副本 · ";
 
 async function main() {
   await signIn();
@@ -606,6 +607,12 @@ async function main() {
       : report.violations.length
         ? "completed_with_violations"
         : "pass";
+  if (!option("--group")) {
+    // The conversation is renamed after its role; keep it marked as a test copy in the sidebar.
+    const { name } = await rpc("groups/get", { groupId });
+    if (!name.startsWith(TEST_MARK))
+      await rpc("groups/update", { groupId, name: `${TEST_MARK}${name}`.slice(0, 80) });
+  }
   report.finishedAt = new Date().toISOString();
   save();
   log(`result ${report.result}; latency ${JSON.stringify(report.latency)}; report ${OUT}`);

@@ -576,6 +576,17 @@ export function jobLinkIn(text: string): string | null {
  * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
  * 「新岗位：」. Short messages are instructions, not a JD.
  */
+/** A question card holds 240 characters: leading context sentences go first, the question stays. */
+export function shortQuestion(question: string, max = 240): string {
+  let text = question.trim();
+  while (text.length > max) {
+    const cut = text.search(/[。！？.!?；;]\s*(?=\S)/);
+    if (cut < 0 || cut + 1 >= text.length) return `${text.slice(0, max - 1)}…`;
+    text = text.slice(cut + 1).trim();
+  }
+  return text;
+}
+
 export function pastedJobTitle(text: string): string | null {
   if (text.trim().length < 400) return null;
   const lines = text
@@ -4692,6 +4703,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
               { threadId: thread.id },
               args,
             );
+          if (name === "recruiting_assess" && args.operation === "ask") {
+            // Clarifying questions come before the search: once this turn shows the ten, it
+            // ends on the next-step card instead of another question.
+            const rounds = await deps.prisma.externalEffect.findMany({
+              where: {
+                runId,
+                spaceId: run.spaceId,
+                kind: "recruiting_research",
+                status: "completed",
+                request: { path: ["operation"], equals: "calibration_round" },
+              },
+              select: { id: true },
+              take: 1,
+            });
+            if (rounds.length)
+              return {
+                error:
+                  "Clarifying questions come before the search, and the ten are already shown. Do not ask it: end the turn with the next-step card (ask_user).",
+              };
+            if (typeof args.question === "string")
+              args = { ...args, question: shortQuestion(args.question) };
+          }
           if (handedOff) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",
@@ -5584,6 +5617,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     next: recruitingBriefConfirmedNextStep(saved.role.revision),
                   };
                 } catch (error) {
+                  // After the ten are shown the brief stays saved unconfirmed: an open question
+                  // is never asked after the search.
+                  if (
+                    error instanceof RecruitingPlaybookValidationError &&
+                    (await deps.prisma.recruitingCalibrationRound.findFirst({
+                      where: { roleId: call.data.roleId, role: { spaceId: run.spaceId } },
+                      select: { id: true },
+                    }))
+                  )
+                    return {
+                      confirmed: false,
+                      next: "The brief stays saved as it is; the ten are already shown. Ask nothing about the brief: end the turn with the next-step card (ask_user).",
+                    };
                   return { error: sanitizeConnectorError(error, runSecrets) };
                 }
               }
@@ -10009,7 +10055,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
             });
           const ask =
-            "The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now).";
+            "The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now).";
           try {
             if (pasted) {
               const title = pastedJobTitle(pasted.text)!;
@@ -10058,6 +10104,42 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter's job link or pasted JD on a thread with no role is saved as a new role by
         // the server before the model's first step, so the first question needs no read or save step.
         linkRole = await startRoleFromJob();
+        // Until the first round, later intake turns carry the job page the server already read,
+        // so the model never fetches it again before searching.
+        const savedJobPage = async () => {
+          if (linkRole || !thread.activeRecruitingRoleId || !deps.artifacts) return undefined;
+          const [read, round] = await Promise.all([
+            deps.prisma.event.findFirst({
+              where: {
+                threadId: thread.id,
+                spaceId: run.spaceId,
+                type: "recruiting.material.read",
+              },
+              orderBy: { seq: "desc" },
+              select: { payload: true },
+            }),
+            deps.prisma.recruitingCalibrationRound.findFirst({
+              where: { roleId: thread.activeRecruitingRoleId },
+              select: { id: true },
+            }),
+          ]);
+          const artifactId = (read?.payload as { artifact?: { artifactId?: unknown } } | null)
+            ?.artifact?.artifactId;
+          if (round || typeof artifactId !== "string") return undefined;
+          const { bytes } = await readActorArtifact(
+            { prisma: deps.prisma, artifacts: deps.artifacts },
+            { spaceId: run.spaceId, userId: run.userId },
+            { artifactId, fromTool: true },
+          );
+          const page = JSON.parse(Buffer.from(bytes).toString("utf8")) as { text?: unknown };
+          return typeof page.text === "string" && page.text.trim()
+            ? `The role's job page, already read and saved (never fetch it again, and never search connectors or tools before the people searches):\n\n${page.text.slice(0, 24_000)}`
+            : undefined;
+        };
+        const jobPageNote = await savedJobPage().catch((error) => {
+          getLogger().warn("saved job page not loaded", { error: String(error) });
+          return undefined;
+        });
         // Recruiting runs carry the intake skill in the turn: reading it cost a model step per run.
         const intakeSkill = tools.some((tool) => tool.name === "recruiting_role")
           ? await skillReadFromTool(
@@ -10080,6 +10162,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : basePrompt,
           intakeSkillNote,
           linkRole?.note,
+          jobPageNote,
           takeoverResume?.promptNote,
           approvalContinuation,
           // A hang-up turn is read, not heard: no spoken-reply constraint.
