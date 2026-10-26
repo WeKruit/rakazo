@@ -358,7 +358,7 @@ export function nextPlaybookStep(
         ? {
             stage,
             label: "开始校准搜寻",
-            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（web_search_exa category:people → recruiting_research save_search → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
+            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（web_search_advanced_exa 四条人才搜索 → recruiting_research save_search → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。`,
           }
         : {
             stage,
@@ -387,7 +387,7 @@ export function nextPlaybookStep(
         stage,
         label: "规模化搜寻",
         prompt:
-          "本轮已获接受，开始扩大搜索：同一步并行跑 3–4 个换说法的快速人才搜索并 save_search，让新的人马上出现在结果里；把剩下的目标人数（默认 100）交给搜寻同事做深度搜索，带上确认后的 brief、每轮反馈，并排除已返回的人；同时让外联同事起草这个岗位的邮件序列（只是草稿，不导入、不启动、不发送）。然后用两三句话说明已加入多少新人、深度搜索在继续并会陆续补进结果、邮件草稿在准备。",
+          "本轮已获接受，开始扩大搜索：先让外联同事起草这个岗位的邮件序列（只是草稿，不导入、不启动、不发送）；然后自己用人才搜索分批扩大，每批同一步并行跑 4 个换说法的 web_search_advanced_exa 人才搜索、下一步 save_search，批与批之间不逐人阅读或排序，直到达到目标人数（默认 100）或一批新增不到 5 人；只有人才搜索补不满目标、或需要领英以外的证据时，才把剩下的人数交给搜寻同事做深度搜索，带上确认后的 brief、每轮反馈，并排除已返回的人。然后用两三句话说明结果里已有多少人、是否还有深度搜索在继续、邮件草稿在准备。",
       };
     case "enrichment":
       return {
