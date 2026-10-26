@@ -531,7 +531,10 @@ export interface AgentRunRequest {
    * the run then continues with it instead of asking again. `{ instead }` returns that text to
    * the model in place of the card, for a question the run may not ask yet.
    */
-  beforeAsk?: (question: string) => Promise<string | { instead: string } | undefined>;
+  beforeAsk?: (
+    question: string,
+    plannedSearches?: string[],
+  ) => Promise<string | { instead: string } | undefined>;
   /** The arguments of a tool call parsed so far while the model is still writing them. */
   onToolCallDelta?: (call: { id: string; name: string; args: Record<string, unknown> }) => void;
   /** Called after a tool returns; implementations must not persist raw result contents. */

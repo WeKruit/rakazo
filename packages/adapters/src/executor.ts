@@ -441,6 +441,7 @@ import {
   executeRecruitingFeedback,
   RecruitingFeedbackValidationError,
 } from "./recruiting-feedback.js";
+import { isRegionOnlyLocation } from "./recruiting-location.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -663,7 +664,10 @@ export function shortQuestion(question: string, max = 240): string {
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
-  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Leave plannedSearches out only when you already know another question must follow this one.";
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow.";
+
+const PLANNED_SEARCHES_MISSING =
+  "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches.";
 
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
@@ -4828,6 +4832,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // recorded round then replaces that message with the final list.
         // show_picks put the first people in chat; the turn owes the recorded ten.
         let firstPicksShown = false;
+        // People whose region-only location the run already asked about once.
+        const regionOnlyAsked = new Set<string>();
+        /** Saved people of the role whose every saved location names only a country or a state. */
+        const regionOnlyPeople = async (roleId: string, keys: readonly string[]) => {
+          const rows = await deps.prisma.recruitingCandidateOccurrence.findMany({
+            where: { roleId, candidateKey: { in: [...keys] } },
+            select: { candidateKey: true, name: true, location: true },
+          });
+          const people = new Map<string, string>();
+          for (const key of keys) {
+            const seen = rows.filter((row) => row.candidateKey === key);
+            if (seen.length && seen.every((row) => isRegionOnlyLocation(row.location)))
+              people.set(
+                key,
+                `${seen.find((row) => row.name)?.name ?? key} (${seen.find((row) => row.location?.trim())?.location?.trim() || "no location"})`,
+              );
+          }
+          return people;
+        };
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
@@ -5122,7 +5145,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // run; calibration_round records the ten and replaces the list.
             const roleId = thread.activeRecruitingRoleId;
             if (!roleId) return { error: "This conversation has no active role." };
-            const keys = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
+            const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
+            // Someone whose profile shows only a country or a state is left out of the first
+            // picks rather than costing a step; the round itself asks about them.
+            const regionOnly = await regionOnlyPeople(roleId, picked);
+            const keys = picked.filter((key) => !regionOnly.has(key));
+            if (!keys.length)
+              return {
+                error: `Not shown: ${[...regionOnly.values()].join(", ")} show only a country or a state. Pick people whose location is inside the role's location scope.`,
+              };
             const text = await recruitingRoundListText(deps.prisma, {
               threadId: run.threadId,
               spaceId: run.spaceId,
@@ -5143,8 +5174,31 @@ export function createRunExecutor(deps: ExecutorDeps) {
             firstPicksShown = true;
             return {
               shown: keys.length,
+              ...(regionOnly.size
+                ? {
+                    notShown: `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
+                  }
+                : {}),
               next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have; search again only if fewer than ten of all those rows fit, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten.",
             };
+          }
+          if (
+            researchInput?.data?.operation === "calibration_round" &&
+            thread.activeRecruitingRoleId
+          ) {
+            const regionOnly = await regionOnlyPeople(
+              thread.activeRecruitingRoleId,
+              researchInput.data.candidateKeys,
+            );
+            // Asked once per person: a role that accepts a whole country or state records them
+            // when the same people come back.
+            const unasked = [...regionOnly.keys()].filter((key) => !regionOnlyAsked.has(key));
+            if (unasked.length) {
+              for (const key of unasked) regionOnlyAsked.add(key);
+              return {
+                error: `Not recorded: ${unasked.map((key) => regionOnly.get(key)).join(", ")} show only a country or a state, which never counts inside a city or metro location scope. Replace them with people from the rows whose location is inside the scope and record the ten again. Only if this role accepts anyone in that whole country or state, record the same ten again.`,
+              };
+            }
           }
           const candidateOperation =
             name === "recruiting_feedback" &&
@@ -11091,7 +11145,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       runSecrets.push(...values),
                     ),
               onToolCallDelta: streamRoundPicks,
-              beforeAsk: async (question) => {
+              beforeAsk: async (question, plannedSearches) => {
                 await briefSaving;
                 // A run that recorded a round asks the next-step choice, which is asked anew each round.
                 if (await nextStepCardAfterRound()) return undefined;
@@ -11110,7 +11164,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   question,
                   intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                 );
-                return known && `"${known.key}" → "${known.value}"`;
+                if (known) return `"${known.key}" → "${known.value}"`;
+                // Any intake answer may be the last one, and the first people come from the searches
+                // planned with it; without four of them the answer turn waits on its own searches.
+                if ((firstRoundPending || linkRole) && (plannedSearches?.length ?? 0) < 4)
+                  return { instead: PLANNED_SEARCHES_MISSING };
+                return undefined;
               },
               onToolCompleted: async (completion) => {
                 await toolCalledAudit(completion.executionId).settled;

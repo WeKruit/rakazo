@@ -160,18 +160,18 @@ for (const stat of Object.values(stats)) {
 }
 lines.push(
   "",
-  "| JD | Run | Q1 | First people in chat | All ten | Searched again | Ten before card | In area | Hiring-company staff | Tool retries | Result |",
-  "|---|---|---|---|---|---|---|---|---|---|---|",
+  "| JD | Run | Q1 | First people in chat | All ten | Run start wait | Searched again | Ten before card | In area | Hiring-company staff | Tool retries | Result |",
+  "|---|---|---|---|---|---|---|---|---|---|---|---|",
 );
 for (const { case: label, run, report } of rows) {
   const f = report.first10;
   if (!f) {
-    lines.push(`| ${label} | ${run} | — | — | — | — | — | — | — | — | ${report.result} |`);
+    lines.push(`| ${label} | ${run} | — | — | — | — | — | — | — | — | — | ${report.result} |`);
     continue;
   }
   const c = check(f, report);
   lines.push(
-    `| ${label} | ${run} | ${s(f.firstQuestionS)} | ${s(f.firstPeopleInChatS)} | ${s(f.allTenS)} | ${c.searched} | ${c.beforeCard} | ${c.area} | ${c.staff} | ${c.retries} | ${report.result} |`,
+    `| ${label} | ${run} | ${s(f.firstQuestionS)} | ${s(f.firstPeopleInChatS)} | ${s(f.allTenS)} | ${s(f.runStartWaitS)} | ${c.searched} | ${c.beforeCard} | ${c.area} | ${c.staff} | ${c.retries} | ${report.result} |`,
   );
 }
 const flagged = rows.flatMap(({ case: label, run, report }) =>
@@ -193,7 +193,9 @@ function escapeHtml(text) {
   );
 }
 function outcome(result) {
-  return { pass: "pass", completed_with_violations: "flagged", incomplete: "no ten" }[result] ?? result;
+  return (
+    { pass: "pass", completed_with_violations: "flagged", incomplete: "no ten" }[result] ?? result
+  );
 }
 function chart(metric) {
   const groups = Object.entries(stats);

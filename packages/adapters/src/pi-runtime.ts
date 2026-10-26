@@ -78,6 +78,7 @@ import {
   MODEL_STREAM_IDLE_TIMEOUT_MS,
   MODEL_STREAM_TIMEOUT_MS,
   MODEL_STREAM_TOTAL_TIMEOUT_MS,
+  modelStreamFirstOutputTimeoutMs,
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
@@ -391,7 +392,7 @@ export class PiAgentRuntime implements AgentRuntime {
           stepThinkingLevel: () => (firstStep ? request.model.firstStepThinkingLevel : undefined),
           attempted: new Set<string>(),
           nextIndex: 0,
-          stream: (target, ctx, options) =>
+          stream: (target, ctx, options, firstOutputTimeoutMs) =>
             reliableModelStream(
               target.models,
               target.model,
@@ -419,6 +420,7 @@ export class PiAgentRuntime implements AgentRuntime {
                   },
                 ),
               target.config.cacheCapabilities?.retentionMode,
+              firstOutputTimeoutMs,
             ),
           onSwitch: async (target) => {
             await request.onModelChange?.(target.config.provider, target.config.id);
@@ -1671,8 +1673,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               throw new Error(
                 "ask_user requires two to four unique, non-empty options or a valid requestedSchema. Add two to four short options (the card already offers a custom answer) and ask again; never ask in plain text instead.",
               );
-            const { question } = parsed.data;
-            const known = await host.request.beforeAsk?.(question);
+            const { question, plannedSearches } = parsed.data;
+            const known = await host.request.beforeAsk?.(question, plannedSearches);
             if (known)
               return {
                 content: [
@@ -1694,7 +1696,6 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             const options = "options" in parsed.data ? parsed.data.options : undefined;
             const requestedSchema =
               "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
-            const { plannedSearches } = parsed.data;
             host.pausePending = true;
             host.queue.push({
               type: "ask",
@@ -1934,7 +1935,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     nextIndex: 0,
     onSwitch: async () => undefined,
     isProviderFailure: (message) => providerFailures.has(message.content),
-    stream: (target, ctx, options) =>
+    stream: (target, ctx, options, firstOutputTimeoutMs) =>
       reliableModelStream(
         target.models,
         target.model,
@@ -1970,6 +1971,7 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
             },
           ),
         requestModel.cacheCapabilities?.retentionMode,
+        firstOutputTimeoutMs,
       ),
   };
   const nestedTools = toAgentTools(childDefs, nestedHost);
@@ -2902,6 +2904,7 @@ interface FallbackStreamState {
     target: RuntimeModelTarget,
     context: TranscriptContext,
     options: ModelsSimpleStreamOptions | undefined,
+    firstOutputTimeoutMs?: number,
   ): AssistantMessageEventStream;
 }
 
@@ -3176,6 +3179,8 @@ function fallbackAwareModelStream(
   const run = async () => {
     let buffered: AssistantMessageEvent[] = [];
     let retries = 0;
+    let attempts = 0;
+    let retriedSilentStream = false;
     let firstRetryableError: Extract<AssistantMessageEvent, { type: "error" }> | undefined;
     while (!signalAborted()) {
       const target = state.getActive();
@@ -3195,10 +3200,13 @@ function fallbackAwareModelStream(
             )
           : "off";
         const reasoning = thinkingLevel === "off" ? undefined : thinkingLevel;
+        // Only the first attempt gets the tight first-output bound; any retry or backup gets the
+        // full idle bound, so a slow but healthy step is not cut short twice.
         stream = state.stream(
           target,
           context,
           state.request.fallbackModels?.length ? { ...options, apiKey, reasoning } : options,
+          attempts++ === 0 ? modelStreamFirstOutputTimeoutMs(thinkingLevel) : undefined,
         );
       } catch (error) {
         finishWithThrownError(target, error);
@@ -3227,6 +3235,16 @@ function fallbackAwareModelStream(
                 break;
               }
               firstRetryableError ??= event;
+              // A stream that opened and then went silent is retried once on a fresh connection.
+              if (
+                !retriedSilentStream &&
+                event.error.errorMessage === CODEX_STREAM_IDLE_TIMEOUT_MESSAGE
+              ) {
+                retriedSilentStream = true;
+                buffered = [];
+                restart = true;
+                break;
+              }
               const delay = isProviderTimeout(event.error)
                 ? undefined
                 : MODEL_PROVIDER_RETRY_DELAYS_MS[retries];
@@ -3388,6 +3406,7 @@ export function codexStreamIdleWatchdog(
   upstream: AbortSignal | undefined,
   idleTimeoutMs: number = MODEL_STREAM_IDLE_TIMEOUT_MS,
   totalTimeoutMs: number = MODEL_STREAM_TOTAL_TIMEOUT_MS,
+  firstOutputTimeoutMs?: number,
 ): StreamIdleWatchdog {
   const controller = new AbortController();
   let timedOut = false;
@@ -3437,6 +3456,7 @@ export function codexStreamIdleWatchdog(
     disposed = true;
     if (timer !== undefined) clearTimeout(timer);
     if (capTimer !== undefined) clearTimeout(capTimer);
+    if (firstOutputTimer !== undefined) clearTimeout(firstOutputTimer);
     if (graceTimer !== undefined) clearTimeout(graceTimer);
     endGrace?.();
     timer = undefined;
@@ -3450,6 +3470,9 @@ export function codexStreamIdleWatchdog(
   // A stream that keeps sending events but never finishes is bounded by one overall cap,
   // started when the first successful response arrives.
   let capTimer: ReturnType<typeof setTimeout> | undefined;
+  // Optional tighter bound from the first successful response until the step shows any output.
+  let firstOutputTimer: ReturnType<typeof setTimeout> | undefined;
+  let outputSeen = false;
   const ping = () => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
@@ -3457,7 +3480,16 @@ export function codexStreamIdleWatchdog(
     if (capTimer === undefined && !disposed && !controller.signal.aborted) {
       capTimer = setTimeout(fire, totalTimeoutMs);
       capTimer.unref?.();
+      if (firstOutputTimeoutMs !== undefined && !outputSeen) {
+        firstOutputTimer = setTimeout(fire, firstOutputTimeoutMs);
+        firstOutputTimer.unref?.();
+      }
     }
+  };
+  const sawOutput = () => {
+    outputSeen = true;
+    if (firstOutputTimer !== undefined) clearTimeout(firstOutputTimer);
+    firstOutputTimer = undefined;
   };
 
   const describeTimeout = (message: AssistantMessage): AssistantMessage =>
@@ -3514,6 +3546,7 @@ export function codexStreamIdleWatchdog(
               if (next.done) return;
               const event = next.value;
               if ("partial" in event && event.partial) partial = event.partial;
+              if (!outputSeen && eventHasPartialOutput(event)) sawOutput();
               ping();
               yield rewrite(event);
             }
@@ -3604,8 +3637,16 @@ export function reliableModelStream(
   accessToken?: string | (() => string | undefined),
   runStream?: (options: ModelsSimpleStreamOptions) => AssistantMessageEventStream,
   cacheRetention?: ModelsSimpleStreamOptions["cacheRetention"],
+  firstOutputTimeoutMs?: number,
 ): AssistantMessageEventStream {
-  const watchdog = isCodexModel(model) ? codexStreamIdleWatchdog(options?.signal) : undefined;
+  const watchdog = isCodexModel(model)
+    ? codexStreamIdleWatchdog(
+        options?.signal,
+        MODEL_STREAM_IDLE_TIMEOUT_MS,
+        MODEL_STREAM_TOTAL_TIMEOUT_MS,
+        firstOutputTimeoutMs,
+      )
+    : undefined;
   try {
     const preparedOptions = reliableStreamOptions(
       model,

@@ -5942,7 +5942,9 @@ describe("native recruiting assessment effect delivery", () => {
       sourceRefs: [],
       intent: { basis: "direct", quote: text.trim() },
     });
-    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain("Do not create, rename or update a role");
+    expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
+      "Do not create, rename or update a role",
+    );
   });
 
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {
