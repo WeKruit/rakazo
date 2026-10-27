@@ -475,6 +475,16 @@ export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
 let warnedKeylessPeopleSearch = false;
 const PEOPLE_SEARCH_RETRY_DELAYS_MS = [1_000, 2_000];
 
+// A contact lookup takes about a minute; wait for it here so the agent never stops on a
+// half-finished lookup. The final status is the record the Contacts view reads.
+const ENRICHMENT_POLL_MS = 5_000;
+const ENRICHMENT_WAIT_MS = 90_000;
+function enrichmentPending(result: Awaited<ReturnType<McpSession["callTool"]>>): boolean {
+  if (result.isError) return false;
+  const status = mcpObject(result)?.status;
+  return typeof status === "string" && /progress|pending|created|queued/i.test(status);
+}
+
 class PeopleSearchRateLimitError extends Error {
   constructor() {
     super("People search is rate-limited (HTTP 429); retry later.");
@@ -838,6 +848,10 @@ export class McpConnector implements ConnectorProvider {
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
         ["web_search_exa", "web_search_advanced_exa"].includes(call.route.toolName);
+      const enrichmentResults =
+        assignment.server.transport === "streamable_http" &&
+        assignment.server.endpoint === "https://mcp.fullenrich.com/mcp" &&
+        call.route.toolName === "get_enrichment_results";
       await requireAutumnTaskOwnership(
         this.prisma,
         context,
@@ -963,10 +977,19 @@ export class McpConnector implements ConnectorProvider {
       }
       callStarted = true;
       let result: Awaited<ReturnType<McpSession["callTool"]>>;
+      const enrichmentDeadline = Date.now() + ENRICHMENT_WAIT_MS;
       for (let attempt = 0; ; attempt += 1) {
         context.signal.throwIfAborted();
         try {
           result = await session.callTool(call.route.toolName, args, { signal: context.signal });
+          if (
+            enrichmentResults &&
+            enrichmentPending(result) &&
+            Date.now() + ENRICHMENT_POLL_MS < enrichmentDeadline
+          ) {
+            await abortableDelay(ENRICHMENT_POLL_MS, context.signal);
+            continue;
+          }
           if (!peopleSearch || !peopleSearchRateLimited(result)) break;
         } catch (error) {
           if (!peopleSearch || !(error instanceof SdkHttpError) || error.status !== 429)

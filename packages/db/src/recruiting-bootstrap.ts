@@ -834,36 +834,59 @@ export async function ensureRecruitingWorkspace(
 }
 
 /**
- * Give the recruiting lead and the sourcing specialist the platform people search, including
- * crews set up before the managed preset existed. Additive: it creates the platform connection
- * only while none with that slug exists, never touches a customized or disabled one, and adds
- * only missing links. It does not wait for runs, because adding a tool changes nothing an active
- * run already holds.
+ * Give crews the platform services added after they were set up: people search for the lead and
+ * the sourcing specialist, contact enrichment for the lead and outreach. Covers crews that
+ * predate the managed preset. Additive: it creates the platform connection only while none with
+ * that slug exists, never changes a connection, links a customized one only when the crew
+ * already uses it, skips a disabled one, and adds only missing links. It does not wait for runs,
+ * because adding a tool changes nothing an active run already holds.
  */
-export async function ensurePlatformPeopleSearch(
+export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor): Promise<void> {
+  for (const slug of ["people-search", "fullenrich"])
+    await ensurePlatformService(prisma, actor, slug);
+}
+
+async function ensurePlatformService(
   prisma: PrismaClient,
   actor: Actor,
+  slug: string,
 ): Promise<void> {
-  const search = RECRUITING_SERVICES.find((service) => service.slug === "people-search");
-  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn");
-  if (!search || !research) return;
+  const service = RECRUITING_SERVICES.find((item) => item.slug === slug);
+  const research = RECRUITING_SERVICES.find((item) => item.slug === "autumn");
+  if (!service || !research) return;
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const plan = async (client: Pick<PrismaClient, "mcpServer" | "bot">) => {
+  const roleBots = (keys: readonly string[]) =>
+    keys.flatMap((key) => [
+      { spawnKey: `recruiting:${actor.userId}:${key}` },
+      { name: RECRUITING_DEFAULT_BOTS.find((role) => role.key === key)?.name ?? key },
+    ]);
+  const plan = async (client: Pick<PrismaClient, "mcpServer" | "bot" | "botMcpServer">) => {
+    // Only a recruiting crew: its lead is on the platform research service.
+    const lead = await client.bot.findFirst({
+      where: {
+        ...scope,
+        archivedAt: null,
+        OR: roleBots(["main"]),
+        mcpServers: { some: { ...scope, server: { ...scope, endpoint: research.endpoint } } },
+      },
+      select: { id: true },
+    });
+    if (!lead) return null;
     const server = await client.mcpServer.findFirst({
-      where: { ...scope, slug: search.slug },
+      where: { ...scope, slug: service.slug },
       select: { id: true, endpoint: true, secretId: true, enabled: true },
     });
-    if (server && (server.endpoint !== search.endpoint || server.secretId || !server.enabled))
+    if (server && (server.endpoint !== service.endpoint || !server.enabled)) return null;
+    if (
+      server?.secretId &&
+      !(await client.botMcpServer.count({ where: { ...scope, serverId: server.id } }))
+    )
       return null;
     const bots = await client.bot.findMany({
       where: {
         ...scope,
         archivedAt: null,
-        OR: search.bots.flatMap((key) => [
-          { spawnKey: `recruiting:${actor.userId}:${key}` },
-          { name: key === "main" ? "Main" : "Sourcer" },
-        ]),
-        mcpServers: { some: { ...scope, server: { ...scope, endpoint: research.endpoint } } },
+        OR: roleBots(service.bots),
         ...(server ? { NOT: { mcpServers: { some: { serverId: server.id } } } } : {}),
       },
       select: { id: true },
@@ -880,11 +903,11 @@ export async function ensurePlatformPeopleSearch(
       (await tx.mcpServer.create({
         data: {
           ...scope,
-          slug: search.slug,
-          name: search.name,
-          description: search.description,
+          slug: service.slug,
+          name: service.name,
+          description: service.description,
           transport: "streamable_http",
-          endpoint: search.endpoint,
+          endpoint: service.endpoint,
         },
       }));
     await tx.botMcpServer.createMany({
@@ -893,7 +916,7 @@ export async function ensurePlatformPeopleSearch(
         botId: bot.id,
         serverId: server.id,
         allowAllTools: false,
-        allowedTools: search.tools,
+        allowedTools: service.tools,
       })),
       skipDuplicates: true,
     });
