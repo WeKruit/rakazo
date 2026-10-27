@@ -178,6 +178,7 @@ import {
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
+const TurnMs = z.number().int().nonnegative().max(86_400_000);
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
 const recruitingWorkspace = z.strictObject({
@@ -529,6 +530,19 @@ export const appContract = {
         runIds: z.array(Id).optional(),
       }),
     ),
+    /** Client-measured milliseconds from Send for one turn; logged only. */
+    reportTiming: oc
+      .input(
+        z.object({
+          runId: Id,
+          echoMs: TurnMs.optional(),
+          acceptedMs: TurnMs.optional(),
+          serverEchoMs: TurnMs.optional(),
+          firstTokenMs: TurnMs.optional(),
+          finalMs: TurnMs.optional(),
+        }),
+      )
+      .output(z.object({ ok: z.literal(true) })),
     react: oc
       .input(
         threadTarget.safeExtend({

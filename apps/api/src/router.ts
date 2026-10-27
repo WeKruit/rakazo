@@ -2628,6 +2628,10 @@ export function createRouter(deps: RouterDeps) {
         });
         return result;
       }),
+      reportTiming: authed.threads.reportTiming.handler(({ context, input }) => {
+        getLogger().info("client.turn.timing", { spaceId: context.actor.spaceId, ...input });
+        return { ok: true as const };
+      }),
       react: authed.threads.react.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
         const result = await reactToThreadMessage(deps, context.actor, target, input);
