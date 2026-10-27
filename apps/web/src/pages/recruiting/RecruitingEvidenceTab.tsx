@@ -12,14 +12,19 @@ import type { VirtualItem } from "@tanstack/react-virtual";
 import { LayoutGrid, List } from "lucide-react";
 import { useMemo, useRef } from "react";
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { withFeatureMessages } from "../../lib/i18n";
 import { ContactsTab } from "../recruiting/ContactsTab";
 import { RetryNotice } from "../recruiting/RetryNotice";
 
 const RecruitingLegacyResults = lazyPanel(() =>
-  import("./RecruitingLegacyResults").then((m) => m.RecruitingLegacyResults),
+  withFeatureMessages(() => import("./RecruitingLegacyResults")).then(
+    (m) => m.RecruitingLegacyResults,
+  ),
 );
 
-const ResearchResults = lazyPanel(() => import("./SourceDocuments").then((m) => m.ResearchResults));
+const ResearchResults = lazyPanel(() =>
+  withFeatureMessages(() => import("./SourceDocuments")).then((m) => m.ResearchResults),
+);
 
 import { TabLoading } from "../recruiting/shared";
 import type { useRecruitingWorkspace } from "../recruiting/useRecruitingWorkspace";

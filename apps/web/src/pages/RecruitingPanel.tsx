@@ -1,21 +1,30 @@
 import { lazyPanel } from "../components/ErrorBoundary";
+import { withFeatureMessages } from "../lib/i18n";
 
 const RecruitingSummary = lazyPanel(() =>
-  import("./recruiting/RecruitingSummary").then((m) => m.RecruitingSummary),
+  withFeatureMessages(() => import("./recruiting/RecruitingSummary")).then(
+    (m) => m.RecruitingSummary,
+  ),
 );
 const RecruitingSupplementaryTab = lazyPanel(() =>
-  import("./recruiting/RecruitingSupplementaryTab").then((m) => m.RecruitingSupplementaryTab),
+  withFeatureMessages(() => import("./recruiting/RecruitingSupplementaryTab")).then(
+    (m) => m.RecruitingSupplementaryTab,
+  ),
 );
 
 const CandidateDetailDialog = lazyPanel(() =>
-  import("./recruiting/CandidateDetailDialog").then((m) => m.CandidateDetailDialog),
+  withFeatureMessages(() => import("./recruiting/CandidateDetailDialog")).then(
+    (m) => m.CandidateDetailDialog,
+  ),
 );
 
 import { CrmRecruitingPanel } from "./recruiting/CrmWorkbench";
 import { RecruitingEvidenceTab } from "./recruiting/RecruitingEvidenceTab";
 
 const RecruitingRoleTab = lazyPanel(() =>
-  import("./recruiting/RecruitingRoleTab").then((m) => m.RecruitingRoleTab),
+  withFeatureMessages(() => import("./recruiting/RecruitingRoleTab")).then(
+    (m) => m.RecruitingRoleTab,
+  ),
 );
 
 import { useRecruitingWorkspace } from "./recruiting/useRecruitingWorkspace";

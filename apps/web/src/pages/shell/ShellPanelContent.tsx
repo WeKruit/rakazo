@@ -50,7 +50,9 @@ const RecruitingPanel = lazyPanel(() =>
   ),
 );
 const RecruitingDetailPanel = lazyPanel(() =>
-  import("../recruiting/DetailPanel").then((module) => module.RecruitingDetailPanel),
+  withFeatureMessages(() => import("../recruiting/DetailPanel")).then(
+    (module) => module.RecruitingDetailPanel,
+  ),
 );
 
 import type { ReactNode } from "react";
