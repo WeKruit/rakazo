@@ -219,6 +219,9 @@ it("browses scoped Contacts and stored mail without inventing a native recruitin
     groupId: "group-1",
     crmBrowse,
   });
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(view.container.textContent).toContain("Existing CRM person");
   expect(view.container.textContent).toContain("person@example.test");
   expect(api.getWorkspace).not.toHaveBeenCalled();
@@ -1796,6 +1799,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
       view: viewName,
       tab: "evidence",
     });
+    await act(async () => vi.dynamicImportSettled());
     if (viewName !== "results")
       expect(view.container.querySelector("h1")?.textContent).toBe(
         viewName === "shortlist" ? "Shortlist" : "Contacts",
@@ -1837,6 +1841,9 @@ it.each(["results", "shortlist", "contacts"] as const)(
         )!
         .click(),
     );
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(api.getAssessment).toHaveBeenCalledWith({
       roleId: role.id,
       candidateKey: "candidate-1",
@@ -2091,6 +2098,7 @@ it("shows actual saved brief criteria without exposing internal field keys or fe
     presentation: "workspace",
     summary: "brief",
   });
+  await act(async () => vi.dynamicImportSettled());
   expect(view.container.textContent).toContain("Systems engineer");
   expect(view.container.textContent).toContain("Bay Area, no remote");
   expect(view.container.textContent).toContain("Not disclosed");
@@ -2893,6 +2901,9 @@ it("bounds legacy workspace candidate rows without discarding the loaded result 
   const view = await mounted("thread-1", undefined, false, undefined, {
     presentation: "workspace",
     view: "results",
+  });
+  await act(async () => {
+    await vi.dynamicImportSettled();
   });
   expect(view.container.querySelector("table")?.getAttribute("aria-rowcount")).toBe("1001");
   expect(view.container.querySelectorAll("[data-candidate-index]").length).toBeLessThanOrEqual(100);
@@ -7542,6 +7553,9 @@ it("answers the original native group question and reloads its persisted answere
   const view = await mounted("thread-1", "current-bot");
   expect(api.listQuestions).toHaveBeenCalledWith({ threadId: "thread-1", roleId: role.id });
   await view.click("Missing info");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(view.container.textContent).toContain(nativeQuestion.block.text);
   expect(view.container.textContent).toContain("candidate-1");
   api.listQuestions.mockResolvedValue({
@@ -7574,6 +7588,9 @@ it("submits custom input to the native originating bot without creating a new ta
   api.listQuestions.mockResolvedValue({ questions: [{ ...nativeQuestion, groupId: null }] });
   const view = await mounted();
   await view.click("Missing info");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   const answer = " \n  Implemented the geometry library in C++ 😀\n  ";
   const input = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]')!;
   await act(async () => {

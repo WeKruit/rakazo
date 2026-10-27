@@ -18,8 +18,8 @@ import {
   writeRecruitingPanelState,
 } from "../../lib/right-panel-state";
 import { rpc } from "../../lib/rpc";
-import type { CriteriaEdit } from "../recruiting/CriteriaEditor";
-import { criteriaDraft, searchFilterDraft } from "../recruiting/CriteriaEditor";
+import type { CriteriaEdit } from "../recruiting/criteria-draft";
+import { criteriaDraft, searchFilterDraft } from "../recruiting/criteria-draft";
 import { useArrivals } from "../recruiting/shared";
 import type { CandidateDiscussionContext, Props, Snapshot } from "../recruiting/workspace-types";
 

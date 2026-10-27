@@ -105,6 +105,31 @@ export default defineConfig(({ mode }) => {
           attachNovncProxy(server, screenProxySecret(), api, screenLog),
       },
     ],
+    // Preserve feature entries while compressing their static dependencies together.
+    // Auth and Shell both use Input and Lucide's factory: keep those small controls
+    // independent so opening sign-in never downloads the authenticated Shell group.
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: "initial-shared", tags: ["$initial"], priority: 30 },
+              {
+                name: "shared-controls",
+                test: /(?:packages[\\/]ui-web[\\/]src[\\/]components[\\/]ui[\\/]input\.tsx|lucide-react[\\/]dist[\\/]esm[\\/]createLucideIcon\.mjs)$/,
+                priority: 25,
+              },
+              { name: "shell-shared", test: /[\\/]pages[\\/]Shell\.tsx$/, priority: 20 },
+              {
+                name: "recruiting-shared",
+                test: /[\\/]pages[\\/]RecruitingPanel\.tsx$/,
+                priority: 10,
+              },
+            ],
+          },
+        },
+      },
+    },
     server: {
       host: process.env.RAKAZO_DEV_HOST ?? rootEnv.RAKAZO_DEV_HOST ?? "127.0.0.1",
       port: webPort,

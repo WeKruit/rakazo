@@ -368,7 +368,7 @@ const bootstrap: AppBootstrap = {
 export async function mockRecruitingApp(
   page: Page,
   options: {
-    locale?: "en" | "zh-CN";
+    locale?: string;
     scheduling?: boolean;
     nativeScheduling?: boolean;
     emptyCalendar?: boolean;

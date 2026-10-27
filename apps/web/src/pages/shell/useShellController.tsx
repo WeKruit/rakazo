@@ -90,8 +90,8 @@ import {
 } from "../../lib/thread-events";
 import { createThreadPrefetch } from "../../lib/thread-prefetch";
 import type { ContextMenuPosition } from "../BotContextMenu";
-import type { RoutineDraftState } from "../RoutineList";
-import { draftFromRoutine, emptyRoutineDraft } from "../RoutineList";
+import type { RoutineDraftState } from "../routine-draft";
+import { draftFromRoutine, emptyRoutineDraft } from "../routine-draft";
 import type { SettingsSection } from "../SettingsOverlay";
 import type { PendingAttachment } from "../shell/Composer";
 import { isCommandPaletteHotkey } from "../shell/command-palette-hotkey";

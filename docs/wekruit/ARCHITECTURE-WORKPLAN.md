@@ -294,6 +294,8 @@ CHECK
 
 ### D1 首屏 JS
 
+- **独立后续本地验收：** 以 D4/D2/D3 独立依赖为基线的 D1-only 重放已完成；中文合成已登录聊天实际首屏 JS 529,849 → 325,964 gzip B，完整 Web 1,676 测试、五包类型检查及冷加载即时反馈检查通过。350 KB 第一阶段通过；250 KB 最终目标和线上 LCP 尚未完成。依赖顺序、逐提交映射、其他页面限制与复现命令见 [D1-INDEPENDENT-FOLLOWUP.md](./D1-INDEPENDENT-FOLLOWUP.md)。暂未发布该后续 PR。
+
 - **现状（本地 `vite build` 实测）：** 首屏要加载的 JS 合计 594 KB（gzip 后）。主包 1.18 MB（未压缩），gzip 后 338 KB。主包里占得最多的是：react-dom 171 KB、`Shell.tsx` 147 KB、`RecruitingPanel.tsx` 113 KB、`ModelSettingsOverlay` 29 KB、`RecruitingCorrespondence` 24 KB、`RoutineEditor`、`InterviewCalendar`、`SchedulingPlan`、`DetailPanel`、markdown 解析器。路由页面已经是按需加载的。
 - **本 PR 已做：** 本地设置页、集成设置页和 MCP 授权回调页改成按需加载，联系人、面试、邮件往来这几个视图也改成按需加载（`recruiting/LazyViews.tsx`）。另外把 `PersonAvatar` 移进 `ProfileImage.tsx`，断开了 DetailPanel 和 CandidateDirectory 之间的循环引用。首屏 JS（gzip -9）从 592,955 字节降到 561,040 字节。
 - **剩下的做法：** 第一屏用不到的面板改成 `lazy()` 加载：设置浮层、例行任务编辑器、邮件序列编辑、面试日历、排期计划、候选人详情。markdown 解析器在第一条消息渲染时再加载。打开这些面板时要有加载占位，不能出现空白。
@@ -499,3 +501,7 @@ pnpm --filter @rakazo/worker --filter @rakazo/adapters check
 ### C4 refreshed independent branch
 
 Ordinary merge of #263 through `8188c88f3` into C4 succeeded without conflicts (`4406d0e134a5c2a26fa961ec2ebbb8075d3eaa5b`). `pnpm --filter @rakazo/api --filter @rakazo/db --filter @rakazo/adapters check` passed. Local synthetic `VERIFY_DATABASE=1 pnpm exec vitest run packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/pi-oauth.test.ts`:120/120 passed in7.89s. `pnpm --filter @rakazo/api test`:1376 passed/51 skipped in17.41s. No provider or multi-container acceptance is claimed. This refresh is local only while remaining-item publication confirmation is pending; #274 has not been merged.
+
+### 串行发布核对（2026-10-27）
+
+D1初始#295、A2#296、C4#274、D4#298、D2#301、D3后续#300均已合入本集成分支。上文各阶段“待发布/待合并”是当时记录，以本段和总览最新状态为准。D1后续生产冷入口实测联系人347,938B/7JS/35总请求、17RPC/0重复；聊天310,672B/8JS/39总请求；登录203,469B/7JS/15总请求。最终250KB和线上LCP仍不达/未测。A2本地部分配对超过10%，整体未完成。F2保留Claude所有权；仅复核已有reconciler/turn-end-guard/question-nudge59/59单测，未替代其崩溃/上线业务验收。新增A5保留Claude认领。

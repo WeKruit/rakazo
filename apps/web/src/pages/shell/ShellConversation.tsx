@@ -22,13 +22,21 @@ import { desktopBridge } from "../../lib/desktop";
 import { clampWidth } from "../../lib/pane-width";
 import { selectedSpaceId } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
-import { CalibrationRoundCard } from "../recruiting/CalibrationRound";
+
+const CalibrationRoundCard = lazyPanel(() =>
+  import("../recruiting/CalibrationRound").then((m) => m.CalibrationRoundCard),
+);
+
 import {
   readShortlistWeekFilter,
   writeShortlistWeekFilter,
 } from "../recruiting/dashboard-drilldown";
 import { RetryNotice } from "../recruiting/RetryNotice";
-import { RoleSetupCard } from "../recruiting/RoleSetup";
+
+const RoleSetupCard = lazyPanel(() =>
+  import("../recruiting/RoleSetup").then((m) => m.RoleSetupCard),
+);
+
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";

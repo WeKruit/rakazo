@@ -277,6 +277,8 @@ it("loads every CRM page while keeping the rendered window bounded", async () =>
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LATENCY);
     });
+    // Crossing the existing 80-row threshold loads the virtualizer module.
+    await act(async () => vi.dynamicImportSettled());
     const loaded = Math.min(shown, TOTAL);
     expect(container.querySelector("table")?.getAttribute("aria-rowcount")).toBe(
       String(loaded + 1),
