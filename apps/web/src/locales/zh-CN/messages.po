@@ -7643,9 +7643,12 @@ msgstr "部分已保存的记录无法显示。"
 msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
 msgstr "部分已保存的结果来自之前的连接。请重新检查以加载当前连接的结果。"
 
+#: src/pages/Shell.tsx
+msgid "Something went wrong."
+msgstr "出了点问题。"
+
 #: src/App.tsx
 #: src/lib/user-error.ts
-#: src/pages/Shell.tsx
 msgid "Something went wrong. Try again."
 msgstr "出了点问题。请重试。"
 
@@ -8271,6 +8274,7 @@ msgstr "试用期于 {day} 结束"
 #: src/pages/ActivityList.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/Shell.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "重试"

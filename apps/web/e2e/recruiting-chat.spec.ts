@@ -85,9 +85,8 @@ test("run errors stay visible with a dark appearance preference", async ({ page 
   await page.goto("/app/g/group-fixture?view=feedback");
   // Recruiting has its own light token palette, independent of this preference.
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(page.getByTestId("composer-error")).toContainText(
-    "Something went wrong. Try again.",
-  );
+  await expect(page.getByTestId("composer-error")).toContainText("Something went wrong.");
+  await expect(page.getByTestId("composer-error-retry")).toHaveText("Try again");
   await expect(page.getByTestId("composer-error")).toBeInViewport();
   await captureScreenshot(page, testInfo, "feedback-run-error");
   await page.getByRole("button", { name: "Dismiss error" }).click();

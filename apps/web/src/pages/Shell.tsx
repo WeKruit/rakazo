@@ -419,6 +419,8 @@ const ATTACHMENT_ACCEPT = [...ATTACHMENT_ALLOWED_MIME_TYPES, ".zip"].join(",");
 const FALLBACK_BOT_COLOR = "#85858A";
 // Allow the API's 15s transaction and 5s pool wait when Postgres is remote.
 const THREAD_SNAPSHOT_TIMEOUT_MS = 30_000;
+/** What the Try again button sends after a failed run; the bot picks up from the history. */
+const RETRY_TEXT = "Try again";
 const RECONNECT_RECRUITING_RETRY_MS = 30_000;
 /** Bound Settings leave so a hung voice status refresh cannot block dismissal. */
 const VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
@@ -3076,11 +3078,7 @@ export function ShellPage() {
   );
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
   const displayedRunError =
-    !sendError && runError
-      ? showToolActivity
-        ? runError
-        : t`Something went wrong. Try again.`
-      : null;
+    !sendError && runError ? (showToolActivity ? runError : t`Something went wrong.`) : null;
   const displayedRunErrorId = displayedRunError ? (activeSnapshot?.run?.id ?? null) : null;
   const handleRunErrorPresented = useCallback((runId: string) => {
     rememberSeenRunErrorId(runId);
@@ -6225,6 +6223,10 @@ export function ShellPage() {
                     runErrorId={emptyCrmChat ? null : displayedRunErrorId}
                     onRunErrorPresented={handleRunErrorPresented}
                     onDismissError={dismissComposerError}
+                    onRetry={() => {
+                      dismissComposerError();
+                      void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID());
+                    }}
                     sending={sending}
                     fileInputRef={fileInputRef}
                     onAttachmentPick={
@@ -8144,6 +8146,7 @@ export const Composer = memo(function Composer({
   runErrorId,
   onRunErrorPresented,
   onDismissError,
+  onRetry,
   sending,
   fileInputRef,
   onAttachmentPick,
@@ -8175,6 +8178,8 @@ export const Composer = memo(function Composer({
   runErrorId: string | null;
   onRunErrorPresented: (runId: string) => void;
   onDismissError: () => void;
+  /** Sends a new turn after a failed run, so the fix is one tap. */
+  onRetry?: () => void;
   sending: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onAttachmentPick: (files: FileList | null) => boolean;
@@ -8619,6 +8624,16 @@ export const Composer = memo(function Composer({
           className="mb-3 flex items-center gap-2 rounded-[14px] border border-destructive/40 bg-destructive/10 px-4 py-2 text-[13px] text-destructive"
         >
           <span className="min-w-0 flex-1">{sendError ?? runError}</span>
+          {!sendError && onRetry ? (
+            <button
+              type="button"
+              data-testid="composer-error-retry"
+              onClick={onRetry}
+              className="shrink-0 font-medium underline-offset-2 hover:underline"
+            >
+              {t`Try again`}
+            </button>
+          ) : null}
           <button
             type="button"
             aria-label={t`Dismiss error`}

@@ -7643,9 +7643,12 @@ msgstr ""
 msgid "Some saved results use an earlier connection setup. Check again to load results from the current connection."
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "Something went wrong."
+msgstr "Etwas ist schiefgelaufen."
+
 #: src/App.tsx
 #: src/lib/user-error.ts
-#: src/pages/Shell.tsx
 msgid "Something went wrong. Try again."
 msgstr "Etwas ist schiefgelaufen. Versuche es erneut."
 
@@ -8271,6 +8274,7 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/RecruitingCorrespondence.tsx
+#: src/pages/Shell.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "Erneut versuchen"
