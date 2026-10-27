@@ -137,7 +137,8 @@ export function buildApprovalAskBlock(
         );
   const safeDetail = detail ? redactSecrets(detail, secrets) : undefined;
   const outboundAction = outboundTitle(toolName);
-  const outboundTarget = outboundAction && pickScopeLabel(args);
+  const outboundTarget =
+    outboundAction && (bookingAttendee(toolName, args)?.name ?? pickScopeLabel(args));
   const outbound = outboundTarget ? `${outboundAction} → ${outboundTarget}` : outboundAction;
   return {
     kind: "ask",
@@ -268,6 +269,7 @@ const OUTBOUND_TITLES: Record<string, string> = {
   gmail_forward_message: "Confirm forwarding email",
   create_lead: "Confirm adding candidates to the campaign",
   add_leads_to_campaign_or_list_bulk: "Confirm adding candidates to the campaign",
+  create_booking: "Confirm interview booking",
   googlecalendar_create_event: "Confirm interview booking",
   googlecalendar_quick_add: "Confirm interview booking",
   googlecalendar_events_import: "Confirm interview booking",
@@ -345,6 +347,8 @@ function formatApprovalDetail(
   recruiting?: RecruitingApprovalDisplay,
   crmImportTarget?: RecruitingCrmTarget,
 ): string | undefined {
+  const booking = formatBooking(toolName, args);
+  if (booking) return booking;
   if (toolName === "recruiting_crm_target") {
     const target = args.target as RecruitingCrmTarget;
     return [
@@ -499,6 +503,78 @@ function formatApprovalDetail(
   }
   if (lines.length === 0) return undefined;
   return lines.join("\n");
+}
+
+type BookingAttendee = { name?: string; email?: string; timeZone?: string };
+
+/** The invitee of a calendar booking request, when the call creates one. */
+function bookingAttendee(toolName: string, args: Record<string, unknown>) {
+  if (!/create_booking$/i.test(toolName)) return undefined;
+  const attendee = args.attendee;
+  return attendee && typeof attendee === "object" && !Array.isArray(attendee)
+    ? (attendee as BookingAttendee)
+    : undefined;
+}
+
+/**
+ * A booking card in the recruiter's terms: who is invited, when in their time zone, and what the
+ * invite says. Every other field is still listed, so the card shows all that will be sent.
+ */
+function formatBooking(toolName: string, args: Record<string, unknown>) {
+  const attendee = bookingAttendee(toolName, args);
+  if (!attendee || typeof args.start !== "string") return undefined;
+  const start = new Date(args.start);
+  if (Number.isNaN(start.getTime())) return undefined;
+  const zone = attendee.timeZone ?? "UTC";
+  let when: string;
+  try {
+    when = `${new Intl.DateTimeFormat("en-US", {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: zone,
+      timeZoneName: "short",
+    }).format(start)} (${zone})`;
+  } catch {
+    when = args.start;
+  }
+  const fields =
+    args.bookingFieldsResponses && typeof args.bookingFieldsResponses === "object"
+      ? (args.bookingFieldsResponses as Record<string, unknown>)
+      : {};
+  const location = args.location as { type?: unknown; integration?: unknown } | undefined;
+  const meeting =
+    location?.type === "integration" || /video/i.test(String(location?.integration ?? ""))
+      ? "Video call"
+      : location
+        ? JSON.stringify(location)
+        : undefined;
+  const known = new Set([
+    "eventTypeId",
+    "start",
+    "attendee",
+    "bookingFieldsResponses",
+    "location",
+    "lengthInMinutes",
+  ]);
+  const other = Object.entries(args).filter(([key]) => !known.has(key));
+  const otherFields = Object.entries(fields).filter(([key]) => key !== "title" && key !== "notes");
+  return [
+    `Candidate: ${attendee.name ?? "unknown"}${attendee.email ? ` <${attendee.email}>` : ""}`,
+    `When: ${when}`,
+    ...(typeof args.lengthInMinutes === "number" ? [`Length: ${args.lengthInMinutes} min`] : []),
+    ...(fields.title ? [`Title: ${String(fields.title)}`] : []),
+    ...(fields.notes ? [`Notes: ${String(fields.notes)}`] : []),
+    ...(meeting ? [`Meeting: ${meeting}`] : []),
+    ...[...otherFields, ...other].map(
+      ([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
+    ),
+    "",
+    "The candidate gets a calendar invitation once you confirm.",
+  ].join("\n");
 }
 
 function pickScopeLabel(args: Record<string, unknown>): string | undefined {

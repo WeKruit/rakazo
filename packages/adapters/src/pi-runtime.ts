@@ -532,10 +532,13 @@ export class PiAgentRuntime implements AgentRuntime {
             .then((steering) => {
               seenSteeringIds.push(...steering.map((item) => item.id));
               for (const item of steering) steerIn(item);
+              // Unread until a step starts with them: an interjection can land after the step
+              // already called ask_user, so it counts too.
+              host.steeredUnseen = (host.steeredUnseen ?? 0) + steering.length;
               if (modelStreaming && steering.some((item) => item.interrupt)) {
                 interjected = true;
                 agent.abort();
-              } else host.steeredUnseen = (host.steeredUnseen ?? 0) + steering.length;
+              }
             })
             .catch(() => undefined)
             .finally(() => {
@@ -748,6 +751,7 @@ export class PiAgentRuntime implements AgentRuntime {
               queue.push({ type: "text", text: "\n\n" });
               streamed += "\n\n";
             }
+            host.steeredUnseen = 0;
             await agent.continue();
           }
         } finally {
