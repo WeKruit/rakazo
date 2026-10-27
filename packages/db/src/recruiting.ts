@@ -3260,16 +3260,24 @@ async function assessmentSnapshot(
 export async function listRecruitingAssessments(
   prisma: PrismaClient,
   actor: Actor,
-  input: { roleId: string },
+  input: { roleId: string; offset?: number },
 ): Promise<RecruitingAssessmentSnapshot[]> {
   return prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
-      const rows = await tx.recruitingAssessment.findMany({
-        where: { roleId: role.id },
-        distinct: ["candidateKey"],
-        orderBy: [{ candidateKey: "asc" }, { version: "desc" }],
-      });
+      const rows =
+        input.offset !== undefined
+          ? await tx.$queryRaw<Prisma.RecruitingAssessmentGetPayload<object>[]>(Prisma.sql`
+            SELECT DISTINCT ON ("candidateKey") * FROM recruiting_assessments
+            WHERE "roleId" = ${role.id}
+            ORDER BY "candidateKey" ASC, version DESC
+            LIMIT 200 OFFSET ${input.offset}
+          `)
+          : await tx.recruitingAssessment.findMany({
+              where: { roleId: role.id },
+              distinct: ["candidateKey"],
+              orderBy: [{ candidateKey: "asc" }, { version: "desc" }],
+            });
       const snapshots = [];
       for (const row of rows) snapshots.push(await assessmentSnapshot(tx, actor, role, row));
       return snapshots;
@@ -3406,7 +3414,13 @@ async function questionTargetCurrent(
 async function questionsInTransaction(
   tx: Tx,
   actor: Actor,
-  input: { threadId: string; roleId: string; effectId?: string; candidateKey?: string },
+  input: {
+    threadId: string;
+    roleId: string;
+    effectId?: string;
+    candidateKey?: string;
+    offset?: number;
+  },
 ): Promise<RecruitingQuestion[]> {
   const thread = await requireThread(tx, actor, input.threadId);
   const role = await requireRole(tx, actor, input.roleId);
@@ -3415,14 +3429,26 @@ async function questionsInTransaction(
       spaceId: actor.spaceId,
       threadId: thread.id,
       type: "recruiting.question.asked",
+      ...(input.offset !== undefined ? { runId: { not: null } } : {}),
       AND: [
         { payload: { path: ["roleId"], equals: role.id } },
+        ...(input.offset !== undefined && input.candidateKey
+          ? [
+              {
+                OR: [
+                  { NOT: { payload: { path: ["target", "kind"], equals: "candidate" } } },
+                  { payload: { path: ["target", "candidateKey"], equals: input.candidateKey } },
+                ],
+              },
+            ]
+          : []),
         ...(input.effectId !== undefined
           ? [{ payload: { path: ["effectId"], equals: input.effectId } }]
           : []),
       ],
     },
     orderBy: { seq: "asc" },
+    ...(input.offset !== undefined ? { take: 200, skip: input.offset } : {}),
   });
   const asked = events.flatMap((event) => {
     const receipt = RecruitingQuestionAskedPayloadSchema.parse(event.payload);
@@ -3668,7 +3694,7 @@ export async function getRecruitingQuestion(
 export async function listRecruitingQuestions(
   prisma: PrismaClient,
   actor: Actor,
-  input: { threadId: string; roleId: string; candidateKey?: string },
+  input: { threadId: string; roleId: string; candidateKey?: string; offset?: number },
 ): Promise<RecruitingQuestion[]> {
   return prisma.$transaction((tx) => questionsInTransaction(tx, actor, input), {
     isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead,
@@ -7369,17 +7395,42 @@ export async function recordRecruitingResearchObservation(
 export async function listRecruitingResearch(
   prisma: PrismaClient,
   actor: Actor,
-  input: { roleId: string },
+  input: { roleId: string; offset?: number },
 ) {
   const afterRead: Array<() => void> = [];
   const result = await prisma.$transaction(
     async (tx) => {
       const role = await requireRole(tx, actor, input.roleId);
+      const paged = input.offset !== undefined;
+      const actionPage = paged
+        ? await tx.recruitingResearchAction.findMany({
+            where: { task: { roleId: role.id } },
+            orderBy: [{ taskId: "asc" }, { id: "asc" }],
+            take: 200,
+            skip: input.offset,
+          })
+        : null;
       const rows = await tx.recruitingResearchTask.findMany({
         where: { roleId: role.id },
         orderBy: { id: "asc" },
-        include: { actions: { orderBy: { id: "asc" } } },
+        ...(paged ? { take: 200, skip: input.offset } : {}),
+        include: { actions: { ...(paged ? { take: 0 } : {}), orderBy: { id: "asc" } } },
       });
+      const taskPageIds = new Set(rows.map((row) => row.id));
+      if (actionPage) {
+        const missing = [...new Set(actionPage.map((action) => action.taskId))].filter(
+          (id) => !taskPageIds.has(id),
+        );
+        if (missing.length)
+          rows.push(
+            ...(await tx.recruitingResearchTask.findMany({
+              where: { roleId: role.id, id: { in: missing } },
+              include: { actions: { take: 0 } },
+            })),
+          );
+        for (const row of rows)
+          row.actions = actionPage.filter((action) => action.taskId === row.id);
+      }
       const tasks = [];
       const actions = [];
       for (const row of rows) {
@@ -7389,10 +7440,18 @@ export async function listRecruitingResearch(
           select: { id: true, spaceId: true, userId: true },
         });
         scoped(actor, server);
-        if (row.pendingActionId && !row.actions.some((action) => action.id === row.pendingActionId))
+        if (
+          row.pendingActionId &&
+          !(paged
+            ? await tx.recruitingResearchAction.findFirst({
+                where: { id: row.pendingActionId, taskId: row.id },
+                select: { id: true },
+              })
+            : row.actions.some((action) => action.id === row.pendingActionId))
+        )
           throw new IsolationError();
         const { actions: taskActions, ...task } = row;
-        tasks.push(RecruitingResearchTaskSchema.parse(task));
+        if (taskPageIds.has(task.id)) tasks.push(RecruitingResearchTaskSchema.parse(task));
         for (const action of taskActions) {
           if (
             !(await tx.recruitingRoleRevision.findFirst({
@@ -7422,29 +7481,40 @@ export async function listRecruitingResearch(
           actions.push(dto);
         }
       }
-      const pages = await tx.recruitingCandidatePage.findMany({
-        where: { roleId: role.id, taskId: null, actionId: null },
-        orderBy: [{ observedAt: "asc" }, { effectId: "asc" }],
-        include: { effect: { select: { runId: true, request: true } } },
-      });
-      await candidatePageArtifacts(tx, actor, pages, false, afterRead);
+      if (actionPage) {
+        const positions = new Map(actionPage.map((action, index) => [action.id, index]));
+        actions.sort((a, b) => positions.get(a.id)! - positions.get(b.id)!);
+      }
       const observations = [];
-      for (const page of pages) {
-        // CSV imports and people searches are unassessed lists, not provider observations.
-        if (unassessedPageRequest(page.effect.request)) continue;
-        const call = researchReadRequest(page.effect.request, undefined, "get_rows");
-        observations.push(
-          RecruitingResearchSavedObservationSchema.parse({
-            effectId: page.effectId,
-            providerTaskId: call.args.task_id,
-            roleRevisionId: page.roleRevisionId,
-            runId: page.effect.runId,
-            rowCount: page.rowCount,
-            observedAt: page.observedAt.toISOString(),
-            requestCursor: page.requestCursor,
-            artifactRef: { artifactId: page.artifactId, sha256: page.artifactHash },
-          }),
-        );
+      let accepted = 0;
+      for (let pageOffset = 0; ; pageOffset += 200) {
+        const pages = await tx.recruitingCandidatePage.findMany({
+          where: { roleId: role.id, taskId: null, actionId: null },
+          orderBy: [{ observedAt: "asc" }, { effectId: "asc" }],
+          include: { effect: { select: { runId: true, request: true } } },
+          ...(paged ? { take: 200, skip: pageOffset } : {}),
+        });
+        await candidatePageArtifacts(tx, actor, pages, false, afterRead);
+        for (const page of pages) {
+          // CSV imports and people searches are unassessed lists, not provider observations.
+          if (unassessedPageRequest(page.effect.request)) continue;
+          if (paged && accepted++ < input.offset!) continue;
+          const call = researchReadRequest(page.effect.request, undefined, "get_rows");
+          observations.push(
+            RecruitingResearchSavedObservationSchema.parse({
+              effectId: page.effectId,
+              providerTaskId: call.args.task_id,
+              roleRevisionId: page.roleRevisionId,
+              runId: page.effect.runId,
+              rowCount: page.rowCount,
+              observedAt: page.observedAt.toISOString(),
+              requestCursor: page.requestCursor,
+              artifactRef: { artifactId: page.artifactId, sha256: page.artifactHash },
+            }),
+          );
+          if (paged && observations.length === 200) break;
+        }
+        if (!paged || pages.length < 200 || observations.length === 200) break;
       }
       return { tasks, actions, observations };
     },
