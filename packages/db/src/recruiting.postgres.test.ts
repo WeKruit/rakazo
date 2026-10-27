@@ -328,7 +328,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       operation,
       title: "Atomic native role",
       sourceRefs: [ref],
-      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [ref] }],
       preferences: [],
       definitionQuestions: [],
       intent: { basis: "direct" as const, quote: "Create and revise this supplied role" },
@@ -3537,7 +3537,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       operation: "create" as const,
       title: "Native role",
       sourceRefs: [],
-      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [source(first.id)] }],
       preferences: [],
       definitionQuestions: [],
       intent: { basis: "direct" as const, quote: "Create this role with seven years" },
@@ -3550,7 +3550,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(created.changed).toBe(true);
     expect(created.status).toBe("saved");
     expect(created.workspace?.revision.sourceRefs).toEqual([created.source]);
-    expect(created.workspace?.revision.criteria[0]?.sourceRefs).toEqual([created.source]);
+    expect(created.workspace?.revision.criteria[0]?.sourceRefs).toEqual([source(first.id)]);
     expect(created.source?.anchor).toEqual({
       kind: "message",
       messageId: first.id,
@@ -3794,7 +3794,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         operation: "create",
         title: "Answered role",
         sourceRefs: [],
-        criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
+        criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [source(answerMessage.id)] }],
         preferences: [],
         definitionQuestions: [],
         intent: { basis: "direct", quote },
@@ -4406,8 +4406,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           expectedRevision: draft.role.revision,
         })
       : draft;
-    let approvalEffectId = `missing-documents-${f.run.id}`;
-    if (confirmed) {
+    const approveDocuments = async (approvedRole: typeof role) => {
       // A separate completed gate run keeps research dispatch assertions scoped to the research run.
       const approvalRun = await prisma.run.create({
         data: {
@@ -4449,8 +4448,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       }
       const request: RecruitingApprovalToolInput = {
         stage: "documents",
-        roleId: role.role.id,
-        expectedRoleRevision: role.role.revision,
+        roleId: approvedRole.role.id,
+        expectedRoleRevision: approvedRole.role.revision,
         documents: { jdText: docs[0]!, namedPdf: docs[1]!, anonymousPdf: null, deck: null },
       };
       const effect = await prisma.externalEffect.create({
@@ -4516,9 +4515,12 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         request,
         material,
       );
-      approvalEffectId = saved.approvalEffectId;
       await prisma.run.update({ where: { id: approvalRun.id }, data: { status: "completed" } });
-    }
+      return saved.approvalEffectId;
+    };
+    const approvalEffectId = confirmed
+      ? await approveDocuments(role)
+      : `missing-documents-${f.run.id}`;
     const server = await prisma.mcpServer.create({
       data: {
         spaceId,
@@ -4587,7 +4589,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       effectKind: "mcp_research",
     };
     const lease = { runId: f.run.id, leaseOwner: "research-worker", leaseFence: 1 };
-    return { ...f, role, draft, definition, server, metadata, input, lease };
+    return { ...f, role, draft, definition, server, metadata, input, lease, approveDocuments };
   }
 
   it("confirms a brief with one durable human receipt and preserves the immutable draft", async () => {
@@ -7150,6 +7152,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         ...f.input,
         expectedRoleRevision: revised.role.revision,
         clientNonce: `${f.input.clientNonce}-corrected`,
+        approvalEffectId: await f.approveDocuments(revised),
         requestArtifact: f.metadata("request-corrected"),
         contextArtifact: { artifactId: adopted.artifact.id, sha256: adopted.artifact.hash },
       });
@@ -8098,7 +8101,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           limit: 10,
         })
       ).items.map((item) => item.candidateKey),
-    ).toEqual(["c", "b", "d", "a", "e", "f", "g", "h", "i", "j"].map(key));
+    ).toEqual(["c", "e", "b", "d", "g", "a", "f", "h", "i", "j"].map(key));
     await recordCandidatePage(
       f,
       prepared,
@@ -8116,7 +8119,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           limit: 10,
         })
       ).items.map((item) => item.candidateKey),
-    ).toEqual(["c", "d", "a", "b", "e", "f", "g", "h", "i", "j"].map(key));
+    ).toEqual(["c", "e", "b", "d", "g", "a", "f", "h", "i", "j"].map(key));
     await prisma.artifact.update({
       where: { id: original.saved.outputArtifact.id },
       data: { hash: "f".repeat(64) },
@@ -8241,7 +8244,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toEqual([]);
   });
 
-  it("requires a feedback card after the tenth saved candidate advances the real stage", async () => {
+  it("requires an explicit ten-person round before feedback and waits for the recruiter", async () => {
     const { f, prepared } = await mappedResearchFixture();
     await prisma.recruitingRole.update({
       where: { id: f.role.role.id },
@@ -8259,6 +8262,31 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         .playbookStage,
     ).toBe("calibration_10");
     await recordCandidatePage(f, prepared, "calibration-tenth", rows.slice(9));
+    expect(
+      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
+        .playbookStage,
+    ).toBe("calibration_10");
+    const roundRequest = {
+      operation: "calibration_round" as const,
+      expectedRoleRevision: f.role.role.revision,
+      candidateKeys: Array.from({ length: 10 }, (_, index) => `linkedin:/in/calibration-${index}`),
+    };
+    const roundEffect = await prisma.externalEffect.create({
+      data: {
+        spaceId,
+        runId: f.run.id,
+        kind: "recruiting_research",
+        status: "executing",
+        idempotencyKey: `round:${f.run.id}`,
+        request: roundRequest,
+      },
+    });
+    await recruiting.saveRecruitingCalibrationRound(
+      prisma,
+      actor,
+      { ...f.lease, effectId: roundEffect.id, effectRequest: roundRequest },
+      roundRequest,
+    );
     expect(
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
         .playbookStage,
@@ -8286,11 +8314,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         ...input,
         blocks: [{ kind: "text", text: "Saved the ten profiles." }],
       }),
-    ).toMatchObject({ action: "continued", stage: "feedback" });
-    expect(sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ internal: true, prompt: expect.stringContaining("原生问题卡") }),
-    );
-    sendUserMessage.mockClear();
+    ).toMatchObject({ action: "ended" });
+    // A complete unapproved round waits for human input; do not manufacture a continuation.
+    expect(sendUserMessage).not.toHaveBeenCalled();
     expect(
       await guardRecruitingTurnEnd(deps, {
         ...input,
@@ -8691,7 +8717,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ).length,
     ).toBeLessThanOrEqual(2);
   });
-  it("filters saved native pages with overlapping identities without narrowing role counts", async () => {
+  it("filters proven research pages with overlapping identities without narrowing role counts", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const pages = [];
     for (const [label, name, hour] of [
@@ -8714,9 +8740,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         { observedAt: new Date(`2026-10-16T${hour}:00:00Z`) },
       );
       pages.push(
-        await prisma.recruitingCandidatePage.update({
+        await prisma.recruitingCandidatePage.findUniqueOrThrow({
           where: { effectId: page.input.effectId },
-          data: { taskId: null, actionId: null },
         }),
       );
     }
@@ -8808,13 +8833,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ...input,
       actionId: prepared.action.id,
     });
-    expect(action.total).toBe(1);
-    expect(action.items[0]).toMatchObject({
+    expect(action.total).toBe(3);
+    expect(action.items.find((item) => item.candidateKey === "linkedin:/in/shared")).toMatchObject({
       company: "Latest company",
       latestSource: { effectId: latest.input.effectId },
     });
-    expect(intersection.items).toEqual([]);
-    expect(intersection.total).toBe(0);
+    expect(intersection.items.map((item) => item.candidateKey)).toEqual(["linkedin:/in/alpha"]);
+    expect(intersection.total).toBe(2);
     expect(intersection.counts).toEqual(first.counts);
     const other = await mappedResearchFixture();
     await recordCandidatePage(other.f, other.prepared, "other-role-page", [
@@ -8827,6 +8852,14 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(foreign.total).toBe(0);
     expect(foreign.items).toEqual([]);
     expect(foreign.counts).toMatchObject({ sourceRows: 1, candidates: 1 });
+    // Detaching a proven action page cannot manufacture a native-save receipt.
+    await prisma.recruitingCandidatePage.update({
+      where: { effectId: pages[0]!.effectId },
+      data: { taskId: null, actionId: null },
+    });
+    await expect(recruiting.listRecruitingCandidates(prisma, actor, input)).rejects.toBeInstanceOf(
+      IsolationError,
+    );
   });
 
   it("keeps cross-action occurrences for one profile while role identities stay isolated", async () => {
