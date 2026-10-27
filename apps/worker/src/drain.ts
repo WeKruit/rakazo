@@ -2,6 +2,7 @@
 export function createWorkerDrain(deps: {
   stopJobs: () => Promise<void>;
   stopReconciler: () => Promise<void>;
+  afterDrain?: () => Promise<void>;
 }) {
   let state: "ready" | "draining" | "drained" | "failed" = "ready";
   let draining: Promise<void> | undefined;
@@ -14,15 +15,17 @@ export function createWorkerDrain(deps: {
       draining = Promise.all([
         Promise.resolve().then(deps.stopJobs),
         Promise.resolve().then(deps.stopReconciler),
-      ]).then(
-        () => {
-          state = "drained";
-        },
-        (error: unknown) => {
-          state = "failed";
-          throw error;
-        },
-      );
+      ])
+        .then(() => deps.afterDrain?.())
+        .then(
+          () => {
+            state = "drained";
+          },
+          (error: unknown) => {
+            state = "failed";
+            throw error;
+          },
+        );
       return draining;
     },
   };
