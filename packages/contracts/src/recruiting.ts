@@ -1104,7 +1104,7 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       .record(RecruitingId, z.string().trim().min(1).max(160))
       .optional()
       .describe(
-        "candidateKey → the must-haves this person's row does not show, in the recruiter's language (for example 「初创公司经历、曾任 Metrology Engineer」). Shown under that person in chat.",
+        "candidateKey → the must-haves this person's row does not show, in English (for example 'startup experience, former Metrology Engineer'). Shown under that person in chat.",
       ),
   }),
   // Shows the round's first good fits in chat while more searches run; records nothing.

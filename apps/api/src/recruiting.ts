@@ -831,7 +831,7 @@ export async function getRecruitingRoleSetup(
         key: "campaign",
         state: "missing",
         label: "First email not prepared yet; prepared automatically on first outreach",
-        action: { kind: "ask_agent", prompt: "为这个岗位准备第一封邮件" },
+        action: { kind: "ask_agent", prompt: "Prepare the first email for this role" },
       });
       const email = await lastUsedMailbox(deps.prisma, actor.spaceId, campaign.serverId);
       items.push(
@@ -857,7 +857,7 @@ export async function getRecruitingRoleSetup(
             key: "crm",
             state: "missing",
             label: "Role record not linked yet",
-            action: { kind: "ask_agent", prompt: "为这个岗位准备候选人名单" },
+            action: { kind: "ask_agent", prompt: "Prepare the candidate list for this role" },
           },
     );
     const count = campaign.leads.length;
@@ -871,7 +871,10 @@ export async function getRecruitingRoleSetup(
               state: "missing",
               label: "No recipients for the first email yet",
               detail: { count },
-              action: { kind: "ask_agent", prompt: "把入围候选人加入第一封邮件的收件人" },
+              action: {
+                kind: "ask_agent",
+                prompt: "Add the shortlisted candidates as recipients of the first email",
+              },
             },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");

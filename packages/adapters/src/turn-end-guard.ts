@@ -209,13 +209,14 @@ export async function recruitingRoundListText(
       .join(" · ");
     const passage = person?.snippet?.trim();
     const unknown = input.unverified?.[key]?.trim();
-    return `${index + 1}. ${head}${passage ? `\n   > ${passage.length > 220 ? `${passage.slice(0, 220)}…` : passage}` : ""}${unknown ? `\n   未核实：${unknown}` : ""}`;
+    return `${index + 1}. ${head}${passage ? `\n   > ${passage.length > 220 ? `${passage.slice(0, 220)}…` : passage}` : ""}${unknown ? `\n   Not verified: ${unknown}` : ""}`;
   });
-  return `本轮 ${lines.length} 位人选：\n\n${lines.join("\n")}`;
+  return `${lines.length} ${lines.length === 1 ? "person" : "people"} this round:\n\n${lines.join("\n")}`;
 }
 
-const PROMISE_LABEL = "完成上一条说要做的事";
-const AUTO_NOTE = "（这是自动继续，不是招聘者的话，引用时用招聘者自己的消息。）";
+const PROMISE_LABEL = "Finish what the last message said it would do";
+const AUTO_NOTE =
+  " (This is an automatic continuation, not the recruiter's words. When quoting, use the recruiter's own messages.)";
 
 /**
  * The internal follow-up a pushed turn starts from. A turn that ended on a promise is told so,
@@ -229,11 +230,11 @@ export function continuationText(input: {
 }) {
   const parts = [
     input.promise
-      ? `你上一条以「${input.promise.slice(0, 160)}」结束，但这一轮没有去做，后台也没有在跑的工作。现在就做，不要再许诺时间。`
+      ? `Your last message ended with "${input.promise.slice(0, 160)}", but this turn did not do it and no background work is running. Do it now, and do not promise a time again. `
       : "",
-    input.step ? `继续下一步：${input.step.label}。${input.step.prompt}` : "",
+    input.step ? `Continue with the next step: ${input.step.label}. ${input.step.prompt}` : "",
     input.last
-      ? "这是最后一次自动继续：本轮要交付结果；确实做不到（工具失败或缺信息），先换一种做法再试一次，仍不行就用一张问题卡（ask_user）问招聘者一个具体决定，说清卡在哪并给出可选做法。不要只汇报状态，也不要说之后再做。"
+      ? " This is the last automatic continuation: this turn must deliver a result. If you truly cannot (a tool failed or information is missing), try another way once; if that still fails, use one question card (ask_user) to ask the recruiter for one concrete decision, saying where it is stuck and offering options. Do not just report status, and do not say you will do it later."
       : "",
   ];
   return `${parts.filter(Boolean).join("")}${AUTO_NOTE}`;
@@ -290,7 +291,7 @@ async function unsavedFeedback(
     stage: "feedback",
     reason: "feedback_refused",
   });
-  const text = `继续：刚才保存招聘者的反馈没有成功，这条反馈还没有记下。原因：${error.slice(0, 600)} 按原因改正后立即用 recruiting_feedback 重新保存，成功后接着做下一步；保存成功之前不要说已记录。${AUTO_NOTE}`;
+  const text = `Continue: saving the recruiter's feedback just failed, so this feedback is not recorded yet. Reason: ${error.slice(0, 600)} Fix it from the reason and save it again with recruiting_feedback right away, then continue with the next step. Do not say it is recorded until the save succeeds.${AUTO_NOTE}`;
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
@@ -310,7 +311,7 @@ async function unsavedFeedback(
     action: "continued",
     runId: sent.runId ?? null,
     stage: "feedback",
-    label: "保存反馈",
+    label: "Save feedback",
     count: 1,
   };
 }
@@ -409,7 +410,10 @@ export async function guardRecruitingTurnEnd(
     return { action: "ended", classification };
   }
   const stage = playbook?.stage ?? "intake";
-  const step = nextStep ?? { label: PROMISE_LABEL, prompt: "" };
+  const step: { label: string; prompt: string; openClarifications?: number } = nextStep ?? {
+    label: PROMISE_LABEL,
+    prompt: "",
+  };
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: run.threadId,
@@ -425,7 +429,7 @@ export async function guardRecruitingTurnEnd(
   const count = countTrailingAutoContinues(recent) + 1;
   const reason = promise
     ? "promise"
-    : step.label.includes("待确认问题")
+    : step.openClarifications
       ? "open_clarifications"
       : "no_deliverable";
   if (count > max) {
@@ -440,8 +444,8 @@ export async function guardRecruitingTurnEnd(
     const saved = Math.max(playbook?.savedCandidates ?? 0, savedRows._sum.rowCount ?? 0);
     await input.postAssistant(
       saved > 0
-        ? `我先停在这里：已保存 ${saved} 位候选人，「${step.label}」还没完成。回复一句「继续」我就接着做。`
-        : `我先停在这里：已连续自动推进 ${max} 次仍没有产出可交付结果。下一步是「${step.label}」；回复一句「继续」我就接着做。`,
+        ? `I've paused here: ${saved} ${saved === 1 ? "candidate is" : "candidates are"} saved, and "${step.label}" isn't finished yet. Reply "continue" and I'll pick it up.`
+        : `I've paused here: ${max} automatic attempts in a row did not produce a result. The next step is "${step.label}". Reply "continue" and I'll pick it up.`,
     );
     return { action: "capped", stage, label: step.label, count: count - 1 };
   }
@@ -553,10 +557,10 @@ export async function guardRecruitingRoleCreate(
   });
   const prompt =
     typeof error === "string"
-      ? `继续：刚才保存岗位被拒，原因：${error.slice(0, 600)} 这不是故障。按原因改正后立即用 recruiting_role create 重新保存（引用写不准就只写来源位置、不写引文），然后继续找人，直到展示十位人选。${AUTO_NOTE}`
+      ? `Continue: saving the role was just refused. Reason: ${error.slice(0, 600)} This is not an outage. Fix it from the reason and save again right away with recruiting_role create (if a quote cannot be exact, give only the source location without the quote), then keep finding people until ten are shown.${AUTO_NOTE}`
       : promise
         ? continuationText({ promise, last: true })
-        : `继续：上一条以报错或卡住结束，但工作没有做完。岗位还没保存：现在用 recruiting_role create 保存岗位（引用写不准就只写来源位置、不写引文），然后继续找人，直到展示十位人选。不要再向招聘方道歉或说保存不可用。${AUTO_NOTE}`;
+        : `Continue: the last message ended on an error or got stuck, but the work is not done. The role is not saved yet: save it now with recruiting_role create (if a quote cannot be exact, give only the source location without the quote), then keep finding people until ten are shown. Do not apologize to the recruiter again or say saving is unavailable.${AUTO_NOTE}`;
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
@@ -576,7 +580,7 @@ export async function guardRecruitingRoleCreate(
     action: "continued",
     runId: sent.runId ?? null,
     stage: "intake",
-    label: typeof error !== "string" && promise ? PROMISE_LABEL : "保存岗位",
+    label: typeof error !== "string" && promise ? PROMISE_LABEL : "Save the role",
     count: 1,
   };
 }

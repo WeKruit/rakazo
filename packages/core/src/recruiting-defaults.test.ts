@@ -242,7 +242,7 @@ describe("maintained recruiting defaults", () => {
   });
 
   it("offers the next step after every round and starts scale on the recruiter's request", () => {
-    expect(RECRUITING_ROUND_NEXT_STEP).toContain("找 100 个类似的人");
+    expect(RECRUITING_ROUND_NEXT_STEP).toContain("Find 100 similar people");
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("ask_user");
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("never list them again");
     for (const part of [
