@@ -32,6 +32,7 @@ import { catalogToolPrefix } from "./approval-effect.js";
 import { calendarEvidenceHash } from "./calendar-approval.js";
 import { readBoundedText } from "./connector-http.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
+import { FindEmailsInput, findEmails } from "./contact-lookup.js";
 import { credentialDigest } from "./credential-digest.js";
 import { appendToolCompletionAudit } from "./executor.js";
 import {
@@ -64,6 +65,7 @@ import {
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   requireQuickSearchBeforeResearch,
+  savedContactEmails,
 } from "./recruiting-research.js";
 import {
   assertSchedulingCall,
@@ -356,6 +358,57 @@ function localInstantlyTools(
     });
   }
   return tools;
+}
+
+const FULLENRICH_MCP = "https://mcp.fullenrich.com/mcp";
+const FIND_EMAILS = "native_find_emails";
+
+/**
+ * The contact lookup tool for an assigned enrichment server: runs the providers one after another
+ * over REST and returns, per person, which provider ran and what it found.
+ */
+function localContactTools(
+  assignment: {
+    serverId: string;
+    allowAllTools: boolean;
+    allowedTools: unknown;
+    server: McpServer;
+  },
+  listed: readonly { name: string }[],
+): ConnectorTool[] {
+  if (
+    assignment.server.transport !== "streamable_http" ||
+    assignment.server.endpoint !== FULLENRICH_MCP ||
+    !(
+      assignment.allowAllTools ||
+      (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes("enrich_bulk"))
+    ) ||
+    listed.some((tool) => tool.name === "find_emails")
+  )
+    return [];
+  const tool: ConnectorTool = {
+    name: `mcp__${assignment.server.slug}__find_emails`,
+    description:
+      "Find email addresses for saved candidates. Pass each person's name, LinkedIn URL and current company (up to 50). Checks several contact sources one after another, each only for people still without an email, and reuses emails already found for this account. Waits for the result (up to about four minutes). Returns, per person, the emails found (type work or personal, and the source's delivery check, e.g. DELIVERABLE, or null when unchecked) and what each source did, plus a summary. Its results are the saved contacts. Does not send anything.",
+    inputSchema: z.toJSONSchema(FindEmailsInput, { io: "input" }),
+    readOnly: true,
+    route: {
+      connectorId: "mcp",
+      resourceId: assignment.serverId,
+      resourceRevision: assignment.server.revision,
+      toolName: FIND_EMAILS,
+      catalogGroup: assignment.server.slug,
+    },
+  };
+  directTools.add(tool);
+  return [tool];
+}
+
+function localTools(
+  assignment: Parameters<typeof localInstantlyTools>[0],
+  listed: readonly { name: string }[],
+): ConnectorTool[] {
+  return [...localInstantlyTools(assignment, listed), ...localContactTools(assignment, listed)];
 }
 
 /** Runtime MCP connector. Authorization is re-checked against the bot assignment on every call. */
@@ -715,7 +768,7 @@ export class McpConnector implements ConnectorProvider {
             }));
           if (assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
             for (const tool of remoteTools) directTools.add(tool);
-          remoteTools.push(...localInstantlyTools(assignment, listed.tools));
+          remoteTools.push(...localTools(assignment, listed.tools));
           return remoteTools;
         } catch (error) {
           // A single unavailable server must not hide tools from other connectors.
@@ -818,6 +871,10 @@ export class McpConnector implements ConnectorProvider {
     let callStarted = false;
     let sessionKey: string | undefined;
     try {
+      if (call.route.toolName === FIND_EMAILS) {
+        yield* this.findContactEmails(call, context);
+        return;
+      }
       const localInstantlyServer =
         nativeInstantlyReads.some((tool) => tool.toolName === call.route!.toolName) ||
         isNativeInstantlyWrite(call.route.toolName)
@@ -1247,6 +1304,68 @@ export class McpConnector implements ConnectorProvider {
         // A network failure mid-request may still have reached the provider.
         ...(error instanceof TypeError ? { outcome: "uncertain" as const } : {}),
       };
+    } finally {
+      await safeFetch.close().catch(() => undefined);
+    }
+  }
+
+  private async *findContactEmails(
+    call: ConnectorCall,
+    context: AdapterContext,
+  ): AsyncIterable<ConnectorEvent> {
+    const redactions: string[] = [];
+    const safeFetch = createSafeRemoteFetch(
+      this.options.network?.fetch,
+      this.options.network?.resolveHostname,
+    );
+    try {
+      const input = FindEmailsInput.parse(call.args);
+      const assignment = await requireMcpToolAssignment(
+        this.prisma,
+        context,
+        call.route!,
+        "enrich_bulk",
+      );
+      const { server } = assignment;
+      if (server.endpoint !== FULLENRICH_MCP || server.transport !== "streamable_http")
+        throw new IsolationError();
+      // The assigned connection's own key, or the platform key when it has none.
+      const { plaintext } = await loadMcpCredentialRecord(
+        this.prisma,
+        this.secrets,
+        server,
+        context,
+      );
+      const material = plaintext ? (JSON.parse(plaintext) as OAuthMaterial) : undefined;
+      if (material) redactions.push(...oauthMaterialSecrets(material));
+      const headers = new Headers(material?.headers);
+      const fullenrich = [material?.secret, headers.get("authorization")]
+        .find((value): value is string => typeof value === "string" && value.length > 0)
+        ?.replace(/^Bearer /i, "");
+      const contactout = process.env.CONTACTOUT_API_KEY?.trim();
+      const leadmagic = process.env.LEADMAGIC_API_KEY?.trim();
+      redactions.push(...[fullenrich, contactout, leadmagic].filter((key): key is string => !!key));
+      const result = await findEmails(input, {
+        fetch: safeFetch,
+        signal: context.signal,
+        keys: { fullenrich, contactout, leadmagic },
+        saved: await savedContactEmails(this.prisma, context, server, FIND_EMAILS),
+      });
+      yield {
+        type: "result",
+        data: redactConnectorPayload(
+          { structuredContent: { source: "local_contact_lookup", ...result } },
+          redactions,
+        ),
+      };
+    } catch (error) {
+      const detail =
+        error instanceof z.ZodError
+          ? ` Invalid arguments: ${z.prettifyError(error)}`
+          : error instanceof Error && !(error instanceof IsolationError)
+            ? ` ${sanitizeConnectorError(error, redactions)}`
+            : " Check the current assigned connection.";
+      yield { type: "error", message: `Contact lookup failed.${detail}` };
     } finally {
       await safeFetch.close().catch(() => undefined);
     }

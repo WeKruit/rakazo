@@ -15,7 +15,8 @@ import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingResearch, listRunToolResults } from "@rakazo/db";
 import { readActorArtifact } from "./artifact-read.js";
-import { isPeopleSearchEndpoint } from "./recruiting-profiles.js";
+import type { FoundEmail } from "./contact-lookup.js";
+import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -194,6 +195,26 @@ export async function requireFullEnrichJobOwnership(
   throw new IsolationError(
     "This contact lookup is not available in your workspace. Start a new lookup in this conversation.",
   );
+}
+
+/** Emails this account's earlier contact lookups on this connection found, by LinkedIn key. */
+export async function savedContactEmails(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+  server: Pick<McpServer, "id" | "revision">,
+  toolName: string,
+): Promise<Map<string, FoundEmail[]>> {
+  const saved = new Map<string, FoundEmail[]>();
+  for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, toolName)) {
+    const people = mcpObject(receipt.result)?.people;
+    for (const person of Array.isArray(people) ? people : []) {
+      const entry = record(person);
+      const key = linkedinPersonKey(entry?.linkedin_url);
+      const emails = Array.isArray(entry?.emails) ? (entry.emails as FoundEmail[]) : [];
+      if (key && emails.length && !saved.has(key)) saved.set(key, emails);
+    }
+  }
+  return saved;
 }
 
 export type { RecruitingResearchObservation } from "@rakazo/contracts";

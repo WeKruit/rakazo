@@ -141,6 +141,8 @@ const NATIVE_INSTANTLY_READS = [
   "native_instantly_get_email",
 ];
 const isNativeInstantlyRead = (tool: string) => NATIVE_INSTANTLY_READS.includes(tool);
+/** The contact lookup that runs several providers; its receipt lists each person's emails. */
+const FIND_EMAILS = "native_find_emails";
 
 function correspondenceProvider(
   endpoint: string | null,
@@ -178,7 +180,7 @@ function correspondenceProvider(
     if (address === "https://mcp.cal.com/mcp")
       return { kind: "cal", tools: ["get_bookings", "get_booking", "get_availability"] };
   } else if (address === "https://mcp.fullenrich.com/mcp") {
-    return { kind: "fullenrich", tools: ["get_enrichment_results"] };
+    return { kind: "fullenrich", tools: ["get_enrichment_results", FIND_EMAILS] };
   }
   return null;
 }
@@ -201,7 +203,11 @@ function correspondenceAllows(
   assignment: { allowAllTools: boolean; allowedTools: unknown },
   tool: string,
 ) {
-  const assigned = isNativeInstantlyRead(tool) ? "list_emails" : tool;
+  const assigned = isNativeInstantlyRead(tool)
+    ? "list_emails"
+    : tool === FIND_EMAILS
+      ? "enrich_bulk"
+      : tool;
   return (
     assignment.allowAllTools ||
     (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(assigned))
@@ -1337,7 +1343,7 @@ export async function getRecruitingCorrespondence(
               "search_events",
               "suggest_time",
             ]
-          : ["get_enrichment_results"];
+          : ["get_enrichment_results", FIND_EMAILS];
     const querySources = sourceRows.filter(
       (source) =>
         source.enabled &&
@@ -1966,6 +1972,40 @@ export async function getRecruitingCorrespondence(
           importEffectId: link.effectId,
           messages: messages.filter((message) => message !== null),
         });
+        continue;
+      }
+      if (provider.kind === "fullenrich" && body && call.route.toolName === FIND_EMAILS) {
+        if (!Array.isArray(body.people)) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        parsed = true;
+        for (const row of body.people) {
+          const entry = correspondenceRecord(row);
+          const linkedinUrl = entry?.linkedin_url;
+          const identity =
+            typeof linkedinUrl === "string" ? recruitingCalibrationIdentity(linkedinUrl) : null;
+          if (!identity || !Array.isArray(entry?.emails) || !entry.emails.length) continue;
+          const candidateKey = `linkedin:${identity}`;
+          if (!candidateKeys.has(candidateKey) || contactKeys.has(candidateKey)) continue;
+          const contact = RecruitingCorrespondenceSchema.shape.contacts.element.safeParse({
+            candidateKey,
+            linkedinUrl,
+            emails: entry.emails.map((email) => {
+              const value = correspondenceRecord(email);
+              return { address: value?.address, status: value?.status ?? null };
+            }),
+            phones: [],
+            source: source.name,
+            checkedAt: effect.updatedAt.toISOString(),
+          });
+          if (!contact.success) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          contactKeys.add(candidateKey);
+          output.contacts.push(contact.data);
+        }
         continue;
       }
       if (provider.kind === "fullenrich" && body) {
