@@ -2110,6 +2110,32 @@ describe("native recruiting role effect delivery", () => {
     expect(f.effects.map((effect) => effect.status)).toEqual(["completed", "completed"]);
   });
 
+  // 2026-10-27: "找 50 个" sent while the round's turn still ran; the brief update quoted the
+  // earlier answer and was refused. The update quotes the recruiter's latest message instead.
+  it("quotes the recruiter's latest message on a role update", async () => {
+    const f = fixture("role-update-latest");
+    vi.mocked(f.prisma.message.findFirst).mockResolvedValue({
+      blocks: [{ kind: "text", text: "这 10 个方向可以，找 50 个类似的人" }],
+    } as never);
+    vi.mocked(executeRecruitingRoleTool).mockRejectedValue(new IsolationError());
+    f.setCalls([
+      {
+        name: "recruiting_role",
+        args: {
+          operation: "update",
+          roleId: "role-1",
+          expectedRevision: 1,
+          intent: { basis: "direct", quote: "优先洛杉矶都会区" },
+        },
+        executionId: "update-latest",
+      },
+    ]);
+    await f.run();
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      intent: { basis: "direct", quote: "这 10 个方向可以，找 50 个类似的人" },
+    });
+  });
+
   it.each(["quote", "scope"])(
     "settles native role source %s errors without repeating the mutation",
     async (kind) => {
