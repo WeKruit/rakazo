@@ -7,7 +7,6 @@ import type {
   Bot,
   BotSection,
   ComputerMode,
-  ComputerReleaseReason,
   ComputerStatus,
   Connection,
   ConnectionCatalogItem,
@@ -97,7 +96,7 @@ import {
   getComposerEnterToSend,
   subscribeComposerEnterToSend,
 } from "../../lib/composer-enter-to-send-pref";
-import { embeddableScreenUrl, loadComputerScreen } from "../../lib/computer-screen";
+import { embeddableScreenUrl } from "../../lib/computer-screen";
 import { publishComputerCommand } from "../../lib/computer-workspace";
 import { scheduleFocusPrompt } from "../../lib/focus-prompt";
 import { clampWidth, usePaneWidth, useViewportWidth } from "../../lib/pane-width";
@@ -132,9 +131,6 @@ import {
   activeThreadRuns,
   applyThreadSendReceipt,
   clearActiveThreadRuns,
-  computerPanelAutoBoot,
-  computerPanelAutoUsesBoot,
-  computerTakeoverBlocked,
   isComputerStatusEvent,
   isThreadSnapshotEvent,
   prependThreadMessagePage,
@@ -171,6 +167,7 @@ import type { RecruitingWorkspaceView } from "../shell/RecruitingNavigation";
 import type { RecruitingChatContact } from "../shell/recruiting-chat-context";
 import { recruitingChatContext } from "../shell/recruiting-chat-context";
 import { sidebarGroupsForSpaces } from "../shell/space-sidebar";
+import { useShellComputer } from "./useShellComputer";
 
 type PendingBrowserNotification = {
   event: Pick<ProductEvent, "id" | "type" | "threadId" | "botId" | "payload">;
@@ -468,8 +465,6 @@ export function useShellController() {
     }>
   >([]);
   const [teachBusy, setTeachBusy] = useState(false);
-  const [computer, setComputer] = useState<ComputerStatus | null>(null);
-  const computerRef = useRef<ComputerStatus | null>(null);
   const threadRefreshEpoch = useRef(0);
   const groupRefreshEpoch = useRef(0);
   // ponytail: keep at most 20 threads in this authenticated shell; switching
@@ -499,32 +494,6 @@ export function useShellController() {
   // A very fast run can finish over SSE while its threads.send response is still
   // returning. Do not let that late receipt resurrect terminal work as queued.
   const terminalRunReceipts = useRef(new Set<string>());
-  // Last-known computer/screen per bot, so switching back to an already-seen
-  // bot paints its computer pane instantly instead of blanking it while the
-  // thread + screen RPCs round-trip again (see refreshThread / refreshComputerScreen).
-  const computerCacheRef = useRef(
-    new Map<string, { computer: ComputerStatus | null; screenUrl: string | null }>(),
-  );
-  // Caps computerCacheRef so a long session that opens many distinct bots
-  // over time doesn't accumulate one entry per bot forever. Re-inserting on
-  // every update keeps Map iteration order as least-recently-used first, so
-  // eviction drops the bot that's been out of view longest.
-  const COMPUTER_CACHE_LIMIT = 20;
-
-  function cacheComputerFor(
-    botId: string,
-    patch: Partial<{ computer: ComputerStatus | null; screenUrl: string | null }>,
-  ) {
-    const cache = computerCacheRef.current;
-    const prev = cache.get(botId) ?? { computer: null, screenUrl: null };
-    cache.delete(botId);
-    cache.set(botId, { ...prev, ...patch });
-    if (cache.size > COMPUTER_CACHE_LIMIT) {
-      const oldest = cache.keys().next().value;
-      if (oldest !== undefined) cache.delete(oldest);
-    }
-  }
-
   function commitSnapshot(next: ThreadSnapshot | null) {
     if (next) {
       const key = next.groupId ? `group:${next.groupId}` : `bot:${next.botId}`;
@@ -540,11 +509,6 @@ export function useShellController() {
   useEffect(() => {
     setSnapshot(withLiveStreamingProgress(snapshotRef.current, streamResponses));
   }, [streamResponses]);
-
-  function commitComputer(next: ComputerStatus | null) {
-    computerRef.current = next;
-    setComputer(next);
-  }
 
   function updateSnapshot(update: (prev: ThreadSnapshot | null) => ThreadSnapshot | null) {
     commitSnapshot(update(snapshotRef.current));
@@ -648,7 +612,6 @@ export function useShellController() {
     sectionMenuAnchor.current = null;
   }, [sectionMenu]);
   const closeSectionMenu = useCallback(() => setSectionMenu(null), []);
-  const [booting, setBooting] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
   const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
@@ -716,39 +679,6 @@ export function useShellController() {
   const [savingRoutine, setSavingRoutine] = useState(false);
   const [runningRoutine, setRunningRoutine] = useState(false);
   const [routineError, setRoutineError] = useState<string | null>(null);
-  const [screenUrl, setScreenUrl] = useState<string | null>(null);
-  const [computerOpen, setComputerOpen] = useState(false);
-  const [computerBotId, setComputerBotId] = useState<string | undefined>();
-  const computerOpenRef = useRef(false);
-  const computerBotIdRef = useRef<string | undefined>(undefined);
-  const computerBootEpoch = useRef(0);
-  const openComputerRef = useRef<(botId?: string) => Promise<boolean>>(async () => false);
-  const [computerViewport, setComputerViewport] = useState<{
-    height: number;
-    offsetTop: number;
-  } | null>(null);
-  const [computerError, setComputerError] = useState<string | null>(null);
-  // Screen-load failures can sit beside a still-valid embed URL; boot and
-  // takeover failures must stay visible even when a URL remains.
-  const [computerErrorFromScreen, setComputerErrorFromScreen] = useState(false);
-  useEffect(() => {
-    if (!computerOpen) {
-      setComputerViewport(null);
-      return;
-    }
-    const viewport = window.visualViewport;
-    if (!viewport) return;
-    const sync = () => {
-      setComputerViewport({ height: viewport.height, offsetTop: viewport.offsetTop });
-    };
-    sync();
-    viewport.addEventListener("resize", sync);
-    viewport.addEventListener("scroll", sync);
-    return () => {
-      viewport.removeEventListener("resize", sync);
-      viewport.removeEventListener("scroll", sync);
-    };
-  }, [computerOpen]);
   useEffect(() => {
     if (!session.data?.user) return;
     let cancelled = false;
@@ -772,7 +702,6 @@ export function useShellController() {
       .then(setUsage)
       .catch(() => undefined);
   }, []);
-  const autoBooted = useRef<string | null>(null);
   const routineSavePending = useRef(false);
   const webhookSecretProvisionRef = useRef(new Map<string, Promise<string>>());
   const ensureWebhookSecret = (botId: string) =>
@@ -809,17 +738,11 @@ export function useShellController() {
   const readVisibleGroups = useRef(new Set<string>());
   const notifiedBrowserEvents = useRef(new Set<string>());
   const pendingBrowserNotifications = useRef(new Map<string, PendingBrowserNotification>());
-  const computerVisible = useRef(false);
-  computerVisible.current = panel === "computer" || computerOpen;
   const autoSpoken = useRef<string | null>(null);
   const autoSpokenBotId = useRef<string | null>(null);
 
   const inGroup = Boolean(groupId);
   const active = inGroup ? undefined : (bots.find((b) => b.id === botId) ?? bots[0]);
-  const computerBot =
-    (computerBotId ? bots.find((bot) => bot.id === computerBotId) : undefined) ?? active;
-  computerOpenRef.current = computerOpen;
-  computerBotIdRef.current = computerBotId ?? active?.id;
   const activeGroup = groups.find((group) => group.id === groupId);
   const archivedRouteGroup = activeGroup
     ? undefined
@@ -866,6 +789,44 @@ export function useShellController() {
   activeBotId.current = inGroup ? undefined : active?.id;
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
+  const {
+    computer,
+    setComputer,
+    computerRef,
+    computerCacheRef,
+    cacheComputerFor,
+    commitComputer,
+    booting,
+    screenUrl,
+    setScreenUrl,
+    computerOpen,
+    setComputerOpen,
+    computerBotIdRef,
+    computerOpenRef,
+    computerViewport,
+    computerError,
+    setComputerError,
+    computerErrorFromScreen,
+    setComputerErrorFromScreen,
+    computerBot,
+    screenRequest,
+    refreshComputerFor,
+    refreshComputerScreen,
+    openComputer,
+    onOpenComputer,
+    releaseComputer,
+  } = useShellComputer({
+    active,
+    bots,
+    botsRef,
+    activeBotId,
+    activeGroupId,
+    panel,
+    snapshot,
+    refreshThread,
+    refreshGroupThread: (id) => refreshGroupThreadRef.current(id),
+  });
+
   // Agent events arrive in bursts and reconnects repeat; re-read the workbench at most once a
   // second, and not at all while the page is hidden.
   const recruitingRefreshQueue = useRef<ReturnType<typeof createCoalescedRefresh>>(undefined);
@@ -922,7 +883,7 @@ export function useShellController() {
     },
     [refreshRecruitingReads],
   );
-  const screenRequest = useRef(0);
+
   const contextBot =
     botMenu?.kind === "bot" ? bots.find((bot) => bot.id === botMenu.id) : undefined;
   const contextGroup =
@@ -1335,25 +1296,6 @@ export function useShellController() {
       }
     });
     return snap;
-  }
-
-  async function refreshComputerScreen(id: string) {
-    if (!computerVisible.current) return null;
-    const request = ++screenRequest.current;
-    return loadComputerScreen({
-      load: () => rpc.computer.screenUrl({ botId: id }),
-      isCurrent: () =>
-        request === screenRequest.current &&
-        (activeBotId.current === id || computerBotIdRef.current === id) &&
-        computerVisible.current,
-      commit: (screen) => {
-        setScreenUrl(screen.url);
-        setComputerError(screen.error);
-        setComputerErrorFromScreen(Boolean(screen.error));
-        cacheComputerFor(id, { screenUrl: screen.url });
-      },
-      fallbackError: t`Could not connect to the computer screen`,
-    });
   }
 
   async function loadOlderMessages() {
@@ -3968,106 +3910,6 @@ export function useShellController() {
     await refreshBots().catch(() => undefined);
   }
 
-  async function bootComputer({
-    botId: targetBotId,
-    takeControl,
-    overlay,
-    force = false,
-  }: {
-    botId: string;
-    takeControl: boolean;
-    overlay: boolean;
-    force?: boolean;
-  }) {
-    const epoch = ++computerBootEpoch.current;
-    const stillThisBoot = () => computerBootEpoch.current === epoch;
-    const stillThisBot = () =>
-      computerBotIdRef.current === targetBotId || activeBotId.current === targetBotId;
-    const cached = computerCacheRef.current.get(targetBotId);
-    const targetComputer = computer?.botId === targetBotId ? computer : (cached?.computer ?? null);
-    const targetScreen = computer?.botId === targetBotId ? screenUrl : (cached?.screenUrl ?? null);
-    const needsBoot = force || targetComputer?.state !== "running" || !targetScreen;
-    if (overlay && needsBoot) setBooting(true);
-    setComputerError(null);
-    setComputerErrorFromScreen(false);
-    try {
-      if (needsBoot) {
-        const status = await rpc.computer.boot({ botId: targetBotId });
-        if (!stillThisBoot() || !stillThisBot()) return;
-        commitComputer(status);
-        cacheComputerFor(targetBotId, { computer: status });
-      }
-      if (takeControl) {
-        await rpc.computer.takeover({ botId: targetBotId });
-        if (!stillThisBoot() || !stillThisBot()) return;
-      }
-      await refreshComputerFor(targetBotId);
-    } catch (error) {
-      if (!stillThisBoot() || !stillThisBot()) return;
-      setComputerError(errorText(error, t`Could not take control`));
-      setComputerErrorFromScreen(false);
-      throw error;
-    } finally {
-      if (stillThisBoot()) setBooting(false);
-    }
-  }
-
-  async function refreshComputerFor(targetBotId: string) {
-    if (activeBotId.current === targetBotId) {
-      await refreshThread(targetBotId);
-      return;
-    }
-    if (computerBotIdRef.current !== targetBotId) return;
-    const status = await rpc.computer.status({ botId: targetBotId });
-    if (computerBotIdRef.current !== targetBotId) return;
-    commitComputer(status);
-    cacheComputerFor(targetBotId, { computer: status });
-    await refreshComputerScreen(targetBotId);
-  }
-
-  useEffect(() => {
-    if (panel !== "computer") {
-      autoBooted.current = null;
-      return;
-    }
-    if (!active) return;
-    const botId = active.id;
-    let cancelled = false;
-    void (async () => {
-      // Refresh from the server first. A stale SSE "booting" snapshot used to
-      // skip this effect, so an RPC takeover never showed "You have control".
-      const snap = await refreshThread(botId).catch(() => null);
-      if (cancelled || activeBotId.current !== botId) return;
-      const state = snap?.computer?.state;
-      const screen = state === "running" ? await refreshComputerScreen(botId) : null;
-      if (cancelled || activeBotId.current !== botId) return;
-      const action = computerPanelAutoBoot(state, screen);
-      if (action === "wait") {
-        if (state === "running") autoBooted.current = botId;
-        return;
-      }
-      if (action === "boot" && autoBooted.current === botId) return;
-      autoBooted.current = botId;
-      if (!computerPanelAutoUsesBoot(action)) return;
-      await bootComputer({
-        botId,
-        takeControl: false,
-        overlay: action === "boot",
-        force: true,
-      }).catch(() => undefined);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [panel, active?.id]);
-
-  useEffect(() => {
-    setComputerOpen(false);
-    setComputerError(null);
-    setComputerErrorFromScreen(false);
-    setComputerBotId(active?.id);
-  }, [active?.id]);
-
   useEffect(() => {
     if (focusPromptBotIdRef.current && focusPromptBotIdRef.current !== active?.id) {
       cancelFocusPrompt();
@@ -4075,13 +3917,6 @@ export function useShellController() {
   }, [active?.id]);
 
   useEffect(() => () => cancelFocusPrompt(), []);
-
-  useEffect(() => {
-    if (!computer?.busyBotName) {
-      setComputerError(null);
-      setComputerErrorFromScreen(false);
-    }
-  }, [computer?.busyBotName]);
 
   useEffect(() => {
     if (panel !== "routine") {
@@ -4159,15 +3994,6 @@ export function useShellController() {
   }, [active?.id, clearReply, groupId, inGroup]);
 
   useEffect(() => {
-    if (!computerOpen) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setComputerOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [computerOpen]);
-
-  useEffect(() => {
     if (!showToolActivity) {
       setCommandPaletteOpen(false);
       return;
@@ -4180,72 +4006,6 @@ export function useShellController() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [showToolActivity]);
-
-  useEffect(() => {
-    const heartbeatBotId = computerBot?.id ?? active?.id;
-    if ((panel !== "computer" && !computerOpen) || !heartbeatBotId || computer?.state !== "running")
-      return;
-    const ping = () =>
-      void rpc.computer.heartbeat({ botId: heartbeatBotId }).catch(() => undefined);
-    ping();
-    const timer = window.setInterval(ping, 60_000);
-    return () => window.clearInterval(timer);
-  }, [panel, computerOpen, computerBot?.id, active?.id, computer?.state]);
-
-  /** Open the computer view. Only an explicit Take control asks for the lease. */
-  async function openComputer(botId?: string, takeControl = false) {
-    const id = botId ?? active?.id;
-    if (!id) return false;
-    const bot = botsRef.current.find((candidate) => candidate.id === id);
-    if (!bot) return false;
-    computerBotIdRef.current = id;
-    setComputerBotId(id);
-    const cached = computerCacheRef.current.get(id);
-    const targetComputer = computer?.botId === id ? computer : (cached?.computer ?? null);
-    const targetScreen = computer?.botId === id ? screenUrl : (cached?.screenUrl ?? null);
-    if (computer?.botId !== id) {
-      commitComputer(targetComputer);
-      setScreenUrl(targetScreen);
-    }
-    setComputerOpen(true);
-    computerVisible.current = true;
-    const needsTakeover = takeControl && !userHoldsComputerControl(targetComputer, id);
-    const blocked = computerTakeoverBlocked(targetComputer, snapshot?.run?.status);
-    try {
-      await bootComputer({
-        botId: id,
-        takeControl: needsTakeover && !blocked,
-        overlay: (needsTakeover && !blocked) || targetComputer?.state !== "running",
-        force: targetComputer?.state !== "running",
-      });
-      return true;
-    } catch {
-      // computerError already set in bootComputer
-      return false;
-    }
-  }
-  openComputerRef.current = openComputer;
-  const onOpenComputer = useCallback((botId?: string) => {
-    void openComputerRef.current(botId);
-  }, []);
-
-  async function releaseComputer(reason?: ComputerReleaseReason) {
-    const botId = computerBotIdRef.current ?? activeBotId.current;
-    if (!botId) return;
-    try {
-      await rpc.computer.release({ botId, reason });
-      if (computerBotIdRef.current !== botId && activeBotId.current !== botId) return;
-      await refreshComputerFor(botId).catch(() => undefined);
-      const groupId = activeGroupId.current;
-      if (groupId) {
-        await refreshGroupThreadRef.current(groupId).catch(() => undefined);
-      }
-    } catch {
-      if (computerBotIdRef.current !== botId && activeBotId.current !== botId) return;
-      setComputerError(t`Could not continue`);
-      setComputerErrorFromScreen(false);
-    }
-  }
 
   function dismissComposerError() {
     // The strip shows one message at a time, so only dismiss the run failure when it is the
