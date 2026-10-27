@@ -352,15 +352,15 @@ describe("contact lookup results", () => {
   });
 
   it("returns the in-progress status once the wait runs out", async () => {
-    const f = fixture(Array(30).fill(pending), {
+    const f = fixture(Array(60).fill(pending), {
       endpoint: ENRICH,
       toolName: "get_enrichment_results",
     });
     try {
       const result = f.read();
-      await vi.advanceTimersByTimeAsync(90_000);
+      await vi.advanceTimersByTimeAsync(240_000);
       expect(await result).toEqual([{ type: "result", data: pending }]);
-      expect(f.calls.length).toBeLessThanOrEqual(18);
+      expect(f.calls.length).toBeLessThanOrEqual(48);
     } finally {
       await f.connector.close();
     }
