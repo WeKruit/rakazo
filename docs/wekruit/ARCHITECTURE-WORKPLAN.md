@@ -19,7 +19,7 @@
 | C1 | 多容器 | 附件放对象存储 | 已合并（#260），等存储配置 | — |
 | C2 | 多容器 | 电脑工作目录放对象存储 | 已合并（#262），等存储配置 | — |
 | C3 | 多容器 | 手机推送 token 放数据库 | 回归修复中（#262，过期会话时区边界） | Adam |
-| C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 进行中 | Adam |
+| C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，待发布） | Adam |
 | C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 待做（依赖 C1–C4） | |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中 | Adam |
@@ -138,6 +138,24 @@ C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret �
 - **现状：** `pi-oauth.ts` 里的 `PiOAuthLogins` 把整个登录流程放在进程内存里，包括设备码轮询、等用户粘贴授权码，以及登录结果。如果用户的 `complete`/`submit` 请求落到了另一个容器，就会报「找不到登录会话」。MCP 授权和令牌刷新已经通过数据库协调，没有这个问题。
 - **做法：** 登录流程继续留在发起它的容器里跑（流程由 pi 库驱动，不重写），但把会话状态写进数据库：状态、错误和归属的容器。拿到凭证以后，由发起登录的那个容器自己保存，不再等客户端来取。任何容器收到 `complete` 都去读数据库里的状态。用户粘贴的授权码先加密存进数据库，再用 Postgres `NOTIFY` 通知发起登录的容器。
 - **验收（代码检查）：** 新增测试：两个 `PiOAuthLogins` 实例共用一个数据库，在 A 上开始登录，在 B 上粘贴授权码并完成，凭证只保存一次。
+
+- **实现与认领：** Adam 认领已先提交并推送（`995ec0ede`）；实现 `dcf40ab3b`、旧收据替换修正 `48eccac6c`，Draft [#274](https://github.com/WeKruit/rakazo/pull/274) base 为 `claude/project-thread-f1cbzk`。保留原 Pi 流程，新增持久化协调器和 `model_oauth_sessions` 加法迁移；发起进程自动保存凭证，其他进程只读结果收据。授权码使用现有 SecretStore 的 ephemeral 加密，NOTIFY 只含不透明会话 ID，复用现有 realtime LISTEN；丢失通知由仅针对本进程活跃登录的轮询补查。
+- **本地实测（Node 24.19.0 / pnpm 9.15.0 / PostgreSQL 16）：** 10 个新 PostgreSQL 场景和 108 个既有 OAuth 测试，共 118/118 通过。A 开始、B 提交并完成；保存回调 1 次、凭证行 1 行；重复和并发 finish 不重复保存。覆盖用户/空间隔离、远程取消和保存竞态、provider 全空间取消、设备码自动保存、过期、替换、丢失 NOTIFY、owner 丢失时不重放不确定写入、错误脱敏。API 1,321 通过 / 50 跳过；adapters 全包当次 5,125 通过 / 52 跳过（包含当时 8 个 C4 DB 场景，已另行实跑；之后另加 2 场景并纳入上述 118 个实跑）。db/adapters/api 类型检查、API bundle、Biome 和 diff 检查通过。
+- **连接预算：** 没有创建新连接池或 LISTEN 客户端；查询走现有事务池，通知复用现有 listener。保持 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432 和现有 API 1 + worker 5 = 6 会话预算。预算未因本项改动，线上连接数还没测。
+- **限制：** 仅本地合成用户和凭证，未部署、未变更云配置/Secret/资源/CI。实际多容器路由、真实 OAuth 提供方、线上会话数、硬杀进程后的恢复还没测。owner 死亡不会重跑不确定保存，也不会接管 pi 库登录流程；会话到期后用户重新登录，成功收据在有效期内可从任何实例读取。迁移尚未在线上执行。既有跳过场景未验证。
+
+```sh
+pnpm --filter @rakazo/db generate
+DATABASE_URL=postgres://postgres@127.0.0.1:55484/rakazo_c4 pnpm --filter @rakazo/db migrate
+VERIFY_DATABASE=1 DATABASE_URL=postgres://postgres@127.0.0.1:55484/rakazo_c4 pnpm test packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/pi-oauth.test.ts
+pnpm --filter @rakazo/adapters test
+pnpm --filter @rakazo/api test
+pnpm --filter @rakazo/adapters --filter @rakazo/api --filter @rakazo/db check
+node scripts/bundle-server.mjs api
+pnpm exec biome check apps/api/src/app.ts apps/api/src/router.ts packages/adapters/src/index.ts packages/adapters/src/pi-oauth.ts packages/adapters/src/pi-oauth-durable.ts packages/adapters/src/pi-oauth-durable.postgres.test.ts
+git diff --check
+```
+
 
 ### C5 拆服务、多容器、滚动发布
 
