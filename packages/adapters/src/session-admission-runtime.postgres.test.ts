@@ -4,6 +4,8 @@ import { once } from "node:events";
 import { createRequire } from "node:module";
 import {
   beginSessionAdmissionShutdown,
+  acquireSessionReplacement,
+  releaseSessionReplacement,
   configureSessionAdmissionBudget,
   createDb,
   createPool,
@@ -140,9 +142,12 @@ suite("session owners against isolated real PostgreSQL", () => {
       await expect(realtime.subscribe("late", () => {})).rejects.toThrow(/closed/);
       await expect(guard.closeAndRelease()).rejects.toThrow(/Rotate desired/);
       expect(await listSessionAdmissions(db.prisma)).toHaveLength(1);
+      const replacement = await acquireSessionReplacement(db.prisma, {
+        owner: "synthetic-runtime-controller",
+      });
       await setDesiredSessionGeneration(
         db.prisma,
-        { service: "worker-a", expectedGeneration: "g1", desiredGeneration: "g2" },
+        { service: "worker-a", expectedGeneration: "g1", desiredGeneration: "g2", replacement },
         quiesced,
       );
       await guard.closeAndRelease();
@@ -162,6 +167,7 @@ suite("session owners against isolated real PostgreSQL", () => {
           })
         ).generation,
       ).toBe("g2");
+      await releaseSessionReplacement(db.prisma, replacement);
     } finally {
       for (const client of clients) client.release();
       await guard.beginShutdown();
@@ -372,9 +378,12 @@ suite("session owners against isolated real PostgreSQL", () => {
         }),
       ).rejects.toThrow(/already reserved/);
       await beginSessionAdmissionShutdown(db.prisma, admission);
+      const replacement = await acquireSessionReplacement(db.prisma, {
+        owner: "synthetic-runtime-controller",
+      });
       await setDesiredSessionGeneration(
         db.prisma,
-        { service: "worker-a", expectedGeneration: "g1", desiredGeneration: "g2" },
+        { service: "worker-a", expectedGeneration: "g1", desiredGeneration: "g2", replacement },
         quiesced,
       );
       await releaseSessionAdmission(db.prisma, admission, {
@@ -393,6 +402,7 @@ suite("session owners against isolated real PostgreSQL", () => {
           })
         ).generation,
       ).toBe("g2");
+      await releaseSessionReplacement(db.prisma, replacement);
     } finally {
       if (child.exitCode === null && child.signalCode === null) {
         const exited = once(child, "exit");

@@ -226,7 +226,11 @@ suite("global session admission on dedicated real PostgreSQL", () => {
     await receipt();
     await desired("worker-a");
     const old = await reserve("worker-a");
+    const replacement = await acquireSessionReplacement(db.prisma, {
+      owner: "rotation-controller",
+    });
     const next = {
+      replacement,
       service: "worker-a" as const,
       expectedGeneration: "g1",
       desiredGeneration: "g2",
@@ -237,6 +241,13 @@ suite("global session admission on dedicated real PostgreSQL", () => {
     await expect(releaseSessionAdmission(db.prisma, old, stopped)).rejects.toThrow(
       /Rotate desired/,
     );
+    await expect(
+      setDesiredSessionGeneration(
+        db.prisma,
+        { ...next, replacement: { ...replacement, token: randomUUID() } },
+        quiesced,
+      ),
+    ).rejects.toThrow(/global replacement claim/);
     await setDesiredSessionGeneration(db.prisma, next, quiesced);
     await expect(setDesiredSessionGeneration(db.prisma, next, quiesced)).rejects.toThrow(
       /generation conflict/,
@@ -246,6 +257,7 @@ suite("global session admission on dedicated real PostgreSQL", () => {
     await releaseSessionAdmission(db.prisma, old, stopped);
     expect((await reserve("worker-a", "g2")).generation).toBe("g2");
     await expect(releaseSessionAdmission(db.prisma, old, stopped)).rejects.toThrow(/Stale/);
+    await releaseSessionReplacement(db.prisma, replacement);
   });
   it("observes actual backend identity and refuses live or late connections at release", async () => {
     await receipt();

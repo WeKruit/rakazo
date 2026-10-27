@@ -81,9 +81,11 @@ export async function setDesiredSessionGeneration(
   prisma: PrismaClient,
   input: {
     service: "worker-a" | "worker-b";
-    expectedGeneration: string | null;
     desiredGeneration: string;
-  },
+  } & (
+    | { expectedGeneration: null; replacement?: never }
+    | { expectedGeneration: string; replacement: { token: string; owner: string } }
+  ),
   driver: QuiescedSessionSlotDriver,
 ) {
   if (!["worker-a", "worker-b"].includes(input.service)) throw new Error("Invalid worker slot");
@@ -93,6 +95,15 @@ export async function setDesiredSessionGeneration(
     await prisma.$transaction(async (tx) => {
       await lock(tx);
       await receipt(tx);
+      if (input.expectedGeneration !== null) {
+        if (!input.replacement)
+          throw new Error("Worker rotation requires the global replacement claim");
+        const claim = await tx.$queryRaw<
+          Array<{ id: string }>
+        >`SELECT id FROM session_admission_budget WHERE id='global' AND "replacementToken"=${input.replacement.token} AND "replacementOwner"=${input.replacement.owner}`;
+        if (claim.length !== 1)
+          throw new Error("Stale global replacement claim for worker rotation");
+      }
       const active = await tx.$queryRaw<
         Array<{ token: string }>
       >`SELECT token FROM session_admissions WHERE service=${input.service} AND status='active'`;
