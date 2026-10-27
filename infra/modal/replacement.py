@@ -68,7 +68,7 @@ class ReplacementController:
         ids = [w.id for w in fleet.workers]
         if len(ids) != len(set(ids)):
             raise ValueError("ambiguous worker identities")
-        if not 0 <= fleet.api_sessions <= 1 or fleet.other_sessions < 0:
+        if not 0 <= fleet.api_sessions <= 2 or fleet.other_sessions < 0:
             raise ValueError("invalid API/other session accounting")
         if any(not 0 <= w.sessions <= self.WORKER_SESSIONS for w in fleet.workers):
             raise ValueError("worker exceeds session budget")

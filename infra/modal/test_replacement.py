@@ -128,10 +128,17 @@ class ReplacementTests(unittest.TestCase):
         self.assertEqual(self.run_controller(d).status, 'failed')
         self.assertNotIn(('start', 'a', 5), d.events)
 
+    def test_two_api_sessions_fit_without_raising_global_limit(self):
+        d = FakeDriver(); d.api = 2
+        self.assertEqual(self.run_controller(d).status, "completed")
+        d = FakeDriver(); d.api = 2; d.other = 4
+        self.assertEqual(self.run_controller(d).status, "failed")
+        self.assertNotIn(("drain", "a"), d.events)
+
     def test_duplicate_targets_and_invalid_budgets_fail_closed(self):
         d = FakeDriver()
         self.assertEqual(self.run_controller(d, ('a', 'a')).status, 'failed')
-        d = FakeDriver(); d.api = 2
+        d = FakeDriver(); d.api = 3
         self.assertEqual(self.run_controller(d).status, 'failed')
         d = FakeDriver(); d.workers['a'] = replace(d.workers['a'], sessions=6)
         self.assertEqual(self.run_controller(d).status, 'failed')
