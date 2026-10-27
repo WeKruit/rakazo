@@ -33,6 +33,7 @@ vi.mock("@rakazo/ui-web", () => {
         </button>
       );
     },
+    Skeleton: Pass,
     AlertDialogContent: Pass,
     AlertDialogFooter: Pass,
     AlertDialogHeader: Pass,
@@ -45,7 +46,7 @@ vi.mock("@rakazo/ui-web", () => {
   };
 });
 
-import { lazyOverlay } from "./ErrorBoundary";
+import { lazyOverlay, lazyPanel } from "./ErrorBoundary";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -131,4 +132,30 @@ it("contains a render error thrown by a loaded overlay", async () => {
 
   expect(container.textContent).toContain("Composer draft");
   expect(container.textContent).toContain("Could not load");
+});
+
+it("shows a scoped skeleton then mounts a deferred panel without removing the shell", async () => {
+  let finish!: (panel: () => ReactNode) => void;
+  const Panel = lazyPanel(
+    () =>
+      new Promise<() => ReactNode>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  await act(async () => {
+    root.render(
+      <>
+        <input defaultValue="draft" />
+        <Panel />
+      </>,
+    );
+  });
+  expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
+  expect(container.querySelector("input")?.value).toBe("draft");
+  await act(async () => {
+    finish(() => <div>Loaded panel</div>);
+  });
+  expect(container.textContent).toContain("Loaded panel");
+  expect(container.querySelector('[aria-busy="true"]')).toBeNull();
+  expect(container.querySelector("input")?.value).toBe("draft");
 });
