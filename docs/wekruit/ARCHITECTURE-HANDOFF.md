@@ -1,25 +1,45 @@
 # Architecture handoff — 2026-10-27
 
-This checkpoint preserves tested work; it does not declare the whole plan complete. PR #263 remains the integration target and must not be merged into main. No deployment or cloud configuration was performed.
+This is the current handoff, not a declaration that every architecture item passed. The target is PR263's `claude/project-thread-f1cbzk`; never merge it into main or deploy from this task. The live plan now has23rows: original21 plus Claude-owned F2 and A5. Preserve their ownership.
 
-## Published implementation
+## Integrated small PRs
 
-Merged small PRs: #265, #267 (C6), #268 (A4 audit), #270 (A2 audit), #272 (C3), #275 (honest acceptance ledger), #269 (F1), #277 (A3), #276 (candidate virtualization portion of D3). C4 #274 remains open. Check live PR status before any integration action.
+| Scope | PR | Verified merge commit |
+|---|---|---|
+| C6 serving | #265 | a95b8d944aed3f31a9d9745d3e5ce7c24b91e283 |
+| C6 browser evidence | #267 | b314a52da2103fb923f7475bbf81995a5df00c0d |
+| A4 audit | #268 | cf48da330aada754a9e218ce40b0ca0ca051aaab |
+| A2 initial audit | #270 | 72a736fd61f0f762a4b1a02479569df5ea8298a4 |
+| C3 UTC expiry | #272 | 074a24b0f08f6440c33e830a6c616677f0e24f39 |
+| F1 instructions | #269 | 168fcaacc088e063b8cd2d0dc3b52b414f7eb88a |
+| A3 bounded lists | #277 | 299af876fea9d2577798c643bab0f404c35bdebc |
+| D3 candidate directory | #276 | 8188c88f3c58299030b8dbfb2ea128144c2a8755 |
+| Initial handoff | #297 | a2204021c9fa5c81c92f342ade4ab0b3697cbd6f |
+| D1 initial lazy entry | #295 | 8016114c08dc7a10f76b460d8bb9740e77a009c0 |
+| A2 opt-in RLS pilot | #296 | 791070e2bf39ca1d0ba1448059d6da63cbb6acc5 |
+| C4 durable OAuth | #274 | 3c7a539d5f64ef9316b76a766cd4bf1e443532d5 |
+| D4 components | #298 | 916401f65a3e30df70fb8756ee6082d6eb59926f |
+| D2 queries and echo-timer fix | #301 | b6b92f9cf38789231fbf97f483b505738cbccbb4 |
+| D3 transcript/legacy results | #300 | 85a3bb1ba425358ebf03a3bcafd7fdc8cb12d527 |
+| D1 cold-entry follow-up | #302 | d4fae3df17e08f1d80be64aa98582c036281e531 |
+| C5 drain/process foundation | #303 | afdf729217a5ceecbf34a06d990a7578335209a3 |
 
-C5 claim 558f876037ae931f8a8a47508adf06d3075fe756 was published after incorporating current integration work at e7dfafeca. Implementation has not yet started at this checkpoint. F2 remains owned by Claude; do not duplicate that work.
+Each PR URL is `https://github.com/WeKruit/rakazo/pull/<number>`. C5 claim558f876037ae931f8a8a47508adf06d3075fe756 was normally pushed at e7dfafeca6e92e0fb8f5949334e5a49faaec481c before implementation. No force push, main merge, deployment, new cloud resource or cloud configuration occurred.
 
-## Tested local integration
+## Verified product checkpoint
 
-Branch `adam/architecture-local-validation`, documentation HEAD `f23b4fbe933092fd88ac512b10a4cbf9f3fa7c08`, product HEAD `52cfe7474`. This aggregate branch is local evidence, not an alternative to separate small PRs.
+D1 follow-up branch `adam/architecture-d1-followup-release` HEAD4aaa64941c93ab05a172e95d9423a9952672ac8f is merged. Frontend/shared2,216/2,216 across179files in49.55s; Web typecheck and Chinese production build pass. Real production routes and English/Chinese names/error feedback12/12,33.0s; cold contacts/detail keyboard/return focus1/1,1.9s; final Shell212/212,29.32s. Synthetic mocked auth/API only.
 
-Latest frontend/shared suite: 2,216 passed across 179 files in 31.14 seconds. Web typecheck and Chinese production build passed. Cold contacts 347,938 bytes gzip (7 JS /35 total requests,17 RPC/zero duplicates); cold chat310,672 bytes (8/39); sign-in203,469 bytes (7/15). D1's250KB target remains unmet.
+Contacts347,938B gzip (7JS/35requests,17RPC/0duplicates), chat310,672B (8/39), sign-in203,469B (7/15). These are actual requested scripts, not a static entry-only approximation. The350KB stage passes,250KB does not; deployed Fast4G LCP remains unmeasured. Subsequent catalog work must report its own measured revision.
 
-The historical shortcut extra-read defect is reproduced on original baseline: a three-second send-echo timer survives unmount. Fix commits1b927fbae38a8947a34c1523fd8264267b8c1b93 and aee66a16e clear pending timers and prevent scheduling after late acceptance. Original assertion retained. See investigation for counterexample and limits.
+D2/D3/D4 satisfy their stated local criteria: zero duplicate identical RPCs;1,000-candidate window at most19rows/36cards without observed>50ms scroll long tasks; every production Web source file at most1,499lines. This does not assert online, other-browser or manual assistive-technology acceptance.
 
-Independent release branches: D1 initial `adam/architecture-d1-lazy` at d852c664ef7d0132c8659e259269b20b031fa9b1; D4 `adam/architecture-d4-release` at d564a9268c05abd96b92c9c8963f2a0b1667951e; D2 `adam/architecture-d2-release` at dc3d4d56efe58d3429cc453ce28a93a7cd59e59d; D3 follow-up `adam/architecture-d3-followup-release` at1f5742a25c8df4e98bd135eb392feabe6c61d585; D1 later `adam/architecture-d1-contacts-entry` at34b9eb587671257272ae7cd215478a55a3d183a5; A2 `adam/architecture-a2-rls-pilot` at81a25a382f325c1d61745dd089f629fc5625e22c; C4 `adam/architecture-c4-oauth` ate50214acb. Local existence is not proof of publication. Publish/integrate serially and verify each remote head.
+The shortcut defect was reproduced on original baseline: a3-second send-echo timer survived Shell unmount. The merged fix cancels timers and prevents scheduling after late acceptance, retaining exact-count assertions. See [causal investigation](SHELL-SHORTCUT-READ-INVESTIGATION.md).
+
+Latest backend regression on the#302 product revision: DB/API2,609passed/430skipped(64.06s),11packagechecks passed, actual local PostgreSQL307/307(22.69s), separate RLS18/18(761ms). Expo online dependency catalog remains unvalidated. C5 separately passed21TS tests (including actual two-host Graphile drain),62Python tests, workercheck and API/workerbundles. C5 is a foundation, not completed service splitting.
 
 ## Remaining boundaries
 
-A2 has local isolation tests but some latency pairs exceed10%; A4 needs correct-database metadata and an explicit foreign-key update-semantics decision. C5 implementation and multi-container deployment validation remain. E1–E4 and other deployment-dependent checks remain unmeasured; the release preflight specifies minimal operator actions. Never infer live acceptance from synthetic fixtures.
+A1/B1/B2 need deployed pool/queue measurements. A2's29-table opt-in pilot passes isolation, but some paired latency samples exceed10%, and remaining table batches/pooler compatibility/actual connection usage remain unverified. A3's online p95 is unmeasured. A4 requires correct-database foreign-key metadata and explicit parent-key update semantics; no silent Cascade change. C1/C2 need approved shared-storage cutover. C3/C4 need actual push/provider/multi-container validation. C5 needs safe shared-home authority transition and serialized drained worker replacement before any split deployment. C6 production routing/TLS and image runtime remain unmeasured. D1 needs further design to reach250KB. E1–E4 require the specific operator actions documented in the preflight. F1's actual agent business flow is untested; F2/A5 remain with Claude.
 
-Full commands, measurements, skipped tests and commit chronology: [local acceptance](ARCHITECTURE-LOCAL-ACCEPTANCE.md). [D1 remaining choices](D1-250KB-OPTIONS.md). [Shortcut investigation](SHELL-SHORTCUT-READ-INVESTIGATION.md). [External validation preflight](ARCHITECTURE-RELEASE-PREFLIGHT.md).
+[Workplan and per-item state](ARCHITECTURE-WORKPLAN.md) · [exact local evidence](ARCHITECTURE-LOCAL-ACCEPTANCE.md) · [D1 follow-up](D1-CONTACTS-ENTRY-FOLLOWUP.md) · [D1 remaining design choices](D1-250KB-OPTIONS.md) · [external validation preflight](ARCHITECTURE-RELEASE-PREFLIGHT.md). Older “pending publication” notes in chronological reports describe their original checkpoint; the merge table above supersedes them.
