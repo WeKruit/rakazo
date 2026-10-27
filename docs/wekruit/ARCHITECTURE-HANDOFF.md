@@ -62,3 +62,11 @@ Publishing resumed after explicit confirmation. #329 documentation merged as `4e
 At integrated `60ccba9a6`, locale and link-confirmation regression passed **38 tests / 6 files, 1.86s**; Web typecheck passed. C5 slot design is approved for code and local tests only; creating/deploying Apps and initial stopped-writer cutover remain outside execution scope.
 
 D1 followup experiments were excluded from integration: the matched action-boundary experiment saved only 558 B (322,313 → 321,755 B) while adding asynchronous race handling. The isolated canonical Zod Mini prototype failed public schema-method and error-class compatibility (3 parity checks passed, 2 failed), so it was not measured or published as a product change. See [the exact compatibility evidence](D1-ZOD-MINI-PROTOTYPE.md). Types/build success did not override the failed prerequisites. No new performance claim is made for that prototype.
+
+## C5 publication completed
+
+[C5 PR #334](https://github.com/WeKruit/rakazo/pull/334) merged into `claude/project-thread-f1cbzk` at `fd5cb90f57dba9e16831c09ebc550ab25b7cbf0f`, from implementation head `a36011948890ca48a1aafb370d3d325aafd8d84e`. The earlier C5 publication denial is resolved.
+
+[Implementation, exact commands and remaining gates](C5-WORKER-SLOTS.md): related regression 7,762 passed/510 skipped; real PostgreSQL and local child-process suites 23/23; final Python 17/17; four package checks and final committed API/worker/controller builds passed. Both manifests matched the final source revision and bundle hashes. Superseded fake replacement policy was removed.
+
+No cloud Apps were created or deployed. Actual pooler observability, remote stop/recreate ordering, 1 Hz availability and uninterrupted live conversations remain untested. Initial stopped-writer storage cutover is release-operator work. D1 final 250 KB and other documented external acceptance gates remain open. #263 has not been merged into main.
