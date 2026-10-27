@@ -44,6 +44,7 @@ import {
   createRunExecutor,
   jobLinkIn,
   namedCandidateKey,
+  nearCandidateKey,
   pastedJobTitle,
   resumeBriefForRun,
   savedCandidateKeyForm,
@@ -5991,6 +5992,24 @@ describe("native recruiting assessment effect delivery", () => {
     // Two saved people share the name, or the key is one word: left as given.
     expect(namedCandidateKey("linkedin:/in/ana-ruiz", rows)).toBe("linkedin:/in/ana-ruiz");
     expect(namedCandidateKey("linkedin:/in/sam", rows)).toBe("linkedin:/in/sam");
+  });
+
+  it("maps a mistyped key to the one saved person it is close to, never an ambiguous one", () => {
+    const rows = [
+      { name: "Angelo Jones", candidateKey: "linkedin:/in/angelo-jones-77a1b2" },
+      { name: "Andrea J Gastaldi", candidateKey: "linkedin:/in/andrea-gastaldi-5c9d" },
+      { name: "Chris Park", candidateKey: "linkedin:/in/chris-park-1" },
+      { name: "Chris Parks", candidateKey: "linkedin:/in/chris-parks-2" },
+    ];
+    expect(nearCandidateKey("linkedin:/in/ang el o-jones", rows)).toBe(
+      "linkedin:/in/angelo-jones-77a1b2",
+    );
+    expect(nearCandidateKey("linkedin:/in/andrew-gastaldi", rows)).toBe(
+      "linkedin:/in/andrea-gastaldi-5c9d",
+    );
+    // Close to two saved people, or too short to tell: left as given and refused.
+    expect(nearCandidateKey("linkedin:/in/chris-parkk", rows)).toBe("linkedin:/in/chris-parkk");
+    expect(nearCandidateKey("linkedin:/in/bob", rows)).toBe("linkedin:/in/bob");
   });
 
   it("maps a key rewritten from the name to the one saved key with the same profile id", () => {

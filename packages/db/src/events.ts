@@ -176,6 +176,8 @@ export type FinalizeRunInput = FinalizeRunBase &
         markUnread?: boolean;
         /** When this attempt began executing, and when it resumed after a restart (else null). */
         timing?: RunTiming;
+        /** Model calls this attempt retried after a stalled stream, kept on run.completed. */
+        modelRetries?: number;
       }
     | { outcome: "failed"; error: string }
   );
@@ -198,6 +200,8 @@ export interface PauseRunForInput {
   offeredActions?: Array<{ id: string; label: string }>;
   /** Server-owned native question binding; model tool arguments never supply this context. */
   recruitingQuestion?: RecruitingQuestionPauseContext;
+  /** Model calls this attempt retried after a stalled stream, kept on run.waiting_input. */
+  modelRetries?: number;
 }
 
 const CHOICE_ASK_CHECKPOINT_KIND = "choice_ask_v1";
@@ -1396,7 +1400,7 @@ export async function pauseRunForInput(
       botId: input.botId,
       type: "run.waiting_input",
       runId: input.runId,
-      payload: {},
+      payload: input.modelRetries ? { modelRetries: input.modelRetries } : {},
     });
     if (question?.kind === "new" && message)
       waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
@@ -1782,7 +1786,15 @@ async function finalizeRunOnce(
       runId: input.runId,
       payload:
         input.outcome === "completed"
-          ? completedRunSummary(input.blocks, writableRun?.startedAt ?? null, now, input.timing)
+          ? {
+              ...completedRunSummary(
+                input.blocks,
+                writableRun?.startedAt ?? null,
+                now,
+                input.timing,
+              ),
+              ...(input.modelRetries ? { modelRetries: input.modelRetries } : {}),
+            }
           : { error: input.error },
     });
     // The final message and the terminal event share one sequence reservation and insert.

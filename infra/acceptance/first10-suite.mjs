@@ -143,6 +143,7 @@ const check = (f, report) => ({
   area: `${f.inArea ?? "—"}/${f.people}`,
   staff: f.hiringCompanyStaff.length,
   retries: report.toolErrors?.errors ?? "—",
+  modelRetries: report.modelRetries ?? "—",
 });
 const lines = [
   `First ten on ${release}, ${startedAt.slice(0, 16)}Z. Q1 counts from the JD; the other times count from the recruiter's last answer.`,
@@ -161,18 +162,18 @@ for (const stat of Object.values(stats)) {
 }
 lines.push(
   "",
-  "| JD | Run | Q1 | First people in chat | All ten | Run start wait | Searched again | Ten before card | In area | Hiring-company staff | Tool retries | Result |",
-  "|---|---|---|---|---|---|---|---|---|---|---|---|",
+  "| JD | Run | Q1 | First people in chat | All ten | Run start wait | Searched again | Ten before card | In area | Hiring-company staff | Tool retries | Model retries | Result |",
+  "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
 );
 for (const { case: label, run, report } of rows) {
   const f = report.first10;
   if (!f) {
-    lines.push(`| ${label} | ${run} | — | — | — | — | — | — | — | — | — | ${report.result} |`);
+    lines.push(`| ${label} | ${run} | — | — | — | — | — | — | — | — | — | — | ${report.result} |`);
     continue;
   }
   const c = check(f, report);
   lines.push(
-    `| ${label} | ${run} | ${s(f.firstQuestionS)} | ${s(f.firstPeopleInChatS)} | ${s(f.allTenS)} | ${s(f.runStartWaitS)} | ${c.searched} | ${c.beforeCard} | ${c.area} | ${c.staff} | ${c.retries} | ${report.result} |`,
+    `| ${label} | ${run} | ${s(f.firstQuestionS)} | ${s(f.firstPeopleInChatS)} | ${s(f.allTenS)} | ${s(f.runStartWaitS)} | ${c.searched} | ${c.beforeCard} | ${c.area} | ${c.staff} | ${c.retries} | ${c.modelRetries} | ${report.result} |`,
   );
 }
 const flagged = rows.flatMap(({ case: label, run, report }) =>
@@ -262,7 +263,7 @@ function renderHtml() {
       if (!f)
         return `<tr><th scope="row"><span class="swatch s-${key}"></span>${escapeHtml(label)} ${run}</th><td colspan="9">—</td><td class="warn">${outcome(report.result)}</td></tr>`;
       const c = check(f, report);
-      return `<tr><th scope="row"><span class="swatch s-${key}"></span>${escapeHtml(label)} ${run}</th><td>${s(f.firstQuestionS)}</td><td>${s(f.firstPeopleInChatS)}</td><td>${s(f.allTenS)}</td><td>${c.searched}</td><td>${c.beforeCard}</td><td>${c.area}</td><td>${c.staff}</td><td>${c.retries}</td><td class="${report.result === "pass" ? "ok" : "warn"}">${outcome(report.result)}</td></tr>`;
+      return `<tr><th scope="row"><span class="swatch s-${key}"></span>${escapeHtml(label)} ${run}</th><td>${s(f.firstQuestionS)}</td><td>${s(f.firstPeopleInChatS)}</td><td>${s(f.allTenS)}</td><td>${c.searched}</td><td>${c.beforeCard}</td><td>${c.area}</td><td>${c.staff}</td><td>${c.retries}</td><td>${c.modelRetries}</td><td class="${report.result === "pass" ? "ok" : "warn"}">${outcome(report.result)}</td></tr>`;
     })
     .join("");
   const charts = METRICS.map(
@@ -332,7 +333,7 @@ ul { margin: 8px 0 0; padding-left: 20px; color: var(--muted); }
 <tbody>${statRows}</tbody></table></section>
 ${charts}
 <section><h2>Every run</h2><div class="scroll"><table>
-<thead><tr><th>Run</th><th>Q1</th><th>First people</th><th>All ten</th><th>Searched again</th><th>Ten before card</th><th>In area</th><th>Hiring-co. staff</th><th>Tool retries</th><th>Result</th></tr></thead>
+<thead><tr><th>Run</th><th>Q1</th><th>First people</th><th>All ten</th><th>Searched again</th><th>Ten before card</th><th>In area</th><th>Hiring-co. staff</th><th>Tool retries</th><th>Model retries</th><th>Result</th></tr></thead>
 <tbody>${runRows}</tbody></table></div></section>
 ${flags}
 </main>

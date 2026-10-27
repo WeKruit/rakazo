@@ -155,6 +155,7 @@ import {
 } from "@rakazo/core/node/approval-effect-key";
 import type {
   McpServer,
+  PauseRunForInput,
   PrismaClient,
   RecruitingRoleToolResult,
   RunTiming,
@@ -685,9 +686,11 @@ async function savedRoleCandidateKeys(
         distinct: ["candidateKey"],
       })
     : [];
-  return mapped.map((key) =>
-    typeof key === "string" && unmatched.includes(key) ? namedCandidateKey(key, named) : key,
-  );
+  return mapped.map((key) => {
+    if (typeof key !== "string" || !unmatched.includes(key)) return key;
+    const byName = namedCandidateKey(key, named);
+    return byName !== key ? byName : nearCandidateKey(key, named);
+  });
 }
 
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
@@ -865,6 +868,68 @@ export function namedCandidateKey(
         .map((row) => row.candidateKey),
     );
   const matches = named(true).size ? named(true) : named(false);
+  return matches.size === 1 ? ([...matches][0] as string) : key;
+}
+
+/** A key or name with only its letters and digits: "ang el o-Jones" reads as "angelojones". */
+function compactName(text: string): string {
+  return text
+    .replace(/^linkedin:\/in\//i, "")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]/gu, "");
+}
+
+function editDistance(a: string, b: string): number {
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const row = [i];
+    for (let j = 1; j <= b.length; j++)
+      row[j] = Math.min(
+        (previous[j] as number) + 1,
+        (row[j - 1] as number) + 1,
+        (previous[j - 1] as number) + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+    previous = row;
+  }
+  return previous[b.length] as number;
+}
+
+/**
+ * A key mistyped with stray spaces, case or hyphens, or a letter or two off ("ang el o-jones",
+ * "andrew-gastaldi" for Andrea J Gastaldi), names the one saved person whose key or name it
+ * matches; when it could be more than one person, it stays as given and is refused.
+ */
+export function nearCandidateKey(
+  key: string,
+  rows: readonly { name: string | null; candidateKey: string }[],
+): string {
+  const slug = key.replace(/^linkedin:\/in\//i, "");
+  const given = new Set(
+    [slug, slug.replace(/-[^-]*\d[^-]*$/, "")].map(compactName).filter((form) => form.length >= 6),
+  );
+  if (!given.size) return key;
+  const forms = (row: { name: string | null; candidateKey: string }) => {
+    const saved = row.candidateKey.replace(/^linkedin:\/in\//, "");
+    return [saved, saved.replace(/-[^-]*\d[^-]*$/, ""), row.name ?? ""]
+      .map(compactName)
+      .filter(Boolean);
+  };
+  const within = (distance: number) =>
+    new Set(
+      rows
+        .filter((row) =>
+          forms(row).some((form) =>
+            [...given].some((typed) =>
+              distance
+                ? typed.length >= 8 && editDistance(typed, form) <= distance
+                : typed === form,
+            ),
+          ),
+        )
+        .map((row) => row.candidateKey),
+    );
+  const exact = within(0);
+  const matches = exact.size ? exact : within(2);
   return matches.size === 1 ? ([...matches][0] as string) : key;
 }
 
@@ -3936,6 +4001,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         activeSince: attemptStartedAt,
         resumedAt: current.startedAt ? attemptStartedAt : null,
       };
+      // Model calls retried after a stalled stream, kept on the run's end event so a slow step
+      // can be told apart from a stall in replays.
+      let modelRetries = 0;
+      const pauseRunForInput = (input: PauseRunForInput) =>
+        deps.events.pauseRunForInput(modelRetries ? { ...input, modelRetries } : input);
       setupMark("lease");
       let leaseValid = true;
       let lastLeaseCheckAt = 0;
@@ -5041,7 +5111,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 return;
               }
               await workspaceCheckpoint.flush();
-              const paused = await deps.events.pauseRunForInput({
+              const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
                 threadId: run.threadId,
                 botId: run.botId,
@@ -5291,6 +5361,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               { threadId: thread.id },
               args,
             );
+          // A left-out role revision is the conversation's current one, so the call is not refused
+          // for a field the server knows.
+          if (
+            name === "recruiting_research" &&
+            thread.activeRecruitingRoleId &&
+            typeof args.expectedRoleRevision !== "number" &&
+            (args.roleId === undefined || args.roleId === thread.activeRecruitingRoleId)
+          ) {
+            const role = await deps.prisma.recruitingRole.findUnique({
+              where: { id: thread.activeRecruitingRoleId },
+              select: { revision: true },
+            });
+            const typed = Number(args.expectedRoleRevision);
+            if (typeof args.expectedRoleRevision === "string" && Number.isInteger(typed))
+              args = { ...args, expectedRoleRevision: typed };
+            else if (role) args = { ...args, expectedRoleRevision: role.revision };
+          }
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -7507,7 +7594,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
               ) {
                 await workspaceCheckpoint.flush();
-                const paused = await deps.events.pauseRunForInput({
+                const paused = await pauseRunForInput({
                   spaceId: run.spaceId,
                   threadId: thread.id,
                   botId: bot.id,
@@ -8110,7 +8197,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 };
               approvalBlock.approvalEvidenceHash = calendarApprovalHash;
             }
-            const paused = await deps.events.pauseRunForInput({
+            const paused = await pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,
               botId: run.botId,
@@ -10247,7 +10334,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return pauseForSecret();
             }
             await workspaceCheckpoint.flush();
-            const paused = await deps.events.pauseRunForInput({
+            const paused = await pauseRunForInput({
               spaceId: run.spaceId,
               threadId: run.threadId,
               botId: run.botId,
@@ -11656,6 +11743,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             } else if (event.type === "progress") {
               toolCallStreak = { key: undefined, count: 0 };
+              if (event.phase === "retrying") modelRetries += 1;
               if (isBackgroundRunTrigger(run.trigger)) continue;
               // Flush batched text deltas first so an activity line cannot land
               // ahead of text the model streamed before the tool call.
@@ -11734,7 +11822,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error: String(error),
                     }),
                   );
-              const paused = await deps.events.pauseRunForInput({
+              const paused = await pauseRunForInput({
                 spaceId: run.spaceId,
                 threadId: run.threadId,
                 botId: run.botId,
@@ -12156,6 +12244,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             blocks: finalBlocks,
             markUnread,
             timing: runTiming,
+            ...(modelRetries ? { modelRetries } : {}),
           });
           if (!completed) return;
           logRunTiming("completed");
