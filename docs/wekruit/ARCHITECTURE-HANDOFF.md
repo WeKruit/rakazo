@@ -62,3 +62,11 @@ Publishing resumed after explicit confirmation. #329 documentation merged as `4e
 At integrated `60ccba9a6`, locale and link-confirmation regression passed **38 tests / 6 files, 1.86s**; Web typecheck passed. C5 slot design is approved for code and local tests only; creating/deploying Apps and initial stopped-writer cutover remain outside execution scope.
 
 D1 followup experiments were excluded from integration: the matched action-boundary experiment saved only 558 B (322,313 → 321,755 B) while adding asynchronous race handling. The isolated canonical Zod Mini prototype failed public schema-method and error-class compatibility (3 parity checks passed, 2 failed), so it was not measured or published as a product change. See [the exact compatibility evidence](D1-ZOD-MINI-PROTOTYPE.md). Types/build success did not override the failed prerequisites. No new performance claim is made for that prototype.
+
+## A2 remaining boundary after read-only recheck
+
+The 29-table pilot is not full RLS completion. Final pooled HTTP p95 deltas were +8.36% (serial warmup) and +2.50% (parallel warmup), but matched pairs included +11.36%, +17.81% and +15.63%. No repeatable additional narrow root cause has been established; do not rerun until a favorable sample or weaken transaction/identity rules. Membership helpers, static plans and public ordered pipelines already reduced observed business SQL cost; committing before result decoding is unsafe because decoding failures must still roll back writes.
+
+The original other 63 tables comprise 14 auth/system/membership, six shared Space, three cross-Space personal credential, 11 general child-association and 29 other personal Space tables. They require their actual ownership/read/write semantics, not a blanket current-Space policy. New cutover/tombstone/admission metadata is system-only and rejects actor access. The API fixture still has 98 owner-empty paths unexercised; the nonempty two-actor database matrix does not fill those API gaps.
+
+Formal deployed RPC p95 <10%, actual 6543 pooler pipeline compatibility, role/grant setup and connection budget are not tested. Deployment and cloud configuration remain prohibited. A2 therefore remains partial: pilot implementation and local database isolation pass; local latency pairs are unstable and the formal deployed gate is unmeasured.
