@@ -1237,6 +1237,25 @@ export function unresolvedContactEmailError(runId: string, email: string, name?:
     : null;
 }
 
+/** candidate_key -> lead email recorded when people were added to the role's outreach campaign. */
+async function roleCampaignLeadEmails(prisma: PrismaClient, actor: Actor, roleId: string) {
+  const emails = new Map<string, string>();
+  const bindings = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      kind: "instantly_role_campaign",
+      request: { path: ["roleId"], equals: roleId },
+    },
+    select: { result: true },
+  });
+  for (const { result } of bindings) {
+    const leads = (result as { leads?: Record<string, { email?: unknown }> } | null)?.leads;
+    for (const [key, lead] of Object.entries(leads ?? {}))
+      if (typeof lead?.email === "string") emails.set(key, lead.email);
+  }
+  return emails;
+}
+
 /** Resolve a named person through the role's CRM-bound contacts and saved candidate pool. */
 export async function resolveRecruitingContact(
   deps: { prisma: PrismaClient; connector?: Pick<ConnectorProvider, "execute"> },
@@ -1272,6 +1291,11 @@ export async function resolveRecruitingContact(
       crm = "unavailable";
     }
   const result = matchRecruitingContacts(input.nameOrEmail, crmRows, pool);
+  // A saved person enrolled in this role's outreach campaign has that lead address stored.
+  const leadEmails = await roleCampaignLeadEmails(deps.prisma, actor, input.roleId);
+  for (const match of result.matches)
+    if (!match.email && match.candidateKey)
+      match.email = leadEmails.get(match.candidateKey) ?? null;
   if (context.runId) rememberResolvedContactEmails(context.runId, result.matches);
   const contacts = result.matches.filter((match) => match.crmCandidateId);
   if (!target || crm !== "read" || !contacts.length) return { ...result, crm };
