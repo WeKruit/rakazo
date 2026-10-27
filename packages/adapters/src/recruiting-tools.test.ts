@@ -1531,8 +1531,12 @@ describe("withCandidatePageSummary", () => {
     const result = (await tools.withCandidatePageSummary(
       { recruitingCandidateOccurrence: { findMany } } as unknown as PrismaClient,
       receipt,
+      [{ grade: { value: "A" } }, { grade: "B" }, { grade: "B" }],
     )) as { summary: { saved: number; newToRole: number; people: { name: string }[] } };
-    expect(result).toMatchObject({ ...receipt, summary: { saved: 3, newToRole: 2 } });
+    expect(result).toMatchObject({
+      ...receipt,
+      summary: { saved: 3, newToRole: 2, grades: { A: 1, B: 2 } },
+    });
     expect(result.summary.people).toEqual([
       {
         name: "a",
