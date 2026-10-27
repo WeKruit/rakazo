@@ -632,6 +632,8 @@ function mcpAssignmentDto(row: {
 export interface RouterDeps {
   cloudAgent?: CloudAgentConnection | null;
   prisma: PrismaClient;
+  /** Narrow system capability for membership-checked creation across source/target Spaces. */
+  createSpaceForMember?: (input: Parameters<typeof createSpaceForMember>[1]) => ReturnType<typeof createSpaceForMember>;
   events: ThreadEvents;
   boardEvents: BoardEvents;
   ticketChanges: TicketChangeNotifier;
@@ -1164,7 +1166,7 @@ export function createRouter(deps: RouterDeps) {
       create: authed.spaces.create.handler(async ({ context, input }) => {
         let space: { id: string; name: string };
         try {
-          space = await createSpaceForMember(deps.prisma, {
+          space = await (deps.createSpaceForMember ?? ((input) => createSpaceForMember(deps.prisma, input)))({
             currentSpaceId: context.actor.spaceId,
             userId: context.actor.userId,
             name: input.name,

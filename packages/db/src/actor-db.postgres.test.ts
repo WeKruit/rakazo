@@ -3,6 +3,7 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { actorPreferenceRlsTables, actorRlsTables, createActorDb, withDatabaseActor } from "./actor-db.js";
 import { createDb } from "./client.js";
+import { createSpaceForMember } from "./spaces.js";
 
 const url = process.env.RLS_TEST_DATABASE_URL;
 const suite = url ? describe.sequential : describe.skip;
@@ -963,4 +964,16 @@ suite("first-batch RLS with a real restricted role", () => {
       expect(await run(0, read)).toHaveLength(1);
     },
   );
+  it("limits privileged Space bootstrap to the caller's current membership", async () => {
+    for (const input of [
+      { userId: actors[0]!.userId, currentSpaceId: actors[1]!.spaceId },
+      { userId: "forged-user", currentSpaceId: actors[0]!.spaceId },
+    ]) await expect(createSpaceForMember(admin.prisma, { ...input, name: "Denied" })).rejects.toThrow("Resource not found");
+    const membership = await admin.prisma.member.findUniqueOrThrow({ where: { id: actors[0]!.userId } });
+    await admin.prisma.member.delete({ where: { id: membership.id } });
+    try {
+      await expect(createSpaceForMember(admin.prisma, { userId: actors[0]!.userId, currentSpaceId: actors[0]!.spaceId, name: "Revoked" })).rejects.toThrow("Resource not found");
+    } finally { await admin.prisma.member.create({ data: membership }); }
+  });
+
 });
