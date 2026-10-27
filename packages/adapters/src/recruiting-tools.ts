@@ -577,7 +577,7 @@ export async function saveNativeRecruitingCandidateResults(
       },
     );
     succeeded = true;
-    return await withCandidatePageSummary(deps.prisma, result);
+    return await withCandidatePageSummary(deps.prisma, result, observation.rows);
   } finally {
     const finished = performance.now();
     if (phase !== "validation") wallMs[phase] = finished - phaseStarted;
@@ -595,12 +595,38 @@ export async function saveNativeRecruitingCandidateResults(
 }
 
 const SUMMARY_PEOPLE = 20;
+const GRADE_COLUMNS = ["grade", "match_tier", "tier"];
+
+/** How many returned rows carry each grade, from the first grade column the rows have. */
+function gradeCounts(rows: readonly unknown[]): Record<string, number> | undefined {
+  const cell = (row: unknown, key: string) => {
+    if (row === null || typeof row !== "object" || Array.isArray(row)) return undefined;
+    const value = (row as Record<string, unknown>)[key];
+    const plain =
+      value !== null && typeof value === "object" && "value" in value
+        ? (value as { value: unknown }).value
+        : value;
+    return typeof plain === "string" && plain.trim() ? plain.trim() : undefined;
+  };
+  const column = GRADE_COLUMNS.find((key) => rows.some((row) => cell(row, key) !== undefined));
+  if (!column) return undefined;
+  const counts: Record<string, number> = {};
+  for (const row of rows) {
+    const grade = cell(row, column) ?? "unknown";
+    counts[grade] = (counts[grade] ?? 0) + 1;
+  }
+  return counts;
+}
 
 /**
  * Adds who was saved to a save_results receipt, so the agent relays the page from this summary
  * instead of paging through the complete output artifact. A summary failure keeps the receipt.
  */
-export async function withCandidatePageSummary(prisma: PrismaClient, result: unknown) {
+export async function withCandidatePageSummary(
+  prisma: PrismaClient,
+  result: unknown,
+  returned: readonly unknown[] = [],
+) {
   if (result === null || typeof result !== "object" || Array.isArray(result)) return result;
   const { roleId, sourceEffectId } = result as { roleId?: unknown; sourceEffectId?: unknown };
   if (typeof roleId !== "string" || typeof sourceEffectId !== "string") return result;
@@ -628,12 +654,14 @@ export async function withCandidatePageSummary(prisma: PrismaClient, result: unk
       select: { candidateKey: true },
     });
     const seen = new Set(earlier.map((row) => row.candidateKey));
+    const grades = gradeCounts(returned);
     const fresh = rows.filter((row) => !seen.has(row.candidateKey));
     return {
       ...result,
       summary: {
         saved: rows.length,
         newToRole: new Set(fresh.map((row) => row.candidateKey)).size,
+        ...(grades ? { grades } : {}),
         people: fresh
           .slice(0, SUMMARY_PEOPLE)
           .map(({ candidateKey: _key, matchFields, ...person }) =>
@@ -641,7 +669,7 @@ export async function withCandidatePageSummary(prisma: PrismaClient, result: unk
               ? { ...person, match: matchFields }
               : person,
           ),
-        note: "Relay results from this summary and the role's Results; the people are saved. Read outputArtifact only for one named person's evidence, with a small limit.",
+        note: "Relay results from this summary (counts, grades, people) and the role's Results; the people are saved. Never copy the output into files or count it with a shell; read outputArtifact only for one named person's evidence, with a small limit.",
       },
     };
   } catch (error) {
