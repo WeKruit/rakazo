@@ -4023,6 +4023,10 @@ it.each([
     await act(async () => {
       await vi.dynamicImportSettled();
     });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
+    });
     // Hover/focus prefetches pass no request options; count only conversation opens.
     const opens = () => shellApi.get.mock.calls.filter((call) => call.length > 1).length;
     const reads = opens();

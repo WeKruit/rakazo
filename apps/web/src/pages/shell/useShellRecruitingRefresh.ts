@@ -115,12 +115,13 @@ export function useShellRecruitingRefresh({
     before?.threadId !== fresh.threadId ||
     before.cursor !== fresh.cursor ||
     Date.now() - lastRecruitingRefreshAt.current >= RECONNECT_RECRUITING_RETRY_MS;
+  const recruitingRefreshScope = useRef<string | undefined>(undefined);
   useEffect(() => {
     const queue = createCoalescedRefresh(
       () => {
         lastRecruitingRefreshAt.current = Date.now();
         recruitingOutage.current = false;
-        revalidateRecruitingReads(recruitingReadCache.current);
+        revalidateRecruitingReads(recruitingReadCache.current, recruitingRefreshScope.current);
         setRecruitingRefresh((value) => value + 1);
       },
       { windowMs: 1_000 },
@@ -146,6 +147,7 @@ export function useShellRecruitingRefresh({
           : current?.botId !== activeBotId.current)
       )
         return;
+      recruitingRefreshScope.current = JSON.stringify([userId, bootstrapMe.spaceId, threadId]);
       recruitingRefreshQueue.current?.request();
     },
     [bootstrapMe?.spaceId, userId],
