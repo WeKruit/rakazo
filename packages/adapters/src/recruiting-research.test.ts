@@ -78,6 +78,15 @@ describe("FullEnrich job ownership", () => {
       );
     },
   );
+  it("accepts a creation the agent called by the tool's display name", async () => {
+    const saved = [
+      "__rakazoCatalogTool",
+      "connectors_execute_tool",
+      { id: "mcp__fullenrich__enrich_bulk", arguments: { data: [{ linkedin_url: "x" }] } },
+      route,
+    ];
+    await expect(authorize(fixture(saved))).resolves.toBeUndefined();
+  });
   it.each(["user", "space", "job", "connection", "revision", "read", "error", "malformed"])(
     "does not grant ownership from %s mismatch",
     async (change) => {

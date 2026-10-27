@@ -55,10 +55,11 @@ async function nativeMcpCreationReceipts(
       route.resourceRevision !== server.revision ||
       route.toolName !== toolName ||
       !requestArgs ||
+      // The executor appends the resolved route only after the catalog id or display name
+      // resolved to this exact tool, so the route, not the model-chosen id, is authoritative.
       (!direct &&
-        (!catalog ||
-          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName) ||
-          catalog.args.id !== `${server.id}:${toolName}`))
+        (!catalog?.route ||
+          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)))
     )
       continue;
     receipts.push({
@@ -170,12 +171,7 @@ export async function requireFullEnrichJobOwnership(
   if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return;
   if (toolName === "get_enrichment_results" && nonblank(args.enrichment_id)) {
     for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "enrich_bulk")) {
-      if (
-        !Array.isArray(receipt.args.contacts) ||
-        !receipt.args.contacts.length ||
-        receipt.args.enrichment_id !== undefined ||
-        record(receipt.result)?.isError === true
-      )
+      if (receipt.args.enrichment_id !== undefined || record(receipt.result)?.isError === true)
         continue;
       const body = mcpObject(receipt.result);
       if (body?.enrichment_id === args.enrichment_id && body.error === undefined) return;
