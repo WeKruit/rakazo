@@ -104,6 +104,8 @@ SQL
 - 池影响：默认不开启时无变化；启用时新增受限身份的 transaction-pooler pool（上限同 `DB_POOL_MAX`），API 最大 transaction checkout 客户端数从 N 增至 2N。生产 `ACTOR_DATABASE_URL` 强制 6543；原 `DATABASE_URL` 6543、`REALTIME_DATABASE_URL` 5432 不变，不新增 LISTEN/session pool，每容器原 6 条 session 预算不变。两个 API pool 都参与退出清理。实际生产后端并发占用和连接等待还没测。
 - 完整首批配置与命令见 [A2-RLS-PILOT.md](./A2-RLS-PILOT.md)。生产角色、grants、凭据、策略启用和发布均未执行；这些依然需要当前范围之外的授权。
 
+- **后续本地策略批次（未发布）：** 扩至 6 表，新增岗位版本、候选人选择、校准轮次；组织成员撤销与跨父记录写入增加真实 PG 验证，8/8 通过；db/api/testkit 类型检查通过。全部 92 表已分类，86 表仍待实现和各自验收，见 [A2 覆盖清单](A2-RLS-COVERAGE.md)。六表 API 隔离复测 143 OK、0 leak/warning、99 owner-empty 未触达；原三表延迟数字不代表此扩展批次复测；A2 整体仍未完成。远端 push/PR/merge 按父线程通知暂停，未重试。
+
 ### A3 列表分页
 
 - **现状（已查）：** 消息（`thread-message-pages.ts`）、候选人（`listRecruitingCandidates`，每页 25 条，游标分页）、反馈都已经是游标分页。用量记录取 100 条，电脑命令历史也有上限。`router.ts` 里 38 处 `findMany` 没写 `take`，查下来基本都是单个用户自己的设置列表，量很小。还剩两处要改：

@@ -1,6 +1,6 @@
 # A2 first-batch RLS pilot
 
-This is an opt-in, locally tested first batch, not a completed deployment or whole-schema RLS rollout. The protected tables are `artifacts`, `messages` and `recruiting_roles`. Other tables retain their existing application-level filters.
+This is an opt-in, locally tested first batch, not a completed deployment or whole-schema RLS rollout. The protected tables are `artifacts`, `messages`, `recruiting_roles`, `recruiting_role_revisions`, `recruiting_candidates` and `recruiting_calibration_rounds`. See [the full 92-table coverage inventory](A2-RLS-COVERAGE.md) for the remaining implementation work. Other tables retain their existing application-level filters.
 
 ## Identity and transaction boundary
 
@@ -26,7 +26,7 @@ pnpm --filter @rakazo/db test
 pnpm --filter @rakazo/api test
 ```
 
-Results: six real-PostgreSQL RLS tests pass; DB/API/testkit typechecks pass; DB unit suite 1,216 pass / 362 skip; API 1,322 pass / 50 skip. The six database tests cover missing owner filters, foreign writes, membership revocation, missing identity, privileged-role and permissive-policy rejection, batch/callback transactions, rollback cleanup, concurrent actors and deferred iterator pulls. Their actor pool has one connection and is idle while streams wait.
+Original three-table results (before the follow-up below): six real-PostgreSQL RLS tests pass; DB/API/testkit typechecks pass; DB unit suite 1,216 pass / 362 skip; API 1,322 pass / 50 skip. The six database tests cover missing owner filters, foreign writes, membership revocation, missing identity, privileged-role and permissive-policy rejection, batch/callback transactions, rollback cleanup, concurrent actors and deferred iterator pulls. Their actor pool has one connection and is idle while streams wait.
 
 The unchanged integration baseline's broader recruiting/membership PostgreSQL suites had 12 failures (271 passed), including after local timezone was changed to UTC. Those are recorded in the main work plan and require their own fixes plus integrated regression; the six RLS tests do not erase them.
 
@@ -68,3 +68,7 @@ An authorized operator must provision a distinct restricted application login an
 Production `ACTOR_DATABASE_URL` must use port 6543, as enforced by environment validation. `DATABASE_URL` remains on the transaction pooler; `REALTIME_DATABASE_URL` remains on 5432. Enabling the option adds an actor transaction pool with the same `DB_POOL_MAX`, so API transaction checkout capacity changes from N to 2N. It adds no LISTEN connection or session pool: the existing six-session-per-container budget is unchanged. Both API pools have bounded shutdown cleanup. Production backend concurrency, pool waits and p95 latency still need measurement; local PostgreSQL tests do not emulate a real transaction pooler.
 
 Current authorization forbids production role/grant/credential changes, policy activation, cloud configuration and deployment. None was attempted. Production rollout, additional protected tables, real transaction-pooler execution and online latency are outstanding. Do not mark whole-plan A2 completed from this pilot alone.
+
+## Local core-recruiting follow-up
+
+The expanded six-table policy script passes eight real-PostgreSQL tests, including foreign revision parent insertion, foreign shortlist-message links, forged calibration approver, own revision transaction and organization membership revocation. DB/API/testkit typechecks pass. The original API isolation fixture was rerun against all six policies in a new synthetic database: 143 OK, zero leaks/warnings, 99 reads empty for the owner too. Latency figures above still describe the original three-table script and are not a six-table measurement. Parent integration separately fixed the original 12 recruiting failures and reports 283/283 on its integrated branch; that result is not claimed for this branch.

@@ -99,6 +99,20 @@ suite("first-batch RLS with a real restricted role", () => {
         });
       });
     }
+    for (const actor of actors) {
+      await admin.prisma.recruitingCandidate.create({
+        data: { roleId: actor.userId, candidateKey: "synthetic" },
+      });
+      await admin.prisma.recruitingCalibrationRound.create({
+        data: {
+          id: actor.userId,
+          roleId: actor.userId,
+          round: 1,
+          candidateKeys: ["synthetic"],
+          effectId: actor.userId,
+        },
+      });
+    }
     target.username = role;
     target.password = "";
     restricted = createActorDb(target.href, { poolMax: 1 });
@@ -139,9 +153,92 @@ suite("first-batch RLS with a real restricted role", () => {
           restricted.prisma.artifact.findMany({ select: { id: true } }),
           restricted.prisma.message.findMany({ select: { id: true } }),
           restricted.prisma.recruitingRole.findMany({ select: { id: true } }),
+          restricted.prisma.recruitingRoleRevision.findMany({ select: { id: true } }),
+          restricted.prisma.recruitingCalibrationRound.findMany({ select: { id: true } }),
         ]),
       );
       for (const rows of result) expect(rows).toEqual([{ id: own }]);
+    }
+  });
+  it("protects candidate selections and rejects foreign parent links", async () => {
+    const own = actors[0]!.userId;
+    const foreign = actors[1]!.userId;
+    expect(
+      await run(0, () =>
+        restricted.prisma.recruitingCandidate.findMany({ select: { roleId: true } }),
+      ),
+    ).toEqual([{ roleId: own }]);
+    await expect(
+      run(0, () =>
+        restricted.prisma.recruitingRoleRevision.create({
+          data: {
+            id: `foreign-revision-${suffix}`,
+            roleId: foreign,
+            revision: 2,
+            criteria: [],
+            preferences: [],
+            sourceRefs: [],
+            definitionQuestions: [],
+          },
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      run(0, () =>
+        restricted.prisma.recruitingCandidate.updateMany({
+          where: { roleId: own },
+          data: { shortlistMessageId: foreign },
+        }),
+      ),
+    ).rejects.toThrow();
+    await expect(
+      run(0, () =>
+        restricted.prisma.recruitingCalibrationRound.updateMany({
+          where: { roleId: own },
+          data: { approvedByUserId: foreign },
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(
+      await run(0, () =>
+        restricted.prisma.recruitingCandidate.deleteMany({ where: { roleId: foreign } }),
+      ),
+    ).toEqual({ count: 0 });
+    // Own writes remain usable with the role/revision cycle's deferred foreign key.
+    await run(0, () =>
+      restricted.prisma.$transaction(async (tx) => {
+        await tx.recruitingRoleRevision.create({
+          data: {
+            id: `own-revision-${suffix}`,
+            roleId: own,
+            revision: 2,
+            criteria: [],
+            preferences: [],
+            sourceRefs: [],
+            definitionQuestions: [],
+          },
+        });
+        await tx.recruitingRole.update({
+          where: { id: own },
+          data: { currentRevisionId: `own-revision-${suffix}`, revision: 2 },
+        });
+        await tx.recruitingCandidate.updateMany({
+          where: { roleId: own },
+          data: { shortlistMessageId: own },
+        });
+      }),
+    );
+  });
+  it("revokes access when organization membership disappears even with a stale Space membership", async () => {
+    const membership = await admin.prisma.member.findUniqueOrThrow({
+      where: { id: actors[0]!.userId },
+    });
+    await admin.prisma.member.delete({ where: { id: membership.id } });
+    try {
+      expect(await run(0, () => restricted.prisma.recruitingRoleRevision.findMany())).toEqual([]);
+      expect(await run(0, () => restricted.prisma.message.findMany())).toEqual([]);
+    } finally {
+      await admin.prisma.member.create({ data: membership });
     }
   });
   it("preserves native batch and callback transactions without identity leakage", async () => {

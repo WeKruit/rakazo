@@ -73,7 +73,7 @@ export function createActorDb(connectionString: string, options: DbClientOptions
       const role = await inner.queryRaw(
         sql(`SELECT r.rolsuper, r.rolbypassrls,
         EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-          WHERE n.nspname='public' AND c.relname IN ('artifacts', 'messages', 'recruiting_roles')
+          WHERE n.nspname='public' AND c.relname IN ('artifacts', 'messages', 'recruiting_roles', 'recruiting_role_revisions', 'recruiting_candidates', 'recruiting_calibration_rounds')
           AND pg_has_role(current_user, c.relowner, 'MEMBER'))
         OR EXISTS (SELECT 1 FROM pg_roles privileged WHERE (privileged.rolsuper OR privileged.rolbypassrls)
           AND pg_has_role(current_user, privileged.oid, 'MEMBER'))
@@ -86,11 +86,11 @@ export function createActorDb(connectionString: string, options: DbClientOptions
       const policies = await inner.queryRaw(
         sql(`SELECT count(*)::int FROM pg_class c
         JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
-        AND c.relname IN ('artifacts', 'messages', 'recruiting_roles') AND c.relrowsecurity
+        AND c.relname IN ('artifacts', 'messages', 'recruiting_roles', 'recruiting_role_revisions', 'recruiting_candidates', 'recruiting_calibration_rounds') AND c.relrowsecurity
         AND EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid AND p.polname='rakazo_actor_isolation')
         AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid AND p.polpermissive AND p.polname<>'rakazo_actor_isolation')`),
       );
-      if (policies.rows[0]?.[0] !== 3) {
+      if (policies.rows[0]?.[0] !== 6) {
         await inner.dispose();
         throw new Error("Protected database requires the first-batch RLS policies");
       }
