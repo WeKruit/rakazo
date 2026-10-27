@@ -1,4 +1,4 @@
-import { Plural, Trans } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { ListRecruitingCandidatesInput, Verdict } from "@rakazo/contracts";
 import {
   Button,
@@ -37,6 +37,7 @@ export function RecruitingEvidenceTab({
 }: {
   model: ReturnType<typeof useRecruitingWorkspace>;
 }) {
+  const { t } = useLingui();
   const {
     shortlistWeekFilter,
     onClearShortlistWeekFilter,
@@ -50,7 +51,6 @@ export function RecruitingEvidenceTab({
     showDiagnostics,
     presentation,
     view,
-    t,
     shortlistFilterId,
     snapshot,
     refresh,

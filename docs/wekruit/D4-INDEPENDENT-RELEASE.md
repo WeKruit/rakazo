@@ -31,6 +31,8 @@ Merge `cdcfb789c` retains D1's latest `d852c664e` test synchronization and evide
 
 ## Local gates
 
+The initial gates below did not catch a real Lingui macro-binding regression in extracted views. The follow-up [Lingui correction and production browser evidence](./D4-LINGUI-REGRESSION.md) supersedes any implication that mocked unit tests alone established translated UI behavior.
+
 - Expanded size script checks every production `.ts` and `.tsx` under `apps/web/src`, excluding test/spec files and generated locale catalogs. **242 files, zero above1,500 lines**. Largest is ModelSettingsOverlay1,499; Shell1,135, useShellController1,479, RecruitingPanel1,122, CrmWorkbench1,368. This includes hooks, so oversized components were not merely renamed to hooks.
 - Complete Web regression: **142 files / 1,655 tests passed**,26.09s. The initial run found three lazy-render timing failures. D1's shared click helper now waits for its target; two additional tests wait for the Interview view and dynamic imports before taking the no-extra-read baseline. Identity, nonce, same-thread and zero-extra-read assertions remain unchanged.
 - Web typecheck and Chinese production build passed. Targeted Biome and diff checks passed.

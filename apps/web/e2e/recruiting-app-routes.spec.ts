@@ -79,7 +79,33 @@ async function checkNarrowProfileNavigation(page: Page, panel: Locator) {
     await right.click();
     const last = row.getByRole("button", { name: names.at(-1)!, exact: true });
     await expectNavigationLabelVisible(last);
-    while (await left.isEnabled()) await left.click();
+    const waitForScrollEnd = async () => {
+      await row.evaluate(async (element) => {
+        const viewport = element.querySelector<HTMLElement>(".overflow-x-auto")!;
+        let previous = viewport.scrollLeft;
+        let stableSince = performance.now();
+        while (performance.now() - stableSince < 100) {
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          const current = viewport.scrollLeft;
+          if (Math.abs(current - previous) > 0.1) stableSince = performance.now();
+          previous = current;
+        }
+      });
+      await expect
+        .poll(() =>
+          left.evaluate((button) => {
+            const viewport = button.parentElement!.querySelector<HTMLElement>(".overflow-x-auto")!;
+            return (button as HTMLButtonElement).disabled === viewport.scrollLeft <= 1;
+          }),
+        )
+        .toBe(true);
+    };
+    // Position must settle after right navigation too, before inspecting the left edge.
+    await waitForScrollEnd();
+    while (await left.isEnabled()) {
+      await left.click();
+      await waitForScrollEnd();
+    }
     const first = row.getByRole("button", { name: names[0], exact: true });
     await first.focus();
     const ancestorScrolls = () =>
@@ -374,6 +400,11 @@ test("changing workspace tabs resets the primary scroll", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await mockRecruitingApp(page);
   await openRoute(page, "sequence");
+  // Route readiness precedes the lazy Sequence module and its content read.
+  const sequence = page.getByRole("region", { name: "Sequence", exact: true });
+  await expect(
+    sequence.getByRole("rowheader", { name: "Platform outreach", exact: true }).first(),
+  ).toBeVisible();
   const primary = page.locator(".recruiting-workspace-main");
   await primary.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
