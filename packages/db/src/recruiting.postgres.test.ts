@@ -328,7 +328,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       operation,
       title: "Atomic native role",
       sourceRefs: [ref],
-      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [ref] }],
       preferences: [],
       definitionQuestions: [],
       intent: { basis: "direct" as const, quote: "Create and revise this supplied role" },
@@ -3537,7 +3537,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       operation: "create" as const,
       title: "Native role",
       sourceRefs: [],
-      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [source(first.id)] }],
       preferences: [],
       definitionQuestions: [],
       intent: { basis: "direct" as const, quote: "Create this role with seven years" },
@@ -3550,7 +3550,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(created.changed).toBe(true);
     expect(created.status).toBe("saved");
     expect(created.workspace?.revision.sourceRefs).toEqual([created.source]);
-    expect(created.workspace?.revision.criteria[0]?.sourceRefs).toEqual([created.source]);
+    expect(created.workspace?.revision.criteria[0]?.sourceRefs).toEqual([source(first.id)]);
     expect(created.source?.anchor).toEqual({
       kind: "message",
       messageId: first.id,
@@ -3794,7 +3794,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         operation: "create",
         title: "Answered role",
         sourceRefs: [],
-        criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
+        criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [source(answerMessage.id)] }],
         preferences: [],
         definitionQuestions: [],
         intent: { basis: "direct", quote },

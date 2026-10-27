@@ -249,7 +249,7 @@ CHECK
 - **现状：** `executor.ts` 有约 14,000 行，其中 482 处和招聘有关。按 AGENTS.md 的原则，招聘相关的行为应该写在机器人指令和技能里，不应该写在执行器代码里。
 - **验收：** 执行器里和招聘有关的引用每一轮都在减少，招聘验收流程不退步。
 
-- **F1 本轮（2026-10-27，[#269](https://github.com/WeKruit/rakazo/pull/269)）：** 移除 executor 对澄清问题强制携带四条搜索计划的业务门槛，以及与原生 intake skill 重复的逐轮筛选/下一步指令。已有 intake skill 负责已存搜索结果复用和后续选择；executor 只补充该部分的已存岗位/搜索事实。没有把同一决策代码挪进新的模块，未改授权、账号隔离、已答问题复用、效果回执或提供方执行边界。
+- **F1 本轮（2026-10-27，[#269](https://github.com/WeKruit/rakazo/pull/269)）：** 移除 executor 对澄清问题强制携带四条搜索计划的业务门槛，以及与原生 intake skill 重复的逐轮筛选/下一步指令。已有 intake skill 负责已存搜索结果复用和后续选择；executor 只补充该部分的已存岗位/搜索事实。没有把同一决策代码挪进新的模块，保留授权、账号隔离、已答问题复用及提供方执行边界。
 - **量化：** 本轮前后 `wc -l packages/adapters/src/executor.ts` 为 14,351 → 14,327；`rg -i -c recruiting packages/adapters/src/executor.ts` 为 482 → 481。仍有大量招聘工具适配与业务逻辑，不能据此说 F1 整项已完成。
 - **认领和实现：** 先以 Adam 认领并推送 `e6b8446de`，实现提交 `888e5dfd05c07a4bd07f2d209076bc1e6b938cd7`，小 PR base 为 `claude/project-thread-f1cbzk`。
 - **本地实测：** Node 24.19.0、pnpm 9.15.0。core 1,232 通过 / 5 跳过；adapters 单独重跑 5,128 通过 / 44 跳过；聚焦回归 238 通过；招聘默认配置安装/升级测试 55 通过；core/adapters 类型检查、Biome 和 diff 检查通过。新用例证明无计划、空计划、单条计划都能提交实质澄清且不调用提供方/不产生效果。用原始 executor 跑同一新回归：2 失败 / 1 通过；修改后 3 通过。
@@ -272,4 +272,12 @@ pnpm exec biome check packages/adapters/src/executor.ts packages/adapters/src/ex
 wc -l packages/adapters/src/executor.ts
 rg -i -c recruiting packages/adapters/src/executor.ts
 git diff --check
+```
+
+- **F1 PostgreSQL 跟进：** 在专用本地合成库 `rakazo_f1` 修复两处实际回归：原始输入与最新人类输入引用相同时优先最新有效来源；取消 run 的已完成读取由后续 run 记录后，按原 owner 和产物记录 run 查询凭据，仍完整验证作用域、绑定及回执。四处测试断言/夹具显式携带已有证据引用，不恢复隐式推断来源。认领前基线 12 失败；本次负责的 7 项全部通过，全文件 277 通过 / 5 失败（282 项），余下五项由集成负责人独立修正，不能称全套通过。DB/adapters 类型检查通过。
+
+```sh
+VERIFY_DATABASE=1 DATABASE_URL=postgresql://postgres@127.0.0.1:55434/rakazo_f1 pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts --testNamePattern 'atomically recovers native role|rejects native role identity|verifies native human authorship|uses the actual native|recovers an actually bound completed read'
+VERIFY_DATABASE=1 DATABASE_URL=postgresql://postgres@127.0.0.1:55434/rakazo_f1 pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts
+pnpm --filter @rakazo/db --filter @rakazo/adapters check
 ```
