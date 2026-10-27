@@ -52,7 +52,12 @@ function DeferredExternalLinkAlert({ url, onDismiss }: { url: string; onDismiss:
     <div role={failed ? "alert" : "status"} aria-busy={!failed}>
       <span>{failed ? copy.loadError : copy.loading}</span>
       {failed ? (
-        <button type="button" onClick={() => window.location.reload()}>
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm(copy.refreshWarning)) window.location.reload();
+          }}
+        >
           {copy.retry}
         </button>
       ) : null}

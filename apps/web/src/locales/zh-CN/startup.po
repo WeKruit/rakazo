@@ -2309,6 +2309,10 @@ msgstr "刷新"
 msgid "Refresh view"
 msgstr "刷新页面"
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
+msgstr "刷新会关闭此链接确认，并可能丢失未保存的消息、附件、回复上下文和选择。仍要刷新吗？"
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Refreshing…"
 msgstr "正在刷新…"

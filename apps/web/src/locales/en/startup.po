@@ -2309,6 +2309,10 @@ msgstr "Refresh"
 msgid "Refresh view"
 msgstr "Refresh view"
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
+msgstr "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Refreshing…"
 msgstr "Refreshing…"

@@ -8,6 +8,7 @@ type MarkdownLinkCopy = {
   loading?: string;
   loadError?: string;
   retry?: string;
+  refreshWarning?: string;
 };
 
 const defaultMarkdownLinkCopy: MarkdownLinkCopy = {
@@ -17,6 +18,8 @@ const defaultMarkdownLinkCopy: MarkdownLinkCopy = {
   loading: "Loading…",
   loadError: "Something went wrong. Try again.",
   retry: "Refresh",
+  refreshWarning:
+    "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?",
 };
 
 const CopyContext = createContext<MarkdownLinkCopy>(defaultMarkdownLinkCopy);

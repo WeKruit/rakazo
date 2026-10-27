@@ -40,6 +40,19 @@ it("blocks navigation synchronously, offers refresh after a failed import and on
       "Something went wrong",
     );
     expect(open).not.toHaveBeenCalled();
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    act(() => {
+      [...container.querySelectorAll("button")]
+        .find((button) => button.textContent === "Refresh")!
+        .click();
+    });
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "may discard unsaved messages, attachments, reply context and selections",
+      ),
+    );
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+    confirm.mockRestore();
     expect(
       [...container.querySelectorAll("button")].some((button) => button.textContent === "Refresh"),
     ).toBe(true);

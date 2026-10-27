@@ -295,3 +295,23 @@ post-reload requests are not included in the cold payload measurement.
 Final production browser gate: all 16 responsive route, keyboard/focus, auth,
 optional-catalog and bilingual cases passed (43.1 seconds). Biome formatting and
 `git diff --check` passed after formatting the newly wrapped lazy imports.
+
+### Review fix: explicit consent before destructive refresh
+
+The failed-import Refresh action now asks, only when clicked:
+“Refreshing closes this link confirmation and may discard unsaved messages,
+attachments, reply context and selections. Refresh anyway?”
+The warning is translated in all ten locales. Canceling it leaves the current
+confirmation and application state mounted; accepting it performs the explicit
+reload. The application does not claim to restore transient attachments or reply
+context. This warning is necessary because refreshing to recover a cached chunk
+failure can destroy unsent local state; it is not shown during ordinary chat,
+ordinary link confirmation, or successful loading.
+
+The real production failure test now enters an unsent message and attaches a
+synthetic text file before the failed link click. It dismisses the refresh
+confirmation and verifies both remain, then accepts refresh and verifies that a
+new link click still opens the original confirmation. All 186 relevant chat-ui
+and i18n tests, both package typechecks and production build passed. The updated
+Chinese contacts fixture is 322286 gzip bytes (7 JS, 35 total requests, 17 RPC,
+zero duplicate recruiting reads); the additional warning costs 151 bytes.

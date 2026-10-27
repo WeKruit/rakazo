@@ -2309,6 +2309,10 @@ msgstr "रीफ़्रेश करें"
 msgid "Refresh view"
 msgstr ""
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
+msgstr "रीफ़्रेश करने से लिंक की यह पुष्टि बंद हो जाएगी और बिना सहेजे संदेश, अटैचमेंट, उत्तर का संदर्भ और चयन खो सकते हैं। फिर भी रीफ़्रेश करें?"
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Refreshing…"
 msgstr ""

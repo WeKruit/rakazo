@@ -2309,6 +2309,10 @@ msgstr "Atualizar"
 msgid "Refresh view"
 msgstr ""
 
+#: src/components/markdown-link-prompt.tsx
+msgid "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
+msgstr "Atualizar fechará esta confirmação de link e poderá descartar mensagens, anexos, contexto de resposta e seleções não salvos. Atualizar mesmo assim?"
+
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Refreshing…"
 msgstr ""

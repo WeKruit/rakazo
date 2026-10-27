@@ -11,6 +11,7 @@ export function MarkdownLinkPrompt({ children }: { children: ReactNode }) {
         loading: t`Loading…`,
         loadError: t`Something went wrong. Try again.`,
         retry: t`Refresh`,
+        refreshWarning: t`Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?`,
         cancel: t`Cancel`,
         open: t`Open`,
       }}
