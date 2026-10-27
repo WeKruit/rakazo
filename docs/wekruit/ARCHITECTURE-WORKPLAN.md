@@ -462,7 +462,7 @@ wc -l packages/adapters/src/executor.ts
 rg -i -c recruiting packages/adapters/src/executor.ts
 ```
 
-- **F1 第三轮有限审查：** 只删除简报确认失败后的轮次例外：已有校准轮次不再吞掉 `RecruitingPlaybookValidationError` 并强制“不要再问简报、结束到下一步卡片”。无论是否已有轮次，均向 agent 返回原验证错误；如何解决冲突由已有指令/技能决定。未放松简报验证、身份/作用域、真实审批、来源凭据、付费效果幂等或轮次完整性。
+- **F1 第三轮有限审查（[#339](https://github.com/WeKruit/rakazo/pull/339)）：** 只删除简报确认失败后的轮次例外：已有校准轮次不再吞掉 `RecruitingPlaybookValidationError` 并强制“不要再问简报、结束到下一步卡片”。无论是否已有轮次，均向 agent 返回原验证错误；如何解决冲突由已有指令/技能决定。未放松简报验证、身份/作用域、真实审批、来源凭据、付费效果幂等或轮次完整性。
 - **审查边界：** `confirmRecruitingBrief` 的验证与 `executeRecruitingApproval` 的原始审批/效果提交属于事实和授权边界，保留；`claimOrReturn`、研究调用绑定/回执、已答问题复用属于幂等及连续性边界，保留。`startRoleFromJob`、预计划搜索和 turn-end guard 仍含领域编排，但涉及持久化/付费调用/自动续行，未在本次一个时序规则的范围内重写，不能因计数减少宣称整项完成。
 - **第三轮合成证据：** 同一新回归在修改前 1 通过 / 1 失败：只有已有轮次分支隐藏实质错误；修改后相关 executor 幂等、计划搜索、默认指令三文件 246/246 通过。executor 总行数 14,231 → 14,218，`rg -i -c recruiting` 为 477 → 475。adapter 类型检查通过，使用当前 schema 本地生成的 Prisma client；最初复用旧生成物产生的模型缺失错误不算通过。真实提供方业务流程仍未测；无真实岗位/候选人、外发或部署。
 
