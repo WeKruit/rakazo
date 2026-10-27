@@ -9,7 +9,10 @@ import type {
   SemanticMemoryProvider,
 } from "@rakazo/adapter-kit";
 import type { MessageBlock, RecruitingFeedbackInput, RecruitingSourceRef } from "@rakazo/contracts";
-import { RecruitingRoleToolInputSchema } from "@rakazo/contracts";
+import {
+  RecruitingResearchToolInputSchema,
+  RecruitingRoleToolInputSchema,
+} from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
 import { boundDirectApprovalRequest, RecruitingAssessmentValidationError } from "@rakazo/core";
 import {
@@ -46,6 +49,7 @@ import {
   namedCandidateKey,
   nearCandidateKey,
   pastedJobTitle,
+  REVISIONED_RESEARCH_OPERATIONS,
   resumeBriefForRun,
   savedCandidateKeyForm,
   selectBuiltinToolsForRun,
@@ -5992,6 +5996,25 @@ describe("native recruiting assessment effect delivery", () => {
     // Two saved people share the name, or the key is one word: left as given.
     expect(namedCandidateKey("linkedin:/in/ana-ruiz", rows)).toBe("linkedin:/in/ana-ruiz");
     expect(namedCandidateKey("linkedin:/in/sam", rows)).toBe("linkedin:/in/sam");
+  });
+
+  it("fills the role revision only for recruiting_research operations whose schema takes it", () => {
+    expect([...REVISIONED_RESEARCH_OPERATIONS].sort()).toEqual([
+      "calibration_round",
+      "continue",
+      "import_csv",
+      "prepare",
+      "save_results",
+      "save_search",
+    ]);
+    for (const operation of ["show_picks", "start", "status", "rows"]) {
+      expect(REVISIONED_RESEARCH_OPERATIONS.has(operation)).toBe(false);
+      const parsed = RecruitingResearchToolInputSchema.safeParse({
+        operation,
+        expectedRoleRevision: 1,
+      });
+      expect(JSON.stringify(parsed.error?.issues)).toContain("unrecognized_keys");
+    }
   });
 
   it("maps a mistyped key to the one saved person it is close to, never an ambiguous one", () => {

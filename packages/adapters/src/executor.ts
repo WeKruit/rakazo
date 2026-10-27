@@ -871,6 +871,17 @@ export function namedCandidateKey(
   return matches.size === 1 ? ([...matches][0] as string) : key;
 }
 
+type SchemaNode = { shape?: Record<string, { value?: unknown }>; options?: SchemaNode[] };
+/** recruiting_research operations whose strict schema takes the role revision; others refuse it. */
+export const REVISIONED_RESEARCH_OPERATIONS: ReadonlySet<string> = new Set(
+  (function operations(node: SchemaNode): string[] {
+    if (node.options) return node.options.flatMap(operations);
+    const shape = node.shape ?? {};
+    const operation = shape.operation?.value;
+    return "expectedRoleRevision" in shape && typeof operation === "string" ? [operation] : [];
+  })(RecruitingResearchToolInputSchema as unknown as SchemaNode),
+);
+
 /** A key or name with only its letters and digits: "ang el o-Jones" reads as "angelojones". */
 function compactName(text: string): string {
   return text
@@ -5366,6 +5377,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (
             name === "recruiting_research" &&
             thread.activeRecruitingRoleId &&
+            REVISIONED_RESEARCH_OPERATIONS.has(String(args.operation)) &&
             typeof args.expectedRoleRevision !== "number" &&
             (args.roleId === undefined || args.roleId === thread.activeRecruitingRoleId)
           ) {
