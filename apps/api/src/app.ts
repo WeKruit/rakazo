@@ -24,6 +24,7 @@ import {
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   ComposioConnector,
+  createAgentHomeStore,
   createArtifactStore,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
@@ -50,7 +51,6 @@ import {
   isComposioEnabled,
   isMessagingSurfaceEnabled,
   isPipedreamEnabled,
-  LocalAgentHomeStore,
   McpConnector,
   McpOAuthBroker,
   messagingPlatformsFromEnv,
@@ -310,7 +310,7 @@ export async function createApp(
   );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
   const oauthLogins = new PiOAuthLogins();
-  const home = new LocalAgentHomeStore(env.dataDir);
+  const home = createAgentHomeStore(env.dataDir, env.artifactStorage);
   const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
   const firstPartyOidc = env.oidc;

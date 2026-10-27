@@ -5,6 +5,7 @@ import {
   mkdir,
   open,
   readdir,
+  readFile,
   realpath,
   rename,
   rm,
@@ -15,10 +16,12 @@ import path from "node:path";
 import type { AdapterContext, AgentHomeStore, PortableFile } from "@rakazo/adapter-kit";
 import { fileHandlePath } from "./file-handle-path.js";
 
+type StoreSignal = Pick<AdapterContext, "signal">;
+
 export class LocalAgentHomeStore implements AgentHomeStore {
   private readonly botWrites = new Map<string, Promise<void>>();
 
-  constructor(private readonly root: string) {}
+  constructor(protected readonly root: string) {}
 
   describe() {
     return {
@@ -29,7 +32,7 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     };
   }
 
-  private botDir(botId: string) {
+  protected botDir(botId: string) {
     if (!botId || botId === "." || botId === ".." || path.basename(botId) !== botId) {
       throw new Error("Invalid bot id");
     }
@@ -40,8 +43,8 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     return path.resolve(this.botDir(botId));
   }
 
-  async checkout(botId: string, dest: string, _context: AdapterContext): Promise<string> {
-    await this.waitForBotWrite(botId);
+  async checkout(botId: string, dest: string, context: AdapterContext): Promise<string> {
+    await this.refresh(botId, context);
     await this.recoverInterruptedCommit(botId);
     await mkdir(dest, { recursive: true });
     const src = this.botDir(botId);
@@ -50,37 +53,39 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     return "working";
   }
 
-  async commit(botId: string, src: string, _context: AdapterContext): Promise<string> {
+  async commit(botId: string, src: string, context: AdapterContext): Promise<string> {
     return this.withBotWrite(botId, async () => {
       await this.recoverInterruptedCommit(botId);
-      const dest = this.botDir(botId);
-      const parent = path.dirname(dest);
-      const staging = path.join(parent, `.${botId}.staging-${randomUUID()}`);
-      const previous = `${dest}.previous`;
-      await mkdir(parent, { recursive: true });
-      await mkdir(staging, { recursive: true });
+      const staging = await this.stagingDir(botId);
       try {
         await copyDir(src, staging);
-        await rm(previous, { recursive: true, force: true });
-        if (await pathExists(dest)) await rename(dest, previous);
-        try {
-          await rename(staging, dest);
-        } catch (error) {
-          if (!(await pathExists(dest)) && (await pathExists(previous))) {
-            await rename(previous, dest).catch(() => undefined);
-          }
-          throw error;
-        }
-        await rm(previous, { recursive: true, force: true });
-        return this.writeRevision(botId);
+        await this.replaceLocal(botId, staging);
+        return this.finishWrite(botId, context);
       } finally {
         await rm(staging, { recursive: true, force: true });
       }
     });
   }
 
-  async revise(botId: string): Promise<string> {
-    return this.withBotWrite(botId, async () => this.writeRevision(botId));
+  async revise(botId: string, context?: AdapterContext): Promise<string> {
+    return this.withBotWrite(botId, async () => this.finishWrite(botId, context));
+  }
+
+  /**
+   * Runs `edit` on the stored home directory, then records a new revision. Server-side cleanup
+   * uses this instead of touching the directory directly, so a replicated store stays current.
+   */
+  async editStored(
+    botId: string,
+    edit: (dir: string) => Promise<void>,
+    context?: AdapterContext,
+  ): Promise<void> {
+    if (context) await this.refresh(botId, context);
+    await this.withBotWrite(botId, async () => {
+      await this.recoverInterruptedCommit(botId);
+      await edit(this.pathFor(botId));
+      await this.finishWrite(botId, context);
+    });
   }
 
   async restore(
@@ -94,10 +99,18 @@ export class LocalAgentHomeStore implements AgentHomeStore {
 
   async *exportHome(
     botId: string,
-    _context: AdapterContext,
+    context: AdapterContext,
     { directory = "", skipHidden = false }: { directory?: string; skipHidden?: boolean } = {},
   ): AsyncIterable<PortableFile> {
-    await this.waitForBotWrite(botId);
+    await this.refresh(botId, context);
+    yield* this.exportLocal(botId, { directory, skipHidden });
+  }
+
+  /** Exports the local copy as stored, without checking for a newer revision elsewhere. */
+  protected async *exportLocal(
+    botId: string,
+    { directory = "", skipHidden = false }: { directory?: string; skipHidden?: boolean } = {},
+  ): AsyncIterable<PortableFile> {
     await this.recoverInterruptedCommit(botId);
     const dir = this.botDir(botId);
     // Resolve the configured store first so a linked home cannot redefine containment.
@@ -114,10 +127,10 @@ export class LocalAgentHomeStore implements AgentHomeStore {
   async readFile(
     botId: string,
     filePath: string,
-    _context: AdapterContext,
+    context: AdapterContext,
     options?: { maxBytes?: number },
   ): Promise<string> {
-    await this.waitForBotWrite(botId);
+    await this.refresh(botId, context);
     await this.recoverInterruptedCommit(botId);
     const full = await containedExistingPath(this.botDir(botId), filePath);
     const handle = await open(full, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -138,8 +151,9 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     botId: string,
     filePath: string,
     content: string,
-    _context: AdapterContext,
+    context: AdapterContext,
   ): Promise<void> {
+    await this.refresh(botId, context);
     await this.withBotWrite(botId, async () => {
       await this.recoverInterruptedCommit(botId);
       const full = await containedWritePath(this.botDir(botId), filePath);
@@ -153,11 +167,12 @@ export class LocalAgentHomeStore implements AgentHomeStore {
       } finally {
         await handle.close();
       }
+      if (this.replicated) await this.finishWrite(botId, context);
     });
   }
 
-  async list(botId: string, dirPath: string, _context: AdapterContext) {
-    await this.waitForBotWrite(botId);
+  async list(botId: string, dirPath: string, context: AdapterContext) {
+    await this.refresh(botId, context);
     await this.recoverInterruptedCommit(botId);
     const root = this.botDir(botId);
     const candidate = safeJoin(root, dirPath);
@@ -178,21 +193,77 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     return listed.filter((entry): entry is NonNullable<typeof entry> => entry !== null);
   }
 
-  private async writeRevision(botId: string) {
+  /** True when every write is also published elsewhere (see ReplicatedAgentHomeStore). */
+  protected readonly replicated: boolean = false;
+
+  /** Brings the local copy up to date before a read. The local store is always current. */
+  protected async refresh(botId: string, _context: StoreSignal): Promise<void> {
+    await this.waitForBotWrite(botId);
+  }
+
+  /** Publishes the local copy as `revision` before it is recorded locally. */
+  protected async publish(
+    _botId: string,
+    _revision: string,
+    _context: StoreSignal | undefined,
+  ): Promise<void> {}
+
+  protected async finishWrite(botId: string, context: StoreSignal | undefined) {
     const revision = `rev-${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const directory = path.join(this.root, "home-revisions");
-    await mkdir(directory, { recursive: true });
-    await writeFile(path.join(directory, `${botId}.txt`), revision, "utf8");
+    await this.publish(botId, revision, context);
+    await this.writeRevision(botId, revision);
     return revision;
   }
 
-  private async recoverInterruptedCommit(botId: string) {
+  protected async readRevision(botId: string): Promise<string | null> {
+    this.botDir(botId);
+    const file = path.join(this.root, "home-revisions", `${botId}.txt`);
+    return readFile(file, "utf8").catch((error: unknown) => {
+      if (isMissing(error)) return null;
+      throw error;
+    });
+  }
+
+  protected async writeRevision(botId: string, revision: string) {
+    const directory = path.join(this.root, "home-revisions");
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, `${botId}.txt`), revision, "utf8");
+  }
+
+  /** A new empty directory next to the stored home, so replaceLocal can rename it in place. */
+  protected async stagingDir(botId: string) {
+    const parent = path.dirname(this.botDir(botId));
+    const staging = path.join(parent, `.${botId}.staging-${randomUUID()}`);
+    await mkdir(staging, { recursive: true });
+    return staging;
+  }
+
+  /** Swaps `src` in as the stored home, keeping the old copy until the rename has finished. */
+  protected async replaceLocal(botId: string, src: string) {
+    const dest = this.botDir(botId);
+    const parent = path.dirname(dest);
+    const previous = `${dest}.previous`;
+    await mkdir(parent, { recursive: true });
+    await rm(previous, { recursive: true, force: true });
+    if (await pathExists(dest)) await rename(dest, previous);
+    try {
+      await rename(src, dest);
+    } catch (error) {
+      if (!(await pathExists(dest)) && (await pathExists(previous))) {
+        await rename(previous, dest).catch(() => undefined);
+      }
+      throw error;
+    }
+    await rm(previous, { recursive: true, force: true });
+  }
+
+  protected async recoverInterruptedCommit(botId: string) {
     const dest = this.botDir(botId);
     const previous = `${dest}.previous`;
     if (!(await pathExists(dest)) && (await pathExists(previous))) await rename(previous, dest);
   }
 
-  private async withBotWrite<T>(botId: string, work: () => Promise<T>): Promise<T> {
+  protected async withBotWrite<T>(botId: string, work: () => Promise<T>): Promise<T> {
     const previous = this.botWrites.get(botId) ?? Promise.resolve();
     let release: () => void = () => undefined;
     const current = new Promise<void>((resolve) => {
@@ -211,7 +282,7 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     }
   }
 
-  private async waitForBotWrite(botId: string) {
+  protected async waitForBotWrite(botId: string) {
     await (this.botWrites.get(botId) ?? Promise.resolve());
   }
 }

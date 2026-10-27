@@ -32,7 +32,7 @@ import {
   teamBrowserProfileName,
   withCleanupDeadline,
 } from "./computer-workspace.js";
-import { resolveAgentHomePath } from "./home.js";
+import { LocalAgentHomeStore, resolveAgentHomePath } from "./home.js";
 import { removePiBotSessions } from "./pi-session.js";
 
 export function confirmSpawnedBotName(confirmName: string, botName: string) {
@@ -470,10 +470,12 @@ export async function destroyBot(
     }),
   );
   if (dedicated) {
-    await rm(resolveAgentHomePath(deps.home, dedicated.homeKey, deps.dataDir ?? "./data"), {
-      recursive: true,
-      force: true,
-    }).catch(() => undefined);
+    await editStoredHome(
+      deps,
+      dedicated.homeKey,
+      (dir) => rm(dir, { recursive: true, force: true }),
+      context,
+    ).catch(() => undefined);
   }
   await removeTeamBrowserProfile(deps, bot.id, sharedComputer, context);
   await removeTeamBotWorkspace(deps, bot, context).catch((error) => {
@@ -680,8 +682,12 @@ async function removeTeamBrowserProfile(
     });
   }
   if (!REMOTE_TEAM_SANDBOX_KINDS.has(computer.kind)) return;
-  const homeDir = resolveAgentHomePath(deps.home, computer.homeKey, deps.dataDir ?? "./data");
-  await removeContainedDirectory(homeDir, ".browser-profiles", name).catch((error) => {
+  await editStoredHome(
+    deps,
+    computer.homeKey,
+    (dir) => removeContainedDirectory(dir, ".browser-profiles", name),
+    context,
+  ).catch((error) => {
     getLogger().error("team browser profile cleanup", error);
   });
 }
@@ -702,8 +708,12 @@ async function removeTeamBotWorkspace(
   // restore from it. Any other home may be mounted by a running computer, where a bot could
   // swap bots/ for a symlink between the checks and rm, so it is only cleaned inside the computer.
   if (REMOTE_TEAM_SANDBOX_KINDS.has(computer.kind)) {
-    const homeDir = resolveAgentHomePath(deps.home, computer.homeKey, deps.dataDir ?? "./data");
-    await removeContainedDirectory(homeDir, "bots", bot.id).catch((error) => {
+    await editStoredHome(
+      deps,
+      computer.homeKey,
+      (dir) => removeContainedDirectory(dir, "bots", bot.id),
+      context,
+    ).catch((error) => {
       getLogger().error("team bot folder cleanup", error);
     });
   }
@@ -720,6 +730,20 @@ async function removeTeamBotWorkspace(
   ).catch((error) => {
     getLogger().error("team bot folder cleanup", error);
   });
+}
+
+/** Changes the stored copy of a home through the store, so a replicated store publishes it. */
+async function editStoredHome(
+  deps: Pick<BotLifecycleDeps, "home" | "dataDir">,
+  homeKey: string,
+  edit: (dir: string) => Promise<void>,
+  context: AdapterContext,
+) {
+  if (deps.home instanceof LocalAgentHomeStore) {
+    await deps.home.editStored(homeKey, edit, context);
+    return;
+  }
+  await edit(resolveAgentHomePath(deps.home, homeKey, deps.dataDir ?? "./data"));
 }
 
 /** Delete one folder in the team home. A symlinked parent is refused; a final symlink is unlinked. */

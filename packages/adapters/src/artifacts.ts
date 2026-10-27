@@ -180,8 +180,13 @@ export class SupabaseArtifactStore implements ArtifactStore {
     return `${context.spaceId}/${id}`;
   }
 
-  private async request(pathname: string, context: AdapterContext, init: RequestInit) {
-    context.signal.throwIfAborted();
+  private async request(
+    pathname: string,
+    signal: AbortSignal,
+    init: RequestInit,
+    options: { missingOk?: boolean } = {},
+  ): Promise<Response | null> {
+    signal.throwIfAborted();
     let response: Response;
     try {
       response = await fetch(`${this.options.url}/storage/v1/object/${pathname}`, {
@@ -189,17 +194,66 @@ export class SupabaseArtifactStore implements ArtifactStore {
         headers: { ...init.headers, apikey: this.options.key },
         redirect: "error",
         cache: "no-store",
-        signal: AbortSignal.any([context.signal, AbortSignal.timeout(30_000)]),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
       });
     } catch {
-      context.signal.throwIfAborted();
+      signal.throwIfAborted();
       throw new Error("Artifact storage request failed");
     }
     if (!response.ok) {
-      await response.body?.cancel().catch(() => {});
+      const body = await response.text().catch(() => "");
+      // Storage answers a missing object with 404, or with 400 and a not_found body.
+      if (
+        options.missingOk &&
+        (response.status === 404 || (response.status === 400 && /not.?found/i.test(body)))
+      ) {
+        return null;
+      }
       throw new Error(`Artifact storage request failed (${response.status})`);
     }
     return response;
+  }
+
+  /** Writes one object under a raw key (path segments of letters, digits, `_`, `-` and `.`). */
+  async putObject(
+    key: string,
+    bytes: Uint8Array,
+    signal: AbortSignal,
+    mimeType = "application/octet-stream",
+  ) {
+    const response = await this.request(`${this.options.bucket}/${checkObjectKey(key)}`, signal, {
+      method: "POST",
+      headers: { "content-type": mimeType, "x-upsert": "true" },
+      body: new Uint8Array(bytes),
+    });
+    await response?.body?.cancel().catch(() => {});
+  }
+
+  /** Reads one object, or null when it does not exist. */
+  async getObject(key: string, signal: AbortSignal): Promise<Uint8Array | null> {
+    const response = await this.request(
+      `authenticated/${this.options.bucket}/${checkObjectKey(key)}`,
+      signal,
+      { method: "GET" },
+      { missingOk: true },
+    );
+    if (!response) return null;
+    try {
+      return new Uint8Array(await response.arrayBuffer());
+    } catch {
+      signal.throwIfAborted();
+      throw new Error("Artifact storage response failed");
+    }
+  }
+
+  async removeObjects(keys: string[], signal: AbortSignal) {
+    if (keys.length === 0) return;
+    const response = await this.request(this.options.bucket, signal, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ prefixes: keys.map(checkObjectKey) }),
+    });
+    await response?.body?.cancel().catch(() => {});
   }
 
   async put(artifact: ArtifactPut, context: AdapterContext) {
@@ -216,21 +270,23 @@ export class SupabaseArtifactStore implements ArtifactStore {
     options: { overwrite?: boolean } = {},
   ) {
     const key = this.objectKey(id, context);
-    const response = await this.request(`${this.options.bucket}/${key}`, context, {
+    const response = await this.request(`${this.options.bucket}/${key}`, context.signal, {
       method: "POST",
       headers: { "content-type": mimeType, "x-upsert": options.overwrite ? "true" : "false" },
       body: new Uint8Array(bytes),
     });
-    await response.body?.cancel().catch(() => {});
+    await response?.body?.cancel().catch(() => {});
   }
 
   async get(id: string, context: AdapterContext) {
     const key = this.objectKey(id, context);
-    const response = await this.request(`authenticated/${this.options.bucket}/${key}`, context, {
-      method: "GET",
-    });
+    const response = await this.request(
+      `authenticated/${this.options.bucket}/${key}`,
+      context.signal,
+      { method: "GET" },
+    );
     try {
-      return new Uint8Array(await response.arrayBuffer());
+      return new Uint8Array(await response!.arrayBuffer());
     } catch {
       context.signal.throwIfAborted();
       throw new Error("Artifact storage response failed");
@@ -238,14 +294,16 @@ export class SupabaseArtifactStore implements ArtifactStore {
   }
 
   async remove(id: string, context: AdapterContext) {
-    const key = this.objectKey(id, context);
-    const response = await this.request(this.options.bucket, context, {
-      method: "DELETE",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ prefixes: [key] }),
-    });
-    await response.body?.cancel().catch(() => {});
+    await this.removeObjects([this.objectKey(id, context)], context.signal);
   }
+}
+
+function checkObjectKey(key: string) {
+  const segments = key.split("/");
+  if (!segments.every((part) => /^[A-Za-z0-9_.-]+$/.test(part) && !/^\.+$/.test(part))) {
+    throw new Error("Invalid artifact storage path");
+  }
+  return key;
 }
 
 export class LocalArtifactStore implements ArtifactStore {

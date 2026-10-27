@@ -496,7 +496,7 @@ export async function checkpointComputerWorkspace(
 ): Promise<string> {
   context.signal.throwIfAborted();
   if (computer.kind === "docker" && home instanceof LocalAgentHomeStore) {
-    return home.revise(homeKey);
+    return home.revise(homeKey, context);
   }
   const staging = await mkdtemp(path.join(tmpdir(), "rakazo-workspace-"));
   let stagedFileCount = 0;
@@ -633,7 +633,7 @@ export async function checkpointAndRecordComputerWorkspace(
   return revision;
 }
 
-async function writePortableFile(root: string, file: PortableFile) {
+export async function writePortableFile(root: string, file: PortableFile) {
   const relative = normalizeWorkspacePath(file.path);
   if (!relative) throw new Error("Workspace snapshots cannot contain an empty file path");
   const target = path.resolve(root, relative);
