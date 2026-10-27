@@ -16,6 +16,7 @@
 //                                             wait for the next round before scaling ("auto" or no
 //                                             text uses a built-in comment naming the first two)
 //            --target <n>                     scale target (default 100)
+//            --scale-text <text>              the scale-out request (default asks in Chinese for the target)
 //            --timeout-min <n>                overall limit (default 60)
 //            --out <file>                     JSON report path (default ./latency-<time>.json)
 //            --area <regex>                   locations the role accepts; others are flagged
@@ -44,7 +45,7 @@ if (!BASE) fail("Set RAKAZO_URL");
 const TARGET = Number(option("--target", "100"));
 const TIMEOUT_MS = Number(option("--timeout-min", "60")) * 60_000;
 const POLL_MS = 2_000;
-const SCALE_TEXT = `这 10 个方向可以，找 ${TARGET} 个类似的人`;
+const SCALE_TEXT = option("--scale-text", `这 10 个方向可以，找 ${TARGET} 个类似的人`);
 const FEEDBACK_RAW = flag("--feedback") ? option("--feedback", "auto") : null;
 const FEEDBACK = FEEDBACK_RAW?.startsWith("--") ? "auto" : FEEDBACK_RAW;
 const feedbackText = (round) => {
@@ -406,13 +407,26 @@ async function readRound(groupId) {
   if (repeats.length) violation("repeated_people", `round ${round.round}: ${repeats.length}`);
   return round;
 }
+// Sends the way the web composer does: to the coordinator, and as an interjection while a reply
+// is still running, so the run sees what a recruiter typing at that moment would cause.
+async function sendAsComposer(groupId, text) {
+  const snapshot = await rpc("threads/get", { groupId }).catch(() => null);
+  const running = (snapshot?.activeRuns ?? []).length > 0 || snapshot?.run?.status === "running";
+  await rpc("threads/send", {
+    groupId,
+    addressing: "coordinator",
+    text,
+    ...(running ? { interrupt: true } : {}),
+  });
+  return running;
+}
 async function sendScale(groupId, threadId) {
   const before = threadId ? await readTotal(threadId) : null;
   report.candidateTotals.push({ s: elapsed(), total: before });
   log(`role has ${before} people before the scale-out request`);
   // Let the previous turn settle so the request is its own user message.
   await sleep(3_000);
-  await rpc("threads/send", { groupId, text: SCALE_TEXT });
+  await sendAsComposer(groupId, SCALE_TEXT);
   mark("scale_sent", { before });
   return "scale";
 }
@@ -713,6 +727,73 @@ function measureFirstTen(events, round) {
   );
 }
 
+// --- Scale-out behaviour -----------------------------------------------------------------------
+// After "find N" the recruiter types nothing else: the work must not ask them to continue, must not
+// start email or outreach work nobody asked for, and must stop searching once the target is met.
+const CONTINUE_ASK =
+  /(reply|say|type|send)\s+["“'‘]?continue|want me to (continue|keep going)|shall I (continue|keep going)|should I (continue|keep going)|回复.{0,4}继续|要不要继续|是否继续|需要继续吗/i;
+const OUTREACH_TOOL =
+  /(ensure_role_campaign|add_shortlist_leads|create_campaign|activate_campaign|reply_to_email|send_email|create_draft|find_emails|enrich_bulk|draft)/i;
+async function checkScale(groupId, events) {
+  const sentAt = Date.parse(report.milestones.scale_sent.at);
+  const after = (e) => Date.parse(e.createdAt) > sentAt;
+  const { members } = await rpc("groups/get", { groupId });
+  const outreachBots = new Set(
+    members.filter((m) => /outreach|email/i.test(m.name)).map((m) => m.botId),
+  );
+  const outreachCalls = events.filter(
+    (e) => e.type === "agent.tool.called" && after(e) && OUTREACH_TOOL.test(e.payload?.name ?? ""),
+  );
+  const outreachRuns = events.filter(
+    (e) => e.type === "run.started" && after(e) && outreachBots.has(e.payload?.botId),
+  );
+  const asks = messages.filter(
+    (m) =>
+      m.role !== "user" &&
+      Date.parse(m.createdAt) > sentAt &&
+      m.blocks.some((b) => (b.kind === "text" || b.kind === "ask") && CONTINUE_ASK.test(b.text)),
+  );
+  const userMessages = messages.filter(
+    (m) => m.role === "user" && Date.parse(m.createdAt) > sentAt,
+  );
+  const targetAt = report.milestones.target_reached
+    ? Date.parse(report.milestones.target_reached.at)
+    : null;
+  // Searches already in flight when the target was met can still land; a minute covers one wave.
+  const searchesAfterTarget = targetAt
+    ? events.filter(
+        (e) =>
+          e.type === "agent.tool.called" &&
+          Date.parse(e.createdAt) > targetAt + 60_000 &&
+          SEARCH_TOOL.test(e.payload?.name ?? "") &&
+          !NOT_A_PEOPLE_SEARCH.test(e.payload.name),
+      ).length
+    : 0;
+  report.scale = {
+    target: TARGET,
+    finalTotal: report.pool?.total ?? lastPoolTotal(),
+    outreachToolCalls: outreachCalls.map((e) => e.payload.name),
+    outreachRuns: outreachRuns.length,
+    continueAsks: asks.map((m) => excerpt(blockText(m.blocks))),
+    userMessagesAfterRequest: userMessages.length,
+    searchesAfterTarget,
+  };
+  for (const name of new Set(report.scale.outreachToolCalls))
+    violation("unasked_outreach", `${name} after the scale-out request`);
+  if (outreachRuns.length && !outreachCalls.length)
+    violation(
+      "unasked_outreach",
+      `the email specialist ran ${outreachRuns.length}× after the request`,
+    );
+  for (const text of report.scale.continueAsks) violation("asked_to_continue", text);
+  if (searchesAfterTarget)
+    violation("searched_after_target", `${searchesAfterTarget} people searches after the target`);
+  log(`scale: ${JSON.stringify(report.scale)}`);
+}
+function lastPoolTotal() {
+  return report.candidateTotals.at(-1)?.total ?? null;
+}
+
 const TEST_MARK = "测试副本 · ";
 
 /** A copy this run created leaves the recruiter's sidebar when the run ends, unless --keep. */
@@ -811,7 +892,7 @@ async function main() {
           await sleep(3_000);
           const text = feedbackText(firstRound);
           report.feedback = { text };
-          await rpc("threads/send", { groupId, text });
+          await sendAsComposer(groupId, text);
           mark("feedback_sent");
           phase = "feedback";
         } else {
@@ -872,9 +953,12 @@ async function main() {
             (snapshot.activeRuns ?? []).length > 0 || snapshot.run?.status === "running",
         )
         .catch(() => true);
+      // Below the target, background research can still bring people after the turn ends, so the
+      // run waits for 10 quiet minutes before it calls the role settled short of the target.
+      const quietFor = lastTotal >= TARGET ? 45_000 : 10 * 60_000;
       if (!busy && replied) {
         settledSince ??= Date.now();
-        if (Date.now() - settledSince > 45_000) {
+        if (Date.now() - Math.max(settledSince, idleSince) > quietFor) {
           mark("scale_settled", { total: lastTotal });
           // Work that stops on a question before the target is a stall a recruiter has to notice.
           const open = pendingAsks();
@@ -909,6 +993,7 @@ async function main() {
     for (const event of events.filter((e) => e.type === "run.failed"))
       violation("run_failed", `${event.createdAt} ${event.payload?.error ?? ""}`.trim());
     if (firstRound) measureFirstTen(events, firstRound);
+    if (report.milestones.scale_sent) await checkScale(groupId, events);
   }
   const m = report.milestones;
   const between = (from, to) =>

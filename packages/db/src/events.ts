@@ -1251,6 +1251,52 @@ export async function answerWaitingRunWithTextInTransaction(
   return commitAnswerRunInput(tx, { ...input, messageId: found.messageId });
 }
 
+/**
+ * A recruiter who writes while the turn is still finishing (for example "find 100" typed as soon
+ * as the ten appear) can land after the turn's last steering read and just before it pauses on a
+ * question card. Sent a moment later, the same text would have answered the card, so it answers
+ * the card now; otherwise the message would sit unread behind a card nobody answers.
+ * Returns the answered run's event when the paused run was resumed.
+ */
+export async function answerPausedAskWithSteering(
+  prisma: PrismaClient,
+  input: { spaceId: string; threadId: string; botId: string; runId: string },
+): Promise<{ threadId: string; seq: number } | null> {
+  return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
+    const rows = await tx.steeringMessage.findMany({
+      where: { runId: input.runId, botId: input.botId, claimedAt: null },
+      include: { message: { select: { id: true, role: true, threadId: true, blocks: true } } },
+      orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
+    });
+    const human = rows.filter(
+      (row) =>
+        row.message.threadId === input.threadId &&
+        row.message.role === "user" &&
+        Array.isArray(row.message.blocks) &&
+        (row.message.blocks as MessageBlock[]).length > 0 &&
+        (row.message.blocks as MessageBlock[]).every((block) => block.kind === "text"),
+    );
+    const last = human.at(-1);
+    if (!last) return null;
+    // The latest message answers the card; earlier ones stay steering for the resumed turn.
+    const answered = await answerWaitingRunWithTextInTransaction(tx, {
+      spaceId: input.spaceId,
+      threadId: input.threadId,
+      runId: input.runId,
+      answeredByUserId: last.userId,
+      answer: (last.message.blocks as MessageBlock[])
+        .map((block) => (block.kind === "text" ? block.text : ""))
+        .join("\n"),
+      answerMessageId: last.message.id,
+    });
+    if (!answered) return null;
+    // The message is the answer now; left as steering it would reach the resumed turn twice.
+    await tx.steeringMessage.delete({ where: { id: last.id } });
+    return answered;
+  });
+}
+
 export async function pauseRunForInput(
   prisma: PrismaClient,
   input: PauseRunForInput,

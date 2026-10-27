@@ -7,6 +7,7 @@ const fakeAgentState = vi.hoisted(() => ({
   form: undefined as Record<string, unknown> | undefined,
   plannedSearches: undefined as string[] | undefined,
   result: undefined as unknown,
+  steered: [] as unknown[],
   tools: [] as Array<{
     name: string;
     execute: (toolCallId: string, params: Record<string, unknown>) => Promise<unknown>;
@@ -41,6 +42,10 @@ vi.mock("@earendil-works/pi-agent-core", async (importOriginal) => ({
     }
 
     async waitForIdle() {}
+
+    steer(message: unknown) {
+      fakeAgentState.steered.push(message);
+    }
 
     abort() {}
   },
@@ -218,5 +223,32 @@ describe("Pi choice asks", () => {
     for await (const event of runtime.run(request, runContext)) events.push(event);
     expect(events.some((event) => event.type === "ask")).toBe(false);
     expect(JSON.stringify(fakeAgentState.result)).toContain("Not asked: record the ten first.");
+  });
+
+  it("reads a message that arrived while the question was written instead of pausing on it", async () => {
+    fakeAgentState.steered = [];
+    const claims = [
+      [],
+      [{ id: "steer-1", messageId: "message-9", text: "Find 100 more like them." }],
+    ];
+    const claimSteering = vi.fn(async () => claims.shift() ?? []);
+    const runtime = new PiAgentRuntime();
+    const events: AgentRuntimeEvent[] = [];
+    for await (const event of runtime.run({ ...runRequest, claimSteering }, runContext))
+      events.push(event);
+    expect(events.some((event) => event.type === "ask")).toBe(false);
+    expect(JSON.stringify(fakeAgentState.result)).toContain(
+      "Not asked: the user sent a new message",
+    );
+    expect(JSON.stringify(fakeAgentState.steered)).toContain("Find 100 more like them.");
+  });
+
+  it("still asks when nothing new arrived", async () => {
+    const claimSteering = vi.fn(async () => []);
+    const runtime = new PiAgentRuntime();
+    const events: AgentRuntimeEvent[] = [];
+    for await (const event of runtime.run({ ...runRequest, claimSteering }, runContext))
+      events.push(event);
+    expect(events.some((event) => event.type === "ask")).toBe(true);
   });
 });

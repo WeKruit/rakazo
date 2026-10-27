@@ -129,6 +129,7 @@ import {
   recruiterAskedToSend,
   recruiterConnectBlock,
   recruiterInstructedSend,
+  recruiterQuestionNotInEnglish,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
   redactSecrets,
@@ -164,6 +165,7 @@ import type {
 import {
   admitRecruitingCrmImport,
   admitRecruitingReply,
+  answerPausedAskWithSteering,
   appendEventInTransaction,
   bindRecruitingSchedulingOperation,
   claimRecruitingCrmImport,
@@ -969,6 +971,9 @@ const HANDOFF_OPENING_NOTE =
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
+
+const ASK_IN_ENGLISH =
+  "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
 
 const PLANNED_SEARCHES_MISSING =
   "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches, or with plannedSearches: [] when the recruiter said not to look for people outside their own list.";
@@ -5209,6 +5214,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let firstPicksShown = false;
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
+        // A recruiter question written in Chinese without the recruiter asking for it goes back once.
+        let askLanguageBounced = false;
         // New people the searches planned with the last answer returned. Once the first picks come
         // from them and there are this many, the ten come from them instead of another search.
         let plannedNewPeople = 0;
@@ -11708,6 +11715,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                 );
                 if (known) return `"${known.key}" → "${known.value}"`;
+                // Recruiter-facing text is English even for a Chinese JD, unless they asked otherwise.
+                if (
+                  hideVendors &&
+                  !askLanguageBounced &&
+                  recruiterQuestionNotInEnglish(question, messages)
+                ) {
+                  askLanguageBounced = true;
+                  return { instead: ASK_IN_ENGLISH };
+                }
                 // Any intake answer may be the last one, and the first people come from the searches
                 // planned with it; without four of them the answer turn waits on its own searches.
                 // An explicit [] is the recruiter's own-list-only instruction.
@@ -12011,6 +12027,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               if (!paused) return;
               logRunTiming("waiting_input");
+              // A recruiter message that arrived while this turn was finishing answers the card.
+              const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                runId,
+              }).catch((error) => {
+                getLogger().error("steering answer for paused ask", error);
+                return null;
+              });
+              if (answeredBySteering) {
+                getLogger().info("run.waiting_input.answered_by_steering", { runId });
+                await deps.events.notify(answeredBySteering.threadId, answeredBySteering.seq);
+                await deps.jobs
+                  .enqueue(runContinueJob(runId))
+                  .catch((error) => getLogger().error("steering answer enqueue", error));
+                return;
+              }
               await notifyRun(deps, run, {
                 kind: "help",
                 title: `${bot.name} needs an answer`,
