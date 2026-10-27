@@ -5404,6 +5404,44 @@ it("clears accepted saved text when only an attachment was picked during the sen
   expect(localStorage.getItem("rakazo.composerDraft.bot:bot-1")).toBeNull();
 });
 
+it.each(["mounted", "unmounted", "late-receipt"] as const)(
+  "cleans up send echo refresh: %s",
+  async (mode) => {
+    const unmount = mode !== "mounted";
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("bot", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+    });
+    const receipt = { runId: "unmounted-echo", taskId: "unmounted-task" };
+    let accept!: (value: typeof receipt) => void;
+    if (mode === "late-receipt") {
+      shellApi.send.mockReturnValue(
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+      );
+    } else shellApi.send.mockResolvedValue(receipt);
+    const composer = container!.querySelector<HTMLTextAreaElement>(
+      'textarea[name="chat-message"]',
+    )!;
+    type(composer, "Synthetic unmounted message");
+    await view.click("Send");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    expect(container!.textContent).toContain("Synthetic unmounted message");
+    if (unmount) {
+      await act(async () => root!.unmount());
+      root = null;
+    }
+    if (mode === "late-receipt") await act(async () => accept(receipt));
+    const reads = shellApi.get.mock.calls.length;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 3_100)));
+    expect(shellApi.get.mock.calls.length).toBe(reads + (unmount ? 0 : 1));
+  },
+);
+
 it("shows a sent message at once and finishes the turn from events without re-reading", async () => {
   const streams: Array<{
     options: Parameters<typeof CoreModule.runThreadSubscription>[0];
