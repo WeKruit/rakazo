@@ -51,3 +51,9 @@ PLAYWRIGHT_BASE_URL=http://127.0.0.1:5212 pnpm --filter @rakazo/web exec playwri
 ```
 
 Production route regression passed **12/12**, including both desktop/mobile route interactions and English/Chinese accessible names plus translated export-error feedback. No publication was attempted.
+
+## Integration refresh before Draft publication
+
+Ordinary merge `8a5e3b570` incorporated #263 through D4 merge `916401f65` and C4. The sole work-plan conflict retained both D3 and C4 evidence. No new functionality or shortcut-timer fix was added. Web check and production build passed; Web tests **1,656/1,656**, 142 files, 32.51 s. Existing Chromium virtualization suite **3/3**, 9.8 s: candidates initial/max 14/19 rows, max36 cards; transcript initial/max17/24 rows, zero observed scroll long tasks, tail gap0. Requests and fixture JS sizes match the earlier follow-up measurements.
+
+Commands: `pnpm --filter @rakazo/web check`, `pnpm --filter @rakazo/web test`, `pnpm --filter @rakazo/web build`, and `PLAYWRIGHT_BROWSERS_PATH=<existing-local-cache> pnpm --filter @rakazo/web exec playwright test --config playwright.candidates.config.ts`. The first browser attempt failed before launch because its default cache lacked the required browser; the unchanged suite passed using the existing matching cache. Historical baseline and route checks above were not rerun in this refresh. CI remains disabled; no online acceptance is claimed.
