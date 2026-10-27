@@ -31,6 +31,8 @@ describe("maintained recruiting defaults", () => {
       expect(bot.instructions).toContain("Never send a fixed questionnaire");
       expect(bot.instructions).toContain("Never ask a recruiter to confirm G0, G1 or G2");
       expect(bot.instructions).toContain("recalled preferences before asking");
+      expect(bot.instructions).toContain("list the choice you recommend first");
+      expect(bot.instructions).toContain("never hold finished results until all work is done");
       expect(bot.instructions).toContain(
         "withdraws or contradicts a preference, update or forget it",
       );
