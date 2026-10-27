@@ -561,6 +561,34 @@ describe("buildApprovalAskBlock", () => {
     ]);
   });
 
+  it("shows an interview booking as who, when and what, without the calendar's name or ids", () => {
+    const block = buildApprovalAskBlock(
+      "booking-effect",
+      "mcp__cal-com__create_booking",
+      {
+        eventTypeId: 5852837,
+        start: "2026-10-30T19:00:00Z",
+        attendee: { name: "Ada Test", email: "ada@example.test", timeZone: "America/Chicago" },
+        bookingFieldsResponses: { title: "Interview – Front Desk Supervisor" },
+        location: { type: "integration", integration: "cal-video" },
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview booking → Ada Test");
+    expect(block.detail).toBe(
+      [
+        "Candidate: Ada Test <ada@example.test>",
+        "When: Fri, Oct 30, 2026, 2:00 PM CDT (America/Chicago)",
+        "Title: Interview – Front Desk Supervisor",
+        "Meeting: Video call",
+        "",
+        "The candidate gets a calendar invitation once you confirm.",
+      ].join("\n"),
+    );
+    expect(`${block.text}\n${block.detail}`).not.toMatch(/cal-com|Cal-com|5852837/);
+  });
+
   it("never names the mail server on a remote reply_to_email card", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",

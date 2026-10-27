@@ -972,6 +972,9 @@ const HANDOFF_OPENING_NOTE =
 const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
+const nextStepAlreadyGiven = (reply: string) =>
+  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round).`;
+
 const ASK_IN_ENGLISH =
   "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
 
@@ -5411,6 +5414,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!round) return undefined;
           return recruitingNextStepCard();
+        };
+        /** What the recruiter wrote after this run recorded its round, newest message. */
+        const recruiterReplyAfterRound = async () => {
+          const round = await deps.prisma.externalEffect.findFirst({
+            where: {
+              runId,
+              spaceId: run.spaceId,
+              kind: "recruiting_research",
+              status: "completed",
+              request: { path: ["operation"], equals: "calibration_round" },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { createdAt: true },
+          });
+          if (!round) return undefined;
+          const reply = await deps.prisma.message.findFirst({
+            where: {
+              threadId: thread.id,
+              role: "user",
+              botId: null,
+              createdAt: { gt: round.createdAt },
+            },
+            orderBy: { seq: "desc" },
+            select: { blocks: true },
+          });
+          const text = (Array.isArray(reply?.blocks) ? (reply.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+            .join("\n");
+          return text || undefined;
         };
         const applyToolNow = async (
           name: string,
@@ -11692,8 +11724,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               onToolCallDelta: streamRoundPicks,
               beforeAsk: async (question, plannedSearches) => {
                 await briefSaving;
-                // A run that recorded a round asks the next-step choice, which is asked anew each round.
-                if (await nextStepCardAfterRound()) return undefined;
+                // A run that recorded a round asks the next-step choice, which is asked anew each round,
+                // unless the recruiter already wrote their next step after the ten appeared.
+                if (await nextStepCardAfterRound()) {
+                  const reply = await recruiterReplyAfterRound();
+                  return reply ? { instead: nextStepAlreadyGiven(reply) } : undefined;
+                }
                 // Fewer than ten fit after a second set of searches: the recruiter decides how to go on.
                 if (firstPicksShown && peopleSearchesRun < 8)
                   return {
