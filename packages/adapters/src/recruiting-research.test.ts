@@ -78,6 +78,11 @@ describe("FullEnrich job ownership", () => {
       );
     },
   );
+  it("names the person's own lookups when the id is mistyped", async () => {
+    await expect(
+      authorize(fixture(), "get_enrichment_results", { enrichment_id: "owned-jbo" }),
+    ).rejects.toThrow("Your latest lookups, newest first: owned-job.");
+  });
   it("accepts a creation the agent called by the tool's display name", async () => {
     const saved = [
       "__rakazoCatalogTool",

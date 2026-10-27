@@ -41,6 +41,7 @@ async function nativeMcpCreationReceipts(
         ],
       })),
     },
+    orderBy: { createdAt: "desc" },
     select: { request: true, result: true },
   });
   const receipts: Array<{ args: Record<string, unknown>; result: unknown }> = [];
@@ -169,13 +170,21 @@ export async function requireFullEnrichJobOwnership(
     return;
   if (toolName === "get_credits" && Object.keys(args).length === 0) return;
   if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return;
-  if (toolName === "get_enrichment_results" && nonblank(args.enrichment_id)) {
+  if (toolName === "get_enrichment_results") {
+    const owned: string[] = [];
     for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "enrich_bulk")) {
       if (receipt.args.enrichment_id !== undefined || record(receipt.result)?.isError === true)
         continue;
       const body = mcpObject(receipt.result);
-      if (body?.enrichment_id === args.enrichment_id && body.error === undefined) return;
+      if (body?.error !== undefined || !nonblank(body?.enrichment_id)) continue;
+      if (body.enrichment_id === args.enrichment_id) return;
+      owned.push(String(body.enrichment_id));
     }
+    // A mistyped id must not lead to a second paid lookup: name the ones this person started.
+    if (owned.length)
+      throw new IsolationError(
+        `No lookup with that id. Your latest lookups, newest first: ${owned.slice(0, 3).join(", ")}. Read one of these, copying the id unchanged; do not start a new lookup.`,
+      );
   }
   throw new IsolationError(
     "This contact lookup is not available in your workspace. Start a new lookup in this conversation.",
