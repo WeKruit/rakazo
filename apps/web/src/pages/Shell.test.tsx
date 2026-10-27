@@ -2742,7 +2742,10 @@ it("keeps the same role chat widget, draft and native card across workspace menu
       mentions: undefined,
     }),
   );
-  expect(container?.querySelector('section[aria-label="Interview"]')).not.toBeNull();
+  await vi.waitFor(async () => {
+    await act(async () => {});
+    expect(container?.querySelector('section[aria-label="Interview"]')).not.toBeNull();
+  });
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   await view.click("Collapse role chat");
   expect(chat.hidden).toBe(true);
@@ -5407,6 +5410,9 @@ it("shows a sent message at once and finishes the turn from events without re-re
       accept = resolve;
     }),
   );
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   const reads = shellApi.get.mock.calls.length;
   const navigationReads = shellApi.listSpaces.mock.calls.length;
   await view.click("Send");
