@@ -114,7 +114,12 @@ export default defineConfig(({ mode }) => {
           codeSplitting: {
             groups: [
               { name: "initial-shared", tags: ["$initial"], priority: 30 },
-              { name: "shell-shared", test: /[\\/]pages[\\/]Shell\.tsx$/, priority: 20 },
+              {
+                name: "shell-shared",
+                test: /[\\/]pages[\\/]Shell\.tsx$/,
+                priority: 20,
+                entriesAware: true,
+              },
               {
                 name: "recruiting-shared",
                 test: /[\\/]pages[\\/]RecruitingPanel\.tsx$/,
