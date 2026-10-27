@@ -59,6 +59,8 @@ export function createDb(
   return { prisma, pool };
 }
 
+const SUPAVISOR_FULL = /EMAXCONN|max client(?:s| connections) reached/i;
+
 export function isTooManyDatabaseConnections(error: unknown): boolean {
   const seen = new Set<unknown>();
   let current: unknown = error;
@@ -69,7 +71,10 @@ export function isTooManyDatabaseConnections(error: unknown): boolean {
     const message = current instanceof Error ? current.message : String(current);
     if (
       message.includes("Too many database connections opened") ||
-      message.includes("sorry, too many clients already")
+      message.includes("sorry, too many clients already") ||
+      // Supabase's pooler refuses with its own XX000 error, e.g. "(EMAXCONNSESSION) max clients
+      // reached in session mode". Unrecognised, it crashed the worker into a restart loop.
+      SUPAVISOR_FULL.test(message)
     ) {
       return true;
     }

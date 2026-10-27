@@ -159,7 +159,7 @@ describe("parsePositiveInteger", () => {
 });
 
 describe("isTooManyDatabaseConnections", () => {
-  it("recognises Prisma P2037 and Postgres 53300", () => {
+  it("recognises Prisma P2037, Postgres 53300 and a full Supabase pooler", () => {
     expect(isTooManyDatabaseConnections({ code: "P2037" })).toBe(true);
     expect(isTooManyDatabaseConnections({ code: "53300" })).toBe(true);
     expect(
@@ -167,6 +167,17 @@ describe("isTooManyDatabaseConnections", () => {
         new Error("Too many database connections opened: sorry, too many clients already"),
       ),
     ).toBe(true);
+    expect(
+      isTooManyDatabaseConnections(
+        Object.assign(
+          new Error(
+            "(EMAXCONNSESSION) max clients reached in session mode - max clients are limited to pool_size: 15",
+          ),
+          { code: "XX000" },
+        ),
+      ),
+    ).toBe(true);
+    expect(isTooManyDatabaseConnections(new Error("Max client connections reached"))).toBe(true);
     expect(isTooManyDatabaseConnections(new Error("relation does not exist"))).toBe(false);
     expect(isTooManyDatabaseConnections(undefined)).toBe(false);
   });
