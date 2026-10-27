@@ -39,3 +39,17 @@ An initial full-web run passed 1,663 tests and failed one shortcut request-count
 Final full-web verification after the explicit initial-message wait passed **1,664/1,664 tests across 143 files** in 26.93 seconds.
 
 Publication and merge are pending the parent task's authorization and serialized integration. Production deployment, real-provider latency and real-user session behavior are not tested here.
+
+## D4 translation repair integration
+
+Ordinary merge `33880fb3b` brings in D4 `d564a9268`: extracted views bind Lingui macros locally, both locale fixtures are retained, and the original real-route tests retain their explicit content/scroll readiness waits. The two merge conflicts preserve D2 `currentWorkspaceRead` while using each view's local `useLingui()` binding. No later D1 optimization or D3 transcript work is included.
+
+After the merge, web/API/contracts type checks and the production build passed. The production D2 fixture passed three times with 0 duplicate recruiting requests, 17 total RPCs, eight recruiting RPCs, 1,611,782 JavaScript bytes / 526,281 gzip bytes / 70 JavaScript requests. Both English and Chinese real-browser accessible-name and export-error cases passed. The final unchanged full-web run passed 1,664/1,664 in 18.53 seconds.
+
+One earlier concurrent full-web run still reproduced the known owner-diagnostics shortcut count failure (3 reads versus 2). This also occurs on the independent D3+D4 branch without D2. Initial-message readiness alone did not eliminate it. Diagnostic-only repetition (60 shortcut cases and a complete 265-case Shell run) and two full-web runs with additional target/call-stack capture passed. No production fix is claimed. The exact-count assertion now includes unexpected read targets and call stacks when it fails, without tolerating an extra read. Root cause remains unresolved; a passing rerun is not proof the intermittent issue is gone.
+
+## Final causal repair and publication gates
+
+The previously unresolved extra-read defect was reproduced on the original baseline: a3-second accepted-send echo timer survives Shell unmount. Portable fix1b927fbae and test followup aee66a16e are applied here as83926628c/43742ca9f. Unmount clears pending timers; a receipt arriving after unmount cannot schedule one; mounted fallback still works and a durable event suppresses its reread. The exact-count assertions remain unchanged. See SHELL-SHORTCUT-READ-INVESTIGATION.md; untraced historical failures are not individually attributed.
+
+After ordinary integration through D4#298, Web typecheck and full Web regression passed:1,667/1,667 across143files,47.66s. Targeted API readView/contracts76/76,466ms. Commands: `pnpm --filter @rakazo/web check`; `pnpm --filter @rakazo/web test`; `pnpm exec vitest run apps/api/src/recruiting-read-view.test.ts packages/contracts/src/recruiting.test.ts --maxWorkers=2`. Earlier production fixture0duplicates/17RPC remains documented; no live acceptance claimed.
