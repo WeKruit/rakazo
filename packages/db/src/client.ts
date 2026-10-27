@@ -11,6 +11,8 @@ export interface DbClientOptions {
   applicationName?: string;
   /** Use the driver's public ordered-query pipeline on checked-out clients. */
   pipeline?: boolean;
+  /** Awaited before a new physical session is exposed to a pool borrower. */
+  verifyConnection?: (client: PoolClient) => Promise<void>;
 }
 
 const DEFAULT_POOL_MAX = 4;
@@ -28,7 +30,7 @@ const poolSessions = new WeakMap<Pool, Set<Client>>();
 export const SESSION_RELEASE_MS = 4_000;
 
 export function createPool(connectionString: string, options: DbClientOptions = {}): Pool {
-  const pool = new Pool({
+  const config = {
     connectionString,
     pipeline: options.pipeline ?? false,
     max: options.poolMax ?? DEFAULT_POOL_MAX,
@@ -40,7 +42,16 @@ export function createPool(connectionString: string, options: DbClientOptions = 
     idleTimeoutMillis: 0,
     application_name: options.applicationName,
     keepAlive: true,
-  });
+    verify: options.verifyConnection
+      ? (client: PoolClient, done: (error?: Error) => void) => {
+          void options.verifyConnection!(client).then(
+            () => done(),
+            (error) => done(error instanceof Error ? error : new Error(String(error))),
+          );
+        }
+      : undefined,
+  };
+  const pool = new Pool(config);
   // graphile-worker (and Node itself) require an 'error' listener on a shared
   // pool: an idle-client disconnect is otherwise an unhandled error that kills
   // the process and orphans the TCP sessions until Postgres times them out.
@@ -66,6 +77,30 @@ export async function closePoolSessions(pool: Pool): Promise<void> {
   await Promise.all(
     [...(poolSessions.get(pool) ?? [])].map((client) => client.end().catch(() => undefined)),
   );
+}
+
+/** Unlike pg-pool.end alone, wait for tracked physical clients' end events too. */
+export async function endTrackedSessionPool(pool: Pool): Promise<void> {
+  const sessions = poolSessions.get(pool);
+  if (!sessions) throw new Error("Cannot confirm shutdown of an untracked session pool");
+  const pending = new Set<Promise<void>>();
+  const watched = new WeakSet<Client>();
+  const watch = (client: Client) => {
+    if (watched.has(client)) return;
+    watched.add(client);
+    const ended = new Promise<void>((resolve) => client.once("end", () => resolve()));
+    pending.add(ended);
+    void ended.finally(() => pending.delete(ended));
+  };
+  pool.on("connect", watch);
+  for (const client of sessions) watch(client);
+  try {
+    await pool.end();
+    while (pending.size) await Promise.all([...pending]);
+    if (sessions.size) throw new Error("Session pool still has physical clients");
+  } finally {
+    pool.off("connect", watch);
+  }
 }
 
 export function createDb(

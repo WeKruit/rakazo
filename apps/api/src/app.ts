@@ -37,6 +37,7 @@ import {
   createRunSandbox,
   createRunSecretWriter,
   createSecretStore,
+  createSessionAdmissionRuntime,
   createTicketChangeNotifier,
   createWebProvider,
   DurablePiOAuthLogins,
@@ -205,14 +206,25 @@ export async function createApp(
         applicationName: "rakazo-api",
       });
   let { prisma } = created;
+  if (process.env.RAKAZO_SESSION_SLOT && (prismaOverride || realtimeOverride))
+    throw new Error("Split admission cannot use overridden session owners");
+  const sessionAdmission = await createSessionAdmissionRuntime(prisma, "api", process.env);
   const realtime =
     realtimeOverride ??
     (created.pool
       ? new PostgresRealtimeFanout({
           connectionString: env.realtimeDatabaseUrl,
           publisher: created.pool,
+          applicationName: sessionAdmission?.admission.sessionApplicationName,
+          verifyConnection: sessionAdmission?.verifyConnection,
+          assertConnectionAdmission: sessionAdmission?.assertConnectionAdmission,
         })
       : new InMemoryRealtimeFanout());
+  if (sessionAdmission) {
+    if (!(realtime instanceof PostgresRealtimeFanout))
+      throw new Error("Unexpected split session owner");
+    sessionAdmission.bindOwners(realtime);
+  }
   const secrets = createSecretStore(env.encryptionKey, process.env, realtime);
   await secrets.start();
   if (secrets.describe().capabilities.degraded)
@@ -1102,6 +1114,11 @@ export async function createApp(
       await mcp.close();
       await actorDb?.prisma.$disconnect().catch(() => undefined);
       await actorDb?.pool.end().catch(() => undefined);
+      if (sessionAdmission) {
+        if (!(realtime instanceof PostgresRealtimeFanout))
+          throw new Error("Unexpected split session owner");
+        await sessionAdmission.closeAndRelease();
+      }
       await prisma.$disconnect().catch(() => undefined);
       await created.pool?.end().catch(() => undefined);
       await ownedJobPool?.end().catch(() => undefined);

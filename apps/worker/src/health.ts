@@ -6,6 +6,7 @@ export async function startWorkerHealth(
   state: () => "ready" | "draining" | "drained" | "failed",
   port: number,
   host = "0.0.0.0",
+  identity?: { instanceId: string; generation: string; service: string },
 ) {
   const server = createServer((request, response) => {
     if (request.method !== "GET" || !["/health", "/ready", "/drain"].includes(request.url ?? "")) {
@@ -19,7 +20,7 @@ export async function startWorkerHealth(
         "content-type": "application/json",
         "cache-control": "no-store",
       })
-      .end(JSON.stringify({ ok, state: current }));
+      .end(JSON.stringify({ ok, state: current, ...(identity ? { identity } : {}) }));
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
