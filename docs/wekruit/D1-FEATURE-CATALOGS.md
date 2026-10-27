@@ -2,7 +2,8 @@
 
 This local follow-up keeps the existing UI and parser contracts. It does not claim the
 final 250 KB goal is complete. It builds on `34b9eb587` / `d2ad4af8f`; earlier D1 work
-and its measurements remain separate.
+and its measurements remain separate. Ordinary merge `bb10b0f3e` integrates the published
+`d4fae3df1` dependency base, including the existing timer and lazy-palette fixes.
 
 ## Behavior and scope
 
@@ -41,21 +42,21 @@ as the preceding D1 measurement scripts; no production or real candidate data.
 
 | Entry | Before gzip bytes | After gzip bytes | After JS / total requests |
 | --- | ---: | ---: | ---: |
-| Contacts with visible role chat | 347,873 | **339,039** | 7 / 35 |
-| One-message authenticated chat | 310,602 | **301,760** | 8 / 39 |
-| Signed-out sign-in | 203,472 | **194,660** | 7 / 15 |
+| Contacts with visible role chat | 347,938 | **339,147** | 7 / 35 |
+| One-message authenticated chat | 310,672 | **301,872** | 8 / 39 |
+| Signed-out sign-in | 203,469 | **194,711** | 7 / 15 |
 
 Contacts still makes 17 RPC calls and zero duplicate recruiting reads. Request counts are
-unchanged. Contacts improves by 8,834 bytes but remains **89,039 bytes over 250,000**; chat
-remains 51,760 bytes over. This is smaller than the earlier maximal source-subset estimate
+unchanged. Machine-readable contacts evidence: [d1-catalog-contacts.json](evidence/d1-catalog-contacts.json). Contacts improves by 8,791 bytes but remains **89,147 bytes over 250,000**; chat
+remains 51,872 bytes over. This is smaller than the earlier maximal source-subset estimate
 because only established optional-page boundaries were split. No schema/runtime migration
 or rendering architecture rewrite was attempted.
 
 ## Verification
 
-- Web: **1,691/1,691 tests**, 149 files, 22.13 s; web type check and production build pass.
+- Web: **1,694/1,694 tests**, 149 files, 35.20 s; web type check and production build pass.
 - Existing recruiting routes, cold contacts keyboard/detail/focus, bilingual controls,
-  and new optional catalog activation: **15/15**, 39.3 s, real local production Chromium.
+  and new optional catalog activation: **15/15**, 40.1 s, real local production Chromium.
 - Expanded settings tests switch English → Chinese and Chinese → English while mounted:
   **2/2**, 5.3 s. The optional catalog is absent before opening settings and present after.
 - Four new loader tests cover deferred loading, latest-locale races, full English fallback,
@@ -85,7 +86,10 @@ the build resolved it. Initial browser fixtures omitted two settings RPCs; expli
 responses were added, retaining the no-unknown-RPC assertion. None of these failed attempts
 are claimed as acceptance results.
 
-Final integration must be revalidated after merging the published dependency branch.
+The matched before figures come from the published dependency build (`d4fae3df1`),
+including its timer fix. Before that merge, this branch measured contacts 347,873 →
+339,039, chat 310,602 → 301,760 and sign-in 203,472 → 194,660 bytes; do not mix the
+two baselines. The final table uses the merged build and published dependency baseline.
 Deployed Fast4G LCP and other browsers remain untested. See
 [D1-250KB-OPTIONS.md](D1-250KB-OPTIONS.md) for further design choices; these results do not
 establish that a different rendering stack is necessary or sufficient.
