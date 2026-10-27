@@ -464,11 +464,13 @@ export function ShellPage() {
         nativeCorrespondence={nativeCorrespondence}
       />
 
-      <CallCard
-        userId={userId}
-        spaceId={bootstrapMe?.spaceId}
-        onSettings={() => openSettings("voice")}
-      />
+      {model.call ? (
+        <CallCard
+          userId={userId}
+          spaceId={bootstrapMe?.spaceId}
+          onSettings={() => openSettings("voice")}
+        />
+      ) : null}
 
       <ResizableSidePanel
         botsSidebarWidth={visibleSidebarWidth}
