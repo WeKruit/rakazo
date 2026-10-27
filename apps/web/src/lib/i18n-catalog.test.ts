@@ -144,6 +144,10 @@ describe("lingui catalogs", () => {
       "../pages/shell/useShellMessages.ts",
       "../pages/shell/useShellThreads.ts",
       "../pages/shell/useShellRecruiting.ts",
+      "../pages/shell/useShellAgentActions.ts",
+      "../pages/shell/useShellCreation.ts",
+      "../pages/shell/useShellNotifications.ts",
+      "../pages/shell/useShellRecruitingRefresh.ts",
     ]) {
       const filename = fileURLToPath(new URL(path, import.meta.url));
       const compiled = transformSync(readFileSync(filename, "utf8"), {
