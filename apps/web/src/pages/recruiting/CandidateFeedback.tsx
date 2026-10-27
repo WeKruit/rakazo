@@ -3,7 +3,7 @@ import type { RecruitingFeedbackRecord } from "@rakazo/contracts";
 import { Button, NativeSelect, NativeSelectOption, Textarea } from "@rakazo/ui-web";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
+import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 import type { CandidateDiscussionContext, CandidateFeedback, Props } from "./workspace-types";
 export function CandidateFeedbackForm({
@@ -240,7 +240,7 @@ export function FeedbackHistory({
     ? `${readCacheScope}:feedback:${JSON.stringify([roleId, candidateKey])}`
     : undefined;
   const cached = cacheKey
-    ? (readCache?.entries.get(cacheKey) as
+    ? (savedRecruitingRead(readCache, cacheKey) as
         | Awaited<ReturnType<typeof rpc.recruiting.listFeedback>>
         | undefined)
     : undefined;

@@ -1,4 +1,4 @@
-/** Fake signed-out session only; no live API or customer data. */
+/** Synthetic signed-out and authenticated sessions; no live API or customer data. */
 import { readFile } from "node:fs/promises";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
@@ -7,6 +7,7 @@ import { chromium } from "@playwright/test";
 import { preview } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
+const locale = process.env.MEASURE_UI_LOCALE;
 const browser = await chromium.launch();
 try {
   for (const directory of process.argv.slice(2)) {
@@ -19,6 +20,11 @@ try {
         logLevel: "silent",
       });
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      if (locale)
+        await page.addInitScript(
+          (value) => localStorage.setItem("rakazo.uiLocale", value),
+          locale,
+        );
       const requests: { url: string; type: string }[] = [];
       page.on("request", (req) =>
         requests.push({ url: new URL(req.url()).pathname, type: req.resourceType() }),
@@ -172,6 +178,7 @@ try {
           JSON.stringify(
             {
               directory: path.basename(directory),
+              locale: locale ?? "application default",
               scope: authenticated
                 ? "cold synthetic authenticated chat with one text message"
                 : "cold signed-out sign-in page",

@@ -1,74 +1,16 @@
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Routine } from "@rakazo/contracts";
-import type { CronPreset } from "@rakazo/core";
-import { formatCron, isOneShotRoutineCrons, presetFromCron } from "@rakazo/core";
+import { formatCron } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
 import { Clock, Pause, Plus } from "lucide-react";
-import { modelOptionKey } from "../lib/model-catalog";
 
-function toDatetimeLocalValue(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function defaultArmRunAtLocal(): string {
-  return toDatetimeLocalValue(new Date(Date.now() + 60 * 60 * 1000));
-}
-
-export function routineNeedsOneShotArm(
-  routine: Pick<Routine, "nextRunAt" | "lastRunAt">,
-  crons: string[],
-) {
-  return isOneShotRoutineCrons(crons) && !routine.nextRunAt && !routine.lastRunAt;
-}
-
-export type RoutineDraftState = {
-  name: string;
-  prompt: string;
-  schedules: CronPreset[];
-  webhookEnabled: boolean;
-  githubEnabled: boolean;
-  messageProvider: string | null;
-  active: boolean;
-  runAtLocal: string;
-  /** Empty runs this routine on the bot's model. */
-  modelKey: string;
-  thinkingLevel: string;
-};
-
-export function emptyRoutineDraft(): RoutineDraftState {
-  return {
-    name: "",
-    prompt: "",
-    schedules: [],
-    webhookEnabled: false,
-    githubEnabled: false,
-    messageProvider: null,
-    active: true,
-    runAtLocal: "",
-    modelKey: "",
-    thinkingLevel: "",
-  };
-}
-
-export function draftFromRoutine(routine: Routine): RoutineDraftState {
-  return {
-    name: routine.name,
-    prompt: routine.prompt,
-    schedules: routine.crons.map(presetFromCron),
-    webhookEnabled: routine.webhookEnabled,
-    githubEnabled: routine.githubEnabled,
-    messageProvider: routine.messageProvider,
-    active: routine.active,
-    runAtLocal: routineNeedsOneShotArm(routine, routine.crons) ? defaultArmRunAtLocal() : "",
-    modelKey:
-      routine.modelProvider && routine.modelId
-        ? modelOptionKey(routine.modelProvider, routine.modelId)
-        : "",
-    thinkingLevel: routine.thinkingLevel ?? "",
-  };
-}
+export {
+  draftFromRoutine,
+  emptyRoutineDraft,
+  type RoutineDraftState,
+  routineNeedsOneShotArm,
+} from "./routine-draft";
 
 export function routineTriggerSummary(routine: Routine): string {
   if (!routine.active) return t`Paused`;

@@ -1,3 +1,4 @@
+import "../../lib/query.test-support";
 // @vitest-environment jsdom
 import { ORPCError } from "@orpc/client";
 import type { ReactNode } from "react";

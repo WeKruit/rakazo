@@ -69,7 +69,7 @@ import { revokePendingAttachmentPreviews } from "../../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../../lib/performance";
 import { setPreloadRecoveryActiveWork } from "../../lib/preload-recovery";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { clearRecruitingReads } from "../../lib/recruiting-read-cache";
+import { clearRecruitingReads, createRecruitingReadCache } from "../../lib/recruiting-read-cache";
 import {
   getResponseStreamingEnabled,
   subscribeResponseStreaming,
@@ -90,8 +90,8 @@ import {
 } from "../../lib/thread-events";
 import { createThreadPrefetch } from "../../lib/thread-prefetch";
 import type { ContextMenuPosition } from "../BotContextMenu";
-import type { RoutineDraftState } from "../RoutineList";
-import { draftFromRoutine, emptyRoutineDraft } from "../RoutineList";
+import type { RoutineDraftState } from "../routine-draft";
+import { draftFromRoutine, emptyRoutineDraft } from "../routine-draft";
 import type { SettingsSection } from "../SettingsOverlay";
 import type { PendingAttachment } from "../shell/Composer";
 import { isCommandPaletteHotkey } from "../shell/command-palette-hotkey";
@@ -183,7 +183,7 @@ export function useShellController() {
   const roleChatId = useId();
   const roleChatTrigger = useRef<HTMLButtonElement>(null);
   const roleChatSection = useRef<HTMLElement>(null);
-  const recruitingReadCache = useRef<RecruitingReadCache>({ entries: new Map(), epoch: 0 });
+  const recruitingReadCache = useRef<RecruitingReadCache>(createRecruitingReadCache());
   const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
   const panelStorageKeyRef = useRef<string | null>(null);
   const observedPanelKey = useRef<string | null>(null);

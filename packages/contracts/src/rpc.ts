@@ -134,6 +134,7 @@ import {
   ListRecruitingRemindersInput,
   ListRecruitingRemindersOutput,
   ReadRecruitingSourceInput,
+  ReadRecruitingViewInput,
   RecordRecruitingProfileViewInput,
   RecruitingAssessmentAskTargetSchema,
   RecruitingAssessmentSchema,
@@ -728,6 +729,33 @@ export const appContract = {
       ]),
     ),
     listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
+    readView: oc
+      .input(ReadRecruitingViewInput)
+      .output(
+        z.discriminatedUnion("kind", [
+          z.strictObject({
+            kind: z.literal("candidates"),
+            workspace: recruitingWorkspace
+              .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
+              .nullable(),
+            data: ListRecruitingCandidatesOutput.nullable(),
+          }),
+          z.strictObject({
+            kind: z.literal("research"),
+            workspace: recruitingWorkspace
+              .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
+              .nullable(),
+            data: z
+              .strictObject({
+                tasks: z.array(RecruitingResearchTaskSchema).max(200),
+                actions: z.array(RecruitingResearchActionSchema).max(200),
+                observations: z.array(RecruitingResearchSavedObservationSchema).max(200),
+              })
+              .nullable(),
+          }),
+        ]),
+      ),
+
     roleCandidates: oc
       .input(threadTarget.safeExtend(RecruitingRoleCandidatesInputFields))
       .output(RecruitingRoleCandidatesOutputSchema),

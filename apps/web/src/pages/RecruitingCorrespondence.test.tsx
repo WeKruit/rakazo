@@ -1,3 +1,4 @@
+import "../lib/query.test-support";
 // @vitest-environment jsdom
 import type { ThreadMessage } from "@rakazo/contracts";
 import { RecruitingOutreachSequenceSchema } from "@rakazo/contracts";

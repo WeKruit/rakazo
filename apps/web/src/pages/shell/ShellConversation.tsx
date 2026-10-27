@@ -22,13 +22,21 @@ import { desktopBridge } from "../../lib/desktop";
 import { clampWidth } from "../../lib/pane-width";
 import { selectedSpaceId } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
-import { CalibrationRoundCard } from "../recruiting/CalibrationRound";
+
+const CalibrationRoundCard = lazyPanel(() =>
+  import("../recruiting/CalibrationRound").then((m) => m.CalibrationRoundCard),
+);
+
 import {
   readShortlistWeekFilter,
   writeShortlistWeekFilter,
 } from "../recruiting/dashboard-drilldown";
 import { RetryNotice } from "../recruiting/RetryNotice";
-import { RoleSetupCard } from "../recruiting/RoleSetup";
+
+const RoleSetupCard = lazyPanel(() =>
+  import("../recruiting/RoleSetup").then((m) => m.RoleSetupCard),
+);
+
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";
@@ -64,6 +72,7 @@ export function ShellConversation({
 }) {
   const { t } = useLingui();
   const {
+    currentWorkspaceRead,
     linkFavicons,
     groupId,
     navigate,
@@ -291,6 +300,7 @@ export function ShellConversation({
         <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
           {effectiveCrmSelection ? (
             <RecruitingPanel
+              workspaceRead={currentWorkspaceRead}
               threadId={activeSnapshot.threadId}
               botId={inGroup ? undefined : active?.id}
               groupId={inGroup ? groupId : undefined}
@@ -388,6 +398,7 @@ export function ShellConversation({
               />
             ) : null}
             <RecruitingPanel
+              workspaceRead={currentWorkspaceRead}
               key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
               presentation="workspace"
               view={
@@ -938,6 +949,7 @@ export function ShellConversation({
                 />
               ) : null}
               <RecruitingPanel
+                workspaceRead={currentWorkspaceRead}
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
                 presentation="workspace"
                 summary={recruitingWorkspaceView === "brief" ? "brief" : "feedback"}

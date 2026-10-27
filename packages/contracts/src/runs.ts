@@ -1,23 +1,9 @@
 import * as z from "zod";
 import { Id, IsoDate, RunStatus } from "./ids.js";
+import { RUN_TRIGGERS } from "./run-triggers.js";
 
-export const RUN_TRIGGERS = [
-  "user",
-  "routine",
-  "resume",
-  "follow_up",
-  "reaction",
-  "call_end",
-  "spawn",
-  "skill",
-  "bot_message",
-  "webhook",
-  "messaging",
-  "cloud_agent",
-  "created",
-  "tickets",
-  "recruiting_research",
-] as const;
+export { RUN_TRIGGERS } from "./run-triggers.js";
+
 export const RunTriggerSchema = z.enum(RUN_TRIGGERS);
 export type RunTrigger = z.infer<typeof RunTriggerSchema>;
 

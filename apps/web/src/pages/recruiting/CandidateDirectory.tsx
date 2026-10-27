@@ -5,7 +5,7 @@ import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useMemo, useRef, useState } from "react";
 import { CandidateWindow } from "./CandidateWindow";
-import { CompanyLogo } from "./OrgBadge";
+import { CompanyLogo } from "./CompanyLogo";
 import { PersonAvatar } from "./ProfileImage";
 import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections, withSavedProfile } from "./profile";

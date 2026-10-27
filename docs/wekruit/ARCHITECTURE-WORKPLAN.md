@@ -24,8 +24,8 @@
 | C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | Adam 已认领；本地实现进行中，线上部署仍禁止 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
-| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 进行中 | Adam |
-| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息待做） | Adam |
+| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 本地验收通过，已合入 [#301](https://github.com/WeKruit/rakazo/pull/301) | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息及旧结果视图后续已本地验收，[#300](https://github.com/WeKruit/rakazo/pull/300) 待串行集成） | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
 | F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
 | E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
@@ -297,6 +297,8 @@ CHECK
 
 ### D1 首屏 JS
 
+- **独立后续本地验收：** 以 D4/D2/D3 独立依赖为基线的 D1-only 重放已完成；中文合成已登录聊天实际首屏 JS 529,849 → 325,964 gzip B，完整 Web 1,676 测试、五包类型检查及冷加载即时反馈检查通过。350 KB 第一阶段通过；250 KB 最终目标和线上 LCP 尚未完成。依赖顺序、逐提交映射、其他页面限制与复现命令见 [D1-INDEPENDENT-FOLLOWUP.md](./D1-INDEPENDENT-FOLLOWUP.md)。暂未发布该后续 PR。
+
 - **现状（本地 `vite build` 实测）：** 首屏要加载的 JS 合计 594 KB（gzip 后）。主包 1.18 MB（未压缩），gzip 后 338 KB。主包里占得最多的是：react-dom 171 KB、`Shell.tsx` 147 KB、`RecruitingPanel.tsx` 113 KB、`ModelSettingsOverlay` 29 KB、`RecruitingCorrespondence` 24 KB、`RoutineEditor`、`InterviewCalendar`、`SchedulingPlan`、`DetailPanel`、markdown 解析器。路由页面已经是按需加载的。
 - **本 PR 已做：** 本地设置页、集成设置页和 MCP 授权回调页改成按需加载，联系人、面试、邮件往来这几个视图也改成按需加载（`recruiting/LazyViews.tsx`）。另外把 `PersonAvatar` 移进 `ProfileImage.tsx`，断开了 DetailPanel 和 CandidateDirectory 之间的循环引用。首屏 JS（gzip -9）从 592,955 字节降到 561,040 字节。
 - **剩下的做法：** 第一屏用不到的面板改成 `lazy()` 加载：设置浮层、例行任务编辑器、邮件序列编辑、面试日历、排期计划、候选人详情。markdown 解析器在第一条消息渲染时再加载。打开这些面板时要有加载占位，不能出现空白。
@@ -324,6 +326,8 @@ RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec tsx scripts/measure-fi
 - **现状：** 服务端数据都靠组件里的 `useEffect` 加手写缓存来取，例如 `Shell.tsx` 里的 `recruitingReadCache`。`Shell.tsx` 一个文件里就有 51 个 `useEffect`、109 个 `useState`。没有统一的请求去重、过期和失效机制。
 - **做法：** 引入 TanStack Query 管理服务端数据。实时事件到达时，只让相关的查询失效。先迁移招聘面板的读取，再迁移其他部分。
 - **验收（代码检查）：** 打开一个岗位页面时，同一个 RPC 带同样参数的重复调用次数为 0（在 e2e 里统计）。
+
+- **D2 独立验收：** 基于 D4 `e0eb80130`；Query 缓存、带授权/新鲜绑定校验的 readView 与 A3 分页均保留。生产合成浏览器前后各三次：重复 RPC 4 → 0，总 RPC 21 → 17，JS gzip 515,958 → 526,190 字节（增加 10,232），JS 请求 70 → 70。web 1,664/1,664、API/readView+招聘合同 76/76、web/API/contracts 类型检查通过。详见 [D2 独立验收](D2-INDEPENDENT-RELEASE.md)。本地门禁通过，发布/合并尚待父任务串行操作，未声称线上验收。
 
 ### D3 长列表虚拟滚动
 
@@ -493,6 +497,14 @@ pnpm --filter @rakazo/worker --filter @rakazo/adapters check
 
 结果：7 个文件、85 个测试通过；两个包类型检查通过。C3 在额外真实本地 PostgreSQL 测试发现时区回归，已单独通过 #272 修复并列出35项实测，不把此前漏测说成已验证。
 
+
+### D3 独立后续本地验收
+
+基于 D4 `e0eb80130b7c64b5c3cb55ff23925dd1c071678b` 移植消息窗口与旧结果视图窗口；仅本地提交，尚未发布/合并。没有带入 D1 后续 lazyLiveWork/windowinglazy 或 D2 缓存改动。完整命令与范围见 [D3-INDEPENDENT-FOLLOWUP.md](D3-INDEPENDENT-FOLLOWUP.md)。Web 类型检查、1,656 项单测、生产构建通过；Chromium 三项合成浏览器测试通过。1,000 消息首屏 DOM 1,000→17，滚动最大 1,030→24（含自动加载 30 条旧消息）；候选目录最大 19 行/36 卡片，滚动无长任务。整项保持待集成，线上和人工辅助技术检查还没测。
 ### C4 refreshed independent branch
 
 Ordinary merge of #263 through `8188c88f3` into C4 succeeded without conflicts (`4406d0e134a5c2a26fa961ec2ebbb8075d3eaa5b`). `pnpm --filter @rakazo/api --filter @rakazo/db --filter @rakazo/adapters check` passed. Local synthetic `VERIFY_DATABASE=1 pnpm exec vitest run packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/pi-oauth.test.ts`:120/120 passed in7.89s. `pnpm --filter @rakazo/api test`:1376 passed/51 skipped in17.41s. No provider or multi-container acceptance is claimed. This refresh is local only while remaining-item publication confirmation is pending; #274 has not been merged.
+
+### 串行发布核对（2026-10-27）
+
+D1初始#295、A2#296、C4#274、D4#298、D2#301、D3后续#300均已合入本集成分支。上文各阶段“待发布/待合并”是当时记录，以本段和总览最新状态为准。D1后续生产冷入口实测联系人347,938B/7JS/35总请求、17RPC/0重复；聊天310,672B/8JS/39总请求；登录203,469B/7JS/15总请求。最终250KB和线上LCP仍不达/未测。A2本地部分配对超过10%，整体未完成。F2保留Claude所有权；仅复核已有reconciler/turn-end-guard/question-nudge59/59单测，未替代其崩溃/上线业务验收。新增A5保留Claude认领。

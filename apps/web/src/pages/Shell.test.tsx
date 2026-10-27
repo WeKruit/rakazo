@@ -1,3 +1,5 @@
+import { recruitingReadViewFixture } from "../lib/query.test-support";
+import { createRecruitingReadCache } from "../lib/recruiting-read-cache";
 // @vitest-environment jsdom
 
 import { ORPCError } from "@orpc/client";
@@ -76,6 +78,7 @@ const shellApi = vi.hoisted(() => ({
     crmData: vi.fn(),
     correspondence: vi.fn(),
     getWorkspace: vi.fn(),
+    readView: vi.fn(),
     listAssessments: vi.fn(),
     listCandidates: vi.fn(),
     listFeedback: vi.fn(),
@@ -703,7 +706,7 @@ it("restarts the CRM role catalog after native invalidation without dispatching 
         ? { operation: "memberships", sources: [source] }
         : { operation: "roles", source: { ...source, organizationId: "org" }, items: [] },
     );
-  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const cache = createRecruitingReadCache();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -1312,7 +1315,7 @@ it.each(["bot", "group"] as const)(
   },
 );
 
-async function renderRoleNavigation(cache: { epoch: number; entries: Map<string, unknown> }) {
+async function renderRoleNavigation(cache: ReturnType<typeof createRecruitingReadCache>) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement("div");
   document.body.append(container);
@@ -1353,7 +1356,7 @@ it("ends a CRM role read in a retryable failure when another read invalidates th
       }),
     )
     .mockReturnValue(new Promise(() => {}));
-  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const cache = createRecruitingReadCache();
   const view = await renderRoleNavigation(cache);
   expect(view.textContent).toContain("Loading roles…");
   // A sibling read was denied and dropped this scope; nothing re-renders the navigation.
@@ -1393,7 +1396,7 @@ it("retries the CRM role list through a deploy's unavailable window but not afte
   shellApi.recruiting.crmData
     .mockRejectedValueOnce(new ORPCError("SERVICE_UNAVAILABLE", { status: 503 }))
     .mockImplementation(async (input) => (input.operation === "memberships" ? memberships : roles));
-  const view = await renderRoleNavigation({ epoch: 0, entries: new Map() });
+  const view = await renderRoleNavigation(createRecruitingReadCache());
   expect(view.textContent).toContain("Loading roles…");
   expect(view.textContent).not.toContain("Could not read candidate records.");
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
@@ -1403,7 +1406,7 @@ it("retries the CRM role list through a deploy's unavailable window but not afte
   view.remove();
   shellApi.recruiting.crmData.mockReset();
   shellApi.recruiting.crmData.mockRejectedValue(new ORPCError("FORBIDDEN"));
-  const denied = await renderRoleNavigation({ epoch: 0, entries: new Map() });
+  const denied = await renderRoleNavigation(createRecruitingReadCache());
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
   expect(shellApi.recruiting.crmData).toHaveBeenCalledTimes(1);
   expect(denied.textContent).toContain("Could not read candidate records.");
@@ -1606,6 +1609,9 @@ it("uses the native current coordinator and exact managed member keys for ordina
   });
   await view.render();
   await view.click("Integrations");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
     coordinatorBotId: "bot-1",
     recruitingBotIds: { outreach: "bot-2", scheduling: undefined },
@@ -1646,6 +1652,9 @@ it("connects personal apps from New Role using only this user's installed native
   await view.render();
   await view.click("New Role");
   await view.click("Integrations");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
     coordinatorBotId: "bot-1",
     recruitingBotIds: { outreach: "managed-outreach", scheduling: "managed-scheduling" },
@@ -3293,6 +3302,7 @@ it("opens native brief and feedback views, reviews workflow, and continues the s
   await view.click("Recruiting workflow");
   expect(view.getProps().presentation).toBe("workspace");
   expect(view.getProps().tab).toBe("dashboard");
+  await act(async () => vi.dynamicImportSettled());
   expect(container?.querySelector(".recruiting-workspace-content")?.textContent).toContain(
     "Research history",
   );
@@ -3965,6 +3975,9 @@ it("switches the owner presentation while retaining the same native thread, pend
     await act(async () => {
       setToolActivityPreference(preference);
     });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(
       container?.querySelector('[data-testid="shell-root"]')?.getAttribute("data-product-view"),
     ).toBe(preference === "on" ? "developer" : "recruiting");
@@ -4017,9 +4030,22 @@ it.each([
       isDeploymentOwner: owner,
       openFeedback: false,
     });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    await vi.waitFor(async () => {
+      await act(async () => {});
+      expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
+    });
     // Hover/focus prefetches pass no request options; count only conversation opens.
     const opens = () => shellApi.get.mock.calls.filter((call) => call.length > 1).length;
     const reads = opens();
+    const extraReads: string[] = [];
+    const getImpl = shellApi.get.getMockImplementation()!;
+    shellApi.get.mockImplementation((...args) => {
+      extraReads.push(JSON.stringify(args[0]) + new Error().stack);
+      return getImpl(...args);
+    });
     const shortcut = async (key: string, modifier: "metaKey" | "ctrlKey") =>
       act(async () => {
         window.dispatchEvent(
@@ -4031,12 +4057,17 @@ it.each([
     await act(async () => {
       await vi.dynamicImportSettled();
     });
+    if (visible)
+      await vi.waitFor(async () => {
+        await act(async () => {});
+        expect(palette()).not.toBeNull();
+      });
     expect(Boolean(palette())).toBe(visible);
     if (!visible) {
       await shortcut("k", "ctrlKey");
       await shortcut("2", "metaKey");
       expect(palette()).toBeNull();
-      expect(opens()).toBe(reads);
+      expect(opens(), extraReads.join("\n")).toBe(reads);
       expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
       return;
     }
@@ -4047,7 +4078,7 @@ it.each([
     await shortcut("k", "ctrlKey");
     await shortcut("2", "metaKey");
     expect(palette()).toBeNull();
-    expect(opens()).toBe(reads);
+    expect(opens(), extraReads.join("\n")).toBe(reads);
     await act(async () => {
       setToolActivityPreference("on");
     });
@@ -5388,6 +5419,44 @@ it("clears accepted saved text when only an attachment was picked during the sen
   expect(localStorage.getItem("rakazo.composerDraft.bot:bot-1")).toBeNull();
 });
 
+it.each(["mounted", "unmounted", "late-receipt"] as const)(
+  "cleans up send echo refresh: %s",
+  async (mode) => {
+    const unmount = mode !== "mounted";
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("bot", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+    });
+    const receipt = { runId: "unmounted-echo", taskId: "unmounted-task" };
+    let accept!: (value: typeof receipt) => void;
+    if (mode === "late-receipt") {
+      shellApi.send.mockReturnValue(
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+      );
+    } else shellApi.send.mockResolvedValue(receipt);
+    const composer = container!.querySelector<HTMLTextAreaElement>(
+      'textarea[name="chat-message"]',
+    )!;
+    type(composer, "Synthetic unmounted message");
+    await view.click("Send");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    expect(container!.textContent).toContain("Synthetic unmounted message");
+    if (unmount) {
+      await act(async () => root!.unmount());
+      root = null;
+    }
+    if (mode === "late-receipt") await act(async () => accept(receipt));
+    const reads = shellApi.get.mock.calls.length;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 3_100)));
+    expect(shellApi.get.mock.calls.length).toBe(reads + (unmount ? 0 : 1));
+  },
+);
+
 it("shows a sent message at once and finishes the turn from events without re-reading", async () => {
   const streams: Array<{
     options: Parameters<typeof CoreModule.runThreadSubscription>[0];
@@ -5456,6 +5525,8 @@ it("shows a sent message at once and finishes the turn from events without re-re
   expect(container!.textContent?.match(/Find three robotics leads/g)).toHaveLength(1);
   expect(container!.textContent).toContain("Here are three.");
   expect(container!.textContent).not.toContain("Starting…");
+  expect(shellApi.get.mock.calls.length).toBe(reads);
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 3_100)));
   expect(shellApi.get.mock.calls.length).toBe(reads);
   // One navigation read at run end for the sidebar preview; none for send or run start.
   expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
@@ -5737,3 +5808,5 @@ it("shows ordinary users the turn's work in plain words and folds it once the re
   expect(summary?.textContent).toContain("Searching candidates");
   expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
 });
+
+shellApi.recruiting.readView.mockImplementation(recruitingReadViewFixture(shellApi.recruiting));
