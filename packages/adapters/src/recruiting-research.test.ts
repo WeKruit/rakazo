@@ -3,11 +3,9 @@ import type { RecruitingSourceRef } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
-  buildRecruitingResearchRequest,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
   projectRecruitingCandidateReport,
-  readRecruitingResearchRequest,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
 } from "./recruiting-research.js";
@@ -343,7 +341,7 @@ const context = {
     text: contextText,
   },
 } as LoadedRecruitingRunContext;
-const request = {
+const _request = {
   operation: "create" as const,
   context,
   source,
@@ -361,151 +359,7 @@ const request = {
   recallScope: "  Bay Area first; expand only if asked.  ",
 };
 const mcp = (body: unknown) => ({ content: [{ type: "text", text: JSON.stringify(body) }] });
-const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
-
-describe("frozen recruiting research requests", () => {
-  it("freezes the actual UTF-8 request and exact role, memory and desired text", () => {
-    const built = buildRecruitingResearchRequest(request);
-    expect(built.sha256).toBe(sha256(built.bytes));
-    expect(built.bytes.equals(Buffer.from(JSON.stringify(built.manifest), "utf8"))).toBe(true);
-    const loaded = readRecruitingResearchRequest(built.bytes, built.sha256);
-    expect(loaded).toEqual(built.manifest);
-    expect(loaded.args).toEqual({ prompt: expect.stringContaining(contextText) });
-    if (!("prompt" in loaded.args)) throw new Error("Expected research prompt");
-    for (const text of [request.instructions, request.output, request.recallScope])
-      expect(loaded.args.prompt).toContain(text);
-    expect(loaded).toMatchObject({
-      version: 3,
-      candidateOutputSchema: "candidate_output_v1",
-      purpose: "calibration",
-      approvalEffectId: "g1-approval",
-      roleId: "role",
-      roleRevisionId: "role-revision",
-      roleRevision: 2,
-      source,
-      contextArtifact: context.contextArtifact,
-    });
-    expect(loaded.args.prompt).toContain("do not change qualification");
-    expect(loaded.args.prompt).toContain("Research purpose:\ncalibration");
-    expect(loaded.args.prompt).toContain("linkedin_url");
-    expect(loaded.args.prompt).toContain("evidence_urls");
-    expect(loaded.args.prompt).not.toContain("maximum years");
-  });
-
-  it("reads immutable v2 requests without inventing a candidate output schema", () => {
-    const built = buildRecruitingResearchRequest(request);
-    const legacy = JSON.parse(built.bytes.toString("utf8"));
-    legacy.version = 2;
-    delete legacy.candidateOutputSchema;
-    legacy.args.prompt = legacy.args.prompt.split("\n\nCanonical candidate output schema:")[0];
-    const bytes = Buffer.from(JSON.stringify(legacy));
-    expect(readRecruitingResearchRequest(bytes, sha256(bytes))).toEqual(legacy);
-    expect(legacy).not.toHaveProperty("candidateOutputSchema");
-  });
-
-  it("continues only the stored provider task with the complete frozen message", () => {
-    const built = buildRecruitingResearchRequest({
-      ...request,
-      operation: "continue",
-      providerTaskId: "provider-task",
-      route: { ...request.route, toolName: "reply" },
-    });
-    expect(built.manifest.args).toEqual({
-      task_id: "provider-task",
-      message: expect.stringContaining(contextText),
-    });
-    expect(readRecruitingResearchRequest(built.bytes, built.sha256)).toEqual(built.manifest);
-  });
-
-  it("rejects tampered bytes before parsing", () => {
-    const built = buildRecruitingResearchRequest(request);
-    expect(() =>
-      readRecruitingResearchRequest(Buffer.concat([built.bytes, Buffer.from(" ")]), built.sha256),
-    ).toThrow(/hash/i);
-  });
-
-  it.each(["create", "continue"] as const)(
-    "reads immutable v1 %s requests without inferring purpose or approval",
-    (operation) => {
-      const built = buildRecruitingResearchRequest(
-        operation === "create"
-          ? request
-          : {
-              ...request,
-              operation,
-              providerTaskId: "provider-task",
-              route: { ...request.route, toolName: "reply" },
-            },
-      );
-      const legacy = JSON.parse(built.bytes.toString("utf8"));
-      legacy.version = 1;
-      delete legacy.purpose;
-      delete legacy.approvalEffectId;
-      delete legacy.candidateOutputSchema;
-      legacy.args[operation === "create" ? "prompt" : "message"] = [
-        contextText,
-        `Research instructions:\n${request.instructions}`,
-        `Requested output:\n${request.output}`,
-        `Recall scope for this round:\n${request.recallScope}`,
-        "The role criteria remain authoritative. Recall scope and output instructions do not change qualification. Preserve missing evidence as unknown; provider labels do not establish qualification.",
-      ].join("\n\n");
-      const bytes = Buffer.from(JSON.stringify(legacy), "utf8");
-      const loaded = readRecruitingResearchRequest(bytes, sha256(bytes));
-      expect(loaded).toEqual(legacy);
-      expect(loaded).not.toHaveProperty("purpose");
-      expect(loaded).not.toHaveProperty("approvalEffectId");
-      expect(bytes.toString("utf8")).toBe(JSON.stringify(legacy));
-    },
-  );
-
-  it.each([
-    (m: Record<string, unknown>) => ({ ...m, arbitrary: true }),
-    (m: Record<string, unknown>) => ({ ...m, purpose: undefined }),
-    (m: Record<string, unknown>) => ({ ...m, approvalEffectId: undefined }),
-    (m: Record<string, unknown>) => ({ ...m, purpose: "scale" }),
-    (m: Record<string, unknown>) => ({ ...m, approvalEffectId: " " }),
-    (m: Record<string, unknown>) => ({ ...m, version: 1 }),
-    (m: Record<string, unknown>) => ({ ...m, args: { prompt: "Conditions omitted" } }),
-    (m: Record<string, unknown>) => ({ ...m, route: { ...request.route, toolName: "reply" } }),
-    (m: Record<string, unknown>) => ({ ...m, route: { ...request.route, resourceRevision: "3" } }),
-    (m: Record<string, unknown>) => ({
-      ...m,
-      args: { prompt: (m.args as { prompt: string }).prompt, count: 10 },
-    }),
-    (m: Record<string, unknown>) => ({
-      ...m,
-      contextArtifact: { artifactId: "context", sha256: "bad" },
-    }),
-  ])("rejects a rehashed but internally invalid closed manifest %#", (tamper) => {
-    const built = buildRecruitingResearchRequest(request);
-    const bytes = Buffer.from(JSON.stringify(tamper(built.manifest)), "utf8");
-    expect(() => readRecruitingResearchRequest(bytes, sha256(bytes))).toThrow();
-  });
-
-  it.each([
-    { instructions: " \n " },
-    { output: " " },
-    { recallScope: " " },
-    { purpose: undefined },
-    { purpose: "other" },
-    { approvalEffectId: undefined },
-    { approvalEffectId: " " },
-    { intent: { basis: "inferred", quote: source.quote! } },
-    { source: { ...source, quote: "Another instruction" } },
-    { context: { ...context, text: "Truncated role" } },
-    { context: { ...context, manifest: { ...context.manifest, roleText: "" } } },
-    {
-      context: {
-        ...context,
-        workspace: { ...context.workspace, role: { ...context.workspace.role, revision: 3 } },
-      },
-    },
-  ])("rejects an invalid preparation %#", (invalid) => {
-    expect(() =>
-      buildRecruitingResearchRequest({ ...request, ...invalid } as typeof request),
-    ).toThrow();
-  });
-});
+const _sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
 describe("recruiting MCP result observations", () => {
   it("accepts a real task ID from structured content or a complete JSON text block", () => {
@@ -771,71 +625,6 @@ describe("recruiting MCP result observations", () => {
       automaticRetry: false,
     });
   });
-});
-
-describe("confirmed brief adoption", () => {
-  it("freezes confirmed feedback rules into the actual provider search text", () => {
-    const updated = structuredClone(context);
-    updated.workspace.revision.brief!.rules = [
-      {
-        criterionId: "production-ownership",
-        origin: "user_instruction",
-        effect: "flag",
-        sourceRefIds: ["feedback-message"],
-      },
-    ];
-    const feedback = {
-      ...source,
-      id: "feedback-message",
-      quote: "Prefer engineers who have operated production services.",
-    };
-    updated.workspace.revision = {
-      ...updated.workspace.revision,
-      sourceRefs: [feedback],
-      criteria: [
-        {
-          id: "production-ownership",
-          priority: "preferred",
-          expression: { kind: "atom", id: "operated-production", statement: feedback.quote },
-          sourceRefs: [feedback],
-          definitionQuestions: [],
-        },
-      ],
-    };
-    updated.manifest.roleText = `<recruiting_role>${JSON.stringify(updated.workspace)}</recruiting_role>`;
-    updated.text = updated.manifest.roleText;
-    updated.manifest.text = updated.text;
-    const built = buildRecruitingResearchRequest({ ...request, context: updated });
-    expect("prompt" in built.manifest.args && built.manifest.args.prompt).toContain(feedback.quote);
-    expect("prompt" in built.manifest.args && built.manifest.args.prompt).toContain(
-      "production-ownership",
-    );
-    expect("prompt" in built.manifest.args && built.manifest.args.prompt).toContain(
-      "feedback-message",
-    );
-    expect(built.manifest.contextText).toContain(JSON.stringify(updated.workspace.revision.brief));
-    expect(context.workspace.revision.brief!.rules).toEqual([]);
-  });
-  it("rejects a draft or an old confirmation before creating provider request bytes", () => {
-    for (const confirmation of [
-      null,
-      { ...context.workspace.revision.brief!.confirmation!, revision: 1 },
-    ]) {
-      const updated = structuredClone(context);
-      updated.workspace.revision.brief!.confirmation = confirmation;
-      expect(() => buildRecruitingResearchRequest({ ...request, context: updated })).toThrow(
-        /Confirm the current recruiting brief/,
-      );
-    }
-  });
-});
-
-it("uses only the native redacted context projection when freezing a confirmed brief", () => {
-  const updated = structuredClone(context);
-  updated.workspace.revision.brief!.fields[0]!.value = "PRIVATE-REDACTION-CANARY";
-  const built = buildRecruitingResearchRequest({ ...request, context: updated });
-  expect(built.bytes.toString()).not.toContain("PRIVATE-REDACTION-CANARY");
-  expect(built.manifest.contextText).toBe(context.text);
 });
 
 describe("retained candidate report projection", () => {

@@ -168,7 +168,6 @@ import {
   bindRecruitingSchedulingOperation,
   claimRecruitingCrmImport,
   claimRecruitingReply,
-  claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
@@ -210,14 +209,12 @@ import {
   readNativeReplyEmailProof,
   readRecruitingPlaybookStep,
   recordUsage,
-  recruitingResearchSnapshot,
   resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
   searchHistory,
-  settleUncertainRecruitingResearchAction,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -474,7 +471,6 @@ import {
   importRecruitingCandidateCsv,
   normalizeRecruitingRoleArgs,
   PEOPLE_SEARCH_AUTOSAVE_KEY,
-  prepareRecruitingResearchTool,
   RecruitingCandidateOutputError,
   RecruitingCsvImportError,
   RecruitingPeopleSearchError,
@@ -5973,70 +5969,47 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (
             researchInput?.success &&
-            ![
-              "prepare",
-              "continue",
-              "save_results",
-              "import_csv",
-              "save_search",
-              "calibration_round",
-            ].includes(researchInput.data.operation)
+            (researchInput.data.operation === "status" || researchInput.data.operation === "rows")
           ) {
             if (!deps.artifacts) return { error: "Recruiting research requires artifact storage" };
             try {
-              const input = researchInput.data;
-              if (
-                input.operation === "prepare" ||
-                input.operation === "continue" ||
-                input.operation === "save_results" ||
-                input.operation === "import_csv" ||
-                input.operation === "save_search" ||
-                input.operation === "calibration_round"
-              )
-                throw new IsolationError();
               researchSelection = await resolveRecruitingResearchTool(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
                 researchActor,
-                input,
+                researchInput.data,
                 context,
               );
-              if ("recoveredResult" in researchSelection && researchSelection.recoveredResult)
+              if (researchSelection.recoveredResult)
                 return redactConnectorPayload(researchSelection.recoveredResult, runSecrets);
-              if (researchSelection.recoveryEffectKind) {
-                name = researchSelection.recoveryEffectKind;
-                args = researchSelection.args;
-                connectorCall = { tool: name, args, route: researchSelection.route, executionId };
-              } else {
-                if (!deps.connector?.resolveCall)
-                  throw new Error("Recruiting research requires native MCP");
-                const resolved = await deps.connector.resolveCall(
-                  {
-                    tool: catalogExecuteToolName("mcp"),
-                    route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
-                    args: {
-                      id: catalogIdForRoute(researchSelection.route),
-                      arguments: researchSelection.args,
-                    },
-                    executionId,
+              if (!deps.connector?.resolveCall)
+                throw new Error("Recruiting research requires native MCP");
+              const resolved = await deps.connector.resolveCall(
+                {
+                  tool: catalogExecuteToolName("mcp"),
+                  route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
+                  args: {
+                    id: catalogIdForRoute(researchSelection.route),
+                    arguments: researchSelection.args,
                   },
-                  context,
-                );
-                const resolvedRoute = resolved?.call.route;
-                if (
-                  !resolved ||
-                  !resolvedRoute?.resourceId ||
-                  !approvalRoutesMatch(
-                    { ...resolvedRoute, resourceId: resolvedRoute.resourceId },
-                    researchSelection.route,
-                  )
+                  executionId,
+                },
+                context,
+              );
+              const resolvedRoute = resolved?.call.route;
+              if (
+                !resolved ||
+                !resolvedRoute?.resourceId ||
+                !approvalRoutesMatch(
+                  { ...resolvedRoute, resourceId: resolvedRoute.resourceId },
+                  researchSelection.route,
                 )
-                  throw new IsolationError();
-                if (BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)) throw new IsolationError();
-                name = resolved.tool.name;
-                args = resolved.call.args;
-                connectorCall = resolved.call;
-                resolvedTool = resolved.tool;
-              }
+              )
+                throw new IsolationError();
+              if (BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)) throw new IsolationError();
+              name = resolved.tool.name;
+              args = resolved.call.args;
+              connectorCall = resolved.call;
+              resolvedTool = resolved.tool;
             } catch (error) {
               return { error: sanitizeConnectorError(error, runSecrets) };
             }
@@ -6650,50 +6623,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (connectorCall.route?.connectorId === "mcp" && !crmImportSelection) {
             try {
               const liveSchema = (resolvedTool ?? connectorTools.get(name))?.inputSchema;
-              if (liveSchema && !researchSelection?.recoveryEffectKind)
-                assertConnectorToolArgs(liveSchema, args);
+              if (liveSchema) assertConnectorToolArgs(liveSchema, args);
               researchAdmission = await admitRecruitingResearchCall(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
                 researchDispatchActor,
                 { ...connectorCall, tool: name, args },
                 context,
-                {
-                  actionId: researchSelection?.actionId,
-                  taskId: researchSelection?.taskId,
-                  frozenRequest: liveRoute
-                    ? boundDirectApprovalRequest(liveRoute, args, CATALOG_APPROVAL_TOOL)
-                    : effectRequest,
-                },
+                { taskId: researchSelection?.taskId },
               );
               if (researchSelection && !researchAdmission) throw new IsolationError();
             } catch (error) {
               return { error: sanitizeConnectorError(error, runSecrets) };
             }
           }
-          const researchMutation =
-            researchAdmission?.kind === "mutation" ? researchAdmission : undefined;
-          const settleResearchUncertainty = async () => {
-            if (!researchMutation?.effect) throw new IsolationError();
-            const settled = await settleUncertainRecruitingResearchAction(
-              deps.prisma,
-              researchActor.actor,
-              {
-                ...researchDispatchActor,
-                taskId: researchMutation.task.id,
-                actionId: researchMutation.action.id,
-                effectId: researchMutation.effect.id,
-                effectKind: researchMutation.effect.kind,
-                effectRequest: researchMutation.effect.request as Prisma.InputJsonValue,
-                result: uncertainEffectResult(name),
-              },
-            );
-            const gate = resolveDuplicateEffectGate(settled.effect, name);
-            if (gate.action !== "return") throw new IsolationError();
-            return { ...settled, result: gate.result };
-          };
           if (researchAdmission && disabledBuiltinTools.has("recruiting_research"))
             return { error: "This tool is disabled for this bot." };
-          if (researchAdmission?.kind === "read" && researchAdmission.recoveredResult)
+          if (researchAdmission?.recoveredResult)
             return redactConnectorPayload(researchAdmission.recoveredResult, runSecrets);
           const researchResult = async (
             admission: RecruitingResearchCallAdmission,
@@ -6719,42 +6664,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               runSecrets,
             );
           };
-          if (researchMutation && researchMutation.status !== "ready") {
-            if (researchMutation.status === "completed")
-              return researchResult(researchMutation, researchMutation.effect?.result);
-            if (
-              researchMutation.status === "unknown" &&
-              researchMutation.effect &&
-              ["executing", "uncertain"].includes(researchMutation.effect.status)
-            ) {
-              const settled = await settleResearchUncertainty();
-              if (settled.effect.status === "completed")
-                return researchResult(
-                  {
-                    ...researchMutation,
-                    task: settled.task,
-                    action: settled.action,
-                    effect: settled.effect,
-                  },
-                  settled.effect.result,
-                  settled.effect,
-                );
-              if (settled.effect.status === "denied") return settled.result;
-              return {
-                status: "unknown",
-                ...recruitingResearchSnapshot(settled.task, settled.action),
-                ownerRunId: settled.effect.runId,
-                automaticRetry: false,
-              };
-            }
-            return {
-              status: researchMutation.status,
-              ...recruitingResearchSnapshot(researchMutation.task, researchMutation.action),
-              ownerRunId: researchMutation.ownerRunId,
-              automaticRetry: false,
-            };
-          }
-          if (researchMutation?.effect) effectRequest = researchMutation.effect.request;
           const viaConnector = !BUILTIN_AGENT_TOOL_NAMES.has(name);
           const memoryWrite = ["remember", "save_shared_memory", "save_memory"].includes(name);
           const currentMemoryThread = memoryWrite
@@ -6972,7 +6881,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               internalMailboxWrite,
           );
           // A run opened by external text may read and draft but never send or change records.
-          if (!verifiedInternalWrite && !researchMutation) {
+          if (!verifiedInternalWrite) {
             const refusal = externalTextTriggerToolRefusal(
               run.trigger,
               researchAdmission?.kind === "read" ? name : policyToolName,
@@ -6986,7 +6895,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           const requiresUnattendedApproval =
             !verifiedInternalWrite &&
-            !researchMutation &&
             unattendedTriggerToolRequiresApproval(
               run.trigger,
               researchAdmission?.kind === "read" ? name : policyToolName,
@@ -6995,7 +6903,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           const requiresApprovalByDefault =
             !verifiedInternalWrite &&
-            !researchMutation &&
             (requiresUnattendedApproval ||
               toolRequiresApproval(
                 researchAdmission?.kind === "read" ? name : policyToolName,
@@ -7234,13 +7141,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : undefined) ??
             replyAdmission?.effect.idempotencyKey ??
             crmImportAdmission?.effect.idempotencyKey ??
-            researchMutation?.effect?.idempotencyKey ??
             (usesApprovalKey && occurrence === 0
               ? approvalEffectKey(runId, replayEffectToolName, args)
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
-          const domainEffect =
-            replyAdmission?.effect ?? crmImportAdmission?.effect ?? researchMutation?.effect;
+          const domainEffect = replyAdmission?.effect ?? crmImportAdmission?.effect;
           const applied = domainEffect
             ? { duplicate: true, effect: domainEffect }
             : READ_ONLY_AGENT_TOOLS.has(name)
@@ -7858,28 +7763,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           from,
                         },
                       )
-                    : researchMutation
-                      ? await claimRecruitingResearchAction(deps.prisma, researchActor.actor, {
+                    : researchAdmission
+                      ? await claimRecruitingResearchReadEffect(deps.prisma, researchActor.actor, {
                           runId,
                           leaseOwner: workerId,
                           leaseFence: fence,
-                          actionId: researchMutation.action.id,
                           effectId: applied!.effect.id,
                           from,
                         })
-                      : researchAdmission?.kind === "read"
-                        ? await claimRecruitingResearchReadEffect(
-                            deps.prisma,
-                            researchActor.actor,
-                            {
-                              runId,
-                              leaseOwner: workerId,
-                              leaseFence: fence,
-                              effectId: applied!.effect.id,
-                              from,
-                            },
-                          )
-                        : await claim(deps.prisma, applied!.effect.id);
+                      : await claim(deps.prisma, applied!.effect.id);
             } catch (error) {
               if (crmImportAdmission || replyAdmission) return roleError(error);
               throw error;
@@ -7935,15 +7827,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   claimedEffect = true;
                   return undefined;
                 }
-                if (researchMutation) return { status: "unknown", automaticRetry: false };
                 return settleUncertainEffect(deps.prisma, applied!.effect.id, name);
               }
             }
-            if (researchMutation)
-              return {
-                error: "Research action changed before dispatch; read its saved state.",
-                automaticRetry: false,
-              };
             throw uncertainEffectError(name);
           };
 
@@ -8412,7 +8298,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const early = await claimOrReturn("intended");
                 if (early !== undefined) return early;
               } else {
-                if (researchMutation) return { status: "unknown", automaticRetry: false };
                 return settleUncertainEffect(deps.prisma, applied.effect.id, gate.toolName);
               }
             } else if (gate.action === "execute") {
@@ -9187,15 +9072,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               !deps.artifacts ||
               !researchInput?.success ||
-              (researchInput.data.operation !== "prepare" &&
-                researchInput.data.operation !== "continue" &&
-                researchInput.data.operation !== "save_results" &&
+              (researchInput.data.operation !== "save_results" &&
                 researchInput.data.operation !== "import_csv" &&
                 researchInput.data.operation !== "save_search" &&
                 researchInput.data.operation !== "calibration_round")
             )
               return finish({
-                error: "Recruiting research requires a valid preparation and artifact storage",
+                error: "Recruiting research requires a valid operation and artifact storage",
               });
             if (applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
@@ -9284,32 +9167,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   context,
                 );
               }
-              if (researchInput.data.operation === "save_results") {
-                if (!applied || !claimedEffect) throw new IsolationError();
-                // The local projection and this native effect complete in one transaction.
-                return await saveNativeRecruitingCandidateResults(
-                  { prisma: deps.prisma, artifacts: deps.artifacts },
-                  {
-                    ...researchActor,
-                    leaseOwner: workerId,
-                    leaseFence: fence,
-                    effectId: applied.effect.id,
-                    effectRequest: applied.effect.request,
-                  },
-                  researchInput.data,
-                  context,
-                );
-              }
-              const result = await prepareRecruitingResearchTool(
+              if (!applied || !claimedEffect) throw new IsolationError();
+              // The local projection and this native effect complete in one transaction.
+              return await saveNativeRecruitingCandidateResults(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
-                researchActor,
+                {
+                  ...researchActor,
+                  leaseOwner: workerId,
+                  leaseFence: fence,
+                  effectId: applied.effect.id,
+                  effectRequest: applied.effect.request,
+                },
                 researchInput.data,
                 context,
-                (sourceId, recallScope) =>
-                  adoptRecruitingContext("research_prepare", "tool_result", sourceId, recallScope),
               );
-              if ("roleContext" in result) await retainRecruitingSource(result.source);
-              return finish(redactConnectorPayload(result, runSecrets));
             } catch (error) {
               if (
                 (researchInput.data.operation === "save_results" ||
@@ -10827,21 +10698,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   });
                 }
                 if (event.outcome === "uncertain" && declaredReadOnly !== true && applied) {
-                  if (researchMutation) {
-                    const settled = await settleResearchUncertainty();
-                    if (settled.effect.status === "completed")
-                      return researchResult(
-                        {
-                          ...researchMutation,
-                          task: settled.task,
-                          action: settled.action,
-                          effect: settled.effect,
-                        },
-                        settled.effect.result,
-                        settled.effect,
-                      );
-                    return settled.result;
-                  }
                   return settleUncertainEffect(deps.prisma, applied.effect.id, name);
                 }
               }

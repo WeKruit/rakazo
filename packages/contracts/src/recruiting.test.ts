@@ -466,20 +466,7 @@ describe("recruiting contracts", () => {
         false,
       );
   });
-  const researchRound = {
-    expectedRoleRevision: 1,
-    purpose: "calibration",
-    approvalEffectId: "documents-approval",
-    clientNonce: "round-nonce",
-    instructions: "  Preserve every current qualification.\r\nUse supplied evidence.\n",
-    output: "  Include original source cells and evidence gaps.\n",
-    recallScope: "  This round only: the example region.\r\n",
-    intent: { basis: "direct", quote: "Find candidates for this role" },
-  };
   const researchInputs = [
-    { ...researchRound, operation: "prepare", mcpServerId: "research-server" },
-    { ...researchRound, operation: "continue", taskId: "local-research-task" },
-    { operation: "start", actionId: "prepared-action" },
     { operation: "status", taskId: "local-research-task" },
     { operation: "rows", taskId: "local-research-task", limit: 7, cursor: "  opaque+/=\r\n " },
   ];
@@ -519,70 +506,16 @@ describe("recruiting contracts", () => {
     },
   );
 
-  it("allows omitting a local task only for scale continuation from the completed native G2", () => {
-    const input = {
-      ...researchRound,
-      operation: "continue",
-      purpose: "scale",
-      approvalEffectId: "g2",
-    };
-    expect(contracts.RecruitingResearchToolInputSchema.parse(input)).toEqual(input);
-    expect(
-      contracts.RecruitingResearchToolInputSchema.safeParse({ ...input, purpose: "calibration" })
-        .success,
-    ).toBe(false);
-    for (const injected of [
-      { providerTaskId: "provider" },
-      { mcpServerId: "server" },
-      { serverRevision: 1 },
-    ])
-      expect(
-        contracts.RecruitingResearchToolInputSchema.safeParse({ ...input, ...injected }).success,
-      ).toBe(false);
-  });
-  it("rejects invalid research identifiers, revisions and blank round text", () => {
-    const prepare = researchInputs[0]!;
-    for (const invalid of [
-      { mcpServerId: "" },
-      { mcpServerId: "  " },
-      { clientNonce: "" },
-      { clientNonce: "\n" },
-      { expectedRoleRevision: 0 },
-      { expectedRoleRevision: -1 },
-      { expectedRoleRevision: 1.5 },
-      { expectedRoleRevision: "1" },
-      { purpose: undefined },
-      { purpose: "guess" },
-      { approvalEffectId: undefined },
-      { approvalEffectId: " " },
-      { instructions: " \r\n\t" },
-      { output: "" },
-      { output: " \n" },
-      { recallScope: " \r\n" },
-      { instructions: undefined },
-      { output: undefined },
-      { intent: { basis: "assistant", quote: "search" } },
-      { intent: { basis: "direct", quote: " " } },
-      { intent: { basis: "direct", quote: "search", actor: "forged" } },
-    ]) {
-      expect(
-        contracts.RecruitingResearchToolInputSchema?.safeParse({ ...prepare, ...invalid }).success,
-      ).toBe(false);
-    }
-    expect(
-      contracts.RecruitingResearchToolInputSchema?.parse({ ...prepare, recallScope: null }),
-    ).toEqual({ ...prepare, recallScope: null });
+  it("rejects invalid research read identifiers and removed operations", () => {
     for (const input of [
-      { ...researchInputs[1], taskId: " " },
-      { operation: "start", actionId: "" },
+      { operation: "prepare", mcpServerId: "server", clientNonce: "nonce" },
+      { operation: "continue", taskId: "task" },
+      { operation: "start", actionId: "action" },
       { operation: "status", taskId: "\n" },
       { operation: "rows", taskId: "" },
       { operation: "rows", taskId: "task", limit: 0 },
       { operation: "rows", taskId: "task", limit: 1.5 },
       { operation: "rows", taskId: "task", cursor: "" },
-      { ...prepare, taskId: "unexpected-task" },
-      { ...researchInputs[1], mcpServerId: "unexpected-server" },
-      { operation: "start", actionId: "action", ...researchRound },
       { operation: "status", taskId: "task", limit: 1 },
       { operation: "rows", taskId: "task", actionId: "action" },
     ]) {
@@ -1339,21 +1272,6 @@ describe("recruiting contracts", () => {
       {
         schema: contracts.ReviseRecruitingRoleInput,
         value: { roleId: role.id, expectedRevision: 1, title: role.title, ...definition },
-      },
-      {
-        schema: contracts.PrepareRecruitingResearchActionInput,
-        value: {
-          taskId: action.taskId,
-          expectedRevision: 1,
-          roleRevisionId: role.currentRevisionId,
-          clientNonce: action.clientNonce,
-          kind: action.kind,
-          purpose: "calibration",
-          approvalEffectId: "documents-approval",
-          requestArtifact: artifact,
-          contextArtifact: artifact,
-          recallScope: action.recallScope,
-        },
       },
       {
         schema: contracts.SaveRecruitingAssessmentInput,

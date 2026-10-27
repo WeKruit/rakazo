@@ -1,30 +1,15 @@
-import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
 import type {
   Actor,
   RecruitingCandidateSource,
-  RecruitingHumanIntent,
   RecruitingResearchObservation,
-  RecruitingResearchPurpose,
-  RecruitingSourceRef,
-} from "@rakazo/contracts";
-import {
-  RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
-  RecruitingArtifactRefSchema,
-  RecruitingCandidateOutputSchemaId,
-  RecruitingHumanIntentSchema,
-  RecruitingId,
-  RecruitingResearchPurposeSchema,
-  RecruitingSourceRefSchema,
 } from "@rakazo/contracts";
 import {
   boundDirectApprovalDetails,
   catalogApprovalDetails,
   projectRecruitingCandidateReport,
-  RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS,
   readRecruitingResearchReadArtifact,
-  requireRecruitingBriefConfirmation,
 } from "@rakazo/core";
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
@@ -34,9 +19,6 @@ import { isPeopleSearchEndpoint } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
-
-import { z } from "zod";
-import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 
 async function nativeMcpCreationReceipts(
   prisma: PrismaClient,
@@ -202,196 +184,6 @@ export async function requireFullEnrichJobOwnership(
   throw new IsolationError(
     "This contact lookup is not available in your workspace. Start a new lookup in this conversation.",
   );
-}
-
-const Text = z.string().refine((text) => text.trim().length > 0, "Text must not be blank");
-const Route = z.strictObject({
-  connectorId: z.literal("mcp"),
-  resourceId: RecruitingId,
-  resourceRevision: z.number().int().positive(),
-  toolName: z.enum(["research", "reply"]),
-  catalogGroup: Text.optional(),
-});
-const Request = {
-  roleId: RecruitingId,
-  roleRevisionId: RecruitingId,
-  roleRevision: z.number().int().positive(),
-  contextArtifact: RecruitingArtifactRefSchema,
-  contextText: Text,
-  source: RecruitingSourceRefSchema,
-  intent: RecruitingHumanIntentSchema,
-  instructions: Text,
-  output: Text,
-  recallScope: Text.nullable(),
-  route: Route,
-};
-const BoundRequest = {
-  ...Request,
-  version: z.literal(2),
-  purpose: RecruitingResearchPurposeSchema,
-  approvalEffectId: RecruitingId,
-};
-export const RecruitingResearchRequestSchema = z
-  .union([
-    z.strictObject({
-      ...Request,
-      version: z.literal(1),
-      operation: z.literal("create"),
-      args: z.strictObject({ prompt: Text }),
-    }),
-    z.strictObject({
-      ...Request,
-      version: z.literal(1),
-      operation: z.literal("continue"),
-      args: z.strictObject({ task_id: RecruitingId, message: Text }),
-    }),
-    z.strictObject({
-      ...BoundRequest,
-      operation: z.literal("create"),
-      args: z.strictObject({ prompt: Text }),
-    }),
-    z.strictObject({
-      ...BoundRequest,
-      operation: z.literal("continue"),
-      args: z.strictObject({ task_id: RecruitingId, message: Text }),
-    }),
-    z.strictObject({
-      ...BoundRequest,
-      version: z.literal(3),
-      candidateOutputSchema: RecruitingCandidateOutputSchemaId,
-      operation: z.literal("create"),
-      args: z.strictObject({ prompt: Text }),
-    }),
-    z.strictObject({
-      ...BoundRequest,
-      version: z.literal(3),
-      candidateOutputSchema: RecruitingCandidateOutputSchemaId,
-      operation: z.literal("continue"),
-      args: z.strictObject({ task_id: RecruitingId, message: Text }),
-    }),
-  ])
-  .superRefine((request, ctx) => {
-    if (
-      request.route.toolName !== (request.operation === "create" ? "research" : "reply") ||
-      request.intent.basis !== "direct" ||
-      request.source.kind !== "original_material" ||
-      request.source.anchor.kind !== "message" ||
-      request.source.readState !== "read" ||
-      request.source.quote !== request.intent.quote ||
-      (request.operation === "create" ? request.args.prompt : request.args.message) !==
-        researchText(request)
-    )
-      ctx.addIssue({
-        code: "custom",
-        message: "Frozen recruiting request identity or text does not match",
-      });
-  });
-export type RecruitingResearchRequest = z.infer<typeof RecruitingResearchRequestSchema>;
-export type RecruitingResearchRoute = z.infer<typeof Route>;
-
-type BuildRequest = {
-  context: LoadedRecruitingRunContext;
-  source: RecruitingSourceRef;
-  intent: RecruitingHumanIntent;
-  purpose: RecruitingResearchPurpose;
-  approvalEffectId: string;
-  route: RecruitingResearchRoute;
-  instructions: string;
-  output: string;
-  recallScope: string | null;
-} & (
-  | { operation: "create"; providerTaskId?: never }
-  | { operation: "continue"; providerTaskId: string }
-);
-
-export function buildRecruitingResearchRequest(input: BuildRequest): {
-  manifest: RecruitingResearchRequest;
-  bytes: Buffer;
-  sha256: string;
-} {
-  const { context } = input;
-  const { role, revision } = context.workspace;
-  requireRecruitingBriefConfirmation(revision);
-  if (
-    role.currentRevisionId !== revision.id ||
-    role.id !== revision.roleId ||
-    role.revision !== revision.revision ||
-    context.manifest.roleId !== role.id ||
-    context.manifest.roleRevisionId !== revision.id ||
-    context.manifest.roleRevision !== revision.revision ||
-    context.text !== context.manifest.text ||
-    !nonblank(context.manifest.roleText) ||
-    !context.text.startsWith(context.manifest.roleText)
-  )
-    throw new Error("Recruiting context does not match the current role version");
-  const text = researchText({
-    contextText: context.text,
-    instructions: input.instructions,
-    output: input.output,
-    recallScope: input.recallScope,
-    purpose: input.purpose,
-    candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
-  });
-  const manifest = RecruitingResearchRequestSchema.parse({
-    version: 3,
-    candidateOutputSchema: RECRUITING_CANDIDATE_OUTPUT_SCHEMA,
-    purpose: input.purpose,
-    approvalEffectId: input.approvalEffectId,
-    operation: input.operation,
-    roleId: role.id,
-    roleRevisionId: revision.id,
-    roleRevision: revision.revision,
-    contextArtifact: context.contextArtifact,
-    contextText: context.text,
-    source: input.source,
-    intent: input.intent,
-    instructions: input.instructions,
-    output: input.output,
-    recallScope: input.recallScope,
-    route: input.route,
-    args:
-      input.operation === "create"
-        ? { prompt: text }
-        : { task_id: input.providerTaskId, message: text },
-  });
-  const bytes = Buffer.from(JSON.stringify(manifest), "utf8");
-  return { manifest, bytes, sha256: hash(bytes) };
-}
-
-export function readRecruitingResearchRequest(
-  bytes: Uint8Array,
-  expectedSha256: string,
-): RecruitingResearchRequest {
-  if (!/^[a-f0-9]{64}$/.test(expectedSha256) || hash(bytes) !== expectedSha256)
-    throw new Error("Recruiting request artifact hash does not match its frozen bytes");
-  return RecruitingResearchRequestSchema.parse(
-    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
-  );
-}
-
-function researchText(input: {
-  contextText: string;
-  instructions: string;
-  output: string;
-  recallScope: string | null;
-  purpose?: RecruitingResearchPurpose;
-  candidateOutputSchema?: string;
-}): string {
-  return [
-    input.contextText,
-    ...(input.purpose === undefined ? [] : [`Research purpose:\n${input.purpose}`]),
-    `Research instructions:\n${input.instructions}`,
-    `Requested output:\n${input.output}`,
-    ...(input.recallScope === null ? [] : [`Recall scope for this round:\n${input.recallScope}`]),
-    "The role criteria remain authoritative. Recall scope and output instructions do not change qualification. Preserve missing evidence as unknown; provider labels do not establish qualification.",
-    ...(input.candidateOutputSchema === undefined
-      ? []
-      : [RECRUITING_CANDIDATE_OUTPUT_INSTRUCTIONS]),
-  ].join("\n\n");
-}
-
-function hash(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
 }
 
 export type { RecruitingResearchObservation } from "@rakazo/contracts";

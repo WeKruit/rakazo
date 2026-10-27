@@ -162,19 +162,16 @@ describe("jsonSchemaParameters", () => {
     }
   });
 
-  it.each([
-    "recruiting_role",
-    "recruiting_research",
-    "recruiting_feedback",
-    "remember",
-    "save_shared_memory",
-  ])("preserves exact human quote guidance in the %s model schema", (name) => {
-    const tool = builtinAgentTools.find((entry) => entry.name === name)!;
-    const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
-    expect(JSON.stringify(wire)).toContain(
-      "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
-    );
-  });
+  it.each(["recruiting_role", "recruiting_feedback", "remember", "save_shared_memory"])(
+    "preserves exact human quote guidance in the %s model schema",
+    (name) => {
+      const tool = builtinAgentTools.find((entry) => entry.name === name)!;
+      const wire = JSON.parse(JSON.stringify(parametersFor(tool)));
+      expect(JSON.stringify(wire)).toContain(
+        "One exact contiguous substring from one actual current human text block, preserving whitespace; do not normalize whitespace or join blocks.",
+      );
+    },
+  );
 
   it.each(["recruiting_feedback", "remember", "save_shared_memory"])(
     "preserves unique-quote preference edits through the %s native Pi wire",
@@ -363,42 +360,14 @@ describe("jsonSchemaParameters", () => {
     expect(incomplete.sourceRefs).toEqual([]);
   });
 
-  it("explains every required preparation field after root union normalization", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research")!;
-    for (const field of [
-      "expectedRoleRevision",
-      "clientNonce",
-      "instructions",
-      "output",
-      "recallScope",
-      "intent",
-      "mcpServerId",
-      "taskId",
-    ])
-      expect(tool.description).toContain(field);
-    expect(tool.description).toContain("recallScope:null");
-  });
-
-  it("preserves all five closed recruiting research inputs through the installed Pi validator", () => {
+  it("preserves closed recruiting research inputs through the installed Pi validator", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
     expect(tool).toBeDefined();
     expect(tool!.readOnly).not.toBe(true);
     const parameters = parametersFor(tool!);
     const wire = JSON.parse(JSON.stringify(parameters));
-    const round = {
-      expectedRoleRevision: 1,
-      purpose: "calibration",
-      approvalEffectId: "documents-approval",
-      clientNonce: "round-nonce",
-      instructions: "  Preserve the complete current role.\r\nKeep every hard gate.\n",
-      output: "  Include original evidence columns.\n",
-      recallScope: "  This round only.\r\n",
-      intent: { basis: "direct", quote: "Search for this role" },
-    };
     const inputs: ToolCall["arguments"][] = [
-      { ...round, operation: "prepare", mcpServerId: "research-server" },
-      { ...round, operation: "continue", taskId: "local-task", recallScope: null },
-      { operation: "start", actionId: "prepared-action" },
+      { operation: "save_results", expectedRoleRevision: 1, providerTaskId: "task", cursor: null },
       { operation: "status", taskId: "local-task" },
       { operation: "rows", taskId: "local-task", limit: 7, cursor: "  opaque+/=\r\n " },
     ];
