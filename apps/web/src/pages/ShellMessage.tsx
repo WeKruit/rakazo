@@ -8,11 +8,14 @@ import { Copy, MoreHorizontal, Reply, Smile } from "lucide-react";
 import { memo, useMemo, useState } from "react";
 import { DeferredMenu, DeferredPopover } from "../components/DeferredPopover";
 import { lazyPanel } from "../components/ErrorBoundary";
+import { withFeatureMessages } from "../lib/i18n";
 
 const ArtifactFileCard = lazyPanel(() =>
   import("../components/ArtifactFileCard").then((m) => m.ArtifactFileCard),
 );
-const AskCard = lazyPanel(() => import("../components/AskCard").then((m) => m.AskCard));
+const AskCard = lazyPanel(() =>
+  withFeatureMessages(() => import("../components/AskCard")).then((m) => m.AskCard),
+);
 
 import { CollaborationMarker } from "../components/ai/CollaborationMarker";
 
@@ -52,15 +55,19 @@ import {
 import { ReplyLine } from "./shell/chat-context";
 
 const AppConnectCard = lazyPanel(() =>
-  import("./shell/message-cards").then((m) => m.AppConnectCard),
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.AppConnectCard),
 );
-const ArtifactImage = lazyPanel(() => import("./shell/message-cards").then((m) => m.ArtifactImage));
+const ArtifactImage = lazyPanel(() =>
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.ArtifactImage),
+);
 const ChartBlockView = lazyPanel(() =>
-  import("./shell/message-cards").then((m) => m.ChartBlockView),
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.ChartBlockView),
 );
-const ChoiceCard = lazyPanel(() => import("./shell/message-cards").then((m) => m.ChoiceCard));
+const ChoiceCard = lazyPanel(() =>
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.ChoiceCard),
+);
 const McpApprovalCard = lazyPanel(() =>
-  import("./shell/message-cards").then((m) => m.McpApprovalCard),
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.McpApprovalCard),
 );
 
 const FALLBACK_BOT_COLOR = "#85858A";

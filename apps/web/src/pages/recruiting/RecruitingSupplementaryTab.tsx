@@ -17,7 +17,9 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Button, TabsContent } from "@rakazo/ui-web";
 import type { useRecruitingWorkspace } from "./useRecruitingWorkspace";
 
-const AskCard = lazyPanel(() => import("../../components/AskCard").then((m) => m.AskCard));
+const AskCard = lazyPanel(() =>
+  withFeatureMessages(() => import("../../components/AskCard")).then((m) => m.AskCard),
+);
 
 import { rpc } from "../../lib/rpc";
 

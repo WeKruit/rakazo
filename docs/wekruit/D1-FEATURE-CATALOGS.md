@@ -237,3 +237,61 @@ Follow-up validation: web/chat-ui typechecks, production build and Biome passed;
 `pnpm exec vitest run apps/web/src/pages/Shell.test.tsx packages/chat-ui/src`
 passed all 370 tests in 10 files (31.73 seconds). Existing confirmation,
 sanitization, table and Markdown assertions remain intact.
+
+## Closed confirmation and optional chat catalogs
+
+The original external-link alert now loads only after a guarded link click.
+`preventDefault()` still runs synchronously, before any import. Pending/error
+states cannot open the destination. Cancel ignores a late import. The loading,
+error, Refresh and Cancel strings reuse existing translated IDs. A real Chromium
+failure test found that retrying the same failed dynamic import remains cached;
+the error state therefore offers an explicit **Refresh**, not an ineffective
+in-place retry. Refresh reloads the app; clicking the link again still shows the
+original confirmation before navigation. It can discard unsent local state, so
+it is never automatic from this component; Cancel remains available. The app's
+pre-existing idle preload-recovery policy is unchanged.
+
+Eight already-deferred chat/control source modules join the existing optional
+catalog: AskCard, message-cards, dialogs, ComputerUpdateProgress, LiveWork,
+bot-panel, bot-credentials and ApprovalRulesSettings. Every direct lazy consumer
+is guarded, including supplementary recruiting cards. Existing LiveWork's
+immediate Starting fallback is unchanged. No content is hidden to avoid loading:
+messages containing these controls load the optional catalog before rendering.
+All 2006 existing compiled message IDs/translations match the preceding commit
+in each of the ten locales (official Lingui catalog API comparison).
+
+Chinese production cold entry, compared with the preceding presentation split:
+
+| Case | Before gzip bytes | After gzip bytes |
+| --- | ---: | ---: |
+| Contacts | 325328 | 322135 |
+| Plain chat | 288026 (preceding parser slice) | 284874 |
+| URL + email + literal bare-domain user message | 354913 | 291476 |
+| Sign-in | 180757 | 177577 |
+
+The intermediate confirmation-only contacts result was 325418 (+90 bytes), and
+links 294762 (-60151 bytes). Optional chat catalogs then reduced contacts by
+3283 bytes and links by 3286. The plain-chat baseline is explicitly the preceding
+parser slice rather than a newly measured matched presentation baseline.
+Contacts keeps 7 JS/35 total requests, 17 RPC calls and zero duplicated recruiting
+reads. It remains **72135 bytes above 250000**. A complex message may load both
+Markdown and optional control catalogs, so these are fixture-specific results.
+
+Validation: combined web/chat-ui 1854 tests across 159 files passed (32.31s),
+including canceled imports and synchronous navigation prevention; both package
+type checks and the production build passed. Existing translation concurrency,
+fallback, all source coverage, Shell immediate-send and zero-extra-read checks
+remain intact. Production recovery is reproducible after asset measurement with:
+
+```sh
+MEASURE_UI_LOCALE=en MEASURE_MESSAGE_ROLE=user MEASURE_MESSAGE_TEXT='See https://example.com/path' MEASURE_EXPECT_LINKS=1 MEASURE_CONFIRM_RECOVERY=1 pnpm --filter @rakazo/web exec tsx scripts/measure-first-load.ts dist
+```
+
+This synthetic check aborts the alert chunk once during the existing automatic
+reload cooldown, stubs external navigation, clicks Refresh, then verifies the
+original alert and Cancel after reload. Its output logs recovery separately;
+post-reload requests are not included in the cold payload measurement.
+
+Final production browser gate: all 16 responsive route, keyboard/focus, auth,
+optional-catalog and bilingual cases passed (43.1 seconds). Biome formatting and
+`git diff --check` passed after formatting the newly wrapped lazy imports.

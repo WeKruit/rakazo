@@ -22,28 +22,34 @@ const CommandPalette = lazyPanel(() =>
   import("../shell/command-palette").then((module) => module.CommandPalette),
 );
 const ClearConversationDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.ClearConversationDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then(
+    (module) => module.ClearConversationDialog,
+  ),
 );
 const DeleteBotDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.DeleteBotDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then((module) => module.DeleteBotDialog),
 );
 const DeleteItemDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.DeleteItemDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then((module) => module.DeleteItemDialog),
 );
 const NewBotSectionDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.NewBotSectionDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then(
+    (module) => module.NewBotSectionDialog,
+  ),
 );
 const NewSpaceDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.NewSpaceDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then((module) => module.NewSpaceDialog),
 );
 const PickerInfoDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.PickerInfoDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then((module) => module.PickerInfoDialog),
 );
 const RenameBotSectionDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.RenameBotSectionDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then(
+    (module) => module.RenameBotSectionDialog,
+  ),
 );
 const RenameSpaceDialog = lazyPanel(() =>
-  import("../shell/dialogs").then((module) => module.RenameSpaceDialog),
+  withFeatureMessages(() => import("../shell/dialogs")).then((module) => module.RenameSpaceDialog),
 );
 
 const BotContextMenu = lazyOverlay(() =>

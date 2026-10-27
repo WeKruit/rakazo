@@ -55,6 +55,11 @@ msgstr "{0} {unitLabel}"
 msgid "{0} at {company}"
 msgstr ""
 
+#. placeholder {0}: block.name
+#: src/pages/shell/message-cards.tsx
+msgid "{0} connection"
+msgstr "Connexion {0}"
+
 #. placeholder {0}: bot.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} default"
@@ -89,6 +94,10 @@ msgstr ""
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} will still respond to direct mentions."
 msgstr "{0} répondra toujours aux mentions directes."
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "{commandVariable} is reserved and cannot be used as a command variable. Choose another name."
+msgstr "{commandVariable} est réservée et ne peut pas être utilisée comme variable de commande. Choisissez un autre nom."
 
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 msgid "{count} months"
@@ -126,6 +135,10 @@ msgstr "{toolCount, plural, one {# outil} other {# outils}}"
 msgid "{undated} without a recorded date"
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "A bit of everything"
+msgstr "Un peu de tout"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "A saved check failed."
 msgstr ""
@@ -153,6 +166,10 @@ msgstr "Jeton d'accès (optionnel)"
 msgid "Account"
 msgstr "Compte"
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Account default"
+msgstr "Défaut du compte"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Account ID"
@@ -166,6 +183,10 @@ msgstr "Libellé du compte"
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr "Comptes"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Action confirmations"
+msgstr "Confirmations d'action"
 
 #. placeholder {0}: bot.name
 #: src/pages/BotContextMenu.tsx
@@ -205,6 +226,10 @@ msgstr "Ajouter"
 msgid "Add {name} to shortlist"
 msgstr ""
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Add a model in Settings to use this."
+msgstr "Ajoutez un modèle dans les Paramètres pour utiliser cette fonctionnalité."
+
 #: src/pages/RoutineEditor.tsx
 msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
 msgstr "Ajoutez une planification, un webhook, GitHub ou un déclencheur de message pour exécuter cette routine."
@@ -232,6 +257,10 @@ msgstr "Ajouter un modèle connecté"
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Add connected models to use them as backups."
 msgstr "Ajoutez des modèles connectés pour les utiliser comme modèles de secours."
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Add credential"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Add Executor"
@@ -293,6 +322,7 @@ msgstr "Ajout en cours…"
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineSchedule.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Advanced"
 msgstr "Avancé"
 
@@ -354,6 +384,37 @@ msgstr "Toute la période"
 msgid "All tools"
 msgstr ""
 
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow {0} actions without asking"
+msgstr "Autoriser les actions {0} sans demander"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow {0} connector without asking"
+msgstr "Autoriser le connecteur {0} sans demander"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow {0} without asking"
+msgstr "Autoriser {0} sans demander"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow email actions without asking"
+msgstr "Autoriser les actions e-mail sans demander"
+
+#: src/components/AskCard.tsx
+msgid "Allow once"
+msgstr "Autoriser une fois"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow purchase actions without asking"
+msgstr "Autoriser les actions d'achat sans demander"
+
+#: src/components/AskCard.tsx
+msgid "Allowed once"
+msgstr "Autorisé une fois"
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
 msgstr ""
@@ -362,10 +423,33 @@ msgstr ""
 msgid "Always act"
 msgstr "Agir toujours"
 
+#: src/components/AskCard.tsx
+msgid "Always allow this tool"
+msgstr "Toujours autoriser cet outil"
+
+#: src/components/AskCard.tsx
+msgid "Always allowed"
+msgstr "Toujours autorisé"
+
+#: src/components/AskCard.tsx
+msgid "Answer"
+msgstr "Répondre"
+
+#: src/components/AskCard.tsx
+msgid "Answered"
+msgstr "Répondu"
+
+#. placeholder {0}: label === undefined ? selectedAskActionLabel(answer, actions) : approvalActionLabel(answer, label)
+#. placeholder {0}: selectedAskActionLabel(answer, actions)
+#: src/components/AskCard.tsx
+msgid "Answered: {0}"
+msgstr "Répondu : {0}"
+
 #: src/pages/Paywall.tsx
 msgid "Any model, with your own key"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
@@ -381,8 +465,21 @@ msgid "Appearance"
 msgstr "Apparence"
 
 #: src/pages/MessagingSettingsOverlay.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Approve"
 msgstr "Approuver"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Approve this server to let your agent use its tools."
+msgstr "Approuvez ce serveur pour permettre à votre agent d'utiliser ses outils."
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Approved"
@@ -406,6 +503,49 @@ msgstr "Artefacts"
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "Ask an agent to clarify in chat."
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before {0}"
+msgstr "Demander avant {0}"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before {0} actions"
+msgstr "Demander avant les actions {0}"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before {0} connector"
+msgstr "Demander avant le connecteur {0}"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before email actions"
+msgstr "Demander avant les actions e-mail"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before purchase actions"
+msgstr "Demander avant les actions d'achat"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before purchases"
+msgstr "Demander avant les achats"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before sending external email"
+msgstr "Demander avant d'envoyer un e-mail externe"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Asking a specialist"
 msgstr ""
 
 #: src/pages/recruiting/DetailPanel.tsx
@@ -456,6 +596,18 @@ msgstr "Code d'autorisation ou URL de rappel"
 msgid "Authorization parameters"
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Authorization timed out. Please try again."
+msgstr "L'autorisation a expiré. Veuillez réessayer."
+
+#: src/pages/shell/message-cards.tsx
+msgid "Authorize"
+msgstr "Autoriser"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Authorize this server so agents can use its tools. A popup opens."
+msgstr "Autorisez ce serveur pour que les agents puissent utiliser ses outils. Une fenêtre contextuelle s'ouvre."
+
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Automated senders"
 msgstr "Expéditeurs automatisés"
@@ -475,6 +627,10 @@ msgstr "Disponible après l'enregistrement de la routine"
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Available time"
 msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Available to this bot's shell commands as {commandVariable}"
+msgstr "Disponible pour les commandes shell de ce bot sous le nom {commandVariable}"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Avatars"
@@ -508,7 +664,16 @@ msgstr "Ordre des modèles de secours"
 msgid "Backup models saved."
 msgstr "Modèles de secours enregistrés."
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Basic auth"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Basic auth ({username})"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Bearer token"
 msgstr "Jeton porteur"
 
@@ -611,6 +776,8 @@ msgstr ""
 msgid "Campaign not synced"
 msgstr ""
 
+#: src/components/AskCard.tsx
+#: src/components/ComputerUpdateProgress.tsx
 #: src/pages/Artifacts.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/ModelSettingsControls.tsx
@@ -618,8 +785,14 @@ msgstr ""
 #: src/pages/Onboarding.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Cancel"
 msgstr "Annuler"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Cancel new bot"
+msgstr "Annuler le nouveau bot"
 
 #: src/pages/GroupPanel.tsx
 msgid "Cancel new group"
@@ -633,6 +806,7 @@ msgstr ""
 msgid "Canceled"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/ActivityList.tsx
 msgid "Cancelled"
 msgstr "Annulé"
@@ -727,6 +901,10 @@ msgstr "Modification en cours…"
 msgid "Channels"
 msgstr "Canaux"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Chart failed to render: {error}"
+msgstr "Le graphique n'a pas pu s'afficher : {error}"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Chat apps"
 msgstr "Applications de discussion"
@@ -775,6 +953,26 @@ msgstr ""
 msgid "Check the OAuth client settings."
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Checking availability"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking candidate records"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking connections"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking email"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking saved context"
+msgstr ""
+
 #: src/pages/HostComputerPrompt.tsx
 msgid "Checking…"
 msgstr "Vérification en cours…"
@@ -803,13 +1001,27 @@ msgstr ""
 msgid "Choose which connected model WeKruit Headhunter uses."
 msgstr "Choisissez le modèle connecté utilisé par WeKruit Headhunter."
 
+#: src/pages/shell/dialogs.tsx
+msgid "Clear"
+msgstr "Effacer"
+
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Clear {0}’s conversation?"
+msgstr "Effacer la conversation de {0} ?"
+
 #: src/pages/BotContextMenu.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Clear conversation"
 msgstr "Effacer la conversation"
 
 #: src/pages/ActivityList.tsx
 msgid "Clear filter {label}"
 msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Clearing…"
+msgstr "Effacement en cours…"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Client"
@@ -841,9 +1053,17 @@ msgstr ""
 msgid "Close"
 msgstr "Fermer"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Close chart"
+msgstr "Fermer le graphique"
+
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Close event details"
 msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Close image preview"
+msgstr "Fermer l'aperçu de l'image"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Close integrations"
@@ -880,6 +1100,10 @@ msgstr "Fermer les paramètres utilisateur"
 msgid "Close voice settings"
 msgstr "Fermer les paramètres vocaux"
 
+#: src/components/AskCard.tsx
+msgid "Code"
+msgstr "Code"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Comfortable"
 msgstr ""
@@ -891,6 +1115,11 @@ msgstr "Bientôt disponible"
 #: src/pages/McpServersOverlay.tsx
 msgid "Command"
 msgstr "Commande"
+
+#: src/components/AskCard.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Command variable"
+msgstr "Variable de commande"
 
 #: src/pages/Board.tsx
 msgid "Comment"
@@ -917,6 +1146,7 @@ msgid "Completed"
 msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "Ordinateur"
 
@@ -945,6 +1175,14 @@ msgstr "Configuré par le déploiement"
 msgid "Configured servers"
 msgstr "Serveurs configurés"
 
+#: src/components/AskCard.tsx
+msgid "Confirm adding candidates to the campaign"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm and send"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Confirm brief"
 msgstr ""
@@ -954,9 +1192,41 @@ msgstr ""
 msgid "Confirm delete"
 msgstr "Confirmer la suppression"
 
+#: src/components/AskCard.tsx
+msgid "Confirm forwarding email"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview booking"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview cancellation"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview change"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Confirm password"
 msgstr "Confirmer le mot de passe"
+
+#: src/components/AskCard.tsx
+msgid "Confirm reply"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending email"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending the first email"
+msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Confirmation"
@@ -972,10 +1242,15 @@ msgstr ""
 msgid "Conflicting information"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connect"
 msgstr "Connecter"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "Connecter {name}"
 
 #: src/pages/Onboarding.tsx
 msgid "Connect a model"
@@ -1001,6 +1276,10 @@ msgstr "Connecter la clé API"
 msgid "Connect Executor"
 msgstr "Connecter l'exécuteur"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Connect MCP server “{name}”"
+msgstr "Connecter le serveur MCP « {name} »"
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Connect OAuth"
 msgstr "Connecter OAuth"
@@ -1013,9 +1292,11 @@ msgstr "Connectez ce fournisseur pour l'utiliser comme modèle personnel."
 msgid "Connect Treg"
 msgstr "Connecter Treg"
 
+#: src/components/AskCard.tsx
 #: src/pages/McpOAuthCallback.tsx
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/ModelSettingsOverlay.tsx
+#: src/pages/shell/message-cards.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connected"
 msgstr "Connecté"
@@ -1036,8 +1317,14 @@ msgstr "Connecté à {0}."
 msgid "Connected and using {0}."
 msgstr "Connecté et utilise {0}."
 
+#: src/pages/shell/message-cards.tsx
+msgid "Connected. Its tools are available from your next message."
+msgstr "Connecté. Ses outils sont disponibles dès votre prochain message."
+
+#: src/components/AskCard.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/shell/message-cards.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Connecting…"
 msgstr "Connexion en cours…"
@@ -1086,6 +1373,10 @@ msgstr "Limite de contexte"
 msgid "Continue"
 msgstr "Continuer"
 
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Continue in Background"
+msgstr "Continuer en arrière-plan"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Conversation"
 msgstr ""
@@ -1124,6 +1415,14 @@ msgstr "Impossible d'ajouter"
 msgid "Could not add MCP server"
 msgstr "Impossible d'ajouter le serveur MCP"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not approve this server"
+msgstr "Impossible d'approuver ce serveur"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not authorize this app"
+msgstr "Impossible d'autoriser cette application"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Could not change password"
 msgstr "Impossible de changer le mot de passe"
@@ -1131,6 +1430,14 @@ msgstr "Impossible de changer le mot de passe"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Could not change the default model"
 msgstr "Impossible de changer le modèle par défaut"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not clear conversation"
+msgstr "Impossible d'effacer la conversation"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Could not complete action"
+msgstr "Impossible de terminer l'action"
 
 #: src/pages/McpOAuthCallback.tsx
 msgid "Could not complete OAuth"
@@ -1161,6 +1468,14 @@ msgstr "Impossible de se connecter à ce fournisseur"
 msgid "Could not connect this voice provider"
 msgstr "Impossible de se connecter à ce fournisseur vocal"
 
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "Impossible de se connecter. Réessayez."
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Could not create bot"
+msgstr "Impossible de créer le bot"
+
 #: src/pages/GroupPanel.tsx
 msgid "Could not create group"
 msgstr "Impossible de créer le groupe"
@@ -1169,13 +1484,37 @@ msgstr "Impossible de créer le groupe"
 msgid "Could not create role"
 msgstr ""
 
+#: src/pages/shell/dialogs.tsx
+msgid "Could not create section"
+msgstr "Impossible de créer la section"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not create space"
+msgstr "Impossible de créer l'espace"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete bot"
+msgstr "Impossible de supprimer le bot"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete group"
+msgstr "Impossible de supprimer le groupe"
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not delete MCP server"
 msgstr "Impossible de supprimer le serveur MCP"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete routine"
+msgstr "Impossible de supprimer la routine"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Could not delete skill"
 msgstr "Impossible de supprimer la compétence"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete space"
+msgstr "Impossible de supprimer l'espace"
 
 #: src/pages/Artifacts.tsx
 msgid "Could not delete this artifact."
@@ -1197,6 +1536,14 @@ msgstr ""
 msgid "Could not disconnect this voice provider"
 msgstr "Impossible de déconnecter ce fournisseur vocal"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not dismiss"
+msgstr "Impossible de fermer"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not dismiss this server"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not install connector"
 msgstr "Impossible d'installer le connecteur"
@@ -1212,6 +1559,10 @@ msgstr ""
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Could not load all activity."
 msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not load approval rules"
+msgstr "Impossible de charger les règles d'approbation"
 
 #: src/pages/Artifacts.tsx
 msgid "Could not load artifacts."
@@ -1246,6 +1597,10 @@ msgstr ""
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "Could not load candidates"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not load credentials."
 msgstr ""
 
 #: src/pages/recruiting/CandidateFeedback.tsx
@@ -1369,9 +1724,29 @@ msgstr "Impossible de retirer"
 msgid "Could not remove connector"
 msgstr "Impossible de retirer le connecteur"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not remove rule"
+msgstr "Impossible de retirer la règle"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not remove the credential"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not rename connection"
 msgstr "Impossible de renommer la connexion"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not rename section"
+msgstr "Impossible de renommer la section"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not rename space"
+msgstr "Impossible de renommer l'espace"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not render chart"
+msgstr "Impossible d'afficher le graphique"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Could not revoke connection"
@@ -1379,8 +1754,13 @@ msgstr "Impossible de révoquer la connexion"
 
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/KnowledgeSection.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Could not save"
 msgstr "Impossible d'enregistrer"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not save Auto Review"
+msgstr "Impossible d'enregistrer la révision automatique"
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Could not save backup models"
@@ -1393,6 +1773,10 @@ msgstr "Impossible d'enregistrer le groupe"
 #: src/pages/Onboarding.tsx
 msgid "Could not save model"
 msgstr "Impossible d'enregistrer le modèle"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not save rule"
+msgstr "Impossible d'enregistrer la règle"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
@@ -1415,6 +1799,14 @@ msgstr "Impossible d'enregistrer ce modèle de parole"
 msgid "Could not save that voice"
 msgstr "Impossible d'enregistrer cette voix"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not save the credential"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not save this choice"
+msgstr "Impossible d'enregistrer ce choix"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Could not save this draft. Try again."
 msgstr ""
@@ -1430,6 +1822,10 @@ msgstr "Impossible de rechercher dans le catalogue"
 #: src/pages/McpServersOverlay.tsx
 msgid "Could not start OAuth"
 msgstr "Impossible de démarrer OAuth"
+
+#: src/components/AskCard.tsx
+msgid "Could not submit this answer"
+msgstr "Impossible de soumettre cette réponse"
 
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not update"
@@ -1460,8 +1856,15 @@ msgid "Couldn't update messaging settings"
 msgstr "Impossible de mettre à jour les paramètres de messagerie"
 
 #: src/pages/Board.tsx
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Create"
 msgstr "Créer"
+
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Create a section and move {0} into it."
+msgstr "Créez une section et déplacez {0} dedans."
 
 #: src/pages/GroupPanel.tsx
 msgid "Create group"
@@ -1471,7 +1874,18 @@ msgstr "Créer un groupe"
 msgid "Create Routine"
 msgstr "Créer une routine"
 
+#: src/components/AskCard.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Create space"
+msgstr "Créer un espace"
+
+#: src/components/AskCard.tsx
+msgid "Created"
+msgstr "Créé"
+
 #: src/pages/GroupPanel.tsx
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Creating…"
 msgstr "Création en cours…"
 
@@ -1483,6 +1897,10 @@ msgstr "Identifiant"
 #: src/pages/PluginsOverlay.tsx
 msgid "credential saved"
 msgstr "Identifiant enregistré"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Credentials"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Credentials are encrypted and never sent to the model."
@@ -1573,6 +1991,14 @@ msgstr ""
 msgid "Current totals · all dates"
 msgstr ""
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Custom header"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Customer support"
+msgstr "Support client"
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Dark"
 msgstr "Sombre"
@@ -1590,10 +2016,15 @@ msgstr "jour"
 msgid "Day {0}"
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Day-to-day work"
+msgstr "Travail quotidien"
+
 #: src/pages/RoutineSchedule.tsx
 msgid "days"
 msgstr "jours"
 
+#: src/components/AskCard.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Decline"
 msgstr "Refuser"
@@ -1617,6 +2048,7 @@ msgstr "Par défaut ({0})"
 #. placeholder {0}: thinkingLevelLabel(defaultThinkingLevel)
 #: src/pages/Onboarding.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Default ({0})"
 msgstr "Par défaut ({0})"
 
@@ -1633,6 +2065,7 @@ msgstr ""
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Delete"
 msgstr "Supprimer"
 
@@ -1646,27 +2079,48 @@ msgstr "Supprimer « {0} » ?"
 msgid "Delete {0}"
 msgstr "Supprimer {0}"
 
+#. placeholder {0}: bot.name
+#. placeholder {0}: item.name
+#: src/pages/shell/dialogs.tsx
+msgid "Delete {0}?"
+msgstr "Supprimer {0} ?"
+
 #: src/pages/GroupPanel.tsx
 msgid "Delete group"
 msgstr "Supprimer le groupe"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Delete memories too"
+msgstr "Supprimer les mémoires également"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Deleted role"
 msgstr ""
 
 #: src/pages/Artifacts.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Deleting…"
 msgstr "Suppression en cours…"
 
+#: src/components/AskCard.tsx
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Denied"
 msgstr "Refusé"
+
+#: src/components/AskCard.tsx
+msgid "Deny"
+msgstr "Refuser"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Deployment default"
 msgstr "Défaut du déploiement"
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Describe what this bot does"
+msgstr "Décrivez ce que fait ce bot"
+
 #: src/pages/Board.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Description"
 msgstr "Description"
 
@@ -1684,6 +2138,10 @@ msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Disabled"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Disabled tools"
 msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
@@ -1720,6 +2178,15 @@ msgstr ""
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 msgid "Discuss candidate"
 msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+#: src/pages/shell/message-cards.tsx
+msgid "Dismiss"
+msgstr "Fermer"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Dismissed. Reconnect anytime from MCP settings."
+msgstr "Fermé. Reconnectez-vous à tout moment depuis les paramètres MCP."
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Display name"
@@ -1771,6 +2238,10 @@ msgstr ""
 msgid "Draft saved"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Drafting email"
+msgstr ""
+
 #: src/pages/BotContextMenu.tsx
 msgid "Duplicate"
 msgstr "Dupliquer"
@@ -1778,6 +2249,10 @@ msgstr "Dupliquer"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Duration"
 msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
+msgstr "ex. Agent Hivenet, Préventes, bot de feuilles de temps"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Earlier history"
@@ -1888,6 +2363,10 @@ msgstr ""
 msgid "Engage when... Ignore..."
 msgstr "Répondre quand... Ignorer..."
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Enter a username and password"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Enter a whole number from 1 to {MAX_MODEL_CONTEXT_WINDOW} for the context limit."
@@ -1978,9 +2457,17 @@ msgstr ""
 msgid "Executor token"
 msgstr "Jeton de l'exécuteur"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Expand"
+msgstr "Développer"
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Experience"
 msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Export"
+msgstr "Exporter"
 
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -2049,6 +2536,10 @@ msgstr "Finalisation de la connexion MCP…"
 msgid "Fit rationale"
 msgstr ""
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Flag unexpected actions"
+msgstr "Signaler les actions inattendues"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Follow-up email"
 msgstr ""
@@ -2082,6 +2573,14 @@ msgstr "ID de passerelle"
 #: src/pages/SettingsOverlay.tsx
 msgid "General"
 msgstr "Général"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Get notified when this Bot finishes or needs input"
+msgstr "Soyez averti lorsque ce bot termine ou a besoin d'une saisie"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Getting ready"
+msgstr "Préparation en cours"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
@@ -2120,6 +2619,10 @@ msgstr "Paramètres du groupe"
 msgid "Group updates"
 msgstr "Mises à jour du groupe"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Groups"
+msgstr "Groupes"
+
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Guide retrieval; qualification criteria stay unchanged."
 msgstr ""
@@ -2137,8 +2640,13 @@ msgstr ""
 msgid "header"
 msgstr "en-tête"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Header \"{header}\""
+msgstr ""
+
 #: src/pages/McpServersOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Header name"
 msgstr "Nom de l'en-tête"
 
@@ -2249,6 +2757,10 @@ msgstr ""
 msgid "Inbox"
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Inbox & email"
+msgstr "Boîte de réception et e-mail"
+
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Include"
@@ -2257,6 +2769,10 @@ msgstr ""
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Industry"
 msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Inherit default"
+msgstr "Hériter du défaut"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Initial email"
@@ -2274,6 +2790,10 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "Instruction"
 msgstr "Instruction"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Integration domain"
@@ -2340,12 +2860,17 @@ msgid "Introduced"
 msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Isolated"
 msgstr "Isolé"
 
 #: src/pages/Artifacts.tsx
 msgid "Isolated preview — no access to your account"
 msgstr "Aperçu isolé — aucun accès à votre compte"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
+msgstr "Sa conversation, ses fichiers et ses routines seront définitivement supprimés. Les bots qu'il a créés restent dans votre liste."
 
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "JD"
@@ -2362,6 +2887,10 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 msgid "just now"
 msgstr "à l'instant"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Keep memories"
+msgstr "Conserver les mémoires"
 
 #: src/pages/RoutineEditor.tsx
 msgid "key"
@@ -2490,6 +3019,10 @@ msgstr "Chargement des paramètres de mémoire…"
 msgid "Loading model catalog…"
 msgstr "Chargement du catalogue de modèles…"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Loading rules…"
+msgstr "Chargement des règles…"
+
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Loading saved availability…"
 msgstr ""
@@ -2552,14 +3085,26 @@ msgstr ""
 msgid "Log out"
 msgstr "Se déconnecter"
 
+#: src/components/AskCard.tsx
+msgid "Looks good, start searching"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "Low"
 msgstr "Faible"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
+msgstr ""
+
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Mailbox not recorded"
 msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Make sure nothing is still running on this computer."
+msgstr "Assurez-vous qu'aucun processus ne tourne encore sur cet ordinateur."
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Manage"
@@ -2672,6 +3217,10 @@ msgstr "Mémoire"
 msgid "Memory changed. Close and reopen it before saving again."
 msgstr ""
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Memory scope"
+msgstr "Portée de la mémoire"
+
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Mentions only"
 msgstr "Mentions uniquement"
@@ -2725,6 +3274,7 @@ msgstr ""
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Model"
 msgstr "Modèle"
 
@@ -2784,18 +3334,29 @@ msgstr "Déplacer {full} vers le bas"
 msgid "Move {full} up"
 msgstr "Déplacer {full} vers le haut"
 
+#: src/pages/shell/dialogs.tsx
+msgid "Move them to your shared memory."
+msgstr "Déplacez-les dans votre mémoire partagée."
+
 #: src/pages/BotContextMenu.tsx
 msgid "Move to"
 msgstr "Déplacer vers"
 
 #: src/pages/GroupPanel.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Name"
 msgstr "Nom"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Name missing"
 msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Name this bot"
+msgstr "Nommez ce bot"
 
 #: src/pages/GroupPanel.tsx
 msgid "Name this group"
@@ -2804,6 +3365,10 @@ msgstr "Nommez ce groupe"
 #: src/pages/RoutineEditor.tsx
 msgid "Name this routine"
 msgstr "Nommez cette routine"
+
+#: src/components/AskCard.tsx
+msgid "Needs changes"
+msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Needs connection"
@@ -2821,6 +3386,10 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 msgid "Needs takeover"
 msgstr "Nécessite une intervention"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "New bot"
+msgstr "Nouveau bot"
 
 #: src/pages/GroupPanel.tsx
 msgid "New group"
@@ -2843,12 +3412,17 @@ msgid "New search"
 msgstr ""
 
 #: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "New section"
 msgstr "Nouvelle section"
 
 #: src/pages/KnowledgeSection.tsx
 msgid "New skill"
 msgstr "Nouvelle compétence"
+
+#: src/pages/shell/dialogs.tsx
+msgid "New space"
+msgstr "Nouvel espace"
 
 #: src/pages/Board.tsx
 msgid "New ticket"
@@ -2911,6 +3485,10 @@ msgstr ""
 msgid "No contacts for this role yet."
 msgstr ""
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "No credentials saved for this bot."
+msgstr ""
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No future confirmed event appears in these saved checks."
 msgstr ""
@@ -2938,6 +3516,10 @@ msgstr ""
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
 msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "No longer active"
+msgstr "Plus actif"
 
 #: src/pages/PluginsOverlay.tsx
 msgid "No managed app catalog is configured on this deployment."
@@ -3173,6 +3755,11 @@ msgstr "Pas dans le catalogue de plugins"
 msgid "Not interested"
 msgstr ""
 
+#: src/components/AskCard.tsx
+#: src/pages/shell/message-cards.tsx
+msgid "Not now"
+msgstr "Pas maintenant"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Not pursuing"
 msgstr ""
@@ -3200,9 +3787,17 @@ msgstr ""
 msgid "Notes"
 msgstr ""
 
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Nothing is still running"
+msgstr "Rien ne tourne encore"
+
 #: src/pages/KnowledgeSection.tsx
 msgid "Nothing remembered yet"
 msgstr "Rien n'est mémorisé pour le moment"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Notifications"
+msgstr "Notifications"
 
 #: src/pages/ActivityList.tsx
 msgid "Now"
@@ -3450,7 +4045,9 @@ msgstr "Mettre en attente"
 msgid "Partial data"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/AccountSettingsOverlay.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Password"
 msgstr "Mot de passe"
 
@@ -3567,6 +4164,10 @@ msgstr ""
 msgid "Prepared"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Preparing a question"
+msgstr ""
+
 #: src/pages/Artifacts.tsx
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr "L'aperçu n'est pas disponible pour ce type de fichier — téléchargez-le pour le consulter."
@@ -3608,6 +4209,14 @@ msgstr ""
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "Priority"
 msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Private"
+msgstr "Privé"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Private workspace with its own bots and groups."
+msgstr "Espace de travail privé avec ses propres bots et groupes."
 
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/DetailPanel.tsx
@@ -3674,6 +4283,10 @@ msgstr ""
 msgid "Read original conversation"
 msgstr ""
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Read replies aloud"
+msgstr "Lire les réponses à voix haute"
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Read status unknown"
 msgstr ""
@@ -3688,6 +4301,14 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Read the selected original email and its actual mailbox conversation for interview planning. Preserve the candidate, mailbox and thread. Do not send or book anything."
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reading a page"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reading files"
 msgstr ""
 
 #: src/pages/recruiting/CandidateFeedback.tsx
@@ -3728,9 +4349,46 @@ msgstr ""
 msgid "Reconnect OAuth"
 msgstr "Reconnecter OAuth"
 
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Reconnecting"
+msgstr "Reconnexion en cours"
+
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Recorded event"
 msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Recording feedback"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recover computer"
+msgstr "Récupérer l'ordinateur"
+
+#. placeholder {0}: update.name
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovering {0}’s Computer"
+msgstr "Récupération de l'ordinateur de {0}"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovering Team Computer"
+msgstr "Récupération de l'ordinateur d'équipe"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovery failed"
+msgstr "Échec de la récupération"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovery is unavailable until the previous operation has stopped."
+msgstr "La récupération n'est pas disponible tant que l'opération précédente n'est pas arrêtée."
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovery restores the last saved workspace. Unsaved work may be lost."
+msgstr "La récupération restaure le dernier espace de travail enregistré. Les travaux non enregistrés peuvent être perdus."
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recreating the computer"
+msgstr "Recréation de l'ordinateur"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Recruiter messages"
@@ -3763,9 +4421,19 @@ msgstr ""
 msgid "Rejected in internal review"
 msgstr ""
 
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Release computer"
+msgstr "Libérer l'ordinateur"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Release interrupted computer?"
+msgstr "Libérer l'ordinateur interrompu ?"
+
+#: src/components/ApprovalRulesSettings.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/ScratchpadSection.tsx
+#: src/pages/shell/bot-credentials.tsx
 msgid "Remove"
 msgstr "Retirer"
 
@@ -3780,6 +4448,10 @@ msgstr "Supprimer {full}"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Remove {name} from shortlist"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Remove {secretName}? This bot will no longer be able to use it."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingRoleTab.tsx
@@ -3811,8 +4483,13 @@ msgid "Removing…"
 msgstr "Retrait en cours…"
 
 #: src/pages/BotContextMenu.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Rename section"
 msgstr "Renommer la section"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Rename space"
+msgstr "Renommer l'espace"
 
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Renews {day}"
@@ -3829,6 +4506,10 @@ msgstr "Remplacer la clé API"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Replace key"
 msgstr "Remplacer la clé"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Replace value"
+msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Replaced"
@@ -3874,6 +4555,10 @@ msgstr ""
 msgid "Requirements and feedback stay with this role."
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Research & writing"
+msgstr "Recherche et rédaction"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
@@ -3896,6 +4581,10 @@ msgstr ""
 #: src/pages/ActivityList.tsx
 msgid "Reset all"
 msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Restoring your workspace"
+msgstr "Restauration de votre espace de travail"
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "Results saved"
@@ -3994,6 +4683,14 @@ msgstr ""
 msgid "Reviewed"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Reviewing candidates"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing the role"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Revise in chat"
 msgstr ""
@@ -4039,6 +4736,10 @@ msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Role interest"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Role requirements"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
@@ -4117,6 +4818,7 @@ msgstr "Exécution en cours…"
 msgid "Runs when this bot receives a verified message from this provider."
 msgstr "S'exécute lorsque ce bot reçoit un message vérifié de ce fournisseur."
 
+#: src/components/AskCard.tsx
 #: src/pages/Board.tsx
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/GroupPanel.tsx
@@ -4125,12 +4827,18 @@ msgstr "S'exécute lorsque ce bot reçoit un message vérifié de ce fournisseur
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Save"
 msgstr "Enregistrer"
 
 #: src/pages/ModelBackupsSettings.tsx
 msgid "Save backups"
 msgstr "Enregistrer les modèles de secours"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Save credential"
+msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Save draft"
@@ -4140,10 +4848,15 @@ msgstr ""
 msgid "Save limits"
 msgstr ""
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Save new value"
+msgstr ""
+
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Save plan"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saved"
 msgstr "Enregistré"
@@ -4254,20 +4967,31 @@ msgstr "Enregistré."
 msgid "Saved. Rotate to reveal."
 msgstr "Enregistré. Tournez pour révéler."
 
+#: src/components/LiveWork.tsx
+msgid "Saving notes"
+msgstr ""
+
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Saving this plan does not approve a booking or message."
 msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Saving your workspace"
+msgstr "Enregistrement de votre espace de travail"
 
 #: src/pages/ExternalConversationSettings.tsx
 msgid "Saving..."
 msgstr "Enregistrement..."
 
+#: src/components/AskCard.tsx
 #: src/pages/GroupPanel.tsx
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/dialogs.tsx
 msgid "Saving…"
 msgstr "Enregistrement en cours…"
 
@@ -4407,6 +5131,14 @@ msgstr ""
 msgid "Searches"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Searching candidates"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Searching the web"
+msgstr ""
+
 #: src/pages/PluginsOverlay.tsx
 #: src/pages/SpaceSearch.tsx
 msgid "Searching…"
@@ -4444,6 +5176,10 @@ msgstr ""
 msgid "Send <0>{linkCode}</0> to the line from your chat app within 10 minutes. You'll get a confirmation reply once linked."
 msgstr "Envoyez <0>{linkCode}</0> au numéro depuis votre application de discussion dans les 10 minutes. Vous recevrez une réponse de confirmation une fois connecté."
 
+#: src/components/AskCard.tsx
+msgid "Send answer"
+msgstr "Envoyer la réponse"
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Send failed"
 msgstr ""
@@ -4464,6 +5200,10 @@ msgstr ""
 msgid "Send totals are not available from these records."
 msgstr ""
 
+#: src/components/AskCard.tsx
+msgid "Send when I say send"
+msgstr ""
+
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Send with Enter"
 msgstr "Envoyer avec Entrée"
@@ -4472,6 +5212,7 @@ msgstr "Envoyer avec Entrée"
 msgid "Sender unavailable"
 msgstr ""
 
+#: src/components/AskCard.tsx
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Sending…"
 msgstr "Envoi en cours…"
@@ -4538,8 +5279,13 @@ msgid "Share the role requirements in the conversation to build this brief."
 msgstr ""
 
 #: src/pages/MemorySettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Shared"
 msgstr "Partagé"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Shared chat with 2-6 bots. They all reply in the same thread."
+msgstr "Conversation partagée avec 2 à 6 bots. Ils répondent tous dans le même fil."
 
 #: src/pages/KnowledgeSection.tsx
 msgid "Shared documents"
@@ -4616,6 +5362,10 @@ msgstr ""
 msgid "Sign up"
 msgstr "S'inscrire"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Site"
+msgstr ""
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Skills"
 msgstr ""
@@ -4691,9 +5441,17 @@ msgstr "L’espace a changé. Rouvrez Modèles pour charger sa liste de secours.
 msgid "Space changed. Reopen Models to save its backup list."
 msgstr "L’espace a changé. Rouvrez Modèles pour enregistrer sa liste de secours."
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Space default"
+msgstr "Défaut de l'espace"
+
 #: src/pages/McpServersOverlay.tsx
 msgid "Space-separated scopes"
 msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Spaces"
+msgstr "Espaces"
 
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Speak + transcribe"
@@ -4864,6 +5622,10 @@ msgstr "Système"
 msgid "Tasks"
 msgstr ""
 
+#: src/pages/shell/bot-panel.tsx
+msgid "Team"
+msgstr "Équipe"
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "Team conversations"
 msgstr "Conversations d'équipe"
@@ -4913,9 +5675,14 @@ msgstr ""
 msgid "These replies are not linked to a specific calendar event."
 msgstr ""
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "These saved settings can't be read. Remove it and add it again."
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Thinking"
 msgstr "Réflexion"
 
@@ -4925,6 +5692,10 @@ msgstr ""
 
 #: src/pages/Artifacts.tsx
 msgid "This can't be undone."
+msgstr "Cette action est irréversible."
+
+#: src/pages/shell/dialogs.tsx
+msgid "This cannot be undone."
 msgstr "Cette action est irréversible."
 
 #: src/pages/PeerMessagesOverlay.tsx
@@ -4949,6 +5720,10 @@ msgstr "ce Mac"
 msgid "This month"
 msgstr "Ce mois-ci"
 
+#: src/pages/shell/dialogs.tsx
+msgid "This permanently removes every message and stops current work. The chat remains available."
+msgstr "Ceci supprime définitivement tous les messages et arrête les travaux en cours. La conversation reste disponible."
+
 #: src/pages/ModelSettingsControls.tsx
 msgid "This removes the connection from every space."
 msgstr ""
@@ -4956,6 +5731,10 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "This result cannot be displayed yet"
 msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "This server cannot be assigned without a bot."
+msgstr "Ce serveur ne peut pas être assigné sans bot."
 
 #: src/pages/McpServersOverlay.tsx
 msgid "This server did not request browser authorization."
@@ -4999,6 +5778,7 @@ msgstr ""
 
 #: src/pages/Board.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/shell/bot-panel.tsx
 msgid "Title"
 msgstr "Titre"
 
@@ -5018,6 +5798,10 @@ msgstr "Aujourd'hui"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Tool access"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
 msgstr ""
 
 #: src/pages/PluginsOverlay.tsx
@@ -5050,6 +5834,14 @@ msgstr ""
 msgid "Try again"
 msgstr "Réessayer"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Type"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Type your answer"
+msgstr "Saisissez votre réponse"
+
 #: src/pages/BotContextMenu.tsx
 msgid "Unassigned"
 msgstr "Non assigné"
@@ -5073,6 +5865,10 @@ msgstr "Désinstaller"
 #: src/pages/recruiting/RecruitingSummary.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Unknown"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Unknown tool"
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -5102,14 +5898,35 @@ msgstr ""
 msgid "Upcoming recorded bookings"
 msgstr ""
 
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Update failed"
+msgstr "Échec de la mise à jour"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Update progress"
+msgstr "Progression de la mise à jour"
+
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 msgid "Updated"
 msgstr "Mis à jour"
 
+#: src/pages/shell/bot-credentials.tsx
+msgid "Updated {updated}"
+msgstr ""
+
 #: src/pages/SettingsOverlay.tsx
 msgid "Updates"
 msgstr "Mises à jour"
+
+#. placeholder {0}: update.name
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Updating {0}’s Computer"
+msgstr "Mise à jour de l'ordinateur de {0}"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Updating Team Computer"
+msgstr "Mise à jour de l'ordinateur d'équipe"
 
 #: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
@@ -5157,9 +5974,26 @@ msgstr ""
 msgid "User memory"
 msgstr ""
 
+#: src/components/AskCard.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Username"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Uses this server's own {hostCredentialSource} credentials to access {selectedProviderName}."
 msgstr "Utilise les identifiants {hostCredentialSource} propres à ce serveur pour accéder à {selectedProviderName}."
+
+#: src/components/LiveWork.tsx
+msgid "Using a connected app"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Value"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Values are encrypted and never shown again."
+msgstr "Les valeurs sont chiffrées et ne sont plus affichées."
 
 #: src/pages/PluginsOverlay.tsx
 msgid "Verify and add"
@@ -5203,6 +6037,7 @@ msgid "View role records"
 msgstr ""
 
 #: src/pages/SettingsOverlay.tsx
+#: src/pages/shell/bot-panel.tsx
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Voice"
 msgstr "Voix"
@@ -5211,6 +6046,10 @@ msgstr "Voix"
 msgid "Waiting for resume"
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Waiting…"
+msgstr "En attente…"
+
 #: src/pages/Paywall.tsx
 msgid "Web, desktop and mobile apps"
 msgstr ""
@@ -5218,6 +6057,10 @@ msgstr ""
 #: src/pages/RoutineEditor.tsx
 msgid "Webhook"
 msgstr "Webhook"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Website login"
+msgstr ""
 
 #. placeholder {0}: week.count
 #: src/pages/recruiting/HomeDashboard.tsx
@@ -5229,9 +6072,21 @@ msgstr ""
 msgid "Weekdays"
 msgstr "Jours ouvrés"
 
+#: src/pages/shell/dialogs.tsx
+msgid "What about its memories?"
+msgstr "Qu'en est-il de ses mémoires ?"
+
+#: src/pages/shell/message-cards.tsx
+msgid "What do you want me on first?"
+msgstr "Que voulez-vous que je fasse en premier ?"
+
 #: src/pages/RoutineEditor.tsx
 msgid "What should this routine do each time it runs?"
 msgstr "Que devrait faire cette routine à chaque exécution ?"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "What this bot is for"
+msgstr "À quoi sert ce bot"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
@@ -5250,12 +6105,20 @@ msgstr "Où les bots doivent-ils s'exécuter ?"
 msgid "Who are you looking for?"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Worked for {duration}"
+msgstr ""
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Workflow filter"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Workflow status"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Working on it"
 msgstr ""
 
 #: src/pages/recruiting/fieldLabels.ts
