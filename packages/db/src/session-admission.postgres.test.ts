@@ -210,6 +210,74 @@ suite("global session admission on dedicated real PostgreSQL", () => {
     expect(replacement.token).not.toBe(held.value.token);
     await releaseSessionReplacement(db.prisma, replacement);
   });
+  it("keeps slow external probes outside SQL admission locks and preserves state on probe failure", async () => {
+    await receipt();
+    await desired("worker-a");
+    const old = await reserve("worker-a");
+    await beginSessionAdmissionShutdown(db.prisma, old);
+    const replacement = await acquireSessionReplacement(db.prisma, {
+      owner: "slow-probe-controller",
+    });
+    let unblock!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let probes = 0;
+    const input = {
+      service: "worker-a" as const,
+      expectedGeneration: "g1",
+      desiredGeneration: "g2",
+      replacement,
+    };
+    const rotating = setDesiredSessionGeneration(db.prisma, input, {
+      withQuiescedSlot: (run) =>
+        run(async () => {
+          probes++;
+          entered();
+          await gate;
+        }),
+    });
+    await started;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const admitted = await Promise.race([
+        reserve(),
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(() => reject(new Error("external probe held admission lock")), 1000);
+        }),
+      ]);
+      expect(admitted.service).toBe("api");
+    } finally {
+      if (timer) clearTimeout(timer);
+      unblock();
+    }
+    await rotating;
+    expect(probes).toBe(1);
+    await expect(
+      setDesiredSessionGeneration(
+        db.prisma,
+        { ...input, expectedGeneration: "g2", desiredGeneration: "g3" },
+        {
+          withQuiescedSlot: (run) =>
+            run(async () => {
+              throw new Error("quiescence unconfirmed");
+            }),
+        },
+      ),
+    ).rejects.toThrow(/unconfirmed/);
+    expect(
+      (
+        await sql.query(
+          "SELECT generation FROM session_admission_generations WHERE service='worker-a'",
+        )
+      ).rows[0].generation,
+    ).toBe("g2");
+    await releaseSessionReplacement(db.prisma, replacement);
+  });
   it("holds crashed worker slots without TTL and respects worker5 + worker5 + API4 + external1", async () => {
     await receipt();
     await desired("worker-a");

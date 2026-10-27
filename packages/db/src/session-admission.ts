@@ -21,7 +21,8 @@ export interface StoppedSessionInstanceDriver {
   withStoppedInstance<T>(release: (assertStopped: () => Promise<void>) => Promise<T>): Promise<T>;
 }
 /** Slot controller keeps old work admission drained while generation CAS executes.
- * This is not a stopped-process proof; release requires the stronger driver below.
+ * The driver must maintain this boundary throughout the callback; the initial probe
+ * runs outside the short SQL transaction. This is not a stopped-process proof.
  */
 export interface QuiescedSessionSlotDriver {
   withQuiescedSlot<T>(rotate: (assertQuiesced: () => Promise<void>) => Promise<T>): Promise<T>;
@@ -73,7 +74,6 @@ export async function configureSessionAdmissionBudget(
       >`SELECT count(*)::int AS count FROM session_admissions`;
       if (rows[0]?.count !== 0) throw new Error("Budget bootstrap requires no admitted instances");
       await tx.$executeRaw`INSERT INTO session_admission_budget(id,"totalSessions","externalReservedSessions") VALUES('global',15,${input.externalReservedSessions})`;
-      await assertQuiesced();
     });
   });
 }
@@ -114,7 +114,6 @@ export async function setDesiredSessionGeneration(
       if ((rows[0]?.generation ?? null) !== input.expectedGeneration)
         throw new Error("Desired generation conflict");
       await tx.$executeRaw`INSERT INTO session_admission_generations(service,generation) VALUES(${input.service},${input.desiredGeneration}) ON CONFLICT(service) DO UPDATE SET generation=EXCLUDED.generation`;
-      await assertQuiesced();
     });
   });
 }
@@ -253,7 +252,6 @@ export async function releaseSessionAdmission(
         SELECT a.pid FROM pg_stat_activity a WHERE a.application_name=${row.sessionApplicationName}
         OR EXISTS (SELECT 1 FROM session_admission_connections c WHERE c.token=${row.token} AND c.pid=a.pid)`;
       if (live.length) throw new Error("Session backends still present or not safely observable");
-      await assertStopped();
       await tx.$executeRaw`DELETE FROM session_admissions WHERE token=${row.token} AND "instanceId"=${target.instanceId}`;
     });
   });
