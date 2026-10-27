@@ -2,7 +2,7 @@
 
 这份文件是架构优化的总清单。每一项写清楚四件事：查到的现状、做法、状态、验收指标。多人协作时，开工前把自己的名字写进「负责」，做完把状态改成「已合并」，并写上 PR 号。
 
-状态：`已上线`、`已合并`（代码在 main 上但还没部署，或者要等配置）、`本 PR`、`进行中`、`待做`。
+状态明确区分实现、合入位置和验收：`本分支`/`代码已合并` 仅描述代码；`本地门禁通过` 不代表线上验收完成；`阻塞` 必须写明待授权动作；`进行中`/`待做` 不作完成声明。本轮小 PR 只合入 #263 的 `claude/project-thread-f1cbzk`，不合入 main。
 
 验收指标分两种。一种是代码检查，本地就能跑。另一种是线上实测，要部署之后用真实流量或压测去量。
 
@@ -10,27 +10,28 @@
 
 | # | 方向 | 项目 | 状态 | 负责 |
 |---|---|---|---|---|
-| A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已上线（#259） | — |
+| A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已有上线记录（#259）；50 并发验收未测 | — |
 | A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 首批实现及本地验收通过；整体未完成，线上角色/配置和 p95 验收受限 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
-| A4 | 数据库 | schema 和迁移文件不一致 | 进行中 | Adam |
-| B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本 PR | — |
-| B2 | 任务队列 | 每分钟记录一次排队情况 | 本 PR | — |
-| C1 | 多容器 | 附件放对象存储 | 已合并（#260），等存储配置 | — |
-| C2 | 多容器 | 电脑工作目录放对象存储 | 已合并（#262），等存储配置 | — |
-| C3 | 多容器 | 手机推送 token 放数据库 | 已合并（#262） | — |
+| A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
+| B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本分支；本地回归通过，线上未测 | — |
+| B2 | 任务队列 | 每分钟记录一次排队情况 | 本分支；部署后分钟日志未测 | — |
+| C1 | 多容器 | 附件放对象存储 | 代码已合并（#260）；存储配置阻塞 | — |
+| C2 | 多容器 | 电脑工作目录放对象存储 | 代码已合并（#262）；存储配置阻塞 | — |
+| C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 进行中 | Adam |
-| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 待做（依赖 C1–C4） | |
-| C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 完成（本地验收，[#265](https://github.com/WeKruit/rakazo/pull/265)，待发布） | Adam |
-| D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中 | Adam |
-| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 待做 | |
-| D3 | 前端 | 长列表虚拟滚动 | 待做 | |
-| D4 | 前端 | 拆分超大组件文件 | 待做 | |
-| E1 | 可靠性 | 告警 | 待做（要在日志平台上配置，需要同意） | |
-| E2 | 可靠性 | 压测：20 和 50 个并发对话 | 待做 | |
-| E3 | 可靠性 | 数据库备份恢复演练 | 待做 | |
-| E4 | 可靠性 | 模型服务只有一个提供方 | 待做 | |
+| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 阻塞（共享存储配置、C4 与部署授权） | |
+| C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
+| D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
+| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 进行中 | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 进行中 | Adam |
+| D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
+| E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
+| E2 | 可靠性 | 压测：20 和 50 个并发对话 | 阻塞（缺获准的部署测试环境和在线压测范围） | |
+| E3 | 可靠性 | 数据库备份恢复演练 | 阻塞（缺备份访问及隔离恢复目标授权） | |
+| E4 | 可靠性 | 模型服务只有一个提供方 | 阻塞（禁止生产连接配置/停用主连接） | |
 | F1 | Agent | 招聘逻辑写死在执行器代码里 | 进行中 | Adam |
+| F2 | Agent / 可靠性 | 回合守卫二期（#65 留下的 5 项） | 2 项已上线，1 项部分完成，2 项待做 | |
 
 ---
 
@@ -111,11 +112,64 @@ SQL
 - **验收（代码检查）：** 任何列表 RPC 单次返回不超过 200 行。
 - **验收（线上实测）：** 有 1,000 个候选人的岗位，联系人视图的 RPC p95 小于 300 ms。
 
-### A4 schema 和迁移不一致
+### A4 schema 和迁移不一致 — 阻塞，尚未通过验收
 
-- **现状：** 对着迁移文件跑 `prisma migrate diff`，结果显示 `computer_updates` 和 `recruiting_crm_*` 几张表缺外键。这些外键在 `schema.prisma` 里有，但迁移里没有，所以新环境建出来的库和 schema 不一样。
-- **做法：** 先确认线上库里有没有这些外键，再补一个加法迁移，或者把 schema 改成和线上一致。
-- **验收（代码检查）：** 迁移文件和 `schema.prisma` 之间的 `prisma migrate diff` 结果为空。
+- **纠正现状（2026-10-27 本地实测）：** 在独立 PostgreSQL 16.15 空库重放全部 129 个迁移成功。四个外键**都存在**，不是缺失；差异是迁移默认的 `ON UPDATE NO ACTION` 与 Prisma 未显式指定 `onUpdate` 时的 `CASCADE`：
+  - `computer_updates_computerId_fkey`
+  - `recruiting_crm_sync_progress_userId_fkey`
+  - `recruiting_crm_sync_progress_spaceId_fkey`
+  - `recruiting_crm_workspace_attachments_roleId_fkey`
+- **两个独立比较：** 已迁移的本地数据库 → `schema.prisma`，以及迁移目录（使用独立 shadow database）→ `schema.prisma`，都返回相同的 4 个 `DROP CONSTRAINT` 和 4 个 `ADD CONSTRAINT ... ON DELETE CASCADE ON UPDATE CASCADE`。Prisma 的 `--exit-code` 为 2（差异不为空；pnpm 包装进程退出 1），因此 A4 的空 diff 验收**未通过**。
+- **阻塞与边界：** 已通过现有 Supabase 连接执行只读 `current_database()` / `to_regclass()`；工具连接的是 `postgres`，两张目标表均不存在。产品实际使用独立 `rakazo` 数据库，当前工具没有数据库选择参数，故尚未取得该库四个外键的线上元数据。需要现有授权的 `rakazo` 只读元数据连接或维护者提供同一查询结果；不需要读取任何用户行。未尝试猜测、提取或输出凭据，未修改线上数据库。操作因连接目标不匹配而阻塞，不是权限审批拒绝。
+- **决定：** 不依据错误的“缺外键”假设新增或替换外键，也不擅自把 schema 改成假定的线上状态。拿到正确元数据后，明确保留 `NO ACTION` 还是迁移为 `CASCADE`，再改 schema 或生成经验证的替换迁移。当前仅更新证据，没有数据库/连接池代码变更，新增会话连接为 0；生产的 `DATABASE_URL` 6543 事务池与 `REALTIME_DATABASE_URL` 5432 会话池预算未改。
+- **本地检查：** Node 24.19.0、pnpm 9.15.0；`pnpm --filter @rakazo/db generate` 与 `pnpm --filter @rakazo/db check` 通过（仓库类型检查脚本是 `check`）；`pnpm --filter @rakazo/db test` 为 1,216 通过、356 跳过，39 文件通过、12 文件跳过。跳过项不作已验证声明。未部署、未改云配置、未读取真实岗位/候选人，CI 保持关闭。
+- **认领：** Adam 认领提交 `45da1c8d1` 已先推入 #263 分支，随后才进行上述本地核对。
+
+本地复现（仅指向新建的可丢弃本地库，禁止将 shadow URL 指向生产）：
+
+```sh
+createdb -h 127.0.0.1 -p 55434 -U postgres rakazo_a4
+createdb -h 127.0.0.1 -p 55434 -U postgres rakazo_a4_shadow
+DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a4 pnpm --filter @rakazo/db exec prisma migrate deploy
+DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a4 pnpm --filter @rakazo/db exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script --exit-code
+pnpm --filter @rakazo/db generate
+pnpm --filter @rakazo/db check
+pnpm --filter @rakazo/db test
+```
+
+迁移目录比较使用临时 `packages/db/prisma.a4.config.ts`（核对完删除，不提交备份）：
+
+```ts
+import { defineConfig } from "prisma/config";
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: { path: "prisma/migrations" },
+  datasource: {
+    url: "postgres://postgres@127.0.0.1:55434/rakazo_a4",
+    shadowDatabaseUrl: "postgres://postgres@127.0.0.1:55434/rakazo_a4_shadow",
+  },
+});
+```
+
+```sh
+pnpm --filter @rakazo/db exec prisma migrate diff --config prisma.a4.config.ts --from-migrations prisma/migrations --to-schema prisma/schema.prisma --script --exit-code
+```
+
+所需线上只读检查（当前 Supabase 工具只完成第一条；外键查询仅在本地执行）：
+
+```sql
+SELECT current_database() AS database_name,
+       to_regclass('public.computer_updates') IS NOT NULL AS has_computer_updates,
+       to_regclass('public.recruiting_crm_contacts') IS NOT NULL AS has_crm_contacts;
+
+SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE contype = 'f'
+  AND conrelid IN ('computer_updates'::regclass,
+                  'recruiting_crm_sync_progress'::regclass,
+                  'recruiting_crm_workspace_attachments'::regclass)
+ORDER BY conrelid::regclass::text, conname;
+```
 
 ## B. 任务队列
 
@@ -134,6 +188,13 @@ SQL
 ## C. 多容器
 
 C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret 值）生效之后，执行 `pnpm --filter @rakazo/api artifacts:copy`，把卷上已有的附件和工作目录拷进桶里。
+
+### C3 推送 token 持久化 — 本地回归修复
+
+- **2026-10-27 实测发现：** 本地 PostgreSQL 会话时区为 America/Chicago 时，已过期会话仍能注册 token。Prisma 的 UTC 无时区 `expiresAt` 与 `now()` 隐式比较会引入数据库时区偏移；已有真实 PostgreSQL 测试出现 1 失败 / 9 通过。
+- **修复：** 比较 `expiresAt > (now() AT TIME ZONE 'UTC')`，保留事务内行锁与 token 唯一归属。新增 UTC、America/Chicago、Asia/Tokyo 下过期拒绝和有效接受的 PostgreSQL 测试。运行时新增连接为 0，连接池预算不变。
+- **结果：** `DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_root VERIFY_DATABASE=1 pnpm test packages/adapters/src/expo-push.postgres.test.ts packages/adapters/src/expo-push.test.ts apps/api/src/artifacts.postgres.test.ts`：35/35 通过；`pnpm --filter @rakazo/adapters check`、两文件 Biome 和 `git diff --check` 通过。全是本地合成用户/会话/token，无真实设备推送。
+- **记录：** 认领 `9c967a3bb`，实现 `9d28721fd`，[PR #272](https://github.com/WeKruit/rakazo/pull/272) base 为 #263 的分支。真实跨容器推送、生产部署尚未测。
 
 ### C4 应用内模型订阅登录
 
@@ -157,6 +218,7 @@ C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret �
 - **认领与 PR：** Adam 先把认领提交 `d1cdbb74d64fe289fa74b79b7ade010fe7f1ddbc` 普通 push 到 `claude/project-thread-f1cbzk`，再实现 `f7c4ae4501f91cb2d96d5f3e011ad127b978ff94`；Draft [#265](https://github.com/WeKruit/rakazo/pull/265) 的 base 为该集成分支。
 - **本地实测：** Node 24.19.0、pnpm 9.15.0。core 1,231 通过 / 5 跳过，API 1,321 通过 / 50 跳过，web 1,649 通过；三个包类型检查通过。屏幕浏览器测试 12/12 通过（development、preview、production 各 4 项），包含直接导航、iframe 隔离、资产重试、WebSocket 和撤权。生产网页构建、API 打包、Biome、diff 检查通过。Modal 源码 AST 检查：2 个 Node 服务，0 个 Vite 运行命令。
 - **TTFB 前后对比：** 同一个本地生产网页构建，每种实现先预热 20 次，再 200 次请求、并发 20、gzip、keepalive。Vite preview 的 p50/p95/max 为 3.17/5.26/6.77 ms；API 网页监听器为 4.07/7.49/9.89 ms；两者错误均为 0。新实现本地 p95 7.49 ms < 200 ms，不把此次变更说成延迟改善。
+- **补充前端量测：** 相同构建、全新浏览器 context、登录初始页、同一组本地 API 假响应，阻断外部资源；实际第一方页面请求 **23 → 23**，JS 请求 **16 → 16**，加载 JS 原始字节 **2,060,246 → 2,060,246**，逐文件 gzip 合计字节 **627,429 → 627,429**。这些是页面加载的真实请求计数，不是 TTFB 压测样本数；C6 没有减少 JS 负载，D1 单独负责。未测试已登录岗位页面。
 - **还没测 / 范围：** 未部署，线上区域 TTFB、实际 Modal 镜像启动、真实屏幕提供方/TLS、生产流量中的进程退出还没测；55 个已有跳过测试未验证。此次目标是 WeKruit Modal，其他 Compose/desktop preview 启动方式未迁移。仅用本地假服务，没有真实岗位/候选人、外发消息、云配置或 Secret 变更；CI 保持关闭。这里的「完成」指实现和本地门禁完成，不代表上线验收完成。
 
 复现命令（仓库根目录，使用 Node 24.19.0；仓库类型检查脚本名是 `check`，没有 `typecheck`）：
@@ -171,6 +233,7 @@ PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers pnpm --filter @rakazo/web exec 
 PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers pnpm --filter @rakazo/web exec playwright test -c playwright.screen-proxy.config.ts
 RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web build
 node scripts/bundle-server.mjs api
+PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec tsx scripts/measure-public-page.ts
 RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec tsx scripts/benchmark-public-web.ts
 pnpm exec biome check apps/api/src/public-web.ts apps/api/src/public-web.test.ts apps/api/src/index.ts apps/web/vite.config.ts apps/web/e2e/screen-proxy-isolation.spec.ts apps/web/scripts/benchmark-public-web.ts packages/core/src/node/novnc-proxy.ts packages/core/src/node/screen-proxy.ts packages/core/src/node/screen-proxy.test.ts packages/core/src/node/novnc-html.ts packages/core/src/node/novnc-html.test.ts packages/core/package.json
 git diff --check
@@ -194,7 +257,8 @@ CHECK
 ### D1 首屏 JS
 
 - **现状（本地 `vite build` 实测）：** 首屏要加载的 JS 合计 594 KB（gzip 后）。主包 1.18 MB（未压缩），gzip 后 338 KB。主包里占得最多的是：react-dom 171 KB、`Shell.tsx` 147 KB、`RecruitingPanel.tsx` 113 KB、`ModelSettingsOverlay` 29 KB、`RecruitingCorrespondence` 24 KB、`RoutineEditor`、`InterviewCalendar`、`SchedulingPlan`、`DetailPanel`、markdown 解析器。路由页面已经是按需加载的。
-- **做法：** 第一屏用不到的面板改成 `lazy()` 加载：设置浮层、例行任务编辑器、邮件序列编辑、面试日历、排期计划、候选人详情。markdown 解析器在第一条消息渲染时再加载。打开这些面板时要有加载占位，不能出现空白。
+- **本 PR 已做：** 本地设置页、集成设置页和 MCP 授权回调页改成按需加载，联系人、面试、邮件往来这几个视图也改成按需加载（`recruiting/LazyViews.tsx`）。另外把 `PersonAvatar` 移进 `ProfileImage.tsx`，断开了 DetailPanel 和 CandidateDirectory 之间的循环引用。首屏 JS（gzip -9）从 592,955 字节降到 561,040 字节。
+- **剩下的做法：** 第一屏用不到的面板改成 `lazy()` 加载：设置浮层、例行任务编辑器、邮件序列编辑、面试日历、排期计划、候选人详情。markdown 解析器在第一条消息渲染时再加载。打开这些面板时要有加载占位，不能出现空白。
 - **验收（代码检查）：** 用 `vite build` 计算首屏 JS，gzip 后不超过 350 KB（第一阶段），最终目标 250 KB。
 - **验收（线上实测）：** 在 Lighthouse 的移动端模拟环境（Fast 4G）下，LCP 小于 2.5 s。
 
@@ -248,3 +312,41 @@ CHECK
 
 - **现状：** `executor.ts` 有约 14,000 行，其中 482 处和招聘有关。按 AGENTS.md 的原则，招聘相关的行为应该写在机器人指令和技能里，不应该写在执行器代码里。
 - **验收：** 执行器里和招聘有关的引用每一轮都在减少，招聘验收流程不退步。
+
+### F2 回合守卫二期（#65 留下的项目）
+
+#65 合并了回合守卫的一期：回合结束时没有交付物，就自动继续下一步。下面是它列为二期、当时没有做的部分，每项都对着 main 检查过。
+
+| 项目 | main 上的现状 | 状态 | 验收 |
+|---|---|---|---|
+| 隐藏自动继续的消息 | `sendUserMessage` 收到以 `autocontinue:` 开头的 nonce 时，会把消息标成 `internal`（`packages/db/src/events.ts`）；消息列表、群组列表和招聘读取都会过滤掉它 | 已上线 | 在 e2e 里，自动继续之后聊天中没有出现「继续下一步：…」 |
+| 10 分钟后提醒还没回答的问题 | `recruiting-idle-sweep.ts` 会在角色空闲 10 分钟后重新跑一次回合守卫，但会跳过「有待回答卡片」的情况。所以用户没回答问题时，不会收到提醒 | 待做 | 一个问题卡片 10 分钟没人回答，就发一条「还在等你确认：…」，每个问题最多发一次；用户回答以后不再发 |
+| 崩溃后自动接着做 | `job-reconciler.ts` 会把租约过期的 `leased`/`running` 运行重新排队，由原来的运行接着做 | 已上线 | 在一个回合中途杀掉 worker：重启后 2 分钟内同一个运行继续，不重复发消息 |
+| 唤醒时无事可做就保持沉默（`<NO_ACTION>`） | 代码里没有 | 待做 | 一次定时或研究唤醒没有新内容时，模型输出 `<NO_ACTION>`，聊天里不出现任何消息，运行正常结束 |
+| 预算用完时给出总结 | `runBudgetStopText` 会发一段固定文字，带上已保存的人数和下一步 | 部分完成：有人数和下一步，但没有模型写的这一轮小结 | 预算用完的那个回合里，最后一条消息包含已保存的人选、这一轮发现了什么，以及下一步 |
+
+## 整体验收边界与阻塞台账（2026-10-27）
+
+本轮仅使用本地独立工作区和合成数据。以下动作尚未执行，原因是本轮明确禁止部署、云端配置/Secret/资源变更或真实岗位候选人测试；没有为获得一个“通过”而用本地假结果替代线上指标。它们不是自动审批拒绝，也没有不确定的线上执行结果。
+
+| 项目 | 已有证据 | 尚未执行的准确动作 / 目标 | 继续所需条件 |
+|---|---|---|---|
+| A1 | 源码分流：worker session pool 上限 4 + worker realtime 1 + API realtime 1 = 每容器 6；查询池走独立 DATABASE_URL。未新增会话连接。 | 在部署环境跑 50 并发，量 db.pool.wait.maxMs <500 且无 EMAXCONNSESSION；核实实际6543/5432配置 | 获准的隔离在线环境、只读运行配置证据、压测授权；当前未测 |
+| B1 | 本地 background handlers / Graphile publisher 回归通过，覆盖槽位限制/对话优先级 | 在线定时任务集中触发时 readyChats 始终为0 | 同上，不能以单测替代调度压力下实测 |
+| B2 | 源码 reporter 每60秒记录 slots/ready/readyChats/oldestReadySeconds/running/exhausted | 部署后连续观察每分钟日志 | 部署与目标日志读取范围；当前未测 |
+| C1 | 本地 artifact adapter 与上传nonce回归通过 | 配置对象存储并迁移现有附件后做跨容器读取 | 现有桶/Secret配置及迁移授权；本轮禁止，未尝试 |
+| C2 | 本地 computer-workspace adapter 回归通过 | 配置共享对象存储并迁移工作目录后跨容器验证 | 同上；不创建桶或更改Volume/Secret |
+| C5 | C6 已把网页进程合并到API；C4单独推进 | 拆分部署服务、启用多个容器、滚动发布并每秒探测首页/RPC与不中断对话 | C1/C2配置和C4验证完成，另需部署/资源配置授权；未执行 |
+| E1 | 已有队列/连接池/运行日志，告警清单保留 | 在现有日志平台创建6类告警，并逐一触发确认送达 | 云日志配置及测试通知目标授权；本轮禁止配置与外发，未执行 |
+| E2 | 本地单测不等于20/50并发对话压测 | 在隔离部署的副本岗位运行20/50并发，测首问<10s、前10人选<20s、readyChats=0、无5xx | 提供获准的测试副本、内部账号、在线服务调用/额度范围；不得用真实岗位或本地模型假响应冒充 |
+| E3 | 无恢复演练证据 | 获取最新备份，在获准隔离目标恢复并记录真实RTO/RPO | 备份访问与恢复目标授权；不自行建立云资源，也不复制真实候选人到未批准测试库 |
+| E4 | 原有每机器人连接边界可复用，无需新路由框架 | 配置备用模型连接、停用主连接并证明对话完成 | 备用服务/凭据和连接切换的明确授权；本轮禁止云配置，不触碰生产连接 |
+
+已有功能本地回归命令（Node 24.19.0、pnpm 9.15.0）：
+
+```sh
+pnpm test packages/adapters/src/background-job-handlers.test.ts packages/adapters/src/wakeup-graphile-host.test.ts packages/adapters/src/computer-workspace.test.ts packages/adapters/src/artifacts.test.ts packages/adapters/src/expo-push.test.ts apps/worker/src
+pnpm --filter @rakazo/worker --filter @rakazo/adapters check
+```
+
+结果：7 个文件、85 个测试通过；两个包类型检查通过。C3 在额外真实本地 PostgreSQL 测试发现时区回归，已单独通过 #272 修复并列出35项实测，不把此前漏测说成已验证。

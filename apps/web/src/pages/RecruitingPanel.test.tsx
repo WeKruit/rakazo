@@ -55,6 +55,7 @@ const api = vi.hoisted(() => ({
 }));
 // A failure here stands for exhausted retries unless a test turns real retries on.
 const readRetries = vi.hoisted(() => ({ real: false }));
+vi.mock("./recruiting/LazyViews", () => import("./recruiting/lazy-views-eager"));
 vi.mock("../lib/read-retry", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/read-retry")>();
   return {

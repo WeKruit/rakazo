@@ -68,7 +68,7 @@ export async function savePushToken(
       await prisma.$transaction(async (tx) => {
         if (sessionId) {
           const live = await tx.$queryRaw<Array<{ id: string }>>`
-            SELECT "id" FROM "session" WHERE "id" = ${sessionId} AND "expiresAt" > now() FOR SHARE`;
+            SELECT "id" FROM "session" WHERE "id" = ${sessionId} AND "expiresAt" > (now() AT TIME ZONE 'UTC') FOR SHARE`;
           if (live.length === 0) throw new PushSessionEndedError();
         }
         await tx.pushToken.deleteMany({ where: { token: value, NOT: { userId } } });
