@@ -5440,6 +5440,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             args.expectedRevision === briefBump.from
           )
             args = { ...args, expectedRevision: briefBump.to };
+          // A brief save that leaves out its intent acts on the recruiter's current message.
+          const turnQuote = currentTurnMessage?.blocks.flatMap((block) =>
+            block.kind === "text" && block.text.trim() ? [block.text] : [],
+          )[0];
+          if (
+            name === "recruiting_role" &&
+            args.operation === "update" &&
+            args.intent === undefined &&
+            turnQuote
+          )
+            args = { ...args, intent: { basis: "direct", quote: turnQuote } };
           if (name === "recruiting_role" && args.operation !== "read")
             args = await fillRecruitingRoleArgs(
               deps.prisma,
@@ -10971,7 +10982,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : result;
             return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
           });
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts), meeting every hard requirement its row can show and not currently at the hiring company. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits only when their row shows no hard requirement of the JD or the answers failed: every must-have past title, industry, company type such as a startup, years and location is checked against the row, and someone whose row shows that experience missing, whose matching role ended years ago, or who is retired or semi-retired does not fit. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it or search deeper at more cost) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
