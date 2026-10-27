@@ -94,3 +94,28 @@ export function locationOutliers(locations: ReadonlyMap<string, string>): string
   )[1];
   return points.filter(([, point]) => miles(point, centre) > COMMUTE_MILES).map(([key]) => key);
 }
+
+/**
+ * People from a local search who are not in its area: when most rows centre on one metro, the
+ * rows beyond commuting distance of it or showing only a country or a state. A search whose rows
+ * spread out (a remote or nationwide role) leaves everyone in.
+ */
+export function outsideSearchArea(
+  locations: ReadonlyMap<string, string | null | undefined>,
+): Set<string> {
+  const points = [...locations]
+    .map(([key, location]) => [key, location ? locate(location) : undefined] as const)
+    .filter((entry): entry is readonly [string, [number, number]] => Boolean(entry[1]));
+  if (points.length < 5) return new Set();
+  const spread = (point: [number, number]) =>
+    points.reduce((sum, [, other]) => sum + miles(point, other), 0);
+  const centre = points.reduce((best, entry) =>
+    spread(entry[1]) < spread(best[1]) ? entry : best,
+  )[1];
+  const far = points.filter(([, point]) => miles(point, centre) > COMMUTE_MILES);
+  if (far.length > points.length * 0.4) return new Set();
+  return new Set([
+    ...far.map(([key]) => key),
+    ...[...locations].filter(([, location]) => isRegionOnlyLocation(location)).map(([key]) => key),
+  ]);
+}

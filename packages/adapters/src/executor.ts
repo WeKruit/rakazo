@@ -443,7 +443,12 @@ import {
   RecruitingFeedbackValidationError,
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
-import { COMMUTE_MILES, isRegionOnlyLocation, locationOutliers } from "./recruiting-location.js";
+import {
+  COMMUTE_MILES,
+  isRegionOnlyLocation,
+  locationOutliers,
+  outsideSearchArea,
+} from "./recruiting-location.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -5207,6 +5212,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // New people the searches planned with the last answer returned. Once the first picks come
         // from them and there are this many, the ten come from them instead of another search.
         let plannedNewPeople = 0;
+        const plannedFresh = new Set<string>();
+        // Rows of planned searches that returned after the pick started, not yet shown to the model.
+        const lateSearchRows: string[] = [];
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
         /**
@@ -5422,8 +5430,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
             peopleSearchesRun = Math.max(peopleSearchesRun, 8);
+            const late = lateSearchRows.splice(0);
             return {
-              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people, and the ten come from them. Record the ten now with calibration_round from those rows, starting with the people already shown; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say.`,
+              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people, and the ten come from them. Record the ten now with calibration_round from those rows, starting with the people already shown; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say.${late.length ? `\n\nThe planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}` : ""}`,
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
@@ -11076,32 +11085,65 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ).catch((error) => ({ error: String(error) })),
           );
           const results = await settlePlannedSearches(pendings, startedAt);
-          const fresh = new Set<string>();
-          for (const result of results) {
+          type PlannedRow = { candidateKey?: unknown; location?: unknown; alreadyInPool?: unknown };
+          const rowsOf = (result: unknown): PlannedRow[] | undefined => {
             const people =
               result && typeof result === "object" && "people" in result
                 ? (result as { people: unknown }).people
                 : undefined;
-            if (!Array.isArray(people)) continue;
-            for (const person of people)
-              if (
-                person &&
-                typeof person === "object" &&
-                typeof person.candidateKey === "string" &&
-                person.alreadyInPool === false
-              )
-                fresh.add(person.candidateKey);
-          }
-          plannedNewPeople = fresh.size;
+            return Array.isArray(people)
+              ? people.filter((row): row is PlannedRow => Boolean(row) && typeof row === "object")
+              : undefined;
+          };
+          const keyOf = (row: PlannedRow) =>
+            typeof row.candidateKey === "string" ? row.candidateKey : undefined;
+          // The searches name the role's metro, so rows away from where most of them are, or
+          // showing only a country or a state, never make the ten: they are left out of the pick.
+          const outsideOf = (rows: PlannedRow[]) =>
+            outsideSearchArea(
+              new Map(
+                rows.flatMap((row) => {
+                  const key = keyOf(row);
+                  return key
+                    ? [[key, typeof row.location === "string" ? row.location : null] as const]
+                    : [];
+                }),
+              ),
+            );
+          const inArea = (rows: PlannedRow[], outside: Set<string>) =>
+            rows.filter((row) => !outside.has(keyOf(row) ?? ""));
+          const addFresh = (rows: PlannedRow[]) => {
+            for (const row of rows) {
+              const key = keyOf(row);
+              if (key && row.alreadyInPool === false) plannedFresh.add(key);
+            }
+            plannedNewPeople = plannedFresh.size;
+          };
+          const onTime = results.flatMap((result) =>
+            result === PLANNED_SEARCH_LATE ? [] : (rowsOf(result) ?? []),
+          );
+          const outside = outsideOf(onTime);
+          addFresh(inArea(onTime, outside));
+          // A search still running at the pick adds its people when it returns; a refused extra
+          // search hands them to the model instead of searching again.
+          results.forEach((result, index) => {
+            if (result !== PLANNED_SEARCH_LATE) return;
+            void pendings[index]?.then((late) => {
+              const rows = rowsOf(late);
+              if (!rows?.length) return;
+              const kept = inArea(rows, outsideOf([...onTime, ...rows]));
+              addFresh(kept);
+              lateSearchRows.push(
+                `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(kept).slice(0, 24_000)}`,
+              );
+            });
+          });
           const searches = planned.data.queries.map((query, index) => {
             const result = results[index];
             if (result === PLANNED_SEARCH_LATE)
               return `Search ${index + 1} "${query}": still running; its people are saved to Results when it returns, so pick from the other searches.`;
-            const people =
-              result && typeof result === "object" && "people" in result
-                ? (result as { people: unknown }).people
-                : result;
-            return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
+            const rows = rowsOf(result);
+            return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
           });
           const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
