@@ -90,7 +90,7 @@ it("discards research on a concurrent role revision change", async () => {
     roleRevisionId: "revision",
   });
   expect(result.data).toBeNull();
-  expect(reads.research).toHaveBeenCalledWith(deps.prisma, actor, { roleId: "role" });
+  expect(reads.research).toHaveBeenCalledWith(deps.prisma, actor, { roleId: "role", offset: 0 });
 });
 it("rejects role overrides and unbounded candidate reads at the contract boundary", () => {
   expect(ReadRecruitingViewInput.safeParse({ ...input, query: { roleId: "other" } }).success).toBe(
@@ -130,4 +130,53 @@ it("never starts data reads for an already revoked session", async () => {
     code: "UNAUTHORIZED",
   });
   expect(reads.candidates).not.toHaveBeenCalled();
+});
+
+it("requests bounded research pages and revalidates authorization on each page", async () => {
+  const researchInput = {
+    kind: "research" as const,
+    threadId: "thread",
+    roleId: "role",
+    roleRevisionId: "revision",
+  };
+  reads.research.mockImplementation(async (_prisma, _actor, { offset }) => ({
+    tasks: [],
+    actions: Array.from({ length: offset === 0 ? 200 : 5 }, (_, id) => ({ id: `${offset + id}` })),
+    observations: [],
+  }));
+  const authorized = vi.fn(async () => true);
+  const first = await readRecruitingView(deps, actor, researchInput, authorized);
+  const next = await readRecruitingView(deps, actor, { ...researchInput, offset: 200 }, authorized);
+  expect(first.data?.actions).toHaveLength(200);
+  expect(next.data?.actions).toHaveLength(5);
+  expect(reads.research).toHaveBeenNthCalledWith(1, deps.prisma, actor, {
+    roleId: "role",
+    offset: 0,
+  });
+  expect(reads.research).toHaveBeenNthCalledWith(2, deps.prisma, actor, {
+    roleId: "role",
+    offset: 200,
+  });
+  expect(authorized).toHaveBeenCalledTimes(4);
+  expect(ReadRecruitingViewInput.safeParse({ ...researchInput, offset: -1 }).success).toBe(false);
+  expect(ReadRecruitingViewInput.safeParse({ ...researchInput, offset: 0.5 }).success).toBe(false);
+  expect(ReadRecruitingViewInput.safeParse({ ...input, offset: 200 }).success).toBe(false);
+});
+it("refuses a later research page after session revocation", async () => {
+  const researchInput = {
+    kind: "research" as const,
+    threadId: "thread",
+    roleId: "role",
+    roleRevisionId: "revision",
+  };
+  const authorized = vi
+    .fn()
+    .mockResolvedValueOnce(true)
+    .mockResolvedValueOnce(true)
+    .mockResolvedValueOnce(false);
+  await readRecruitingView(deps, actor, researchInput, authorized);
+  await expect(
+    readRecruitingView(deps, actor, { ...researchInput, offset: 200 }, authorized),
+  ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+  expect(reads.research).toHaveBeenCalledOnce();
 });

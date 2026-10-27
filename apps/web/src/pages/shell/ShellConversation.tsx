@@ -292,7 +292,7 @@ export function ShellConversation({
         <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
           {effectiveCrmSelection ? (
             <RecruitingPanel
- workspaceRead={currentWorkspaceRead}
+              workspaceRead={currentWorkspaceRead}
               threadId={activeSnapshot.threadId}
               botId={inGroup ? undefined : active?.id}
               groupId={inGroup ? groupId : undefined}
@@ -390,7 +390,7 @@ export function ShellConversation({
               />
             ) : null}
             <RecruitingPanel
- workspaceRead={currentWorkspaceRead}
+              workspaceRead={currentWorkspaceRead}
               key={`${userId}:${bootstrapMe?.spaceId}:${knownThreadId}:workspace`}
               presentation="workspace"
               view={
@@ -941,7 +941,7 @@ export function ShellConversation({
                 />
               ) : null}
               <RecruitingPanel
- workspaceRead={currentWorkspaceRead}
+                workspaceRead={currentWorkspaceRead}
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}:summary`}
                 presentation="workspace"
                 summary={recruitingWorkspaceView === "brief" ? "brief" : "feedback"}

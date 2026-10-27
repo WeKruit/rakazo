@@ -1297,6 +1297,7 @@ export const ReadRecruitingViewInput = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("research"),
+    offset: z.number().int().min(0).optional(),
     threadId: RecruitingId,
     roleId: RecruitingId,
     roleRevisionId: RecruitingId,

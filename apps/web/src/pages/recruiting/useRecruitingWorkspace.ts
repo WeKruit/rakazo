@@ -5,7 +5,12 @@ import { RecruitingEmploymentRuleSchema } from "@rakazo/contracts";
 import { recruitingBriefClarifications } from "@rakazo/core";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { retryTransientRead } from "../../lib/read-retry";
-import { clearRecruitingReads, savedRecruitingRead, rememberRecruitingRead } from "../../lib/recruiting-read-cache";
+import {
+  clearRecruitingReads,
+  rememberRecruitingRead,
+  savedRecruitingRead,
+} from "../../lib/recruiting-read-cache";
+import { readResearchViewPages } from "../../lib/recruiting-read-view";
 import type { RecruitingPanelState } from "../../lib/right-panel-state";
 import {
   readRecruitingPanelState,
@@ -49,8 +54,9 @@ export function useRecruitingWorkspace({
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<Pick<Snapshot, "workspace"> | null>(
     () =>
       workspaceCacheKey
-        ? ((savedRecruitingRead(readCache, workspaceCacheKey) as Pick<Snapshot, "workspace"> | undefined) ??
-          null)
+        ? ((savedRecruitingRead(readCache, workspaceCacheKey) as
+            | Pick<Snapshot, "workspace">
+            | undefined) ?? null)
         : null,
   );
   const initialStorageKey =
@@ -281,12 +287,15 @@ export function useRecruitingWorkspace({
             roleId
               ? candidateWorkspace
                 ? read(async () => {
-                    const view = await rpc.recruiting.readView({
-                      kind: "research",
-                      threadId,
-                      roleId,
-                      roleRevisionId: workspace!.revision.id,
-                    });
+                    const view = await readResearchViewPages(
+                      {
+                        threadId,
+                        roleId,
+                        roleRevisionId: workspace!.revision.id,
+                      },
+                      rpc.recruiting.readView,
+                      abort.signal,
+                    );
                     if (view.kind !== "research") throw new Error("Recruiting read kind changed");
                     verifiedResearch = view.workspace;
                     if (

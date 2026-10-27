@@ -4020,6 +4020,9 @@ it.each([
       isDeploymentOwner: owner,
       openFeedback: false,
     });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     // Hover/focus prefetches pass no request options; count only conversation opens.
     const opens = () => shellApi.get.mock.calls.filter((call) => call.length > 1).length;
     const reads = opens();

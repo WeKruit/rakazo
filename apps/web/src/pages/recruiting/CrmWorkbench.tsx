@@ -20,7 +20,12 @@ import type { ReactNode } from "react";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { Shimmer } from "../../components/ai/primitives";
 import { retryTransientRead } from "../../lib/read-retry";
-import { clearRecruitingReads, fetchRecruitingRead, savedRecruitingRead, rememberRecruitingRead } from "../../lib/recruiting-read-cache";
+import {
+  clearRecruitingReads,
+  fetchRecruitingRead,
+  rememberRecruitingRead,
+  savedRecruitingRead,
+} from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 import type { RecruitingDetailPerson } from "../recruiting/detail";
 import { useRecruitingDetail } from "../recruiting/detail";
@@ -49,7 +54,13 @@ function useBoundRole(
   const read = useKeyedRead(
     enabled && !workspaceRead ? JSON.stringify([threadId, refreshSignal]) : null,
     async (): Promise<{ role?: BoundRole; title?: string }> => {
-      const workspace = await fetchRecruitingRead(cache.readCache, cache.readCacheScope, "getWorkspace", { threadId }, () => rpc.recruiting.getWorkspace({ threadId }));
+      const workspace = await fetchRecruitingRead(
+        cache.readCache,
+        cache.readCacheScope,
+        "getWorkspace",
+        { threadId },
+        () => rpc.recruiting.getWorkspace({ threadId }),
+      );
       // The native role names the workbench, bound to a CRM role or not.
       const title = workspace?.role.title;
       return workspace?.crmTarget
@@ -167,7 +178,9 @@ export function CrmRecruitingPanel({
     setRead({
       key,
       loading: true,
-      data: cacheKey ? (savedRecruitingRead(readCache, cacheKey) as CandidatePage | undefined) : undefined,
+      data: cacheKey
+        ? (savedRecruitingRead(readCache, cacheKey) as CandidatePage | undefined)
+        : undefined,
     });
     void retryTransientRead(() => rpc.recruiting.crmData(input), abort.signal)
       .then((value) => {
@@ -235,7 +248,9 @@ export function CrmRecruitingPanel({
       : undefined;
     setMail({
       key: mailKey,
-      data: savedKey ? (savedRecruitingRead(readCache, savedKey) as MailPage | undefined) : undefined,
+      data: savedKey
+        ? (savedRecruitingRead(readCache, savedKey) as MailPage | undefined)
+        : undefined,
     });
     void retryTransientRead(() => rpc.recruiting.crmData(mailInput), abort.signal)
       .then((value) => {
@@ -381,7 +396,9 @@ export function CrmRecruitingPanel({
     setSectionRead({
       key: sectionKey,
       loading: true,
-      data: savedKey ? (savedRecruitingRead(readCache, savedKey) as SectionPage | undefined) : undefined,
+      data: savedKey
+        ? (savedRecruitingRead(readCache, savedKey) as SectionPage | undefined)
+        : undefined,
     });
     void retryTransientRead(() => rpc.recruiting.crmData(sectionInput), abort.signal)
       .then((value) => {
@@ -451,7 +468,9 @@ export function CrmRecruitingPanel({
     setDetailsRead({
       key: detailsKey,
       loading: true,
-      data: savedKey ? (savedRecruitingRead(readCache, savedKey) as DetailsPage | undefined) : undefined,
+      data: savedKey
+        ? (savedRecruitingRead(readCache, savedKey) as DetailsPage | undefined)
+        : undefined,
     });
     void retryTransientRead(() => rpc.recruiting.crmData(detailsInput), abort.signal)
       .then((value) => {

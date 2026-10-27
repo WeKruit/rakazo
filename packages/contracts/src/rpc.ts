@@ -747,9 +747,9 @@ export const appContract = {
               .nullable(),
             data: z
               .strictObject({
-                tasks: z.array(RecruitingResearchTaskSchema),
-                actions: z.array(RecruitingResearchActionSchema),
-                observations: z.array(RecruitingResearchSavedObservationSchema),
+                tasks: z.array(RecruitingResearchTaskSchema).max(200),
+                actions: z.array(RecruitingResearchActionSchema).max(200),
+                observations: z.array(RecruitingResearchSavedObservationSchema).max(200),
               })
               .nullable(),
           }),

@@ -628,7 +628,7 @@ export function ShellPage() {
             ) : null}
             {panel === "recruiting" && activeSnapshot?.threadId ? (
               <RecruitingPanel
- workspaceRead={currentWorkspaceRead}
+                workspaceRead={currentWorkspaceRead}
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}

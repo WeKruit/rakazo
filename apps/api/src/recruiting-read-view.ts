@@ -49,7 +49,10 @@ export async function readRecruitingView(
           : null,
     };
   }
-  const data = await listRecruitingResearch(deps.prisma, actor, { roleId: input.roleId });
+  const data = await listRecruitingResearch(deps.prisma, actor, {
+    roleId: input.roleId,
+    offset: input.offset ?? 0,
+  });
   const workspace = await readWorkspace();
   return {
     kind: "research" as const,
