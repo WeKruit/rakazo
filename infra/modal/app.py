@@ -154,6 +154,7 @@ class Recruiting:
             # Prisma loads dotenv independently. Verify isolation before any migration.
             reject_staging_dotenv(ROOT)
             check_staging_database(env, ROOT)
+        env["WEB_STATIC_DIR"] = "/app/apps/web/dist"
         # Same migration-before-API order as the upstream Compose entrypoint.
         phase("migrate.start")
         migrate = time.monotonic()
@@ -169,7 +170,6 @@ class Recruiting:
         services = [
             ("api", ["node", "--enable-source-maps", "dist/index.mjs"]),
             ("worker", ["node", "--enable-source-maps", "dist/index.mjs"]),
-            ("web", ["node", "node_modules/vite/bin/vite.js", "preview"]),
         ]
         for package, command in services:
             phase(f"{package}.spawn")
