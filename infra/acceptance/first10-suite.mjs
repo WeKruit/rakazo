@@ -73,7 +73,6 @@ if (!FROM)
           harness,
           ...item.args,
           "--skip-scale",
-          "--archive",
           "--area",
           ATLANTA,
           "--timeout-min",
