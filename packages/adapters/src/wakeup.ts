@@ -6,7 +6,7 @@ import {
   type JobWorkerHost,
 } from "@rakazo/adapter-kit";
 import { isTooManyDatabaseConnections } from "@rakazo/db";
-import { runCorrelatedJob, unwrapJobPayload, wrapJobPayload } from "@rakazo/logging";
+import { getLogger, runCorrelatedJob, unwrapJobPayload, wrapJobPayload } from "@rakazo/logging";
 import { makeWorkerUtils, type Runner, run, type WorkerUtils } from "graphile-worker";
 import type { Pool } from "pg";
 import { recordHistoryCompactAttemptsExhausted } from "./history-compaction.js";
@@ -457,4 +457,45 @@ export class InMemoryJobQueue implements JobPublisher, JobWorkerHost {
     this.stopped = !this.closeRequested;
     this.closing = false;
   }
+}
+
+const QUEUE_REPORT_MS = 60_000;
+
+/**
+ * Logs one `jobs.queue` line a minute: jobs ready but not yet started, how long the oldest has
+ * waited, conversation runs among them, and jobs running now against the slot count. A
+ * conversation run that waits here means every worker slot is busy.
+ */
+export function startJobQueueReporter(pool: Pool, slots: number, signal: AbortSignal): void {
+  const report = async () => {
+    const { rows } = await pool.query<Record<string, string | number | null>>(
+      `select
+         count(*) filter (where j.is_available and j.run_at <= now()) as ready,
+         count(*) filter (where j.is_available and j.run_at <= now()
+           and t.identifier = 'run.continue' and j.priority < $1) as "readyChats",
+         coalesce(extract(epoch from now() - min(j.run_at)
+           filter (where j.is_available and j.run_at <= now())), 0)::int as "oldestReadySeconds",
+         count(*) filter (where j.locked_at is not null) as running,
+         count(*) filter (where j.attempts >= j.max_attempts) as exhausted
+       from graphile_worker._private_jobs j
+       join graphile_worker._private_tasks t on t.id = j.task_id`,
+      [BACKGROUND_PRIORITY],
+    );
+    const row = rows[0] ?? {};
+    getLogger().info("jobs.queue", {
+      slots,
+      ready: Number(row.ready ?? 0),
+      readyChats: Number(row.readyChats ?? 0),
+      oldestReadySeconds: Number(row.oldestReadySeconds ?? 0),
+      running: Number(row.running ?? 0),
+      exhausted: Number(row.exhausted ?? 0),
+    });
+  };
+  const timer = setInterval(() => {
+    void report().catch((error: unknown) =>
+      getLogger().warn("jobs.queue report failed", { error: String(error) }),
+    );
+  }, QUEUE_REPORT_MS);
+  timer.unref();
+  signal.addEventListener("abort", () => clearInterval(timer), { once: true });
 }

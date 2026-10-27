@@ -53,6 +53,7 @@ import {
   ScriptedAgentRuntime,
   SpaceMemoryProviderResolver,
   sandboxProviderOptionsFromEnv,
+  startJobQueueReporter,
   withSecretPersistence,
 } from "@rakazo/adapters";
 import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
@@ -230,8 +231,10 @@ async function main() {
   setInterval(prewarm, DISCOVERY_PREWARM_REFRESH_MS).unref();
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
   const home = createAgentHomeStore(dataDir, artifactStorage);
+  const workerConcurrency = parsePositiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 4);
   const inMemoryJobs = process.env.WAKEUP_DRIVER === "memory" ? new InMemoryJobQueue() : undefined;
   const jobs: JobPublisher = inMemoryJobs ?? new GraphileJobPublisher(pool);
+  if (!inMemoryJobs) startJobQueueReporter(pool, workerConcurrency, shutdown.signal);
   const ticketChanges = createTicketChangeNotifier({
     boardEvents,
     jobs,
@@ -241,7 +244,7 @@ async function main() {
   const jobHost: JobWorkerHost =
     inMemoryJobs ??
     new GraphileJobWorkerHost(sessionPool, {
-      concurrency: parsePositiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 4),
+      concurrency: workerConcurrency,
       noHandleSignals: true,
     });
   // One provider instance so emulator launches and polls share the same Map.
@@ -312,6 +315,8 @@ async function main() {
     cloudAgent,
     connector: stack.connector,
     shutdownSignal: shutdown.signal,
+    // Keep at least two in five slots for conversations.
+    scheduledRunSlots: Math.max(1, Math.floor((workerConcurrency * 3) / 5)),
   });
   // graphile-worker run() connects through the shared pool. createPool already
   // retries connect() on 53300 a finite number of times. Keep retrying start
