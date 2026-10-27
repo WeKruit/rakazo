@@ -1,4 +1,11 @@
-import { attachmentUploadKey, useShellMessages } from "./useShellMessages";
+import { useShellAgentActions } from "./useShellAgentActions";
+import { useShellRecruitingRefresh } from "./useShellRecruitingRefresh";
+
+export { eventChangesRecruitingPanel } from "./useShellRecruitingRefresh";
+
+import { useShellCreation } from "./useShellCreation";
+import { useShellMessages } from "./useShellMessages";
+import { useShellNotifications } from "./useShellNotifications";
 import { useShellRecruiting } from "./useShellRecruiting";
 import { useShellRoster } from "./useShellRoster";
 import { useShellThreads } from "./useShellThreads";
@@ -8,14 +15,11 @@ export { firstThreadRoute } from "./useShellRoster";
 import { Trans, useLingui } from "@lingui/react/macro";
 import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
 import type {
-  AgentSkillCatalogEntry,
   Bot,
   BotSection,
-  ComputerMode,
   Connection,
   ConnectionCatalogItem,
   Group,
-  ProductEvent,
   Routine,
   Space,
   SpaceMemoryConfig,
@@ -23,7 +27,6 @@ import type {
   ThreadMessage,
   ThreadSnapshot,
   UsageCosts,
-  VoiceStatus,
 } from "@rakazo/contracts";
 import { GROUP_MEMBER_MAX, GROUP_MEMBER_MIN } from "@rakazo/contracts";
 import {
@@ -31,8 +34,6 @@ import {
   attachmentsForThread,
   buildComposerMentionOptions,
   isActive,
-  isRunTerminalEvent,
-  speechFromBlocks,
   withLiveStreamingProgress,
 } from "@rakazo/core";
 import type { GroupAvatarMember } from "@rakazo/ui-web";
@@ -57,24 +58,18 @@ import {
   subscribeBotsSidebarDensity,
 } from "../../lib/bots-sidebar-density-pref";
 import { readBotsSidebarCollapsed, writeBotsSidebarCollapsed } from "../../lib/bots-sidebar-pref";
-import {
-  deliverBrowserNotification as deliverNativeBrowserNotification,
-  shouldNotifyBrowser,
-} from "../../lib/browser-notifications";
 import { useCallSession } from "../../lib/call-session";
-import { createCoalescedRefresh } from "../../lib/coalesced-refresh";
 import {
   getComposerEnterToSend,
   subscribeComposerEnterToSend,
 } from "../../lib/composer-enter-to-send-pref";
 import { embeddableScreenUrl } from "../../lib/computer-screen";
-import { scheduleFocusPrompt } from "../../lib/focus-prompt";
 import { clampWidth, usePaneWidth, useViewportWidth } from "../../lib/pane-width";
 import { revokePendingAttachmentPreviews } from "../../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../../lib/performance";
 import { setPreloadRecoveryActiveWork } from "../../lib/preload-recovery";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { clearRecruitingReads, revalidateRecruitingReads } from "../../lib/recruiting-read-cache";
+import { clearRecruitingReads } from "../../lib/recruiting-read-cache";
 import {
   getResponseStreamingEnabled,
   subscribeResponseStreaming,
@@ -85,18 +80,15 @@ import {
   rightPanelStorageKey,
   writeRightPanelState,
 } from "../../lib/right-panel-state";
-import { rpc, selectedSpaceId } from "../../lib/rpc";
+import { rpc } from "../../lib/rpc";
 import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../../lib/run-error-storage";
 import { sharedInflight } from "../../lib/shared-inflight";
 import {
   activeThreadRuns,
-  clearActiveThreadRuns,
   threadRunError,
   userHoldsComputerControl,
 } from "../../lib/thread-events";
 import { createThreadPrefetch } from "../../lib/thread-prefetch";
-import { speaker } from "../../lib/tts";
-import { errorText } from "../../lib/user-error";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { RoutineDraftState } from "../RoutineList";
 import { draftFromRoutine, emptyRoutineDraft } from "../RoutineList";
@@ -106,87 +98,6 @@ import { isCommandPaletteHotkey } from "../shell/command-palette-hotkey";
 import { FALLBACK_BOT_COLOR } from "../shell/constants";
 import { memberName } from "../shell/group-members";
 import { useShellComputer } from "./useShellComputer";
-
-type PendingBrowserNotification = {
-  event: Pick<ProductEvent, "id" | "type" | "threadId" | "botId" | "payload">;
-  botId: string;
-  botName: string;
-  groupNotification: boolean;
-};
-
-const RECONNECT_RECRUITING_RETRY_MS = 30_000;
-
-export function eventChangesRecruitingPanel(
-  event: Pick<ProductEvent, "type" | "payload">,
-): boolean {
-  if (event.type === "thread.message.created" && event.payload.role === "user")
-    return (
-      Array.isArray(event.payload.blocks) &&
-      event.payload.blocks.some(
-        (block) =>
-          block && typeof block === "object" && block.kind === "text" && block.recruitingFeedback,
-      )
-    );
-  if (event.type === "effect.recorded") {
-    const result = event.payload.result;
-    // A calibration round was recorded or accepted, or a people search was saved.
-    if (
-      (event.payload.tool === "recruiting_research" &&
-        ("round" in event.payload || event.payload.status === "saved")) ||
-      (event.payload.tool === "recruiting_feedback" &&
-        result &&
-        typeof result === "object" &&
-        "round" in result)
-    )
-      return true;
-    if (
-      event.payload.tool === "recruiting_feedback" &&
-      result &&
-      typeof result === "object" &&
-      "status" in result &&
-      result.status === "recorded" &&
-      "feedback" in result
-    ) {
-      const feedback = result.feedback;
-      return (
-        feedback !== null &&
-        typeof feedback === "object" &&
-        "target" in feedback &&
-        feedback.target === "candidate" &&
-        "operation" in feedback &&
-        ["hold", "pass", "resume"].includes(String(feedback.operation))
-      );
-    }
-    return (
-      (event.payload.tool === "recruiting_role" &&
-        event.payload.status === "saved" &&
-        event.payload.changed === true) ||
-      (event.payload.tool === "recruiting_crm_target" && event.payload.status === "connected") ||
-      (event.payload.tool === "recruiting_shortlist" &&
-        result !== null &&
-        typeof result === "object" &&
-        "kind" in result &&
-        result.kind === "saved")
-    );
-  }
-  // Connector reads refresh at run termination; the executor marks successful writes.
-  if (event.type === "agent.tool.completed")
-    return (
-      event.payload.name === "recruiting_crm_import" ||
-      event.payload.name === "recruiting_reply" ||
-      (event.payload.wrote === true && event.payload.outcome === "succeeded")
-    );
-  return (
-    (event.type.startsWith("recruiting.") &&
-      event.type !== "recruiting.context.adopted" &&
-      event.type !== "recruiting.material.read" &&
-      event.type !== "recruiting.searches.planned" &&
-      !(event.type === "recruiting.read" && event.payload.phase === "bound")) ||
-    event.type === "memory.revised" ||
-    event.type === "thread.cleared" ||
-    isRunTerminalEvent(event)
-  );
-}
 
 export function useShellController() {
   const { t } = useLingui();
@@ -302,7 +213,6 @@ export function useShellController() {
   const [routinesBotId, setRoutinesBotId] = useState<string | null>(null);
   const [taughtSkills, setTaughtSkills] = useState<TaughtSkill[]>([]);
   const [taughtSkillsBotId, setTaughtSkillsBotId] = useState<string | null>(null);
-  const [agentSkills, setAgentSkills] = useState<AgentSkillCatalogEntry[]>([]);
   const [mentionRoutines, setMentionRoutines] = useState<Array<Routine & { botName?: string }>>([]);
   const [mentionConnectors, setMentionConnectors] = useState<
     Array<{
@@ -354,39 +264,7 @@ export function useShellController() {
     SpaceMemoryConfig | null | undefined
   >(undefined);
   const memoryProviderConfigRevision = useRef(0);
-  const {
-    groups,
-    setGroups,
-    groupsRef,
-    bots,
-    setBots,
-    botsRef,
-    botSections,
-    spaces,
-    setSpaces,
-    archivedBots,
-    archivedGroups,
-    collapsedSidebarSections,
-    collapsedRosterParents,
-    query,
-    setQuery,
-    searchHits,
-    setSearchHits,
-    searchLoading,
-    botsRefreshUser,
-    initialBotsLoaded,
-    bootstrapMe,
-    setBootstrapMe,
-    showToolActivity,
-    refreshBots,
-    applyRunStatus,
-    sidebarGroups,
-    openSpaceChat,
-    reorderRosterBot,
-    toggleSidebarSection,
-    toggleRosterParent,
-    showSpaceSearch,
-  } = useShellRoster({
+  const shellRoster = useShellRoster({
     userId,
     botId,
     groupId,
@@ -404,9 +282,25 @@ export function useShellController() {
       setRoutinesBotId(bootstrap.thread.botId ?? null);
     },
   });
+  const {
+    groups,
+    setGroups,
+    groupsRef,
+    bots,
+    setBots,
+    botsRef,
+    spaces,
+    archivedGroups,
+    setQuery,
+    setSearchHits,
+    botsRefreshUser,
+    initialBotsLoaded,
+    bootstrapMe,
+    showToolActivity,
+    refreshBots,
+    applyRunStatus,
+  } = shellRoster;
 
-  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus | null>(null);
-  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
   const [dismissedRunErrorIds, setDismissedRunErrorIds] =
     useState<ReadonlySet<string>>(readSeenRunErrorIds);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -608,10 +502,6 @@ export function useShellController() {
   } | null>(null);
   const manuallyUnread = useRef(new Set<string>());
   const readVisibleGroups = useRef(new Set<string>());
-  const notifiedBrowserEvents = useRef(new Set<string>());
-  const pendingBrowserNotifications = useRef(new Map<string, PendingBrowserNotification>());
-  const autoSpoken = useRef<string | null>(null);
-  const autoSpokenBotId = useRef<string | null>(null);
 
   const inGroup = Boolean(groupId);
   const active = inGroup ? undefined : (bots.find((b) => b.id === botId) ?? bots[0]);
@@ -657,9 +547,19 @@ export function useShellController() {
   activeBotId.current = inGroup ? undefined : active?.id;
   const activeGroupId = useRef<string | undefined>(groupId);
   activeGroupId.current = groupId;
+  const shellComputer = useShellComputer({
+    active,
+    bots,
+    botsRef,
+    activeBotId,
+    activeGroupId,
+    panel,
+    snapshot,
+    refreshThread: (id) => refreshThread(id),
+    refreshGroupThread: (id) => refreshGroupThreadRef.current(id),
+  });
   const {
     computer,
-    setComputer,
     computerRef,
     computerCacheRef,
     cacheComputerFor,
@@ -671,209 +571,40 @@ export function useShellController() {
     setComputerOpen,
     computerBotIdRef,
     computerOpenRef,
-    computerViewport,
     computerError,
     setComputerError,
     computerErrorFromScreen,
     setComputerErrorFromScreen,
     computerBot,
     screenRequest,
-    refreshComputerFor,
     refreshComputerScreen,
-    openComputer,
-    onOpenComputer,
-    releaseComputer,
-  } = useShellComputer({
-    active,
-    bots,
-    botsRef,
-    activeBotId,
+  } = shellComputer;
+
+  const {
+    recruitingOutage,
+    reconnectNeedsRecruitingRead,
+    refreshRecruitingReads,
+    invalidateRecruiting,
+  } = useShellRecruitingRefresh({
+    userId,
+    bootstrapMe,
+    botsRefreshUser,
+    snapshotRef,
     activeGroupId,
-    panel,
-    snapshot,
-    refreshThread: (id) => refreshThread(id),
-    refreshGroupThread: (id) => refreshGroupThreadRef.current(id),
+    activeBotId,
+    recruitingReadCache,
+    setRecruitingRefresh,
   });
-
-  // Agent events arrive in bursts and reconnects repeat; re-read the workbench at most once a
-  // second, and not at all while the page is hidden.
-  const recruitingRefreshQueue = useRef<ReturnType<typeof createCoalescedRefresh>>(undefined);
-  const lastRecruitingRefreshAt = useRef(0);
-  /** Set when a resync could not reach the backend, whose workbench reads may have failed too. */
-  const recruitingOutage = useRef(false);
-  /** A reconnect re-reads the workbench only if it missed events, or to retry after a while. */
-  const reconnectNeedsRecruitingRead = (
-    before: { threadId: string; cursor: number } | null | undefined,
-    fresh: { threadId: string; cursor: number },
-  ) =>
-    recruitingOutage.current ||
-    before?.threadId !== fresh.threadId ||
-    before.cursor !== fresh.cursor ||
-    Date.now() - lastRecruitingRefreshAt.current >= RECONNECT_RECRUITING_RETRY_MS;
-  useEffect(() => {
-    const queue = createCoalescedRefresh(
-      () => {
-        lastRecruitingRefreshAt.current = Date.now();
-        recruitingOutage.current = false;
-        revalidateRecruitingReads(recruitingReadCache.current);
-        setRecruitingRefresh((value) => value + 1);
-      },
-      { windowMs: 1_000 },
-    );
-    recruitingRefreshQueue.current = queue;
-    return () => {
-      queue.dispose();
-      recruitingRefreshQueue.current = undefined;
-    };
-  }, []);
-  const refreshRecruitingReads = useCallback(
-    (threadId: string, spaceId: string | undefined) => {
-      const current = snapshotRef.current;
-      if (
-        !userId ||
-        !bootstrapMe?.spaceId ||
-        botsRefreshUser.current.id !== userId ||
-        (selectedSpaceId() ?? bootstrapMe.spaceId) !== bootstrapMe.spaceId ||
-        spaceId !== bootstrapMe.spaceId ||
-        threadId !== current?.threadId ||
-        (activeGroupId.current
-          ? current?.groupId !== activeGroupId.current
-          : current?.botId !== activeBotId.current)
-      )
-        return;
-      recruitingRefreshQueue.current?.request();
-    },
-    [bootstrapMe?.spaceId, userId],
-  );
-  const invalidateRecruiting = useCallback(
-    (event: ProductEvent) => {
-      if (eventChangesRecruitingPanel(event)) refreshRecruitingReads(event.threadId, event.spaceId);
-    },
-    [refreshRecruitingReads],
-  );
-
   const contextBot =
     botMenu?.kind === "bot" ? bots.find((bot) => bot.id === botMenu.id) : undefined;
   const contextGroup =
     botMenu?.kind === "group" ? groups.find((group) => group.id === botMenu.id) : undefined;
   const contextChat = contextBot ?? contextGroup;
   const closeBotMenu = useCallback(() => setBotMenu(null), []);
-  const updateBotUnread = useCallback((id: string, unread: boolean) => {
-    setBots((current) => {
-      const bot = current.find((candidate) => candidate.id === id);
-      if (!bot || bot.unread === unread) return current;
-      return current.map((candidate) =>
-        candidate.id === id ? { ...candidate, unread } : candidate,
-      );
-    });
-  }, []);
-  const markBotRead = useCallback(
-    async (id: string) => {
-      await rpc.threads.markRead({ botId: id });
-      manuallyUnread.current.delete(id);
-      updateBotUnread(id, false);
-    },
-    [updateBotUnread],
-  );
-  const markBotUnread = useCallback(
-    async (id: string) => {
-      manuallyUnread.current.add(id);
-      try {
-        await rpc.threads.markUnread({ botId: id });
-      } catch (err) {
-        manuallyUnread.current.delete(id);
-        throw err;
-      }
-      updateBotUnread(id, true);
-    },
-    [updateBotUnread],
-  );
-  // A bot the user marked unread by hand stays unread until they open it again,
-  // otherwise the auto-read below would undo the action on the next window focus.
-  const markBotReadIfVisible = useCallback(
-    (id: string) => {
-      if (manuallyUnread.current.has(id)) return;
-      if (document.visibilityState === "visible" && document.hasFocus()) {
-        void markBotRead(id).catch(() => undefined);
-      }
-    },
-    [markBotRead],
-  );
-  const deliverBrowserNotification = useCallback((pending: PendingBrowserNotification): boolean => {
-    const currentBot = botsRef.current.find((bot) => bot.id === pending.botId);
-    if (!currentBot || typeof Notification === "undefined") return true;
-    const result = deliverNativeBrowserNotification(
-      pending.event,
-      currentBot.name || pending.botName,
-      {
-        enabled: pending.groupNotification || currentBot.notifyOnFinish,
-        pageVisible: document.visibilityState === "visible",
-        windowFocused: document.hasFocus(),
-        permission: Notification.permission,
-        notifiedEventIds: notifiedBrowserEvents.current,
-        show: (title, body, tag) => new Notification(title, { body, tag }),
-      },
-    );
-    return result !== "pending";
-  }, []);
-  const flushPendingBrowserNotifications = useCallback(() => {
-    for (const [threadId, pending] of pendingBrowserNotifications.current) {
-      if (deliverBrowserNotification(pending)) {
-        pendingBrowserNotifications.current.delete(threadId);
-      }
-    }
-  }, [deliverBrowserNotification]);
-  const notifyBrowserForEvent = useCallback(
-    (
-      event: Pick<ProductEvent, "id" | "type" | "threadId" | "seq" | "botId" | "payload">,
-      subscribedThreadId: string | undefined,
-      initialCursor: number,
-      streamReady: boolean,
-      botName: string,
-      enabled: boolean,
-      groupNotification: boolean,
-    ) => {
-      const botId = event.botId;
-      if (typeof botId !== "string") return;
-      const eligible = shouldNotifyBrowser(event, {
-        subscribedThreadId: subscribedThreadId ?? "",
-        initialCursor,
-        streamReady,
-        pageVisible: document.visibilityState === "visible",
-        windowFocused: document.hasFocus(),
-        permission: "granted",
-        notifiedEventIds: notifiedBrowserEvents.current,
-      });
-      if (!eligible || !enabled) return;
-      const pending = {
-        event,
-        botId,
-        botName,
-        groupNotification,
-      } satisfies PendingBrowserNotification;
-      if (typeof Notification === "undefined" || Notification.permission === "denied") return;
-      if (Notification.permission === "default") {
-        pendingBrowserNotifications.current.set(event.threadId, pending);
-        return;
-      }
-      if (deliverBrowserNotification(pending)) {
-        pendingBrowserNotifications.current.delete(event.threadId);
-      } else {
-        pendingBrowserNotifications.current.set(event.threadId, pending);
-      }
-    },
-    [deliverBrowserNotification],
-  );
-
-  const {
-    prefetchThread,
-    prefetchSidebarChat,
-    refreshGroupThread,
-    refreshThread,
-    loadOlderMessages,
-    jumpToSearchHit,
-    jumpToMessage,
-  } = useShellThreads({
+  const shellNotifications = useShellNotifications({ active, botsRef, setBots, manuallyUnread });
+  const { markBotReadIfVisible, flushPendingBrowserNotifications, notifyBrowserForEvent } =
+    shellNotifications;
+  const shellThreads = useShellThreads({
     messageScroll,
     bootstrapMe,
     userId,
@@ -937,85 +668,7 @@ export function useShellController() {
     initiallyScrolledThread,
     setScrollRequest,
   });
-  useEffect(() => {
-    if (!showToolActivity) return;
-    let cancelled = false;
-    void rpc.agentSkills
-      .list()
-      .then((skills) => {
-        if (!cancelled) setAgentSkills(skills);
-      })
-      .catch(() => {
-        if (!cancelled) setAgentSkills([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [showToolActivity]);
-
-  const refreshAgentSkills = useCallback(() => {
-    void rpc.agentSkills
-      .list()
-      .then(setAgentSkills)
-      .catch(() => undefined);
-  }, []);
-
-  useEffect(() => {
-    void rpc.voice
-      .status()
-      .then(setVoiceStatus)
-      .catch(() => undefined);
-    const unsubSpeech = speaker.subscribe((state) => {
-      setSpeakingMessageId(state.status === "idle" ? null : (state.messageId ?? null));
-    });
-    return () => {
-      unsubSpeech();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!active || !snapshot || snapshot.botId !== active.id) return;
-    const lastBot = [...snapshot.messages].reverse().find((message) => message.role === "bot");
-    if (autoSpokenBotId.current !== active.id) {
-      autoSpokenBotId.current = active.id;
-      autoSpoken.current = lastBot?.id ?? null;
-      return;
-    }
-    if (call?.botId === active.id || !active.autoSpeak) {
-      autoSpoken.current = lastBot?.id ?? null;
-      return;
-    }
-    if (snapshot.run && ["running", "queued", "leased"].includes(snapshot.run.status)) return;
-    if (!lastBot || lastBot.id === autoSpoken.current) return;
-    const text = speechFromBlocks(lastBot.blocks);
-    if (!text) return;
-    autoSpoken.current = lastBot.id;
-    void speaker.speak(text, { botId: active.id, messageId: lastBot.id });
-  }, [
-    snapshot?.messages,
-    snapshot?.run?.status,
-    snapshot?.botId,
-    active?.autoSpeak,
-    active?.id,
-    call?.botId,
-  ]);
-
-  useEffect(() => {
-    if (!active) return;
-    // Opening a bot clears the manual unread flag so it can auto-read again.
-    manuallyUnread.current.delete(active.id);
-    const markVisibleBotRead = () => {
-      markBotReadIfVisible(active.id);
-    };
-    markVisibleBotRead();
-    window.addEventListener("focus", markVisibleBotRead);
-    document.addEventListener("visibilitychange", markVisibleBotRead);
-    return () => {
-      window.removeEventListener("focus", markVisibleBotRead);
-      document.removeEventListener("visibilitychange", markVisibleBotRead);
-    };
-  }, [active?.id, markBotReadIfVisible]);
-
+  const { refreshGroupThread, refreshThread, loadOlderMessages, jumpToMessage } = shellThreads;
   // The routine panel copies a routine's data into local draft state at click time
   // rather than deriving it from `active`, so it goes stale across a bot switch —
   // without this, Save on bot B could silently update bot A's routine.
@@ -1060,58 +713,7 @@ export function useShellController() {
       });
     }
   }, [active?.id, groupId, inGroup, routines, routinesBotId, searchParams, setSearchParams]);
-  const {
-    activeSnapshot,
-    recruitingWorkspaceView,
-    workspaceNewRole,
-    crmMode,
-    homeView,
-    crmSelection,
-    knownThreadId,
-    recruitingCacheScope,
-    boundRoleView,
-    currentBindingRead,
-    emptyCrmChat,
-    composerDraftKey,
-    boundRoleCrmMode,
-    effectiveCrmSelection,
-    workspaceCandidates,
-    workspaceCorrespondence,
-    workspaceFull,
-    roleChatWorkspace,
-    roleChatHidden,
-    workspaceBrief,
-    openRecruitingView,
-    activeRecruitingTab,
-    changeRecruitingTab,
-    composerRef,
-    correspondenceScope,
-    currentCorrespondenceScope,
-    selectedSchedulingPlan,
-    setSelectedSchedulingPlan,
-    selectedCorrespondence,
-    selectCorrespondence,
-    currentRecruitingCacheScope,
-    selectedContact,
-    chatContextApi,
-    recruitingDetail,
-    chatRoleTitle,
-    sendFromComposer,
-    openRoleChat,
-    candidateFeedbackRecipients,
-    discussionScope,
-    draftCrmReply,
-    discussCandidate,
-    feedbackCandidate,
-    sendRoleText,
-    connectionMemberIds,
-    recruitingConnectionBot,
-    transcriptMessages,
-    transcriptArtifactTarget,
-    saveSequenceDraft,
-    openingCrmRole,
-    openCrmRole,
-  } = useShellRecruiting({
+  const shellRecruiting = useShellRecruiting({
     inGroup,
     snapshot,
     groupId,
@@ -1157,6 +759,19 @@ export function useShellController() {
     refreshGroupThread: (id) => refreshGroupThreadRef.current(id),
     refreshThread: (id) => refreshThreadRef.current(id),
   });
+  const {
+    activeSnapshot,
+    knownThreadId,
+    roleChatWorkspace,
+    composerRef,
+    currentCorrespondenceScope,
+    selectedSchedulingPlan,
+    selectedCorrespondence,
+    currentRecruitingCacheScope,
+    selectedContact,
+    chatRoleTitle,
+    discussionScope,
+  } = shellRecruiting;
   // Keep the armed reply even when its parent leaves the loaded page: the
   // server resolves a paged-out target and degrades a deleted one to a plain
   // reply instead of failing the send.
@@ -1384,17 +999,7 @@ export function useShellController() {
     activeSnapshot?.threadId,
   ]);
 
-  const {
-    openBot,
-    loadOlder,
-    jumpToReplyMessage,
-    answerMessage,
-    reactToMessage,
-    attachmentUploads,
-    onAttachmentPick,
-    removeAttachment,
-    sendMessage,
-  } = useShellMessages({
+  const shellMessages = useShellMessages({
     navigate,
     loadOlderMessagesRef,
     jumpGeneration,
@@ -1440,245 +1045,69 @@ export function useShellController() {
     setSteer,
     refreshBots,
   });
-  const stopRun = useCallback(
-    async (runId?: string) => {
-      if (sending) return;
-      sendingRef.current = true;
-      setSending(true);
-      try {
-        const botTarget = activeBotId.current;
-        const groupTarget = activeGroupId.current;
-        if (groupTarget) {
-          setSendError(null);
-          try {
-            await rpc.threads.stop({
-              groupId: groupTarget,
-              ...(runId !== undefined ? { runId } : {}),
-            });
-          } catch (error) {
-            if (activeGroupId.current === groupTarget) {
-              setSendError(errorText(error, t`Failed to stop`));
-            }
-            return;
-          }
-          // Clear run UI ahead of the run.cancelled event so refresh races with in-flight gets.
-          if (activeGroupId.current === groupTarget) {
-            updateSnapshot((prev) =>
-              prev && prev.groupId === groupTarget ? clearActiveThreadRuns(prev, runId) : prev,
-            );
-          }
-          await refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
-          return;
-        }
-        if (!botTarget) return;
-        setSendError(null);
-        try {
-          await rpc.threads.stop({ botId: botTarget, ...(runId !== undefined ? { runId } : {}) });
-        } catch (error) {
-          if (activeBotId.current === botTarget) {
-            setSendError(errorText(error, t`Failed to stop`));
-          }
-          return;
-        }
-        // Clear local run/busy immediately rather than waiting for run.cancelled so a
-        // superseded in-flight refresh (older cursor) cannot leave Stop enabled / Take control
-        // blocked while the API is already idle.
-        if (activeBotId.current === botTarget) {
-          updateSnapshot((prev) =>
-            !prev || (prev.botId !== botTarget && prev.botId)
-              ? prev
-              : clearActiveThreadRuns(prev, runId),
-          );
-          const currentComputer = computerRef.current;
-          if (runId === undefined && currentComputer?.busyBotName) {
-            commitComputer({ ...currentComputer, busyBotName: null });
-          }
-        }
-        await refreshThreadRef.current(botTarget).catch(() => undefined);
-      } finally {
-        sendingRef.current = false;
-        setSending(false);
-      }
-    },
-    [sending, t],
-  );
-  const stopTeaching = useCallback(async () => {
-    const id = activeBotId.current;
-    if (!id || teachBusy) return;
-    const recording = taughtSkills.find(
-      (skill) => skill.status === "recording" && taughtSkillsBotId === id,
-    );
-    if (!recording) return;
-    setTeachBusy(true);
-    try {
-      await rpc.skills.stop({ skillId: recording.id });
-      await refreshThreadRef.current(id);
-      setComputerOpen(false);
-    } finally {
-      setTeachBusy(false);
-    }
-  }, [teachBusy, taughtSkills, taughtSkillsBotId]);
-  // Transcript and MessageView are memoized; these must stay referentially stable or every
-  // Shell state change re-renders the whole transcript.
-  const refreshActiveThread = useCallback(async () => {
-    const groupId = activeGroupId.current;
-    if (groupId) {
-      await refreshGroupThreadRef.current(groupId);
-      return;
-    }
-    const id = activeBotId.current;
-    if (!id) return;
-    await refreshThreadRef.current(id);
-  }, []);
-  // Teach chrome needs skills applied before this resolves — refreshThread only
-  // kicks skills.list off in the background, so Stop teaching would never mount
-  // if that background call failed or lagged behind local recovery.
-  const refreshActiveTeaching = useCallback(async () => {
-    const id = activeBotId.current;
-    if (!id) return;
-    await refreshThreadRef.current(id);
-    const skills = await rpc.skills.list({ botId: id });
-    if (activeBotId.current !== id) return;
-    setTaughtSkills(skills);
-    setTaughtSkillsBotId(id);
-  }, []);
-  const addSkillRoutine = useCallback((name: string, prompt: string) => {
-    setRoutineDraft({ ...emptyRoutineDraft(), name, prompt });
-    setRoutineWebhookSecret(null);
-    setEditingRoutine(null);
-    setPanel("routine");
-  }, []);
-  const speakingMessageIdRef = useRef(speakingMessageId);
-  speakingMessageIdRef.current = speakingMessageId;
-  const speakMessage = useCallback((message: ThreadMessage) => {
-    if (speakingMessageIdRef.current === message.id) {
-      speaker.stop();
-      return;
-    }
-    const text = speechFromBlocks(message.blocks);
-    const id = message.botId ?? activeBotId.current;
-    if (text && id) void speaker.speak(text, { botId: id, messageId: message.id });
-  }, []);
-
-  const pendingRoleCreation = useRef<{
-    key: string;
-    group: Group;
-    clientNonce: string;
-    uploads: Map<string, { clientNonce: string; artifactId?: string }>;
-  } | null>(null);
-  async function createGroup(input: { name: string; botIds: string[]; description?: string }) {
-    const attachments = showToolActivity
-      ? []
-      : attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
-    if (attachments.length && !input.description)
-      input = {
-        ...input,
-        description: t`Use the attached files to define this role and start the search.`,
-      };
-    const submittedUser = botsRefreshUser.current;
-    const submittedSpace = bootstrapMe?.spaceId;
-    const submittedTarget = activeGroupId.current ?? activeBotId.current;
-    const stillCurrent = () =>
-      discussionScope.current.active &&
-      discussionScope.current.panel === "create-group" &&
-      submittedUser.id === userId &&
-      botsRefreshUser.current === submittedUser &&
-      (activeGroupId.current ?? activeBotId.current) === submittedTarget &&
-      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
-
-    setCreatingGroup(true);
-    try {
-      const key = JSON.stringify([
-        userId,
-        bootstrapMe?.spaceId,
-        input,
-        attachments.map((item) => item.id),
-      ]);
-      let attempt =
-        input.description && pendingRoleCreation.current?.key === key
-          ? pendingRoleCreation.current
-          : null;
-      const group =
-        attempt?.group ?? (await rpc.groups.create({ name: input.name, botIds: input.botIds }));
-      if (input.description && !attempt) {
-        attempt = {
-          key,
-          group,
-          clientNonce: crypto.randomUUID(),
-          uploads: new Map(
-            attachments.map((pending) => [
-              attachmentUploadKey(pending),
-              { clientNonce: crypto.randomUUID() },
-            ]),
-          ),
-        };
-        pendingRoleCreation.current = attempt;
-      }
-      if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
-      setGroups((current) =>
-        current.some((item) => item.id === group.id) ? current : [group, ...current],
-      );
-      if (input.description && attempt) {
-        const currentAttempt = attempt;
-        const settled = await Promise.allSettled(
-          attachments.map(async (pending) => {
-            const id = attachmentUploadKey(pending);
-            const upload = currentAttempt.uploads.get(id);
-            if (!upload) throw new Error(t`The workspace changed. Open the role again.`);
-            if (upload.artifactId) return;
-            upload.artifactId = await attachmentUploads.current.resolveOne(
-              { id, file: pending.file },
-              { groupId: group.id },
-              { clientNonce: upload.clientNonce },
-            );
-            attachmentUploads.current.discard(id);
-          }),
-        );
-        const failed = settled.find(
-          (result): result is PromiseRejectedResult => result.status === "rejected",
-        );
-        if (failed) throw failed.reason;
-        const artifactIds = attachments.map((pending) => {
-          const artifactId = currentAttempt.uploads.get(attachmentUploadKey(pending))?.artifactId;
-          if (!artifactId) throw new Error(t`Could not upload file`);
-          return artifactId;
-        });
-        if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
-        await rpc.threads.followUp({
-          groupId: group.id,
-          text: input.description,
-          ...(artifactIds.length ? { artifactIds } : {}),
-          mentions: [input.botIds[0]!],
-          clientNonce: currentAttempt.clientNonce,
-        });
-        pendingRoleCreation.current = null;
-      }
-      if (!stillCurrent()) return;
-      navigate(`/app/g/${group.id}${input.description ? "?view=brief" : ""}`);
-      setPanel(null);
-      setNewRoleSourceId(null);
-      setNewRoleDescription("");
-      await refreshBots().catch(() => undefined);
-    } finally {
-      setCreatingGroup(false);
-    }
-  }
-
-  function startNewRole(sourceId: string, description = "") {
-    if (!canCreateRoleFrom(sourceId)) return;
-    setNewRoleSourceId(sourceId);
-    setNewRoleDescription(description);
-    setPanel("create-group");
-    setMobileSidebarOpen(false);
-  }
-
-  function restoreGroup(groupId: string) {
-    return rpc.groups
-      .restore({ groupId })
-      .then(() => refreshBots(true))
-      .catch((error) => setSendError(errorText(error, t`Could not continue`)));
-  }
-
+  const { attachmentUploads, sendMessage } = shellMessages;
+  const shellAgentActions = useShellAgentActions({
+    showToolActivity,
+    active,
+    snapshot,
+    callBotId: call?.botId,
+    sending,
+    sendingRef,
+    setSending,
+    activeBotId,
+    activeGroupId,
+    setSendError,
+    updateSnapshot,
+    refreshThreadRef,
+    refreshGroupThreadRef,
+    computerRef,
+    commitComputer,
+    teachBusy,
+    taughtSkills,
+    taughtSkillsBotId,
+    setTeachBusy,
+    setComputerOpen,
+    setTaughtSkills,
+    setTaughtSkillsBotId,
+    setRoutineDraft,
+    setRoutineWebhookSecret,
+    setEditingRoutine,
+    setPanel,
+  });
+  const newRoleAttachmentKey = JSON.stringify([
+    "new-role",
+    userId,
+    bootstrapMe?.spaceId,
+    roleSourceGroup?.id,
+  ]);
+  const shellCreation = useShellCreation({
+    showToolActivity,
+    pendingAttachments,
+    newRoleAttachmentKey,
+    botsRefreshUser,
+    bootstrapMe,
+    activeGroupId,
+    activeBotId,
+    discussionScope,
+    userId,
+    setCreatingGroup,
+    setGroups,
+    attachmentUploads,
+    navigate,
+    setPanel,
+    setNewRoleSourceId,
+    setNewRoleDescription,
+    refreshBots,
+    canCreateRoleFrom,
+    setMobileSidebarOpen,
+    setSendError,
+    botsRef,
+    setBots,
+    cancelFocusPrompt,
+    focusPromptAbortRef,
+    focusPromptBotIdRef,
+    sendingRef,
+  });
   function cancelFocusPrompt() {
     focusPromptAbortRef.current?.abort();
     focusPromptAbortRef.current = null;
@@ -1693,59 +1122,6 @@ export function useShellController() {
   function openSettings(section: SettingsSection = "general") {
     setSettingsSection(section);
     setSettingsOpen(true);
-  }
-
-  async function createBot(input: {
-    name: string;
-    title: string;
-    description: string;
-    computerMode: ComputerMode;
-  }) {
-    const { normalizeCreateBotProfile } = await import("./shell-action-validation");
-    const isFirstBot = botsRef.current.length === 0;
-    const bot = await rpc.bots.create({
-      ...normalizeCreateBotProfile(input),
-      notifyOnFinish: true,
-      computerMode: input.computerMode,
-    });
-    setBots((current) =>
-      current.some((item) => item.id === bot.id) ? current : [bot, ...current],
-    );
-    navigate(`/app/${bot.id}`);
-    setPanel(null);
-    // Register cancellation before awaiting start so leaving the bot during
-    // startup cannot miss the abort and still schedule a late focus card.
-    cancelFocusPrompt();
-    const controller = new AbortController();
-    focusPromptAbortRef.current = controller;
-    focusPromptBotIdRef.current = bot.id;
-    const started = await rpc.onboarding
-      .start({ botId: bot.id })
-      .then(() => true)
-      .catch(() => false);
-    if (!started || controller.signal.aborted || focusPromptBotIdRef.current !== bot.id) {
-      if (focusPromptAbortRef.current === controller) {
-        focusPromptAbortRef.current = null;
-        focusPromptBotIdRef.current = null;
-      }
-      await refreshBots().catch(() => undefined);
-      return;
-    }
-    void scheduleFocusPrompt({
-      immediate: isFirstBot,
-      signal: controller.signal,
-      shouldSkip: () => sendingRef.current,
-      prompt: async () => {
-        if (focusPromptBotIdRef.current !== bot.id || activeBotId.current !== bot.id) return;
-        await rpc.onboarding.promptFocus({ botId: bot.id }).catch(() => undefined);
-      },
-    }).finally(() => {
-      if (focusPromptAbortRef.current === controller) {
-        focusPromptAbortRef.current = null;
-        focusPromptBotIdRef.current = null;
-      }
-    });
-    await refreshBots().catch(() => undefined);
   }
 
   useEffect(() => {
@@ -1893,14 +1269,16 @@ export function useShellController() {
     .slice(0, 2)
     .toUpperCase();
 
-  const newRoleAttachmentKey = JSON.stringify([
-    "new-role",
-    userId,
-    bootstrapMe?.spaceId,
-    roleSourceGroup?.id,
-  ]);
   const newRoleAttachments = attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
   return {
+    ...shellAgentActions,
+    ...shellCreation,
+    ...shellNotifications,
+    ...shellRoster,
+    ...shellComputer,
+    ...shellThreads,
+    ...shellRecruiting,
+    ...shellMessages,
     t,
     linkFavicons,
     botId,
@@ -1910,26 +1288,11 @@ export function useShellController() {
     setSearchParams,
     session,
     userId,
-    groups,
-    setGroups,
-    bots,
-    setBots,
-    botSections,
-    spaces,
-    setSpaces,
-    archivedBots,
-    archivedGroups,
     archivedOpen,
     setArchivedOpen,
     setNewRoleSourceId,
     newRoleDescription,
     setNewRoleDescription,
-    collapsedSidebarSections,
-    collapsedRosterParents,
-    query,
-    setQuery,
-    searchHits,
-    searchLoading,
     snapshot,
     botsSidebarDensity,
     enterToSend,
@@ -1963,12 +1326,7 @@ export function useShellController() {
     peerConversation,
     setPeerConversation,
     routines,
-    agentSkills,
-    setAgentSkills,
     teachBusy,
-    computer,
-    setComputer,
-    botsRefreshUser,
     updateSnapshot,
     pluginsOpen,
     setPluginsOpen,
@@ -1985,9 +1343,6 @@ export function useShellController() {
     memoryProviderConfig,
     setMemoryProviderConfig,
     memoryProviderConfigRevision,
-    voiceStatus,
-    setVoiceStatus,
-    speakingMessageId,
     dismissedRunErrorIds,
     menuOpen,
     setMenuOpen,
@@ -2034,13 +1389,8 @@ export function useShellController() {
     setSectionMenu,
     sectionMenuAnchor,
     closeSectionMenu,
-    booting,
     loadingOlder,
-    initialBotsLoaded,
-    bootstrapMe,
-    setBootstrapMe,
     call,
-    showToolActivity,
     viewportWidth,
     botsSidebarWidth,
     setBotsSidebarWidth,
@@ -2066,9 +1416,6 @@ export function useShellController() {
     setRunningRoutine,
     routineError,
     setRoutineError,
-    computerOpen,
-    setComputerOpen,
-    computerViewport,
     usage,
     refreshUsage,
     routineSavePending,
@@ -2083,7 +1430,6 @@ export function useShellController() {
     pinnedAroundRef,
     inGroup,
     active,
-    computerBot,
     activeGroup,
     archivedRouteGroup,
     roleSourceGroup,
@@ -2098,64 +1444,9 @@ export function useShellController() {
     contextGroup,
     contextChat,
     closeBotMenu,
-    markBotRead,
-    markBotUnread,
-    refreshBots,
-    prefetchThread,
-    prefetchSidebarChat,
-    refreshGroupThread,
-    refreshThread,
-    refreshAgentSkills,
-    sidebarGroups,
-    openSpaceChat,
-    reorderRosterBot,
-    toggleSidebarSection,
-    toggleRosterParent,
-    showSpaceSearch,
-    jumpToSearchHit,
-    activeSnapshot,
-    recruitingWorkspaceView,
-    workspaceNewRole,
-    crmMode,
-    homeView,
-    crmSelection,
-    knownThreadId,
-    recruitingCacheScope,
-    boundRoleView,
-    currentBindingRead,
-    emptyCrmChat,
-    composerDraftKey,
-    boundRoleCrmMode,
-    effectiveCrmSelection,
-    workspaceCandidates,
-    workspaceCorrespondence,
-    workspaceFull,
-    roleChatWorkspace,
-    roleChatHidden,
-    workspaceBrief,
-    openRecruitingView,
-    activeRecruitingTab,
-    changeRecruitingTab,
-    composerRef,
-    correspondenceScope,
-    setSelectedSchedulingPlan,
-    selectedCorrespondence,
-    selectCorrespondence,
-    chatContextApi,
-    recruitingDetail,
-    sendFromComposer,
-    openRoleChat,
-    candidateFeedbackRecipients,
-    discussionScope,
-    draftCrmReply,
-    discussCandidate,
-    feedbackCandidate,
-    sendRoleText,
     activeReplyTarget,
     activeReplyQuote,
     clearReply,
-    connectionMemberIds,
-    recruitingConnectionBot,
     currentRuns,
     answerableAskIds,
     workingRuns,
@@ -2167,40 +1458,14 @@ export function useShellController() {
     displayedRunError,
     displayedRunErrorId,
     handleRunErrorPresented,
-    transcriptMessages,
-    transcriptArtifactTarget,
-    saveSequenceDraft,
     resolveTranscriptBot,
     workingBots,
     resolveTranscriptMemberName,
     replyTargetName,
     composerMentionTargets,
     shellReady,
-    openBot,
-    loadOlder,
-    jumpToReplyMessage,
-    answerMessage,
-    reactToMessage,
-    onAttachmentPick,
-    removeAttachment,
-    openingCrmRole,
-    openCrmRole,
-    stopRun,
-    stopTeaching,
-    refreshActiveThread,
-    refreshActiveTeaching,
-    addSkillRoutine,
-    speakMessage,
-    createGroup,
-    startNewRole,
-    restoreGroup,
     setBotsSidebarCollapsedPref,
     openSettings,
-    createBot,
-    refreshComputerFor,
-    openComputer,
-    onOpenComputer,
-    releaseComputer,
     dismissComposerError,
     embeddedScreenUrl,
     hasControl,
