@@ -137,3 +137,27 @@ it.each(["reschedule_booking", "cancel_booking"])(
     expect(f.connector.execute).not.toHaveBeenCalled();
   },
 );
+
+it("books a fixed-length event type without a duration when a slot starts at the approved time", async () => {
+  const f = fixture();
+  const { lengthInMinutes: _, ...args } = f.args;
+  f.tool.inputSchema.required = ["eventTypeId", "start", "end", "timeZone", "format"];
+  expect(await f.check({ args })).toBeUndefined();
+  expect(f.connector.execute).toHaveBeenCalledWith(
+    expect.objectContaining({
+      args: {
+        eventTypeId: 42,
+        start: args.start,
+        end: "2026-11-01T06:30:00.000Z",
+        timeZone: "UTC",
+        format: "range",
+      },
+    }),
+    expect.anything(),
+  );
+  f.setData({
+    status: "success",
+    data: { "2026-11-01": [{ start: "2026-11-01T06:00:00Z", end: "2026-11-01T06:30:00Z" }] },
+  });
+  expect(await f.check({ args })).toMatchObject({ code: "CALENDAR_SLOT_CONFLICT" });
+});
