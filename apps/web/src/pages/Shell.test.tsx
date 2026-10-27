@@ -4030,6 +4030,12 @@ it.each([
     // Hover/focus prefetches pass no request options; count only conversation opens.
     const opens = () => shellApi.get.mock.calls.filter((call) => call.length > 1).length;
     const reads = opens();
+    const extraReads: string[] = [];
+    const getImpl = shellApi.get.getMockImplementation()!;
+    shellApi.get.mockImplementation((...args) => {
+      extraReads.push(JSON.stringify(args[0]) + new Error().stack);
+      return getImpl(...args);
+    });
     const shortcut = async (key: string, modifier: "metaKey" | "ctrlKey") =>
       act(async () => {
         window.dispatchEvent(
@@ -4046,7 +4052,7 @@ it.each([
       await shortcut("k", "ctrlKey");
       await shortcut("2", "metaKey");
       expect(palette()).toBeNull();
-      expect(opens()).toBe(reads);
+      expect(opens(), extraReads.join("\n")).toBe(reads);
       expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
       return;
     }
@@ -4057,7 +4063,7 @@ it.each([
     await shortcut("k", "ctrlKey");
     await shortcut("2", "metaKey");
     expect(palette()).toBeNull();
-    expect(opens()).toBe(reads);
+    expect(opens(), extraReads.join("\n")).toBe(reads);
     await act(async () => {
       setToolActivityPreference("on");
     });
