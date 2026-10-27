@@ -177,3 +177,32 @@ No assertion is made that the remaining graph is irreducible or that all safe op
 are exhausted. The validated first-stage result is frozen; the final 250 KB goal remains open.
 Deployed Fast4G LCP is **not measured**. The earlier local Lighthouse attempt with the real
 persistent SSE lifecycle timed out and is not an acceptance result.
+
+
+## Follow-up investigation toward 250 KB
+
+A subsequent canonical `RUN_TRIGGERS` constant-only module preserves the old export and
+schema instance while keeping unused run-schema construction out of the reducer import.
+With the same Chinese fixtures, contacts measured **347,873 bytes** (7 JS, 35 requests,
+17 RPC, zero duplicate reads), chat **310,602 bytes**, and sign-in **203,472 bytes**.
+The small net reductions include changed bundle-name compression; this is not a material
+solution to the remaining 97,873-byte contacts gap.
+
+Validation: `pnpm exec vitest run packages/core/src/thread-reducer.test.ts` passed 14/14;
+`pnpm --filter @rakazo/contracts check` and the production build passed. Both measurement
+commands above were rerun against this build. No unrelated feature or validation changed.
+
+Inspection of installed Zod 4.6.2 establishes that classic schema constructors attach
+`processJSONSchema`, and the base schema exposes `toJSONSchema` plus Standard Schema JSON
+input/output methods. Its JSON-schema processors are therefore reachable through the
+retained public instance API, not merely an accidentally imported barrel. Replacing imports
+with named imports does not remove that dependency. Stripping these methods or aliasing
+processors to stubs would change schema behavior and was not attempted.
+
+The main bundle's only rendered contract modules are auth (937 source bytes), pagination
+constants (1,027), and local settings (171); this is not evidence of a large collection of
+unused contract schemas in the main bundle. Employment validation currently computes the
+editor's invalid/disabled state synchronously; moving it only to submit would change visible
+validation behavior. A functional Zod Mini migration would require canonical schema and
+consumer API changes with parser/error/ORPC compatibility coverage. Its actual route savings
+are unmeasured, so it is a design option rather than a claimed solution.
