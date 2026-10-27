@@ -321,6 +321,23 @@ describe("guardRecruitingTurnEnd", () => {
     expect(cut).not.toContain("Bo");
   });
 
+  it("names the must-haves a person's row does not show", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "person-1", name: "Person 1" }]),
+      },
+    } as never;
+    const text = await recruitingRoundListText(prisma, {
+      threadId: "thread-1",
+      spaceId: "space-1",
+      roleId: "role-1",
+      candidateKeys: ["person-1"],
+      unverified: { "person-1": "初创公司经历" },
+    });
+    expect(text).toContain("1. **Person 1**\n   未核实：初创公司经历");
+  });
+
   it.each([
     [10, false, true, false, "ended"],
     [9, false, true, false, "continued"],

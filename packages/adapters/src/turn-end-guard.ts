@@ -177,6 +177,8 @@ export async function recruitingRoundListText(
     knownOnly?: boolean;
     /** The last key may be cut mid-word: leave it out while it is the start of another person's. */
     lastMayBeCut?: boolean;
+    /** Per person, the must-haves their row does not show. */
+    unverified?: Readonly<Record<string, string>>;
   },
 ) {
   const people = await recruitingRoundPeople(prisma, input);
@@ -200,7 +202,8 @@ export async function recruitingRoundListText(
       .filter(Boolean)
       .join(" · ");
     const passage = person?.snippet?.trim();
-    return `${index + 1}. ${head}${passage ? `\n   > ${passage.length > 220 ? `${passage.slice(0, 220)}…` : passage}` : ""}`;
+    const unknown = input.unverified?.[key]?.trim();
+    return `${index + 1}. ${head}${passage ? `\n   > ${passage.length > 220 ? `${passage.slice(0, 220)}…` : passage}` : ""}${unknown ? `\n   未核实：${unknown}` : ""}`;
   });
   return `本轮 ${lines.length} 位人选：\n\n${lines.join("\n")}`;
 }
