@@ -12,7 +12,10 @@ it("applies the 200-row cap after authorization and preserves explicit continuat
     createdAt: new Date(0),
     updatedAt: new Date(0),
   }));
-  const findMany = vi.fn().mockResolvedValue(rows);
+  const findMany = vi.fn(async ({ take, skip }) => {
+    expect(take).toBe(200);
+    return rows.slice(skip, skip + take);
+  });
   const deps = { env: {}, prisma: { botSection: { findMany } } } as unknown as RouterDeps;
   const actor: Actor = {
     spaceId: "test-space",

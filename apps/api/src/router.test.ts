@@ -221,6 +221,9 @@ describe("account preferences", () => {
     const client = createRouterClient(createRouter(deps), { context: { actor } });
     await expect(client.capabilities.list()).resolves.toEqual([]);
     expect(findMany).toHaveBeenCalledWith({
+      take: 200,
+      skip: 0,
+      orderBy: { id: "asc" },
       where: {
         spaceId: actor.spaceId,
         userId: actor.userId,
@@ -1229,7 +1232,9 @@ describe("MCP loopback endpoints", () => {
       expect(JSON.stringify(body)).not.toContain("test-platform-credential-not-for-clients");
       expect(list).toHaveBeenCalledWith({
         where: { spaceId: "workspace-1", userId: "member-1" },
-        orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+        orderBy: [{ name: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        take: 200,
+        skip: 0,
       });
     } finally {
       vi.unstubAllEnvs();
