@@ -21,7 +21,7 @@
 | C3 | 多容器 | 手机推送 token 放数据库 | 已合并（#262） | — |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 待做 | |
 | C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 待做（依赖 C1–C4） | |
-| C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 进行中 | Adam |
+| C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 完成（本地验收，[#265](https://github.com/WeKruit/rakazo/pull/265)，待发布） | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 待做 | |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 待做 | |
 | D3 | 前端 | 长列表虚拟滚动 | 待做 | |
@@ -97,6 +97,42 @@ C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret �
 - **现状：** 线上网页由 `vite preview` 提供，`/rpc` 和 noVNC 屏幕也是它代理的。
 - **做法：** 网页静态文件改由 API 进程或 CDN 提供，屏幕代理（HTTP 和 WebSocket）移到 API。这部分涉及安全，要带测试。
 - **验收：** 生产镜像里不再运行 `vite`。首页 TTFB p95 小于 200 ms。
+
+- **实现（C6，2026-10-27）：** Modal 改为仅启动 API 和 worker 两个 Node 进程。API 进程提供静态网页、公开 API/RPC 路由和 HTTP/WebSocket 屏幕代理，内部路由保持 loopback。屏幕代理抽入共享 core 模块，保留授权复查、撤权断流和响应隔离。没有新建数据库池或会话连接；现有连接池配置未改。
+- **认领与 PR：** Adam 先把认领提交 `d1cdbb74d64fe289fa74b79b7ade010fe7f1ddbc` 普通 push 到 `claude/project-thread-f1cbzk`，再实现 `f7c4ae4501f91cb2d96d5f3e011ad127b978ff94`；Draft [#265](https://github.com/WeKruit/rakazo/pull/265) 的 base 为该集成分支。
+- **本地实测：** Node 24.19.0、pnpm 9.15.0。core 1,231 通过 / 5 跳过，API 1,321 通过 / 50 跳过，web 1,649 通过；三个包类型检查通过。屏幕浏览器测试 12/12 通过（development、preview、production 各 4 项），包含直接导航、iframe 隔离、资产重试、WebSocket 和撤权。生产网页构建、API 打包、Biome、diff 检查通过。Modal 源码 AST 检查：2 个 Node 服务，0 个 Vite 运行命令。
+- **TTFB 前后对比：** 同一个本地生产网页构建，每种实现先预热 20 次，再 200 次请求、并发 20、gzip、keepalive。Vite preview 的 p50/p95/max 为 3.17/5.26/6.77 ms；API 网页监听器为 4.07/7.49/9.89 ms；两者错误均为 0。新实现本地 p95 7.49 ms < 200 ms，不把此次变更说成延迟改善。
+- **还没测 / 范围：** 未部署，线上区域 TTFB、实际 Modal 镜像启动、真实屏幕提供方/TLS、生产流量中的进程退出还没测；55 个已有跳过测试未验证。此次目标是 WeKruit Modal，其他 Compose/desktop preview 启动方式未迁移。仅用本地假服务，没有真实岗位/候选人、外发消息、云配置或 Secret 变更；CI 保持关闭。这里的「完成」指实现和本地门禁完成，不代表上线验收完成。
+
+复现命令（仓库根目录，使用 Node 24.19.0；仓库类型检查脚本名是 `check`，没有 `typecheck`）：
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @rakazo/db generate
+pnpm --filter @rakazo/api --filter @rakazo/core --filter @rakazo/web check
+pnpm --filter @rakazo/api --filter @rakazo/core test
+pnpm --filter @rakazo/web test
+PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers pnpm --filter @rakazo/web exec playwright install chromium --only-shell
+PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers pnpm --filter @rakazo/web exec playwright test -c playwright.screen-proxy.config.ts
+RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web build
+node scripts/bundle-server.mjs api
+RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec tsx scripts/benchmark-public-web.ts
+pnpm exec biome check apps/api/src/public-web.ts apps/api/src/public-web.test.ts apps/api/src/index.ts apps/web/vite.config.ts apps/web/e2e/screen-proxy-isolation.spec.ts apps/web/scripts/benchmark-public-web.ts packages/core/src/node/novnc-proxy.ts packages/core/src/node/screen-proxy.ts packages/core/src/node/screen-proxy.test.ts packages/core/src/node/novnc-html.ts packages/core/src/node/novnc-html.test.ts packages/core/package.json
+git diff --check
+python3 - <<'CHECK'
+import ast
+from pathlib import Path
+p = Path('infra/modal/app.py')
+tree = ast.parse(p.read_text())
+services = next(n.value for n in ast.walk(tree) if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == 'services' for t in n.targets))
+value = ast.literal_eval(services)
+assert [name for name, _ in value] == ['api', 'worker']
+assert all('vite' not in ' '.join(cmd) for _, cmd in value)
+assert 'env["WEB_STATIC_DIR"] = "/app/apps/web/dist"' in p.read_text()
+print('2 Node services; 0 Vite runtime commands; static root configured')
+CHECK
+```
+
 
 ## D. 前端
 
