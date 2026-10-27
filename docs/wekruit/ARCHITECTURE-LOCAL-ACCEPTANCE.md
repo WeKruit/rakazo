@@ -246,3 +246,18 @@ A corrected, isolated D4 baseline run captured the extra RPC stack: `readThreadS
 Portable fix `1b927fbae` and confirmed-event test `aee66a16e` are integrated as `bc0621928` and `52cfe7474`. The hook cancels its timers on unmount and avoids creating a timer if an accepted send receipt arrives after unmount. Mounted fallback still reads once; unmounted, late-receipt and durable-event-confirmed cases read zero. No shortcut assertion, mock queue, authorization, accepted-send or nonce semantics were weakened. The full investigation and controlled comparisons are in `SHELL-SHORTCUT-READ-INVESTIGATION.md`.
 
 Final integrated `pnpm exec vitest run apps/web/src packages/chat-ui/src packages/ui-web/src packages/contracts/src --maxWorkers=4`: **2216/2216**,179 files,31.14s. Web check and production build exited0. The two actual Chinese cold-entry measurement scripts again exited0 on this exact product code: contacts**347938B**,7 JS/35 requests/17 RPC/0 duplicates; chat**310672B**,8 JS/39 requests; sign-in**203469B**,7 JS/15 requests. Request evidence: `evidence/d1-echo-fix-requests.json`. Final250KB remains unmet (contacts97938B, chat60672B above it), with the larger design options documented separately. No publication, deployment or cloud action occurred.
+
+## Published integration backend gates (2026-10-27)
+
+Execution revision4aaa64941c93ab05a172e95d9423a9952672ac8f, merged by#302; private workspace dependencies and generated Prisma client. Node24.19.0/pnpm9.15.0. No source or branch modifications during verification.
+
+```sh
+pnpm exec vitest run packages/db/src apps/api/src --maxWorkers=2
+EXPO_OFFLINE=1 pnpm --filter @rakazo/contracts --filter @rakazo/core --filter @rakazo/db --filter @rakazo/adapters --filter @rakazo/api --filter @rakazo/worker --filter @rakazo/testkit --filter @rakazo/mobile --filter @rakazo/web --filter @rakazo/ui-web --filter @rakazo/chat-ui check
+TZ=UTC DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_root VERIFY_DATABASE=1 pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts packages/db/src/space-membership.postgres.test.ts packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/expo-push.postgres.test.ts
+RLS_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2_rls_root pnpm exec vitest run packages/db/src/actor-db.postgres.test.ts
+```
+
+DB/API2,609passed/430skipped,64.06s;11packagechecks passed (not separately timed); actual local PostgreSQL307/307,22.69s; independent RLS18/18,761ms.430skips are not passes. Expo offline validation does not validate the online dependency catalog. These numbers precede the separately tested C5 foundation; its worker/Python gates are recorded in C5-LOCAL-DRAIN.md.
+
+F2 ownership remains Claude. Existing `job-reconciler.test.ts`, `turn-end-guard.test.ts`, `recruiting-question-nudge.test.ts`:59/59,1.24s. The first fresh-worktree attempt failed two imports because the generated Prisma client was absent; `pnpm --filter @rakazo/db generate` restored the normal prerequisite before this successful run. No F2 implementation was changed, no actual worker crash or online outcome was tested.
