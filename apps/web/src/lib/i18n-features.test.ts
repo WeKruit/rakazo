@@ -94,3 +94,42 @@ it("does not render an untranslated feature when both catalogs fail, and can ret
   await withFeatureMessages(async () => ({}));
   expect(i18n._("feature")).toBe("Ready");
 });
+
+it("preserves visible startup translations when both optional catalogs fail", async () => {
+  setCatalogLoadersForTests(loaders(async (locale) => ({ messages: { base: `${locale} ready` } })));
+  await activateUiLocale("zh-CN");
+  setFeatureCatalogLoadersForTests(
+    loaders(async () => {
+      throw new Error("offline");
+    }),
+  );
+  await expect(withFeatureMessages(async () => ({}))).rejects.toThrow(
+    "Could not load translations",
+  );
+  expect(i18n.locale).toBe("zh-CN");
+  expect(i18n._("base")).toBe("zh-CN ready");
+  setFeatureCatalogLoadersForTests(
+    loaders(async (locale) => ({ messages: { feature: `${locale} feature` } })),
+  );
+  await withFeatureMessages(async () => ({}));
+  expect(i18n.locale).toBe("zh-CN");
+  expect(i18n._("feature")).toBe("zh-CN feature");
+});
+
+it("keeps a fully translated mounted feature when a later locale and English fail", async () => {
+  setCatalogLoadersForTests(loaders(async (locale) => ({ messages: { base: locale } })));
+  setFeatureCatalogLoadersForTests(
+    loaders(async (locale) => ({ messages: { feature: `${locale} feature` } })),
+  );
+  await activateUiLocale("zh-CN");
+  await withFeatureMessages(async () => ({}));
+  setFeatureCatalogLoadersForTests(
+    loaders(async () => {
+      throw new Error("offline");
+    }),
+  );
+  expect(await activateUiLocale("de")).toBe("zh-CN");
+  expect(i18n.locale).toBe("zh-CN");
+  expect(i18n._("base")).toBe("zh-CN");
+  expect(i18n._("feature")).toBe("zh-CN feature");
+});
