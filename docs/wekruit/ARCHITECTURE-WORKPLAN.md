@@ -2,7 +2,7 @@
 
 这份文件是架构优化的总清单。每一项写清楚四件事：查到的现状、做法、状态、验收指标。多人协作时，开工前把自己的名字写进「负责」，做完把状态改成「已合并」，并写上 PR 号。
 
-状态：`已上线`、`已合并`（代码在 main 上但还没部署，或者要等配置）、`本 PR`、`进行中`、`待做`。
+状态明确区分实现、合入位置和验收：`本分支`/`代码已合并` 仅描述代码；`本地门禁通过` 不代表线上验收完成；`阻塞` 必须写明待授权动作；`进行中`/`待做` 不作完成声明。本轮小 PR 只合入 #263 的 `claude/project-thread-f1cbzk`，不合入 main。
 
 验收指标分两种。一种是代码检查，本地就能跑。另一种是线上实测，要部署之后用真实流量或压测去量。
 
@@ -10,26 +10,26 @@
 
 | # | 方向 | 项目 | 状态 | 负责 |
 |---|---|---|---|---|
-| A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已上线（#259） | — |
-| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 进行中 | Adam |
+| A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已有上线记录（#259）；50 并发验收未测 | — |
+| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 未完成：本地审计已做；实现待做，线上角色/配置和 p95 验收受限 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
 | A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
-| B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本 PR | — |
-| B2 | 任务队列 | 每分钟记录一次排队情况 | 本 PR | — |
-| C1 | 多容器 | 附件放对象存储 | 已合并（#260），等存储配置 | — |
-| C2 | 多容器 | 电脑工作目录放对象存储 | 已合并（#262），等存储配置 | — |
-| C3 | 多容器 | 手机推送 token 放数据库 | 回归修复中（#262，过期会话时区边界） | Adam |
+| B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本分支；本地回归通过，线上未测 | — |
+| B2 | 任务队列 | 每分钟记录一次排队情况 | 本分支；部署后分钟日志未测 | — |
+| C1 | 多容器 | 附件放对象存储 | 代码已合并（#260）；存储配置阻塞 | — |
+| C2 | 多容器 | 电脑工作目录放对象存储 | 代码已合并（#262）；存储配置阻塞 | — |
+| C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，待发布） | Adam |
-| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 待做（依赖 C1–C4） | |
+| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 阻塞（共享存储配置、C4 与部署授权） | |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中 | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 进行中 | Adam |
 | D3 | 前端 | 长列表虚拟滚动 | 进行中 | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
-| E1 | 可靠性 | 告警 | 待做（要在日志平台上配置，需要同意） | |
-| E2 | 可靠性 | 压测：20 和 50 个并发对话 | 待做 | |
-| E3 | 可靠性 | 数据库备份恢复演练 | 待做 | |
-| E4 | 可靠性 | 模型服务只有一个提供方 | 待做 | |
+| E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
+| E2 | 可靠性 | 压测：20 和 50 个并发对话 | 阻塞（缺获准的部署测试环境和在线压测范围） | |
+| E3 | 可靠性 | 数据库备份恢复演练 | 阻塞（缺备份访问及隔离恢复目标授权） | |
+| E4 | 可靠性 | 模型服务只有一个提供方 | 阻塞（禁止生产连接配置/停用主连接） | |
 | F1 | Agent | 招聘逻辑写死在执行器代码里 | 进行中 | Adam |
 
 ---
@@ -47,6 +47,50 @@
 - **做法：** 先给存用户数据的表加 RLS 策略，按 `current_setting('app.user_id')` 过滤，从招聘相关表、消息表和附件表开始。连接身份用一个不带 `BYPASSRLS` 的角色，每个事务里用 `SET LOCAL` 设置当前用户（事务模式连接池支持这种写法）。后台任务和迁移用单独的角色。分批上线，每批先跑隔离测试。
 - **验收（代码检查）：** 现有隔离测试全过。新增一个测试：故意漏掉 `userId` 条件查询别人的数据，结果必须是 0 行。
 - **验收（线上实测）：** 开启 RLS 前后，RPC 的 p95 延迟变化小于 10%。
+
+- **本地审计（2026-10-27，认领 `7fbaf515e`）：** 在全新、仅含合成数据的本地 PostgreSQL 16 数据库重放现有迁移，得到 92 张应用表、0 张启用 RLS、0 张 FORCE RLS、0 条 policy。以本地 fixture 的 superuser/BYPASSRLS 连接执行事务内 `set_config('app.user_id', synthetic_user_id, true)` 后，直接查询另一个合成账号的附件和招聘岗位仍分别返回 5 行和 1 行，**不满足漏过滤条件必须 0 行的验收**。这不是线上角色权限检查，也不证明生产账号可绕过应用层。
+- **现有隔离基线：** 运行原 `infra/acceptance/account-isolation.mjs`，由原 testkit harness 启动本地 API、scripted runtime、fake sandbox 和 emulated email；只把 Docker 数据库启动替换为独立本地 PostgreSQL。报告为 `isolated`，143 项 `ok`、0 leak、0 warning；另有 99 项因测试副本缺少对应数据未触达。不能把这个结果写成历史 268 项全过，也不能当作新增 RLS 验收通过。`pnpm --filter @rakazo/db check` 通过（包含 cross-package tests 类型检查）。
+- **真实数据库回归未全过：** 在未修改产品代码的 `e6b8446de` 上，`VERIFY_DATABASE=1` 的 recruiting 与 space-membership PostgreSQL 测试为 271 通过、12 失败；只把本地数据库默认时区设为 UTC 并重连后仍是 271/12。失败涉及 native source/role recovery、排序、calibration 和候选页可见性；不能把这些已有失败归因于尚未实现的 RLS，也不能忽略为已通过。数据库回归门禁仍未满足。
+- **尚未实现，非权限阻塞：** `createDb` 返回共享 Prisma client；`createApp` 把它传给 auth、RPC 和后台回调，RPC context 有 actor 但没有绑定数据库事务身份。`recruiting.ts` 当前有 70 处 `$transaction` 调用，不能通过给整个 RPC 包一层长事务安全替代。还需明确并实现按调用传递的用户数据库 client、嵌套事务复用、流式订阅与后台操作的生命周期边界，以及消息通过 thread 归属访问的策略；然后加入非 superuser/非 BYPASSRLS 测试、漏条件 0 行测试、提交/回滚后身份不残留测试和全量隔离回归。没有加入未接线 helper、没有启用会阻断现有身份的 RLS 迁移。
+- **确切权限阻塞：** 生产 API/worker/迁移角色分离、非 BYPASSRLS 运行身份和对应连接凭据的配置，需要数据库角色/授权及云配置变更；当前禁止这些操作，也禁止部署，所以没有尝试这些写入，状态为**待授权、未执行**，不是工具拒绝或结果不明。线上开启策略前后 RPC p95 <10% 的测量同样待部署授权。不能仅以本地 fixture 的角色配置替代生产身份验证。
+- **连接预算：** 此审计未改应用、池或角色；生产约束仍是 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432，每容器 session 连接不超过 6。后续身份实现须使用事务内 `SET LOCAL`/`set_config(..., true)`，不能新增每用户常驻连接或把 SSE 生命周期变成长数据库事务。当前没有声称该后续实现已验证。
+
+A2 本地审计复现（全新合成数据库，不能替换为生产 URL）：
+
+```sh
+# 已有只监听 loopback 的本地 PostgreSQL 16，创建独立空数据库。
+createdb -h 127.0.0.1 -p 55434 -U postgres rakazo_a2
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @rakazo/db generate
+# 临时 runner 保留原 testkit fixture/验收逻辑，仅替换数据库启动；完成后删除。
+python3 - <<'PYRUNNER'
+from pathlib import Path
+source = Path('packages/testkit/src/cli/account-isolation.ts').read_text()
+source = source.replace('import { PostgreSqlContainer } from "@testcontainers/postgresql";\n', '')
+source = source.replace('const container = await new PostgreSqlContainer("postgres:16-alpine").start();', 'const container = { getConnectionUri: () => "postgres://postgres@127.0.0.1:55434/rakazo_a2", stop: async () => {} };')
+Path('packages/testkit/src/cli/.a2-local-isolation.ts').write_text(source)
+PYRUNNER
+API_PORT=3194 pnpm exec tsx packages/testkit/src/cli/.a2-local-isolation.ts --out /tmp/rakazo-a2-isolation.json
+rm packages/testkit/src/cli/.a2-local-isolation.ts
+pnpm --filter @rakazo/db check
+# 以下回归基线未全过：271 passed / 12 failed。
+DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2 VERIFY_DATABASE=1 pnpm test packages/db/src/recruiting.postgres.test.ts packages/db/src/space-membership.postgres.test.ts
+psql postgres://postgres@127.0.0.1:55434/rakazo_a2 -X -v ON_ERROR_STOP=1 <<'SQL'
+SELECT count(*) FILTER (WHERE c.relname <> '_prisma_migrations') AS application_tables,
+       count(*) FILTER (WHERE c.relrowsecurity) AS rls_enabled,
+       count(*) FILTER (WHERE c.relforcerowsecurity) AS rls_forced
+FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+WHERE n.nspname='public' AND c.relkind='r';
+SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user;
+SELECT count(*) AS policies FROM pg_policies WHERE schemaname='public';
+BEGIN;
+SELECT set_config('app.user_id', (SELECT id FROM "user" WHERE email='b@isolation.test'), true) IS NOT NULL AS synthetic_actor_context_set;
+SELECT count(*) AS foreign_artifacts_visible_without_filter FROM artifacts WHERE "userId" <> current_setting('app.user_id');
+SELECT count(*) AS foreign_roles_visible_without_filter FROM recruiting_roles WHERE "userId" <> current_setting('app.user_id');
+ROLLBACK;
+SQL
+```
+
 
 ### A3 列表分页
 
@@ -132,6 +176,13 @@ ORDER BY conrelid::regclass::text, conname;
 ## C. 多容器
 
 C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret 值）生效之后，执行 `pnpm --filter @rakazo/api artifacts:copy`，把卷上已有的附件和工作目录拷进桶里。
+
+### C3 推送 token 持久化 — 本地回归修复
+
+- **2026-10-27 实测发现：** 本地 PostgreSQL 会话时区为 America/Chicago 时，已过期会话仍能注册 token。Prisma 的 UTC 无时区 `expiresAt` 与 `now()` 隐式比较会引入数据库时区偏移；已有真实 PostgreSQL 测试出现 1 失败 / 9 通过。
+- **修复：** 比较 `expiresAt > (now() AT TIME ZONE 'UTC')`，保留事务内行锁与 token 唯一归属。新增 UTC、America/Chicago、Asia/Tokyo 下过期拒绝和有效接受的 PostgreSQL 测试。运行时新增连接为 0，连接池预算不变。
+- **结果：** `DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_root VERIFY_DATABASE=1 pnpm test packages/adapters/src/expo-push.postgres.test.ts packages/adapters/src/expo-push.test.ts apps/api/src/artifacts.postgres.test.ts`：35/35 通过；`pnpm --filter @rakazo/adapters check`、两文件 Biome 和 `git diff --check` 通过。全是本地合成用户/会话/token，无真实设备推送。
+- **记录：** 认领 `9c967a3bb`，实现 `9d28721fd`，[PR #272](https://github.com/WeKruit/rakazo/pull/272) base 为 #263 的分支。真实跨容器推送、生产部署尚未测。
 
 ### C4 应用内模型订阅登录
 
@@ -266,3 +317,29 @@ CHECK
 
 - **现状：** `executor.ts` 有约 14,000 行，其中 482 处和招聘有关。按 AGENTS.md 的原则，招聘相关的行为应该写在机器人指令和技能里，不应该写在执行器代码里。
 - **验收：** 执行器里和招聘有关的引用每一轮都在减少，招聘验收流程不退步。
+
+## 整体验收边界与阻塞台账（2026-10-27）
+
+本轮仅使用本地独立工作区和合成数据。以下动作尚未执行，原因是本轮明确禁止部署、云端配置/Secret/资源变更或真实岗位候选人测试；没有为获得一个“通过”而用本地假结果替代线上指标。它们不是自动审批拒绝，也没有不确定的线上执行结果。
+
+| 项目 | 已有证据 | 尚未执行的准确动作 / 目标 | 继续所需条件 |
+|---|---|---|---|
+| A1 | 源码分流：worker session pool 上限 4 + worker realtime 1 + API realtime 1 = 每容器 6；查询池走独立 DATABASE_URL。未新增会话连接。 | 在部署环境跑 50 并发，量 db.pool.wait.maxMs <500 且无 EMAXCONNSESSION；核实实际6543/5432配置 | 获准的隔离在线环境、只读运行配置证据、压测授权；当前未测 |
+| B1 | 本地 background handlers / Graphile publisher 回归通过，覆盖槽位限制/对话优先级 | 在线定时任务集中触发时 readyChats 始终为0 | 同上，不能以单测替代调度压力下实测 |
+| B2 | 源码 reporter 每60秒记录 slots/ready/readyChats/oldestReadySeconds/running/exhausted | 部署后连续观察每分钟日志 | 部署与目标日志读取范围；当前未测 |
+| C1 | 本地 artifact adapter 与上传nonce回归通过 | 配置对象存储并迁移现有附件后做跨容器读取 | 现有桶/Secret配置及迁移授权；本轮禁止，未尝试 |
+| C2 | 本地 computer-workspace adapter 回归通过 | 配置共享对象存储并迁移工作目录后跨容器验证 | 同上；不创建桶或更改Volume/Secret |
+| C5 | C6 已把网页进程合并到API；C4单独推进 | 拆分部署服务、启用多个容器、滚动发布并每秒探测首页/RPC与不中断对话 | C1/C2配置和C4验证完成，另需部署/资源配置授权；未执行 |
+| E1 | 已有队列/连接池/运行日志，告警清单保留 | 在现有日志平台创建6类告警，并逐一触发确认送达 | 云日志配置及测试通知目标授权；本轮禁止配置与外发，未执行 |
+| E2 | 本地单测不等于20/50并发对话压测 | 在隔离部署的副本岗位运行20/50并发，测首问<10s、前10人选<20s、readyChats=0、无5xx | 提供获准的测试副本、内部账号、在线服务调用/额度范围；不得用真实岗位或本地模型假响应冒充 |
+| E3 | 无恢复演练证据 | 获取最新备份，在获准隔离目标恢复并记录真实RTO/RPO | 备份访问与恢复目标授权；不自行建立云资源，也不复制真实候选人到未批准测试库 |
+| E4 | 原有每机器人连接边界可复用，无需新路由框架 | 配置备用模型连接、停用主连接并证明对话完成 | 备用服务/凭据和连接切换的明确授权；本轮禁止云配置，不触碰生产连接 |
+
+已有功能本地回归命令（Node 24.19.0、pnpm 9.15.0）：
+
+```sh
+pnpm test packages/adapters/src/background-job-handlers.test.ts packages/adapters/src/wakeup-graphile-host.test.ts packages/adapters/src/computer-workspace.test.ts packages/adapters/src/artifacts.test.ts packages/adapters/src/expo-push.test.ts apps/worker/src
+pnpm --filter @rakazo/worker --filter @rakazo/adapters check
+```
+
+结果：7 个文件、85 个测试通过；两个包类型检查通过。C3 在额外真实本地 PostgreSQL 测试发现时区回归，已单独通过 #272 修复并列出35项实测，不把此前漏测说成已验证。
