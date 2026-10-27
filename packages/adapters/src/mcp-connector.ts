@@ -478,7 +478,7 @@ const PEOPLE_SEARCH_RETRY_DELAYS_MS = [1_000, 2_000];
 // A contact lookup takes about a minute; wait for it here so the agent never stops on a
 // half-finished lookup. The final status is the record the Contacts view reads.
 const ENRICHMENT_POLL_MS = 5_000;
-const ENRICHMENT_WAIT_MS = 90_000;
+const ENRICHMENT_WAIT_MS = 240_000;
 function enrichmentPending(result: Awaited<ReturnType<McpSession["callTool"]>>): boolean {
   if (result.isError) return false;
   const status = mcpObject(result)?.status;
