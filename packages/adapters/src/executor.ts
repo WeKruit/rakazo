@@ -5471,10 +5471,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             args = { ...args, expectedRevision: briefBump.to };
           // A brief save whose intent is missing or not copied from the recruiter's current
           // message acts on that message, so the save never fails on the quote.
-          const turnTexts =
-            currentTurnMessage?.blocks.flatMap((block) =>
+          // A message the recruiter sent while this turn ran is the current one, so it is read now.
+          const latestHuman =
+            name === "recruiting_role" && args.operation === "update"
+              ? await deps.prisma.message.findFirst({
+                  where: { threadId: thread.id, role: "user" },
+                  orderBy: { seq: "desc" },
+                  select: { blocks: true },
+                })
+              : null;
+          const textsOf = (blocks: unknown) =>
+            (Array.isArray(blocks) ? (blocks as MessageBlock[]) : []).flatMap((block) =>
               block.kind === "text" && block.text.trim() ? [block.text] : [],
-            ) ?? [];
+            );
+          const latestTexts = textsOf(latestHuman?.blocks);
+          const turnTexts = latestTexts.length ? latestTexts : textsOf(currentTurnMessage?.blocks);
           const givenQuote = (args.intent as { quote?: unknown } | undefined)?.quote;
           if (
             name === "recruiting_role" &&
@@ -5521,6 +5532,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args = { ...args, expectedRoleRevision: typed };
             else if (role) args = { ...args, expectedRoleRevision: role.revision };
           }
+          // An unverified note written as a list is one note, so the round records on the first call.
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            args.unverified &&
+            typeof args.unverified === "object" &&
+            !Array.isArray(args.unverified)
+          )
+            args = {
+              ...args,
+              unverified: Object.fromEntries(
+                Object.entries(args.unverified as Record<string, unknown>).map(([key, value]) => [
+                  key,
+                  Array.isArray(value) ? value.map(String).join("、") : value,
+                ]),
+              ),
+            };
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
