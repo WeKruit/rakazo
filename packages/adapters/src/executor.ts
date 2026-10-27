@@ -8421,6 +8421,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !deps.artifacts ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
+              // Only the people search fills Results; a plain web search finds pages, not people.
+              route.toolName !== "web_search_advanced_exa" ||
               (returned !== null && typeof returned === "object" && "error" in returned)
             )
               return null;

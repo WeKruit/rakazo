@@ -15,7 +15,17 @@ import { createBotInTransaction } from "./repos.js";
 import { IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
 
-const RECRUITING_SERVICES = [
+type RecruitingService = {
+  slug: string;
+  name: string;
+  description: string;
+  endpoint: string;
+  bots: string[];
+  tools: string[];
+  toolsByBot?: Record<string, string[]>;
+};
+
+const RECRUITING_SERVICES: RecruitingService[] = [
   {
     slug: "autumn",
     name: "Autumn",
@@ -37,8 +47,11 @@ const RECRUITING_SERVICES = [
     name: "People search",
     description: "Platform people search for quick calibration rounds",
     endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
-    bots: ["main", "sourcer"],
+    bots: ["main", "sourcer", "outreach"],
     tools: ["web_search_exa", "web_search_advanced_exa"],
+    // Outreach searches the public web for a person's own posted email; only the advanced
+    // people search saves results into the role's candidates.
+    toolsByBot: { outreach: ["web_search_exa"] },
   },
 ];
 
@@ -75,9 +88,7 @@ const CRM_READ_TOOLS = [
   "list_crm_candidate_messages",
   "list_crm_roles",
 ];
-function recruitingServices(
-  firstPartyMcpUrl?: string,
-): Array<(typeof RECRUITING_SERVICES)[number] & { toolsByBot?: Record<string, string[]> }> {
+function recruitingServices(firstPartyMcpUrl?: string): RecruitingService[] {
   return firstPartyMcpUrl
     ? [
         ...RECRUITING_SERVICES,
@@ -846,6 +857,17 @@ export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor)
     await ensurePlatformService(prisma, actor, slug);
 }
 
+function toolsFor(
+  service: RecruitingService,
+  bot: { name?: string; spawnKey?: string | null },
+): string[] {
+  const key =
+    RECRUITING_DEFAULT_BOTS.find(
+      (role) => bot.spawnKey?.endsWith(`:${role.key}`) || (!bot.spawnKey && bot.name === role.name),
+    )?.key ?? "";
+  return service.toolsByBot?.[key] ?? service.tools;
+}
+
 async function ensurePlatformService(
   prisma: PrismaClient,
   actor: Actor,
@@ -889,7 +911,7 @@ async function ensurePlatformService(
         OR: roleBots(service.bots),
         ...(server ? { NOT: { mcpServers: { some: { serverId: server.id } } } } : {}),
       },
-      select: { id: true },
+      select: { id: true, name: true, spawnKey: true },
     });
     return bots.length ? { server, bots } : null;
   };
@@ -916,7 +938,7 @@ async function ensurePlatformService(
         botId: bot.id,
         serverId: server.id,
         allowAllTools: false,
-        allowedTools: service.tools,
+        allowedTools: toolsFor(service, bot),
       })),
       skipDuplicates: true,
     });

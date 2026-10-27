@@ -47,7 +47,13 @@ function fixture(
     },
     bot: {
       findFirst: vi.fn(async () => (options.lead === false ? null : { id: "main-bot" })),
-      findMany: vi.fn(async () => (missing[current] ?? []).map((id) => ({ id }))),
+      findMany: vi.fn(async () =>
+        (missing[current] ?? []).map((id) => ({
+          id,
+          name: id.startsWith("outreach") ? "Outreach" : id,
+          spawnKey: null,
+        })),
+      ),
     },
     botMcpServer: {
       count: vi.fn(async () => options.linked ?? 0),
@@ -97,6 +103,15 @@ describe("ensurePlatformServices", () => {
     f.tx.botMcpServer.createMany.mockClear();
     await ensurePlatformServices(f.prisma, actor);
     expect(f.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+  });
+
+  it("gives outreach the plain web search only, which never fills Results", async () => {
+    const f = fixture({ missing: { "people-search": ["outreach-bot"] } });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
+      data: [expect.objectContaining({ botId: "outreach-bot", allowedTools: ["web_search_exa"] })],
+      skipDuplicates: true,
+    });
   });
 
   it("links outreach to the enrichment connection the crew already uses, even with its own key", async () => {
