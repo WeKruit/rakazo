@@ -121,6 +121,18 @@ describe("native memory revisions", () => {
     });
   });
 
+  it("bounds revision reads before loading history", async () => {
+    const { deps, findFirst } = fixture();
+    await memoryHistory(deps.prisma, actor, "memory-document", 400);
+    expect(findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        include: {
+          revisions: { orderBy: [{ revision: "desc" }, { id: "asc" }], take: 200, skip: 400 },
+        },
+      }),
+    );
+  });
+
   it("rejects history and update outside the actor/bot boundary without leaking content", async () => {
     const { deps, findFirst, commit } = fixture();
     findFirst.mockResolvedValue(null);
