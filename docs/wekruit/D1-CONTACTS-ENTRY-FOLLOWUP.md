@@ -206,3 +206,13 @@ editor's invalid/disabled state synchronously; moving it only to submit would ch
 validation behavior. A functional Zod Mini migration would require canonical schema and
 consumer API changes with parser/error/ORPC compatibility coverage. Its actual route savings
 are unmeasured, so it is a design option rather than a claimed solution.
+
+## Independent publication after prerequisites
+
+Initial D1#295, D4#298, D2#301 and D3#300 were separately integrated before this follow-up. Ordinary merges retain fresh query reads, transcript virtualization and the causal echo-timer repair. After fixing only the new worktree's shared dependency links (Vite rejected a CSS import outside its workspace), private workspace links and generated Prisma sources are used; no test assertion or allowed-root rule was relaxed.
+
+`pnpm --filter @rakazo/web check` passed. `pnpm exec vitest run apps/web/src packages/chat-ui/src packages/ui-web/src packages/contracts/src --maxWorkers=4`:2,216/2,216 across179files,49.55s. Chinese `vite build --manifest` passed. Real production browser original routes plus English/Chinese accessible names/error feedback12/12,33.0s; cold contacts directory/detail keyboard/return-focus1/1,1.9s. No actual auth/API service or real recruiting records used.
+
+Cold Chromium measurements reproduce the tested integration: contacts347,938B gzip,7JS/35requests,17RPC/0duplicate; chat310,672B,8JS/39requests; sign-in203,469B,7JS/15requests. Compared with original Chinese chat626,677B/15JS/47requests and sign-in629,622B/16JS/26requests, both bytes and request counts fall. Contacts' saved intermediate baseline469,995B is not an original-project baseline. Final250KB remains unmet, deployed Fast4G LCP untested. The subsequently proposed language-catalog split is not included in this checkpoint.
+
+Commands: `RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec vite build --manifest`; `RAKAZO_ALLOW_DEV_SECRETS=1 MEASURE_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec tsx scripts/measure-contacts-load.ts dist`; same command with `measure-first-load.ts`; production loopback preview and `playwright test e2e/recruiting-app-routes.spec.ts e2e/recruiting-lingui.spec.ts --workers=1`, then `e2e/recruiting-contacts-cold.spec.ts`.
