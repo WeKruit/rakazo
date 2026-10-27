@@ -119,6 +119,9 @@ export function createActorDb(connectionString: string, options: DbClientOptions
         sql(`SELECT count(*)::int FROM pg_class c
         JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
         AND c.relname IN (${protectedSqlNames}) AND c.relrowsecurity
+        AND EXISTS (SELECT 1 FROM pg_proc f JOIN pg_namespace fn ON fn.oid=f.pronamespace
+          WHERE fn.nspname='public' AND f.proname='rakazo_actor_member' AND f.pronargs=0
+          AND NOT f.prosecdef AND f.provolatile='s' AND f.proconfig @> ARRAY['search_path=pg_catalog'])
         AND EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid AND p.polname='rakazo_actor_isolation')
         AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid AND p.polpermissive AND p.polname<>'rakazo_actor_isolation')`),
       );

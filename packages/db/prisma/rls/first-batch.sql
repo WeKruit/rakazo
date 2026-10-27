@@ -3,18 +3,33 @@
 -- NOSUPERUSER NOBYPASSRLS API role and configuring ACTOR_DATABASE_URL.
 -- Auth/background/migration connections retain their separately authorized role.
 BEGIN;
+-- SECURITY INVOKER preserves the caller's grants. A fixed search_path prevents
+-- shadowing and SQL-function inlining; each policy InitPlan evaluates current
+-- transaction identity and membership without expanding these joins per parent.
+CREATE OR REPLACE FUNCTION public.rakazo_actor_member() RETURNS boolean
+LANGUAGE sql STABLE SECURITY INVOKER
+SET search_path = pg_catalog
+AS $membership$
+  SELECT EXISTS (
+    SELECT 1 FROM public.space_members sm
+    JOIN public.spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId"
+    JOIN public.member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId"
+    WHERE sm."userId"=NULLIF(current_setting('app.user_id', true), '')
+      AND sm."spaceId"=NULLIF(current_setting('app.space_id', true), '')
+  );
+$membership$;
 ALTER TABLE artifacts ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON artifacts;
 CREATE POLICY rakazo_actor_isolation ON artifacts FOR ALL
 USING (
   "userId" = NULLIF(current_setting('app.user_id', true), '')
   AND "spaceId" = NULLIF(current_setting('app.space_id', true), '')
-  AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id = sm."spaceId" AND s."organizationId" = sm."organizationId" JOIN member m ON m."organizationId" = sm."organizationId" AND m."userId" = sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), ''))
+  AND (SELECT public.rakazo_actor_member())
 )
 WITH CHECK (
   "userId" = NULLIF(current_setting('app.user_id', true), '')
   AND "spaceId" = NULLIF(current_setting('app.space_id', true), '')
-  AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id = sm."spaceId" AND s."organizationId" = sm."organizationId" JOIN member m ON m."organizationId" = sm."organizationId" AND m."userId" = sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), ''))
+  AND (SELECT public.rakazo_actor_member())
 );
 ALTER TABLE recruiting_roles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_roles;
@@ -22,32 +37,19 @@ CREATE POLICY rakazo_actor_isolation ON recruiting_roles FOR ALL
 USING (
   "userId" = NULLIF(current_setting('app.user_id', true), '')
   AND "spaceId" = NULLIF(current_setting('app.space_id', true), '')
-  AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id = sm."spaceId" AND s."organizationId" = sm."organizationId" JOIN member m ON m."organizationId" = sm."organizationId" AND m."userId" = sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), ''))
+  AND (SELECT public.rakazo_actor_member())
 )
 WITH CHECK (
   "userId" = NULLIF(current_setting('app.user_id', true), '')
   AND "spaceId" = NULLIF(current_setting('app.space_id', true), '')
-  AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id = sm."spaceId" AND s."organizationId" = sm."organizationId" JOIN member m ON m."organizationId" = sm."organizationId" AND m."userId" = sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), ''))
-);
+  AND (SELECT public.rakazo_actor_member())
+
+  AND EXISTS (SELECT 1 FROM threads t WHERE t.id=recruiting_roles."sourceThreadId") AND ("crmBindingEffectId" IS NULL OR EXISTS (SELECT 1 FROM external_effects e WHERE e.id=recruiting_roles."crmBindingEffectId")));
 ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON messages;
 CREATE POLICY rakazo_actor_isolation ON messages FOR ALL
-USING (EXISTS (
-  SELECT 1 FROM threads t JOIN space_members sm ON sm."spaceId" = t."spaceId" AND sm."userId" = t."userId"
-  JOIN spaces s ON s.id = sm."spaceId" AND s."organizationId" = sm."organizationId"
-  JOIN member m ON m."organizationId" = sm."organizationId" AND m."userId" = sm."userId"
-  WHERE t.id = messages."threadId"
-    AND t."userId" = NULLIF(current_setting('app.user_id', true), '')
-    AND t."spaceId" = NULLIF(current_setting('app.space_id', true), '')
-))
-WITH CHECK (EXISTS (
-  SELECT 1 FROM threads t JOIN space_members sm ON sm."spaceId" = t."spaceId" AND sm."userId" = t."userId"
-  JOIN spaces s ON s.id = sm."spaceId" AND s."organizationId" = sm."organizationId"
-  JOIN member m ON m."organizationId" = sm."organizationId" AND m."userId" = sm."userId"
-  WHERE t.id = messages."threadId"
-    AND t."userId" = NULLIF(current_setting('app.user_id', true), '')
-    AND t."spaceId" = NULLIF(current_setting('app.space_id', true), '')
-));
+USING (EXISTS (SELECT 1 FROM threads t WHERE t.id = messages."threadId"))
+WITH CHECK (EXISTS (SELECT 1 FROM threads t WHERE t.id = messages."threadId"));
 -- These core child rows inherit the already-protected role boundary. The role
 -- policy does not query its revision, avoiding a recursive RLS dependency.
 ALTER TABLE recruiting_role_revisions ENABLE ROW LEVEL SECURITY;
@@ -74,18 +76,20 @@ WITH CHECK (EXISTS (SELECT 1 FROM recruiting_roles r WHERE r.id = recruiting_cal
 ALTER TABLE threads ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON threads;
 CREATE POLICY rakazo_actor_isolation ON threads FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
 ALTER TABLE tasks ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON tasks;
 CREATE POLICY rakazo_actor_isolation ON tasks FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member())
+  AND EXISTS (SELECT 1 FROM threads t WHERE t.id=tasks."threadId") AND EXISTS (SELECT 1 FROM bots b WHERE b.id=tasks."botId" AND b."userId"=tasks."userId" AND b."spaceId"=tasks."spaceId"));
 ALTER TABLE runs ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON runs;
 CREATE POLICY rakazo_actor_isolation ON runs FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member())
+  AND EXISTS (SELECT 1 FROM threads t WHERE t.id=runs."threadId") AND EXISTS (SELECT 1 FROM tasks t WHERE t.id=runs."taskId") AND EXISTS (SELECT 1 FROM bots b WHERE b.id=runs."botId" AND b."userId"=runs."userId" AND b."spaceId"=runs."spaceId"));
 ALTER TABLE external_effects ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON external_effects;
 CREATE POLICY rakazo_actor_isolation ON external_effects FOR ALL
@@ -99,53 +103,53 @@ WITH CHECK (EXISTS (SELECT 1 FROM threads parent WHERE parent."id"=events."threa
 ALTER TABLE recruiting_crm_roles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_roles;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_roles FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_roles."mcpServerId" AND m."userId"=recruiting_crm_roles."userId" AND m."spaceId"=recruiting_crm_roles."spaceId"));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_roles."mcpServerId" AND m."userId"=recruiting_crm_roles."userId" AND m."spaceId"=recruiting_crm_roles."spaceId"));
 ALTER TABLE recruiting_crm_contacts ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_contacts;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_contacts FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_contacts."mcpServerId" AND m."userId"=recruiting_crm_contacts."userId" AND m."spaceId"=recruiting_crm_contacts."spaceId"));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_contacts."mcpServerId" AND m."userId"=recruiting_crm_contacts."userId" AND m."spaceId"=recruiting_crm_contacts."spaceId"));
 ALTER TABLE recruiting_crm_messages ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_messages;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_messages FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_messages."mcpServerId" AND m."userId"=recruiting_crm_messages."userId" AND m."spaceId"=recruiting_crm_messages."spaceId"));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_messages."mcpServerId" AND m."userId"=recruiting_crm_messages."userId" AND m."spaceId"=recruiting_crm_messages."spaceId"));
 ALTER TABLE recruiting_crm_sync_progress ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_sync_progress;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_sync_progress FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
 ALTER TABLE recruiting_crm_campaigns ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_campaigns;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_campaigns FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_campaigns."mcpServerId" AND m."userId"=recruiting_crm_campaigns."userId" AND m."spaceId"=recruiting_crm_campaigns."spaceId"));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_campaigns."mcpServerId" AND m."userId"=recruiting_crm_campaigns."userId" AND m."spaceId"=recruiting_crm_campaigns."spaceId"));
 ALTER TABLE recruiting_crm_leads ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_leads;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_leads FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_leads."mcpServerId" AND m."userId"=recruiting_crm_leads."userId" AND m."spaceId"=recruiting_crm_leads."spaceId"));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_leads."mcpServerId" AND m."userId"=recruiting_crm_leads."userId" AND m."spaceId"=recruiting_crm_leads."spaceId"));
 ALTER TABLE recruiting_crm_workspace_attachments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_workspace_attachments;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_workspace_attachments FOR ALL
-USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_workspace_attachments."mcpServerId" AND m."userId"=recruiting_crm_workspace_attachments."userId" AND m."spaceId"=recruiting_crm_workspace_attachments."spaceId") AND EXISTS (SELECT 1 FROM recruiting_roles parent WHERE parent."id"=recruiting_crm_workspace_attachments."roleId"));
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM mcp_servers m WHERE m.id=recruiting_crm_workspace_attachments."mcpServerId" AND m."userId"=recruiting_crm_workspace_attachments."userId" AND m."spaceId"=recruiting_crm_workspace_attachments."spaceId") AND EXISTS (SELECT 1 FROM recruiting_roles parent WHERE parent."id"=recruiting_crm_workspace_attachments."roleId"));
 ALTER TABLE recruiting_reminders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_reminders;
 CREATE POLICY rakazo_actor_isolation ON recruiting_reminders FOR ALL
-USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND ("roleId" IS NULL OR EXISTS (SELECT 1 FROM recruiting_roles parent WHERE parent."id"=recruiting_reminders."roleId")));
+USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND ("roleId" IS NULL OR EXISTS (SELECT 1 FROM recruiting_roles parent WHERE parent."id"=recruiting_reminders."roleId")));
 ALTER TABLE recruiting_candidate_notes ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_candidate_notes;
 CREATE POLICY rakazo_actor_isolation ON recruiting_candidate_notes FOR ALL
-USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND ("roleId" IS NULL OR EXISTS (SELECT 1 FROM recruiting_roles parent WHERE parent."id"=recruiting_candidate_notes."roleId")));
+USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND ("roleId" IS NULL OR EXISTS (SELECT 1 FROM recruiting_roles parent WHERE parent."id"=recruiting_candidate_notes."roleId")));
 ALTER TABLE recruiting_saved_profiles ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_saved_profiles;
 CREATE POLICY rakazo_actor_isolation ON recruiting_saved_profiles FOR ALL
-USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')))
-WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND EXISTS (SELECT 1 FROM space_members sm JOIN spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId" JOIN member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId" WHERE sm."userId" = NULLIF(current_setting('app.user_id', true), '') AND sm."spaceId" = NULLIF(current_setting('app.space_id', true), '')) AND EXISTS (SELECT 1 FROM external_effects parent WHERE parent."id"=recruiting_saved_profiles."sourceEffectId"));
+USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM external_effects parent WHERE parent."id"=recruiting_saved_profiles."sourceEffectId"));
 ALTER TABLE recruiting_research_tasks ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_research_tasks;
 CREATE POLICY rakazo_actor_isolation ON recruiting_research_tasks FOR ALL

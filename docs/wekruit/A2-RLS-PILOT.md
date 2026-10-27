@@ -78,3 +78,41 @@ The expanded six-table policy script passes eight real-PostgreSQL tests, includi
 The final local first-batch policies cover 29 tables; 11/11 PostgreSQL tests pass. Every table has nonempty data for both synthetic accounts, with restricted-role insertion/update and omitted-filter reads. All 29 reject access after organization membership removal and enforce both user and active Space when a user belongs to both Spaces. The schema cascades removed organization membership to Space membership; prior “stale membership” phrasing did not reflect that constraint. Ten cross-parent mutation cases reject specifically through RLS. The enhanced original API isolation fixture returns 144 OK, zero leaks/warnings, and 98 owner-empty reads still unexercised.
 
 First full-batch latency run: baseline p50/p95/max 7.02/9.32/19.44 ms; RLS 10.49/16.25/26.09 ms; zero errors, p95 **+74.36%**, exceeding the target. Earlier three-table +2.99% is historical and must not be used for this batch. Production performance remains untested, and local performance is not yet accepted.
+
+### Quiet-window counterbalanced measurement
+
+The final policies were applied to the existing synthetic fixture. Other agents paused heavy tests/builds for this run. The benchmark executes B/R/R/B/B/R, with 20 warmups and 200 measured requests at concurrency 5 per sample. All requests succeeded.
+
+| Sample | Mode | p50 ms | p95 ms | Max ms | Errors |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | Baseline | 7.35 | 12.25 | 15.96 | 0 |
+| 2 | RLS | 9.29 | 14.64 | 17.81 | 0 |
+| 3 | RLS | 8.47 | 11.67 | 18.79 | 0 |
+| 4 | Baseline | 5.43 | 7.27 | 10.56 | 0 |
+| 5 | Baseline | 5.49 | 8.10 | 10.10 | 0 |
+| 6 | RLS | 8.33 | 11.56 | 16.70 | 0 |
+
+Paired p95 changes: **+19.51%, +60.52%, +42.72%**. None meets <10%. The mean of sample p95 values is 9.2067 ms baseline versus 12.6233 ms RLS (+37.11%); this is explicitly not a pooled 600-request p95. Sample medians are 8.10 versus 11.67 ms. The original +74.36% run remains above; these results do not replace it with a best case. **Local performance acceptance fails; production performance is untested.**
+
+Native Prisma callback/batch transactions already bind identity once. Standalone operations still require BEGIN, transaction-local identity binding, business SQL and COMMIT. The policy membership lookup was changed to an uncorrelated actor-constant lookup, but no request-wide transaction, identity caching or privileged fallback was introduced. Further safe reduction requires a separately reviewed query/transaction boundary optimization and measurement; production permission would not itself fix this local overhead.
+
+### Narrow policy-planning optimization
+
+The artifact-list endpoint already executes one business SQL statement; there was no duplicated application query to batch. A corrected diagnostic instrument waited for completion for both node-postgres callback and Promise APIs (an initial callback timing experiment measured submission only and is discarded). On 200 sequential direct calls to the same `listSpaceArtifacts` implementation:
+
+| State | SQL class | Calls | Mean ms | p95 ms |
+| --- | --- | ---: | ---: | ---: |
+| Before, baseline | Business | 200 | 0.6173 | 0.7720 |
+| Before, RLS | BEGIN | 200 | 0.0808 | 0.1207 |
+| Before, RLS | SET LOCAL | 200 | 0.1112 | 0.1445 |
+| Before, RLS | Business | 200 | 2.2746 | 2.6086 |
+| Before, RLS | COMMIT | 200 | 0.1297 | 0.2031 |
+| After, baseline | Business | 200 | 0.5524 | 0.6262 |
+| After, RLS | BEGIN | 200 | 0.0674 | 0.0788 |
+| After, RLS | SET LOCAL | 200 | 0.0878 | 0.1021 |
+| After, RLS | Business | 200 | 1.1078 | 1.1929 |
+| After, RLS | COMMIT | 200 | 0.0804 | 0.0949 |
+
+Before total operation time: baseline 144.999 ms, RLS 549.392 ms. After: baseline 128.858 ms, RLS 286.181 ms. These sequential diagnostic timings are not HTTP p95 or a controlled throughput test. `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` for the same synthetic artifact query gave before baseline planning/execution 0.229/0.101 ms and RLS 1.724/0.318 ms; after baseline 0.210/0.092 ms and RLS 0.411/0.566 ms. The principal excess was policy-plan expansion, not just three additional network round trips.
+
+The wired `public.rakazo_actor_member()` is SQL STABLE, SECURITY INVOKER, has fixed `pg_catalog` search_path and fully qualified membership relations. The fixed configuration avoids SQL-function inlining. Policies invoke it through statement-local InitPlans; no actor/membership result is cached across requests. Message policies inherit the already-protected thread instead of repeating the same membership join. Startup rejects a SECURITY DEFINER, IMMUTABLE or incorrectly configured helper. The 29-table/15-cross-parent suite now passes **12/12**, including both unsafe function mutations, membership revocation, pooled actor switching and concurrent iterators. HTTP acceptance after this change still requires the second quiet-window run.

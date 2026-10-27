@@ -502,6 +502,19 @@ suite("first-batch RLS with a real restricted role", () => {
     const own = actors[0]!.userId;
     const foreign = actors[1]!.userId;
     const mutations: Array<() => Promise<unknown>> = [
+      () => restricted.prisma.task.update({ where: { id: own }, data: { threadId: foreign } }),
+      () => restricted.prisma.run.update({ where: { id: own }, data: { taskId: foreign } }),
+      () =>
+        restricted.prisma.recruitingRole.update({
+          where: { id: own },
+          data: { sourceThreadId: foreign },
+        }),
+      () =>
+        restricted.prisma.externalEffect.update({
+          where: { id: `${own}-read` },
+          data: { runId: foreign },
+        }),
+      () => restricted.prisma.event.update({ where: { id: own }, data: { threadId: foreign } }),
       () =>
         restricted.prisma.recruitingResearchTask.update({
           where: { id: own },
@@ -625,6 +638,22 @@ suite("first-batch RLS with a real restricted role", () => {
         }))
       ).output,
     ).toEqual([]);
+  });
+  it("rejects a membership function changed to SECURITY DEFINER or IMMUTABLE", async () => {
+    const target = new URL(url!);
+    target.username = role;
+    target.password = "";
+    for (const unsafeAttribute of ["SECURITY DEFINER", "IMMUTABLE"]) {
+      await sql.query(`ALTER FUNCTION public.rakazo_actor_member() ${unsafeAttribute}`);
+      const unsafe = createActorDb(target.href, { poolMax: 1 });
+      try {
+        await expect(unsafe.prisma.$connect()).rejects.toThrow("first-batch RLS policies");
+      } finally {
+        await unsafe.prisma.$disconnect();
+        await unsafe.pool.end();
+        await sql.query("ALTER FUNCTION public.rakazo_actor_member() SECURITY INVOKER STABLE");
+      }
+    }
   });
   it("rejects an additional permissive policy at startup", async () => {
     await sql.query("CREATE POLICY unwanted_allow ON artifacts USING (true)");
