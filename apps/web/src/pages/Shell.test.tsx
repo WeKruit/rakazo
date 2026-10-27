@@ -4057,6 +4057,11 @@ it.each([
     await act(async () => {
       await vi.dynamicImportSettled();
     });
+    if (visible)
+      await vi.waitFor(async () => {
+        await act(async () => {});
+        expect(palette()).not.toBeNull();
+      });
     expect(Boolean(palette())).toBe(visible);
     if (!visible) {
       await shortcut("k", "ctrlKey");
