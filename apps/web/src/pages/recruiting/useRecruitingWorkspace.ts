@@ -5,7 +5,7 @@ import { RecruitingEmploymentRuleSchema } from "@rakazo/contracts";
 import { recruitingBriefClarifications } from "@rakazo/core";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { retryTransientRead } from "../../lib/read-retry";
-import { clearRecruitingReads, rememberRecruitingRead } from "../../lib/recruiting-read-cache";
+import { clearRecruitingReads, savedRecruitingRead, rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import type { RecruitingPanelState } from "../../lib/right-panel-state";
 import {
   readRecruitingPanelState,
@@ -48,7 +48,7 @@ export function useRecruitingWorkspace({
   const [workspaceSnapshot, setWorkspaceSnapshot] = useState<Pick<Snapshot, "workspace"> | null>(
     () =>
       workspaceCacheKey
-        ? ((readCache?.entries.get(workspaceCacheKey) as Pick<Snapshot, "workspace"> | undefined) ??
+        ? ((savedRecruitingRead(readCache, workspaceCacheKey) as Pick<Snapshot, "workspace"> | undefined) ??
           null)
         : null,
   );
@@ -491,7 +491,7 @@ export function useRecruitingWorkspace({
     setCandidatePage(
       (current) =>
         (candidatesCacheKey
-          ? (readCache?.entries.get(candidatesCacheKey) as
+          ? (savedRecruitingRead(readCache, candidatesCacheKey) as
               | ListRecruitingCandidatesOutput
               | undefined)
           : undefined) ?? (retainCandidatePage ? current : null),

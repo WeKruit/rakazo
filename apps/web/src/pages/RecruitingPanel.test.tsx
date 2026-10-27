@@ -1,3 +1,4 @@
+import "../lib/query.test-support";
 // @vitest-environment jsdom
 import { createHash, webcrypto } from "node:crypto";
 import { ORPCError } from "@orpc/client";
@@ -19,6 +20,11 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import {
+  createRecruitingReadCache,
+  rememberRecruitingRead,
+  savedRecruitingRead,
+} from "../lib/recruiting-read-cache";
 import {
   readRecruitingPanelState,
   readRightPanelState,
@@ -878,7 +884,7 @@ it("restarts an invalidated pending CRM read using the existing refresh signal",
       }),
     )
     .mockResolvedValue(page);
-  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const cache = createRecruitingReadCache();
   const options = {
     groupId: "group-1",
     readCache: cache,
@@ -1858,7 +1864,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
 );
 
 it("shows a warm scoped pool read-only until current validation and evicts it on denial without restoring late rows", async () => {
-  const cache = { entries: new Map<string, unknown>(), epoch: 0 };
+  const cache = createRecruitingReadCache();
   const scope = JSON.stringify(["actor-1", role.spaceId, "thread-1"]);
   const options = {
     presentation: "workspace" as const,
@@ -1872,7 +1878,7 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
   await mounted("thread-1", undefined, false, undefined, options);
   await cleanup?.();
   cleanup = undefined;
-  cache.entries.set("another-role:workspace", { title: "Other role" });
+  rememberRecruitingRead(cache, "another-role:workspace", { title: "Other role" });
   let finishWorkspace!: (value: unknown) => void;
   let finishRows!: (value: unknown) => void;
   api.getWorkspace.mockReturnValueOnce(
@@ -1900,11 +1906,21 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
   api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
   await view.render("thread-1", 1);
   expect(view.container.querySelector(".hire-table-wrap")).toBeNull();
-  expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
-  expect(cache.entries.has("another-role:workspace")).toBe(true);
+  expect(
+    cache.client
+      .getQueryCache()
+      .getAll()
+      .some(({ queryKey }) => String(queryKey[1]).startsWith(`${scope}:`)),
+  ).toBe(false);
+  expect(Boolean(savedRecruitingRead(cache, "another-role:workspace"))).toBe(true);
   await act(async () => finishRows(page));
   expect(view.container.querySelector(".hire-table-wrap")).toBeNull();
-  expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
+  expect(
+    cache.client
+      .getQueryCache()
+      .getAll()
+      .some(({ queryKey }) => String(queryKey[1]).startsWith(`${scope}:`)),
+  ).toBe(false);
 });
 
 it("preserves an explicit workspace assessment filter when a refreshed pool has no assessments", async () => {
@@ -4373,7 +4389,7 @@ it("persists shortlist with the candidate revision and leaves conflicts visibly 
     }),
   );
   const view = await mounted("thread-1", undefined, true, undefined, {
-    readCache: { entries: new Map(), epoch: 0 },
+    readCache: createRecruitingReadCache(),
     readCacheScope: JSON.stringify(["actor-1", role.spaceId, "thread-1"]),
   });
   await view.click("Evidence");
@@ -8716,7 +8732,7 @@ it("does not display the Contacts pool as a pending Shortlist query and retains 
   const navigation = {
     presentation: "workspace" as const,
     groupId: "group-1",
-    readCache: { entries: new Map<string, unknown>(), epoch: 0 },
+    readCache: createRecruitingReadCache(),
     readCacheScope: JSON.stringify(["actor-1", role.spaceId, "thread-1"]),
   };
   const view = await mounted("thread-1", undefined, false, undefined, {
@@ -9001,3 +9017,4 @@ it.each(["contacts", "shortlist"] as const)(
     expect(view.container.querySelector(".hire-standard-view > .hire-section-header")).toBeNull();
   },
 );
+

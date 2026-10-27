@@ -1,3 +1,5 @@
+import "../lib/query.test-support";
+import { createRecruitingReadCache } from "../lib/recruiting-read-cache";
 // @vitest-environment jsdom
 
 import { ORPCError } from "@orpc/client";
@@ -703,7 +705,7 @@ it("restarts the CRM role catalog after native invalidation without dispatching 
         ? { operation: "memberships", sources: [source] }
         : { operation: "roles", source: { ...source, organizationId: "org" }, items: [] },
     );
-  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const cache = createRecruitingReadCache();
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);
@@ -1312,7 +1314,7 @@ it.each(["bot", "group"] as const)(
   },
 );
 
-async function renderRoleNavigation(cache: { epoch: number; entries: Map<string, unknown> }) {
+async function renderRoleNavigation(cache: ReturnType<typeof createRecruitingReadCache>) {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   container = document.createElement("div");
   document.body.append(container);
@@ -1353,7 +1355,7 @@ it("ends a CRM role read in a retryable failure when another read invalidates th
       }),
     )
     .mockReturnValue(new Promise(() => {}));
-  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const cache = createRecruitingReadCache();
   const view = await renderRoleNavigation(cache);
   expect(view.textContent).toContain("Loading roles…");
   // A sibling read was denied and dropped this scope; nothing re-renders the navigation.
@@ -1393,7 +1395,7 @@ it("retries the CRM role list through a deploy's unavailable window but not afte
   shellApi.recruiting.crmData
     .mockRejectedValueOnce(new ORPCError("SERVICE_UNAVAILABLE", { status: 503 }))
     .mockImplementation(async (input) => (input.operation === "memberships" ? memberships : roles));
-  const view = await renderRoleNavigation({ epoch: 0, entries: new Map() });
+  const view = await renderRoleNavigation(createRecruitingReadCache());
   expect(view.textContent).toContain("Loading roles…");
   expect(view.textContent).not.toContain("Could not read candidate records.");
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
@@ -1403,7 +1405,7 @@ it("retries the CRM role list through a deploy's unavailable window but not afte
   view.remove();
   shellApi.recruiting.crmData.mockReset();
   shellApi.recruiting.crmData.mockRejectedValue(new ORPCError("FORBIDDEN"));
-  const denied = await renderRoleNavigation({ epoch: 0, entries: new Map() });
+  const denied = await renderRoleNavigation(createRecruitingReadCache());
   await act(async () => new Promise((resolve) => setTimeout(resolve, 1_100)));
   expect(shellApi.recruiting.crmData).toHaveBeenCalledTimes(1);
   expect(denied.textContent).toContain("Could not read candidate records.");
@@ -5737,3 +5739,4 @@ it("shows ordinary users the turn's work in plain words and folds it once the re
   expect(summary?.textContent).toContain("Searching candidates");
   expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
 });
+

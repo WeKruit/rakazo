@@ -240,7 +240,7 @@ export function FeedbackHistory({
     ? `${readCacheScope}:feedback:${JSON.stringify([roleId, candidateKey])}`
     : undefined;
   const cached = cacheKey
-    ? (readCache?.entries.get(cacheKey) as
+    ? (savedRecruitingRead(readCache, cacheKey) as
         | Awaited<ReturnType<typeof rpc.recruiting.listFeedback>>
         | undefined)
     : undefined;
