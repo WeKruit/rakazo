@@ -3776,6 +3776,33 @@ describe("local native Instantly campaign and lead tools", () => {
     ]);
   });
 
+  it("ensure_role_campaign send_hours pauses a live campaign, saves the hours and asks to activate", async () => {
+    const f = fixture();
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.campaign.status = 1;
+    f.state.requests.length = 0;
+    const result = f.result(
+      await f.run("ensure_role_campaign", { role_id: "role-1", send_hours: "any_time" }),
+    );
+    expect(result).toMatchObject({ sendHours: "any_time", paused: expect.any(String) });
+    const writes = f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/list"));
+    expect(writes[0]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` });
+    expect(writes[1]).toMatchObject({
+      method: "PATCH",
+      body: {
+        campaign_schedule: {
+          schedules: [
+            {
+              timing: { from: "00:00", to: "23:59" },
+              days: { "0": true, "6": true },
+              timezone: "America/Chicago",
+            },
+          ],
+        },
+      },
+    });
+  });
+
   it("create_campaign in a role conversation binds the role, so ensure_role_campaign reuses it", async () => {
     const f = fixture();
     f.state.activeRoleId = "role-1";

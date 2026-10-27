@@ -29,6 +29,10 @@ const CampaignSetup = {
   eaccount: Email.describe("Your connected Instantly sending mailbox. Never a contact address."),
   steps: z.array(Step).min(1).max(10).optional().describe("Email sequence; first item is email 1."),
   timezone: z.string().max(64).default("America/Chicago").describe("Instantly schedule timezone."),
+  send_hours: z
+    .enum(["weekdays_9_to_5", "any_time"])
+    .optional()
+    .describe("When emails may go out; new campaigns default to weekdays_9_to_5."),
 };
 const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
 const Lead = z.strictObject({
@@ -78,6 +82,9 @@ const EnsureRoleCampaignInput = z.strictObject({
     .describe("Sending mailbox; omit to use the last-used or first connected Instantly account."),
   steps: CampaignSetup.steps,
   timezone: CampaignSetup.timezone,
+  send_hours: CampaignSetup.send_hours.describe(
+    "Change when emails may go out; an active campaign is paused for the change and needs activate_campaign again.",
+  ),
 });
 const AddShortlistLeadsInput = z.strictObject({
   role_id: RoleId,
@@ -260,6 +267,7 @@ export function instantlyRest(
 // Instantly campaign status: 0 draft, 1 active, 2 paused, 3 completed. Enrolling into an active
 // campaign starts sending, so leads only go into draft/paused ones; activation is the card.
 const ENROLLABLE = new Set([0, 2]);
+const ACTIVE = 1;
 async function requireEnrollable(rest: InstantlyRest, campaignId: string) {
   const campaign = await rest("GET", `/campaigns/${campaignId}`);
   if (!ENROLLABLE.has(campaign.status as number))
@@ -338,20 +346,25 @@ function firstEmail(campaign: Record<string, unknown> | undefined) {
     : null;
 }
 
+function campaignSchedule(hours: "weekdays_9_to_5" | "any_time", zone: string) {
+  const anyTime = hours === "any_time";
+  return {
+    schedules: [
+      {
+        name: anyTime ? "Any time" : "Weekdays",
+        timing: anyTime ? { from: "00:00", to: "23:59" } : { from: "09:00", to: "17:00" },
+        // ponytail: "1".."5" assumed Mon-Fri (docs do not define the day index); adjust in UI if off.
+        days: { "0": anyTime, "1": true, "2": true, "3": true, "4": true, "5": true, "6": anyTime },
+        timezone: providerTimezone(zone),
+      },
+    ],
+  };
+}
+
 function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>) {
   return {
     name,
-    campaign_schedule: {
-      schedules: [
-        {
-          name: "Weekdays",
-          timing: { from: "09:00", to: "17:00" },
-          // ponytail: "1".."5" assumed Mon-Fri (docs do not define the day index); adjust in UI if off.
-          days: { "0": false, "1": true, "2": true, "3": true, "4": true, "5": true, "6": false },
-          timezone: providerTimezone(setup.timezone),
-        },
-      ],
-    },
+    campaign_schedule: campaignSchedule(setup.send_hours ?? "weekdays_9_to_5", setup.timezone),
     ...(setup.steps ? { sequences: sequences(setup.steps) } : {}),
     email_list: [setup.eaccount],
     // Instantly has no per-lead stop; the campaign flag is the only native stop on reply.
@@ -652,10 +665,16 @@ async function ensureRoleCampaign(
         ENROLLABLE.has(campaign.status as number) &&
         existing.binding.created === true &&
         current === null;
-      if (patched || writeSteps)
+      // The provider edits only draft or paused campaigns, so a live one is paused for new hours.
+      const pausedForHours = Boolean(input.send_hours) && campaign.status === ACTIVE;
+      if (pausedForHours) await rest("POST", `/campaigns/${mappedId}/pause`);
+      if (patched || writeSteps || input.send_hours)
         await rest("PATCH", `/campaigns/${mappedId}`, {
           ...(patched ? { stop_on_reply: true } : {}),
           ...(writeSteps ? { sequences: sequences(input.steps!) } : {}),
+          ...(input.send_hours
+            ? { campaign_schedule: campaignSchedule(input.send_hours, input.timezone) }
+            : {}),
         });
       if (writeSteps) await requireSavedEmail(rest, mappedId);
       return {
@@ -663,6 +682,10 @@ async function ensureRoleCampaign(
         created: false,
         stopOnReplyPatched: patched,
         stepsSaved: writeSteps,
+        ...(input.send_hours ? { sendHours: input.send_hours } : {}),
+        ...(pausedForHours
+          ? { paused: "Paused to change the hours; call activate_campaign to resume sending" }
+          : {}),
         hasEmail: writeSteps || current !== null,
         ...(input.steps && !writeSteps
           ? {
