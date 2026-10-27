@@ -219,6 +219,9 @@ it("browses scoped Contacts and stored mail without inventing a native recruitin
     groupId: "group-1",
     crmBrowse,
   });
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(view.container.textContent).toContain("Existing CRM person");
   expect(view.container.textContent).toContain("person@example.test");
   expect(api.getWorkspace).not.toHaveBeenCalled();

@@ -142,6 +142,7 @@ describe("lingui catalogs", () => {
       "../pages/recruiting/CandidatePresentation.tsx",
       "../pages/recruiting/CriteriaEditor.tsx",
       "../pages/recruiting/CrmWorkbench.tsx",
+      "../pages/recruiting/CrmHistory.tsx",
       "../pages/recruiting/SourceDocuments.tsx",
       "../pages/recruiting/VerdictLabel.tsx",
       "../pages/recruiting/RecruitingRoleTab.tsx",
