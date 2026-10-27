@@ -1,8 +1,26 @@
 import { defineConfig } from "@lingui/conf";
 import { formatter } from "@lingui/format-po";
 
-// Top-level optional pages already sit behind lazy UI boundaries.
+// Optional pages and recruiting views already sit behind lazy UI boundaries.
 const deferredPages = [
+  "src/pages/recruiting/CrmHistory.tsx",
+  "src/pages/recruiting/CandidatePresentation.tsx",
+  "src/pages/recruiting/SchedulingPlan.tsx",
+  "src/pages/recruiting/HomeDashboard.tsx",
+  "src/pages/recruiting/DetailPanel.tsx",
+  "src/pages/recruiting/RecruitingSupplementaryTab.tsx",
+  "src/pages/recruiting/InterviewCalendar.tsx",
+  "src/pages/recruiting/RecruitingRoleTab.tsx",
+  "src/pages/recruiting/ActivityTab.tsx",
+  "src/pages/recruiting/fieldLabels.ts",
+  "src/pages/recruiting/SourceDocuments.tsx",
+  "src/pages/recruiting/RecruitingLegacyResults.tsx",
+  "src/pages/recruiting/InterviewTab.tsx",
+  "src/pages/recruiting/CandidateFeedback.tsx",
+  "src/pages/recruiting/RecruitingSummary.tsx",
+  "src/pages/recruiting/SequenceTab.tsx",
+  "src/pages/recruiting/CandidateDetailDialog.tsx",
+
   "src/pages/AccountSettingsOverlay.tsx",
   "src/pages/ActivityList.tsx",
   "src/pages/Artifacts.tsx",

@@ -52,6 +52,7 @@ import {
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { computersAreUnavailable } from "../../components/ComputersUnavailableHint";
 import { readActivityMode, writeActivityMode } from "../../lib/activity-mode";
+import type { AuthSessionState } from "../../lib/auth";
 import { authClient } from "../../lib/auth";
 import {
   getBotsSidebarDensity,
@@ -110,7 +111,7 @@ export function useShellController() {
   // effect below, which should only restart when the active bot changes).
   const searchParamsRef = useRef(searchParams);
   searchParamsRef.current = searchParams;
-  const session = authClient.useSession();
+  const session: AuthSessionState = authClient.useSession();
   const userId = session.data?.user.id;
   // The placeholder name a new role's group carries until its title is saved.
   const newRoleNames = useRef<string[]>([]);

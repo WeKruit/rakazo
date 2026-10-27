@@ -8,6 +8,7 @@ export default defineConfig({
   testDir: "./e2e",
   testMatch: [
     "i18n-feature-catalog.spec.ts",
+    "auth-client-boundary.spec.ts",
     "recruiting-app-routes.spec.ts",
     "recruiting-lingui.spec.ts",
     "recruiting-contacts-cold.spec.ts",

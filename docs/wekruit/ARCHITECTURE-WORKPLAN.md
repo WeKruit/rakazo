@@ -12,7 +12,7 @@
 |---|---|---|---|---|
 | A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已有上线记录（#259）；50 并发验收未测 | — |
 | A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 招聘首批隔离通过；本地性能未稳定达标，线上门禁未测，整体未完成 | Adam |
-| A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
+| A3 | 数据库 | 列表接口都分页、有上限 | 已合入 [#277](https://github.com/WeKruit/rakazo/pull/277)，本地门禁通过；线上 p95 未测 | Adam |
 | A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
 | A5 | 数据库 | 对话开头到第一次搜索的查询次数（现 150–220 条，约 3–5 秒）：合并重复读取，缩短对话行锁 | 进行中 | Claude（工具出错率线程） |
 | B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本分支；本地回归通过，线上未测 | — |
@@ -21,12 +21,12 @@
 | C2 | 多容器 | 电脑工作目录放对象存储 | 代码已合并（#262）；存储配置阻塞 | — |
 | C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，线上未测） | Adam |
-| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | Adam 已认领；本地实现进行中，线上部署仍禁止 | Adam |
+| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 基础[#303](https://github.com/WeKruit/rakazo/pull/303)已合入；存储fence/迁移验证/串行替换本地实现继续，线上部署仍禁止 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
-| D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
-| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 本地验收通过，已合入 [#301](https://github.com/WeKruit/rakazo/pull/301) | Adam |
-| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息及旧结果视图后续已本地验收，[#300](https://github.com/WeKruit/rakazo/pull/300) 待串行集成） | Adam |
-| D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
+| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#295](https://github.com/WeKruit/rakazo/pull/295)、[#302](https://github.com/WeKruit/rakazo/pull/302) 已合入，联系人339,147B、聊天301,872B gzip（语言包[#304](https://github.com/WeKruit/rakazo/pull/304)）；最终250KB未达，线上LCP未测 | Adam |
+| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 完成（本项代码验收）：重复RPC为0，[#301](https://github.com/WeKruit/rakazo/pull/301) 已合入 | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 完成（本地验收）：最多19行/36卡，无观测>50ms长任务；[#276](https://github.com/WeKruit/rakazo/pull/276)、[#300](https://github.com/WeKruit/rakazo/pull/300) 已合入 | Adam |
+| D4 | 前端 | 拆分超大组件文件 | 完成：生产源文件最多1,499行，零超限；[#298](https://github.com/WeKruit/rakazo/pull/298) 已合入 | Adam |
 | F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
 | E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
 | E2 | 可靠性 | 压测：20 和 50 个并发对话 | 阻塞（缺获准的部署测试环境和在线压测范围） | |

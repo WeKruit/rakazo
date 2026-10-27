@@ -1,15 +1,15 @@
 import { lazy, Suspense } from "react";
-import type { ChatMarkdownProps } from "./markdown";
-import { plainTextLinkParts } from "./markdown";
+import { mayContainExplicitLink } from "./link-candidates";
+import type { ChatMarkdownProps } from "./markdown-shared";
 import "./markdown.web.css";
 
-export { LinkFaviconsContext, RemoteImagesContext } from "./markdown";
+export { LinkFaviconsContext, RemoteImagesContext } from "./markdown-shared";
 
 const Markdown = lazy(() =>
   import("./markdown.web").then((module) => ({ default: module.ChatMarkdown })),
 );
 const Links = lazy(() =>
-  import("./markdown.web").then((module) => ({ default: module.LinkifiedText })),
+  import("./plain-text-links.web").then((module) => ({ default: module.PlainTextLinks })),
 );
 /** Keep message text visible while the renderer's first chunk loads. */
 export function ChatMarkdown(props: ChatMarkdownProps) {
@@ -45,8 +45,7 @@ export function ChatMarkdown(props: ChatMarkdownProps) {
   );
 }
 export function LinkifiedText(props: { children: string }) {
-  if (plainTextLinkParts(props.children).every((part) => part.type === "text"))
-    return <>{props.children}</>;
+  if (!mayContainExplicitLink(props.children)) return <>{props.children}</>;
   return (
     <Suspense fallback={<span aria-busy="true">{props.children}</span>}>
       <Links {...props} />

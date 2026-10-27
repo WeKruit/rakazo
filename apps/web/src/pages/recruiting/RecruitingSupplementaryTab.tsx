@@ -1,14 +1,17 @@
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { withFeatureMessages } from "../../lib/i18n";
 
 import { CandidateCounts, ResearchActionStatus } from "./CandidatePresentation";
 
 const ArtifactReference = lazyPanel(() =>
-  import("./SourceDocuments").then((m) => m.ArtifactReference),
+  withFeatureMessages(() => import("./SourceDocuments")).then((m) => m.ArtifactReference),
 );
 const MemoryDocumentView = lazyPanel(() =>
-  import("./SourceDocuments").then((m) => m.MemoryDocumentView),
+  withFeatureMessages(() => import("./SourceDocuments")).then((m) => m.MemoryDocumentView),
 );
-const Sources = lazyPanel(() => import("./SourceDocuments").then((m) => m.Sources));
+const Sources = lazyPanel(() =>
+  withFeatureMessages(() => import("./SourceDocuments")).then((m) => m.Sources),
+);
 
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Button, TabsContent } from "@rakazo/ui-web";
@@ -19,7 +22,7 @@ const AskCard = lazyPanel(() => import("../../components/AskCard").then((m) => m
 import { rpc } from "../../lib/rpc";
 
 const FeedbackHistory = lazyPanel(() =>
-  import("./CandidateFeedback").then((m) => m.FeedbackHistory),
+  withFeatureMessages(() => import("./CandidateFeedback")).then((m) => m.FeedbackHistory),
 );
 
 export function RecruitingSupplementaryTab({
