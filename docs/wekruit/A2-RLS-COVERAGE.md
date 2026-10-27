@@ -2,7 +2,7 @@
 
 The first rollout batch is **all 22 `recruiting_*` tables, messages and artifacts, plus threads/tasks/runs/events/external effects as the ownership and receipt dependencies**: 29 tables. Direct queries to a recruiting child no longer depend on the caller remembering its parent filter. Each protected table has nonempty synthetic data for two users, real non-owner/NOBYPASSRLS reads and legal writes. The authenticated actor composition is opt-in and fails closed; workers/auth/migrations retain their explicit system identity.
 
-This is a staged rollout as specified by A2, not whole-schema RLS. The 63 other tables are enumerated for later batches or separate system authorization, not all counted as missing user-data policies in this batch. No production activation or publication occurred.
+This is a staged rollout as specified by A2, not whole-schema RLS. The current Prisma schema contains **99 application models/tables**: the 29-table actor pilot and 70 outside that pilot. The original audit had 92; the seven additions are classified below. The 70 other tables are enumerated for later batches or separate system authorization, not all counted as missing user-data policies in this batch. No production activation occurred. The first-batch pilot was subsequently integrated through PR #296; this inventory does not imply whole-schema protection.
 
 ## First batch (29)
 
@@ -27,6 +27,22 @@ This is a staged rollout as specified by A2, not whole-schema RLS. The 63 other 
 ## Outside this batch: Personal Space rows (29)
 
 `ai_data_consents`, `action_auto_review_preferences`, `space_model_preferences`, `space_backup_models`, `space_voice_preferences`, `bots`, `bot_sections`, `chat_groups`, `cloud_agents`, `routines`, `scratchpad_items`, `taught_skills`, `agent_skills`, `connections`, `capability_installs`, `memory_documents`, `agent_homes`, `browser_profiles`, `computers`, `usage_records`, `notification_preferences`, `space_memory_configs`, `mcp_servers`, `mcp_oauth_sessions`, `bot_mcp_servers`, `messaging_identities`, `messaging_link_codes`, `bot_secrets`, `external_conversations`.
+
+## Since the original 92-table audit: seven additional tables
+
+- `model_oauth_sessions`: durable provider-login coordination, including encrypted submitted codes and bounded results. `apps/api/src/app.ts` constructs `DurablePiOAuthLogins` with the explicit system Prisma client. Authenticated begin/status/submit/cancel calls enforce user/Space predicates; owner-instance polling, expiry cleanup and cross-Space per-user credential serialization run outside actor RPC scope. It is not part of the actor RLS pilot. A later credential-boundary review must cover both actor requests and system completion; blindly applying active-Space RLS to its system lifecycle would not establish that boundary. Existing application checks remain required; this audit does not claim database isolation for the OAuth table.
+- `home_authority_tombstones` and `home_authority_cutover`: system-only irreversible authority fences and verified cutover receipts. They carry deployment/storage authority, not personal preferences. Their migration enables RLS without actor policies; the actor startup guard rejects missing, disabled or policy-bearing metadata. The narrow retired-home helper intentionally returns only collision existence while keeping metadata mutation unavailable to actors.
+- `session_admission_generations`, `session_admissions`, `session_admission_connections`, `session_admission_budget`: system-only generation fences, reservations, observed physical connections and global capacity/replacement claim. Repository transactions use the explicit system client. Migrations enable RLS with no actor policies, and startup checks the boundary. These four tables must not receive a user/Space policy merely to increase the actor-table count.
+
+Arithmetic: original 29 + 14 + 6 + 3 + 11 + 29 = 92; OAuth coordination 1 + home authority 2 + admission 4 = 7; current total 99. The six system metadata tables have deny-all actor RLS already; the other 64 outside-pilot tables retain their documented separate/application authorization boundaries.
+
+## Current combined-source API isolation rerun
+
+On integration revision `ba744c11842a55905fd1c8301269774b73f325f8`, after the public pg pipeline and all current migrations, the complete existing account-isolation fixture was rerun against a new synthetic PostgreSQL database with a real non-owner/NOBYPASSRLS actor role. Only Docker database startup was replaced with a dedicated loopback database; fixture seeding and acceptance logic were unchanged. Scripted runtime, fake sandbox and email/provider emulators were used; no provider jobs or external messages ran.
+
+Command: `API_PORT=3196 ACTOR_DATABASE_URL=<restricted-local-fixture-url> pnpm exec tsx packages/testkit/src/cli/.a2-local-isolation.ts --out <temporary-report.json>`; database setup used `prisma migrate deploy`, the opt-in `first-batch.sql`, and a local restricted role. The temporary harness was removed after the run. Acceptance started at 2026-10-27 19:51:01.920 UTC and finished at 19:51:04.018 UTC (**2.098 seconds**, excluding setup), exit **0**, result **isolated**: **144 checks, 0 leaks, 0 warnings, 98 unexercised owner-empty paths**. The 98 paths are not newly verified, and this does not establish production or provider-workflow acceptance. No product regression was found in this run.
+
+This rerun is correctness evidence, not a latency benchmark. The latest retained pipeline measurements are in `A2-RLS-PILOT.md`: pooled p95 changes +8.36% (serial warmup) and +2.50% (parallel warmup), but individual pairs still exceeded 10%. Earlier failed measurements below remain historical evidence. The formal online <10% gate remains unmeasured; A2 is not marked complete.
 
 ## Why the other categories are separate
 
