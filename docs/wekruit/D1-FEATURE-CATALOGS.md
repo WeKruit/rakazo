@@ -194,3 +194,46 @@ catalog loading/language switching, and auth/session/selected-space behavior.
 
 Follow-up review: https://github.com/WeKruit/rakazo/pull/307 (Draft, targeting the
 #263 branch; this document does not assert it has merged).
+
+## Plain-link presentation follow-up
+
+`link-presentation.web.tsx` now owns the original confirmation context/dialog,
+anchor, favicon and website-link components. Both Markdown and plain links use
+these same canonical components; the public Markdown exports remain compatible.
+Plain links no longer import ReactMarkdown, GFM/CJK parsing or table rendering.
+No math/highlighting engine was found in this dependency path.
+
+Matched Chinese cold-message production results (same content and visible links):
+
+| Case | Before gzip bytes | After gzip bytes |
+| --- | ---: | ---: |
+| User URL + email + literal bare domain | 411345 | 354913 |
+| Bot formatted Markdown, link and inline code | 410702 | 411337 |
+| Contacts | 325302 | 325328 |
+| Sign-in | 180756 | 180757 |
+
+The 56432-byte plain-link reduction is real; complete Markdown costs 635 extra
+bytes because its presentation is now shared across a module boundary. Contacts
+has no meaningful benefit (+26 bytes), so this does not reduce its remaining
+75328-byte distance to 250000. The linked-message case remains 4913 bytes above
+350000. All values include loaded dynamic dependencies, not just the entry file.
+
+Commands are the previous measurement command with user text unchanged, plus
+`MEASURE_MESSAGE_ROLE=bot MEASURE_MESSAGE_TEXT='**Important**: See [example](https://example.com/path) and code.' MEASURE_EXPECT_LINKS=1` for formatted content
+(the measured case used inline-code backticks around code). Both browser cases
+waited for the actual anchors before collecting their final asset set.
+
+Further ordinary opportunities are not exhausted: an unopened confirmation
+dialog still shares the link presentation module, and some optional chat
+controls still contribute startup translations. Their net savings have not been
+measured. Neither is evidence that contacts can reach 250000. The visible
+React DOM/router, client auth/RPC, Zod validation, Shell state and visible
+recruiting controls remain in the loaded graph. Removing them changes behavior;
+selective schema API migration or server-rendered/partial-hydration work needs
+separate design and parity verification. These are alternatives to study, not
+claims that a stack replacement is required or guaranteed to meet the target.
+
+Follow-up validation: web/chat-ui typechecks, production build and Biome passed;
+`pnpm exec vitest run apps/web/src/pages/Shell.test.tsx packages/chat-ui/src`
+passed all 370 tests in 10 files (31.73 seconds). Existing confirmation,
+sanitization, table and Markdown assertions remain intact.

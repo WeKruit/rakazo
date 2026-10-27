@@ -2,7 +2,7 @@ import { lazy, Suspense } from "react";
 import { plainTextLinkParts } from "./linkify";
 
 const Links = lazy(() =>
-  import("./markdown.web").then((module) => ({ default: module.LinkifiedText })),
+  import("./link-presentation.web").then((module) => ({ default: module.LinkifiedText })),
 );
 
 /** Candidate punctuation is parsed by the unchanged canonical parser. */
