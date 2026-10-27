@@ -48,11 +48,11 @@ export const RECRUITING_CALIBRATION_QUICK_SEARCH = `Calibration rounds are quick
 
 /** Returned with a saved people search, so the pick happens in the next step for every account. */
 export const RECRUITING_SEARCH_SAVED_NEXT_STEP =
-  "Pick the ten from candidateRows now in the order of the recruiter's requirements and call calibration_round at once; save the brief only after the round is recorded, never before it. Work from these rows directly: no files, shell, scratchpad, profile reads or other lookups before the round is recorded; a requirement the rows cannot show stays unknown and never holds the round.";
+  "Pick the ten from candidateRows now in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location), and call calibration_round at once; save the brief only after the round is recorded, never before it. Work from these rows directly: no files, shell, scratchpad, profile reads or other lookups before the round is recorded; a requirement the rows cannot show stays unknown and never holds the round.";
 
 /** Returned with each people search the server saved as it returned. */
 export const RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP =
-  "These people are already saved and shown in Results; do not call save_search for this search. If this step issued fewer than four searches, issue all the remaining ones now together as parallel calls in one step. Once every search has returned, pick the ten from these people rows in the order of the recruiter's requirements and call calibration_round at once with their candidateKeys and this expectedRoleRevision; save the brief only after the round is recorded, never before it. No files, shell, profile reads or other lookups before the round is recorded.";
+  "These people are already saved and shown in Results; do not call save_search for this search. If this step issued fewer than four searches, issue all the remaining ones now together as parallel calls in one step. Once every search has returned, pick the ten from these people rows in the order of the recruiter's requirements, only people whose rows fail no hard requirement (must-have title, industry, company type, years, location), and call calibration_round at once with their candidateKeys and this expectedRoleRevision; save the brief only after the round is recorded, never before it. No files, shell, profile reads or other lookups before the round is recorded.";
 
 /** Returned when the recruiter confirms the brief, so the first round starts without a role read. */
 export function recruitingBriefConfirmedNextStep(revision: number) {
