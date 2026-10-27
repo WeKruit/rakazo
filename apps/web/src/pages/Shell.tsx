@@ -310,10 +310,7 @@ import { ActivityList } from "./ActivityList";
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { CreateGroupForm, GroupSettings, memberName } from "./GroupPanel";
 import { HostComputerPrompt } from "./HostComputerPrompt";
-import {
-  RecruitingCorrespondence,
-  type RecruitingSequenceSaveInput,
-} from "./RecruitingCorrespondence";
+import type { RecruitingSequenceSaveInput } from "./RecruitingCorrespondence";
 import type {
   CandidateDiscussionContext,
   CandidateFeedback,
@@ -342,7 +339,7 @@ import {
   writeShortlistWeekFilter,
 } from "./recruiting/dashboard-drilldown";
 import { HomeDashboard } from "./recruiting/HomeDashboard";
-import { InterviewTab } from "./recruiting/InterviewTab";
+import { InterviewTab, RecruitingCorrespondence } from "./recruiting/LazyViews";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { RoleSetupCard } from "./recruiting/RoleSetup";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";

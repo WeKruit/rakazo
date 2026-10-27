@@ -20,7 +20,9 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
-import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./index";
+import { ContactsTab } from "./ContactsTab";
+import { InterviewTab } from "./InterviewTab";
+import { InboxTab, SequenceTab } from "./index";
 
 const LATENCY = 300;
 const ORG = "00000000-0000-4000-8000-000000000001";
