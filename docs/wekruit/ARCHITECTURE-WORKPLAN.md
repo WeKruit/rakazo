@@ -13,7 +13,7 @@
 | A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已上线（#259） | — |
 | A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 进行中 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
-| A4 | 数据库 | schema 和迁移文件不一致 | 进行中 | Adam |
+| A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实） | Adam |
 | B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本 PR | — |
 | B2 | 任务队列 | 每分钟记录一次排队情况 | 本 PR | — |
 | C1 | 多容器 | 附件放对象存储 | 已合并（#260），等存储配置 | — |
@@ -56,11 +56,64 @@
 - **验收（代码检查）：** 任何列表 RPC 单次返回不超过 200 行。
 - **验收（线上实测）：** 有 1,000 个候选人的岗位，联系人视图的 RPC p95 小于 300 ms。
 
-### A4 schema 和迁移不一致
+### A4 schema 和迁移不一致 — 阻塞，尚未通过验收
 
-- **现状：** 对着迁移文件跑 `prisma migrate diff`，结果显示 `computer_updates` 和 `recruiting_crm_*` 几张表缺外键。这些外键在 `schema.prisma` 里有，但迁移里没有，所以新环境建出来的库和 schema 不一样。
-- **做法：** 先确认线上库里有没有这些外键，再补一个加法迁移，或者把 schema 改成和线上一致。
-- **验收（代码检查）：** 迁移文件和 `schema.prisma` 之间的 `prisma migrate diff` 结果为空。
+- **纠正现状（2026-10-27 本地实测）：** 在独立 PostgreSQL 16.15 空库重放全部 129 个迁移成功。四个外键**都存在**，不是缺失；差异是迁移默认的 `ON UPDATE NO ACTION` 与 Prisma 未显式指定 `onUpdate` 时的 `CASCADE`：
+  - `computer_updates_computerId_fkey`
+  - `recruiting_crm_sync_progress_userId_fkey`
+  - `recruiting_crm_sync_progress_spaceId_fkey`
+  - `recruiting_crm_workspace_attachments_roleId_fkey`
+- **两个独立比较：** 已迁移的本地数据库 → `schema.prisma`，以及迁移目录（使用独立 shadow database）→ `schema.prisma`，都返回相同的 4 个 `DROP CONSTRAINT` 和 4 个 `ADD CONSTRAINT ... ON DELETE CASCADE ON UPDATE CASCADE`。Prisma 的 `--exit-code` 为 2（差异不为空；pnpm 包装进程退出 1），因此 A4 的空 diff 验收**未通过**。
+- **阻塞与边界：** 已通过现有 Supabase 连接执行只读 `current_database()` / `to_regclass()`；工具连接的是 `postgres`，两张目标表均不存在。产品实际使用独立 `rakazo` 数据库，当前工具没有数据库选择参数，故尚未取得该库四个外键的线上元数据。需要现有授权的 `rakazo` 只读元数据连接或维护者提供同一查询结果；不需要读取任何用户行。未尝试猜测、提取或输出凭据，未修改线上数据库。操作因连接目标不匹配而阻塞，不是权限审批拒绝。
+- **决定：** 不依据错误的“缺外键”假设新增或替换外键，也不擅自把 schema 改成假定的线上状态。拿到正确元数据后，明确保留 `NO ACTION` 还是迁移为 `CASCADE`，再改 schema 或生成经验证的替换迁移。当前仅更新证据，没有数据库/连接池代码变更，新增会话连接为 0；生产的 `DATABASE_URL` 6543 事务池与 `REALTIME_DATABASE_URL` 5432 会话池预算未改。
+- **本地检查：** Node 24.19.0、pnpm 9.15.0；`pnpm --filter @rakazo/db generate` 与 `pnpm --filter @rakazo/db check` 通过（仓库类型检查脚本是 `check`）；`pnpm --filter @rakazo/db test` 为 1,216 通过、356 跳过，39 文件通过、12 文件跳过。跳过项不作已验证声明。未部署、未改云配置、未读取真实岗位/候选人，CI 保持关闭。
+- **认领：** Adam 认领提交 `45da1c8d1` 已先推入 #263 分支，随后才进行上述本地核对。
+
+本地复现（仅指向新建的可丢弃本地库，禁止将 shadow URL 指向生产）：
+
+```sh
+createdb -h 127.0.0.1 -p 55434 -U postgres rakazo_a4
+createdb -h 127.0.0.1 -p 55434 -U postgres rakazo_a4_shadow
+DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a4 pnpm --filter @rakazo/db exec prisma migrate deploy
+DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a4 pnpm --filter @rakazo/db exec prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script --exit-code
+pnpm --filter @rakazo/db generate
+pnpm --filter @rakazo/db check
+pnpm --filter @rakazo/db test
+```
+
+迁移目录比较使用临时 `packages/db/prisma.a4.config.ts`（核对完删除，不提交备份）：
+
+```ts
+import { defineConfig } from "prisma/config";
+export default defineConfig({
+  schema: "prisma/schema.prisma",
+  migrations: { path: "prisma/migrations" },
+  datasource: {
+    url: "postgres://postgres@127.0.0.1:55434/rakazo_a4",
+    shadowDatabaseUrl: "postgres://postgres@127.0.0.1:55434/rakazo_a4_shadow",
+  },
+});
+```
+
+```sh
+pnpm --filter @rakazo/db exec prisma migrate diff --config prisma.a4.config.ts --from-migrations prisma/migrations --to-schema prisma/schema.prisma --script --exit-code
+```
+
+所需线上只读检查（当前 Supabase 工具只完成第一条；外键查询仅在本地执行）：
+
+```sql
+SELECT current_database() AS database_name,
+       to_regclass('public.computer_updates') IS NOT NULL AS has_computer_updates,
+       to_regclass('public.recruiting_crm_contacts') IS NOT NULL AS has_crm_contacts;
+
+SELECT conrelid::regclass::text, conname, pg_get_constraintdef(oid)
+FROM pg_constraint
+WHERE contype = 'f'
+  AND conrelid IN ('computer_updates'::regclass,
+                  'recruiting_crm_sync_progress'::regclass,
+                  'recruiting_crm_workspace_attachments'::regclass)
+ORDER BY conrelid::regclass::text, conname;
+```
 
 ## B. 任务队列
 
