@@ -105,9 +105,9 @@ export default defineConfig(({ mode }) => {
           attachNovncProxy(server, screenProxySecret(), api, screenLog),
       },
     ],
-    // Keep the three existing entry boundaries while compressing their static dependencies
-    // together. Dynamic feature imports and locale catalogs remain separate. Shared UI
-    // utility definitions may move earlier; no closed feature is mounted by this grouping.
+    // Preserve feature entries while compressing their static dependencies together.
+    // Auth and Shell both use Input and Lucide's factory: keep those small controls
+    // independent so opening sign-in never downloads the authenticated Shell group.
     build: {
       rolldownOptions: {
         output: {
@@ -115,11 +115,11 @@ export default defineConfig(({ mode }) => {
             groups: [
               { name: "initial-shared", tags: ["$initial"], priority: 30 },
               {
-                name: "shell-shared",
-                test: /[\\/]pages[\\/]Shell\.tsx$/,
-                priority: 20,
-                entriesAware: true,
+                name: "shared-controls",
+                test: /(?:packages[\\/]ui-web[\\/]src[\\/]components[\\/]ui[\\/]input\.tsx|lucide-react[\\/]dist[\\/]esm[\\/]createLucideIcon\.mjs)$/,
+                priority: 25,
               },
+              { name: "shell-shared", test: /[\\/]pages[\\/]Shell\.tsx$/, priority: 20 },
               {
                 name: "recruiting-shared",
                 test: /[\\/]pages[\\/]RecruitingPanel\.tsx$/,
