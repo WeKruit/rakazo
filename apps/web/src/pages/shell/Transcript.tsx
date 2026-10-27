@@ -31,7 +31,9 @@ import { ActiveBotGlyph } from "../../components/ai/CollaborationMarker";
 import { LoadingState, Shimmer } from "../../components/ai/primitives";
 import { VoiceChatCard } from "../../components/call/VoiceChatCard";
 import { lazyPanel } from "../../components/ErrorBoundary";
-import { LiveWork } from "../../components/LiveWork";
+
+const LiveWork = lazyPanel(() => import("../../components/LiveWork").then((m) => m.LiveWork));
+
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { quoteDraftForSelection } from "../../lib/quote-selection";
 import { isRunPhase, rosterWorkStatusLabel, threadTailLabel } from "../../lib/roster-status";
@@ -633,7 +635,10 @@ export const Transcript = memo(function Transcript({
               }
             />
           )
-        ) : !tailPhase && !showToolActivity && messages.at(-1)?.role !== "user" ? (
+        ) : workSession?.endedAt &&
+          !tailPhase &&
+          !showToolActivity &&
+          messages.at(-1)?.role !== "user" ? (
           <LiveWork session={workSession} live={false} label="" />
         ) : null}
       </div>
