@@ -69,14 +69,6 @@ describe("native recruiting approval tool", () => {
     expect(role?.description).not.toContain("in the Role panel");
   });
 
-  it("binds research to the matching playbook gate and keeps continuations in their phase", () => {
-    const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
-
-    expect(tool?.description).toContain("purpose, approvalEffectId");
-    expect(tool?.description).toContain("calibration uses the G1 documents approval receipt");
-    expect(tool?.description).toContain("Calibration rounds are never approved on a card");
-    expect(tool?.description).toContain("continue keeps the same task and phase");
-  });
   it("reuses indexed native row identities when assessing research results", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_assess");
     expect(tool?.description).toContain("reuse the exact candidateKey");
@@ -86,7 +78,7 @@ describe("native recruiting approval tool", () => {
     const tool = builtinAgentTools.find((entry) => entry.name === "recruiting_research");
     expect(tool?.description).toContain("save_results");
     expect(tool?.description).toContain("same run");
-    expect(tool?.description).toContain("not a prerequisite");
+    expect(tool?.description).toContain("research provider's own research and reply tools");
     expect(tool?.description).toContain("linkedin_url");
   });
 

@@ -1083,16 +1083,6 @@ export const RecruitingRoleToolInputSchema = z.discriminatedUnion("operation", [
 export type RecruitingRoleToolInput = z.infer<typeof RecruitingRoleToolInputSchema>;
 
 const ResearchText = z.string().regex(/\S/, "Text must not be blank");
-const ResearchRoundInput = {
-  expectedRoleRevision: Revision,
-  purpose: RecruitingResearchPurposeSchema,
-  approvalEffectId: RecruitingId,
-  clientNonce: RecruitingId,
-  instructions: ResearchText,
-  output: ResearchText,
-  recallScope: ResearchText.nullable(),
-  intent: RecruitingHumanIntentSchema,
-};
 export const RECRUITING_CALIBRATION_ROUND_SIZE = 10;
 export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation", [
   // Marks the exact ten saved people this calibration round shows the recruiter.
@@ -1147,26 +1137,6 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
       resumeUrl: ResearchText.optional(),
     }),
   }),
-  z.strictObject({
-    ...ResearchRoundInput,
-    operation: z.literal("prepare"),
-    mcpServerId: RecruitingId,
-  }),
-  z.discriminatedUnion("purpose", [
-    z.strictObject({
-      ...ResearchRoundInput,
-      operation: z.literal("continue"),
-      purpose: z.literal("calibration"),
-      taskId: RecruitingId,
-    }),
-    z.strictObject({
-      ...ResearchRoundInput,
-      operation: z.literal("continue"),
-      purpose: z.literal("scale"),
-      taskId: RecruitingId.optional(),
-    }),
-  ]),
-  z.strictObject({ operation: z.literal("start"), actionId: RecruitingId }),
   z.strictObject({ operation: z.literal("status"), taskId: RecruitingId }),
   z.strictObject({
     operation: z.literal("rows"),
@@ -1176,17 +1146,6 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
   }),
 ]);
 export type RecruitingResearchToolInput = z.infer<typeof RecruitingResearchToolInputSchema>;
-
-export const PrepareRecruitingResearchActionInput = z.strictObject({
-  ...ResearchRequest,
-  purpose: RecruitingResearchPurposeSchema,
-  approvalEffectId: RecruitingId,
-  /** Expected role revision; later dispatch checks the current role and adoption atomically. */
-  expectedRevision: Revision,
-});
-export type PrepareRecruitingResearchActionInput = z.infer<
-  typeof PrepareRecruitingResearchActionInput
->;
 
 export const SaveRecruitingAssessmentInput = z
   .strictObject({
