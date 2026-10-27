@@ -116,3 +116,28 @@ The artifact-list endpoint already executes one business SQL statement; there wa
 Before total operation time: baseline 144.999 ms, RLS 549.392 ms. After: baseline 128.858 ms, RLS 286.181 ms. These sequential diagnostic timings are not HTTP p95 or a controlled throughput test. `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)` for the same synthetic artifact query gave before baseline planning/execution 0.229/0.101 ms and RLS 1.724/0.318 ms; after baseline 0.210/0.092 ms and RLS 0.411/0.566 ms. The principal excess was policy-plan expansion, not just three additional network round trips.
 
 The wired `public.rakazo_actor_member()` is SQL STABLE, SECURITY INVOKER, has fixed `pg_catalog` search_path and fully qualified membership relations. The fixed configuration avoids SQL-function inlining. Policies invoke it through statement-local InitPlans; no actor/membership result is cached across requests. Message policies inherit the already-protected thread instead of repeating the same membership join. Startup rejects a SECURITY DEFINER, IMMUTABLE or incorrectly configured helper. The 29-table/15-cross-parent suite now passes **12/12**, including both unsafe function mutations, membership revocation, pooled actor switching and concurrent iterators. HTTP acceptance after this change still requires the second quiet-window run.
+
+### Final quiet-window HTTP result after optimization
+
+The same B/R/R/B/B/R procedure, same two synthetic fixture users, 20 warmups and 200 requests at concurrency five per sample was repeated after other agents paused heavy work.
+
+| Sample | Mode | p50 ms | p95 ms | Max ms | Errors |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | Baseline | 6.43 | 8.89 | 18.50 | 0 |
+| 2 | RLS | 7.54 | 14.06 | 17.85 | 0 |
+| 3 | RLS | 7.27 | 10.19 | 11.56 | 0 |
+| 4 | Baseline | 5.49 | 9.62 | 20.17 | 0 |
+| 5 | Baseline | 5.44 | 8.05 | 9.59 | 0 |
+| 6 | RLS | 6.67 | 9.38 | 13.29 | 0 |
+
+Paired p95 changes are **+58.16%, +5.93%, +16.52%**. Only one pair is below 10%; the local comparison is **not consistently within target**. Mean sample p95 is 8.8533 versus 11.2100 ms (+26.62%), with sample medians 8.89 versus 10.19 ms. These summaries are not pooled-request percentiles. Both quiet-window runs and the earlier +74.36% result are retained; no best sample is selected as acceptance.
+
+The work plan's formal p95 gate is an **online measurement**. Deployment is prohibited, so that formal gate remains **not measured**, independently of the observed local overhead. First-batch database isolation is locally validated; A2 is not complete or approved for activation. A performance review is needed before rollout.
+
+### Remaining performance design options, not implemented
+
+The measured endpoint has one business SQL statement. The restricted adapter executes exactly BEGIN + SET LOCAL + business SQL + COMMIT (200 of each in the diagnostic), while existing native callback/batch transactions already share one identity binding. There is no repeated application query to remove in this endpoint. A request-wide transaction would hold connections over external I/O or streams and was not introduced.
+
+Further options require evidence and separate review: reduce policy parent expansion with explicit, integrity-constrained ownership columns on selected child tables; identify genuinely database-only multi-query services that can use one existing native transaction; and verify transaction-pooler behavior in the authorized staging/online environment. Prepared statements were not enabled because compatibility with the actual 6543 transaction pooler has not been verified. No SQL parameter concatenation, session identity reuse, membership cache or SECURITY DEFINER workaround is acceptable. No additional architecture change is justified by selecting one favorable local percentile.
+
+Final post-function API isolation rerun on a new synthetic database: **144 OK, zero leaks/warnings, 98 owner-empty reads still unexercised**. The final DB/API/testkit typechecks pass. No production database, roles, cloud configuration, deployment, real candidate/job, or outbound service was used. Publication remains paused; the implementation branch has no new PR or remote merge.
