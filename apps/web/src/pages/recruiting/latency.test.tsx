@@ -267,7 +267,7 @@ it("prefers the API's cursor over the offset when one is returned", async () => 
   expect(crmData.mock.calls[1]![0]).not.toHaveProperty("offset");
 });
 
-it("loads more rows with the CRM offset until every row is shown", async () => {
+it("loads every CRM page while keeping the rendered window bounded", async () => {
   const { container } = await timeToFirstRows(<ContactsTab {...props} crmTarget={target} />);
   expect(container.querySelectorAll("tbody tr")).toHaveLength(25);
   const more = () =>
@@ -277,9 +277,13 @@ it("loads more rows with the CRM offset until every row is shown", async () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LATENCY);
     });
-    expect(container.querySelectorAll("tbody tr")).toHaveLength(Math.min(shown, TOTAL));
+    const loaded = Math.min(shown, TOTAL);
+    expect(container.querySelector("table")?.getAttribute("aria-rowcount")).toBe(
+      String(loaded + 1),
+    );
+    expect(container.querySelectorAll("tbody tr:has(th)").length).toBeLessThanOrEqual(80);
   }
-  expect(container.querySelectorAll("tbody tr")).toHaveLength(TOTAL);
+  expect(container.querySelector("table")?.getAttribute("aria-rowcount")).toBe(String(TOTAL + 1));
   expect(more()).toBeUndefined();
   expect(crmData.mock.calls.map(([input]) => (input as Input).offset ?? 0)).toEqual([
     0, 25, 50, 75, 100,

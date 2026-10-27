@@ -9,7 +9,7 @@ import {
   parseSkillMd,
   type SkillSource,
 } from "@rakazo/core";
-import { IsolationError, type PrismaClient } from "@rakazo/db";
+import { IsolationError, Prisma, type PrismaClient } from "@rakazo/db";
 
 type AgentSkillRow = {
   id: string;
@@ -132,12 +132,43 @@ export function createAgentSkillsService(prisma: PrismaClient) {
   }
 
   return {
-    async list(actor: Actor): Promise<Omit<AgentSkill, "content">[]> {
+    async list(actor: Actor, offset?: number): Promise<Omit<AgentSkill, "content">[]> {
+      const builtins = builtinCatalog();
+      if (offset !== undefined) {
+        // Builtins precede saved skills, except when an owned saved name overrides them.
+        // Check only the finite builtin names; never load every saved skill to find overrides.
+        const names = builtins.map((skill) => skill.name.trim().toLowerCase());
+        const overrides = names.length
+          ? await prisma.$queryRaw<{ name: string }[]>(Prisma.sql`
+          SELECT DISTINCT lower(btrim("name")) AS name FROM "agent_skills"
+          WHERE "spaceId" = ${actor.spaceId} AND "userId" = ${actor.userId}
+            AND lower(btrim("name")) IN (${Prisma.join(names)})
+          LIMIT ${names.length}
+        `)
+          : [];
+        const overridden = new Set(overrides.map((row) => row.name));
+        const visible = builtins.filter(
+          (skill) => !overridden.has(skill.name.trim().toLowerCase()),
+        );
+        const prefix = visible.slice(offset, offset + 200);
+        const remaining = 200 - prefix.length;
+        const rows = remaining
+          ? await prisma.agentSkill.findMany({
+              where: { spaceId: actor.spaceId, userId: actor.userId },
+              orderBy: [{ name: "asc" }, { id: "asc" }],
+              take: remaining,
+              skip: Math.max(0, offset - visible.length),
+            })
+          : [];
+        return [...prefix, ...rows.map(mapAgentSkill)].map(
+          ({ content: _content, ...entry }) => entry,
+        );
+      }
       const rows = await prisma.agentSkill.findMany({
         where: { spaceId: actor.spaceId, userId: actor.userId },
         orderBy: [{ name: "asc" }, { id: "asc" }],
       });
-      return mergeBuiltinSkills(builtinCatalog(), rows.map(mapAgentSkill)).map(
+      return mergeBuiltinSkills(builtins, rows.map(mapAgentSkill)).map(
         ({ content: _content, ...entry }) => entry,
       );
     },

@@ -156,3 +156,38 @@ it.each([
     expect(resolveSkillContent({ content: saved.content })).toEqual(validated);
   },
 );
+
+describe("bounded agent skill catalog", () => {
+  it("continues across builtins and 1000 saved skills without missing overridden names", async () => {
+    const rows = Array.from({ length: 1000 }, (_, index) => ({
+      ...savedSkill(
+        index === 0
+          ? " Recruitment intake and handoff "
+          : `Skill ${String(index).padStart(4, "0")}`,
+      ),
+      id: `saved-${index}`,
+    }));
+    const findMany = vi.fn(async ({ skip = 0, take }: { skip?: number; take?: number }) =>
+      rows.slice(skip, take === undefined ? undefined : skip + take),
+    );
+    const query = vi.fn(async () => [{ name: "recruitment intake and handoff" }]);
+    const service = createAgentSkillsService({
+      agentSkill: { findMany },
+      $queryRaw: query,
+    } as unknown as PrismaClient);
+    const expected = await service.list(actor);
+    findMany.mockClear();
+    const gathered = [];
+    for (let offset = 0; ; offset += 200) {
+      const page = await service.list(actor, offset);
+      expect(page.length).toBeLessThanOrEqual(200);
+      gathered.push(...page);
+      if (page.length < 200) break;
+    }
+    expect(gathered).toEqual(expected);
+    expect(gathered.filter((entry) => entry.id.startsWith("saved-"))).toHaveLength(1000);
+    for (const [args] of findMany.mock.calls) expect(args.take).toBeLessThanOrEqual(200);
+    expect(query).toHaveBeenCalled();
+    expect(await service.list(actor, expected.length + 200)).toEqual([]);
+  });
+});

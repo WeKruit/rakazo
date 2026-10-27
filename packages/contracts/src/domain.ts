@@ -283,10 +283,10 @@ export const SpaceSchema = z.object({
   canRename: z.boolean().optional(),
   /** True only when the current member may delete this non-default space. */
   canDelete: z.boolean().optional(),
-  bots: z.array(SpaceBotSchema),
-  groups: z.array(SpaceGroupSchema),
-  externalConversations: z.array(ExternalConversationSchema),
-  botSections: z.array(BotSectionSchema),
+  bots: z.array(SpaceBotSchema).max(200),
+  groups: z.array(SpaceGroupSchema).max(200),
+  externalConversations: z.array(ExternalConversationSchema).max(200),
+  botSections: z.array(BotSectionSchema).max(200),
 });
 export type Space = z.infer<typeof SpaceSchema>;
 
@@ -294,12 +294,13 @@ export const SpaceNavigationSchema = z.object({
   current: z.object({
     id: Id,
     name: z.string(),
-    bots: z.array(BotSchema),
-    groups: z.array(GroupSchema),
-    externalConversations: z.array(ExternalConversationSchema),
-    botSections: z.array(BotSectionSchema),
+    bots: z.array(BotSchema).max(200),
+    groups: z.array(GroupSchema).max(200),
+    externalConversations: z.array(ExternalConversationSchema).max(200),
+    botSections: z.array(BotSectionSchema).max(200),
   }),
-  spaces: z.array(SpaceSchema),
+  spaces: z.array(SpaceSchema).max(200),
+  nextOffset: z.number().int().nullable().optional(),
 });
 export type SpaceNavigation = z.infer<typeof SpaceNavigationSchema>;
 
@@ -1510,14 +1511,15 @@ export type BillingStatus = z.infer<typeof BillingStatusSchema>;
 
 export const AppBootstrapSchema = z.object({
   me: MeSchema,
-  bots: z.array(BotSchema),
-  groups: z.array(GroupSchema),
-  botSections: z.array(BotSectionSchema),
-  archivedBots: z.array(BotSchema),
-  archivedGroups: z.array(GroupSchema),
+  bots: z.array(BotSchema).max(200),
+  groups: z.array(GroupSchema).max(200),
+  botSections: z.array(BotSectionSchema).max(200),
+  archivedBots: z.array(BotSchema).max(200),
+  archivedGroups: z.array(GroupSchema).max(200),
   thread: ThreadSnapshotSchema.nullable(),
-  routines: z.array(RoutineSchema),
-  spaces: z.array(SpaceSchema),
+  routines: z.array(RoutineSchema).max(200),
+  spaces: z.array(SpaceSchema).max(200),
+  nextOffset: z.number().int().nullable().optional(),
 });
 export type AppBootstrap = z.infer<typeof AppBootstrapSchema>;
 
