@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { isRegionOnlyLocation, locate, locationOutliers } from "./recruiting-location.js";
+import {
+  isRegionOnlyLocation,
+  locate,
+  locationOutliers,
+  outsideSearchArea,
+} from "./recruiting-location.js";
 
 describe("isRegionOnlyLocation", () => {
   it.each(["United States", "USA", "Georgia, United States", "Texas", "", null, undefined])(
@@ -53,5 +58,39 @@ describe("locationOutliers", () => {
       ["b", "Somewhere Unknown"],
     ]);
     expect(locationOutliers(people)).toEqual([]);
+  });
+});
+
+// 2026-10-27: a country-only pick from the planned rows was bounced and the ten were recorded again.
+describe("outsideSearchArea", () => {
+  const atlanta: [string, string | null][] = [
+    ["a", "Atlanta, Georgia, United States"],
+    ["b", "Marietta, Georgia, United States"],
+    ["c", "Decatur, Georgia, United States"],
+    ["d", "Alpharetta, GA"],
+    ["e", "McDonough, Georgia, United States"],
+    ["f", "Duluth, Georgia, United States"],
+  ];
+
+  it("leaves out far, country-only and unlocated rows of a local search", () => {
+    const rows = new Map([
+      ...atlanta,
+      ["far", "Haslet, Texas, United States"],
+      ["us", "United States"],
+      ["none", null],
+    ]);
+    expect([...outsideSearchArea(rows)].sort()).toEqual(["far", "none", "us"]);
+  });
+
+  it("leaves everyone in when the rows spread out, as for a remote role", () => {
+    const rows = new Map<string, string | null>([
+      ["a", "Atlanta, Georgia, United States"],
+      ["b", "Austin, Texas, United States"],
+      ["c", "Denver, Colorado, United States"],
+      ["d", "Seattle, Washington, United States"],
+      ["e", "Boston, Massachusetts, United States"],
+      ["us", "United States"],
+    ]);
+    expect(outsideSearchArea(rows).size).toBe(0);
   });
 });
