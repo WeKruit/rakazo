@@ -265,6 +265,22 @@ function poolWaitReporter(pool: Pool): {
 }
 
 /**
+ * Prisma's engine drops the async stack, so its statements are named by verb and first table,
+ * such as `SELECT runs`.
+ */
+function statementShape(statement: unknown): string {
+  const text =
+    typeof statement === "string"
+      ? statement
+      : typeof (statement as { text?: unknown } | undefined)?.text === "string"
+        ? (statement as { text: string }).text
+        : "";
+  const verb = /^\s*(\w+)/.exec(text)?.[1]?.toUpperCase() ?? "?";
+  const table = /\b(?:FROM|INTO|UPDATE|JOIN)\s+(?:"?\w+"?\.)?"?(\w+)"?/i.exec(text)?.[1];
+  return table ? `${verb} ${table}` : verb;
+}
+
+/**
  * Times every statement from send to reply. A statement that waits for a server connection inside
  * a transaction-mode pooler shows up here, not as a pool checkout wait.
  */
@@ -273,7 +289,7 @@ function timeQueries(client: PoolClient, queried: (ms: number) => void): void {
   client.query = ((...args: unknown[]) => {
     const startedAt = performance.now();
     // Inside a background job, name the statement's source line for that job's tally.
-    const site = getLogContext()["job.id"] ? (callerFrame() ?? "?") : undefined;
+    const site = getLogContext()["job.id"] ? (callerFrame() ?? statementShape(args[0])) : undefined;
     const done = () => {
       const ms = performance.now() - startedAt;
       queried(ms);
