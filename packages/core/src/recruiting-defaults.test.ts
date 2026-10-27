@@ -256,16 +256,17 @@ describe("maintained recruiting defaults", () => {
       "until the role holds the target or a wave adds fewer than five new people",
       "when the people search stopped short of the target",
       "everyone already returned excluded",
-      "a draft only: no campaign activation, import or send",
+      // 2026-10-27: "find 50" with 124 people saved still started paid research and an email draft.
+      "When Results already hold the target, there is no deeper search and no handoff.",
+      "Draft outreach email only when the recruiter asks for it",
       // A handoff ends the coordinator's turn: the searches and the update come first.
       "tell the recruiter in two or three lines with message_user",
       "end the turn with exactly one handoff, last",
-      "who then hands the email draft to the outreach teammate",
     ])
       expect(RECRUITING_SCALE_START).toContain(part);
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer");
     expect(sourcer?.instructions).toContain(
-      "hand it to Outreach only after the research is started, as your last call",
+      "Hand an email draft to Outreach only when the recruiter asked for one",
     );
     // Quick-search rounds leave no research task: the scale-out starts one without asking.
     expect(sourcer?.instructions).toContain(
