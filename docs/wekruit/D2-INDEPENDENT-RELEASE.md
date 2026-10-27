@@ -39,3 +39,11 @@ An initial full-web run passed 1,663 tests and failed one shortcut request-count
 Final full-web verification after the explicit initial-message wait passed **1,664/1,664 tests across 143 files** in 26.93 seconds.
 
 Publication and merge are pending the parent task's authorization and serialized integration. Production deployment, real-provider latency and real-user session behavior are not tested here.
+
+## D4 translation repair integration
+
+Ordinary merge `33880fb3b` brings in D4 `d564a9268`: extracted views bind Lingui macros locally, both locale fixtures are retained, and the original real-route tests retain their explicit content/scroll readiness waits. The two merge conflicts preserve D2 `currentWorkspaceRead` while using each view's local `useLingui()` binding. No later D1 optimization or D3 transcript work is included.
+
+After the merge, web/API/contracts type checks and the production build passed. The production D2 fixture passed three times with 0 duplicate recruiting requests, 17 total RPCs, eight recruiting RPCs, 1,611,782 JavaScript bytes / 526,281 gzip bytes / 70 JavaScript requests. Both English and Chinese real-browser accessible-name and export-error cases passed. The final unchanged full-web run passed 1,664/1,664 in 18.53 seconds.
+
+One earlier concurrent full-web run still reproduced the known owner-diagnostics shortcut count failure (3 reads versus 2). This also occurs on the independent D3+D4 branch without D2. Initial-message readiness alone did not eliminate it. Diagnostic-only repetition (60 shortcut cases and a complete 265-case Shell run) and two full-web runs with additional target/call-stack capture passed. No production fix is claimed. The exact-count assertion now includes unexpected read targets and call stacks when it fails, without tolerating an extra read. Root cause remains unresolved; a passing rerun is not proof the intermittent issue is gone.
