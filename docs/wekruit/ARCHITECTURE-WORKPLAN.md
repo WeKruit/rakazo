@@ -280,6 +280,24 @@ git diff --check
 ```
 
 
+### D3 #276 发布前刷新（候选列表独立范围）
+
+- 普通合并 #263 最新分支 `168fcaacc`，合并提交 `600d11f7b`；头像导入冲突保留新的 ProfileImage 模块与虚拟窗口 hooks。没有引入 D1/D4 的 Shell 拆分或聊天 Transcript 实现。
+- 相同生产 fixture 对当前 base 的前后重测：1,000 合成人选初始/最大表格 DOM **1,000/1,000 → 14/19**，卡片最大 **36**；两侧均没有 >50ms 的测量滚动长任务。实际冷页面请求 **5 → 5**、JS 请求 **1 → 1**。fixture 原始 JS **895,401 → 932,377 B**，gzip **286,363 → 297,393 B**（增加11,030 B）；不是完整应用首屏或线上性能。键盘、选中项、布局切换和滚动恢复断言通过。
+- 刷新门禁：web **141文件/1,649测试通过**（28.10s）；相关 latency **16/16**；web 类型检查、中文生产 build、5文件 Biome、diff检查通过。前后浏览器各 **1/1**（5.4s/8.3s）。
+- 范围边界：整项 D3 仍未标完成。旧 RecruitingPanel 和真实 Transcript 的后续本地实现依赖 D1/D4，保留在独立 followup 提交中，由主线程在这些依赖合入后串行集成；不能夹带进本候选列表 PR。线上、其他浏览器、CPU降速、人工辅助技术仍未测。
+
+```sh
+pnpm exec vitest run apps/web/src/pages/recruiting/latency.test.tsx --maxWorkers=2
+pnpm --filter @rakazo/web test
+pnpm --filter @rakazo/web check
+RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec vite build --manifest
+D3_BASE_REF=168fcaacc pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+pnpm exec biome check apps/web/src/pages/recruiting/CandidateDirectory.tsx apps/web/src/pages/recruiting/CandidateWindow.tsx apps/web/e2e/candidate-virtualization.spec.ts apps/web/e2e/fixtures/candidates.tsx apps/web/playwright.candidates.config.ts
+git diff --check
+```
+
 ### D4 拆分超大组件文件
 
 - **现状：** `Shell.tsx` 有 9,793 行，`RecruitingPanel.tsx` 有 6,737 行。
