@@ -24,7 +24,7 @@
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中 | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 进行中 | Adam |
-| D3 | 前端 | 长列表虚拟滚动 | 进行中 | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息待做） | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
 | E1 | 可靠性 | 告警 | 待做（要在日志平台上配置，需要同意） | |
 | E2 | 可靠性 | 压测：20 和 50 个并发对话 | 待做 | |
@@ -155,6 +155,24 @@ CHECK
 
 - **现状：** 消息和候选人列表都会把每一项渲染成 DOM，没有用虚拟滚动。
 - **验收：** 有 1,000 个候选人的列表，渲染出来的行节点不超过 100 个，滚动时没有超过 50 ms 的长任务。
+
+- **实现范围：** `ContactsTab` 使用的主 `CandidateDirectory` 表格/卡片超过 80 人后使用固定版本 `@tanstack/react-virtual` 3.14.23，测量实际高度、保留焦点行和稳定 key，支持 Home/End/上下箭头、响应式卡片分组，以及切换表格/卡片时恢复测量缓存和滚动位置。原有加载、选中和 shortlist 状态仍由调用者维护，不丢弃已加载候选人。没有新增用户可见文案。
+- **认领/实现：** Adam 先推送认领 `09d5070b2`，实现提交 `0950da29b0a89243a08665d1a247174cb109f80e`，Draft [#276](https://github.com/WeKruit/rakazo/pull/276) 指向 #263 分支。
+- **实测（Node 24.19.0，本地 Chromium，1440×900，生产构建的真实组件加 1,000 个合成人员）：** 表格初始行节点 1,000 → 14；30 个滚动位置的最大行节点 1,000 → 19；新卡片模式 30 个滚动位置最多 36 人，390px 响应式卡片也不超过 100 人。两次表格测量及新卡片测量均未记录到 >50 ms long task。键盘首尾导航、点击选中、shortlist 滚出/滚回后保持、滚动时焦点行保留、布局切换后恢复滚动全部通过。
+- **前后成本：** 同一个冷启动 fixture 页面实际请求尝试数 5 → 5，其中 JS 请求 1 → 1（不是滚动采样次数；原有外部字体请求被测试拦截，计入尝试数）。fixture JS 原始字节 895,559 → 932,535，gzip 字节 286,325 → 297,386。完整应用静态入口及静态 imports 闭包为 14 个 JS，原始字节 1,987,089 → 2,024,057，gzip 字节 594,217 → 605,997（增加 11,780）。这是 D1 合入前的隔离对比，最终集成需重测，不作首屏减包声明。
+- **门禁：** `pnpm --filter @rakazo/web check` 通过；web 141 个测试文件、1,649 个测试全通过；生产 build、Biome、`git diff --check` 通过；浏览器验收 1/1 通过（包含上述多项断言）。
+- **尚未完成/未测：** 旧 `RecruitingPanel` 结果视图和带流式更新的聊天消息列表尚未虚拟化，因此整项 D3 未标完成。部署环境、真实页面/API 集成、其他浏览器、CPU 降速和辅助技术人工检查未测。仅本地合成数据，未调用真实岗位/候选人或外部服务；CI 保持关闭，故没有 CI 截图。
+
+```sh
+pnpm --filter @rakazo/web check
+pnpm --filter @rakazo/web test
+RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec vite build --manifest
+PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers D3_BASE_REF=5e99915aa pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+pnpm exec biome check apps/web/src/pages/recruiting/CandidateDirectory.tsx apps/web/src/pages/recruiting/CandidateWindow.tsx apps/web/src/pages/recruiting/latency.test.tsx apps/web/e2e/candidate-virtualization.spec.ts apps/web/e2e/fixtures/candidates.tsx apps/web/playwright.candidates.config.ts apps/web/package.json
+git diff --check
+```
+
 
 ### D4 拆分超大组件文件
 
