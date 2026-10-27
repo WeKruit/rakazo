@@ -247,3 +247,34 @@ export async function releaseSessionAdmission(
     });
   });
 }
+
+/** Global replacement-controller exclusion. No expiry: a failed controller leaves
+ * the claim charged until a separately verified recovery decides it is safe.
+ */
+export async function acquireSessionReplacement(prisma: PrismaClient, input: { owner: string }) {
+  value(input.owner, "replacement owner");
+  return prisma.$transaction(async (tx) => {
+    await lock(tx);
+    await receipt(tx);
+    const token = randomUUID();
+    const changed =
+      await tx.$executeRaw`UPDATE session_admission_budget SET "replacementToken"=${token}, "replacementOwner"=${input.owner} WHERE id='global' AND "replacementToken" IS NULL`;
+    if (changed !== 1)
+      throw new Error("Global replacement controller is already reserved or budget missing");
+    return { token, owner: input.owner };
+  });
+}
+/** Only the owning controller may release after completed replacement (or a proven
+ * pre-mutation cancellation). External deployment completion is not inferred here.
+ */
+export async function releaseSessionReplacement(
+  prisma: PrismaClient,
+  input: { token: string; owner: string },
+) {
+  await prisma.$transaction(async (tx) => {
+    await lock(tx);
+    const changed =
+      await tx.$executeRaw`UPDATE session_admission_budget SET "replacementToken"=NULL, "replacementOwner"=NULL WHERE id='global' AND "replacementToken"=${input.token} AND "replacementOwner"=${input.owner}`;
+    if (changed !== 1) throw new Error("Stale global replacement owner or token");
+  });
+}

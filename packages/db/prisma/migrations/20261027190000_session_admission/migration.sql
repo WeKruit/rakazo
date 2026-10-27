@@ -34,6 +34,9 @@ CREATE TABLE session_admission_budget (
   id text PRIMARY KEY CHECK (id='global'),
   "totalSessions" integer NOT NULL CHECK ("totalSessions"=15),
   "externalReservedSessions" integer NOT NULL CHECK ("externalReservedSessions" BETWEEN 1 AND 14),
+  "replacementToken" text,
+  "replacementOwner" text,
+  CONSTRAINT session_replacement_owner_pair CHECK (("replacementToken" IS NULL) = ("replacementOwner" IS NULL)),
   "cutoverId" text NOT NULL DEFAULT 'verified' REFERENCES home_authority_cutover(id),
   CHECK ("cutoverId"='verified')
 );

@@ -6,6 +6,8 @@ import { createActorDb, withDatabaseActor } from "./actor-db.js";
 import { createDb } from "./client.js";
 import {
   beginSessionAdmissionShutdown,
+  acquireSessionReplacement,
+  releaseSessionReplacement,
   configureSessionAdmissionBudget,
   listSessionAdmissions,
   registerSessionConnection,
@@ -182,6 +184,32 @@ suite("global session admission on dedicated real PostgreSQL", () => {
     );
     expect(await listSessionAdmissions(db.prisma)).toHaveLength(1);
   });
+  it("excludes concurrent replacement controllers and never expires a failed owner", async () => {
+    await receipt();
+    const results = await Promise.allSettled([
+      acquireSessionReplacement(db.prisma, { owner: "controller-a" }),
+      acquireSessionReplacement(other.prisma, { owner: "controller-b" }),
+    ]);
+    const success = results.filter((result) => result.status === "fulfilled");
+    expect(success).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const held = success[0]!;
+    if (held.status !== "fulfilled") throw new Error("Missing controller fixture");
+    await expect(
+      acquireSessionReplacement(db.prisma, { owner: "crash-replacement" }),
+    ).rejects.toThrow(/already reserved/);
+    await expect(
+      releaseSessionReplacement(db.prisma, { ...held.value, owner: "wrong-owner" }),
+    ).rejects.toThrow(/Stale/);
+    await expect(
+      releaseSessionReplacement(db.prisma, { ...held.value, token: randomUUID() }),
+    ).rejects.toThrow(/Stale/);
+    await releaseSessionReplacement(db.prisma, held.value);
+    await expect(releaseSessionReplacement(db.prisma, held.value)).rejects.toThrow(/Stale/);
+    const replacement = await acquireSessionReplacement(db.prisma, { owner: "next-controller" });
+    expect(replacement.token).not.toBe(held.value.token);
+    await releaseSessionReplacement(db.prisma, replacement);
+  });
   it("holds crashed worker slots without TTL and respects worker5 + worker5 + API4 + external1", async () => {
     await receipt();
     await desired("worker-a");
@@ -294,6 +322,13 @@ suite("global session admission on dedicated real PostgreSQL", () => {
       ),
     ).rejects.toThrow(/row-level security/);
     expect((await actor.query("DELETE FROM session_admissions")).rowCount).toBe(0);
+    expect(
+      (
+        await actor.query(
+          "UPDATE session_admission_budget SET \"replacementToken\"='bad', \"replacementOwner\"='bad'",
+        )
+      ).rowCount,
+    ).toBe(0);
     expect((await actor.query("UPDATE session_admissions SET status='closing'")).rowCount).toBe(0);
     await expect(
       actor.query(

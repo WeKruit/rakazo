@@ -2157,6 +2157,8 @@ model SessionAdmissionBudget {
   id String @id
   totalSessions Int
   externalReservedSessions Int
+  replacementToken String?
+  replacementOwner String?
   cutoverId String @default("verified")
   cutover HomeAuthorityCutover @relation(fields:[cutoverId], references:[id], onDelete:NoAction,onUpdate:NoAction)
   @@map("session_admission_budget")
