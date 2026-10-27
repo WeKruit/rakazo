@@ -5203,6 +5203,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // recorded round then replaces that message with the final list.
         // show_picks put the first people in chat; the turn owes the recorded ten.
         let firstPicksShown = false;
+        // People searches this run sent, so a short round can ask once two sets came back short.
+        let peopleSearchesRun = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
         /**
@@ -5409,6 +5411,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
           // The model's first tools run once the role from a job link is saved.
           if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
@@ -5589,7 +5592,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     notShown: `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
                   }
                 : {}),
-              next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have; search again only if fewer than ten of all those rows fit, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten.",
+              next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have; search again only if fewer than ten of all those rows meet every hard requirement, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ask the recruiter how to go on, as the round instructions say.",
             };
           }
           if (
@@ -11623,7 +11626,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await briefSaving;
                 // A run that recorded a round asks the next-step choice, which is asked anew each round.
                 if (await nextStepCardAfterRound()) return undefined;
-                if (firstPicksShown)
+                // Fewer than ten fit after a second set of searches: the recruiter decides how to go on.
+                if (firstPicksShown && peopleSearchesRun < 8)
                   return {
                     instead:
                       "Not asked: the ten are not recorded yet. Record them now with calibration_round, starting with the people already shown in chat in the same order; then end on the next-step card.",
