@@ -2884,6 +2884,22 @@ it.each(["role change", "access denial"])(
   },
 );
 
+it("bounds legacy workspace candidate rows without discarding the loaded result count", async () => {
+  api.listCandidates.mockResolvedValue(
+    candidatePage(
+      Array.from({ length: 1000 }, (_, index) => candidateFixture(`synthetic-${index}`)),
+    ),
+  );
+  const view = await mounted("thread-1", undefined, false, undefined, {
+    presentation: "workspace",
+    view: "results",
+  });
+  expect(view.container.querySelector("table")?.getAttribute("aria-rowcount")).toBe("1001");
+  expect(view.container.querySelectorAll("[data-candidate-index]").length).toBeLessThanOrEqual(100);
+  await view.click("Cards");
+  expect(view.container.querySelectorAll("[data-candidate-index]").length).toBeLessThanOrEqual(100);
+});
+
 it("defaults to a table with authoritative score ordering and leaves unknown scores last", async () => {
   const people = (
     [
