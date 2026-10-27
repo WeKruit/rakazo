@@ -159,3 +159,22 @@ Same diagnostic method, 20 warmups and 200 sequential direct `listSpaceArtifacts
 Total baseline 129.081 ms; RLS 220.614 ms. The prior SQL-helper sample had RLS business mean 1.1078 ms and total 286.181 ms. EXPLAIN planning/execution: baseline 0.237/0.096 ms; RLS 0.444/0.181 ms (prior SQL helper 0.411/0.566 ms). This supports reducing helper execution overhead, not declaring HTTP acceptance. A coordinated six-sample HTTP rerun is pending.
 
 The explicit BEGIN/bound SET LOCAL/business/COMMIT sequence still adds three commands per standalone read. node-postgres processes queued commands after ReadyForQuery; merely submitting four Promises without awaiting is not a supported wire-protocol pipeline and complicates rollback/error safety. No protocol internals, concatenated identity values, dynamic SQL gateway, wider connection lifetime, or permission-result cache was introduced. Removing the remaining commands would require a separate transaction/driver architecture decision and end-to-end error, cancellation and pooler validation.
+
+### Final static-plan HTTP measurement and remaining cost
+
+The coordinated run's first request log is **2026-10-27 04:42:26.032 UTC**, after the other reported Web/Mobile tests ended at 04:42:08 UTC. The quiet window is valid; it was not rerun to select a better sample. Warmups, sample counts, concurrency and B/R/R/B/B/R order are unchanged. The benchmark now preserves all 1,200 raw request durations in `RLS_BENCH_TRACE`, emitted only after measurement.
+
+| Sample | Mode | p50 ms | p95 ms | Max ms | Errors |
+| --- | --- | ---: | ---: | ---: | ---: |
+| 1 | Baseline | 6.47 | 8.66 | 15.77 | 0 |
+| 2 | RLS | 7.04 | 10.06 | 14.12 | 0 |
+| 3 | RLS | 6.68 | 11.64 | 18.53 | 0 |
+| 4 | Baseline | 5.33 | 7.82 | 8.83 | 0 |
+| 5 | Baseline | 5.16 | 8.22 | 8.58 | 0 |
+| 6 | RLS | 7.11 | 14.33 | 17.86 | 0 |
+
+Paired p95 changes: **+16.17%, +48.85%, +74.33%**. True pooled 600-request p95 per mode, computed from retained raw durations: **8.183625 → 13.029083 ms (+59.21%)**. All samples are included; no pair passes <10%. Sample-p95 means are 8.2333 → 12.0100 ms, a separate statistic. First-quarter and later-quarter tails both occur (RLS sample 6 quarter p95 values 14.378/12.443/11.897/17.137 ms), so this is not dismissed as only first-request warmup.
+
+A separate concurrency-five diagnostic retained pool max four, matching the configured default rather than increasing connection budget. For 200 calls: baseline pool checkout mean/p95 0.2684/0.5642 ms; RLS 0.3312/1.2461 ms. Baseline business SQL mean/p95 0.7413/0.7377 ms; RLS 0.8736/1.0138 ms. RLS BEGIN/SET/COMMIT each ran 200 times, with means 0.0922/0.1009/0.0982 ms. Total concurrent workload elapsed 62.846 ms baseline versus 97.367 ms RLS. This supports longer checked-out transaction lifetime and queue-tail amplification in addition to remaining policy execution. It is not a replacement for the HTTP result.
+
+No further unsupported architecture change was made. The standalone transaction boundary requires three extra commands with the current supported driver API; increasing pool capacity requires a connection-budget decision, and a protocol pipeline/new transactional gateway requires error/cancellation/pooler validation. Wider transactions around I/O, cross-request permission caching, parameter concatenation, definer privileges, and unverified named prepared statements remain excluded. The safe static-plan improvement is retained because direct SQL execution improved while all isolation tests pass, but **local HTTP target remains unmet; formal online gate remains unmeasured**.

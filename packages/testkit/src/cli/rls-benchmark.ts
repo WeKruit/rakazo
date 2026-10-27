@@ -43,6 +43,7 @@ const [{ createApp }, { ComposioEmulator, EmailEmulator }, { serve }] = await Pr
   import("@hono/node-server"),
 ]);
 const results = [];
+const traces: Array<{ sample: number; mode: string; durationsMs: number[] }> = [];
 try {
   for (const [sample, mode] of (
     ["baseline", "rls", "rls", "baseline", "baseline", "rls"] as const
@@ -97,6 +98,9 @@ try {
       const timings: number[] = [];
       for (let index = 0; index < 200; index += 5)
         timings.push(...(await Promise.all(Array.from({ length: 5 }, read))));
+      // Preserve acquisition order for tail diagnosis; sorting only the summary
+      // must not discard the raw samples or permit selecting a favorable subset.
+      traces.push({ sample: sample + 1, mode, durationsMs: [...timings] });
       timings.sort((a, b) => a - b);
       results.push({
         sample: sample + 1,
@@ -115,6 +119,7 @@ try {
     }
   }
   console.log(`RLS_BENCH ${JSON.stringify(results)}`);
+  console.log(`RLS_BENCH_TRACE ${JSON.stringify(traces)}`);
 } finally {
   await rm(dataDir, { recursive: true, force: true });
 }
