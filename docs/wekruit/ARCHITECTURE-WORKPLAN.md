@@ -112,6 +112,8 @@ SQL
 
 - **继续性能定位（本地）：** membership helper 改为静态 PL/pgSQL RETURN EXISTS，保留 INVOKER/STABLE/固定 search_path，只复用查询计划、不缓存 actor/权限结果。12/12 安全测试通过；200 次微基准 RLS business mean 1.1078→0.8169 ms，总 286.181→220.614 ms；EXPLAIN execution 0.566→0.181 ms。后续统一静默 HTTP 六轮三对 +16.17%/+48.85%/+74.33%；保留全部 raw trace 后真实 pooled p95 8.183625→13.029083 ms（+59.21%，600/600 请求，0 errors），仍未达本地目标。并发5/pool4诊断指出 checkout p95 0.5642→1.2461 ms及3条额外事务命令；不加连接预算、不缓存权限、不降低指标。正式线上门禁仍未测。
 
+- **最新集成门禁：** 普通合入 #263 `8188c88f3c58299030b8dbfb2ea128144c2a8755`，保留分页与 actor middleware。db/api/testkit 类型检查通过；DB 单元 1216 pass/373 skip、API 单元 1377 pass/51 skip、真实 PG RLS+recruiting+membership 298/298。最终 API 合成隔离 144 OK/0 leak/0 warning/98 owner-empty 未触达。发布仅为 Draft 审查，性能未达与线上未测状态不变，不自行合并。
+
 ### A3 列表分页
 
 - **现状（已查）：** 消息（`thread-message-pages.ts`）、候选人（`listRecruitingCandidates`，每页 25 条，游标分页）、反馈都已经是游标分页。用量记录取 100 条，电脑命令历史也有上限。`router.ts` 里 38 处 `findMany` 没写 `take`，查下来基本都是单个用户自己的设置列表，量很小。还剩两处要改：
