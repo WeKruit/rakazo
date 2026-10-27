@@ -3,17 +3,9 @@
 Requires Modal >=1.6. Secrets and files belong to this App only; no local Docker.
 """
 
-import contextlib
-import datetime
 import os
-import signal
-import socket
-import subprocess
 import sys
-import threading
-import time
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import modal
 
@@ -21,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/app")
 # The container runs this file outside the checkout; its source copy lives in /app.
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-from infra.modal.release_config import check_staging_database, public_origin, reject_staging_dotenv, release_profile, staging_environment  # noqa: E402
+from infra.modal.release_config import release_profile  # noqa: E402
 RELEASE_PROFILE = release_profile(os.environ)
 APP_NAME = os.environ.get("MODAL_APP_NAME", "rakazo-recruiting")
 SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")

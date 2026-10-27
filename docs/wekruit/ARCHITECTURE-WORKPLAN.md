@@ -242,6 +242,9 @@ git diff --check
 
 ### C5 拆服务、多容器、滚动发布
 
+- **本地基础实现（仍未完成）：** 认领 `558f876037ae931f8a8a47508adf06d3075fe756` 普通 push 后，提取可独立启动 API/worker 的进程生命周期，增加 SIGUSR2 非取消排空、只读健康状态和超时拒绝替换工具。真实本地 PostgreSQL/Graphile 双 worker：旧任务完成一次，新任务由另一个 worker 执行；17 个 TS 测试、62 个 Python 测试通过，worker 类型检查和 API/worker 打包通过。详细命令和边界见 [C5-LOCAL-DRAIN.md](./C5-LOCAL-DRAIN.md)。split 部署入口硬性拒绝执行，现有生产入口/资源/Secret/发布保护不变。
+- **全局预算与剩余：** API 1、worker 5 会话；各两容器稳定 12，新增一个替换 worker 就到 17，整代重叠 24，超过既有总额 15。6543/5432 验证和预算检查已实现，线上 high-water 未测。共享 home 权威指针迁移及旧写者排除、逐 worker 排空替换发布控制器尚未完成；没有用本地通过冒充线上滚动/对话不中断验收。
+
 - **现状：** `infra/modal/app.py` 只有一个服务，设置是 `max_containers=1` 加 `nonpreemptible`，发布方式是 `--strategy recreate`。所以每次发布都会中断服务。
 - **做法：** 拆成 web/API 和 worker 两个服务。worker 本来就靠租约和 fencing 处理多实例，可以直接开多个容器。API 无状态之后，`max_containers` 改成大于 1，再换成滚动发布。
 - **验收（线上实测）：** 发布期间每秒探测一次首页和一个 RPC，失败数为 0，并且发布期间对话没有中断。

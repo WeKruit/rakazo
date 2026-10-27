@@ -37,3 +37,17 @@ class TopologyTests(unittest.TestCase):
                 wait_for_drain(123, 8001, 0, send_signal=lambda *args: None, read=lambda: status)
         wait_for_drain(123, 8001, 1, send_signal=lambda *args: None,
                        read=lambda: {"state": "drained", "ok": True})
+
+class SplitGateTests(unittest.TestCase):
+    def test_split_entrypoint_fails_before_any_modal_import_or_resource_resolution(self):
+        import runpy
+        from unittest.mock import patch
+        import builtins
+        original = builtins.__import__
+        def no_modal(name, *args, **kwargs):
+            if name == "modal":
+                raise AssertionError("split gate must not touch Modal")
+            return original(name, *args, **kwargs)
+        with patch("builtins.__import__", side_effect=no_modal):
+            with self.assertRaisesRegex(RuntimeError, "split deployment is disabled"):
+                runpy.run_module("infra.modal.split_app", run_name="__main__")
