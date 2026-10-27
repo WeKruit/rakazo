@@ -445,3 +445,7 @@ pnpm --filter @rakazo/worker --filter @rakazo/adapters check
 ```
 
 结果：7 个文件、85 个测试通过；两个包类型检查通过。C3 在额外真实本地 PostgreSQL 测试发现时区回归，已单独通过 #272 修复并列出35项实测，不把此前漏测说成已验证。
+
+### C4 refreshed independent branch
+
+Ordinary merge of #263 through `8188c88f3` into C4 succeeded without conflicts (`4406d0e134a5c2a26fa961ec2ebbb8075d3eaa5b`). `pnpm --filter @rakazo/api --filter @rakazo/db --filter @rakazo/adapters check` passed. Local synthetic `VERIFY_DATABASE=1 pnpm exec vitest run packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/pi-oauth.test.ts`:120/120 passed in7.89s. `pnpm --filter @rakazo/api test`:1376 passed/51 skipped in17.41s. No provider or multi-container acceptance is claimed. This refresh is local only while remaining-item publication confirmation is pending; #274 has not been merged.
