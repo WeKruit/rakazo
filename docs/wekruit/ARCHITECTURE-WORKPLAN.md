@@ -242,7 +242,7 @@ git diff --check
 
 ### C5 拆服务、多容器、滚动发布
 
-- **本地基础实现（仍未完成）：** 认领 `558f876037ae931f8a8a47508adf06d3075fe756` 普通 push 后，提取可独立启动 API/worker 的进程生命周期，增加 SIGUSR2 非取消排空、只读健康状态和超时拒绝替换工具。真实本地 PostgreSQL/Graphile 双 worker：旧任务完成一次，新任务由另一个 worker 执行；21 个 TS 测试、62 个 Python 测试通过，worker 类型检查和 API/worker 打包通过。详细命令和边界见 [C5-LOCAL-DRAIN.md](./C5-LOCAL-DRAIN.md)。真实 Modal 双服务定义尚未实施，不添加占位入口；现有生产入口/资源/Secret/发布保护不变。
+- **本地基础实现（仍未完成）：** 认领 `558f876037ae931f8a8a47508adf06d3075fe756` 普通 push 后，提取可独立启动 API/worker 的进程生命周期，增加 SIGUSR2 非取消排空、只读健康状态和超时拒绝替换工具。真实本地 PostgreSQL/Graphile 双 worker：旧任务完成一次，新任务由另一个 worker 执行；21 个 TS 测试、62 个 Python 测试通过，worker 类型检查和 API/worker 打包通过。Draft [#303](https://github.com/WeKruit/rakazo/pull/303) 的 base 为 #263 分支；实现 `15aeb0421`、补充验证 `c6b1cbb3a`、收敛 `90dca2d89`。详细命令和边界见 [C5-LOCAL-DRAIN.md](./C5-LOCAL-DRAIN.md)。真实 Modal 双服务定义尚未实施，不添加占位入口；现有生产入口/资源/Secret/发布保护不变。
 - **全局预算与剩余：** API 1、worker 5 会话；各两容器稳定 12，新增一个替换 worker 就到 17，整代重叠 24，超过既有总额 15。6543/5432 验证和预算检查已实现，线上 high-water 未测。共享 home 权威指针迁移及旧写者排除、逐 worker 排空替换发布控制器尚未完成；没有用本地通过冒充线上滚动/对话不中断验收。
 
 - **现状：** `infra/modal/app.py` 只有一个服务，设置是 `max_containers=1` 加 `nonpreemptible`，发布方式是 `--strategy recreate`。所以每次发布都会中断服务。
