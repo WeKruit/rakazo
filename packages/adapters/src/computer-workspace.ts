@@ -16,6 +16,7 @@ import { getLogger } from "@rakazo/logging";
 import { normalizeWorkspacePath, teamBotWorkspaceDirectory } from "./computer-support.js";
 import { isSandboxGoneError } from "./e2b-sandbox.js";
 import { LocalAgentHomeStore } from "./home.js";
+import { authoritativeRevision } from "./home-authority.js";
 
 export const PORTABLE_TRANSFER_BATCH_BYTES = 8 * 1024 * 1024;
 
@@ -377,11 +378,10 @@ export async function claimComputerWorkspaceMaintenance(
     assertOwned,
     async recordRevision(revision: string) {
       await assertOwned();
-      const recorded = await prisma.computer.updateMany({
-        where,
-        data: { homeRevision: revision },
-      });
-      if (recorded.count !== 1) {
+      const count = authoritativeRevision(revision)
+        ? await prisma.computer.count({ where: { ...where, homeRevision: revision } })
+        : (await prisma.computer.updateMany({ where, data: { homeRevision: revision } })).count;
+      if (count !== 1) {
         const error = new Error("Computer checkpoint interrupted");
         controller.abort(error);
         throw error;
@@ -495,6 +495,7 @@ export async function checkpointComputerWorkspace(
   beforeCommit?: () => Promise<void>,
 ): Promise<string> {
   context.signal.throwIfAborted();
+  const expectedRevision = await home.captureRevision?.(homeKey, context);
   if (computer.kind === "docker" && home instanceof LocalAgentHomeStore) {
     return home.revise(homeKey, context);
   }
@@ -531,7 +532,7 @@ export async function checkpointComputerWorkspace(
       commitGuardMs: performance.now() - guardStartedAt,
     });
     const commitStartedAt = performance.now();
-    const revision = await home.commit(homeKey, staging, context);
+    const revision = await home.commit(homeKey, staging, context, expectedRevision);
     const commitMs = performance.now() - commitStartedAt;
     context.signal.throwIfAborted();
     getLogger().info("computer.workspace.commit.complete", {
@@ -625,11 +626,11 @@ export async function checkpointAndRecordComputerWorkspace(
     computer,
     context,
   );
-  const recorded = await deps.prisma.computer.updateMany({
-    where: { id: computerRecord.id, providerRef: computer.providerRef },
-    data: { homeRevision: revision },
-  });
-  if (recorded.count !== 1) throw new Error("Computer checkpoint interrupted");
+  const where = { id: computerRecord.id, providerRef: computer.providerRef };
+  const count = authoritativeRevision(revision)
+    ? await deps.prisma.computer.count({ where: { ...where, homeRevision: revision } })
+    : (await deps.prisma.computer.updateMany({ where, data: { homeRevision: revision } })).count;
+  if (count !== 1) throw new Error("Computer checkpoint interrupted");
   return revision;
 }
 

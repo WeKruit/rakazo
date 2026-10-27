@@ -105,7 +105,7 @@ export function createActorDb(connectionString: string, options: DbClientOptions
       const role = await inner.queryRaw(
         sql(`SELECT r.rolsuper, r.rolbypassrls,
         EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-          WHERE n.nspname='public' AND c.relname IN (${protectedSqlNames})
+          WHERE n.nspname='public' AND c.relname IN (${protectedSqlNames}, 'home_authority_tombstones', 'home_authority_cutover')
           AND pg_has_role(current_user, c.relowner, 'MEMBER'))
         OR EXISTS (SELECT 1 FROM pg_roles privileged WHERE (privileged.rolsuper OR privileged.rolbypassrls)
           AND pg_has_role(current_user, privileged.oid, 'MEMBER'))
@@ -128,6 +128,16 @@ export function createActorDb(connectionString: string, options: DbClientOptions
       if (policies.rows[0]?.[0] !== actorRlsTables.length) {
         await inner.dispose();
         throw new Error("Protected database requires the first-batch RLS policies");
+      }
+      const internal = await inner.queryRaw(
+        sql(`SELECT count(*)::int FROM pg_class c
+        JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
+        AND c.relname IN ('home_authority_tombstones', 'home_authority_cutover') AND c.relrowsecurity
+        AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid)`),
+      );
+      if (internal.rows[0]?.[0] !== 2) {
+        await inner.dispose();
+        throw new Error("Protected database requires system-only home authority metadata");
       }
       async function startTransaction(level?: Parameters<Adapter["startTransaction"]>[0]) {
         const actor = actorIdentity();

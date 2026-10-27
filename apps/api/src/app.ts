@@ -21,6 +21,7 @@ import type {
 import {
   AutumnFileConnector,
   applyMessagingOutboundStatus,
+  assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   ComposioConnector,
@@ -311,7 +312,8 @@ export async function createApp(
   );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
   const oauthLogins = new DurablePiOAuthLogins(prisma, secrets, realtime);
-  const home = createAgentHomeStore(env.dataDir, env.artifactStorage);
+  await assertHomeStorageConfiguration(prisma, env.artifactStorage);
+  const home = createAgentHomeStore(env.dataDir, env.artifactStorage, prisma);
   const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
   const firstPartyOidc = env.oidc;
