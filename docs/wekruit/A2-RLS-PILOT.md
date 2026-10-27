@@ -188,3 +188,7 @@ On that final integrated code: DB/API/testkit typechecks passed; DB unit suite *
 The final real API fixture on a fresh synthetic database returned **144 OK / 0 leaks / 0 warnings / 98 owner-empty reads**. An intermediate integrated run returned 142/0/0/100 with zero synthetic usage rows, whereas the final run had two usage rows; both results are recorded rather than treating empty-owner cases as isolation passes. An old pre-integration API run was interrupted without a final result and is not counted as passing. No gate depends on CI.
 
 Publication is authorized for review, but this remains a Draft with the formal online gate unmeasured and local performance not consistently within target. It must not be marked complete or activated from these results.
+
+### Publication attempt outcome
+
+The ordinary push of the reviewed implementation branch was rejected by automatic approval before process launch: the reviewer did not recognize trusted end-user authorization for that exact external publication. The push did not execute. No alternative publication path, PR creation or merge was attempted after rejection. The local implementation and validation commits remain available; publication requires a new authorization recognized by the approval boundary. This is separate from the unmet performance acceptance.

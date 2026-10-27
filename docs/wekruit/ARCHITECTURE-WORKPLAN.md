@@ -114,6 +114,8 @@ SQL
 
 - **最新集成门禁：** 普通合入 #263 `8188c88f3c58299030b8dbfb2ea128144c2a8755`，保留分页与 actor middleware。db/api/testkit 类型检查通过；DB 单元 1216 pass/373 skip、API 单元 1377 pass/51 skip、真实 PG RLS+recruiting+membership 298/298。最终 API 合成隔离 144 OK/0 leak/0 warning/98 owner-empty 未触达。发布仅为 Draft 审查，性能未达与线上未测状态不变，不自行合并。
 
+- **发布操作结果：** 普通 push 在进程启动前再次被自动审批拒绝（未识别该次外部发布的可信用户授权），已知未执行；未换路径、未创建 Draft PR、未合并。保留本地提交与上述实测，待可被审批识别的新授权；性能门禁状态不因此改变。
+
 ### A3 列表分页
 
 - **现状（已查）：** 消息（`thread-message-pages.ts`）、候选人（`listRecruitingCandidates`，每页 25 条，游标分页）、反馈都已经是游标分页。用量记录取 100 条，电脑命令历史也有上限。`router.ts` 里 38 处 `findMany` 没写 `take`，查下来基本都是单个用户自己的设置列表，量很小。还剩两处要改：
