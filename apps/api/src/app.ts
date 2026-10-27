@@ -38,6 +38,7 @@ import {
   createSecretStore,
   createTicketChangeNotifier,
   createWebProvider,
+  DurablePiOAuthLogins,
   deletePushToken,
   destroyBot,
   EmailEmulator,
@@ -55,7 +56,6 @@ import {
   McpOAuthBroker,
   messagingPlatformsFromEnv,
   PiAgentRuntime,
-  PiOAuthLogins,
   PipedreamConnector,
   PostgresRealtimeFanout,
   pipedreamConfigFromEnv,
@@ -310,7 +310,7 @@ export async function createApp(
     env.mcpAllowPrivateEndpoint,
   );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
-  const oauthLogins = new PiOAuthLogins();
+  const oauthLogins = new DurablePiOAuthLogins(prisma, secrets, realtime);
   const home = createAgentHomeStore(env.dataDir, env.artifactStorage);
   const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
@@ -1076,7 +1076,7 @@ export async function createApp(
           void realtime.close();
           for (const pool of pools) void closePoolSessions(pool);
         }, SESSION_RELEASE_MS).unref();
-      oauthLogins.abortAll();
+      await oauthLogins.abortAll();
       messagingStopped = true;
       clearMessagingRetryDelay?.();
       clearTeamChatRetryDelay?.();
