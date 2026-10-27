@@ -139,3 +139,55 @@ logout/selection clearing and login. It observes no organization endpoint reques
 All endpoints are synthetic. The fixed synthetic server verifies client transport, not
 server authorization; the existing App/Shell tests still verify scoped state replacement.
 No real account was used, no email sent and no server auth configuration changed.
+
+## Canonical link parser boundary (local follow-up)
+
+The existing Linkify parser and its exact rules now live in a canonical leaf;
+`markdown.ts` retains its public exports. Initial contexts and URL helpers use a
+light shared module. Plain text without a colon or at-sign cannot match the
+existing explicit-scheme/email grammar and renders synchronously. Potential
+links load the original parser and original link component; no replacement
+parser or weaker URL sanitation is introduced. Fullwidth markers conservatively
+load the parser. Bare domains remain literal, matching the existing
+`fuzzyLink: false` behavior. Pending imports retain visible text with `aria-busy`.
+
+Matched production builds, Chinese locale, synthetic fixtures:
+
+| Cold entry | Before gzip bytes | After gzip bytes |
+| --- | ---: | ---: |
+| Contacts with visible contacts | 329543 | 325302 |
+| Plain-text chat | 292260 | 288026 |
+| Sign-in | 185083 | 180756 |
+| User message with URL, email and bare domain | 410505 | 411345 |
+
+The linked-message case deliberately waits for both original anchors before
+measuring. Its URL and mailto hrefs are unchanged; the bare domain stays literal.
+It costs 840 additional bytes from the deferred boundary. This is a reduction
+for plain entries, not a claim that every message or route gets smaller.
+Contacts retains 7 JS requests, 35 total requests, 17 RPC requests and zero
+duplicate recruiting reads. The 250000-byte final goal remains unmet (contacts
+75302 bytes above it); linked-message rendering is also above 350000 bytes.
+
+Validation commands:
+
+```sh
+pnpm --filter @rakazo/chat-ui check
+pnpm --filter @rakazo/web check
+pnpm exec vitest run packages/chat-ui/src apps/web/src
+VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web build
+MEASURE_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec tsx scripts/measure-first-load.ts BEFORE_DIST dist
+MEASURE_UI_LOCALE=zh-CN MEASURE_MESSAGE_ROLE=user MEASURE_MESSAGE_TEXT='See https://example.com/path and user@example.com plus example.com' MEASURE_EXPECT_LINKS=2 pnpm --filter @rakazo/web exec tsx scripts/measure-first-load.ts BEFORE_DIST dist
+MEASURE_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec tsx scripts/measure-contacts-load.ts dist
+pnpm --filter @rakazo/web exec playwright test --config playwright.catalog.config.ts
+```
+
+Both type checks and production build passed. Combined web/chat-ui tests:
+1852 passed across 158 files (32.23 seconds), including canonical parser parity,
+Unicode/punycode/email/protocol/newline cases and actual cold first-link rendering.
+The source-isolated baseline uses the previous committed chat-ui package with
+identical application/catalog/auth sources; its measured plain-entry values
+match the preceding committed results. No deployed LCP or real-user data was used.
+
+Production browser gate: all 16 cases passed in 44.0 seconds, covering real
+responsive recruiting routes, contacts keyboard/focus, EN/ZH labels, optional
+catalog loading/language switching, and auth/session/selected-space behavior.

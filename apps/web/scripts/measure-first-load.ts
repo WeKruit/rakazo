@@ -8,6 +8,8 @@ import { preview } from "vite";
 
 const root = path.resolve(import.meta.dirname, "..");
 const locale = process.env.MEASURE_UI_LOCALE;
+const messageText = process.env.MEASURE_MESSAGE_TEXT ?? "Synthetic benchmark message.";
+const messageRole = process.env.MEASURE_MESSAGE_ROLE === "user" ? "user" : "bot";
 const browser = await chromium.launch();
 try {
   for (const directory of process.argv.slice(2)) {
@@ -21,10 +23,7 @@ try {
       });
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
       if (locale)
-        await page.addInitScript(
-          (value) => localStorage.setItem("rakazo.uiLocale", value),
-          locale,
-        );
+        await page.addInitScript((value) => localStorage.setItem("rakazo.uiLocale", value), locale);
       const requests: { url: string; type: string }[] = [];
       page.on("request", (req) =>
         requests.push({ url: new URL(req.url()).pathname, type: req.resourceType() }),
@@ -83,10 +82,10 @@ try {
             id: "synthetic-message",
             threadId: bot.threadId,
             seq: 1,
-            role: "bot",
+            role: messageRole,
             botId: bot.id,
             createdAt: "2026-01-01T00:00:00Z",
-            blocks: [{ kind: "text", text: "Synthetic benchmark message." }],
+            blocks: [{ kind: "text", text: messageText }],
           },
         ],
         olderCursor: null,
@@ -163,9 +162,20 @@ try {
         await page.goto(
           `http://127.0.0.1:${(server.httpServer.address() as AddressInfo).port}${authenticated ? "/app/synthetic-bot" : "/sign-in"}`,
         );
-        if (authenticated)
-          await page.getByText("Synthetic benchmark message.", { exact: true }).waitFor();
-        else await page.locator('input[type="email"]').waitFor();
+        if (authenticated) {
+          if (!process.env.MEASURE_MESSAGE_TEXT && messageRole === "bot") {
+            await page.getByText(messageText, { exact: true }).waitFor();
+          } else {
+            const message = page.locator('[data-message-id="synthetic-message"]');
+            await message.waitFor();
+            const links = Number(process.env.MEASURE_EXPECT_LINKS ?? 0);
+            if (links > 0)
+              await message
+                .locator("a")
+                .nth(links - 1)
+                .waitFor();
+          }
+        } else await page.locator('input[type="email"]').waitFor();
         await page.waitForTimeout(1000);
         const scripts = requests.filter((r) => r.type === "script");
         let gzipBytes = 0;
@@ -182,6 +192,20 @@ try {
               scope: authenticated
                 ? "cold synthetic authenticated chat with one text message"
                 : "cold signed-out sign-in page",
+              ...(authenticated
+                ? {
+                    messageRole,
+                    messageText,
+                    renderedLinkHrefs: await page
+                      .locator('[data-message-id="synthetic-message"] a')
+                      .evaluateAll((anchors) =>
+                        anchors.map((anchor) => anchor.getAttribute("href")),
+                      ),
+                    renderedText: await page
+                      .locator('[data-message-id="synthetic-message"]')
+                      .innerText(),
+                  }
+                : {}),
               gzipBytes,
               totalRequests: requests.length,
               scriptRequests: requests.filter((r) => r.type === "script").length,
