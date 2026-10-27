@@ -7,9 +7,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   Button,
+  Skeleton,
 } from "@rakazo/ui-web";
 import type { ComponentType, ReactNode } from "react";
-import { Component, lazy } from "react";
+import { Component, lazy, Suspense } from "react";
 
 type ErrorBoundaryProps = {
   children: ReactNode;
@@ -77,6 +78,27 @@ export function lazyOverlay<Props extends { onClose: () => void }>(
         }
       >
         <Overlay {...props} />
+      </ErrorBoundary>
+    );
+  };
+}
+
+/** A panel keeps its own loading/error boundary so a cold chunk cannot blank the shell. */
+export function lazyPanel<Props extends object>(load: () => Promise<ComponentType<Props>>) {
+  const Panel = lazy(() => load().then((component) => ({ default: component })));
+  return function LazyPanel(props: Props) {
+    return (
+      <ErrorBoundary fallback={<SectionLoadFailed />}>
+        <Suspense
+          fallback={
+            <div aria-busy="true" className="space-y-3 p-4">
+              <Skeleton className="h-5 w-2/3" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          }
+        >
+          <Panel {...props} />
+        </Suspense>
       </ErrorBoundary>
     );
   };

@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { LinkFavicons } from "@rakazo/chat-ui/web";
-import { LinkFaviconsContext, RemoteImagesContext } from "@rakazo/chat-ui/web";
+import type { LinkFavicons } from "@rakazo/chat-ui/web-contexts";
+import { LinkFaviconsContext, RemoteImagesContext } from "@rakazo/chat-ui/web-contexts";
 import { LOCAL_SETTINGS_PAGE } from "@rakazo/contracts";
 import { Button, Skeleton } from "@rakazo/ui-web";
 import {
@@ -35,9 +35,15 @@ import {
 } from "./lib/session-gate";
 import { completeSsoCallback, SSO_CALLBACK_PATH } from "./lib/sso-flow";
 import { IntegrationSetupPage } from "./pages/IntegrationSetup";
-import { LocalSettingsPage } from "./pages/LocalSettings";
+
 import { McpOAuthCallbackPage } from "./pages/McpOAuthCallback";
-import { ShellPage } from "./pages/Shell";
+
+const ShellPage = lazy(() =>
+  import("./pages/Shell").then((module) => ({ default: module.ShellPage })),
+);
+const LocalSettingsPage = lazy(() =>
+  import("./pages/LocalSettings").then((module) => ({ default: module.LocalSettingsPage })),
+);
 
 const AuthPage = lazy(() =>
   import("./pages/Auth").then((module) => ({ default: module.AuthPage })),
@@ -83,7 +89,15 @@ export function App() {
           {window.location.pathname === SSO_CALLBACK_PATH ? (
             <SsoCallbackPage />
           ) : window.location.pathname === LOCAL_SETTINGS_PAGE ? (
-            <LocalSettingsPage />
+            <Suspense
+              fallback={
+                <div className="p-6">
+                  <Skeleton className="h-24 w-full" />
+                </div>
+              }
+            >
+              <LocalSettingsPage />
+            </Suspense>
           ) : (
             <SessionApp />
           )}

@@ -84,6 +84,16 @@ vi.mock("./recruiting", () => {
     InterviewTab: tab("interview"),
   };
 });
+vi.mock("./recruiting/SequenceTab", async () => ({
+  SequenceTab: (await import("./recruiting")).SequenceTab,
+}));
+vi.mock("./recruiting/InterviewTab", async () => ({
+  InterviewTab: (await import("./recruiting")).InterviewTab,
+}));
+vi.mock("./recruiting/InboxTab", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  InboxWithReply: (await import("./recruiting")).InboxWithReply,
+}));
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
   Plural: ({ _1, other, value }: { _1: string; other: string; value: number }) =>
@@ -211,6 +221,9 @@ it("browses scoped Contacts and stored mail without inventing a native recruitin
   await view.render("thread-1", 0, false, undefined, {
     groupId: "group-1",
     crmBrowse: { ...crmBrowse, view: "inbox", candidateId: "crm-person" },
+  });
+  await act(async () => {
+    await vi.dynamicImportSettled();
   });
   expect(view.container.textContent).toContain("Full stored reply");
   expect(api.crmData).toHaveBeenCalledWith(
@@ -370,6 +383,9 @@ it("shows exact candidate native correspondence with CRM history without treatin
   });
   expect(view.container.textContent).toContain("Recruiter messages are unavailable for this role.");
   expect(view.container.textContent).not.toContain("No recruiter messages were found.");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(view.container.textContent).toContain("read full body");
   expect(view.container.textContent).toContain("Instantly account");
   expect(view.container.textContent).toContain("Send outcome unknown");
@@ -8849,6 +8865,9 @@ it("mounts the role tabs for a CRM-bound conversation and keeps stored CRM views
       groupId: "group-1",
       crmBrowse: { ...browse, view: tab },
       roleConversation: true,
+    });
+    await act(async () => {
+      await vi.dynamicImportSettled();
     });
     const roleTab = view.container.querySelector("[data-role-tab]");
     expect(roleTab?.getAttribute("data-role-tab")).toBe(tab);

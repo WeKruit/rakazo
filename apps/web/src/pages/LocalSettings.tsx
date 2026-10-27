@@ -1,9 +1,13 @@
 import { Trans } from "@lingui/react/macro";
 import { Button } from "@rakazo/ui-web";
 import { useEffect, useState } from "react";
+import { lazyPanel } from "../components/ErrorBoundary";
 import { IntegrationSetup } from "../components/integrations/IntegrationSetup";
 import { rpc } from "../lib/rpc";
-import { ModelSettingsOverlay } from "./ModelSettingsOverlay";
+
+const ModelSettingsOverlay = lazyPanel(() =>
+  import("./ModelSettingsOverlay").then((module) => module.ModelSettingsOverlay),
+);
 
 export function LocalSettingsPage() {
   const [section, setSection] = useState<"models" | "integrations" | null>(null);
