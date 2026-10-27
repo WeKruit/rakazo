@@ -12,6 +12,7 @@ import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import {
+  answerPausedAskWithSteering,
   answerRunInput,
   answerWaitingRunWithTextInTransaction,
   appendEvent,
@@ -2003,6 +2004,100 @@ describe("pauseRunForTakeover", () => {
         }),
       }),
     );
+  });
+});
+
+describe("answerPausedAskWithSteering", () => {
+  const card = {
+    id: "card-1",
+    threadId: "thread-1",
+    runId: "run-1",
+    role: "bot",
+    blocks: [{ kind: "ask", text: "What next?", status: "pending" }],
+  };
+  const human = (id: string, text: string) => ({
+    id,
+    threadId: "thread-1",
+    runId: "run-1",
+    role: "user",
+    botId: null,
+    externalTranscriptFor: null,
+    blocks: [{ kind: "text", text }],
+  });
+  function fixture(rows: { id: string; userId: string; message: Record<string, unknown> }[]) {
+    const messages = new Map<string, Record<string, unknown>>([
+      [card.id, card],
+      ...rows.map((row) => [row.message.id as string, row.message] as const),
+    ]);
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "thread-1" }]),
+      steeringMessage: {
+        findMany: vi.fn().mockResolvedValue(rows),
+        delete: vi.fn().mockResolvedValue({}),
+      },
+      message: {
+        findMany: vi.fn().mockResolvedValue([card]),
+        findFirst: vi.fn(async ({ where }: { where: { id: string } }) => messages.get(where.id)),
+        create: vi.fn(),
+        update: vi.fn().mockResolvedValue(card),
+      },
+      run: {
+        findFirst: vi.fn().mockResolvedValue({ botId: "bot-1", userId: "user-1" }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUnique: vi.fn().mockResolvedValue({ status: "queued" }),
+      },
+      task: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+      thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 9, nextMessageSeq: 6 }) },
+      event: {
+        create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
+          ...event(data.seq),
+          type: data.type,
+        })),
+      },
+    };
+    const prisma = { $transaction: (fn: (t: typeof tx) => unknown) => fn(tx) };
+    return { tx, prisma };
+  }
+  const input = { spaceId: "workspace-1", threadId: "thread-1", botId: "bot-1", runId: "run-1" };
+
+  it("answers the card with the message the recruiter sent while the turn was finishing", async () => {
+    const { tx, prisma } = fixture([
+      { id: "steer-1", userId: "user-1", message: human("human-1", "Find 100 more like them.") },
+    ]);
+    await expect(answerPausedAskWithSteering(prisma as never, input)).resolves.toMatchObject({
+      threadId: "thread-1",
+    });
+    expect(tx.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "queued" } }),
+    );
+    expect(tx.message.create).not.toHaveBeenCalled();
+    expect(tx.steeringMessage.delete).toHaveBeenCalledWith({ where: { id: "steer-1" } });
+  });
+
+  it("uses the latest message and leaves earlier ones as steering", async () => {
+    const { tx, prisma } = fixture([
+      { id: "steer-1", userId: "user-1", message: human("human-1", "Looks good.") },
+      { id: "steer-2", userId: "user-1", message: human("human-2", "Find 150.") },
+    ]);
+    await answerPausedAskWithSteering(prisma as never, input);
+    expect(tx.task.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { prompt: "What next?\nAnswer: Find 150." } }),
+    );
+    expect(tx.steeringMessage.delete).toHaveBeenCalledTimes(1);
+    expect(tx.steeringMessage.delete).toHaveBeenCalledWith({ where: { id: "steer-2" } });
+  });
+
+  it("leaves the card open without a recruiter text message", async () => {
+    const { tx, prisma } = fixture([
+      {
+        id: "steer-1",
+        userId: "user-1",
+        message: { ...human("human-1", ""), blocks: [{ kind: "file", artifactId: "a-1" }] },
+      },
+    ]);
+    await expect(answerPausedAskWithSteering(prisma as never, input)).resolves.toBeNull();
+    expect(tx.run.updateMany).not.toHaveBeenCalled();
+    expect(tx.steeringMessage.delete).not.toHaveBeenCalled();
   });
 });
 
