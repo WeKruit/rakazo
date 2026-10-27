@@ -128,3 +128,79 @@ See the [official Zod Mini API](https://zod.dev/packages/mini).
 
 No larger implementation was started during this read-only investigation. The decision
 should distinguish incremental progress from a commitment to the final byte target.
+
+## Updated measured ownership after chat/catalog boundaries
+
+The latest local Chinese contacts fixture is **322135 gzip bytes**, leaving
+72135 bytes to 250000. Its seven actual downloaded JS assets are:
+
+| Asset responsibility | Actual gzip bytes |
+| --- | ---: |
+| Main application/runtime/auth/RPC | 157099 |
+| Shell, transcript/composer state and query cache | 105498 |
+| Visible recruiting directory and its model | 41921 |
+| Startup translations | 12406 |
+| Shared Input/icon factory | 4271 |
+| RoleSetup | 512 |
+| Bundler runtime | 428 |
+
+Module-level ownership below comes from the immediately preceding confirmation
+build's `generateBundle` module records. These are **rendered source bytes**, not
+compressed contributions; cross-module minification/compression means they cannot
+be subtracted from the gzip budget. Optional catalog changes affect translation
+assets and guard calls, not these dependency identities.
+
+- Main: React DOM 460027, Zod 238179, React Router 94927, tailwind-merge 55956,
+  better-auth 30242, better-fetch 23509, ORPC client 19805 rendered bytes.
+  React DOM currently renders/hydrates the entire interactive app; Router handles
+  direct navigation and nested route state; auth/RPC establish this session and
+  scoped reads. None is an unopened-feature import. Zod remains used by canonical
+  validation, so dropping it or treating schema constructors as globally pure
+  would alter the guarantee rather than defer an unused feature. This does not
+  prove every byte of those libraries is irreducible.
+- Shell: local web code 387718, core 107470, query-core 61796 rendered bytes.
+  The largest source modules are controller 41134, conversation 33673, Composer
+  32198, recruiting hook 31505, Transcript 21558, Shell 21407, navigation 19542,
+  thread hook 18277, roster hook 17367 and message hook 14315. Transcript,
+  composer, navigation, subscriptions and query state are active on this route;
+  postponing all of them would remove visible controls or move real work outside
+  the measurement. Some callback bodies are ordinary remaining split candidates:
+  drafting replies, feedback, sequence saves, and group/bot creation. Earlier
+  read-only selections estimated a few to roughly 10 KB net potential, not an
+  actual saving; synchronous send echo, busy states, revision/space guards and
+  post-import cancellation must remain eager.
+- Recruiting: web code 156458 and Base UI 64355 rendered bytes. The active
+  workspace hook is 32451, CRM wrapper 20978, CandidateDirectory 18717, profile
+  model 14038, ContactsTab 12841, EvidenceTab 12675, timeline model 10798 and
+  quickOutput 10145. `candidateSections` is called by the visible directory and
+  ContactsTab, and uses quickOutput and profile timeline normalization; those
+  imports are not merely a closed detail panel. Tabs and checkboxes are visible
+  controls. Hook action bodies still mix with read/model code and can be studied
+  separately; whole-module deferral would change this cold page.
+
+Concrete choices, with no promise that any one reaches 250 KB:
+
+1. Continue ordinary action-engine extraction, preserving synchronous feedback,
+   gesture-sensitive operations and stale-context guards. This is the lowest
+   architecture risk but the existing estimate is much smaller than 72 KB. It
+   needs delayed-import race tests and matched route measurements, not just a
+   source-size subtraction.
+2. Design a canonical schema/runtime migration (for example selected Zod Mini
+   schemas), preserving full input/output/error behavior and ORPC Standard Schema
+   integration. The earlier Zod diagnostic gzip is not removable in full: Mini
+   retains runtime validation and current callers use classic fluent APIs. This
+   is a cross-package compatibility project, not a browser alias or validation
+   bypass; net savings remain unmeasured.
+3. Study a narrower rendering/runtime architecture for the authenticated shell
+   (server-provided initial view with selective hydration, or lighter controls
+   where equivalent accessibility can be demonstrated). This affects routing,
+   auth bootstrapping, subscriptions, focus/keyboard and interactive readiness.
+   A prototype must measure the same visible interactive page, including all
+   hydrated code, rather than hide controls or postpone them past measurement.
+   No current evidence establishes a required framework replacement or a numeric
+   saving for this choice.
+
+The safe ordinary work completed here includes real dormant dependency removal,
+not just repackaging. Remaining opportunities have been distinguished from
+currently active requirements; this is not a claim that bundle analysis is
+exhausted or that SSR is mandatory. Deployed Fast4G LCP remains unmeasured.

@@ -3,6 +3,15 @@ import { formatter } from "@lingui/format-po";
 
 // Optional pages and recruiting views already sit behind lazy UI boundaries.
 const deferredPages = [
+  "src/components/AskCard.tsx",
+  "src/pages/shell/message-cards.tsx",
+  "src/pages/shell/dialogs.tsx",
+  "src/components/ComputerUpdateProgress.tsx",
+  "src/components/LiveWork.tsx",
+  "src/pages/shell/bot-panel.tsx",
+  "src/pages/shell/bot-credentials.tsx",
+  "src/components/ApprovalRulesSettings.tsx",
+
   "src/pages/recruiting/CrmHistory.tsx",
   "src/pages/recruiting/CandidatePresentation.tsx",
   "src/pages/recruiting/SchedulingPlan.tsx",

@@ -1,22 +1,12 @@
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@rakazo/ui-web";
 import type { MouseEvent, ReactNode } from "react";
-import { createContext, useCallback, useContext, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { loadExternalLinkAlert } from "./external-link-alert-loader";
 import { GlobeIcon } from "./icons";
 import { plainTextLinkParts } from "./linkify";
 import { useMarkdownLinkCopy } from "./markdown-link-prompt";
 import {
   linkFaviconOrigin,
   linkLabel,
-  markdownLinkDisplayParts,
   markdownLinkRequiresConfirmation,
   useLinkFavicon,
 } from "./markdown-shared";
@@ -36,47 +26,45 @@ function holdExternalLink(event: MouseEvent<HTMLAnchorElement>, request: (url: s
   request(destination);
 }
 
-function ExternalLinkUrl({ url }: { url: string }) {
-  const parts = markdownLinkDisplayParts(url);
-  if (!parts) return url;
-  return (
-    <>
-      {parts.before}
-      <strong className="font-semibold">{parts.host}</strong>
-      {parts.after}
-    </>
-  );
-}
-
-function ExternalLinkAlert({ url, onDismiss }: { url: string; onDismiss: () => void }) {
+function DeferredExternalLinkAlert({ url, onDismiss }: { url: string; onDismiss: () => void }) {
   const copy = useMarkdownLinkCopy();
+  const [Alert, setAlert] = useState<
+    typeof import("./external-link-alert.web").ExternalLinkAlert | null
+  >(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let active = true;
+    setFailed(false);
+    loadExternalLinkAlert().then(
+      (module) => {
+        if (active) setAlert(() => module.ExternalLinkAlert);
+      },
+      () => {
+        if (active) setFailed(true);
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+  if (Alert) return <Alert url={url} onDismiss={onDismiss} />;
   return (
-    <AlertDialog
-      open
-      onOpenChange={(open) => {
-        if (!open) onDismiss();
-      }}
-    >
-      <AlertDialogContent className="sm:max-w-md">
-        <AlertDialogHeader className="place-items-start text-left">
-          <AlertDialogTitle>{copy.title}</AlertDialogTitle>
-          <AlertDialogDescription className="break-all text-left text-foreground">
-            <ExternalLinkUrl url={url} />
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{copy.cancel}</AlertDialogCancel>
-          <AlertDialogAction
-            onClick={() => {
-              window.open(url, "_blank", "noopener,noreferrer");
-              onDismiss();
-            }}
-          >
-            {copy.open}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <div role={failed ? "alert" : "status"} aria-busy={!failed}>
+      <span>{failed ? copy.loadError : copy.loading}</span>
+      {failed ? (
+        <button
+          type="button"
+          onClick={() => {
+            if (window.confirm(copy.refreshWarning)) window.location.reload();
+          }}
+        >
+          {copy.retry}
+        </button>
+      ) : null}
+      <button type="button" onClick={onDismiss}>
+        {copy.cancel}
+      </button>
+    </div>
   );
 }
 
@@ -85,7 +73,9 @@ export function useExternalLinkConfirm() {
   const request = useCallback((destination: string) => {
     setUrl(destination);
   }, []);
-  const dialog = url ? <ExternalLinkAlert url={url} onDismiss={() => setUrl(null)} /> : null;
+  const dialog = url ? (
+    <DeferredExternalLinkAlert url={url} onDismiss={() => setUrl(null)} />
+  ) : null;
   return { request, dialog };
 }
 

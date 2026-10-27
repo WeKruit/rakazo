@@ -215,6 +215,10 @@ try {
             2,
           ),
         );
+        if (authenticated && process.env.MEASURE_CONFIRM_RECOVERY === "1") {
+          const { verifyLinkConfirmationRecovery } = await import("./verify-link-confirmation");
+          await verifyLinkConfirmationRecovery(page);
+        }
       } finally {
         await page.close();
         await server.close();
