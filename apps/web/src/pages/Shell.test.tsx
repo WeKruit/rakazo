@@ -3302,6 +3302,7 @@ it("opens native brief and feedback views, reviews workflow, and continues the s
   await view.click("Recruiting workflow");
   expect(view.getProps().presentation).toBe("workspace");
   expect(view.getProps().tab).toBe("dashboard");
+  await act(async () => vi.dynamicImportSettled());
   expect(container?.querySelector(".recruiting-workspace-content")?.textContent).toContain(
     "Research history",
   );
