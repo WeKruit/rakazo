@@ -36,3 +36,18 @@ git diff --check
 Typecheck passed. Web unit tests: **1,656 passed, 142 files**. Production build passed. Current browser run: **3 passed**; baseline comparison: **1 passed**. An initial extra prepend assertion clicked a button that automatic scrolling had already consumed; the corrected test explicitly exercises the automatic scroll path and verifies older rows plus return to latest. No product failure was hidden by that correction.
 
 Not tested: deployment/online environment, real API/page integration, other browsers, CPU throttling, manual assistive technology, and pixel-stable anchor location across all prepend/image-resize combinations. CI remains disabled. This local follow-up does not claim whole-plan completion.
+
+## D4 translation fix integration
+
+Normal merge `06c4fae7659a32293d7a7c91e7d60981ccb3ed4d` brings D4's independent `d564a9268c05abd96b92c9c8963f2a0b1667951e` translation fix into this follow-up without later D1/D2 product work. Evidence retains both virtual card/table renderers and its local `useLingui` macro binding. Existing route readiness waits and assertions were retained unchanged.
+
+After merging, web check and production build passed. Candidate/transcript Chromium fixtures passed **3/3**: max 19 candidate rows / 36 cards / 24 transcript messages, no observed scroll long tasks; streaming tail gap 0 px. Full web tests initially had one intermittent keyboard-diagnostics request-count assertion (3 versus 2); a complete unchanged rerun passed **1,656/1,656** across 142 files. The initial failure is retained here rather than reported as an uninterrupted pass.
+
+Production route command (own local preview port, synthetic fixture only):
+
+```sh
+RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec vite preview --host 127.0.0.1 --port 5212
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:5212 pnpm --filter @rakazo/web exec playwright test e2e/recruiting-app-routes.spec.ts e2e/recruiting-lingui.spec.ts --workers=1
+```
+
+Production route regression passed **12/12**, including both desktop/mobile route interactions and English/Chinese accessible names plus translated export-error feedback. No publication was attempted.
