@@ -5511,6 +5511,8 @@ it("shows a sent message at once and finishes the turn from events without re-re
   expect(container!.textContent).toContain("Here are three.");
   expect(container!.textContent).not.toContain("Starting…");
   expect(shellApi.get.mock.calls.length).toBe(reads);
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 3_100)));
+  expect(shellApi.get.mock.calls.length).toBe(reads);
   // One navigation read at run end for the sidebar preview; none for send or run start.
   expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
 });
