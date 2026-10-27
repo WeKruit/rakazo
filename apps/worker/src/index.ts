@@ -12,6 +12,7 @@ import {
   artifactStorageOptionsFromEnv,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
+  createAgentHomeStore,
   createArtifactStore,
   createBackgroundJobHandlers,
   createCloudAgentConnection,
@@ -35,7 +36,6 @@ import {
   isComposioEnabled,
   isMessagingSurfaceEnabled,
   isPipedreamEnabled,
-  LocalAgentHomeStore,
   McpConnector,
   McpOAuthBroker,
   messagingEnvFromProcess,
@@ -229,7 +229,7 @@ async function main() {
   prewarm();
   setInterval(prewarm, DISCOVERY_PREWARM_REFRESH_MS).unref();
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
-  const home = new LocalAgentHomeStore(dataDir);
+  const home = createAgentHomeStore(dataDir, artifactStorage);
   const inMemoryJobs = process.env.WAKEUP_DRIVER === "memory" ? new InMemoryJobQueue() : undefined;
   const jobs: JobPublisher = inMemoryJobs ?? new GraphileJobPublisher(pool);
   const ticketChanges = createTicketChangeNotifier({
@@ -247,7 +247,7 @@ async function main() {
   // One provider instance so emulator launches and polls share the same Map.
   const cloudAgent = createCloudAgentConnection();
   // Shared with the reconciler so a stuck wait uses the same push path as a finish notice.
-  const notifications = new ExpoPushProvider(dataDir, (sessionId) =>
+  const notifications = new ExpoPushProvider(prisma, (sessionId) =>
     pushSessionExpiresAt(prisma, sessionId),
   );
   const executor = createRunExecutor({

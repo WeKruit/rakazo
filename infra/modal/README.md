@@ -155,10 +155,16 @@ copy them inside the running container with `pnpm --filter @rakazo/api artifacts
 It uploads `artifacts/<space>/<uuid>` to `<space>/<uuid>`, reads each object back and
 compares SHA-256, and can be rerun. The volume copies are kept.
 
-This only shares immutable artifact objects. Agent home checkpoints, pending OAuth
-logins and credential-refresh coordination still require their own native-state
-work before multiple application containers can be enabled safely. Keep the
-single-writer deployment until those boundaries and failover are verified.
+The same bucket also holds computer homes. Each home write publishes one gzipped
+snapshot under `agent-homes/<key>/<revision>` and moves `agent-homes/<key>/current`
+to it; before a read, a container whose local copy has an older revision downloads
+the current one. A home already on the volume is published the first time it is
+read, and `artifacts:copy` publishes every remaining one.
+
+Pending in-app model subscription sign-ins (`PiOAuthLogins`) are still held in
+process memory, so a sign-in must finish on the container that started it. MCP
+OAuth and credential refresh already coordinate through the database. Keep the
+single-writer deployment until sign-in and failover are verified.
 
 ## Acceptance
 

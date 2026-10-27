@@ -606,11 +606,11 @@ describeWithDatabase("API authorization and resource isolation", () => {
     // Another device, or unregistering, only ever touches the caller's own token.
     await rpc(app, second, "notifications/registerPush", { token: "ExponentPushToken[other]" });
     await rpc(app, second, "notifications/unregisterPush");
-    await expect(loadPushToken(dataDir, firstUser)).resolves.toBe(device);
+    await expect(loadPushToken(handles.prisma, firstUser)).resolves.toBe(device);
 
     await rpc(app, second, "notifications/registerPush", { token: device });
-    await expect(loadPushToken(dataDir, secondUser)).resolves.toBe(device);
-    await expect(loadPushToken(dataDir, firstUser)).resolves.toBeUndefined();
+    await expect(loadPushToken(handles.prisma, secondUser)).resolves.toBe(device);
+    await expect(loadPushToken(handles.prisma, firstUser)).resolves.toBeUndefined();
     const multiline = await raw(app, first, "notifications/registerPush", {
       token: `${device}\nsession`,
     });
@@ -729,10 +729,10 @@ describeWithDatabase("API authorization and resource isolation", () => {
     // Signing out or revoking other sessions elsewhere keeps the phone's token.
     await authPost(app, await signin(app, email), "/sign-out");
     await authPost(app, phone, "/revoke-other-sessions");
-    await expect(loadPushToken(dataDir, userId)).resolves.toBe(token);
+    await expect(loadPushToken(handles.prisma, userId)).resolves.toBe(token);
 
     await authPost(app, await signin(app, email), "/revoke-other-sessions");
-    await expect(loadPushToken(dataDir, userId)).resolves.toBeUndefined();
+    await expect(loadPushToken(handles.prisma, userId)).resolves.toBeUndefined();
 
     const relogged = await signin(app, email);
     await rpc(app, relogged, "notifications/registerPush", { token });
@@ -741,7 +741,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
       newPassword: "password34",
       revokeOtherSessions: true,
     });
-    await expect(loadPushToken(dataDir, userId)).resolves.toBeUndefined();
+    await expect(loadPushToken(handles.prisma, userId)).resolves.toBeUndefined();
 
     // Changing the password on the phone itself replaces its session; the token follows it.
     const samePhone = await signin(app, email, "password34");
@@ -751,14 +751,14 @@ describeWithDatabase("API authorization and resource isolation", () => {
       newPassword: "password56",
       revokeOtherSessions: true,
     });
-    await expect(loadPushToken(dataDir, userId)).resolves.toBe(token);
+    await expect(loadPushToken(handles.prisma, userId)).resolves.toBe(token);
     await authPost(app, await signin(app, email, "password56"), "/revoke-other-sessions");
-    await expect(loadPushToken(dataDir, userId)).resolves.toBeUndefined();
+    await expect(loadPushToken(handles.prisma, userId)).resolves.toBeUndefined();
 
     const signedIn = await signin(app, email, "password56");
     await rpc(app, signedIn, "notifications/registerPush", { token });
     await authPost(app, signedIn, "/revoke-sessions");
-    await expect(loadPushToken(dataDir, userId)).resolves.toBeUndefined();
+    await expect(loadPushToken(handles.prisma, userId)).resolves.toBeUndefined();
   });
 
   it("does not deliver a push token after its session expires without a request", async () => {
@@ -774,7 +774,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
     try {
-      const push = new ExpoPushProvider(dataDir, (sessionId) =>
+      const push = new ExpoPushProvider(handles.prisma, (sessionId) =>
         pushSessionExpiresAt(handles.prisma, sessionId),
       );
       await expect(
@@ -790,7 +790,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
         ),
       ).resolves.toBe("undeliverable");
       expect(fetchMock).not.toHaveBeenCalled();
-      await expect(loadPushToken(dataDir, userId)).resolves.toBeUndefined();
+      await expect(loadPushToken(handles.prisma, userId)).resolves.toBeUndefined();
     } finally {
       vi.unstubAllGlobals();
     }
