@@ -95,22 +95,24 @@ function fixture(
       };
     },
   };
+  const leadBindings: { result: unknown }[] = [];
+  const prisma = { externalEffect: { findMany: vi.fn(async () => leadBindings) } } as never;
   const context = { runId: "run-resolve", operationId: "op", signal: new AbortController().signal };
   const resolve = (nameOrEmail: string) =>
     resolveRecruitingContact(
-      { prisma: {} as never, connector },
+      { prisma, connector },
       actor,
       { roleId: "native-role", nameOrEmail },
       context as never,
     );
   const replies = (limit?: number) =>
     listRecruitingRoleReplies(
-      { prisma: {} as never, connector },
+      { prisma, connector },
       actor,
       { roleId: "native-role", ...(limit ? { limit } : {}) },
       context as never,
     );
-  return { calls, resolve, replies, connector, mail };
+  return { calls, resolve, replies, connector, mail, leadBindings };
 }
 
 describe("resolveRecruitingContact", () => {
@@ -161,6 +163,17 @@ describe("resolveRecruitingContact", () => {
     expect((await f.resolve("JOSE@example.test")).matches).toHaveLength(1);
   });
 
+  it("uses the lead address stored when a saved person was added to the role's campaign", async () => {
+    const f = fixture([], [{ name: "Adam Test", linkedinUrl: "https://www.linkedin.com/in/adam" }]);
+    f.leadBindings.push({
+      result: { leads: { "key-0": { leadId: "l1", email: "adam@example.test" } } },
+    });
+    expect((await f.resolve("adam")).matches).toMatchObject([
+      { name: "Adam Test", email: "adam@example.test", sources: ["saved_pool"] },
+    ]);
+    expect(unresolvedContactEmailError("run-resolve", "adam@example.test", "Adam Test")).toBeNull();
+  });
+
   it("returns every match for disambiguation when several people share the name", async () => {
     const f = fixture([
       crmRow("4", "Sumeet Parekh", "sumeetparekh1@gmail.com"),
@@ -197,7 +210,13 @@ describe("resolveRecruitingContact", () => {
       { id: "data-infra", title: "Dyna Robotics — Software Engineer, Data Infra" },
     ]);
     const result = await resolveRecruitingContactAcrossRoles(
-      { prisma: { recruitingRole: { findMany } } as never, connector: f.connector },
+      {
+        prisma: {
+          recruitingRole: { findMany },
+          externalEffect: { findMany: async () => [] },
+        } as never,
+        connector: f.connector,
+      },
       actor,
       "sumeet",
       { runId: "run-roleless", operationId: "op", signal: new AbortController().signal } as never,
