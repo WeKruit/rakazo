@@ -1,3 +1,10 @@
+import type { ComposerHandle, PendingAttachment } from "./shell/Composer";
+import { ATTACHMENT_ACCEPT, Composer, candidateReferenceText } from "./shell/Composer";
+import { FALLBACK_BOT_COLOR } from "./shell/constants";
+
+export type { ComposerHandle } from "./shell/Composer";
+export { Composer, candidateReferenceText } from "./shell/Composer";
+
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
@@ -30,7 +37,6 @@ import type {
   VoiceStatus,
 } from "@rakazo/contracts";
 import {
-  ATTACHMENT_ALLOWED_MIME_TYPES,
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_COUNT,
   GROUP_MEMBER_MAX,
@@ -38,41 +44,26 @@ import {
   normalizeCreateBotProfile,
   RecruitingOutreachSequenceSchema,
 } from "@rakazo/contracts";
-import type { ComposerMention, SlashActionId, ThreadTailPhase, WorkTracker } from "@rakazo/core";
+import type { ComposerMention } from "@rakazo/core";
 import {
   addPendingUserMessage,
   answerableAskMessageIds,
   attachmentsForThread,
   buildComposerMentionOptions,
-  clampMentionHighlightIndex,
   cronFromPreset,
-  EMPTY_WORK_TRACKER,
-  formatMessageTime,
-  groupVoiceChats,
   inferAttachmentMimeType,
   isActive,
-  isPeerReceiptBlocks,
   isRunTerminalEvent,
-  isToolActivityBlock,
   isXlsxFileName,
-  mentionChipKey,
   nestRosterByParent,
   pendingUserMessageId,
-  projectMessageReactions,
   removePendingUserMessage,
   reorderBotTo,
-  replyAttachment,
   resolveComposerSendPlan,
-  resolveMentionPickerKey,
   runThreadSubscription,
-  SLASH_ACTIONS,
   searchHitThreadTarget,
-  serializeComposerPrompt,
   speechFromBlocks,
   threadTailPhase,
-  timeSeparatorIds,
-  trackWork,
-  truncateSlashDescription,
   userVisibleMessages,
   withLiveStreamingProgress,
 } from "@rakazo/core";
@@ -95,14 +86,10 @@ import {
   PopoverTrigger,
 } from "@rakazo/ui-web";
 import {
-  ArrowDown,
-  ArrowUp,
   Bell,
-  Box,
   BriefcaseBusiness,
   ChevronDown,
   CircleAlert,
-  Clock,
   Download,
   FolderOpen,
   Gauge,
@@ -111,53 +98,35 @@ import {
   LogOut,
   Maximize2,
   Menu,
-  Mic,
   Monitor,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
-  Paperclip,
   Pencil,
   Plus,
-  Puzzle,
   Search,
   Settings,
   Sparkles,
-  Square,
   SquareKanban,
-  TextQuote,
   Trash2,
   X,
 } from "lucide-react";
-import type {
-  ClipboardEvent,
-  ComponentProps,
-  CSSProperties,
-  DragEvent,
-  MutableRefObject,
-  Ref,
-  RefObject,
-} from "react";
+import type { ComponentProps, CSSProperties, MutableRefObject } from "react";
 import {
   createRef,
-  Fragment,
-  memo,
   Suspense,
   useCallback,
   useContext,
   useEffect,
   useId,
-  useImperativeHandle,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
   useSyncExternalStore,
 } from "react";
-import { createPortal } from "react-dom";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { ActiveBotGlyph } from "../components/ai/CollaborationMarker";
-import { LoadingState, MessageSkeleton, Shimmer } from "../components/ai/primitives";
+import { MessageSkeleton } from "../components/ai/primitives";
 import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
 import {
   ComputersUnavailableHint,
@@ -165,9 +134,7 @@ import {
 } from "../components/ComputersUnavailableHint";
 import { ComputerUpdateProgress } from "../components/ComputerUpdateProgress";
 import { CallCard } from "../components/call/CallCard";
-import { VoiceChatCard } from "../components/call/VoiceChatCard";
 import { lazyOverlay, lazyPanel } from "../components/ErrorBoundary";
-import { LiveWork } from "../components/LiveWork";
 import { PaneResizeHandle } from "../components/PaneResizeHandle";
 import { TeachCaptureOverlay } from "../components/teach/TeachCaptureOverlay";
 import { TeachComputerOverlayControl } from "../components/teach/TeachComputerOverlay";
@@ -195,13 +162,6 @@ import { startCall, useCallSession } from "../lib/call-session";
 import { newClientId } from "../lib/client-id";
 import { createCoalescedRefresh } from "../lib/coalesced-refresh";
 import {
-  beginComposerDraftSubmission,
-  readComposerDraft,
-  settleComposerDraftSubmission,
-  subscribeComposerDraftAccepted,
-  writeComposerDraft,
-} from "../lib/composer-draft";
-import {
   getComposerEnterToSend,
   subscribeComposerEnterToSend,
 } from "../lib/composer-enter-to-send-pref";
@@ -214,19 +174,15 @@ import { publishComputerCommand } from "../lib/computer-workspace";
 import { desktopBridge } from "../lib/desktop";
 import { scheduleFocusPrompt } from "../lib/focus-prompt";
 import { localTimezone } from "../lib/local-timezone";
-import { previewMessageText } from "../lib/message-text";
 import { parseModelOptionKey } from "../lib/model-catalog";
 import { clampWidth, usePaneWidth, useViewportWidth } from "../lib/pane-width";
 import {
   createAttachmentUploads,
-  isFileDrag,
-  isFilePaste,
   readFileAsBase64,
   revokePendingAttachmentPreviews,
 } from "../lib/pending-attachments";
 import { markAfterPaint, markOnce } from "../lib/performance";
 import { setPreloadRecoveryActiveWork } from "../lib/preload-recovery";
-import { quoteDraftForSelection } from "../lib/quote-selection";
 import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
 import {
@@ -243,10 +199,8 @@ import {
 } from "../lib/right-panel-state";
 import {
   compactRosterStatusLabel,
-  isRunPhase,
   rosterHasUndismissedRunError,
   rosterWorkStatusLabel,
-  threadTailLabel,
 } from "../lib/roster-status";
 import { clearSpaceSelection, rpc, selectedSpaceId, selectSpace } from "../lib/rpc";
 import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../lib/run-error-storage";
@@ -270,16 +224,10 @@ import {
 } from "../lib/thread-events";
 import { createThreadPrefetch, threadPrefetchKey } from "../lib/thread-prefetch";
 import { getToolActivityEnabled, subscribeToolActivity } from "../lib/tool-activity-preference";
-import { messageHasVisibleBlocks } from "../lib/tool-activity-view";
-import {
-  transcriptCanSnapAfterFrame,
-  transcriptIsNearEnd,
-  transcriptMovedDown,
-} from "../lib/transcript-scroll";
+import { transcriptCanSnapAfterFrame, transcriptIsNearEnd } from "../lib/transcript-scroll";
 import { speaker } from "../lib/tts";
 import { observeThreadEvent, turnTimer } from "../lib/turn-timing";
 import { errorText } from "../lib/user-error";
-
 import type { ContextMenuPosition } from "./BotContextMenu";
 import { HostComputerPrompt } from "./HostComputerPrompt";
 import type { RecruitingSequenceSaveInput } from "./RecruitingCorrespondence";
@@ -311,10 +259,8 @@ import { TabLoading } from "./recruiting/shared";
 import type { SettingsSection } from "./SettingsOverlay";
 import { SpaceSearchResults } from "./SpaceSearch";
 import { BotCreatePicker } from "./shell/bot-picker";
-import { ComposerReplyPreview, TimeSeparator } from "./shell/chat-context";
 import { isCommandPaletteHotkey } from "./shell/command-palette-hotkey";
 import { memberName } from "./shell/group-members";
-
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
 import { RecruitingNavigation } from "./shell/RecruitingNavigation";
 import type { RecruitingChatContact } from "./shell/recruiting-chat-context";
@@ -323,11 +269,9 @@ import {
   recruitingChatContext,
 } from "./shell/recruiting-chat-context";
 import { commitSpaceRename, sidebarGroupsForSpaces } from "./shell/space-sidebar";
+import { Transcript } from "./shell/Transcript";
 import { WindowChrome } from "./WindowChrome";
 
-const MessageHoverActions = lazyPanel(() =>
-  import("./ShellMessage").then((module) => module.MessageHoverActions),
-);
 const CommandPalette = lazyPanel(() =>
   import("./shell/command-palette").then((module) => module.CommandPalette),
 );
@@ -361,7 +305,6 @@ const RenameBotSectionDialog = lazyPanel(() =>
 const RenameSpaceDialog = lazyPanel(() =>
   import("./shell/dialogs").then((module) => module.RenameSpaceDialog),
 );
-const MessageView = lazyPanel(() => import("./ShellMessage").then((module) => module.MessageView));
 const ComputerWorkspace = lazyPanel(() =>
   import("../components/computer/ComputerWorkspace").then((module) => module.ComputerWorkspace),
 );
@@ -423,13 +366,6 @@ const McpServersOverlay = lazyOverlay(() =>
   import("./McpServersOverlay").then((module) => module.McpServersOverlay),
 );
 
-type PendingAttachment = {
-  id: string;
-  threadKey: string;
-  file: File;
-  previewUrl?: string;
-};
-
 type PendingBrowserNotification = {
   event: Pick<ProductEvent, "id" | "type" | "threadId" | "botId" | "payload">;
   botId: string;
@@ -437,9 +373,8 @@ type PendingBrowserNotification = {
   groupNotification: boolean;
 };
 
-const ATTACHMENT_ACCEPT = [...ATTACHMENT_ALLOWED_MIME_TYPES, ".zip"].join(",");
 /** Identity colour for bots the roster no longer knows about. */
-const FALLBACK_BOT_COLOR = "#85858A";
+
 // Allow the API's 15s transaction and 5s pool wait when Postgres is remote.
 const THREAD_SNAPSHOT_TIMEOUT_MS = 30_000;
 const RECONNECT_RECRUITING_RETRY_MS = 30_000;
@@ -7462,1593 +7397,6 @@ export function ShellPage() {
       </RecruitingChatContextProvider>
     </AvatarStyleProvider>
   );
-}
-
-const Transcript = memo(function Transcript({
-  narrow,
-  visible,
-  scrollRef,
-  scrollRequest,
-  onScrollRequestHandled,
-  artifactTarget,
-  messages,
-  showToolActivity,
-  olderCursor,
-  loadingOlder,
-  answerableAskMessageIds,
-  running,
-  tailPhase,
-  workingBots,
-  workRuns,
-  onLoadOlder,
-  onOpenBot,
-  onAnswer,
-  onReply,
-  onQuote,
-  onReact,
-  onJumpToMessage,
-  onOpenPeerMessages,
-  memberName,
-  peerBot,
-  onRefresh,
-  onBotChanged,
-  onAddRoutine,
-  voiceReady,
-  speakingMessageId,
-  onSpeak,
-  onOpenComputer,
-}: {
-  narrow: boolean;
-  visible: boolean;
-  scrollRef: RefObject<HTMLDivElement | null>;
-  scrollRequest: { messageId: string; nonce: number } | null;
-  onScrollRequestHandled: () => void;
-  artifactTarget: ArtifactTarget;
-  messages: ThreadMessage[];
-  showToolActivity: boolean;
-  olderCursor: number | null;
-  loadingOlder: boolean;
-  answerableAskMessageIds: string[];
-  running: boolean;
-  tailPhase: ThreadTailPhase | null;
-  workingBots: GroupAvatarMember[];
-  /** Runs still working, with their start times, for the turn's clock and steps. */
-  workRuns: ReadonlyArray<{
-    id: string;
-    status: string;
-    startedAt: string | null;
-    createdAt: string;
-  }>;
-  onLoadOlder: () => void | Promise<void>;
-  onOpenBot: (botId: string) => void;
-  onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
-  onReply: (message: ThreadMessage) => void;
-  onQuote: (message: ThreadMessage, quote: string) => void;
-  onReact: (message: ThreadMessage, reaction: MessageReaction) => Promise<void>;
-  onJumpToMessage: (messageId: string) => void;
-  onOpenPeerMessages: (peer: { peerBotId: string; peerBotName: string }) => void;
-  memberName?: (botId: string | undefined) => string | undefined;
-  peerBot: (botId: string) => { name?: string; color: string; status?: string } | undefined;
-  onRefresh: () => Promise<void>;
-  onBotChanged: () => Promise<void>;
-  onAddRoutine: (name: string, prompt: string) => void;
-  voiceReady: boolean;
-  speakingMessageId: string | null;
-  onSpeak: (message: ThreadMessage) => void;
-  onOpenComputer: (botId?: string) => void;
-}) {
-  const { t } = useLingui();
-  const [atEnd, setAtEnd] = useState(true);
-  const following = useRef(true);
-  const autoScrolling = useRef(false);
-  const lastScrollTop = useRef<number | null>(null);
-  const autoScrollTimer = useRef<number | undefined>(undefined);
-  const jumpButtonRef = useRef<HTMLButtonElement>(null);
-  const messageById = useMemo(
-    () => new Map(messages.map((message) => [message.id, message])),
-    [messages],
-  );
-  // Keep the original waiting cards at hand after later group replies; render each card once.
-  const reactionView = useMemo(
-    () =>
-      projectMessageReactions([
-        ...messages.filter((message) => !answerableAskMessageIds.includes(message.id)),
-        ...messages.filter((message) => answerableAskMessageIds.includes(message.id)),
-      ]),
-    [messages, answerableAskMessageIds],
-  );
-  const separatorIds = timeSeparatorIds(
-    reactionView.visibleMessages.filter((message) =>
-      messageHasVisibleBlocks(message.blocks, showToolActivity),
-    ),
-  );
-  // The turn's work survives narration messages that replace the live row, and its
-  // summary stays after the reply; the fold returns the same object when nothing changed.
-  const workTracker = useRef<WorkTracker>(EMPTY_WORK_TRACKER);
-  workTracker.current = trackWork(
-    workTracker.current,
-    { runs: workRuns, messages },
-    new Date(Date.now()).toISOString(),
-  );
-  const workSession = workTracker.current.session;
-  const workingLabel =
-    showToolActivity && isRunPhase(tailPhase) && workingBots.length
-      ? workingBots
-          .map(({ name, status }) =>
-            [name, status && rosterWorkStatusLabel(status)].filter(Boolean).join(" · "),
-          )
-          .join("; ")
-      : threadTailLabel(tailPhase);
-  const [quoteDraft, setQuoteDraft] = useState<{
-    message: ThreadMessage;
-    text: string;
-    range: Range;
-  } | null>(null);
-  const selectingWithMouse = useRef(false);
-
-  const evaluateSelection = useCallback(() => {
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-      setQuoteDraft(null);
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    const contentOf = (node: Node) =>
-      (node instanceof Element ? node : node.parentElement)?.closest<HTMLElement>(
-        "[data-quote-message-id]",
-      ) ?? null;
-    const startContent = contentOf(range.startContainer);
-    const endContent = contentOf(range.endContainer);
-    // selection.toString() serializes the whole range (a Ctrl+A transcript is
-    // unbounded), so it only runs once both endpoints sit in one message.
-    const draft = quoteDraftForSelection(
-      {
-        startContent,
-        endContent,
-        text: startContent && startContent === endContent ? selection.toString() : "",
-      },
-      messageById,
-    );
-    setQuoteDraft((prev) => {
-      if (!draft) return null;
-      // Repeat firings for an unchanged selection reuse the draft so the
-      // transcript isn't re-rendered by every unrelated selection event. A
-      // moved selection (e.g. keyboard-selecting a second occurrence of the
-      // same text) must carry its new Range — the pill anchors to it.
-      if (
-        prev &&
-        prev.message === draft.message &&
-        prev.text === draft.text &&
-        prev.range.compareBoundaryPoints(Range.START_TO_START, range) === 0 &&
-        prev.range.compareBoundaryPoints(Range.END_TO_END, range) === 0
-      ) {
-        return prev;
-      }
-      return { ...draft, range };
-    });
-  }, [messageById]);
-
-  // Keyboard and assistive-tech selections never reach a mouseup, so the pill
-  // lifecycle listens on selectionchange; the mouse flag keeps it hidden while
-  // a drag is still in flight.
-  useEffect(() => {
-    const onMouseDown = (event: MouseEvent) => {
-      selectingWithMouse.current = true;
-      if ((event.target as Element | null)?.closest?.("[data-quote-selection]")) return;
-      setQuoteDraft(null);
-    };
-    const onMouseUp = () => {
-      selectingWithMouse.current = false;
-      evaluateSelection();
-    };
-    const onSelectionChange = () => {
-      if (!selectingWithMouse.current) evaluateSelection();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setQuoteDraft(null);
-    };
-    // A drag that ends outside the window never fires document mouseup; reset
-    // the flag on blur so keyboard selections keep working afterwards.
-    const onWindowBlur = () => {
-      selectingWithMouse.current = false;
-    };
-    document.addEventListener("mousedown", onMouseDown, true);
-    document.addEventListener("mouseup", onMouseUp, true);
-    document.addEventListener("selectionchange", onSelectionChange);
-    document.addEventListener("keydown", onKey);
-    window.addEventListener("blur", onWindowBlur);
-    return () => {
-      document.removeEventListener("mousedown", onMouseDown, true);
-      document.removeEventListener("mouseup", onMouseUp, true);
-      document.removeEventListener("selectionchange", onSelectionChange);
-      document.removeEventListener("keydown", onKey);
-      window.removeEventListener("blur", onWindowBlur);
-    };
-  }, [evaluateSelection]);
-  const snapToEnd = useCallback(() => {
-    const element = scrollRef.current;
-    if (!element) return;
-    following.current = true;
-    autoScrolling.current = false;
-    setAtEnd(true);
-    element.scrollTo({ top: element.scrollHeight, behavior: "auto" });
-  }, [scrollRef]);
-
-  const jumpToLatest = useCallback(() => {
-    const element = scrollRef.current;
-    if (!element) return;
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    following.current = true;
-    autoScrolling.current = !reducedMotion;
-    setAtEnd(true);
-    element.scrollTo({
-      top: element.scrollHeight,
-      behavior: reducedMotion ? "auto" : "smooth",
-    });
-    window.clearTimeout(autoScrollTimer.current);
-    // Fallback only: onScroll clears autoScrolling once near-end is reached.
-    autoScrollTimer.current = window.setTimeout(
-      () => {
-        autoScrolling.current = false;
-      },
-      reducedMotion ? 0 : 2_000,
-    );
-  }, [scrollRef]);
-
-  const scrolledJump = useRef<number | null>(null);
-  const jumpScrolling = useRef(false);
-  const jumpScrollTimer = useRef<number | undefined>(undefined);
-  const endJumpScroll = useCallback(() => {
-    jumpScrolling.current = false;
-    window.clearTimeout(jumpScrollTimer.current);
-    scrollRef.current?.removeEventListener("scrollend", endJumpScroll);
-  }, [scrollRef]);
-  // A jump scroll must win over follow-the-tail: unfollow inside the commit
-  // that mounts the row so a live commit cannot cancel the animation, keep
-  // retrying while the pinned window is still rendering, and suppress the
-  // near-end follow re-arm only for the jump's own scroll events — scrollend
-  // (or user input interrupting it, which also fires scrollend) ends the
-  // suppression, with the timeout as fallback when no scroll happens.
-  useLayoutEffect(() => {
-    if (!visible || !scrollRequest || scrolledJump.current === scrollRequest.nonce) return;
-    const element = scrollRef.current;
-    const row = element?.querySelector(
-      `[data-message-id="${CSS.escape(scrollRequest.messageId)}"]`,
-    );
-    if (!element || !row) return;
-    scrolledJump.current = scrollRequest.nonce;
-    following.current = false;
-    autoScrolling.current = false;
-    jumpScrolling.current = true;
-    element.addEventListener("scrollend", endJumpScroll, { once: true });
-    window.clearTimeout(jumpScrollTimer.current);
-    jumpScrollTimer.current = window.setTimeout(endJumpScroll, 2_000);
-    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    row.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
-    row.animate(
-      reducedMotion
-        ? [{ backgroundColor: "var(--muted)" }, { backgroundColor: "var(--muted)" }]
-        : [
-            { backgroundColor: "transparent" },
-            { backgroundColor: "var(--muted)" },
-            { backgroundColor: "transparent" },
-          ],
-      { duration: 1200 },
-    );
-    onScrollRequestHandled();
-  }, [visible, messages, scrollRequest, scrollRef, endJumpScroll, onScrollRequestHandled]);
-
-  useLayoutEffect(() => {
-    if (visible && following.current) snapToEnd();
-  }, [visible, messages, running, snapToEnd]);
-
-  useLayoutEffect(() => {
-    const button = jumpButtonRef.current;
-    if (atEnd && button && document.activeElement === button) {
-      button.blur();
-    }
-  }, [atEnd]);
-
-  const loadOlder = useCallback(() => {
-    const wasFollowing = following.current;
-    // Prepend must not race the messages-driven snap-to-end follow path.
-    following.current = false;
-    autoScrolling.current = false;
-    const pending = onLoadOlder();
-    if (!pending) return;
-    return Promise.resolve(pending).catch((error) => {
-      const element = scrollRef.current;
-      if (wasFollowing && element && transcriptIsNearEnd(element)) {
-        following.current = true;
-        setAtEnd(true);
-      }
-      throw error;
-    });
-  }, [onLoadOlder, scrollRef]);
-
-  useEffect(
-    () => () => {
-      window.clearTimeout(autoScrollTimer.current);
-      window.clearTimeout(jumpScrollTimer.current);
-    },
-    [],
-  );
-
-  return (
-    <div className="relative flex min-h-0 flex-1">
-      <div
-        ref={scrollRef}
-        data-testid="transcript"
-        onPointerDown={(event) => {
-          lastScrollTop.current = event.currentTarget.scrollTop;
-          autoScrolling.current = false;
-          following.current = false;
-        }}
-        onTouchStart={(event) => {
-          lastScrollTop.current = event.currentTarget.scrollTop;
-          autoScrolling.current = false;
-          following.current = false;
-        }}
-        onWheel={(event) => {
-          if (event.deltaY < 0) {
-            lastScrollTop.current = event.currentTarget.scrollTop;
-            autoScrolling.current = false;
-            following.current = false;
-          }
-        }}
-        onScroll={(event) => {
-          if (!visible) return;
-          const scrolledDown = transcriptMovedDown(
-            lastScrollTop.current,
-            event.currentTarget.scrollTop,
-          );
-          // threads.get returns only the latest page; reading upward pages in older history.
-          if (
-            !scrolledDown &&
-            event.currentTarget.scrollTop < 200 &&
-            olderCursor != null &&
-            !loadingOlder &&
-            !jumpScrolling.current
-          )
-            void loadOlder()?.catch(() => undefined);
-          lastScrollTop.current = event.currentTarget.scrollTop;
-          const nearEnd = transcriptIsNearEnd(event.currentTarget);
-          setAtEnd(nearEnd);
-          // A jump scroll owns the viewport until its animation settles; its
-          // own near-end crossings must not re-arm tail-following.
-          if (jumpScrolling.current) return;
-          if (nearEnd) {
-            if (scrolledDown) following.current = true;
-            if (autoScrolling.current) {
-              autoScrolling.current = false;
-              window.clearTimeout(autoScrollTimer.current);
-            }
-          } else if (!autoScrolling.current) {
-            following.current = false;
-          }
-        }}
-        className="chat-transcript rk-scroll flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-4 py-5 md:px-7 md:py-6"
-      >
-        {olderCursor != null ? (
-          <button
-            type="button"
-            disabled={loadingOlder}
-            onClick={() => void loadOlder()}
-            className="self-center rounded-lg px-3 py-1.5 text-[13px] text-muted-foreground hover:bg-muted hover:text-foreground/75 disabled:opacity-50"
-          >
-            {loadingOlder ? t`Loading…` : t`Load earlier messages`}
-          </button>
-        ) : null}
-        {groupVoiceChats(reactionView.visibleMessages).map((item) => {
-          if (item.kind === "voiceChat") {
-            return (
-              <div key={item.key}>
-                {item.messages[0] && separatorIds.has(item.messages[0].id) ? (
-                  <TimeSeparator
-                    createdAt={item.messages[0].createdAt}
-                    locale={i18n.locale || "en"}
-                  />
-                ) : null}
-                <VoiceChatCard group={item} revealMessageId={scrollRequest?.messageId} />
-              </div>
-            );
-          }
-          const message = item.message;
-          if (!messageHasVisibleBlocks(message.blocks, showToolActivity)) return null;
-          const peerReceipt = isPeerReceiptBlocks(message.blocks);
-          const messageReactions = reactionView.reactions.get(message.id);
-          return (
-            <Fragment key={message.id}>
-              {separatorIds.has(message.id) ? (
-                <TimeSeparator createdAt={message.createdAt} locale={i18n.locale || "en"} />
-              ) : null}
-              <div
-                data-message-id={message.id}
-                data-message-role={message.role}
-                className={peerReceipt ? "relative py-0.5" : "group/message relative hover:z-20"}
-              >
-                <div
-                  className={
-                    peerReceipt
-                      ? undefined
-                      : `relative flex ${message.role === "user" ? "justify-end" : "justify-start"}`
-                  }
-                >
-                  <div
-                    data-testid={peerReceipt ? undefined : "message-bubble-frame"}
-                    className={
-                      peerReceipt
-                        ? undefined
-                        : `relative w-fit min-w-0 ${
-                            narrow
-                              ? message.role === "user"
-                                ? "max-w-[88%]"
-                                : "max-w-full"
-                              : message.role === "user"
-                                ? "max-w-[min(84%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[84%]"
-                                : "max-w-[min(88%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[88%]"
-                          }`
-                    }
-                  >
-                    <MessageView
-                      artifactTarget={artifactTarget}
-                      message={message}
-                      canAnswer={answerableAskMessageIds.includes(message.id)}
-                      onOpenBot={onOpenBot}
-                      onOpenPeerMessages={onOpenPeerMessages}
-                      onAnswer={onAnswer}
-                      speakerName={
-                        peerReceipt
-                          ? undefined
-                          : message.role === "bot"
-                            ? showToolActivity
-                              ? memberName?.(message.botId)
-                              : undefined
-                            : undefined
-                      }
-                      memberName={memberName}
-                      peerBot={peerBot}
-                      replyParent={
-                        message.replyToMessageId
-                          ? messageById.get(message.replyToMessageId)
-                          : undefined
-                      }
-                      onJumpToMessage={onJumpToMessage}
-                      onRefresh={onRefresh}
-                      onBotChanged={onBotChanged}
-                      onAddRoutine={onAddRoutine}
-                      voiceReady={voiceReady}
-                      speaking={speakingMessageId === message.id}
-                      onSpeak={() => onSpeak(message)}
-                      onOpenComputer={onOpenComputer}
-                      showToolActivity={showToolActivity}
-                    />
-                    {peerReceipt ? null : (
-                      <MessageHoverActions
-                        message={message}
-                        below={narrow}
-                        side={message.role === "user" ? "start" : "end"}
-                        onReply={onReply}
-                        onReact={onReact}
-                      />
-                    )}
-                  </div>
-                </div>
-                {!peerReceipt && !message.id.startsWith("progress:") ? (
-                  <time
-                    dateTime={message.createdAt}
-                    data-testid="message-hover-time"
-                    className={cn(
-                      "pointer-events-none absolute z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 group-has-[[aria-expanded=true]]/message:opacity-100 [@media(hover:none)]:transition-none",
-                      narrow
-                        ? [
-                            "bottom-1 max-w-[50%]",
-                            message.role === "user" ? "start-0 text-start" : "end-0 text-end",
-                          ]
-                        : [
-                            "top-1",
-                            // Hover keeps the date in the side margin. Touch leaves that margin for the bubble and drops the revealed time under it.
-                            message.role === "user"
-                              ? "start-0 max-w-[max(8rem,16%)] text-start"
-                              : "end-0 max-w-[max(8rem,12%)] text-end",
-                            "[@media(hover:none)]:group-hover/message:static [@media(hover:none)]:group-focus-within/message:static [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:static",
-                            "[@media(hover:none)]:group-hover/message:block [@media(hover:none)]:group-focus-within/message:block [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:block",
-                            "[@media(hover:none)]:group-hover/message:mt-1 [@media(hover:none)]:group-focus-within/message:mt-1 [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:mt-1",
-                            "[@media(hover:none)]:group-hover/message:w-full [@media(hover:none)]:group-focus-within/message:w-full [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:w-full",
-                            "[@media(hover:none)]:group-hover/message:max-w-none [@media(hover:none)]:group-focus-within/message:max-w-none [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:max-w-none",
-                            message.role === "user"
-                              ? "[@media(hover:none)]:group-hover/message:text-end [@media(hover:none)]:group-focus-within/message:text-end [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-end"
-                              : "[@media(hover:none)]:group-hover/message:text-start [@media(hover:none)]:group-focus-within/message:text-start [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-start",
-                          ],
-                    )}
-                  >
-                    {formatMessageTime(message.createdAt, i18n.locale || "en")}
-                  </time>
-                ) : null}
-                {!peerReceipt && messageReactions ? (
-                  <div
-                    data-testid="message-reactions"
-                    className={cn(
-                      "mt-1 flex flex-wrap gap-1",
-                      message.role === "user" && "justify-end",
-                    )}
-                  >
-                    {[...messageReactions].map(([emoji, count]) => (
-                      <span
-                        key={emoji}
-                        className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs"
-                      >
-                        {emoji}
-                        {count > 1 ? ` ${count}` : ""}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </Fragment>
-          );
-        })}
-        {workingLabel &&
-        // Streaming reply text is its own progress; the run label steps aside for it.
-        !(
-          isRunPhase(tailPhase) &&
-          messages.some(
-            (message) =>
-              message.id.startsWith("progress:") &&
-              message.blocks.some(
-                (block) =>
-                  block.kind === "progress" && !isToolActivityBlock(block) && Boolean(block.text),
-              ),
-          )
-        ) ? (
-          showToolActivity && isRunPhase(tailPhase) && workingBots.length ? (
-            <ActiveBotGlyph bots={workingBots} label={workingLabel} />
-          ) : tailPhase === "working" ||
-            tailPhase === "starting" ||
-            tailPhase === "compacting" ||
-            tailPhase === "retrying" ? (
-            <LiveWork
-              session={
-                workSession?.endedAt
-                  ? null
-                  : workSession && tailPhase === "compacting"
-                    ? { ...workSession, current: null }
-                    : workSession
-              }
-              live
-              label={workingLabel}
-              showSteps={!showToolActivity}
-            />
-          ) : (
-            <LoadingState
-              label={workingLabel}
-              indicator={
-                <span aria-hidden>
-                  <Shimmer>{workingLabel}</Shimmer>
-                </span>
-              }
-            />
-          )
-        ) : !tailPhase && !showToolActivity && messages.at(-1)?.role !== "user" ? (
-          <LiveWork session={workSession} live={false} label="" />
-        ) : null}
-      </div>
-      {quoteDraft ? (
-        <QuoteSelectionButton
-          range={quoteDraft.range}
-          onQuote={() => {
-            onQuote(quoteDraft.message, quoteDraft.text);
-            window.getSelection()?.removeAllRanges();
-            setQuoteDraft(null);
-          }}
-        />
-      ) : null}
-      <button
-        ref={jumpButtonRef}
-        type="button"
-        aria-label={t`Jump to latest`}
-        aria-hidden={atEnd}
-        tabIndex={atEnd ? -1 : 0}
-        onClick={jumpToLatest}
-        className={`absolute bottom-4 left-1/2 z-20 grid h-9 w-9 -translate-x-1/2 place-items-center rounded-full border border-border bg-muted/95 text-foreground/75 shadow-md backdrop-blur transition-[opacity,transform,background-color] duration-200 ease-[cubic-bezier(.22,1,.36,1)] hover:bg-border motion-reduce:transition-none ${
-          atEnd ? "pointer-events-none translate-y-2 opacity-0" : "translate-y-0 opacity-100"
-        }`}
-      >
-        <ArrowDown size={17} strokeWidth={1.8} />
-      </button>
-    </div>
-  );
-});
-
-/**
- * Floating Quote action anchored to the selection's bounding rect. Measures
- * itself after mount so it can flip below the selection when there is no room
- * above and stay clamped inside the viewport; re-anchors on scroll/resize.
- */
-const QuoteSelectionButton = memo(function QuoteSelectionButton({
-  range,
-  onQuote,
-}: {
-  range: Range;
-  onQuote: () => void;
-}) {
-  const { t } = useLingui();
-  const buttonRef = useRef<HTMLButtonElement>(null);
-  const [placement, setPlacement] = useState<{
-    top: number;
-    left: number;
-    above: boolean;
-  } | null>(null);
-
-  useLayoutEffect(() => {
-    const update = () => {
-      if (range.collapsed || !document.contains(range.commonAncestorContainer)) {
-        setPlacement(null);
-        return;
-      }
-      const rect = range.getBoundingClientRect();
-      const width = buttonRef.current?.offsetWidth ?? 0;
-      const height = buttonRef.current?.offsetHeight ?? 0;
-      const above = rect.top >= height + 8;
-      setPlacement({
-        top: above ? rect.top - 8 : rect.bottom + 8,
-        left: Math.min(
-          Math.max(rect.left + rect.width / 2, width / 2 + 8),
-          window.innerWidth - width / 2 - 8,
-        ),
-        above,
-      });
-    };
-    update();
-    window.addEventListener("resize", update);
-    // Scroll doesn't bubble — listen on the capture phase to catch any scroller.
-    window.addEventListener("scroll", update, { capture: true, passive: true });
-    return () => {
-      window.removeEventListener("resize", update);
-      window.removeEventListener("scroll", update, true);
-    };
-  }, [range]);
-
-  return createPortal(
-    <button
-      ref={buttonRef}
-      type="button"
-      data-quote-selection
-      data-testid="quote-selection"
-      onMouseDown={(event) => {
-        // Keep the highlight alive until the click commits the quote.
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-      onClick={onQuote}
-      style={placement ? { top: placement.top, left: placement.left } : { visibility: "hidden" }}
-      className={cn(
-        "fixed z-50 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-[13px] font-medium text-foreground shadow-md hover:bg-muted",
-        placement?.above === false ? "translate-y-0" : "-translate-y-full",
-      )}
-    >
-      <TextQuote size={13} strokeWidth={2} />
-      {t`Quote`}
-    </button>,
-    document.body,
-  );
-});
-
-export function candidateReferenceText(candidate: CandidateDiscussionContext): string {
-  const reference = [
-    t`Name: ${candidate.name ?? t`Name missing`}`,
-    t`Role: ${candidate.roleTitle}`,
-    ...(candidate.roleVersion === undefined ? [] : [t`Role version: ${candidate.roleVersion}`]),
-    ...(candidate.title ? [t`Title: ${candidate.title}`] : []),
-    ...(candidate.company ? [t`Company: ${candidate.company}`] : []),
-    t`LinkedIn: ${candidate.linkedinUrl ?? t`LinkedIn missing`}`,
-    t`Resume: ${candidate.resumeUrl ?? t`Resume missing`}`,
-  ].join("\n");
-  return `${t`Candidate reference`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n`;
-}
-
-export type ComposerHandle = {
-  insertContext: (context: { draftKey: string; text: string }) => void;
-};
-
-export const Composer = memo(function Composer({
-  ref,
-  artifactTarget,
-  activeName,
-  compact = false,
-  running,
-  disabled,
-  pendingAttachments,
-  attachmentNotice,
-  sendError,
-  runError,
-  runErrorId,
-  onRunErrorPresented,
-  onDismissError,
-  sending,
-  fileInputRef,
-  onAttachmentPick,
-  onRemoveAttachment,
-  onSend,
-  onStop,
-  onVoice,
-  replyTarget,
-  replyQuote,
-  replyTargetName,
-  onClearReply,
-  mentionTargets,
-  agentSkills,
-  onSlashOpen,
-  onSlashAction,
-  draftKey,
-  contextKey,
-  enterToSend,
-}: {
-  ref?: Ref<ComposerHandle>;
-  activeName?: string;
-  compact?: boolean;
-  running: boolean;
-  disabled?: boolean;
-  pendingAttachments: PendingAttachment[];
-  attachmentNotice: string | null;
-  sendError: string | null;
-  runError: string | null;
-  runErrorId: string | null;
-  onRunErrorPresented: (runId: string) => void;
-  onDismissError: () => void;
-  sending: boolean;
-  fileInputRef: RefObject<HTMLInputElement | null>;
-  onAttachmentPick: (files: FileList | null) => boolean;
-  onRemoveAttachment: (attachment: PendingAttachment) => void;
-  onSend: (text: string, mentions: ComposerMention[], clientNonce: string) => Promise<boolean>;
-  onStop: () => Promise<void>;
-  onVoice?: () => void;
-  artifactTarget: ArtifactTarget;
-  replyTarget?: ThreadMessage | null;
-  replyQuote?: string | null;
-  replyTargetName?: string;
-  onClearReply?: () => void;
-  mentionTargets?: ComposerMention[];
-  agentSkills?: AgentSkillCatalogEntry[];
-  onSlashOpen?: () => void;
-  onSlashAction?: (action: SlashActionId) => void;
-  draftKey: string;
-  contextKey?: string;
-  enterToSend: boolean;
-}) {
-  const { t } = useLingui();
-  const [draft, setDraft] = useState(() => readComposerDraft(draftKey));
-  const [mentionQuery, setMentionQuery] = useState<string | null>(() => {
-    const mentionMatch = /(?:^|\s)@([\w-]*)$/.exec(draft);
-    return mentionMatch ? (mentionMatch[1] ?? "") : null;
-  });
-  const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
-  const [slashQuery, setSlashQuery] = useState<string | null>(() => {
-    const slashMatch = /^\/([^\n]*)$/.exec(draft);
-    return slashMatch ? (slashMatch[1] ?? "") : null;
-  });
-  const [selectedSkill, setSelectedSkill] = useState<AgentSkillCatalogEntry | null>(null);
-  const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
-  const editRevision = useRef(0);
-  useEffect(
-    () =>
-      subscribeComposerDraftAccepted(draftKey, (text) => {
-        setDraft((current) => (current === text ? "" : current));
-        setMentionQuery(null);
-        setSlashQuery(null);
-      }),
-    [draftKey],
-  );
-  const retryNonce = useRef<{ nonce: string; contextKey?: string } | null>(null);
-  const replyId = replyTarget?.id ?? null;
-  const quote = replyTarget ? (replyQuote ?? null) : null;
-  const previousReply = useRef({ id: replyId, quote });
-  useEffect(() => {
-    if (previousReply.current.id !== replyId || previousReply.current.quote !== quote) {
-      editRevision.current += 1;
-      retryNonce.current = null;
-      previousReply.current = { id: replyId, quote };
-    }
-  }, [replyId, quote]);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [replyAnnouncement, setReplyAnnouncement] = useState("");
-  // What the live region currently holds — a send disarming the reply clears
-  // "reply" text, while an explicit cancel must keep "Reply cancelled".
-  const replyAnnouncementKind = useRef<"reply" | "cancelled" | null>(null);
-  const prevReplyTarget = useRef<ThreadMessage | null>(null);
-  const runErrorRef = useRef<HTMLDivElement>(null);
-  const presentedRunErrorIdRef = useRef<string | null>(null);
-  const mentionListboxId = useId();
-  const dragDepth = useRef(0);
-  const [draggingFiles, setDraggingFiles] = useState(false);
-  const canSend =
-    draft.trim().length > 0 ||
-    selectedSkill !== null ||
-    selectedMentions.length > 0 ||
-    pendingAttachments.length > 0;
-
-  useEffect(() => {
-    if (!runError || !runErrorId) return;
-    const currentRunErrorId = runErrorId;
-    let frame = 0;
-    function recordIfPresented() {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        const element = runErrorRef.current;
-        if (!element || document.visibilityState !== "visible") return;
-        const rect = element.getBoundingClientRect();
-        const topElement = document.elementFromPoint(
-          rect.left + rect.width / 2,
-          rect.top + rect.height / 2,
-        );
-        if (topElement && (topElement === element || element.contains(topElement))) {
-          if (presentedRunErrorIdRef.current === currentRunErrorId) return;
-          presentedRunErrorIdRef.current = currentRunErrorId;
-          onRunErrorPresented(currentRunErrorId);
-        }
-      });
-    }
-    recordIfPresented();
-    const observer = new MutationObserver(recordIfPresented);
-    observer.observe(document.body, { childList: true, subtree: true });
-    document.addEventListener("transitionend", recordIfPresented);
-    document.addEventListener("visibilitychange", recordIfPresented);
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-      document.removeEventListener("transitionend", recordIfPresented);
-      document.removeEventListener("visibilitychange", recordIfPresented);
-    };
-  }, [onRunErrorPresented, runError, runErrorId]);
-
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-
-    function syncHeight() {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      textarea.style.height = `${measureTextareaHeight(textarea)}px`;
-    }
-
-    syncHeight();
-    let lastWidth = el.getBoundingClientRect().width;
-    const observer = new ResizeObserver(() => {
-      const textarea = textareaRef.current;
-      if (!textarea) return;
-      const width = textarea.getBoundingClientRect().width;
-      if (width === lastWidth) return;
-      lastWidth = width;
-      syncHeight();
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [draft]);
-
-  function markEdited() {
-    editRevision.current += 1;
-    retryNonce.current = null;
-  }
-
-  function pickAttachments(files: FileList | null) {
-    if (!files?.length) return;
-    if (onAttachmentPick(files)) markEdited();
-  }
-
-  function updateDraft(value: string) {
-    markEdited();
-    writeComposerDraft(draftKey, value);
-    setDraft(value);
-    const mentionMatch = /(?:^|\s)@([\w-]*)$/.exec(value);
-    setMentionQuery(mentionMatch ? (mentionMatch[1] ?? "") : null);
-    // `/` only at the start of the draft so forced skills expand (`Use skill:` / `/Name` prefix).
-    const slashMatch = selectedSkill === null ? /^\/([^\n]*)$/.exec(value) : null;
-    const nextSlash = slashMatch ? (slashMatch[1] ?? "") : null;
-    if (nextSlash !== null && slashQuery === null) onSlashOpen?.();
-    setSlashQuery(nextSlash);
-  }
-
-  function focusComposer() {
-    textareaRef.current?.focus();
-  }
-
-  const contextHandle = useRef<ComposerHandle | null>(null);
-  useImperativeHandle(ref, () => {
-    const handle: ComposerHandle = {
-      insertContext: ({ draftKey: target, text }) => {
-        const textarea = textareaRef.current;
-        if (contextHandle.current !== handle || target !== draftKey || !textarea || !text.trim())
-          return;
-        const next = `${draft}${draft ? "\n\n" : ""}${text}`;
-        updateDraft(next);
-        const revision = editRevision.current;
-        focusComposer();
-        let interrupted = false;
-        const interrupt = () => {
-          interrupted = true;
-        };
-        const interactions = ["blur", "pointerdown", "keydown"] as const;
-        for (const event of interactions)
-          textarea.addEventListener(event, interrupt, { once: true });
-        window.requestAnimationFrame(() => {
-          for (const event of interactions) textarea.removeEventListener(event, interrupt);
-          if (
-            interrupted ||
-            textareaRef.current !== textarea ||
-            textarea.value !== next ||
-            document.activeElement !== textarea ||
-            editRevision.current !== revision
-          )
-            return;
-          textarea.setSelectionRange(next.length, next.length);
-          textarea.scrollTop = textarea.scrollHeight;
-        });
-      },
-    };
-    contextHandle.current = handle;
-    return handle;
-  });
-
-  function insertMention(mention: ComposerMention) {
-    markEdited();
-    const next = draft.replace(/@([\w-]*)$/, "");
-    writeComposerDraft(draftKey, next);
-    setDraft(next);
-    setMentionQuery(null);
-    setMentionHighlightIndex(0);
-    setSelectedMentions((current) =>
-      current.some((selected) => mentionChipKey(selected) === mentionChipKey(mention))
-        ? current
-        : [...current, mention],
-    );
-    focusComposer();
-  }
-
-  function insertSkill(skill: AgentSkillCatalogEntry) {
-    markEdited();
-    setSelectedSkill(skill);
-    writeComposerDraft(draftKey, "");
-    setDraft("");
-    setSlashQuery(null);
-  }
-
-  function runSlashAction(action: SlashActionId) {
-    markEdited();
-    writeComposerDraft(draftKey, "");
-    setDraft("");
-    setSlashQuery(null);
-    onSlashAction?.(action);
-  }
-
-  function removeLastChip() {
-    markEdited();
-    if (selectedMentions.length > 0) {
-      setSelectedMentions((current) => current.slice(0, -1));
-      return;
-    }
-    if (selectedSkill) setSelectedSkill(null);
-  }
-
-  const mentionOptions = useMemo(() => {
-    if (mentionQuery === null || !mentionTargets?.length) return [];
-    const query = mentionQuery.trim().toLowerCase();
-    return mentionTargets
-      .filter((target) => !query || target.name.toLowerCase().startsWith(query))
-      .slice(0, 10);
-  }, [mentionQuery, mentionTargets]);
-
-  useEffect(() => {
-    setMentionHighlightIndex(0);
-  }, [mentionQuery, mentionOptions]);
-
-  const activeMentionIndex = clampMentionHighlightIndex(
-    mentionHighlightIndex,
-    mentionOptions.length,
-  );
-  const mentionPickerOpen = mentionOptions.length > 0;
-  const activeMentionOptionId = mentionPickerOpen
-    ? `${mentionListboxId}-option-${activeMentionIndex}`
-    : undefined;
-
-  const slashSkillOptions = useMemo(() => {
-    if (slashQuery === null) return [];
-    const query = slashQuery.trim().toLowerCase();
-    const skills = agentSkills ?? [];
-    return skills
-      .filter((skill) => {
-        if (!query) return true;
-        return (
-          skill.name.toLowerCase().includes(query) ||
-          skill.description.toLowerCase().includes(query)
-        );
-      })
-      .slice(0, 8);
-  }, [agentSkills, slashQuery]);
-
-  const slashActionOptions = useMemo(() => {
-    if (!onSlashAction) return [];
-    if (slashQuery === null) return [];
-    const query = slashQuery.trim().toLowerCase();
-    return SLASH_ACTIONS.filter((action) => !query || action.label.toLowerCase().includes(query));
-  }, [slashQuery, onSlashAction]);
-
-  const showSlashPicker =
-    slashQuery !== null &&
-    mentionQuery === null &&
-    (slashSkillOptions.length > 0 || slashActionOptions.length > 0);
-
-  async function send() {
-    if (!canSend || sending || disabled) return;
-    const revision = editRevision.current;
-    const clientNonce =
-      retryNonce.current?.contextKey === contextKey
-        ? (retryNonce.current?.nonce ?? newClientNonce())
-        : newClientNonce();
-    retryNonce.current = null;
-    const text = serializeComposerPrompt(draft, selectedSkill, selectedMentions);
-    const submission = beginComposerDraftSubmission(draftKey, draft);
-    setDraft("");
-    setMentionQuery(null);
-    setMentionHighlightIndex(0);
-    setSlashQuery(null);
-    setSelectedSkill(null);
-    const mentions = selectedMentions;
-    setSelectedMentions([]);
-    try {
-      const accepted = (await onSend(text, mentions, clientNonce)) !== false;
-      settleComposerDraftSubmission(draftKey, submission, accepted);
-      if (accepted) return;
-    } catch {
-      settleComposerDraftSubmission(draftKey, submission, false);
-      // A rejected callback leaves acceptance unknown; do not restore a possible send.
-      return;
-    }
-    // Restore only an untouched draft, retaining its nonce for an unchanged retry.
-    if (editRevision.current !== revision) return;
-    retryNonce.current = { nonce: clientNonce, contextKey };
-    setDraft(draft);
-    setSelectedSkill(selectedSkill);
-    setSelectedMentions(mentions);
-  }
-
-  function handleDragEnter(event: DragEvent<HTMLFieldSetElement>) {
-    const dataTransfer = event.dataTransfer;
-    if (!isFileDrag(dataTransfer)) return;
-    event.preventDefault();
-    if (disabled) {
-      dragDepth.current = 0;
-      setDraggingFiles(false);
-      return;
-    }
-    dragDepth.current += 1;
-    setDraggingFiles(true);
-  }
-
-  function handleDragOver(event: DragEvent<HTMLFieldSetElement>) {
-    const dataTransfer = event.dataTransfer;
-    if (!isFileDrag(dataTransfer)) return;
-    event.preventDefault();
-    dataTransfer.dropEffect = disabled ? "none" : "copy";
-    if (disabled) {
-      dragDepth.current = 0;
-      setDraggingFiles(false);
-      return;
-    }
-    setDraggingFiles(true);
-  }
-
-  function handleDragLeave(event: DragEvent<HTMLFieldSetElement>) {
-    if (!isFileDrag(event.dataTransfer)) return;
-    if (disabled) {
-      dragDepth.current = 0;
-      setDraggingFiles(false);
-      return;
-    }
-    dragDepth.current = Math.max(0, dragDepth.current - 1);
-    if (dragDepth.current === 0) setDraggingFiles(false);
-  }
-
-  function handleDrop(event: DragEvent<HTMLFieldSetElement>) {
-    const dataTransfer = event.dataTransfer;
-    if (!isFileDrag(dataTransfer)) return;
-    event.preventDefault();
-    dragDepth.current = 0;
-    setDraggingFiles(false);
-    if (!disabled) pickAttachments(dataTransfer.files);
-  }
-
-  function handlePaste(event: ClipboardEvent<HTMLTextAreaElement>) {
-    const clipboardData = event.clipboardData;
-    // Only intercept real FileList pastes; leave text-only / empty-files native.
-    if (disabled || !clipboardData || !isFilePaste(clipboardData)) return;
-    event.preventDefault();
-    pickAttachments(clipboardData.files);
-    const text = clipboardData.getData("text/plain");
-    if (!text) return;
-    const textarea = event.currentTarget;
-    const start = textarea.selectionStart;
-    const end = textarea.selectionEnd;
-    updateDraft(`${draft.slice(0, start)}${text}${draft.slice(end)}`);
-    const caret = start + text.length;
-    window.requestAnimationFrame(() => {
-      textareaRef.current?.setSelectionRange(caret, caret);
-    });
-  }
-
-  const showComposerPlaceholder =
-    draft.length === 0 && selectedSkill === null && selectedMentions.length === 0;
-  const replyName = replyTarget ? (replyTargetName ?? previewMessageText(replyTarget)) : "";
-  const replyNameRef = useRef(replyName);
-  replyNameRef.current = replyName;
-  const announceTimer = useRef(0);
-  useEffect(() => () => window.clearTimeout(announceTimer.current), []);
-
-  // Arming or retargeting a reply unmounts the control that started it, so
-  // focus would drop to <body>; announce on start and when the target changes.
-  // The timer lives in a ref: a same-id rerender (e.g. the display name
-  // resolving after arming) must not cancel the pending announcement.
-  useEffect(() => {
-    const prev = prevReplyTarget.current;
-    prevReplyTarget.current = replyTarget ?? null;
-    if (!replyTarget) {
-      // Cancel (or send) within the delay must not let a stale "Replying to"
-      // overwrite the cancel announcement — kill the pending timer.
-      window.clearTimeout(announceTimer.current);
-      // A send disarms the reply without touching the region — drop the stale
-      // "Replying to" so it cannot linger or re-announce. An explicit cancel
-      // sets "Reply cancelled" in the same event, so only clear "reply" text.
-      if (replyAnnouncementKind.current === "reply") {
-        replyAnnouncementKind.current = null;
-        setReplyAnnouncement("");
-      }
-      return;
-    }
-    if (!prev || prev.id !== replyTarget.id) {
-      textareaRef.current?.focus();
-      // Clear-then-set so a switch between same-author targets re-announces —
-      // identical live-region text would otherwise be a no-op.
-      setReplyAnnouncement("");
-      replyAnnouncementKind.current = null;
-      window.clearTimeout(announceTimer.current);
-      announceTimer.current = window.setTimeout(() => {
-        replyAnnouncementKind.current = "reply";
-        setReplyAnnouncement(t`Replying to ${replyNameRef.current}`);
-      }, 50);
-    }
-  }, [replyTarget, replyName, t]);
-
-  return (
-    <fieldset
-      aria-label={t`Message composer`}
-      data-dragging={draggingFiles ? "files" : undefined}
-      onDragEnter={handleDragEnter}
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      className={`chat-composer relative z-30 m-0 min-w-0 border-0 px-3 pb-4 pt-3 md:px-6 md:pb-6 ${
-        draggingFiles ? "rounded-[14px] ring-2 ring-inset ring-ring" : ""
-      }`}
-    >
-      <div role="status" data-testid="composer-announcement" className="sr-only">
-        {replyAnnouncement}
-      </div>
-      {sendError || runError ? (
-        <div
-          ref={runErrorRef}
-          role="alert"
-          data-testid="composer-error"
-          className="mb-3 flex items-center gap-2 rounded-[14px] border border-destructive/40 bg-destructive/10 px-4 py-2 text-[13px] text-destructive"
-        >
-          <span className="min-w-0 flex-1">{sendError ?? runError}</span>
-          <button
-            type="button"
-            aria-label={t`Dismiss error`}
-            data-testid="composer-error-dismiss"
-            onClick={() => {
-              onDismissError();
-              window.requestAnimationFrame(() => textareaRef.current?.focus());
-            }}
-            className="shrink-0 text-destructive hover:text-foreground"
-          >
-            <X size={13} strokeWidth={2} />
-          </button>
-        </div>
-      ) : null}
-      {replyTarget ? (
-        <ComposerReplyPreview
-          author={replyName}
-          text={previewMessageText(replyTarget)}
-          quote={replyQuote}
-          attachment={replyAttachment(replyTarget.blocks)}
-          target={artifactTarget}
-          onDismiss={() => {
-            replyAnnouncementKind.current = "cancelled";
-            window.clearTimeout(announceTimer.current);
-            onClearReply?.();
-            setReplyAnnouncement(t`Reply cancelled`);
-            textareaRef.current?.focus();
-          }}
-        />
-      ) : null}
-      {attachmentNotice ? (
-        <div className="mb-3 rounded-[14px] border border-warning/40 bg-warning/10 px-4 py-2 text-[13px] text-warning">
-          {attachmentNotice}
-        </div>
-      ) : null}
-      {pendingAttachments.length ? (
-        <div className="mb-3 flex flex-wrap gap-2">
-          {pendingAttachments.map((attachment) => (
-            <div
-              key={attachment.id}
-              className="flex items-center gap-2 rounded-full border border-border bg-muted px-3 py-1.5 text-[13px] text-foreground/75"
-            >
-              {attachment.previewUrl ? (
-                <img
-                  src={attachment.previewUrl}
-                  alt={attachment.file.name}
-                  className="h-8 w-8 rounded object-cover"
-                />
-              ) : (
-                <Paperclip size={14} strokeWidth={1.8} />
-              )}
-              <span className="max-w-[180px] truncate" dir="auto">
-                {attachment.file.name}
-              </span>
-              <button
-                type="button"
-                aria-label={t`Remove ${attachment.file.name}`}
-                onClick={() => {
-                  markEdited();
-                  onRemoveAttachment(attachment);
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X size={13} strokeWidth={2} />
-              </button>
-            </div>
-          ))}
-        </div>
-      ) : null}
-      {mentionPickerOpen ? (
-        <div
-          id={mentionListboxId}
-          role="listbox"
-          aria-label={t`Mentions`}
-          data-testid="mention-picker"
-          className="mb-2 overflow-hidden rounded-[14px] border border-border bg-muted"
-        >
-          {mentionOptions.map((mention, index) => {
-            const optionId = `${mentionListboxId}-option-${index}`;
-            const highlighted = index === activeMentionIndex;
-            return (
-              <button
-                id={optionId}
-                key={mentionChipKey(mention)}
-                type="button"
-                role="option"
-                aria-selected={highlighted}
-                aria-label={t`@${mention.name}`}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => insertMention(mention)}
-                // Opening the list under a stationary pointer must not steal the keyboard highlight.
-                onMouseMove={() => setMentionHighlightIndex(index)}
-                className={`flex w-full items-start gap-3 px-4 py-2.5 text-start hover:bg-accent ${
-                  highlighted ? "bg-accent" : ""
-                }`}
-              >
-                <MentionOptionIcon mention={mention} />
-                <span className="min-w-0">
-                  <span dir="auto" className="block text-[14px] text-foreground">
-                    @{mention.name}
-                  </span>
-                  {mention.subtitle ? (
-                    <span dir="auto" className="block truncate text-[12.5px] text-muted-foreground">
-                      {mention.subtitle}
-                    </span>
-                  ) : null}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-      {showSlashPicker ? (
-        <div
-          data-testid="slash-picker"
-          className="mb-2 overflow-hidden rounded-[14px] border border-border bg-muted"
-        >
-          {slashSkillOptions.map((skill) => (
-            <button
-              key={skill.id}
-              type="button"
-              aria-label={t`Skill ${skill.name}`}
-              onClick={() => insertSkill(skill)}
-              className="flex w-full items-start gap-3 px-4 py-2.5 text-start hover:bg-accent"
-            >
-              <Box size={16} strokeWidth={1.7} className="mt-0.5 shrink-0 text-muted-foreground" />
-              <span className="min-w-0">
-                <span dir="auto" className="block text-[14px] text-foreground">
-                  {skill.name}
-                </span>
-                <span dir="auto" className="block truncate text-[12.5px] text-muted-foreground">
-                  {truncateSlashDescription(skill.description)}
-                </span>
-              </span>
-            </button>
-          ))}
-          {slashActionOptions.map((action) => {
-            const label = slashActionLabel(action.id);
-            return (
-              <button
-                key={action.id}
-                type="button"
-                aria-label={label}
-                onClick={() => runSlashAction(action.id)}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-start hover:bg-accent"
-              >
-                <Settings size={16} strokeWidth={1.7} className="shrink-0 text-muted-foreground" />
-                <span className="text-[14px] text-foreground">{label}</span>
-              </button>
-            );
-          })}
-        </div>
-      ) : null}
-      <div
-        data-testid="composer-bar"
-        className="grid grid-cols-[auto_minmax(0,1fr)_auto] content-end items-center gap-x-2 gap-y-2 rounded-[26px] border border-border bg-background pb-[9px] pe-2.5 ps-3 pt-3 transition-colors focus-within:border-ring"
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          accept={ATTACHMENT_ACCEPT}
-          className="hidden"
-          onChange={(event) => pickAttachments(event.target.files)}
-        />
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t`Attach file`}
-          disabled={disabled}
-          onClick={() => fileInputRef.current?.click()}
-          className="composer-attach col-start-1 row-start-2 size-8 shrink-0 rounded-full border border-border bg-muted text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <Plus size={16} strokeWidth={2} />
-        </Button>
-        <div className="composer-input col-span-3 row-start-1 flex min-w-0 flex-wrap items-end gap-1.5 px-1.5">
-          {selectedSkill ? (
-            <span
-              data-testid="skill-chip"
-              className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[13px] text-foreground"
-            >
-              <Box size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />
-              <span dir="auto" className="truncate">
-                {selectedSkill.name}
-              </span>
-              <button
-                type="button"
-                aria-label={t`Remove skill ${selectedSkill.name}`}
-                onClick={() => {
-                  markEdited();
-                  setSelectedSkill(null);
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X size={12} strokeWidth={2} />
-              </button>
-            </span>
-          ) : null}
-          {selectedMentions.map((mention) => (
-            <span
-              key={mentionChipKey(mention)}
-              data-testid="mention-chip"
-              data-mention-kind={mention.kind}
-              className="inline-flex max-w-full items-center gap-1.5 rounded-full bg-accent px-2.5 py-1 text-[13px] text-foreground"
-            >
-              <MentionChipIcon mention={mention} />
-              <span dir="auto" className="truncate">
-                {mention.name}
-              </span>
-              <button
-                type="button"
-                aria-label={t`Remove mention ${mention.name}`}
-                onClick={() => {
-                  markEdited();
-                  setSelectedMentions((current) =>
-                    current.filter(
-                      (selected) => mentionChipKey(selected) !== mentionChipKey(mention),
-                    ),
-                  );
-                }}
-                className="text-muted-foreground hover:text-foreground"
-              >
-                <X size={12} strokeWidth={2} />
-              </button>
-            </span>
-          ))}
-          <textarea
-            ref={textareaRef}
-            value={draft}
-            onChange={(event) => updateDraft(event.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Backspace" &&
-                draft.length === 0 &&
-                (selectedSkill !== null || selectedMentions.length > 0)
-              ) {
-                event.preventDefault();
-                removeLastChip();
-                return;
-              }
-              const action = resolveMentionPickerKey({
-                key: event.key,
-                shiftKey: event.shiftKey,
-                ctrlKey: event.ctrlKey,
-                metaKey: event.metaKey,
-                enterToSend,
-                isComposing: event.nativeEvent.isComposing || event.keyCode === 229,
-                optionCount: mentionOptions.length,
-                highlightedIndex: activeMentionIndex,
-              });
-              if (action.type === "complete") {
-                const mention = mentionOptions[action.index];
-                if (!mention) return;
-                event.preventDefault();
-                insertMention(mention);
-                return;
-              }
-              if (action.type === "move") {
-                event.preventDefault();
-                setMentionHighlightIndex(action.index);
-                return;
-              }
-              if (action.type === "dismiss") {
-                event.preventDefault();
-                setMentionQuery(null);
-                setMentionHighlightIndex(0);
-                return;
-              }
-              if (action.type === "send") {
-                event.preventDefault();
-                void send();
-              }
-            }}
-            disabled={disabled}
-            placeholder={
-              showComposerPlaceholder
-                ? activeName && !compact
-                  ? t`Message ${activeName}`
-                  : t`Message…`
-                : undefined
-            }
-            aria-label={activeName ? t`Message ${activeName}` : t`Message`}
-            role="combobox"
-            aria-autocomplete="list"
-            aria-haspopup="listbox"
-            aria-expanded={mentionPickerOpen}
-            aria-controls={mentionPickerOpen ? mentionListboxId : undefined}
-            aria-activedescendant={activeMentionOptionId}
-            name="chat-message"
-            autoComplete="off"
-            dir="auto"
-            rows={compact ? 1 : 2}
-            className={`rk-scroll max-h-60 ${compact ? "min-h-7" : "min-h-12"} min-w-[8rem] flex-1 resize-none overflow-y-auto bg-transparent py-0.5 text-base leading-6 text-foreground outline-none placeholder:text-muted-foreground disabled:opacity-40`}
-          />
-        </div>
-        <div className="composer-actions col-start-3 row-start-2 flex shrink-0 items-center gap-2 justify-self-end">
-          {onVoice && draft.trim().length === 0 ? (
-            <Button
-              variant="outline"
-              size="icon"
-              aria-label={t`Voice`}
-              title={t`Voice`}
-              disabled={disabled}
-              onClick={onVoice}
-              className="composer-secondary size-8 shrink-0 rounded-full text-foreground/75"
-            >
-              <Mic size={16} strokeWidth={1.8} />
-            </Button>
-          ) : null}
-          {running ? (
-            <>
-              <Button
-                size="icon"
-                aria-label={t`Send`}
-                disabled={sending || !canSend || disabled}
-                onClick={send}
-                className="size-8 rounded-full bg-white text-black hover:bg-white/90 shadow-sm transition-transform active:scale-95"
-              >
-                <ArrowUp size={16} strokeWidth={2.2} />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                aria-label={t`Stop`}
-                disabled={sending}
-                onClick={() => void onStop()}
-                className="composer-secondary size-8 rounded-full border border-border bg-muted text-foreground/80 shadow-sm transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <Square size={11} strokeWidth={0} fill="currentColor" />
-              </Button>
-            </>
-          ) : (
-            <Button
-              size="icon"
-              aria-label={t`Send`}
-              disabled={sending || !canSend || disabled}
-              onClick={send}
-              className="size-8 shrink-0 rounded-full bg-white text-black hover:bg-white/90 shadow-sm transition-transform active:scale-95 disabled:bg-white/10 disabled:text-muted-foreground/30 disabled:shadow-none"
-            >
-              <ArrowUp size={16} strokeWidth={2.2} />
-            </Button>
-          )}
-        </div>
-      </div>
-    </fieldset>
-  );
-});
-
-/** Hides the scrollbar while measuring and leaves the height at 0. */
-function measureTextareaHeight(textarea: HTMLTextAreaElement) {
-  const { style } = textarea;
-  style.overflowY = "hidden";
-  style.height = "0px";
-  const height = textarea.scrollHeight;
-  style.overflowY = "";
-  return height;
-}
-
-function slashActionLabel(id: SlashActionId) {
-  switch (id) {
-    case "chat-settings":
-      return t`Chat Settings`;
-    case "settings-general":
-      return t`Settings: General`;
-    case "settings-usage":
-      return t`Settings: Usage`;
-  }
-}
-
-function MentionOptionIcon({ mention }: { mention: ComposerMention }) {
-  if (mention.kind === "routine") {
-    return <Clock size={16} strokeWidth={1.7} className="mt-0.5 shrink-0 text-muted-foreground" />;
-  }
-  if (mention.kind === "connector") {
-    return <Puzzle size={16} strokeWidth={1.7} className="mt-0.5 shrink-0 text-muted-foreground" />;
-  }
-  if (mention.kind === "group") {
-    return (
-      <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-accent text-[9px] text-foreground/75">
-        G
-      </span>
-    );
-  }
-  if (mention.kind === "everyone") {
-    return (
-      <span className="mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full bg-accent text-[9px] text-foreground/75">
-        @
-      </span>
-    );
-  }
-  return <BotAvatar color={mention.color ?? FALLBACK_BOT_COLOR} identity={mention.id} size={16} />;
-}
-
-function MentionChipIcon({ mention }: { mention: ComposerMention }) {
-  if (mention.kind === "routine") {
-    return <Clock size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />;
-  }
-  if (mention.kind === "connector") {
-    return <Puzzle size={13} strokeWidth={1.7} className="shrink-0 text-muted-foreground/70" />;
-  }
-  if (mention.kind === "group" || mention.kind === "everyone") {
-    return (
-      <span className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-accent text-[9px] text-foreground/75">
-        {mention.kind === "group" ? "G" : "@"}
-      </span>
-    );
-  }
-  return <BotAvatar color={mention.color ?? FALLBACK_BOT_COLOR} identity={mention.id} size={16} />;
 }
 
 function formatRosterTime(isoDate?: string | null): string {
