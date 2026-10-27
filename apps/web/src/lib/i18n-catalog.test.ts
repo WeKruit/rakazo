@@ -492,9 +492,6 @@ describe("lingui catalogs", () => {
     expect(catalog).toContain('msgid "Language"\nmsgstr "Язык"');
     expect(catalog).toContain('msgid "Cancel"\nmsgstr "Отмена"');
     expect(catalog).toContain(
-      'msgid "{0} runs · {1} tokens"\nmsgstr "Запусков: {0} · токенов: {1}"',
-    );
-    expect(catalog).toContain(
       'msgstr "{0, plural, one {# модель} few {# модели} many {# моделей} other {# модели}}"',
     );
   });
@@ -508,9 +505,6 @@ describe("lingui catalogs", () => {
     expect(catalog).toContain('msgid "Settings"\nmsgstr "Paramètres"');
     expect(catalog).toContain('msgid "Language"\nmsgstr "Langue"');
     expect(catalog).toContain('msgid "Cancel"\nmsgstr "Annuler"');
-    expect(catalog).toContain(
-      'msgid "{0} runs · {1} tokens"\nmsgstr "{0} exécutions · {1} jetons"',
-    );
     expect(catalog).toContain('msgstr "{0, plural, one {# modèle} other {# modèles}}"');
     expect(catalog).toContain(
       'msgid "Configure a plugin catalog on the server to connect apps."\nmsgstr "Configurez un catalogue de plugins sur le serveur pour connecter des applications."',

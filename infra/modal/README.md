@@ -146,16 +146,14 @@ The native API and worker can use Supabase private object storage through the sa
 - `ARTIFACT_STORAGE_BUCKET`: one existing private bucket name.
 
 With all three fields absent, the existing local provider remains selected.
-Partial or invalid remote configuration stops startup. Remote failures do not
-fall back to local files, and this adapter does not create buckets or permissions.
+Partial or invalid remote configuration stops startup. The adapter does not create
+buckets or permissions.
 
-Do not enable remote storage over an existing installation until all referenced
-local artifact objects have been copied from `artifacts/<space>/<uuid>` to
-`<space>/<uuid>` in the private bucket, preserving their storage keys and checking
-actual bytes against each database row's length and SHA256. Quiesce writers for
-the final inventory and cutover so no attachment is omitted. Switch API and worker
-together; retain the verified old data. No such copy or cutover is performed by
-this configuration change.
+Enabling remote storage over an existing installation needs no downtime: new files
+go to the bucket, and files saved on the volume before stay readable from it. Then
+copy them inside the running container with `pnpm --filter @rakazo/api artifacts:copy`.
+It uploads `artifacts/<space>/<uuid>` to `<space>/<uuid>`, reads each object back and
+compares SHA-256, and can be rerun. The volume copies are kept.
 
 This only shares immutable artifact objects. Agent home checkpoints, pending OAuth
 logins and credential-refresh coordination still require their own native-state

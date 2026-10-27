@@ -1,6 +1,6 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { mkdir, open, rm } from "node:fs/promises";
+import { mkdir, open, readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import type {
   AdapterContext,
@@ -63,7 +63,94 @@ export function artifactStorageOptionsFromEnv(
 }
 
 export function createArtifactStore(root: string, options?: ArtifactStorageOptions): ArtifactStore {
-  return options ? new SupabaseArtifactStore(options) : new LocalArtifactStore(root);
+  return options
+    ? new VolumeFallbackArtifactStore(
+        new SupabaseArtifactStore(options),
+        new LocalArtifactStore(root),
+      )
+    : new LocalArtifactStore(root);
+}
+
+function isMissingFile(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+}
+
+/**
+ * Object storage for new files, with files saved on the local volume before object storage was
+ * configured still readable until copyLocalArtifacts has moved them.
+ */
+export class VolumeFallbackArtifactStore implements ArtifactStore {
+  constructor(
+    private readonly remote: SupabaseArtifactStore,
+    private readonly local: LocalArtifactStore,
+  ) {}
+
+  describe() {
+    return this.remote.describe();
+  }
+
+  put(artifact: ArtifactPut, context: AdapterContext) {
+    return this.remote.put(artifact, context);
+  }
+
+  async get(id: string, context: AdapterContext) {
+    try {
+      return await this.local.get(id, context);
+    } catch (error) {
+      if (!isMissingFile(error)) throw error;
+    }
+    return this.remote.get(id, context);
+  }
+
+  async remove(id: string, context: AdapterContext) {
+    await this.remote.remove(id, context);
+    await this.local.remove(id, context);
+  }
+}
+
+function sha256(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * Copies every file under <root>/artifacts/<spaceId>/<id> to object storage under the same key.
+ * Each copy is read back and compared by SHA-256. Rerunning is safe: an object that already
+ * exists is overwritten with the same bytes. Local files are left in place.
+ */
+export async function copyLocalArtifacts(
+  root: string,
+  remote: SupabaseArtifactStore,
+  signal: AbortSignal,
+): Promise<{ copied: number; bytes: number }> {
+  const base = path.join(root, "artifacts");
+  let spaces: string[];
+  try {
+    spaces = await readdir(base);
+  } catch (error) {
+    if (isMissingFile(error)) return { copied: 0, bytes: 0 };
+    throw error;
+  }
+  const local = new LocalArtifactStore(root);
+  let copied = 0;
+  let bytes = 0;
+  for (const spaceId of spaces) {
+    for (const id of await readdir(path.join(base, spaceId))) {
+      const context = {
+        spaceId,
+        operationId: "artifact-copy",
+        traceId: "artifact-copy",
+        signal,
+      } as AdapterContext;
+      const data = await local.get(id, context);
+      await remote.upload(id, data, "application/octet-stream", context, { overwrite: true });
+      if (sha256(await remote.get(id, context)) !== sha256(data)) {
+        throw new Error(`Copied artifact ${spaceId}/${id} does not match the local file`);
+      }
+      copied += 1;
+      bytes += data.byteLength;
+    }
+  }
+  return { copied, bytes };
 }
 
 export class SupabaseArtifactStore implements ArtifactStore {
@@ -117,14 +204,24 @@ export class SupabaseArtifactStore implements ArtifactStore {
 
   async put(artifact: ArtifactPut, context: AdapterContext) {
     const id = randomUUID();
+    await this.upload(id, artifact.bytes, artifact.mimeType, context);
+    return { id, hash: String(artifact.bytes.byteLength) };
+  }
+
+  async upload(
+    id: string,
+    bytes: Uint8Array,
+    mimeType: string,
+    context: AdapterContext,
+    options: { overwrite?: boolean } = {},
+  ) {
     const key = this.objectKey(id, context);
     const response = await this.request(`${this.options.bucket}/${key}`, context, {
       method: "POST",
-      headers: { "content-type": artifact.mimeType, "x-upsert": "false" },
-      body: new Uint8Array(artifact.bytes),
+      headers: { "content-type": mimeType, "x-upsert": options.overwrite ? "true" : "false" },
+      body: new Uint8Array(bytes),
     });
     await response.body?.cancel().catch(() => {});
-    return { id, hash: String(artifact.bytes.byteLength) };
   }
 
   async get(id: string, context: AdapterContext) {
