@@ -119,3 +119,23 @@ Web **1,694/1,694** (149 files, 31.73 s), web check, production build, all local
 checks, and the same **15/15** production browser cases (40.5 s) pass. Commands are the
 same as above. First-stage and second-slice measurements are kept separate. No schema,
 authentication plugin, or server behavior was changed in this slice.
+
+## Separate unused web organization-client registration
+
+The web app consumes no Better Auth organization actions, hooks, reflected properties or
+organization endpoints. Space membership/selection uses the existing authorized product
+RPCs. Removing only the unused browser plugin leaves the server organization plugin,
+session client, permission enforcement and RPC behavior intact. A named session-state
+interface keeps the controller's exported type portable; session fields are unchanged.
+
+After the second catalog slice, this independently measured change takes contacts
+**332,440 → 329,543 gzip B**, chat **295,153 → 292,260**, and sign-in
+**187,986 → 185,083**. The 2,897-byte contacts saving is actual route gzip, not the
+roughly 13 KB rendered-source attribution that motivated the audit.
+
+Web **1,694/1,694**, web type check and production build pass. A new actual local Chromium
+test passes (**1/1**, 3.1 s) through session display, selected-Space request-header change,
+logout/selection clearing and login. It observes no organization endpoint requests.
+All endpoints are synthetic. The fixed synthetic server verifies client transport, not
+server authorization; the existing App/Shell tests still verify scoped state replacement.
+No real account was used, no email sent and no server auth configuration changed.
