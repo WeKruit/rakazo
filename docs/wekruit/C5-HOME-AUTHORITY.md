@@ -42,6 +42,6 @@ node scripts/bundle-server.mjs api
 node scripts/bundle-server.mjs worker
 ```
 
-Final results are recorded in the workplan after the final source migration is replayed from an empty isolated database. An earlier scratch database was manually synchronized while the migration was under development; it is not the fresh-replay proof.
+Final source replay from an empty isolated PostgreSQL database passed. Authority tests: 14/14; restricted-role tests: 6/6; adapters: 5,118 passed / 73 skipped; API/worker/db: 2,616 passed / 437 skipped; five package checks, API/worker bundles, 25 Python tests, Biome and diff checks passed. Prisma diff contains no new C5-model differences; four pre-existing foreign-key onUpdate differences remain outside this change. The first sandboxed full run was stopped after network-fixture timeouts; the final full runs passed with loopback access. An earlier scratch database was manually synchronized while the migration was under development; it is not the fresh-replay proof.
 
 Not measured: real storage inventory/copy/readback, actual writer quiescence/admission fencing, cloud driver lease/capacity enforcement, deployed split-service readiness, session high-water under real traffic, every-second homepage/RPC probes during a release, and uninterrupted real conversations. No online completion is claimed.

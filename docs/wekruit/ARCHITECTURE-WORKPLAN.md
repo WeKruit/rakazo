@@ -242,8 +242,10 @@ git diff --check
 
 ### C5 拆服务、多容器、滚动发布
 
-- **本地基础实现（仍未完成）：** 认领 `558f876037ae931f8a8a47508adf06d3075fe756` 普通 push 后，提取可独立启动 API/worker 的进程生命周期，增加 SIGUSR2 非取消排空、只读健康状态和超时拒绝替换工具。真实本地 PostgreSQL/Graphile 双 worker：旧任务完成一次，新任务由另一个 worker 执行；21 个 TS 测试、62 个 Python 测试通过，worker 类型检查和 API/worker 打包通过。Draft [#303](https://github.com/WeKruit/rakazo/pull/303) 的 base 为 #263 分支；实现 `15aeb0421`、补充验证 `c6b1cbb3a`、收敛 `90dca2d89`。详细命令和边界见 [C5-LOCAL-DRAIN.md](./C5-LOCAL-DRAIN.md)。真实 Modal 双服务定义尚未实施，不添加占位入口；现有生产入口/资源/Secret/发布保护不变。
-- **全局预算与剩余：** API 1、worker 5 会话；各两容器稳定 12，新增一个替换 worker 就到 17，整代重叠 24，超过既有总额 15。6543/5432 验证和预算检查已实现，线上 high-water 未测。共享 home 权威指针迁移及旧写者排除、逐 worker 排空替换发布控制器尚未完成；没有用本地通过冒充线上滚动/对话不中断验收。
+- **本地基础实现（线上验收仍未完成）：** 认领 `558f876037ae931f8a8a47508adf06d3075fe756` 普通 push 后，[#303](https://github.com/WeKruit/rakazo/pull/303) 已合入 #263（`afdf729217a5ceecbf34a06d990a7578335209a3`）。独立 API/worker 进程生命周期、SIGUSR2 非取消排空、只读健康状态、超时拒绝替换，真实本地 PostgreSQL/Graphile 双 worker 证明旧任务完成一次且新任务由另一 worker 执行。原门禁与命令见 [C5-LOCAL-DRAIN.md](./C5-LOCAL-DRAIN.md)。
+- **本地后续实现：** `d41e2b3ca` 增加 DB 权威 homeRevision CAS、摘要校验的独立快照 namespace、maintenance/run/lifecycle fence、合法 Team 成员验证、旧写者 trigger、删除后仍有效的内部 tombstone、完整迁移清单和 verified receipt。新建 home 由 DB 保留为 pending-v2，再经快照上传/readback/CAS 初始化；配置丢失、缺失已提交对象、旧 writer、未验证旧数据均 fail closed。真实 SDK 1.6.1 离线注册双服务定义；串行 replacement driver policy 不自动连接生产入口。设计、命令与精确限制见 [C5-HOME-AUTHORITY.md](./C5-HOME-AUTHORITY.md) 和 [C5-REPLACEMENT.md](./C5-REPLACEMENT.md)。
+- **实测门禁：** 最终迁移源从空白隔离 PostgreSQL 全量重放成功；authority **14/14**、restricted actor/RLS **6/6**，涵盖并发 CAS、旧写者、delete/recreate、Team 成员与租约、新建 pending 并发初始化、存储失败重试和配置撤回。adapters 全量 **5,118 通过 / 73 跳过**；API/worker/db **2,616 通过 / 437 跳过**；5 包 check、API/worker bundle、Python **25/25**、Biome/diff 通过。Prisma schema diff 的新 C5 模型无差异；存在4个既有外键 onUpdate 差异，未把它们改入本项。首次 sandbox 网络fixture超时的运行已停止；最终全量使用允许loopback的执行环境通过，跳过项未验证。
+- **全局预算与真实边界：** API 1、worker 5 会话，各两容器稳定 **12**；额外 worker **17**、整代重叠 **24** 均超过 **15**，只能先排空/确认 stop+sessions0 再替换，不能擅自增额度。无新增常驻连接；DATABASE_URL 6543、REALTIME_DATABASE_URL 5432 边界不变。完整cutover需真实旧 API/worker 停止且持续阻断重启/admission 的部署driver，现有存储全部快照验证，以及真实发布driver的全局lease/容量预留；本地假驱动未证明云端能力。Docker/desktop本地目录数据不能自动进入本远程fleet，清单拒绝且不会静默清空。未部署/改资源/Secret，未测每秒首页/RPC零失败、真实对话不中断、生产连接high-water；不标整项完成。
 
 - **现状：** `infra/modal/app.py` 只有一个服务，设置是 `max_containers=1` 加 `nonpreemptible`，发布方式是 `--strategy recreate`。所以每次发布都会中断服务。
 - **做法：** 拆成 web/API 和 worker 两个服务。worker 本来就靠租约和 fencing 处理多实例，可以直接开多个容器。API 无状态之后，`max_containers` 改成大于 1，再换成滚动发布。
