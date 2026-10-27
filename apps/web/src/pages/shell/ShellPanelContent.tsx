@@ -34,10 +34,10 @@ const GroupSettings = lazyPanel(() =>
   withFeatureMessages(() => import("../GroupPanel")).then((module) => module.GroupSettings),
 );
 const BotSettings = lazyPanel(() =>
-  import("../shell/bot-panel").then((module) => module.BotSettings),
+  withFeatureMessages(() => import("../shell/bot-panel")).then((module) => module.BotSettings),
 );
 const CreateBotForm = lazyPanel(() =>
-  import("../shell/bot-panel").then((module) => module.CreateBotForm),
+  withFeatureMessages(() => import("../shell/bot-panel")).then((module) => module.CreateBotForm),
 );
 const RoutineEditor = lazyPanel(() =>
   withFeatureMessages(() => import("../RoutineEditor")).then((module) => module.RoutineEditor),

@@ -41,11 +41,6 @@ msgstr "{0} (over 10 MiB)"
 msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
 msgstr "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
 
-#. placeholder {0}: block.name
-#: src/pages/shell/message-cards.tsx
-msgid "{0} connection"
-msgstr "{0} connection"
-
 #. placeholder {0}: archivedRouteGroup.name
 #: src/pages/shell/ShellConversation.tsx
 msgid "{0} is archived."
@@ -73,10 +68,6 @@ msgstr "{amount} / {period}"
 #: src/pages/shell/computer-presentation.tsx
 msgid "{botName}’s computer"
 msgstr "{botName}’s computer"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "{commandVariable} is reserved and cannot be used as a command variable. Choose another name."
-msgstr "{commandVariable} is reserved and cannot be used as a command variable. Choose another name."
 
 #: src/lib/billing.ts
 msgid "{count} days"
@@ -178,10 +169,6 @@ msgstr "@{0}"
 msgid "≥ Observed in loaded records"
 msgstr "≥ Observed in loaded records"
 
-#: src/pages/shell/message-cards.tsx
-msgid "A bit of everything"
-msgstr "A bit of everything"
-
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
 msgstr "About groups"
@@ -197,14 +184,6 @@ msgstr "Accepted. Finding more people."
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Access token"
 msgstr "Access token"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Account default"
-msgstr "Account default"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Action confirmations"
-msgstr "Action confirmations"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
@@ -237,10 +216,6 @@ msgstr "Activity"
 msgid "Add {name} to shortlist"
 msgstr "Add {name} to shortlist"
 
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Add a model in Settings to use this."
-msgstr "Add a model in Settings to use this."
-
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Add a run time for this one-shot."
 msgstr "Add a run time for this one-shot."
@@ -248,10 +223,6 @@ msgstr "Add a run time for this one-shot."
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Add a schedule, webhook, GitHub, or message trigger"
 msgstr "Add a schedule, webhook, GitHub, or message trigger"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Add credential"
-msgstr "Add credential"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Add MCP server"
@@ -272,10 +243,6 @@ msgstr "Add to routine"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Added"
 msgstr "Added"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Advanced"
-msgstr "Advanced"
 
 #: src/pages/shell/ShellConversation.tsx
 msgid "Agent"
@@ -309,52 +276,13 @@ msgstr "All rounds"
 msgid "All statuses"
 msgstr "All statuses"
 
-#. placeholder {0}: rule.matchValue
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Allow {0} actions without asking"
-msgstr "Allow {0} actions without asking"
-
-#. placeholder {0}: rule.matchValue
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Allow {0} connector without asking"
-msgstr "Allow {0} connector without asking"
-
-#. placeholder {0}: rule.matchValue
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Allow {0} without asking"
-msgstr "Allow {0} without asking"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Allow email actions without asking"
-msgstr "Allow email actions without asking"
-
-#: src/components/AskCard.tsx
-msgid "Allow once"
-msgstr "Allow once"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Allow purchase actions without asking"
-msgstr "Allow purchase actions without asking"
-
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Allow writing"
 msgstr "Allow writing"
 
-#: src/components/AskCard.tsx
-msgid "Allowed once"
-msgstr "Allowed once"
-
 #: src/pages/Auth.tsx
 msgid "Already have an account?"
 msgstr "Already have an account?"
-
-#: src/components/AskCard.tsx
-msgid "Always allow this tool"
-msgstr "Always allow this tool"
-
-#: src/components/AskCard.tsx
-msgid "Always allowed"
-msgstr "Always allowed"
 
 #: src/lib/model-connection-preflight.ts
 msgid "An API key is stored for this provider, not a subscription sign-in."
@@ -364,20 +292,6 @@ msgstr "An API key is stored for this provider, not a subscription sign-in."
 msgid "AND"
 msgstr "AND"
 
-#: src/components/AskCard.tsx
-msgid "Answer"
-msgstr "Answer"
-
-#: src/components/AskCard.tsx
-msgid "Answered"
-msgstr "Answered"
-
-#. placeholder {0}: label === undefined ? selectedAskActionLabel(answer, actions) : approvalActionLabel(answer, label)
-#. placeholder {0}: selectedAskActionLabel(answer, actions)
-#: src/components/AskCard.tsx
-msgid "Answered: {0}"
-msgstr "Answered: {0}"
-
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Any of"
 msgstr "Any of"
@@ -386,7 +300,6 @@ msgstr "Any of"
 msgid "API is back, but the update did not finish. Check the host logs."
 msgstr "API is back, but the update did not finish. Check the host logs."
 
-#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/lib/localized-provider-hint.ts
 msgid "API key"
@@ -395,22 +308,6 @@ msgstr "API key"
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Approval boundaries"
 msgstr "Approval boundaries"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Approve"
-msgstr "Approve"
-
-#: src/components/AskCard.tsx
-msgid "Approve calibration"
-msgstr "Approve calibration"
-
-#: src/components/AskCard.tsx
-msgid "Approve documents"
-msgstr "Approve documents"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Approve this server to let your agent use its tools."
-msgstr "Approve this server to let your agent use its tools."
 
 #: src/pages/ShellMessage.tsx
 msgid "archived"
@@ -429,52 +326,9 @@ msgstr "Archived. Chat, memory, and files kept."
 msgid "Artifacts"
 msgstr "Artifacts"
 
-#. placeholder {0}: rule.matchValue
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before {0}"
-msgstr "Ask before {0}"
-
-#. placeholder {0}: rule.matchValue
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before {0} actions"
-msgstr "Ask before {0} actions"
-
-#. placeholder {0}: rule.matchValue
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before {0} connector"
-msgstr "Ask before {0} connector"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before a specific tool"
-msgstr "Ask before a specific tool"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before email actions"
-msgstr "Ask before email actions"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before purchase actions"
-msgstr "Ask before purchase actions"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before purchases"
-msgstr "Ask before purchases"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before sending external email"
-msgstr "Ask before sending external email"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask first"
-msgstr "Ask first"
-
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Ask the server owner to configure this provider."
 msgstr "Ask the server owner to configure this provider."
-
-#: src/components/LiveWork.tsx
-msgid "Asking a specialist"
-msgstr "Asking a specialist"
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Assessment date"
@@ -501,18 +355,6 @@ msgstr "Attachment"
 msgid "Authentication failed."
 msgstr "Authentication failed."
 
-#: src/pages/shell/message-cards.tsx
-msgid "Authorization timed out. Please try again."
-msgstr "Authorization timed out. Please try again."
-
-#: src/pages/shell/message-cards.tsx
-msgid "Authorize"
-msgstr "Authorize"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Authorize this server so agents can use its tools. A popup opens."
-msgstr "Authorize this server so agents can use its tools. A popup opens."
-
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Autumn rank"
 msgstr "Autumn rank"
@@ -520,10 +362,6 @@ msgstr "Autumn rank"
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr "Available time"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Available to this bot's shell commands as {commandVariable}"
-msgstr "Available to this bot's shell commands as {commandVariable}"
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Avatar Studio"
@@ -557,16 +395,7 @@ msgstr "Back to sign in"
 msgid "Base URL"
 msgstr "Base URL"
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "Basic auth"
-msgstr "Basic auth"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Basic auth ({username})"
-msgstr "Basic auth ({username})"
-
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
-#: src/pages/shell/bot-credentials.tsx
 msgid "Bearer token"
 msgstr "Bearer token"
 
@@ -630,21 +459,13 @@ msgstr "Calibration round"
 msgid "Can't reach the server."
 msgstr "Can't reach the server."
 
-#: src/components/AskCard.tsx
 #: src/components/ComputerMaintenanceActions.tsx
-#: src/components/ComputerUpdateProgress.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
-#: src/pages/shell/bot-credentials.tsx
-#: src/pages/shell/dialogs.tsx
 msgid "Cancel"
 msgstr "Cancel"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Cancel new bot"
-msgstr "Cancel new bot"
 
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
@@ -653,10 +474,6 @@ msgstr "Cancel reply"
 #: src/components/CloudAgentCard.tsx
 msgid "cancelled"
 msgstr "cancelled"
-
-#: src/components/AskCard.tsx
-msgid "Cancelled"
-msgstr "Cancelled"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Candidate cards"
@@ -695,10 +512,6 @@ msgstr "Candidates"
 msgid "Cards"
 msgstr "Cards"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Chart failed to render: {error}"
-msgstr "Chart failed to render: {error}"
-
 #: src/pages/shell/Composer.tsx
 msgid "Chat Settings"
 msgstr "Chat Settings"
@@ -736,29 +549,9 @@ msgstr "Check the server URL and network, then test again."
 msgid "Check your email"
 msgstr "Check your email"
 
-#: src/components/LiveWork.tsx
-msgid "Checking availability"
-msgstr "Checking availability"
-
-#: src/components/LiveWork.tsx
-msgid "Checking candidate records"
-msgstr "Checking candidate records"
-
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Checking computer setup…"
 msgstr "Checking computer setup…"
-
-#: src/components/LiveWork.tsx
-msgid "Checking connections"
-msgstr "Checking connections"
-
-#: src/components/LiveWork.tsx
-msgid "Checking email"
-msgstr "Checking email"
-
-#: src/components/LiveWork.tsx
-msgid "Checking saved context"
-msgstr "Checking saved context"
 
 #: src/components/ComputersUnavailableHint.tsx
 #: src/components/DesktopUpdates.tsx
@@ -786,26 +579,9 @@ msgstr "Choose file"
 msgid "Choose the role again."
 msgstr "Choose the role again."
 
-#: src/pages/shell/dialogs.tsx
-msgid "Clear"
-msgstr "Clear"
-
-#. placeholder {0}: bot.name
-#: src/pages/shell/dialogs.tsx
-msgid "Clear {0}’s conversation?"
-msgstr "Clear {0}’s conversation?"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Clear conversation"
-msgstr "Clear conversation"
-
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Clear date filter"
 msgstr "Clear date filter"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Clearing…"
-msgstr "Clearing…"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Clicked"
@@ -834,17 +610,9 @@ msgstr "Close"
 msgid "Close {title}"
 msgstr "Close {title}"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Close chart"
-msgstr "Close chart"
-
 #: src/pages/Shell.tsx
 msgid "Close computer"
 msgstr "Close computer"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Close image preview"
-msgstr "Close image preview"
 
 #: src/pages/Shell.tsx
 msgid "Close navigation"
@@ -862,10 +630,6 @@ msgstr "Close preview"
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Cloud"
 msgstr "Cloud"
-
-#: src/components/AskCard.tsx
-msgid "Code"
-msgstr "Code"
 
 #. placeholder {0}: group.title
 #. placeholder {0}: item.chat.name
@@ -889,11 +653,6 @@ msgstr "Color"
 msgid "Color {color}"
 msgstr "Color {color}"
 
-#: src/components/AskCard.tsx
-#: src/pages/shell/bot-credentials.tsx
-msgid "Command variable"
-msgstr "Command variable"
-
 #: src/lib/roster-status.ts
 msgid "Compacting…"
 msgstr "Compacting…"
@@ -907,7 +666,6 @@ msgstr "Company deck"
 msgid "Company: {0}"
 msgstr "Company: {0}"
 
-#: src/pages/shell/bot-panel.tsx
 #: src/pages/ShellMessage.tsx
 msgid "Computer"
 msgstr "Computer"
@@ -936,88 +694,31 @@ msgstr "Computers are available. Reload or open a bot to continue."
 msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 msgstr "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
 
-#: src/components/AskCard.tsx
-msgid "Confirm adding candidates to the campaign"
-msgstr "Confirm adding candidates to the campaign"
-
-#: src/components/AskCard.tsx
-msgid "Confirm and send"
-msgstr "Confirm and send"
-
-#: src/components/AskCard.tsx
-msgid "Confirm forwarding email"
-msgstr "Confirm forwarding email"
-
-#: src/components/AskCard.tsx
-msgid "Confirm interview booking"
-msgstr "Confirm interview booking"
-
-#: src/components/AskCard.tsx
-msgid "Confirm interview cancellation"
-msgstr "Confirm interview cancellation"
-
-#: src/components/AskCard.tsx
-msgid "Confirm interview change"
-msgstr "Confirm interview change"
-
 #: src/pages/Auth.tsx
 msgid "Confirm password"
 msgstr "Confirm password"
-
-#: src/components/AskCard.tsx
-msgid "Confirm reply"
-msgstr "Confirm reply"
-
-#: src/components/AskCard.tsx
-msgid "Confirm requirements"
-msgstr "Confirm requirements"
-
-#: src/components/AskCard.tsx
-msgid "Confirm sending email"
-msgstr "Confirm sending email"
-
-#: src/components/AskCard.tsx
-msgid "Confirm sending the first email"
-msgstr "Confirm sending the first email"
 
 #: src/lib/model-connection-preflight.ts
 msgid "Confirm the URL is reachable from this browser session, then test again."
 msgstr "Confirm the URL is reachable from this browser session, then test again."
 
-#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Connect"
 msgstr "Connect"
 
-#: src/components/AskCard.tsx
-msgid "Connect {name}"
-msgstr "Connect {name}"
-
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Connect an app"
 msgstr "Connect an app"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Connect MCP server “{name}”"
-msgstr "Connect MCP server “{name}”"
-
-#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
-#: src/pages/shell/message-cards.tsx
 msgid "Connected"
 msgstr "Connected"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Connected. Its tools are available from your next message."
-msgstr "Connected. Its tools are available from your next message."
-
-#: src/components/AskCard.tsx
 #: src/components/integrations/IntegrationSetup.tsx
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
-#: src/pages/shell/message-cards.tsx
 msgid "Connecting…"
 msgstr "Connecting…"
 
@@ -1048,10 +749,6 @@ msgstr "Contacts"
 msgid "Continue"
 msgstr "Continue"
 
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Continue in Background"
-msgstr "Continue in Background"
-
 #. placeholder {0}: reset.sso.name
 #: src/pages/Auth.tsx
 msgid "Continue with {0}"
@@ -1077,14 +774,6 @@ msgstr "Copy"
 msgid "Copy .env example"
 msgstr "Copy .env example"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Could not approve this server"
-msgstr "Could not approve this server"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Could not authorize this app"
-msgstr "Could not authorize this app"
-
 #: src/lib/model-connection-preflight.ts
 msgid "Could not check stored credentials."
 msgstr "Could not check stored credentials."
@@ -1092,14 +781,6 @@ msgstr "Could not check stored credentials."
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not check teaching status. Refresh the view to continue."
 msgstr "Could not check teaching status. Refresh the view to continue."
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not clear conversation"
-msgstr "Could not clear conversation"
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Could not complete action"
-msgstr "Could not complete action"
 
 #: src/components/DesktopUpdates.tsx
 msgid "Could not complete the update. Try again."
@@ -1121,10 +802,6 @@ msgstr "Could not connect this app. Check your account settings and try again."
 msgid "Could not connect to the computer screen"
 msgstr "Could not connect to the computer screen"
 
-#: src/components/AskCard.tsx
-msgid "Could not connect. Try again."
-msgstr "Could not connect. Try again."
-
 #: src/components/AccountAccess.tsx
 #: src/lib/account-security.ts
 #: src/lib/mcp-connect.ts
@@ -1136,42 +813,6 @@ msgstr "Could not connect. Try again."
 #: src/pages/shell/useShellCreation.ts
 msgid "Could not continue"
 msgstr "Could not continue"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Could not create bot"
-msgstr "Could not create bot"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not create section"
-msgstr "Could not create section"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not create space"
-msgstr "Could not create space"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not delete bot"
-msgstr "Could not delete bot"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not delete group"
-msgstr "Could not delete group"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not delete routine"
-msgstr "Could not delete routine"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not delete space"
-msgstr "Could not delete space"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Could not dismiss"
-msgstr "Could not dismiss"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Could not dismiss this server"
-msgstr "Could not dismiss this server"
 
 #. placeholder {0}: props.name
 #: src/components/ArtifactFileCard.tsx
@@ -1199,10 +840,6 @@ msgstr "Could not list files"
 msgid "Could not load"
 msgstr "Could not load"
 
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Could not load approval rules"
-msgstr "Could not load approval rules"
-
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Could not load candidate records"
 msgstr "Could not load candidate records"
@@ -1223,10 +860,6 @@ msgstr "Could not load commands"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Could not load contact details"
 msgstr "Could not load contact details"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Could not load credentials."
-msgstr "Could not load credentials."
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
@@ -1291,26 +924,6 @@ msgstr "Could not reach the server"
 msgid "Could not read candidate records."
 msgstr "Could not read candidate records."
 
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Could not remove rule"
-msgstr "Could not remove rule"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Could not remove the credential"
-msgstr "Could not remove the credential"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not rename section"
-msgstr "Could not rename section"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Could not rename space"
-msgstr "Could not rename space"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Could not render chart"
-msgstr "Could not render chart"
-
 #: src/pages/Auth.tsx
 msgid "Could not reset password"
 msgstr "Could not reset password"
@@ -1319,29 +932,13 @@ msgstr "Could not reset password"
 msgid "Could not run routine"
 msgstr "Could not run routine"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "Could not save"
-msgstr "Could not save"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Could not save Auto Review"
-msgstr "Could not save Auto Review"
-
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not save routine"
 msgstr "Could not save routine"
 
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Could not save rule"
-msgstr "Could not save rule"
-
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Could not save shortlist"
 msgstr "Could not save shortlist"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Could not save the credential"
-msgstr "Could not save the credential"
 
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Could not save the note."
@@ -1350,10 +947,6 @@ msgstr "Could not save the note."
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Could not save the reminder."
 msgstr "Could not save the reminder."
-
-#: src/pages/shell/message-cards.tsx
-msgid "Could not save this choice"
-msgstr "Could not save this choice"
 
 #: src/pages/Auth.tsx
 msgid "Could not send reset email"
@@ -1366,10 +959,6 @@ msgstr "Could not send that"
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Could not start teaching"
 msgstr "Could not start teaching"
-
-#: src/components/AskCard.tsx
-msgid "Could not submit this answer"
-msgstr "Could not submit this answer"
 
 #: src/pages/shell/useShellComputer.ts
 msgid "Could not take control"
@@ -1396,16 +985,9 @@ msgstr "Could not verify computer setup ({failureMessage}). Fix the connection, 
 msgid "Count through"
 msgstr "Count through"
 
-#: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
-#: src/pages/shell/dialogs.tsx
 msgid "Create"
 msgstr "Create"
-
-#. placeholder {0}: bot.name
-#: src/pages/shell/dialogs.tsx
-msgid "Create a section and move {0} into it."
-msgstr "Create a section and move {0} into it."
 
 #: src/pages/Auth.tsx
 msgid "Create account"
@@ -1428,27 +1010,9 @@ msgstr "Create new Space"
 msgid "Create reminder"
 msgstr "Create reminder"
 
-#: src/components/AskCard.tsx
-#: src/pages/shell/dialogs.tsx
-msgid "Create space"
-msgstr "Create space"
-
 #: src/pages/Auth.tsx
 msgid "Create your WeKruit Headhunter account"
 msgstr "Create your WeKruit Headhunter account"
-
-#: src/components/AskCard.tsx
-msgid "Created"
-msgstr "Created"
-
-#: src/pages/shell/bot-panel.tsx
-#: src/pages/shell/dialogs.tsx
-msgid "Creating…"
-msgstr "Creating…"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Credentials"
-msgstr "Credentials"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1467,14 +1031,6 @@ msgstr "Current role"
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Current tenure"
 msgstr "Current tenure"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Custom header"
-msgstr "Custom header"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Customer support"
-msgstr "Customer support"
 
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Customize bot avatar"
@@ -1497,26 +1053,13 @@ msgstr "Date: {0}"
 msgid "day"
 msgstr "day"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Day-to-day work"
-msgstr "Day-to-day work"
-
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Days unavailable."
 msgstr "Days unavailable."
 
-#: src/components/AskCard.tsx
-msgid "Decline"
-msgstr "Decline"
-
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Default"
 msgstr "Default"
-
-#. placeholder {0}: thinkingLevelLabel(defaultThinkingLevel)
-#: src/pages/shell/bot-panel.tsx
-msgid "Default ({0})"
-msgstr "Default ({0})"
 
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay unavailable."
@@ -1530,7 +1073,6 @@ msgstr "Delay: {0} days"
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 #: src/pages/shell/DeveloperSidebar.tsx
-#: src/pages/shell/dialogs.tsx
 msgid "Delete"
 msgstr "Delete"
 
@@ -1540,19 +1082,9 @@ msgstr "Delete"
 msgid "Delete {0}"
 msgstr "Delete {0}"
 
-#. placeholder {0}: bot.name
-#. placeholder {0}: item.name
-#: src/pages/shell/dialogs.tsx
-msgid "Delete {0}?"
-msgstr "Delete {0}?"
-
 #: src/components/AccountAccess.tsx
 msgid "Delete account"
 msgstr "Delete account"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Delete memories too"
-msgstr "Delete memories too"
 
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Delete space"
@@ -1562,28 +1094,11 @@ msgstr "Delete space"
 msgid "deleted"
 msgstr "deleted"
 
-#: src/pages/shell/dialogs.tsx
-msgid "Deleting…"
-msgstr "Deleting…"
-
 #: src/components/AccountAccess.tsx
 msgid "Deletion code"
 msgstr "Deletion code"
 
-#: src/components/AskCard.tsx
-msgid "Denied"
-msgstr "Denied"
-
-#: src/components/AskCard.tsx
-msgid "Deny"
-msgstr "Deny"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Describe what this bot does"
-msgstr "Describe what this bot does"
-
 #: src/pages/recruiting/ProfileTimeline.tsx
-#: src/pages/shell/bot-panel.tsx
 msgid "Description"
 msgstr "Description"
 
@@ -1599,23 +1114,13 @@ msgstr "Desktop update"
 msgid "Direct MCP"
 msgstr "Direct MCP"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "Disabled tools"
-msgstr "Disabled tools"
-
-#: src/components/ComputerUpdateProgress.tsx
 #: src/components/teach/TeachComputerOverlay.tsx
-#: src/pages/shell/message-cards.tsx
 msgid "Dismiss"
 msgstr "Dismiss"
 
 #: src/pages/shell/Composer.tsx
 msgid "Dismiss error"
 msgstr "Dismiss error"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Dismissed. Reconnect anytime from MCP settings."
-msgstr "Dismissed. Reconnect anytime from MCP settings."
 
 #: src/components/ComputersUnavailableHint.tsx
 msgid "Docker is configured but computers are not responding. Confirm the sandbox supervisor is running, then recreate the stack after changing .env."
@@ -1666,10 +1171,6 @@ msgstr "Draft reply"
 msgid "Draft skill"
 msgstr "Draft skill"
 
-#: src/components/LiveWork.tsx
-msgid "Drafting email"
-msgstr "Drafting email"
-
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Drag, drop, or paste an image"
 msgstr "Drag, drop, or paste an image"
@@ -1677,10 +1178,6 @@ msgstr "Drag, drop, or paste an image"
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Due"
 msgstr "Due"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
-msgstr "e.g. Hivenet Agent, Presales, Timesheets bot"
 
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
@@ -1745,10 +1242,6 @@ msgstr "Employment rule"
 msgid "Enter a password"
 msgstr "Enter a password"
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "Enter a username and password"
-msgstr "Enter a username and password"
-
 #: src/lib/user-error.ts
 msgid "Enter a valid email"
 msgstr "Enter a valid email"
@@ -1766,19 +1259,11 @@ msgstr "Error"
 msgid "Evidence"
 msgstr "Evidence"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Expand"
-msgstr "Expand"
-
 #. placeholder {0}: group.title
 #. placeholder {0}: item.chat.name
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Expand {0}"
 msgstr "Expand {0}"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Export"
-msgstr "Export"
 
 #: src/pages/shell/ShellConversation.tsx
 msgid "Export conversation"
@@ -1861,10 +1346,6 @@ msgstr "Fit"
 msgid "Fixed date"
 msgstr "Fixed date"
 
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Flag unexpected actions"
-msgstr "Flag unexpected actions"
-
 #: src/pages/Auth.tsx
 msgid "Forgot password?"
 msgstr "Forgot password?"
@@ -1891,14 +1372,6 @@ msgstr "Gap"
 msgid "Get credentials"
 msgstr "Get credentials"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "Get notified when this Bot finishes or needs input"
-msgstr "Get notified when this Bot finishes or needs input"
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Getting ready"
-msgstr "Getting ready"
-
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Good example"
 msgstr "Good example"
@@ -1912,10 +1385,6 @@ msgstr "Good example: {name}"
 msgid "Group"
 msgstr "Group"
 
-#: src/pages/shell/dialogs.tsx
-msgid "Groups"
-msgstr "Groups"
-
 #: src/components/call/CallCard.tsx
 msgid "Hang up"
 msgstr "Hang up"
@@ -1927,14 +1396,6 @@ msgstr "Hang up first, then answer on screen."
 #: src/lib/call-session-engine.ts
 msgid "Hang up, then answer on screen."
 msgstr "Hang up, then answer on screen."
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Header \"{header}\""
-msgstr "Header \"{header}\""
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Header name"
-msgstr "Header name"
 
 #: src/pages/Shell.tsx
 msgid "Hide bots"
@@ -1991,14 +1452,6 @@ msgstr "In review"
 msgid "Inbox"
 msgstr "Inbox"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Inbox & email"
-msgstr "Inbox & email"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Inherit default"
-msgstr "Inherit default"
-
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Inputs"
 msgstr "Inputs"
@@ -2006,10 +1459,6 @@ msgstr "Inputs"
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Instance API key"
 msgstr "Instance API key"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Instructions"
-msgstr "Instructions"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Integration options"
@@ -2075,14 +1524,6 @@ msgstr "Introduced"
 msgid "Is a company deck available?"
 msgstr "Is a company deck available?"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "Isolated"
-msgstr "Isolated"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
-msgstr "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
-
 #: src/pages/shell/RecruitingNavigation.tsx
 #: src/pages/shell/ShellConversation.tsx
 msgid "Job Brief"
@@ -2099,10 +1540,6 @@ msgstr "Jump to replied message: {excerpt}"
 #: src/lib/relative-time.ts
 msgid "just now"
 msgstr "just now"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Keep memories"
-msgstr "Keep memories"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Key work"
@@ -2165,11 +1602,8 @@ msgstr "Loading preview…"
 msgid "Loading roles…"
 msgstr "Loading roles…"
 
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Loading rules…"
-msgstr "Loading rules…"
-
 #: src/App.tsx
+#: src/components/markdown-link-prompt.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -2194,10 +1628,6 @@ msgstr "Log out"
 msgid "Looks good, find more"
 msgstr "Looks good, find more"
 
-#: src/components/AskCard.tsx
-msgid "Looks good, start searching"
-msgstr "Looks good, start searching"
-
 #. js-lingui-explicit-id
 #: src/lib/model-catalog.ts
 msgid "Low"
@@ -2206,14 +1636,6 @@ msgstr "Low"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "Low"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
-msgstr "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Make sure nothing is still running on this computer."
-msgstr "Make sure nothing is still running on this computer."
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -2246,10 +1668,6 @@ msgstr "Medium"
 #: src/pages/RecruitingPanel.tsx
 msgid "Memory"
 msgstr "Memory"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Memory scope"
-msgstr "Memory scope"
 
 #: src/pages/shell/Composer.tsx
 msgid "Mentions"
@@ -2324,10 +1742,6 @@ msgstr "Minimum complete calendar months"
 msgid "Missing info"
 msgstr "Missing info"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "Model"
-msgstr "Model"
-
 #: src/lib/model-connection-preflight.ts
 msgid "Model \"{modelId}\" was not listed."
 msgstr "Model \"{modelId}\" was not listed."
@@ -2348,10 +1762,6 @@ msgstr "More"
 msgid "More computer actions"
 msgstr "More computer actions"
 
-#: src/pages/shell/dialogs.tsx
-msgid "Move them to your shared memory."
-msgstr "Move them to your shared memory."
-
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Must not"
 msgstr "Must not"
@@ -2364,19 +1774,12 @@ msgstr "Mute"
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
-#: src/pages/shell/bot-credentials.tsx
-#: src/pages/shell/bot-panel.tsx
-#: src/pages/shell/dialogs.tsx
 msgid "Name"
 msgstr "Name"
 
 #: src/pages/shell/Composer.tsx
 msgid "Name missing"
 msgstr "Name missing"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Name this bot"
-msgstr "Name this bot"
 
 #. placeholder {0}: candidate.name ?? t`Name missing`
 #. placeholder {0}: draft.candidateName
@@ -2388,10 +1791,6 @@ msgstr "Name: {0}"
 #: src/lib/roster-status.ts
 msgid "Needs an answer"
 msgstr "Needs an answer"
-
-#: src/components/AskCard.tsx
-msgid "Needs changes"
-msgstr "Needs changes"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Needs confirmation"
@@ -2410,10 +1809,6 @@ msgstr "Needs scheduling"
 msgid "Needs you"
 msgstr "Needs you"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "New bot"
-msgstr "New bot"
-
 #: src/pages/Auth.tsx
 msgid "New password"
 msgstr "New password"
@@ -2426,14 +1821,6 @@ msgstr "New role"
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "New Role"
 msgstr "New Role"
-
-#: src/pages/shell/dialogs.tsx
-msgid "New section"
-msgstr "New section"
-
-#: src/pages/shell/dialogs.tsx
-msgid "New space"
-msgstr "New space"
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
@@ -2465,10 +1852,6 @@ msgstr "No candidate records for this role yet."
 msgid "No contacts for this role yet."
 msgstr "No contacts for this role yet."
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "No credentials saved for this bot."
-msgstr "No credentials saved for this bot."
-
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "No dated sends in the available records."
 msgstr "No dated sends in the available records."
@@ -2493,10 +1876,6 @@ msgstr "No loaded candidates match these filters."
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
 msgstr "No loaded candidates match this date filter."
-
-#: src/components/AskCard.tsx
-msgid "No longer active"
-msgstr "No longer active"
 
 #: src/lib/model-connection-preflight.ts
 msgid "No models listed."
@@ -2565,11 +1944,6 @@ msgstr "Not a fit"
 msgid "Not a fit: {name}"
 msgstr "Not a fit: {name}"
 
-#: src/components/AskCard.tsx
-#: src/pages/shell/message-cards.tsx
-msgid "Not now"
-msgstr "Not now"
-
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Not reported"
 msgstr "Not reported"
@@ -2581,14 +1955,6 @@ msgstr "Note"
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Notes"
 msgstr "Notes"
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Nothing is still running"
-msgstr "Nothing is still running"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Notifications"
-msgstr "Notifications"
 
 #. placeholder {0}: call.botName
 #: src/components/call/CallCard.tsx
@@ -2721,9 +2087,7 @@ msgstr "Overdue ({0})"
 msgid "Partial match"
 msgstr "Partial match"
 
-#: src/components/AskCard.tsx
 #: src/pages/Auth.tsx
-#: src/pages/shell/bot-credentials.tsx
 msgid "Password"
 msgstr "Password"
 
@@ -2768,10 +2132,6 @@ msgstr "Pick a model from the list or enter a model id served by this endpoint."
 msgid "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
 msgstr "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
 
-#: src/components/LiveWork.tsx
-msgid "Preparing a question"
-msgstr "Preparing a question"
-
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Present"
 msgstr "Present"
@@ -2788,14 +2148,6 @@ msgstr "Preview only"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Preview only. Ask for the complete message to read the full body."
 msgstr "Preview only. Ask for the complete message to read the full body."
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Private"
-msgstr "Private"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Private workspace with its own bots and groups."
-msgstr "Private workspace with its own bots and groups."
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
@@ -2834,10 +2186,6 @@ msgstr "React"
 msgid "Reactions"
 msgstr "Reactions"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "Read replies aloud"
-msgstr "Read replies aloud"
-
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Read the attached materials for this role."
 msgstr "Read the attached materials for this role."
@@ -2845,14 +2193,6 @@ msgstr "Read the attached materials for this role."
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
 msgstr "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
-
-#: src/components/LiveWork.tsx
-msgid "Reading a page"
-msgstr "Reading a page"
-
-#: src/components/LiveWork.tsx
-msgid "Reading files"
-msgstr "Reading files"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Reason"
@@ -2883,7 +2223,6 @@ msgid "Recipients unavailable"
 msgstr "Recipients unavailable"
 
 #: src/App.tsx
-#: src/components/ComputerUpdateProgress.tsx
 msgid "Reconnecting"
 msgstr "Reconnecting"
 
@@ -2894,10 +2233,6 @@ msgstr "Reconnecting…"
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Recorded send activity"
 msgstr "Recorded send activity"
-
-#: src/components/LiveWork.tsx
-msgid "Recording feedback"
-msgstr "Recording feedback"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Recording may have started, but the view could not refresh"
@@ -2913,7 +2248,6 @@ msgid "Recording: {0}"
 msgstr "Recording: {0}"
 
 #: src/components/ComputerMaintenanceActions.tsx
-#: src/components/ComputerUpdateProgress.tsx
 msgid "Recover computer"
 msgstr "Recover computer"
 
@@ -2921,39 +2255,17 @@ msgstr "Recover computer"
 msgid "Recover computer?"
 msgstr "Recover computer?"
 
-#. placeholder {0}: update.name
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Recovering {0}’s Computer"
-msgstr "Recovering {0}’s Computer"
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Recovering Team Computer"
-msgstr "Recovering Team Computer"
-
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Recovering…"
 msgstr "Recovering…"
 
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Recovery failed"
-msgstr "Recovery failed"
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Recovery is unavailable until the previous operation has stopped."
-msgstr "Recovery is unavailable until the previous operation has stopped."
-
 #: src/components/ComputerMaintenanceActions.tsx
-#: src/components/ComputerUpdateProgress.tsx
 msgid "Recovery restores the last saved workspace. Unsaved work may be lost."
 msgstr "Recovery restores the last saved workspace. Unsaved work may be lost."
 
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Recreate a computer that is not working."
 msgstr "Recreate a computer that is not working."
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Recreating the computer"
-msgstr "Recreating the computer"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Recruiter messages are unavailable for this role."
@@ -2988,6 +2300,7 @@ msgstr "Refine in chat"
 
 #: src/App.tsx
 #: src/components/LazyOverlay.tsx
+#: src/components/markdown-link-prompt.tsx
 #: src/pages/RecruitingPanel.tsx
 msgid "Refresh"
 msgstr "Refresh"
@@ -2995,6 +2308,10 @@ msgstr "Refresh"
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Refresh view"
 msgstr "Refresh view"
+
+#: src/components/markdown-link-prompt.tsx
+msgid "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
+msgstr "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
 
 #: src/components/teach/TeachComputerOverlay.tsx
 msgid "Refreshing…"
@@ -3004,26 +2321,13 @@ msgstr "Refreshing…"
 msgid "Registration is closed"
 msgstr "Registration is closed"
 
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Release computer"
-msgstr "Release computer"
-
 #: src/pages/Shell.tsx
 msgid "Release control"
 msgstr "Release control"
 
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Release interrupted computer?"
-msgstr "Release interrupted computer?"
-
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Reminder"
 msgstr "Reminder"
-
-#: src/components/ApprovalRulesSettings.tsx
-#: src/pages/shell/bot-credentials.tsx
-msgid "Remove"
-msgstr "Remove"
 
 #. placeholder {0}: attachment.file.name
 #: src/pages/shell/Composer.tsx
@@ -3033,10 +2337,6 @@ msgstr "Remove {0}"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Remove {name} from shortlist"
 msgstr "Remove {name} from shortlist"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Remove {secretName}? This bot will no longer be able to use it."
-msgstr "Remove {secretName}? This bot will no longer be able to use it."
 
 #. placeholder {0}: mention.name
 #: src/pages/shell/Composer.tsx
@@ -3052,19 +2352,13 @@ msgstr "Remove skill {0}"
 msgid "Removed with chat, computer, and memory."
 msgstr "Removed with chat, computer, and memory."
 
-#: src/pages/shell/dialogs.tsx
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Rename section"
 msgstr "Rename section"
 
-#: src/pages/shell/dialogs.tsx
 #: src/pages/shell/ShellOverlays.tsx
 msgid "Rename space"
 msgstr "Rename space"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Replace value"
-msgstr "Replace value"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 #: src/pages/recruiting/SequenceStats.tsx
@@ -3091,10 +2385,6 @@ msgstr "Reply to the selected email"
 #: src/pages/shell/Composer.tsx
 msgid "Replying to {0}"
 msgstr "Replying to {0}"
-
-#: src/pages/shell/message-cards.tsx
-msgid "Research & writing"
-msgstr "Research & writing"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Research round"
@@ -3155,10 +2445,6 @@ msgstr "Restore the last saved workspace."
 msgid "Restore the last saved workspace. Unsaved work on the computer is lost."
 msgstr "Restore the last saved workspace. Unsaved work on the computer is lost."
 
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Restoring your workspace"
-msgstr "Restoring your workspace"
-
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Resume consideration"
 msgstr "Resume consideration"
@@ -3198,14 +2484,6 @@ msgstr "Return to the original role before saving this draft."
 msgid "Review provider settings and test again."
 msgstr "Review provider settings and test again."
 
-#: src/components/LiveWork.tsx
-msgid "Reviewing candidates"
-msgstr "Reviewing candidates"
-
-#: src/components/LiveWork.tsx
-msgid "Reviewing the role"
-msgstr "Reviewing the role"
-
 #: src/pages/RecruitingPanel.tsx
 msgid "Role"
 msgstr "Role"
@@ -3217,10 +2495,6 @@ msgstr "Role conversation"
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Role conversations"
 msgstr "Role conversations"
-
-#: src/components/AskCard.tsx
-msgid "Role requirements"
-msgstr "Role requirements"
 
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
@@ -3270,28 +2544,16 @@ msgstr "running"
 msgid "Salary range"
 msgstr "Salary range"
 
-#: src/components/AskCard.tsx
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
-#: src/pages/shell/bot-panel.tsx
-#: src/pages/shell/dialogs.tsx
 msgid "Save"
 msgstr "Save"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Save credential"
-msgstr "Save credential"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Save new value"
-msgstr "Save new value"
 
 #: src/components/ComputerMaintenanceActions.tsx
 msgid "Save the workspace and install current software."
 msgstr "Save the workspace and install current software."
 
-#: src/components/AskCard.tsx
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Saved"
 msgstr "Saved"
@@ -3320,18 +2582,7 @@ msgstr "Saved results"
 msgid "Saved role summary"
 msgstr "Saved role summary"
 
-#: src/components/LiveWork.tsx
-msgid "Saving notes"
-msgstr "Saving notes"
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Saving your workspace"
-msgstr "Saving your workspace"
-
-#: src/components/AskCard.tsx
 #: src/components/teach/SkillDraftCard.tsx
-#: src/pages/shell/bot-credentials.tsx
-#: src/pages/shell/dialogs.tsx
 msgid "Saving…"
 msgstr "Saving…"
 
@@ -3387,14 +2638,6 @@ msgstr "Search roles"
 msgid "Search update {0}"
 msgstr "Search update {0}"
 
-#: src/components/LiveWork.tsx
-msgid "Searching candidates"
-msgstr "Searching candidates"
-
-#: src/components/LiveWork.tsx
-msgid "Searching the web"
-msgstr "Searching the web"
-
 #: src/pages/shell/ShellConversation.tsx
 msgid "Select a bot"
 msgstr "Select a bot"
@@ -3402,10 +2645,6 @@ msgstr "Select a bot"
 #: src/pages/shell/Composer.tsx
 msgid "Send"
 msgstr "Send"
-
-#: src/components/AskCard.tsx
-msgid "Send answer"
-msgstr "Send answer"
 
 #: src/components/AccountAccess.tsx
 msgid "Send deletion code"
@@ -3427,10 +2666,6 @@ msgstr "Send recorded"
 msgid "Send reset link"
 msgstr "Send reset link"
 
-#: src/components/AskCard.tsx
-msgid "Send when I say send"
-msgstr "Send when I say send"
-
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Sender unavailable"
 msgstr "Sender unavailable"
@@ -3439,7 +2674,6 @@ msgstr "Sender unavailable"
 msgid "Sending schedule"
 msgstr "Sending schedule"
 
-#: src/components/AskCard.tsx
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Sending…"
 msgstr "Sending…"
@@ -3493,14 +2727,6 @@ msgstr "Setup help"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Shape"
 msgstr "Shape"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Shared"
-msgstr "Shared"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Shared chat with 2-6 bots. They all reply in the same thread."
-msgstr "Shared chat with 2-6 bots. They all reply in the same thread."
 
 #: src/components/computer/TerminalApp.tsx
 msgid "Shell"
@@ -3587,10 +2813,6 @@ msgstr "Sign in with the subscription, or test the API key instead."
 msgid "Sign up"
 msgstr "Sign up"
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "Site"
-msgstr "Site"
-
 #. placeholder {0}: skill.name
 #: src/pages/shell/Composer.tsx
 msgid "Skill {0}"
@@ -3631,6 +2853,7 @@ msgid "Some saved contact details could not be displayed."
 msgstr "Some saved contact details could not be displayed."
 
 #: src/App.tsx
+#: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
 #: src/pages/shell/useShellController.tsx
 msgid "Something went wrong. Try again."
@@ -3652,14 +2875,6 @@ msgstr "Source unavailable"
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Sources"
 msgstr "Sources"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Space default"
-msgstr "Space default"
-
-#: src/pages/shell/dialogs.tsx
-msgid "Spaces"
-msgstr "Spaces"
 
 #: src/pages/ShellMessage.tsx
 msgid "Speak"
@@ -3763,10 +2978,6 @@ msgstr "Teach a task"
 msgid "Teaching in progress. Stop teaching before sending a new message."
 msgstr "Teaching in progress. Stop teaching before sending a new message."
 
-#: src/pages/shell/bot-panel.tsx
-msgid "Team"
-msgstr "Team"
-
 #: src/pages/shell/computer-presentation.tsx
 msgid "Team Computer"
 msgstr "Team Computer"
@@ -3819,21 +3030,9 @@ msgstr "The recruiting team is not ready yet."
 msgid "The workspace changed. Open the role again."
 msgstr "The workspace changed. Open the role again."
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "These saved settings can't be read. Remove it and add it again."
-msgstr "These saved settings can't be read. Remove it and add it again."
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Thinking"
-msgstr "Thinking"
-
 #: src/pages/shell/computer-presentation.tsx
 msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
 msgstr "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
-
-#: src/pages/shell/dialogs.tsx
-msgid "This cannot be undone."
-msgstr "This cannot be undone."
 
 #: src/components/ArtifactFileCard.tsx
 msgid "This file is not valid UTF-8 text."
@@ -3846,10 +3045,6 @@ msgstr "This filter belongs to another role."
 #: src/components/AccountAccess.tsx
 msgid "This permanently deletes your account and data."
 msgstr "This permanently deletes your account and data."
-
-#: src/pages/shell/dialogs.tsx
-msgid "This permanently removes every message and stops current work. The chat remains available."
-msgstr "This permanently removes every message and stops current work. The chat remains available."
 
 #: src/lib/model-connection-preflight.ts
 msgid "This provider cannot be tested without saving."
@@ -3867,10 +3062,6 @@ msgstr "This reset link is invalid or expired"
 msgid "This role changed. Select the candidate again."
 msgstr "This role changed. Select the candidate again."
 
-#: src/pages/shell/message-cards.tsx
-msgid "This server cannot be assigned without a bot."
-msgstr "This server cannot be assigned without a bot."
-
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Thread"
 msgstr "Thread"
@@ -3878,10 +3069,6 @@ msgstr "Thread"
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Time not recorded"
 msgstr "Time not recorded"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Title"
-msgstr "Title"
 
 #. placeholder {0}: candidate.title
 #: src/pages/shell/Composer.tsx
@@ -3904,10 +3091,6 @@ msgstr "To:"
 msgid "Today"
 msgstr "Today"
 
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Tool name"
-msgstr "Tool name"
-
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
 msgstr "Total experience"
@@ -3924,17 +3107,9 @@ msgstr "Try again"
 msgid "Try the test again."
 msgstr "Try the test again."
 
-#: src/pages/shell/bot-credentials.tsx
-msgid "Type"
-msgstr "Type"
-
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Type without recording"
 msgstr "Type without recording"
-
-#: src/components/AskCard.tsx
-msgid "Type your answer"
-msgstr "Type your answer"
 
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Type your note here"
@@ -3950,10 +3125,6 @@ msgstr "Unavailable"
 #: src/pages/recruiting/VerdictLabel.tsx
 msgid "Unknown"
 msgstr "Unknown"
-
-#: src/pages/shell/bot-panel.tsx
-msgid "Unknown tool"
-msgstr "Unknown tool"
 
 #: src/pages/recruiting/VerdictLabel.tsx
 msgid "Unmet"
@@ -4006,7 +3177,6 @@ msgstr "Update available"
 msgid "Update computer"
 msgstr "Update computer"
 
-#: src/components/ComputerUpdateProgress.tsx
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Update failed"
 msgstr "Update failed"
@@ -4015,26 +3185,9 @@ msgstr "Update failed"
 msgid "Update finished with errors"
 msgstr "Update finished with errors"
 
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Update progress"
-msgstr "Update progress"
-
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Updated"
 msgstr "Updated"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Updated {updated}"
-msgstr "Updated {updated}"
-
-#. placeholder {0}: update.name
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Updating {0}’s Computer"
-msgstr "Updating {0}’s Computer"
-
-#: src/components/ComputerUpdateProgress.tsx
-msgid "Updating Team Computer"
-msgstr "Updating Team Computer"
 
 #: src/components/ComputerMaintenanceActions.tsx
 #: src/components/SoftwareUpdateSection.tsx
@@ -4066,24 +3219,6 @@ msgstr "Use Protected input for passwords."
 msgid "Use the attached files to define this role and start the search."
 msgstr "Use the attached files to define this role and start the search."
 
-#: src/components/AskCard.tsx
-#: src/pages/shell/bot-credentials.tsx
-msgid "Username"
-msgstr "Username"
-
-#: src/components/LiveWork.tsx
-msgid "Using a connected app"
-msgstr "Using a connected app"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Value"
-msgstr "Value"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Values are encrypted and never shown again."
-msgstr "Values are encrypted and never shown again."
-
-#: src/pages/shell/bot-panel.tsx
 #: src/pages/shell/Composer.tsx
 msgid "Voice"
 msgstr "Voice"
@@ -4112,14 +3247,6 @@ msgstr "Waiting for the API to come back…"
 msgid "Waiting in line…"
 msgstr "Waiting in line…"
 
-#: src/pages/shell/message-cards.tsx
-msgid "Waiting…"
-msgstr "Waiting…"
-
-#: src/pages/shell/bot-credentials.tsx
-msgid "Website login"
-msgstr "Website login"
-
 #: src/lib/billing.ts
 msgid "week"
 msgstr "week"
@@ -4127,14 +3254,6 @@ msgstr "week"
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "WeKruit home"
 msgstr "WeKruit home"
-
-#: src/pages/shell/dialogs.tsx
-msgid "What about its memories?"
-msgstr "What about its memories?"
-
-#: src/pages/shell/message-cards.tsx
-msgid "What do you want me on first?"
-msgstr "What do you want me on first?"
 
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "What location or remote work scope applies?"
@@ -4148,10 +3267,6 @@ msgstr "What result will you demonstrate?"
 msgid "What salary range may be stated in outreach?"
 msgstr "What salary range may be stated in outreach?"
 
-#: src/pages/shell/bot-panel.tsx
-msgid "What this bot is for"
-msgstr "What this bot is for"
-
 #: src/components/teach/SkillDraftCard.tsx
 msgid "What to return"
 msgstr "What to return"
@@ -4164,17 +3279,9 @@ msgstr "When to use"
 msgid "Won't do"
 msgstr "Won't do"
 
-#: src/components/LiveWork.tsx
-msgid "Worked for {duration}"
-msgstr "Worked for {duration}"
-
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "Working in background…"
-
-#: src/components/LiveWork.tsx
-msgid "Working on it"
-msgstr "Working on it"
 
 #: src/lib/roster-status.ts
 #: src/pages/Auth.tsx

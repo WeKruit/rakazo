@@ -81,7 +81,8 @@ function activateLoaded(
 
 /**
  * Load and activate a locale. Concurrent calls: only the latest selection wins.
- * If the preferred catalog fails, falls back to English (then empty English).
+ * If the preferred catalog fails, tries English, then preserves the active catalog.
+ * Empty English is only the final fallback before any locale has been activated.
  */
 export function activateUiLocale(locale: UiLocale): Promise<UiLocale> {
   activationInFlight = loadAndActivateLocale(locale);
@@ -113,10 +114,11 @@ async function loadAndActivateLocale(locale: UiLocale): Promise<UiLocale> {
         if (!isCurrent()) return getActiveUiLocale();
         return activateLoaded("en", messages);
       } catch {
-        // Continue to empty English below.
+        // Preserve the last activated catalog when both complete loads fail.
       }
     }
     if (!isCurrent()) return getActiveUiLocale();
+    if (activeLocale !== null) return activeLocale;
     return activateLoaded("en", {}, false);
   }
 }

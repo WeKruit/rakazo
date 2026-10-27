@@ -27,7 +27,7 @@ const ComputerMaintenanceActions = lazyPanel(() =>
 );
 
 const ComputerUpdateProgress = lazyPanel(() =>
-  import("../components/ComputerUpdateProgress").then(
+  withFeatureMessages(() => import("../components/ComputerUpdateProgress")).then(
     (m) => (props: ComponentProps<typeof m.ComputerUpdateProgress>) => (
       <m.ComputerUpdateProgress {...props} />
     ),

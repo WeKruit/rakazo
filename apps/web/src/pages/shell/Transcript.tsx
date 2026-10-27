@@ -31,9 +31,10 @@ import { ActiveBotGlyph } from "../../components/ai/CollaborationMarker";
 import { LoadingState, Shimmer } from "../../components/ai/primitives";
 import { VoiceChatCard } from "../../components/call/VoiceChatCard";
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { withFeatureMessages } from "../../lib/i18n";
 
 const LiveWork = lazyPanel(
-  () => import("../../components/LiveWork").then((m) => m.LiveWork),
+  () => withFeatureMessages(() => import("../../components/LiveWork")).then((m) => m.LiveWork),
   ({ live, label }) =>
     live ? (
       <LoadingState

@@ -261,3 +261,15 @@ RLS_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2_rls_root pnp
 DB/API2,609passed/430skipped,64.06s;11packagechecks passed (not separately timed); actual local PostgreSQL307/307,22.69s; independent RLS18/18,761ms.430skips are not passes. Expo offline validation does not validate the online dependency catalog. These numbers precede the separately tested C5 foundation; its worker/Python gates are recorded in C5-LOCAL-DRAIN.md.
 
 F2 ownership remains Claude. Existing `job-reconciler.test.ts`, `turn-end-guard.test.ts`, `recruiting-question-nudge.test.ts`:59/59,1.24s. The first fresh-worktree attempt failed two imports because the generated Prisma client was absent; `pnpm --filter @rakazo/db generate` restored the normal prerequisite before this successful run. No F2 implementation was changed, no actual worker crash or online outcome was tested.
+
+## Broad regression after C5 foundation and first catalog split
+
+At34acd2a5c (product through#303/#304), `pnpm exec vitest run --maxWorkers=4` with local socket permission ran793passing files and59skipped files:13,376tests passed,686skipped,142.66s. Two additional suites failed import because the fresh worktree lacked the infra/updater dependency links (`@hono/node-server`, `yaml`); no product assertion failed in that run. After linking the locked dependencies privately, `pnpm exec vitest run infra/updater/src/index.test.ts infra/updater/src/release-workflow.test.ts --maxWorkers=2` passed2/2files and36/36tests in782ms. Thus the completed coverage is13,412passing tests plus686skips across the original run and targeted repair, not one claimed all-green invocation.
+
+An earlier sandboxed attempt was deliberately stopped after a loopback listener fixture timed out and the supervisor dependency directory was missing; it is not a passing run. The permitted run above included the repaired supervisor package and passed the SSRF rebinding fixture. Tar emitted locale warnings without failed assertions. No root-test filtering, assertion relaxation or production connection was used. This broad result precedes the next C5 authority work and second D1 catalog slice; those require their own applicable gates.
+
+## Optional-catalog failure preservation
+
+A failed preferred and English optional catalog previously activated empty English, replacing a usable Chinese startup view with untranslated message IDs. Preserve the last activated catalog and keep the unopened optional feature blocked; first-bootstrap fallback remains unchanged. A later successful load can still open the feature, and failed locale changes preserve already translated mounted features.
+
+Validation: `pnpm exec vitest run apps/web/src/lib/i18n-features.test.ts apps/web/src/lib/i18n-activate.test.ts apps/web/src/lib/i18n-startup.test.ts apps/web/src/lib/i18n-catalog.test.ts apps/web/src/lib/ui-locale.test.ts` passed **36 tests / 5 files, 1.84s**. `pnpm --filter @rakazo/web check`, `pnpm --filter @rakazo/web build` (2.56s) and `git diff --check` passed. This is failure-path correctness, not a new route-size or deployed LCP measurement; those acceptance gaps remain open.
