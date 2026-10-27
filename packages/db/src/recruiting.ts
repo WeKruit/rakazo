@@ -11034,14 +11034,19 @@ export async function saveRecruitingCalibrationRound(
       // The exact keys to pick from, so one retry is enough instead of guessing keys from names.
       const others = await tx.recruitingCandidateOccurrence.findMany({
         where: { roleId: role.id, candidateKey: { notIn: [...known] } },
-        select: { candidateKey: true, name: true },
+        select: { candidateKey: true, name: true, company: true },
         distinct: ["candidateKey"],
         orderBy: { candidateKey: "asc" },
         take: 20,
       });
-      const choices = others.map((row) => `${row.name ?? "?"} = ${row.candidateKey}`).join("; ");
+      const choices = others
+        .map(
+          (row) =>
+            `${row.name ?? "?"}${row.company ? ` (${row.company})` : ""} = ${row.candidateKey}`,
+        )
+        .join("; ");
       throw new RecruitingCalibrationRoundError(
-        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${notes.join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).${choices ? ` Saved people not yet in this round: ${choices}.` : ""}`,
+        `Every person in a calibration round must be a saved candidate of this role. Not saved: ${notes.join(", ")}. Use the exact candidateKey of a saved people row instead (the rows are already saved; no save_search is needed).${choices ? ` Saved people not yet in this round, in key order, to look up the key of the person you meant (never pick someone because they are listed here; every pick still fits every requirement and is not at the hiring company): ${choices}.` : ""}`,
       );
     }
     const previous = await tx.recruitingCalibrationRound.findFirst({
