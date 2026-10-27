@@ -224,12 +224,15 @@ describe("maintained recruiting defaults", () => {
     expect(RECRUITING_INTAKE_FLOW).toContain("Role documents never hold up the calibration search");
   });
 
-  it("keeps calibration searches parallel and tops up a short search", () => {
+  it("keeps calibration searches parallel and lets the recruiter decide a short round", () => {
     for (const part of [
       "issue four differently worded platform people searches together as parallel tool calls in one step",
       'highlightsQuery "concrete evidence of: "',
       "which lists them in chat with their profile passages",
-      "top up the same round with one research request on this role for only the missing number",
+      "never fill the round with people who fail a requirement",
+      "a requirement is never relaxed to fill the ten",
+      "offering to relax that named requirement or to keep searching with a deeper search",
+      "request research on this role for only the missing number of people",
       "Never tell the recruiter about search quotas",
     ])
       expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);
