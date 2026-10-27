@@ -61,6 +61,7 @@ import {
   closePoolSessions,
   createBoardEvents,
   createDb,
+  createPool,
   createThreadEvents,
   isTooManyDatabaseConnections,
   parsePositiveInteger,
@@ -94,19 +95,24 @@ async function main() {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) throw new Error("DATABASE_URL is required");
   const shutdown = new AbortController();
-  // Shared by Prisma, the reconciliation leadership lock, and both graphile-worker
-  // components (see GraphileJobPublisher/GraphileJobWorkerHost) — one pool instead
-  // of four separate ones. Keep this modest: graphile holds a LISTEN client and
-  // leadership holds an advisory-lock client for the process lifetime, and a
-  // larger max just competes for Postgres max_connections (53300).
+  // Prisma and job publishing hold a connection only per query or transaction, so DATABASE_URL
+  // may be a transaction-mode pooler. graphile's runner (LISTEN, prepared statements) and the
+  // reconciler's lock keep a session for the process lifetime, so they use the session URL,
+  // REALTIME_DATABASE_URL, when it is a separate connection.
   const created = createDb(databaseUrl, {
     poolMax: parsePositiveInteger(process.env.DB_POOL_MAX, 8),
     applicationName: "rakazo-worker",
   });
   const { pool } = created;
   let { prisma } = created;
+  const sessionUrl = process.env.REALTIME_DATABASE_URL ?? databaseUrl;
+  // LISTEN, the lock, and two for fetching and completing jobs.
+  const sessionPool =
+    sessionUrl === databaseUrl
+      ? pool
+      : createPool(sessionUrl, { poolMax: 4, applicationName: "rakazo-worker-session" });
   const realtime = new PostgresRealtimeFanout({
-    connectionString: process.env.REALTIME_DATABASE_URL ?? databaseUrl,
+    connectionString: sessionUrl,
     publisher: pool,
   });
   const secrets = await createWorkerSecretStore(process.env, realtime);
@@ -234,7 +240,7 @@ async function main() {
   });
   const jobHost: JobWorkerHost =
     inMemoryJobs ??
-    new GraphileJobWorkerHost(pool, {
+    new GraphileJobWorkerHost(sessionPool, {
       concurrency: parsePositiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 4),
       noHandleSignals: true,
     });
@@ -331,7 +337,7 @@ async function main() {
     jobs,
     events,
     notifications,
-    leadership: createPostgresReconciliationLeadership(pool),
+    leadership: createPostgresReconciliationLeadership(sessionPool),
     reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
   });
@@ -346,6 +352,7 @@ async function main() {
     setTimeout(() => {
       void realtime.close();
       void closePoolSessions(pool);
+      void closePoolSessions(sessionPool);
     }, SESSION_RELEASE_MS).unref();
     try {
       await reconciler.stop();
@@ -358,6 +365,7 @@ async function main() {
       firstPartyAuth?.disposeOidcDiscovery();
       await prisma.$disconnect().catch(() => undefined);
       await pool.end().catch(() => undefined);
+      if (sessionPool !== pool) await sessionPool.end().catch(() => undefined);
     } finally {
       await logger.flush({ timeoutMs: 2_000 });
     }
