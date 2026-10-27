@@ -83,6 +83,10 @@ A subsequent attempted filtered recruiting PostgreSQL run used `pnpm test ... -t
 
 Publication preparation merged upstream `9b2705c66fe952aa90c1a011dcb51ed22c82ef82` normally. API/DB/adapters/contracts/core/web/mobile checks passed; web and mobile suites reran with **1,654 / 1,004 passed**.
 
+After the ordinary merge of F1 base `168fcaacc088e063b8cd2d0dc3b52b414f7eb88a`, publication gates reran: API **1,376 passed / 51 skipped**, adapters **5,118 passed / 47 skipped**, core **1,239 passed / 5 skipped**, contracts **332 passed**; complete recruiting PostgreSQL **285 passed**; the two synthetic list/HTTP files **3 passed**. This HTTP run measured p50 **22.47 ms**, p95 **26.58 ms**, max **46.62 ms** (100 samples/10 warmups); its query-only p95 was **0.86/0.46 ms**. Earlier measurements above are retained, not overwritten.
+
+The online Expo dependency-version advisory reported newly available patch versions and stopped the first combined check before mobile TypeScript. No lockfile/dependency upgrade was made. Repeating the seven-package check with `EXPO_OFFLINE=1` used the installed dependency map and passed all TypeScript checks; Expo explicitly notes that offline dependency-version advice is limited. This is separate from the passing mobile TypeScript and 1,004 unit tests.
+
 ## Remaining acceptance
 
 Online 1,000-candidate contacts-view RPC p95 < 300 ms is **not tested**. PR #277 targets only the #263 integration branch; final merge status is tracked on that PR. No deployment, live provider call, real candidate/job test, cloud configuration change, or CI enablement was performed. Final integration tests must run on the combined #263 branch; this worktree's results do not substitute for that run.
