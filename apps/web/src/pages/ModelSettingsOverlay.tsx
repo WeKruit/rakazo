@@ -1463,7 +1463,7 @@ export function ModelSettingsOverlay({
       <ModelDisconnectDialog
         open={confirmDisconnect}
         onOpenChange={setConfirmDisconnect}
-        name={disconnectName}
+        disconnectName={disconnectName}
         pending={pending === "disconnect"}
         onConfirm={() => {
           setConfirmDisconnect(false);

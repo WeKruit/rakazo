@@ -319,13 +319,13 @@ function ModelOption({
 export function ModelDisconnectDialog({
   open,
   onOpenChange,
-  name,
+  disconnectName,
   pending,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  name: string;
+  disconnectName: string;
   pending: boolean;
   onConfirm: () => void;
 }) {
@@ -334,7 +334,7 @@ export function ModelDisconnectDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            <Trans>Disconnect {name}?</Trans>
+            <Trans>Disconnect {disconnectName}?</Trans>
           </AlertDialogTitle>
           <AlertDialogDescription>
             <Trans>This removes the connection from every space.</Trans>
