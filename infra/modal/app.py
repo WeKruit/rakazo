@@ -108,9 +108,7 @@ image = (
          "MODAL_ENVIRONMENT": os.environ.get("MODAL_ENVIRONMENT", "main"),
          "RAKAZO_RELEASE_PROFILE": RELEASE_PROFILE, "RAKAZO_GIT_SHA": SOURCE_REVISION},
     port=8000,
-    # Same cloud and region as the database pooler: every statement is a round trip.
     compute_region="us-west",
-    cloud="aws",
     unauthenticated=True,  # Native Better Auth protects application/API routes.
     min_containers=1,
     max_containers=1,  # ponytail: one native DATA_DIR writer; scale only with a shared store.
