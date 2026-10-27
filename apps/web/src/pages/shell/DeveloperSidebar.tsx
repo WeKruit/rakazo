@@ -23,6 +23,7 @@ import {
   Search,
 } from "lucide-react";
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { withFeatureMessages } from "../../lib/i18n";
 import {
   compactRosterStatusLabel,
   rosterHasUndismissedRunError,
@@ -37,7 +38,7 @@ import type { useShellController } from "../shell/useShellController";
 import { WindowChrome } from "../WindowChrome";
 
 const ActivityList = lazyPanel(() =>
-  import("../ActivityList").then((module) => module.ActivityList),
+  withFeatureMessages(() => import("../ActivityList")).then((module) => module.ActivityList),
 );
 
 export function DeveloperSidebar({ model }: { model: ReturnType<typeof useShellController> }) {

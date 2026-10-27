@@ -3,10 +3,13 @@ import { Button } from "@rakazo/ui-web";
 import { useEffect, useState } from "react";
 import { lazyPanel } from "../components/ErrorBoundary";
 import { IntegrationSetup } from "../components/integrations/IntegrationSetup";
+import { withFeatureMessages } from "../lib/i18n";
 import { rpc } from "../lib/rpc";
 
 const ModelSettingsOverlay = lazyPanel(() =>
-  import("./ModelSettingsOverlay").then((module) => module.ModelSettingsOverlay),
+  withFeatureMessages(() => import("./ModelSettingsOverlay")).then(
+    (module) => module.ModelSettingsOverlay,
+  ),
 );
 
 export function LocalSettingsPage() {

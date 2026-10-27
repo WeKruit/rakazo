@@ -9,6 +9,7 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Suspense } from "react";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { lazyOverlay } from "../../components/LazyOverlay";
+import { withFeatureMessages } from "../../lib/i18n";
 import { rightPanelStorageKey } from "../../lib/right-panel-state";
 import { rpc, selectedSpaceId, selectSpace } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
@@ -46,22 +47,28 @@ const RenameSpaceDialog = lazyPanel(() =>
 );
 
 const BotContextMenu = lazyOverlay(() =>
-  import("../BotContextMenu").then((module) => module.BotContextMenu),
+  withFeatureMessages(() => import("../BotContextMenu")).then((module) => module.BotContextMenu),
 );
 const MessagingSettingsOverlay = lazyOverlay(() =>
-  import("../MessagingSettingsOverlay").then((module) => module.MessagingSettingsOverlay),
+  withFeatureMessages(() => import("../MessagingSettingsOverlay")).then(
+    (module) => module.MessagingSettingsOverlay,
+  ),
 );
 const SettingsOverlay = lazyOverlay(() =>
-  import("../SettingsOverlay").then((module) => module.SettingsOverlay),
+  withFeatureMessages(() => import("../SettingsOverlay")).then((module) => module.SettingsOverlay),
 );
 const PeerMessagesOverlay = lazyOverlay(() =>
-  import("../PeerMessagesOverlay").then((module) => module.PeerMessagesOverlay),
+  withFeatureMessages(() => import("../PeerMessagesOverlay")).then(
+    (module) => module.PeerMessagesOverlay,
+  ),
 );
 const PluginsOverlay = lazyOverlay(() =>
-  import("../PluginsOverlay").then((module) => module.PluginsOverlay),
+  withFeatureMessages(() => import("../PluginsOverlay")).then((module) => module.PluginsOverlay),
 );
 const McpServersOverlay = lazyOverlay(() =>
-  import("../McpServersOverlay").then((module) => module.McpServersOverlay),
+  withFeatureMessages(() => import("../McpServersOverlay")).then(
+    (module) => module.McpServersOverlay,
+  ),
 );
 const VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 function voiceStatusRefreshTimeout(): Promise<never> {

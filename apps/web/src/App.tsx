@@ -24,6 +24,7 @@ import {
   subscribeTicketBoardEnabled,
 } from "./lib/bootstrap";
 import { discardCall } from "./lib/call-session";
+import { withFeatureMessages } from "./lib/i18n";
 import { markAfterPaint, markOnce } from "./lib/performance";
 import { getRemoteImagesEnabled, subscribeRemoteImages } from "./lib/remote-images-preference";
 import { rpc, selectedSpaceId, subscribeSpaceSelection } from "./lib/rpc";
@@ -46,25 +47,39 @@ const PasswordResetPage = lazy(() =>
   import("./pages/Auth").then((module) => ({ default: module.PasswordResetPage })),
 );
 const OnboardingPage = lazy(() =>
-  import("./pages/Onboarding").then((module) => ({ default: module.OnboardingPage })),
+  withFeatureMessages(() => import("./pages/Onboarding")).then((module) => ({
+    default: module.OnboardingPage,
+  })),
 );
 const WelcomePage = lazy(() =>
-  import("./pages/Welcome").then((module) => ({ default: module.WelcomePage })),
+  withFeatureMessages(() => import("./pages/Welcome")).then((module) => ({
+    default: module.WelcomePage,
+  })),
 );
 const ArtifactsPage = lazy(() =>
-  import("./pages/Artifacts").then((module) => ({ default: module.ArtifactsPage })),
+  withFeatureMessages(() => import("./pages/Artifacts")).then((module) => ({
+    default: module.ArtifactsPage,
+  })),
 );
 const IntegrationSetupPage = lazy(() =>
-  import("./pages/IntegrationSetup").then((module) => ({ default: module.IntegrationSetupPage })),
+  withFeatureMessages(() => import("./pages/IntegrationSetup")).then((module) => ({
+    default: module.IntegrationSetupPage,
+  })),
 );
 const LocalSettingsPage = lazy(() =>
-  import("./pages/LocalSettings").then((module) => ({ default: module.LocalSettingsPage })),
+  withFeatureMessages(() => import("./pages/LocalSettings")).then((module) => ({
+    default: module.LocalSettingsPage,
+  })),
 );
 const McpOAuthCallbackPage = lazy(() =>
-  import("./pages/McpOAuthCallback").then((module) => ({ default: module.McpOAuthCallbackPage })),
+  withFeatureMessages(() => import("./pages/McpOAuthCallback")).then((module) => ({
+    default: module.McpOAuthCallbackPage,
+  })),
 );
 const BoardPage = lazy(() =>
-  import("./pages/Board").then((module) => ({ default: module.BoardPage })),
+  withFeatureMessages(() => import("./pages/Board")).then((module) => ({
+    default: module.BoardPage,
+  })),
 );
 
 function SsoCallbackPage() {

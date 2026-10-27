@@ -1,7 +1,8 @@
+import { withFeatureMessages } from "../lib/i18n";
 import { computerLabel, DesktopKindEmptyState } from "./shell/computer-presentation";
 
 const ShellPanelContent = lazyPanel(() =>
-  import("./shell/ShellPanelContent").then((m) => m.ShellPanelContent),
+  withFeatureMessages(() => import("./shell/ShellPanelContent")).then((m) => m.ShellPanelContent),
 );
 
 import { ATTACHMENT_ACCEPT } from "./shell/Composer";
@@ -54,7 +55,7 @@ import { screenIframeSandbox } from "../lib/computer-screen";
 import { computerTakeoverBlocked } from "../lib/thread-events";
 
 const HostComputerPrompt = lazyPanel(() =>
-  import("./HostComputerPrompt").then((m) => m.HostComputerPrompt),
+  withFeatureMessages(() => import("./HostComputerPrompt")).then((m) => m.HostComputerPrompt),
 );
 
 import { ResizableSidePanel } from "./ResizableSidePanel";
@@ -64,7 +65,7 @@ import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
 
 const CreateGroupForm = lazyPanel(() =>
-  import("./GroupPanel").then((module) => module.CreateGroupForm),
+  withFeatureMessages(() => import("./GroupPanel")).then((module) => module.CreateGroupForm),
 );
 
 const ComputerWorkspace = lazyPanel(() =>
@@ -75,7 +76,7 @@ const HomeDashboard = lazyPanel(() =>
 );
 
 const RecruitingCorrespondence = lazyPanel(() =>
-  import("./RecruitingCorrespondence").then(
+  withFeatureMessages(() => import("./RecruitingCorrespondence")).then(
     (module) => (props: ComponentProps<typeof module.RecruitingCorrespondence>) => (
       <module.RecruitingCorrespondence {...props} />
     ),

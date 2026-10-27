@@ -1,5 +1,6 @@
 import type { ComponentProps } from "react";
 import { lazy, Suspense } from "react";
+import { withFeatureMessages } from "../../lib/i18n";
 import type {
   CorrespondenceEmails as CorrespondenceEmailsComponent,
   RecruitingCorrespondence as RecruitingCorrespondenceComponent,
@@ -16,12 +17,12 @@ const LoadedContactsTab = lazy(() =>
 );
 
 const LoadedRecruitingCorrespondence = lazy(() =>
-  import("../RecruitingCorrespondence").then((module) => ({
+  withFeatureMessages(() => import("../RecruitingCorrespondence")).then((module) => ({
     default: module.RecruitingCorrespondence,
   })),
 );
 const LoadedCorrespondenceEmails = lazy(() =>
-  import("../RecruitingCorrespondence").then((module) => ({
+  withFeatureMessages(() => import("../RecruitingCorrespondence")).then((module) => ({
     default: module.CorrespondenceEmails,
   })),
 );
