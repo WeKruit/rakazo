@@ -8,6 +8,9 @@ export function MarkdownLinkPrompt({ children }: { children: ReactNode }) {
     <MarkdownLinkPromptProvider
       copy={{
         title: t`Open external link?`,
+        loading: t`Loading…`,
+        loadError: t`Something went wrong. Try again.`,
+        retry: t`Refresh`,
         cancel: t`Cancel`,
         open: t`Open`,
       }}

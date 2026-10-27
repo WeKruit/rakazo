@@ -5,12 +5,18 @@ type MarkdownLinkCopy = {
   title: string;
   cancel: string;
   open: string;
+  loading?: string;
+  loadError?: string;
+  retry?: string;
 };
 
 const defaultMarkdownLinkCopy: MarkdownLinkCopy = {
   title: "Open external link?",
   cancel: "Cancel",
   open: "Open",
+  loading: "Loading…",
+  loadError: "Something went wrong. Try again.",
+  retry: "Refresh",
 };
 
 const CopyContext = createContext<MarkdownLinkCopy>(defaultMarkdownLinkCopy);
@@ -33,7 +39,7 @@ export function MarkdownLinkPromptProvider({
 }
 
 export function useMarkdownLinkCopy() {
-  return useContext(CopyContext);
+  return { ...defaultMarkdownLinkCopy, ...useContext(CopyContext) };
 }
 
 export function useMarkdownLinkAppOrigin() {
