@@ -34,6 +34,8 @@ import {
   listRunToolResults,
   listUnmappedRecruitingResearchReads,
   RecruitingConflictError,
+  RecruitingIntentQuoteError,
+  RecruitingSourceValidationError,
   readNativeRecruitingCandidatePage,
   readRecruitingResearchContext,
   recordRecruitingResearchObservation,
@@ -66,6 +68,75 @@ const ROLE_KEYS = [
   "definitionQuestions",
 ] as const;
 
+const SOURCE_KINDS = [
+  "provider_report",
+  "original_material",
+  "candidate_statement",
+  "recruiter_verified",
+];
+const READ_STATES = ["read", "unread", "unavailable"];
+const SHA256 = /^[a-f0-9]{64}$/;
+
+/**
+ * Rewrites one source reference into the shape the schema takes, or drops it when it names no
+ * message or file. The server then fills the file fingerprint and checks ownership as before, so a
+ * citation slip never costs the save.
+ */
+function repairSourceRef(
+  value: unknown,
+  now: string,
+  index: number,
+): Record<string, unknown> | undefined {
+  const object = (item: unknown): item is Record<string, unknown> =>
+    !!item && typeof item === "object" && !Array.isArray(item);
+  const text = (item: unknown) =>
+    typeof item === "string" && item.trim() ? item.trim() : undefined;
+  if (!object(value)) return undefined;
+  const anchor = object(value.anchor) ? value.anchor : {};
+  const file = object(anchor.artifact) ? anchor.artifact : {};
+  const artifactId = text(file.artifactId) ?? text(anchor.artifactId) ?? text(value.artifactId);
+  const messageId = text(anchor.messageId) ?? text(value.messageId);
+  const locator = text(anchor.locator) ?? text(value.locator);
+  const sha256 = text(file.sha256) ?? text(anchor.sha256);
+  const fixedAnchor =
+    messageId && (anchor.kind !== "artifact" || !artifactId)
+      ? { kind: "message", messageId, locator: locator ?? "blocks[0].text" }
+      : artifactId
+        ? {
+            kind: "artifact",
+            artifact: {
+              artifactId,
+              sha256: sha256 && SHA256.test(sha256) ? sha256 : "0".repeat(64),
+            },
+            locator: locator ?? "text",
+          }
+        : undefined;
+  if (!fixedAnchor) return undefined;
+  const readState = READ_STATES.includes(String(value.readState))
+    ? String(value.readState)
+    : "read";
+  const time = text(value.readAt) ? Date.parse(String(value.readAt)) : Number.NaN;
+  const quote = readState === "read" ? text(value.quote) : undefined;
+  const url = text(value.url);
+  return {
+    id: text(value.id) ?? `source-${index + 1}`,
+    kind: SOURCE_KINDS.includes(String(value.kind)) ? value.kind : "original_material",
+    anchor: fixedAnchor,
+    readState,
+    readAt: readState === "unread" ? null : Number.isNaN(time) ? now : new Date(time).toISOString(),
+    ...(url && /^https?:\/\//.test(url) ? { url } : {}),
+    ...(quote ? { quote } : {}),
+  };
+}
+
+function repairSourceRefs(value: unknown, now: string): Record<string, unknown>[] | undefined {
+  if (value === undefined) return undefined;
+  return (Array.isArray(value) ? value : [value]).flatMap((item, index) => {
+    const repaired = repairSourceRef(item, now, index);
+    return repaired ? [repaired] : [];
+  });
+}
+
 /**
  * Repairs harmless slips before the schema check, so they never cost a rejected call and a
  * regenerated brief: a read carries only its operation; a read human-message reference without
@@ -92,6 +163,24 @@ export function normalizeRecruitingRoleArgs(
   if (!["create", "update", "revise"].includes(String(visited.operation))) return visited;
   const object = (value: unknown): value is Record<string, unknown> =>
     !!value && typeof value === "object" && !Array.isArray(value);
+  // Every citation is put into the schema's shape; a criterion keeps at least the role's first one.
+  const roleRefs = repairSourceRefs(visited.sourceRefs, now);
+  if (roleRefs) visited = { ...visited, sourceRefs: roleRefs };
+  const repairCriteria = (list: unknown) =>
+    Array.isArray(list)
+      ? list.map((criterion) => {
+          if (!object(criterion) || criterion.sourceRefs === undefined) return criterion;
+          const refs = repairSourceRefs(criterion.sourceRefs, now) ?? [];
+          return { ...criterion, sourceRefs: refs.length ? refs : (roleRefs ?? []).slice(0, 1) };
+        })
+      : list;
+  if (Array.isArray(visited.criteria))
+    visited = { ...visited, criteria: repairCriteria(visited.criteria) };
+  else if (object(visited.criteria) && Array.isArray(visited.criteria.upsert))
+    visited = {
+      ...visited,
+      criteria: { ...visited.criteria, upsert: repairCriteria(visited.criteria.upsert) },
+    };
   // An update's criteria hold only upsert/remove; other keys written there belong to the call.
   if (visited.operation === "update" && object(visited.criteria)) {
     const { upsert, remove, ...stray } = visited.criteria;
@@ -1301,5 +1390,49 @@ export async function resolveRecruitingContactAcrossRoles(
         : ("ambiguous" as const),
     matches,
     crm,
+  };
+}
+
+/**
+ * The arguments for the server's one repeat of a refused role save: every citation becomes a plain
+ * locator (no quote to match), and a mistyped intent quote becomes the recruiter's own words. The
+ * repeat passes the same ownership checks; undefined when it would change nothing.
+ */
+export function repairedRoleSave(
+  args: Record<string, unknown>,
+  error: unknown,
+): Record<string, unknown> | undefined {
+  if (args.operation === "read" || !(error instanceof Error)) return undefined;
+  if (
+    !(error instanceof IsolationError) &&
+    !(error instanceof RecruitingSourceValidationError) &&
+    error.name !== "RecruitingPlaybookValidationError" &&
+    error.name !== "ZodError"
+  )
+    return undefined;
+  let changed = false;
+  const strip = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(strip);
+    if (!value || typeof value !== "object") return value;
+    const record = Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, strip(item)]),
+    );
+    if (!("anchor" in record) || !("quote" in record)) return record;
+    changed = true;
+    const { quote: _quote, ...rest } = record;
+    return rest;
+  };
+  const { intent, ...rest } = args;
+  const repaired = strip(rest) as Record<string, unknown>;
+  const quote = error instanceof RecruitingIntentQuoteError ? error.quote : undefined;
+  const intentRecord =
+    intent && typeof intent === "object" ? (intent as Record<string, unknown>) : {};
+  if (quote && quote !== intentRecord.quote) changed = true;
+  if (!changed) return undefined;
+  return {
+    ...repaired,
+    ...(intent === undefined && !quote
+      ? {}
+      : { intent: { ...intentRecord, ...(quote ? { quote } : {}) } }),
   };
 }

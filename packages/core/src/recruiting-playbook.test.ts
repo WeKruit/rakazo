@@ -16,6 +16,8 @@ import {
   requireRecruitingBriefConfirmation,
   requireRecruitingPlaybookGate,
   turnEndPromise,
+  turnEndStarted,
+  turnEndStuck,
   validateRecruitingBrief,
 } from "./recruiting-playbook.js";
 
@@ -101,7 +103,7 @@ describe("sourced recruiting intake", () => {
     const draft = brief();
     draft.fields[0] = { ...draft.fields[0]!, origin: "user_instruction", sourceRefIds: [] };
     expect(() => validateRecruitingBrief(draft, role)).toThrow(
-      "brief.fields[0].sourceRefIds: add at least one source ID. Cite a full read source reference with an exact quote; user_instruction must cite the actual human-message reference.",
+      "brief.fields[0].sourceRefIds: add at least one source ID. Cite a read source reference; user_instruction must cite the actual human-message reference.",
     );
     const answer = {
       ...source,
@@ -542,6 +544,24 @@ describe("classifyTurnEnd", () => {
 });
 
 // Endings seen in live role threads on 2026-10-25/26, where the turn stopped after promising.
+describe("turnEndStarted and turnEndStuck", () => {
+  // 2026-10-27 16:38, LA role: "lets find 50" ended on a claim with no question.
+  it("finds a claim of started work anywhere in a turn that asks nothing", () => {
+    const text =
+      "已开始扩展搜索，目标是新增 50 位，不重复首轮人选。后续结果会保留可点击的 LinkedIn 链接和来源；学历、语言仍会标为待核实。";
+    expect(turnEndStarted(text)).toContain("已开始扩展搜索");
+    expect(turnEndStarted("已保存 10 位候选人。")).toBeUndefined();
+    expect(turnEndStarted("已开始搜索。你希望先看哪一类？")).toBeUndefined();
+  });
+  // 2026-10-27 16:30, LA role: the turn ended on an apology with no question and no role.
+  it("finds a failure report that ends a turn without a question", () => {
+    expect(turnEndStuck("岗位尚未成功建立。抱歉，当前流程卡在岗位记录这一步。")).toBeTruthy();
+    expect(turnEndStuck("I couldn't save the role.")).toBeTruthy();
+    expect(turnEndStuck("岗位已保存，开始找人。")).toBeUndefined();
+    expect(turnEndStuck("保存失败了，要换个方式吗？")).toBeUndefined();
+  });
+});
+
 describe("turnEndPromise", () => {
   it.each([
     "岗位保存恢复后，我会把这项语言要求和 JD 一起纳入岗位简报，再继续搜索。",

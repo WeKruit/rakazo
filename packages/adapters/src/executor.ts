@@ -474,6 +474,7 @@ import {
   RecruitingCandidateOutputError,
   RecruitingCsvImportError,
   RecruitingPeopleSearchError,
+  repairedRoleSave,
   resolveRecruitingResearchTool,
   saveNativeRecruitingCandidateResults,
   saveRecruitingPeopleSearch,
@@ -5404,7 +5405,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             /\p{Script=Han}/u.test(JSON.stringify(human?.blocks ?? "")),
           );
         };
-        const applyTool = async (
+        const applyToolNow = async (
           name: string,
           rawArgs: Record<string, unknown>,
           executionId: string,
@@ -9453,7 +9454,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               result = await executeRole();
             } catch (error) {
-              return finish(roleError(error));
+              const refused = await finish(roleError(error));
+              // A save refused over its citations is repeated once by the server with them as
+              // plain locators and the recruiter's own words as the intent, so it never stops
+              // the work. Ownership checks still apply to the repeat.
+              const repeat = repairedRoleSave(args, error);
+              if (!repeat || executionId.endsWith(":repaired")) return refused;
+              getLogger().warn("recruiting.role.save_repaired", {
+                runId,
+                operation: args.operation,
+                error: error instanceof Error ? error.name : String(error),
+              });
+              const repeated: unknown = await applyTool(name, repeat, `${executionId}:repaired`);
+              return repeated && typeof repeated === "object" && "error" in repeated
+                ? refused
+                : repeated;
             }
             // Native writes complete their immutable domain receipt in the same transaction.
             if (args.operation === "read" && !(await persistEffectResult(result)))
@@ -10826,6 +10841,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return finish({ error: `unknown tool ${name}` });
         };
+        // A role save still running when a question card pauses the turn would lose its lease and be
+        // refused; the card waits for it instead.
+        const savesInFlight = new Set<Promise<unknown>>();
+        const applyTool = (...call: Parameters<typeof applyToolNow>) => {
+          const [name, rawArgs] = call;
+          const applied = applyToolNow(...call);
+          if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
+          const settled = applied.catch(() => undefined);
+          savesInFlight.add(settled);
+          void settled.then(() => savesInFlight.delete(settled));
+          return applied;
+        };
 
         const pluginLine =
           connectedPlugins.length > 0
@@ -11815,6 +11842,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
               });
             } else if (event.type === "ask") {
+              await Promise.all(savesInFlight);
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
                 const card = await nextStepCardAfterRound();

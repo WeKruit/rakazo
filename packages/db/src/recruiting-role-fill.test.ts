@@ -22,6 +22,7 @@ function prisma({
   activeRoleId = null as string | null,
   events = [receipt] as unknown[],
   messages = [] as unknown[],
+  outside = [] as string[],
 } = {}) {
   return {
     thread: {
@@ -33,7 +34,15 @@ function prisma({
     },
     artifact: { findMany: vi.fn(async () => [{ id: "artifact-1", hash }]) },
     event: { findMany: vi.fn(async () => events.map((payload) => ({ payload }))) },
-    message: { findMany: vi.fn(async () => messages) },
+    message: {
+      // An id lookup finds every message in this conversation except the ones named outside.
+      findMany: vi.fn(async ({ where }: { where: { id?: { in: string[] } } }) =>
+        where.id
+          ? where.id.in.filter((id) => !outside.includes(id)).map((id) => ({ id }))
+          : messages,
+      ),
+      findFirst: vi.fn(async () => ({ id: "latest-human" })),
+    },
     recruitingRole: { findFirst: vi.fn(async () => null) },
     recruitingRoleRevision: { findUnique: vi.fn(async () => null) },
   } as never;
@@ -183,6 +192,31 @@ describe("fillRecruitingRoleArgs", () => {
     expect(brief.searchFilters![0]!.sourceRefIds).toEqual(["human-message:m2"]);
     expect(brief.rules).toEqual([
       { criterionId: "sim", origin: "jd", effect: "reject", sourceRefIds: ["jd"] },
+    ]);
+  });
+
+  // A made-up message id cites the recruiter's latest message as a plain locator.
+  it("re-points a citation of a message outside this conversation", async () => {
+    const made = {
+      id: "human-salary",
+      kind: "original_material",
+      anchor: { kind: "message", messageId: "human-salary", locator: "blocks[0].text" },
+      readState: "read",
+      readAt: "2026-10-27T16:28:00.000Z",
+      quote: "US$51K–68K",
+    };
+    const filled = await fillRecruitingRoleArgs(
+      prisma({ events: [], outside: ["human-salary"] }),
+      actor,
+      context,
+      { operation: "create", sourceRefs: [made], criteria: [] },
+    );
+    const { quote: _quote, ...rest } = made;
+    expect(filled.sourceRefs).toEqual([
+      {
+        ...rest,
+        anchor: { kind: "message", messageId: "latest-human", locator: "blocks[0].text" },
+      },
     ]);
   });
 

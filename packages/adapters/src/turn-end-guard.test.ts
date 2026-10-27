@@ -268,6 +268,25 @@ describe("guardRecruitingTurnEnd", () => {
     expect(text).toContain("10. **Person 9** · Warehouse Manager · Example Co · Atlanta");
   });
 
+  it("links each name to the LinkedIn profile its key names", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "linkedin:/in/runqi-guo", name: "Runqi Guo", company: "Pattern" },
+        ]),
+      },
+    } as never;
+    expect(
+      await recruitingRoundListText(prisma, {
+        threadId: "thread-1",
+        spaceId: "space-1",
+        roleId: "role-1",
+        candidateKeys: ["linkedin:/in/runqi-guo"],
+      }),
+    ).toContain("1. **[Runqi Guo](https://www.linkedin.com/in/runqi-guo)** · Pattern");
+  });
+
   it("lists only the saved people of a list still being written", async () => {
     const prisma = {
       externalEffect: { findMany: vi.fn(async () => []) },
@@ -310,7 +329,7 @@ describe("guardRecruitingTurnEnd", () => {
       lastMayBeCut: true,
     });
     expect(whole).toContain("本轮 2 位人选");
-    expect(whole).toContain("2. **Ana**");
+    expect(whole).toContain("2. **[Ana](https://www.linkedin.com/in/ana)**");
     // "bo" may still become "bo-lee": not shown yet.
     const cut = await recruitingRoundListText(prisma, {
       ...input,
@@ -726,7 +745,7 @@ describe("guardRecruitingTurnEnd", () => {
 });
 
 describe("guardRecruitingRoleCreate", () => {
-  function roleFixture(result: unknown, priorAutoContinues = 0) {
+  function roleFixture(result: unknown, priorAutoContinues = 0, toolEvents: unknown[] = []) {
     const sendUserMessage = vi.fn(async () => ({ messageId: "m-2", seq: 9, runId: "run-2" }));
     const enqueue = vi.fn(async () => undefined);
     const recent = Array.from({ length: priorAutoContinues }, (_, i) => ({
@@ -737,6 +756,7 @@ describe("guardRecruitingRoleCreate", () => {
       prisma: {
         message: { findMany: vi.fn(async () => recent) },
         externalEffect: { findFirst: vi.fn(async () => (result ? { result } : null)) },
+        event: { findMany: vi.fn(async () => toolEvents.map((payload) => ({ payload }))) },
       },
       events: { sendUserMessage },
       jobs: { enqueue },
@@ -784,13 +804,48 @@ describe("guardRecruitingRoleCreate", () => {
     ).toMatchObject({ action: "ended" });
   });
 
+  // The 2026-10-27 16:30 LA attachment role: one create lost to a question card's pause, one
+  // refused by the tool's format check, then an apology with no question and no role.
+  it("pushes when the turn ends on a failure report, even with no refused save on record", async () => {
+    const f = roleFixture(null);
+    const result = await guardRecruitingRoleCreate(f.deps, {
+      ...input,
+      blocks: [
+        {
+          kind: "text",
+          text: "英语已记录为优先项。搜索已返回人才资料，但岗位尚未成功建立。抱歉，当前流程卡在岗位记录这一步。",
+        },
+      ],
+    });
+    expect(result).toMatchObject({ action: "continued", label: "保存岗位" });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("直到展示十位人选") }),
+    );
+  });
+
+  it("pushes with the reason when the save was refused before reaching the server", async () => {
+    const f = roleFixture(null, 0, [
+      { name: "recruiting_role" },
+      { name: "recruiting_role", error: "sourceRefs.0.anchor: must match exactly one schema" },
+    ]);
+    const result = await guardRecruitingRoleCreate(f.deps, {
+      ...input,
+      blocks: [{ kind: "text", text: "已记录。" }],
+    });
+    expect(result).toMatchObject({ action: "continued", label: "保存岗位" });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("must match exactly one schema") }),
+    );
+  });
+
   it("does not push after a saved create, a question, or a push it already made", async () => {
     const refused = { error: "refused" };
-    expect(await guardRecruitingRoleCreate(roleFixture(null).deps, input)).toMatchObject({
+    const done = { ...input, blocks: [{ kind: "text", text: "好的，已记下。" }] as MessageBlock[] };
+    expect(await guardRecruitingRoleCreate(roleFixture(null).deps, done)).toMatchObject({
       action: "ended",
     });
     expect(
-      await guardRecruitingRoleCreate(roleFixture({ status: "saved" }).deps, input),
+      await guardRecruitingRoleCreate(roleFixture({ status: "saved" }).deps, done),
     ).toMatchObject({ action: "ended" });
     const asked = { ...input, blocks: [{ kind: "ask", text: "地点？", status: "pending" }] };
     expect(
