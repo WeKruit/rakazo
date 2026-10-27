@@ -129,6 +129,8 @@ describe("lingui catalogs", () => {
       "../pages/shell/computer-presentation.tsx",
       "../pages/RecruitingPanel.tsx",
       "../pages/recruiting/CandidateDetailDialog.tsx",
+      "../pages/recruiting/RecruitingSummary.tsx",
+      "../pages/recruiting/RecruitingSupplementaryTab.tsx",
       "../pages/shell/ShellSidebar.tsx",
       "../pages/shell/DeveloperSidebar.tsx",
       "../pages/shell/ShellConversation.tsx",

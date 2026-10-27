@@ -2094,6 +2094,7 @@ it("shows actual saved brief criteria without exposing internal field keys or fe
     presentation: "workspace",
     summary: "brief",
   });
+  await act(async () => vi.dynamicImportSettled());
   expect(view.container.textContent).toContain("Systems engineer");
   expect(view.container.textContent).toContain("Bay Area, no remote");
   expect(view.container.textContent).toContain("Not disclosed");
