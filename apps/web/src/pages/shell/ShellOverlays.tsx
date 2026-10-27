@@ -7,7 +7,8 @@ import {
 } from "@rakazo/ui-web";
 import { Pencil, Trash2 } from "lucide-react";
 import { Suspense } from "react";
-import { lazyOverlay, lazyPanel } from "../../components/ErrorBoundary";
+import { lazyPanel } from "../../components/ErrorBoundary";
+import { lazyOverlay } from "../../components/LazyOverlay";
 import { rightPanelStorageKey } from "../../lib/right-panel-state";
 import { rpc, selectedSpaceId, selectSpace } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
