@@ -30,7 +30,7 @@
 | E2 | 可靠性 | 压测：20 和 50 个并发对话 | 待做 | |
 | E3 | 可靠性 | 数据库备份恢复演练 | 待做 | |
 | E4 | 可靠性 | 模型服务只有一个提供方 | 待做 | |
-| F1 | Agent | 招聘逻辑写死在执行器代码里 | 进行中 | Adam |
+| F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
 
 ---
 
@@ -248,3 +248,28 @@ CHECK
 
 - **现状：** `executor.ts` 有约 14,000 行，其中 482 处和招聘有关。按 AGENTS.md 的原则，招聘相关的行为应该写在机器人指令和技能里，不应该写在执行器代码里。
 - **验收：** 执行器里和招聘有关的引用每一轮都在减少，招聘验收流程不退步。
+
+- **F1 本轮（2026-10-27，[#269](https://github.com/WeKruit/rakazo/pull/269)）：** 移除 executor 对澄清问题强制携带四条搜索计划的业务门槛，以及与原生 intake skill 重复的逐轮筛选/下一步指令。已有 intake skill 负责已存搜索结果复用和后续选择；executor 只补充该部分的已存岗位/搜索事实。没有把同一决策代码挪进新的模块，未改授权、账号隔离、已答问题复用、效果回执或提供方执行边界。
+- **量化：** 本轮前后 `wc -l packages/adapters/src/executor.ts` 为 14,351 → 14,327；`rg -i -c recruiting packages/adapters/src/executor.ts` 为 482 → 481。仍有大量招聘工具适配与业务逻辑，不能据此说 F1 整项已完成。
+- **认领和实现：** 先以 Adam 认领并推送 `e6b8446de`，实现提交 `888e5dfd05c07a4bd07f2d209076bc1e6b938cd7`，小 PR base 为 `claude/project-thread-f1cbzk`。
+- **本地实测：** Node 24.19.0、pnpm 9.15.0。core 1,232 通过 / 5 跳过；adapters 单独重跑 5,128 通过 / 44 跳过；聚焦回归 238 通过；招聘默认配置安装/升级测试 55 通过；core/adapters 类型检查、Biome 和 diff 检查通过。新用例证明无计划、空计划、单条计划都能提交实质澄清且不调用提供方/不产生效果。用原始 executor 跑同一新回归：2 失败 / 1 通过；修改后 3 通过。
+- **初次失败记录：** 首次全 adapters 测试为 5,127 通过、1 失败（computer-idle 的固定临时 marker 建 symlink 遇到 EEXIST）；恢复原始 F1 源码后单独运行该测试文件 59/59 通过，随后独立全量重跑 5,128/5,128 通过。未修改无关生产代码掩盖问题。
+- **未完成的验收：** 真实提供方支持的测试副本岗位 → 10 人校准 → 人工反馈 → 同任务继续的业务不退步尚未测；现有本地假服务测试不替代该证据。因此 F1 只记部分实现，不记完成。未在真实岗位/候选人上测试，无部署、云配置、Secret、资源、外发或 CI 改动。
+
+F1 复现命令（仓库根目录，Node 24.19.0）：
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @rakazo/db generate
+pnpm --filter @rakazo/core --filter @rakazo/adapters check
+pnpm --filter @rakazo/core --filter @rakazo/adapters test
+pnpm --filter @rakazo/adapters test
+pnpm test packages/adapters/src/executor-effect-idempotency.test.ts packages/adapters/src/executor-planned-searches.test.ts packages/core/src/recruiting-defaults.test.ts
+pnpm test packages/db/src/recruiting-bootstrap.test.ts
+pnpm exec vitest run packages/adapters/src/computer-idle.test.ts
+pnpm exec vitest run packages/adapters/src/executor-effect-idempotency.test.ts --testNamePattern 'intake questions follow'
+pnpm exec biome check packages/adapters/src/executor.ts packages/adapters/src/executor-effect-idempotency.test.ts packages/core/src/recruiting-defaults.ts packages/core/src/recruiting-defaults.test.ts
+wc -l packages/adapters/src/executor.ts
+rg -i -c recruiting packages/adapters/src/executor.ts
+git diff --check
+```
