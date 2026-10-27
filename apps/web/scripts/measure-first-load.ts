@@ -22,6 +22,8 @@ try {
         logLevel: "silent",
       });
       const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      if (process.env.MEASURE_SANDBOX_RECOVERY === "1")
+        await page.addInitScript(() => localStorage.setItem("rakazo.showToolActivity", "on"));
       if (locale)
         await page.addInitScript((value) => localStorage.setItem("rakazo.uiLocale", value), locale);
       const requests: { url: string; type: string }[] = [];
@@ -39,7 +41,7 @@ try {
         name: user.name,
         email: user.email,
         spaceId: "synthetic-space",
-        isDeploymentOwner: false,
+        isDeploymentOwner: process.env.MEASURE_SANDBOX_RECOVERY === "1",
         ticketBoardEnabled: false,
         needsModel: false,
         billingEnabled: false,
@@ -49,7 +51,7 @@ try {
         hostCredentialSource: null,
         computerHost: null,
         canChooseHostComputer: false,
-        sandboxProvider: "fake",
+        sandboxProvider: process.env.MEASURE_SANDBOX_RECOVERY === "1" ? "none" : "fake",
         avatarStyle: "shape",
       };
       const bot = {
@@ -215,6 +217,10 @@ try {
             2,
           ),
         );
+        if (authenticated && process.env.MEASURE_SANDBOX_RECOVERY === "1") {
+          const { verifySandboxRecovery } = await import("./verify-sandbox-recovery");
+          await verifySandboxRecovery(page, me);
+        }
         if (authenticated && process.env.MEASURE_CONFIRM_RECOVERY === "1") {
           const { verifyLinkConfirmationRecovery } = await import("./verify-link-confirmation");
           await verifyLinkConfirmationRecovery(page);

@@ -315,3 +315,33 @@ new link click still opens the original confirmation. All 186 relevant chat-ui
 and i18n tests, both package typechecks and production build passed. The updated
 Chinese contacts fixture is 322286 gzip bytes (7 JS, 35 total requests, 17 RPC,
 zero duplicate recruiting reads); the additional warning costs 151 bytes.
+
+## Direct sandbox predicate import
+
+The Shell controller now imports `computersAreUnavailable` directly from its
+existing `lib/computer-sandbox` implementation rather than through the
+`ComputersUnavailableHint` component module. The old component re-export remains
+compatible; no component or predicate behavior changed and no new asynchronous
+boundary was added.
+
+Matched Chinese cold contacts on base `ba744c118`:
+**322313 → 321748 gzip bytes (-565)**, with 7 JS requests, 35 total requests,
+17 RPC calls and zero duplicate recruiting reads in both builds. This is a small
+verified dependency cleanup; it does not meet the 250000-byte final target.
+Web typecheck, production build and all 217 Shell/sandbox tests passed (28.58s).
+
+The synthetic browser recovery fixture is available through:
+
+```sh
+MEASURE_UI_LOCALE=en MEASURE_SANDBOX_RECOVERY=1 pnpm --filter @rakazo/web exec tsx scripts/measure-first-load.ts dist
+```
+
+It uses a synthetic owner in tool-activity mode with no sandbox, opens the real
+computer panel, verifies the existing recovery controls, makes the mocked health
+check fail, and then returns a healthy mocked provider on retry. It does not
+contact or create any computer provider. Normal measurements keep their original
+fixture and count assets before the optional recovery interaction.
+
+The production recovery fixture passed: the original no-sandbox controls render,
+the mocked failure shows the existing error state, and a second check displays
+the recovered state and removes the retry control. No new product copy was added.

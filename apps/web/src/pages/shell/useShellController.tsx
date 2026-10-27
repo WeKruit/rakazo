@@ -50,7 +50,6 @@ import {
   useSyncExternalStore,
 } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
-import { computersAreUnavailable } from "../../components/ComputersUnavailableHint";
 import { readActivityMode, writeActivityMode } from "../../lib/activity-mode";
 import type { AuthSessionState } from "../../lib/auth";
 import { authClient } from "../../lib/auth";
@@ -64,6 +63,7 @@ import {
   getComposerEnterToSend,
   subscribeComposerEnterToSend,
 } from "../../lib/composer-enter-to-send-pref";
+import { computersAreUnavailable } from "../../lib/computer-sandbox";
 import { embeddableScreenUrl } from "../../lib/computer-screen";
 import { clampWidth, usePaneWidth, useViewportWidth } from "../../lib/pane-width";
 import { revokePendingAttachmentPreviews } from "../../lib/pending-attachments";
