@@ -66,7 +66,7 @@ preemption from interrupting the sole file-store writer. Modal charges 3× the
 standard CPU and memory rates for this placement; the existing resource bounds
 remain unchanged. Deployments and application failures can still require a restart.
 
-Compute is pinned to `us-west`; the existing routing region and public URL stay
+Compute is pinned to AWS `us-west`, the cloud and region of the Supabase pooler; the existing routing region and public URL stay
 unchanged so native sign-in and authorized connector callbacks keep their current
 origin. This moves compute, not the routing proxy or the Supabase database. The
 existing Volume is reused and remains the only native file store. Region selection
