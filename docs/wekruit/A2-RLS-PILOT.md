@@ -228,3 +228,7 @@ Reproduce each protocol separately with `RLS_BENCH_WARMUP_CONCURRENCY=1` or `5`,
 ### Post-pipeline regression gates
 
 `pnpm --filter @rakazo/db --filter @rakazo/api --filter @rakazo/testkit check`: all three passed. `TZ=UTC VERIFY_DATABASE=1 DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2 RLS_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2_rls pnpm test packages/db/src/actor-db.postgres.test.ts packages/db/src/recruiting.postgres.test.ts packages/db/src/space-membership.postgres.test.ts`: **304/304 passed, 22.42 s**. `pnpm exec vitest run packages/db/src apps/api/src --maxWorkers=2`: **2,593 passed / 430 skipped**, 96 files passed /20 skipped, 46.44 s. Skipped cases are not claimed as verified. These are post-pipeline results; the earlier fixture API isolation result predates pipeline, while the new HTTP benchmark exercised the actual API pipeline path. Production pooler compatibility, formal online p95 and later table batches remain unverified.
+
+### Publication resumed after renewed authorization
+
+Ordinary push and Draft creation succeeded: [PR #296](https://github.com/WeKruit/rakazo/pull/296), base `claude/project-thread-f1cbzk`. The prior rejection is historical, not a current publication blocker. No merge or activation occurred; incomplete performance and online acceptance remain explicit.
