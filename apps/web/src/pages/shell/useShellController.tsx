@@ -1,0 +1,4646 @@
+import { Trans, useLingui } from "@lingui/react/macro";
+import { ORPCError } from "@orpc/client";
+import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
+import type {
+  AgentSkillCatalogEntry,
+  AskAnswer,
+  Bot,
+  BotSection,
+  ComputerMode,
+  ComputerReleaseReason,
+  ComputerStatus,
+  Connection,
+  ConnectionCatalogItem,
+  Group,
+  Me,
+  MessageReaction,
+  ProductEvent,
+  RecruitingCorrespondenceReference,
+  Routine,
+  SearchHit,
+  Space,
+  SpaceMemoryConfig,
+  TaughtSkill,
+  ThreadMessage,
+  ThreadSnapshot,
+  UsageCosts,
+  VoiceStatus,
+} from "@rakazo/contracts";
+import {
+  ATTACHMENT_MAX_BYTES,
+  ATTACHMENT_MAX_COUNT,
+  GROUP_MEMBER_MAX,
+  GROUP_MEMBER_MIN,
+  normalizeCreateBotProfile,
+  RecruitingOutreachSequenceSchema,
+} from "@rakazo/contracts";
+import type { ComposerMention } from "@rakazo/core";
+import {
+  addPendingUserMessage,
+  answerableAskMessageIds,
+  attachmentsForThread,
+  buildComposerMentionOptions,
+  inferAttachmentMimeType,
+  isActive,
+  isRunTerminalEvent,
+  isXlsxFileName,
+  pendingUserMessageId,
+  removePendingUserMessage,
+  reorderBotTo,
+  resolveComposerSendPlan,
+  runThreadSubscription,
+  searchHitThreadTarget,
+  speechFromBlocks,
+  userVisibleMessages,
+  withLiveStreamingProgress,
+} from "@rakazo/core";
+import type { GroupAvatarMember } from "@rakazo/ui-web";
+import { Button } from "@rakazo/ui-web";
+import type { MutableRefObject } from "react";
+import {
+  createRef,
+  useCallback,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { computersAreUnavailable } from "../../components/ComputersUnavailableHint";
+import { readActivityMode, writeActivityMode } from "../../lib/activity-mode";
+import type { ArtifactTarget } from "../../lib/artifact-open";
+import { authClient } from "../../lib/auth";
+import { takeInitialBootstrap } from "../../lib/bootstrap";
+import {
+  applyBotStatus,
+  botStatusFromRunEvent,
+  openBotStatusChannel,
+} from "../../lib/bot-run-status";
+import {
+  getBotsSidebarDensity,
+  subscribeBotsSidebarDensity,
+} from "../../lib/bots-sidebar-density-pref";
+import { readBotsSidebarCollapsed, writeBotsSidebarCollapsed } from "../../lib/bots-sidebar-pref";
+import {
+  deliverBrowserNotification as deliverNativeBrowserNotification,
+  requestBrowserNotificationPermission,
+  shouldNotifyBrowser,
+} from "../../lib/browser-notifications";
+import { useCallSession } from "../../lib/call-session";
+import { newClientId } from "../../lib/client-id";
+import { createCoalescedRefresh } from "../../lib/coalesced-refresh";
+import {
+  getComposerEnterToSend,
+  subscribeComposerEnterToSend,
+} from "../../lib/composer-enter-to-send-pref";
+import { embeddableScreenUrl, loadComputerScreen } from "../../lib/computer-screen";
+import { publishComputerCommand } from "../../lib/computer-workspace";
+import { scheduleFocusPrompt } from "../../lib/focus-prompt";
+import { clampWidth, usePaneWidth, useViewportWidth } from "../../lib/pane-width";
+import {
+  createAttachmentUploads,
+  readFileAsBase64,
+  revokePendingAttachmentPreviews,
+} from "../../lib/pending-attachments";
+import { markAfterPaint, markOnce } from "../../lib/performance";
+import { setPreloadRecoveryActiveWork } from "../../lib/preload-recovery";
+import { retryTransientRead } from "../../lib/read-retry";
+import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
+import {
+  clearRecruitingReads,
+  rememberRecruitingRead,
+  revalidateRecruitingReads,
+} from "../../lib/recruiting-read-cache";
+import {
+  getResponseStreamingEnabled,
+  subscribeResponseStreaming,
+} from "../../lib/response-streaming";
+import type { Panel, RecruitingPanelState, RightPanelState } from "../../lib/right-panel-state";
+import {
+  readRightPanelState,
+  rightPanelStorageKey,
+  writeRightPanelState,
+} from "../../lib/right-panel-state";
+import { rpc, selectedSpaceId, selectSpace } from "../../lib/rpc";
+import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../../lib/run-error-storage";
+import { sharedInflight } from "../../lib/shared-inflight";
+import {
+  activeThreadRuns,
+  applyThreadSendReceipt,
+  clearActiveThreadRuns,
+  computerPanelAutoBoot,
+  computerPanelAutoUsesBoot,
+  computerTakeoverBlocked,
+  isComputerStatusEvent,
+  isThreadSnapshotEvent,
+  prependThreadMessagePage,
+  reconcileRefreshedThread,
+  reduceComputerStatus,
+  reduceThreadSnapshot,
+  threadRunError,
+  userHoldsComputerControl,
+} from "../../lib/thread-events";
+import { createThreadPrefetch, threadPrefetchKey } from "../../lib/thread-prefetch";
+import { getToolActivityEnabled, subscribeToolActivity } from "../../lib/tool-activity-preference";
+import { transcriptCanSnapAfterFrame, transcriptIsNearEnd } from "../../lib/transcript-scroll";
+import { speaker } from "../../lib/tts";
+import { observeThreadEvent, turnTimer } from "../../lib/turn-timing";
+import { errorText } from "../../lib/user-error";
+import type { ContextMenuPosition } from "../BotContextMenu";
+import type { RecruitingSequenceSaveInput } from "../RecruitingCorrespondence";
+import type {
+  CandidateDiscussionContext,
+  CandidateFeedback,
+  CrmBrowseSelection,
+  CrmReplyDraftContext,
+} from "../RecruitingPanel";
+import type { RoutineDraftState } from "../RoutineList";
+import { draftFromRoutine, emptyRoutineDraft } from "../RoutineList";
+import { useRecruitingDetailController } from "../recruiting/detail";
+import type { SettingsSection } from "../SettingsOverlay";
+import type { ComposerHandle, PendingAttachment } from "../shell/Composer";
+import { candidateReferenceText } from "../shell/Composer";
+import { isCommandPaletteHotkey } from "../shell/command-palette-hotkey";
+import { FALLBACK_BOT_COLOR } from "../shell/constants";
+import { memberName } from "../shell/group-members";
+import type { RecruitingWorkspaceView } from "../shell/RecruitingNavigation";
+import type { RecruitingChatContact } from "../shell/recruiting-chat-context";
+import { recruitingChatContext } from "../shell/recruiting-chat-context";
+import { sidebarGroupsForSpaces } from "../shell/space-sidebar";
+
+type PendingBrowserNotification = {
+  event: Pick<ProductEvent, "id" | "type" | "threadId" | "botId" | "payload">;
+  botId: string;
+  botName: string;
+  groupNotification: boolean;
+};
+
+/** Identity colour for bots the roster no longer knows about. */
+
+// Allow the API's 15s transaction and 5s pool wait when Postgres is remote.
+const THREAD_SNAPSHOT_TIMEOUT_MS = 30_000;
+const RECONNECT_RECRUITING_RETRY_MS = 30_000;
+/** Bound Settings leave so a hung voice status refresh cannot block dismissal. */
+
+function threadSnapshotSignal(parent: AbortSignal): AbortSignal {
+  return AbortSignal.any([parent, AbortSignal.timeout(THREAD_SNAPSHOT_TIMEOUT_MS)]);
+}
+
+function collapsedSidebarSectionsStorageKey(userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  return `rakazo:collapsed-sidebar-sections:${userId}`;
+}
+
+function collapsedRosterParentsStorageKey(userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  return `rakazo:collapsed-roster-parents:${userId}`;
+}
+
+function readCollapsedIdSet(storageKey: string | null): Set<string> {
+  if (!storageKey) return new Set();
+  try {
+    const value = window.localStorage.getItem(storageKey);
+    const keys: unknown = value ? JSON.parse(value) : [];
+    return new Set(
+      Array.isArray(keys) ? keys.filter((key): key is string => typeof key === "string") : [],
+    );
+  } catch {
+    return new Set();
+  }
+}
+
+function toggleCollapsedIdSet(
+  previous: ReadonlySet<string>,
+  id: string,
+  storageKey: string | null,
+): Set<string> {
+  const next = new Set(previous);
+  if (next.has(id)) next.delete(id);
+  else next.add(id);
+  if (storageKey) {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify([...next]));
+    } catch {
+      // Keep the UI usable when storage is unavailable.
+    }
+  }
+  return next;
+}
+
+function readCollapsedSidebarSections(userId: string | null | undefined): Set<string> {
+  return readCollapsedIdSet(collapsedSidebarSectionsStorageKey(userId));
+}
+
+function readCollapsedRosterParents(userId: string | null | undefined): Set<string> {
+  return readCollapsedIdSet(collapsedRosterParentsStorageKey(userId));
+}
+
+/** How long a sent message may wait for its durable event before the thread is re-read. */
+const SEND_ECHO_GRACE_MS = 3_000;
+
+function attachmentUploadKey(attachment: Pick<PendingAttachment, "id" | "threadKey">) {
+  return `${attachment.threadKey}:${attachment.id}`;
+}
+
+export function eventChangesRecruitingPanel(
+  event: Pick<ProductEvent, "type" | "payload">,
+): boolean {
+  if (event.type === "thread.message.created" && event.payload.role === "user")
+    return (
+      Array.isArray(event.payload.blocks) &&
+      event.payload.blocks.some(
+        (block) =>
+          block && typeof block === "object" && block.kind === "text" && block.recruitingFeedback,
+      )
+    );
+  if (event.type === "effect.recorded") {
+    const result = event.payload.result;
+    // A calibration round was recorded or accepted, or a people search was saved.
+    if (
+      (event.payload.tool === "recruiting_research" &&
+        ("round" in event.payload || event.payload.status === "saved")) ||
+      (event.payload.tool === "recruiting_feedback" &&
+        result &&
+        typeof result === "object" &&
+        "round" in result)
+    )
+      return true;
+    if (
+      event.payload.tool === "recruiting_feedback" &&
+      result &&
+      typeof result === "object" &&
+      "status" in result &&
+      result.status === "recorded" &&
+      "feedback" in result
+    ) {
+      const feedback = result.feedback;
+      return (
+        feedback !== null &&
+        typeof feedback === "object" &&
+        "target" in feedback &&
+        feedback.target === "candidate" &&
+        "operation" in feedback &&
+        ["hold", "pass", "resume"].includes(String(feedback.operation))
+      );
+    }
+    return (
+      (event.payload.tool === "recruiting_role" &&
+        event.payload.status === "saved" &&
+        event.payload.changed === true) ||
+      (event.payload.tool === "recruiting_crm_target" && event.payload.status === "connected") ||
+      (event.payload.tool === "recruiting_shortlist" &&
+        result !== null &&
+        typeof result === "object" &&
+        "kind" in result &&
+        result.kind === "saved")
+    );
+  }
+  // Connector reads refresh at run termination; the executor marks successful writes.
+  if (event.type === "agent.tool.completed")
+    return (
+      event.payload.name === "recruiting_crm_import" ||
+      event.payload.name === "recruiting_reply" ||
+      (event.payload.wrote === true && event.payload.outcome === "succeeded")
+    );
+  return (
+    (event.type.startsWith("recruiting.") &&
+      event.type !== "recruiting.context.adopted" &&
+      event.type !== "recruiting.material.read" &&
+      event.type !== "recruiting.searches.planned" &&
+      !(event.type === "recruiting.read" && event.payload.phase === "bound")) ||
+    event.type === "memory.revised" ||
+    event.type === "thread.cleared" ||
+    isRunTerminalEvent(event)
+  );
+}
+
+export function useShellController() {
+  const { t } = useLingui();
+  const linkFavicons = useContext(LinkFaviconsContext);
+  const { botId, groupId } = useParams();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  // Mirrors searchParams for effects that only need to read it once on run,
+  // not re-run on every unrelated query-param change (e.g. the SSE subscribe
+  // effect below, which should only restart when the active bot changes).
+  const searchParamsRef = useRef(searchParams);
+  searchParamsRef.current = searchParams;
+  const session = authClient.useSession();
+  const userId = session.data?.user.id;
+  const [groups, setGroups] = useState<Group[]>([]);
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  // The placeholder name a new role's group carries until its title is saved.
+  const newRoleNames = useRef<string[]>([]);
+  newRoleNames.current = ["New role", t`New role`];
+  const [recruitingTab, setRecruitingTab] = useState<{
+    threadId: string;
+    tab: RecruitingPanelState["tab"];
+  } | null>(null);
+  const [bots, setBots] = useState<Bot[]>([]);
+  const botsRef = useRef(bots);
+  botsRef.current = bots;
+  const botOrderEpochRef = useRef(0);
+  const pendingBotOrderRef = useRef<string[] | null>(null);
+  const savingBotOrderRef = useRef(false);
+  const [botSections, setBotSections] = useState<BotSection[]>([]);
+  const [spaces, setSpaces] = useState<Space[]>([]);
+  const [archivedBots, setArchivedBots] = useState<Bot[]>([]);
+  const [archivedGroups, setArchivedGroups] = useState<Group[]>([]);
+  const archivedGroupsRef = useRef(archivedGroups);
+  archivedGroupsRef.current = archivedGroups;
+  const [archivedOpen, setArchivedOpen] = useState(false);
+  const [newRoleSourceId, setNewRoleSourceId] = useState<string | null>(null);
+  const [newRoleDescription, setNewRoleDescription] = useState("");
+  const [creatingGroup, setCreatingGroup] = useState(false);
+  const [collapsedSidebarSections, setCollapsedSidebarSections] = useState(() => new Set<string>());
+  const [collapsedRosterParents, setCollapsedRosterParents] = useState(() => new Set<string>());
+
+  useEffect(() => {
+    setCollapsedSidebarSections(readCollapsedSidebarSections(userId));
+    setCollapsedRosterParents(readCollapsedRosterParents(userId));
+  }, [userId]);
+  useEffect(() => {
+    setBotsSidebarCollapsed(readBotsSidebarCollapsed(userId));
+  }, [userId]);
+  const [query, setQuery] = useState("");
+  const [searchHits, setSearchHits] = useState<SearchHit[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [snapshot, setSnapshot] = useState<ThreadSnapshot | null>(null);
+  const snapshotRef = useRef<ThreadSnapshot | null>(null);
+  const streamResponses = useSyncExternalStore(
+    subscribeResponseStreaming,
+    getResponseStreamingEnabled,
+    () => false,
+  );
+  const streamResponsesRef = useRef(streamResponses);
+  streamResponsesRef.current = streamResponses;
+  const botsSidebarDensity = useSyncExternalStore(
+    subscribeBotsSidebarDensity,
+    getBotsSidebarDensity,
+    () => "comfortable",
+  );
+  const enterToSend = useSyncExternalStore(
+    subscribeComposerEnterToSend,
+    getComposerEnterToSend,
+    () => false,
+  );
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
+  const [replyTarget, setReplyTarget] = useState<ThreadMessage | null>(null);
+  const [replyQuote, setReplyQuote] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [exportingConversation, setExportingConversation] = useState(false);
+  const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [panel, setPanelState] = useState<Panel>(null);
+  const [recruitingRefresh, setRecruitingRefresh] = useState(0);
+  // The role chat starts open: answers and confirmation cards must be visible without a click.
+  const [roleChatOpen, setRoleChatOpen] = useState(true);
+  // A message sent during a reply interjects; it is queued until the reply takes it in.
+  const [steer, setSteer] = useState<{ threadId: string; state: "queued" | "applied" } | null>(
+    null,
+  );
+  const [requeuedRunIds, setRequeuedRunIds] = useState<string[]>([]);
+  const observeRunSignal = useCallback(
+    (event: { type: string; runId?: string | null; threadId?: string | null }) => {
+      if (event.type === "run.steering.claimed")
+        setSteer((current) =>
+          current && current.threadId === event.threadId && current.state === "queued"
+            ? { ...current, state: "applied" }
+            : current,
+        );
+      if (event.type === "run.requeued" && event.runId) {
+        const runId = event.runId;
+        setRequeuedRunIds((current) =>
+          current.includes(runId) ? current : [...current.slice(-9), runId],
+        );
+      }
+    },
+    [],
+  );
+  const roleChatId = useId();
+  const roleChatTrigger = useRef<HTMLButtonElement>(null);
+  const roleChatSection = useRef<HTMLElement>(null);
+  const recruitingReadCache = useRef<RecruitingReadCache>({ entries: new Map(), epoch: 0 });
+  const [restoredPanelKey, setRestoredPanelKey] = useState<string | null>(null);
+  const panelStorageKeyRef = useRef<string | null>(null);
+  const observedPanelKey = useRef<string | null>(null);
+  const explicitPanelTarget = useRef<string | null>(null);
+  const pendingPanelRestore = useRef<RightPanelState | null>(null);
+  const pendingExplicitPanel = useRef(false);
+  const panelSearch = useRef({ searchParams, setSearchParams });
+  panelSearch.current = { searchParams, setSearchParams };
+  const setPanel = useCallback((next: Panel | ((current: Panel) => Panel)) => {
+    // A user navigation wins over a saved routine still waiting for its list.
+    pendingPanelRestore.current = null;
+    pendingExplicitPanel.current = panelStorageKeyRef.current === null;
+    setRestoredPanelKey(panelStorageKeyRef.current);
+    setPanelState(next);
+    const currentSearch = panelSearch.current;
+    if (currentSearch.searchParams.has("routine")) {
+      const params = new URLSearchParams(currentSearch.searchParams);
+      params.delete("routine");
+      currentSearch.setSearchParams(params, { replace: true });
+    }
+  }, []);
+  const [peerConversation, setPeerConversation] = useState<{
+    peerBotId: string;
+    peerBotName: string;
+  } | null>(null);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [routinesBotId, setRoutinesBotId] = useState<string | null>(null);
+  const [taughtSkills, setTaughtSkills] = useState<TaughtSkill[]>([]);
+  const [taughtSkillsBotId, setTaughtSkillsBotId] = useState<string | null>(null);
+  const [agentSkills, setAgentSkills] = useState<AgentSkillCatalogEntry[]>([]);
+  const [mentionRoutines, setMentionRoutines] = useState<Array<Routine & { botName?: string }>>([]);
+  const [mentionConnectors, setMentionConnectors] = useState<
+    Array<{
+      id: string;
+      name: string;
+      authStatus: "connected" | "needs_auth";
+      connectionId?: string;
+    }>
+  >([]);
+  const [teachBusy, setTeachBusy] = useState(false);
+  const [computer, setComputer] = useState<ComputerStatus | null>(null);
+  const computerRef = useRef<ComputerStatus | null>(null);
+  const threadRefreshEpoch = useRef(0);
+  const groupRefreshEpoch = useRef(0);
+  // ponytail: keep at most 20 threads in this authenticated shell; switching
+  // account/space reloads it. Native refresh/SSE remains authoritative.
+  const threadSnapshotCache = useRef(new Map<string, ThreadSnapshot>());
+  // Hover/focus reads for a conversation about to open; keyed by user and Space.
+  const threadPrefetch = useRef(createThreadPrefetch<ThreadSnapshot>());
+  const validatedThreadEpoch = useRef<number | null>(null);
+  const botsRefreshEpoch = useRef(0);
+  const botsRefreshApplied = useRef(0);
+  const archivedBotsRefreshEpoch = useRef(0);
+  const botsRefreshInFlight = useRef<Promise<void> | null>(null);
+  const pendingBotsRefresh = useRef<{
+    user: { id: string | undefined };
+    request: number;
+    archivedRequest: number | null;
+    includeArchived: boolean;
+    replaceBotOrder: boolean;
+  } | null>(null);
+  const botsRefreshUser = useRef({ id: userId });
+  if (botsRefreshUser.current.id !== userId) {
+    botsRefreshUser.current = { id: userId };
+    pendingBotsRefresh.current = null;
+    botsRefreshEpoch.current++;
+    archivedBotsRefreshEpoch.current++;
+  }
+  // A very fast run can finish over SSE while its threads.send response is still
+  // returning. Do not let that late receipt resurrect terminal work as queued.
+  const terminalRunReceipts = useRef(new Set<string>());
+  // Last-known computer/screen per bot, so switching back to an already-seen
+  // bot paints its computer pane instantly instead of blanking it while the
+  // thread + screen RPCs round-trip again (see refreshThread / refreshComputerScreen).
+  const computerCacheRef = useRef(
+    new Map<string, { computer: ComputerStatus | null; screenUrl: string | null }>(),
+  );
+  // Caps computerCacheRef so a long session that opens many distinct bots
+  // over time doesn't accumulate one entry per bot forever. Re-inserting on
+  // every update keeps Map iteration order as least-recently-used first, so
+  // eviction drops the bot that's been out of view longest.
+  const COMPUTER_CACHE_LIMIT = 20;
+
+  function cacheComputerFor(
+    botId: string,
+    patch: Partial<{ computer: ComputerStatus | null; screenUrl: string | null }>,
+  ) {
+    const cache = computerCacheRef.current;
+    const prev = cache.get(botId) ?? { computer: null, screenUrl: null };
+    cache.delete(botId);
+    cache.set(botId, { ...prev, ...patch });
+    if (cache.size > COMPUTER_CACHE_LIMIT) {
+      const oldest = cache.keys().next().value;
+      if (oldest !== undefined) cache.delete(oldest);
+    }
+  }
+
+  function commitSnapshot(next: ThreadSnapshot | null) {
+    if (next) {
+      const key = next.groupId ? `group:${next.groupId}` : `bot:${next.botId}`;
+      const cache = threadSnapshotCache.current;
+      cache.delete(key);
+      cache.set(key, next);
+      if (cache.size > 20) cache.delete(cache.keys().next().value!);
+    }
+    snapshotRef.current = next;
+    setSnapshot(withLiveStreamingProgress(next, streamResponsesRef.current));
+  }
+
+  useEffect(() => {
+    setSnapshot(withLiveStreamingProgress(snapshotRef.current, streamResponses));
+  }, [streamResponses]);
+
+  function commitComputer(next: ComputerStatus | null) {
+    computerRef.current = next;
+    setComputer(next);
+  }
+
+  function updateSnapshot(update: (prev: ThreadSnapshot | null) => ThreadSnapshot | null) {
+    commitSnapshot(update(snapshotRef.current));
+  }
+  const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [mcpOpen, setMcpOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("general");
+  const [messagingSettingsOpen, setMessagingSettingsOpen] = useState(false);
+  const [messagingSurfaceEnabled, setMessagingSurfaceEnabled] = useState(false);
+  const [messagingProviders, setMessagingProviders] = useState<string[]>([]);
+  const [memoryProviderConfig, setMemoryProviderConfig] = useState<
+    SpaceMemoryConfig | null | undefined
+  >(undefined);
+  const memoryProviderConfigRevision = useRef(0);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceStatus | null>(null);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const [dismissedRunErrorIds, setDismissedRunErrorIds] =
+    useState<ReadonlySet<string>>(readSeenRunErrorIds);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const mobileSidebarSwipeRef = useRef<{ startX: number; startY: number } | null>(null);
+  const [draggedBotId, setDraggedBotId] = useState<string | null>(null);
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const [botsSidebarCollapsed, setBotsSidebarCollapsed] = useState(false);
+  const focusPromptAbortRef = useRef<AbortController | null>(null);
+  const focusPromptBotIdRef = useRef<string | null>(null);
+  const botsSidebarEdgeDragRef = useRef<{ startX: number; mode: "expand" | "collapse" } | null>(
+    null,
+  );
+  const [newSpaceOpen, setNewSpaceOpen] = useState(false);
+  const [pickerInfoTopic, setPickerInfoTopic] = useState<"group" | "space" | null>(null);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+
+  useEffect(() => {
+    const desktop = window.matchMedia("(min-width: 768px)");
+    function closeMobileSidebar() {
+      if (desktop.matches) setMobileSidebarOpen(false);
+    }
+    closeMobileSidebar();
+    desktop.addEventListener("change", closeMobileSidebar);
+    return () => desktop.removeEventListener("change", closeMobileSidebar);
+  }, []);
+  const [activityMode, setActivityMode] = useState(readActivityMode);
+  const toggleActivityMode = useCallback(() => {
+    setActivityMode((on) => {
+      const next = !on;
+      writeActivityMode(next);
+      return next;
+    });
+  }, []);
+  const [botMenu, setBotMenu] = useState<{
+    kind: "bot" | "group";
+    id: string;
+    position: ContextMenuPosition;
+  } | null>(null);
+  // The context menu anchors to the pointer, so return focus to the row that opened it.
+  const botMenuAnchor = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (botMenu || !botMenuAnchor.current) return;
+    botMenuAnchor.current.focus();
+    botMenuAnchor.current = null;
+  }, [botMenu]);
+  const [deleteTarget, setDeleteTarget] = useState<Bot | null>(null);
+  const [deleteGroupTarget, setDeleteGroupTarget] = useState<Group | null>(null);
+  const [deleteSpaceTarget, setDeleteSpaceTarget] = useState<Space | null>(null);
+  const [renameSpaceTarget, setRenameSpaceTarget] = useState<Space | null>(null);
+  const [spaceMenu, setSpaceMenu] = useState<{
+    id: string;
+    position: ContextMenuPosition;
+  } | null>(null);
+  const spaceMenuAnchor = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (spaceMenu || !spaceMenuAnchor.current) return;
+    spaceMenuAnchor.current.focus();
+    spaceMenuAnchor.current = null;
+  }, [spaceMenu]);
+  const closeSpaceMenu = useCallback(() => setSpaceMenu(null), []);
+  const spaceMenuTarget = spaceMenu
+    ? (spaces.find((space) => space.id === spaceMenu.id) ?? null)
+    : null;
+  const [clearTarget, setClearTarget] = useState<
+    { kind: "bot"; chat: Bot } | { kind: "group"; chat: Group } | null
+  >(null);
+  const [newSectionTarget, setNewSectionTarget] = useState<
+    { kind: "bot"; chat: Bot } | { kind: "group"; chat: Group } | null
+  >(null);
+  const [renameSectionTarget, setRenameSectionTarget] = useState<{
+    section: BotSection;
+    spaceId: string;
+  } | null>(null);
+  const [sectionMenu, setSectionMenu] = useState<{
+    section: BotSection;
+    spaceId: string;
+    position: ContextMenuPosition;
+  } | null>(null);
+  const sectionMenuAnchor = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (sectionMenu || !sectionMenuAnchor.current) return;
+    sectionMenuAnchor.current.focus();
+    sectionMenuAnchor.current = null;
+  }, [sectionMenu]);
+  const closeSectionMenu = useCallback(() => setSectionMenu(null), []);
+  const [booting, setBooting] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [initialBotsLoaded, setInitialBotsLoaded] = useState(false);
+  const [bootstrapMe, setBootstrapMe] = useState<Me | null>();
+  useEffect(() => {
+    const cache = recruitingReadCache.current;
+    // Saved reads belong to one account and Space; drop them on unmount or when either changes.
+    const prefetched = threadPrefetch.current;
+    return () => {
+      clearRecruitingReads(cache);
+      prefetched.clear();
+    };
+  }, [userId, bootstrapMe?.spaceId]);
+  const call = useCallSession(userId, bootstrapMe?.spaceId);
+  const showToolActivity = useSyncExternalStore(
+    subscribeToolActivity,
+    () => getToolActivityEnabled(bootstrapMe?.isDeploymentOwner === true),
+    () => false,
+  );
+  const viewportWidth = useViewportWidth();
+  const [botsSidebarWidth, setBotsSidebarWidth] = usePaneWidth(
+    "rakazo:bots-sidebar-width",
+    showToolActivity ? 316 : 260,
+  );
+  const botsSidebarMaxWidth = Math.max(220, Math.min(480, viewportWidth - 640));
+  const visibleSidebarWidth = botsSidebarCollapsed
+    ? 0
+    : clampWidth(botsSidebarWidth, 220, botsSidebarMaxWidth);
+  const [roleChatWidth, setRoleChatWidth] = usePaneWidth(
+    "rakazo:role-chat-width",
+    clampWidth(viewportWidth * 0.34, 320, 420),
+  );
+  const roleChatMaxWidth = Math.max(320, Math.min(720, viewportWidth - visibleSidebarWidth - 320));
+  const showToolActivityRef = useRef<boolean | null>(null);
+  showToolActivityRef.current = bootstrapMe ? showToolActivity : null;
+  useEffect(() => {
+    if (!showToolActivity && panel && panel !== "recruiting" && panel !== "create-group") {
+      setPanel(null);
+    }
+  }, [showToolActivity, panel]);
+  const [keepComputerRecovery, setKeepComputerRecovery] = useState(false);
+  const recoveryHoldTimer = useRef<number | undefined>(undefined);
+  const showComputerRecoveryHint =
+    computersAreUnavailable(bootstrapMe?.sandboxProvider) || keepComputerRecovery;
+  const releaseComputerRecovery = useCallback(() => {
+    window.clearTimeout(recoveryHoldTimer.current);
+    recoveryHoldTimer.current = undefined;
+    setKeepComputerRecovery(false);
+  }, []);
+  const holdComputerRecovery = useCallback(() => {
+    setKeepComputerRecovery(true);
+    window.clearTimeout(recoveryHoldTimer.current);
+    recoveryHoldTimer.current = window.setTimeout(() => {
+      recoveryHoldTimer.current = undefined;
+      setKeepComputerRecovery(false);
+    }, 4000);
+  }, []);
+  useEffect(() => {
+    if (panel !== "computer") releaseComputerRecovery();
+  }, [panel, releaseComputerRecovery]);
+  useEffect(() => () => window.clearTimeout(recoveryHoldTimer.current), []);
+  const [routineDraft, setRoutineDraft] = useState<RoutineDraftState>(emptyRoutineDraft());
+  const [routineWebhookSecret, setRoutineWebhookSecret] = useState<string | null>(null);
+  const [editingRoutine, setEditingRoutine] = useState<Routine | null>(null);
+  const [deleteRoutineTarget, setDeleteRoutineTarget] = useState<Routine | null>(null);
+  const [savingRoutine, setSavingRoutine] = useState(false);
+  const [runningRoutine, setRunningRoutine] = useState(false);
+  const [routineError, setRoutineError] = useState<string | null>(null);
+  const [screenUrl, setScreenUrl] = useState<string | null>(null);
+  const [computerOpen, setComputerOpen] = useState(false);
+  const [computerBotId, setComputerBotId] = useState<string | undefined>();
+  const computerOpenRef = useRef(false);
+  const computerBotIdRef = useRef<string | undefined>(undefined);
+  const computerBootEpoch = useRef(0);
+  const openComputerRef = useRef<(botId?: string) => Promise<boolean>>(async () => false);
+  const [computerViewport, setComputerViewport] = useState<{
+    height: number;
+    offsetTop: number;
+  } | null>(null);
+  const [computerError, setComputerError] = useState<string | null>(null);
+  // Screen-load failures can sit beside a still-valid embed URL; boot and
+  // takeover failures must stay visible even when a URL remains.
+  const [computerErrorFromScreen, setComputerErrorFromScreen] = useState(false);
+  useEffect(() => {
+    if (!computerOpen) {
+      setComputerViewport(null);
+      return;
+    }
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const sync = () => {
+      setComputerViewport({ height: viewport.height, offsetTop: viewport.offsetTop });
+    };
+    sync();
+    viewport.addEventListener("resize", sync);
+    viewport.addEventListener("scroll", sync);
+    return () => {
+      viewport.removeEventListener("resize", sync);
+      viewport.removeEventListener("scroll", sync);
+    };
+  }, [computerOpen]);
+  useEffect(() => {
+    if (!session.data?.user) return;
+    let cancelled = false;
+    void rpc.messaging
+      .status()
+      .then((status) => {
+        if (!cancelled) {
+          setMessagingSurfaceEnabled(status.enabled);
+          setMessagingProviders(status.providers);
+        }
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [session.data?.user]);
+  const [usage, setUsage] = useState<UsageCosts | null>(null);
+  const refreshUsage = useCallback(() => {
+    void rpc.usage
+      .costs()
+      .then(setUsage)
+      .catch(() => undefined);
+  }, []);
+  const autoBooted = useRef<string | null>(null);
+  const routineSavePending = useRef(false);
+  const webhookSecretProvisionRef = useRef(new Map<string, Promise<string>>());
+  const ensureWebhookSecret = (botId: string) =>
+    sharedInflight(webhookSecretProvisionRef.current, botId, async () => {
+      const result = await rpc.bots.rotateWebhookSecret({ botId });
+      setRoutineWebhookSecret(result.secret);
+      setBots((current) =>
+        current.map((bot) => (bot.id === botId ? { ...bot, webhookConfigured: true } : bot)),
+      );
+      return result.secret;
+    });
+  const routineSaveRequest = useRef(0);
+  const routineRunPending = useRef(false);
+  const bootstrappedThread = useRef<ThreadSnapshot | null>(null);
+  const expandedHistoryThread = useRef<string | null>(null);
+  const historyEpoch = useRef(0);
+  const jumpGeneration = useRef(0);
+  const [scrollRequest, setScrollRequest] = useState<{
+    messageId: string;
+    nonce: number;
+  } | null>(null);
+  const clearScrollRequest = useCallback(() => setScrollRequest(null), []);
+  const initiallyScrolledThread = useRef<string | null>(null);
+  const messageScroll = useRef<HTMLDivElement>(null);
+  const pinnedAroundRef = useRef<{
+    botId?: string;
+    groupId?: string;
+    messageId: string;
+    threadId: string;
+    messages: ThreadMessage[];
+    olderCursor: number | null;
+  } | null>(null);
+  const manuallyUnread = useRef(new Set<string>());
+  const readVisibleGroups = useRef(new Set<string>());
+  const notifiedBrowserEvents = useRef(new Set<string>());
+  const pendingBrowserNotifications = useRef(new Map<string, PendingBrowserNotification>());
+  const computerVisible = useRef(false);
+  computerVisible.current = panel === "computer" || computerOpen;
+  const autoSpoken = useRef<string | null>(null);
+  const autoSpokenBotId = useRef<string | null>(null);
+
+  const inGroup = Boolean(groupId);
+  const active = inGroup ? undefined : (bots.find((b) => b.id === botId) ?? bots[0]);
+  const computerBot =
+    (computerBotId ? bots.find((bot) => bot.id === computerBotId) : undefined) ?? active;
+  computerOpenRef.current = computerOpen;
+  computerBotIdRef.current = computerBotId ?? active?.id;
+  const activeGroup = groups.find((group) => group.id === groupId);
+  const archivedRouteGroup = activeGroup
+    ? undefined
+    : archivedGroups.find((group) => group.id === groupId);
+  const roleSourceGroup =
+    panel === "create-group" && newRoleSourceId
+      ? [...groups, ...archivedGroups].find((group) => group.id === newRoleSourceId)
+      : activeGroup;
+  function canCreateRoleFrom(id: string) {
+    const group = [...groups, ...archivedGroups].find((group) => group.id === id);
+    return Boolean(
+      !creatingGroup &&
+        group &&
+        group.members.length >= GROUP_MEMBER_MIN &&
+        group.members.length <= GROUP_MEMBER_MAX &&
+        group.members.every((member) =>
+          bots.some((bot) => bot.id === member.botId && !bot.archivedAt),
+        ),
+    );
+  }
+  // Reuse this role's ordered native crew; its first member already owns default sends.
+  const roleCrewBots = (roleSourceGroup?.members ?? []).flatMap((member) => {
+    const bot = bots.find((bot) => bot.id === member.botId && !bot.archivedAt);
+    return bot ? [bot] : [];
+  });
+  const activePendingAttachments = useMemo(
+    () => attachmentsForThread(pendingAttachments, inGroup ? groupId : active?.id),
+    [active?.id, groupId, inGroup, pendingAttachments],
+  );
+  const activeRoutines = !inGroup && routinesBotId === active?.id ? routines : [];
+  const panelTarget = inGroup ? activeGroup?.id : active?.id;
+  const panelStorageKey =
+    userId && bootstrapMe?.spaceId && panelTarget
+      ? rightPanelStorageKey(userId, bootstrapMe.spaceId, inGroup ? "group" : "bot", panelTarget)
+      : null;
+  panelStorageKeyRef.current = panelStorageKey;
+  const activeTaughtSkills = taughtSkillsBotId === active?.id ? taughtSkills : [];
+  const recordingSkill = activeTaughtSkills.find((skill) => skill.status === "recording") ?? null;
+  const routeBotId = useRef<string | undefined>(botId);
+  routeBotId.current = botId;
+  const routeGroupId = useRef<string | undefined>(groupId);
+  routeGroupId.current = groupId;
+  const activeBotId = useRef<string | undefined>(inGroup ? undefined : active?.id);
+  activeBotId.current = inGroup ? undefined : active?.id;
+  const activeGroupId = useRef<string | undefined>(groupId);
+  activeGroupId.current = groupId;
+  // Agent events arrive in bursts and reconnects repeat; re-read the workbench at most once a
+  // second, and not at all while the page is hidden.
+  const recruitingRefreshQueue = useRef<ReturnType<typeof createCoalescedRefresh>>(undefined);
+  const lastRecruitingRefreshAt = useRef(0);
+  /** Set when a resync could not reach the backend, whose workbench reads may have failed too. */
+  const recruitingOutage = useRef(false);
+  /** A reconnect re-reads the workbench only if it missed events, or to retry after a while. */
+  const reconnectNeedsRecruitingRead = (
+    before: { threadId: string; cursor: number } | null | undefined,
+    fresh: { threadId: string; cursor: number },
+  ) =>
+    recruitingOutage.current ||
+    before?.threadId !== fresh.threadId ||
+    before.cursor !== fresh.cursor ||
+    Date.now() - lastRecruitingRefreshAt.current >= RECONNECT_RECRUITING_RETRY_MS;
+  useEffect(() => {
+    const queue = createCoalescedRefresh(
+      () => {
+        lastRecruitingRefreshAt.current = Date.now();
+        recruitingOutage.current = false;
+        revalidateRecruitingReads(recruitingReadCache.current);
+        setRecruitingRefresh((value) => value + 1);
+      },
+      { windowMs: 1_000 },
+    );
+    recruitingRefreshQueue.current = queue;
+    return () => {
+      queue.dispose();
+      recruitingRefreshQueue.current = undefined;
+    };
+  }, []);
+  const refreshRecruitingReads = useCallback(
+    (threadId: string, spaceId: string | undefined) => {
+      const current = snapshotRef.current;
+      if (
+        !userId ||
+        !bootstrapMe?.spaceId ||
+        botsRefreshUser.current.id !== userId ||
+        (selectedSpaceId() ?? bootstrapMe.spaceId) !== bootstrapMe.spaceId ||
+        spaceId !== bootstrapMe.spaceId ||
+        threadId !== current?.threadId ||
+        (activeGroupId.current
+          ? current?.groupId !== activeGroupId.current
+          : current?.botId !== activeBotId.current)
+      )
+        return;
+      recruitingRefreshQueue.current?.request();
+    },
+    [bootstrapMe?.spaceId, userId],
+  );
+  const invalidateRecruiting = useCallback(
+    (event: ProductEvent) => {
+      if (eventChangesRecruitingPanel(event)) refreshRecruitingReads(event.threadId, event.spaceId);
+    },
+    [refreshRecruitingReads],
+  );
+  const screenRequest = useRef(0);
+  const contextBot =
+    botMenu?.kind === "bot" ? bots.find((bot) => bot.id === botMenu.id) : undefined;
+  const contextGroup =
+    botMenu?.kind === "group" ? groups.find((group) => group.id === botMenu.id) : undefined;
+  const contextChat = contextBot ?? contextGroup;
+  const closeBotMenu = useCallback(() => setBotMenu(null), []);
+  const updateBotUnread = useCallback((id: string, unread: boolean) => {
+    setBots((current) => {
+      const bot = current.find((candidate) => candidate.id === id);
+      if (!bot || bot.unread === unread) return current;
+      return current.map((candidate) =>
+        candidate.id === id ? { ...candidate, unread } : candidate,
+      );
+    });
+  }, []);
+  const markBotRead = useCallback(
+    async (id: string) => {
+      await rpc.threads.markRead({ botId: id });
+      manuallyUnread.current.delete(id);
+      updateBotUnread(id, false);
+    },
+    [updateBotUnread],
+  );
+  const markBotUnread = useCallback(
+    async (id: string) => {
+      manuallyUnread.current.add(id);
+      try {
+        await rpc.threads.markUnread({ botId: id });
+      } catch (err) {
+        manuallyUnread.current.delete(id);
+        throw err;
+      }
+      updateBotUnread(id, true);
+    },
+    [updateBotUnread],
+  );
+  // A bot the user marked unread by hand stays unread until they open it again,
+  // otherwise the auto-read below would undo the action on the next window focus.
+  const markBotReadIfVisible = useCallback(
+    (id: string) => {
+      if (manuallyUnread.current.has(id)) return;
+      if (document.visibilityState === "visible" && document.hasFocus()) {
+        void markBotRead(id).catch(() => undefined);
+      }
+    },
+    [markBotRead],
+  );
+  const deliverBrowserNotification = useCallback((pending: PendingBrowserNotification): boolean => {
+    const currentBot = botsRef.current.find((bot) => bot.id === pending.botId);
+    if (!currentBot || typeof Notification === "undefined") return true;
+    const result = deliverNativeBrowserNotification(
+      pending.event,
+      currentBot.name || pending.botName,
+      {
+        enabled: pending.groupNotification || currentBot.notifyOnFinish,
+        pageVisible: document.visibilityState === "visible",
+        windowFocused: document.hasFocus(),
+        permission: Notification.permission,
+        notifiedEventIds: notifiedBrowserEvents.current,
+        show: (title, body, tag) => new Notification(title, { body, tag }),
+      },
+    );
+    return result !== "pending";
+  }, []);
+  const flushPendingBrowserNotifications = useCallback(() => {
+    for (const [threadId, pending] of pendingBrowserNotifications.current) {
+      if (deliverBrowserNotification(pending)) {
+        pendingBrowserNotifications.current.delete(threadId);
+      }
+    }
+  }, [deliverBrowserNotification]);
+  const notifyBrowserForEvent = useCallback(
+    (
+      event: Pick<ProductEvent, "id" | "type" | "threadId" | "seq" | "botId" | "payload">,
+      subscribedThreadId: string | undefined,
+      initialCursor: number,
+      streamReady: boolean,
+      botName: string,
+      enabled: boolean,
+      groupNotification: boolean,
+    ) => {
+      const botId = event.botId;
+      if (typeof botId !== "string") return;
+      const eligible = shouldNotifyBrowser(event, {
+        subscribedThreadId: subscribedThreadId ?? "",
+        initialCursor,
+        streamReady,
+        pageVisible: document.visibilityState === "visible",
+        windowFocused: document.hasFocus(),
+        permission: "granted",
+        notifiedEventIds: notifiedBrowserEvents.current,
+      });
+      if (!eligible || !enabled) return;
+      const pending = {
+        event,
+        botId,
+        botName,
+        groupNotification,
+      } satisfies PendingBrowserNotification;
+      if (typeof Notification === "undefined" || Notification.permission === "denied") return;
+      if (Notification.permission === "default") {
+        pendingBrowserNotifications.current.set(event.threadId, pending);
+        return;
+      }
+      if (deliverBrowserNotification(pending)) {
+        pendingBrowserNotifications.current.delete(event.threadId);
+      } else {
+        pendingBrowserNotifications.current.set(event.threadId, pending);
+      }
+    },
+    [deliverBrowserNotification],
+  );
+
+  const refreshBots = useCallback(
+    (includeArchived = false, replaceBotOrder = false) => {
+      const user = botsRefreshUser.current;
+      if (!user.id) return Promise.resolve();
+      const pending = pendingBotsRefresh.current;
+      const request = ++botsRefreshEpoch.current;
+      const archivedRequest = includeArchived ? ++archivedBotsRefreshEpoch.current : null;
+      // ponytail: retain one pending refresh in this shell; merge triggers, never candidate data.
+      pendingBotsRefresh.current = {
+        user,
+        request,
+        archivedRequest:
+          archivedRequest ?? (pending?.user === user ? pending.archivedRequest : null),
+        includeArchived: includeArchived || (pending?.user === user && pending.includeArchived),
+        replaceBotOrder: replaceBotOrder || (pending?.user === user && pending.replaceBotOrder),
+      };
+      if (botsRefreshInFlight.current) return botsRefreshInFlight.current;
+      const refreshing = Promise.resolve().then(async () => {
+        try {
+          while (pendingBotsRefresh.current) {
+            const { user, request, archivedRequest, includeArchived, replaceBotOrder } =
+              pendingBotsRefresh.current;
+            pendingBotsRefresh.current = null;
+            if (user !== botsRefreshUser.current) continue;
+            markOnce("rk:renderer:bots-request-start");
+            const botOrderEpoch = botOrderEpochRef.current;
+            const preserveBotOrder =
+              savingBotOrderRef.current || pendingBotOrderRef.current !== null;
+            const requests = [
+              rpc.spaces.list(),
+              includeArchived ? rpc.bots.listArchived() : Promise.resolve(null),
+              includeArchived ? rpc.groups.listArchived() : Promise.resolve(null),
+            ] as const;
+            try {
+              const [navigation, archived, archivedGroupList] = await Promise.all(requests);
+              if (user !== botsRefreshUser.current) continue;
+              const { bots: list, botSections: sections, groups: groupList } = navigation.current;
+              markOnce("rk:renderer:bots-response");
+              const botsFresh = request === botsRefreshEpoch.current;
+              const archivedFresh =
+                archivedRequest != null && archivedRequest === archivedBotsRefreshEpoch.current;
+              if (!botsFresh && replaceBotOrder && botOrderEpoch === botOrderEpochRef.current) {
+                const pending =
+                  pendingBotsRefresh.current as (typeof pendingBotsRefresh)["current"];
+                if (pending?.user === user) pending.replaceBotOrder = true;
+              }
+              if (!botsFresh && !archivedFresh) continue;
+              if (archivedFresh && archived) setArchivedBots(archived);
+              if (archivedFresh && archivedGroupList) setArchivedGroups(archivedGroupList);
+              if (!botsFresh) continue;
+              if (
+                botOrderEpoch === botOrderEpochRef.current &&
+                (replaceBotOrder || (!preserveBotOrder && !savingBotOrderRef.current))
+              ) {
+                setBots(list);
+              }
+              setBotSections(sections);
+              setGroups(groupList);
+              setSpaces(navigation.spaces);
+              setInitialBotsLoaded(true);
+              botsRefreshApplied.current = request;
+              if (
+                includeArchived &&
+                list.length === 0 &&
+                archived?.length === 0 &&
+                groupList.length === 0 &&
+                archivedGroupList?.length === 0 &&
+                !navigation.spaces.some((space) => space.hasContent)
+              ) {
+                navigate("/onboarding", { replace: true });
+                continue;
+              }
+              const developerView = showToolActivityRef.current;
+              if (developerView === null) continue;
+              const currentGroupId = routeGroupId.current;
+              if (currentGroupId) {
+                if (
+                  !groupList.some((group) => group.id === currentGroupId) &&
+                  !(archivedGroupList ?? archivedGroupsRef.current).some(
+                    (group) => group.id === currentGroupId,
+                  )
+                ) {
+                  navigate(firstThreadRoute(list, groupList, !developerView), {
+                    replace: true,
+                  });
+                }
+                continue;
+              }
+              const currentBotId = routeBotId.current;
+              if (!currentBotId || !list.some((bot) => bot.id === currentBotId)) {
+                navigate(firstThreadRoute(list, groupList, !developerView), {
+                  replace: true,
+                });
+              }
+            } catch (error) {
+              await Promise.allSettled(requests);
+              // Other callers can enqueue while this failed batch settles.
+              const pending = pendingBotsRefresh.current as (typeof pendingBotsRefresh)["current"];
+              if (!pending) throw error;
+              if (pending.user === user) {
+                pending.includeArchived ||= includeArchived;
+                pending.replaceBotOrder ||= replaceBotOrder;
+                pending.archivedRequest ??= archivedRequest;
+              }
+            }
+          }
+        } finally {
+          botsRefreshInFlight.current = null;
+        }
+      });
+      botsRefreshInFlight.current = refreshing;
+      return refreshing;
+    },
+    [navigate],
+  );
+  // Run events update the sidebar in place and reach this user's other tabs at once.
+  const botStatusChannel = useRef<ReturnType<typeof openBotStatusChannel> | null>(null);
+  useEffect(() => {
+    const spaceId = bootstrapMe?.spaceId;
+    if (!userId || !spaceId) return;
+    const channel = openBotStatusChannel({ userId, spaceId }, ({ botId, status }) => {
+      setBots((current) => applyBotStatus(current, botId, status));
+      // The finished run's preview and error badge come from the navigation read.
+      if (status === "idle") void refreshBots().catch(() => undefined);
+    });
+    botStatusChannel.current = channel;
+    return () => {
+      channel.close();
+      botStatusChannel.current = null;
+    };
+  }, [userId, bootstrapMe?.spaceId, refreshBots]);
+  const applyRunStatus = useCallback((event: ProductEvent) => {
+    const status = botStatusFromRunEvent(event);
+    if (!status) return;
+    setBots((current) => applyBotStatus(current, event.botId, status));
+    botStatusChannel.current?.post({ botId: event.botId, status });
+  }, []);
+
+  function snapTranscriptToEndAfterFrame() {
+    const queuedElement = messageScroll.current;
+    if (!queuedElement) return;
+    const queuedScrollTop = queuedElement.scrollTop;
+    window.requestAnimationFrame(() => {
+      const element = messageScroll.current;
+      if (transcriptCanSnapAfterFrame(element, queuedElement, queuedScrollTop)) {
+        queuedElement.scrollTop = queuedElement.scrollHeight;
+      }
+    });
+  }
+
+  function prefetchThread(target: { botId?: string; groupId?: string }, spaceId?: string) {
+    const currentSpaceId = bootstrapMe?.spaceId;
+    if (
+      !userId ||
+      !currentSpaceId ||
+      spaceId !== currentSpaceId ||
+      (selectedSpaceId() ?? currentSpaceId) !== currentSpaceId ||
+      (target.groupId ? target.groupId === groupId : !inGroup && target.botId === active?.id)
+    )
+      return;
+    threadPrefetch.current.prefetch(threadPrefetchKey(userId, currentSpaceId, target), () =>
+      rpc.threads.get(target),
+    );
+  }
+
+  function prefetchSidebarChat(item: { kind: string; chat: { id: string; spaceId: string } }) {
+    prefetchThread(
+      item.kind === "bot" ? { botId: item.chat.id } : { groupId: item.chat.id },
+      item.chat.spaceId,
+    );
+  }
+
+  async function readThreadSnapshot(
+    target: { botId?: string; groupId?: string },
+    signal: AbortSignal | undefined,
+    isCurrent: () => boolean,
+    opening = false,
+  ) {
+    try {
+      const prefetched =
+        opening && userId && bootstrapMe?.spaceId
+          ? await threadPrefetch.current
+              .take(threadPrefetchKey(userId, bootstrapMe.spaceId, target))
+              ?.catch(() => undefined)
+          : undefined;
+      if (prefetched) return prefetched;
+      return await rpc.threads.get(target, signal ? { signal } : undefined);
+    } catch (error) {
+      if (
+        isCurrent() &&
+        !signal?.aborted &&
+        error instanceof ORPCError &&
+        ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+      ) {
+        threadSnapshotCache.current.delete(
+          target.groupId ? `group:${target.groupId}` : `bot:${target.botId}`,
+        );
+        validatedThreadEpoch.current = null;
+        commitSnapshot(null);
+      }
+      throw error;
+    }
+  }
+
+  async function refreshGroupThread(id: string, signal?: AbortSignal, opening = false) {
+    const scrollElement = messageScroll.current;
+    const stickToEnd = !scrollElement || transcriptIsNearEnd(scrollElement);
+    markOnce("rk:renderer:thread-request-start");
+    const epoch = historyEpoch.current;
+    const request = ++groupRefreshEpoch.current;
+    const isCurrent = () =>
+      activeGroupId.current === id &&
+      epoch === historyEpoch.current &&
+      request === groupRefreshEpoch.current;
+    const snap = await readThreadSnapshot({ groupId: id }, signal, isCurrent, opening);
+    markOnce("rk:renderer:thread-response");
+    if (!isCurrent()) return snap;
+    const reconciled = reconcileRefreshedThread(
+      snapshotRef.current,
+      snap,
+      computerRef.current,
+      expandedHistoryThread.current === snap.threadId,
+    );
+    validatedThreadEpoch.current = epoch;
+    commitSnapshot(reconciled.snapshot);
+    if (!computerOpenRef.current) commitComputer(null);
+    setRoutines([]);
+    setRoutinesBotId(null);
+    // Keep the search-jump viewport; expandedHistoryThread merge still accepts live messages.
+    if (
+      stickToEnd &&
+      (!scrollElement || transcriptIsNearEnd(scrollElement)) &&
+      expandedHistoryThread.current !== snap.threadId
+    ) {
+      snapTranscriptToEndAfterFrame();
+    }
+    return snap;
+  }
+
+  async function refreshThread(id: string, signal?: AbortSignal, opening = false) {
+    const scrollElement = messageScroll.current;
+    const stickToEnd = !scrollElement || transcriptIsNearEnd(scrollElement);
+    markOnce("rk:renderer:thread-request-start");
+    const epoch = historyEpoch.current;
+    const request = ++threadRefreshEpoch.current;
+    // Apply threads.get as soon as it returns so stop/takeover status is not held behind
+    // routines/skills/screen fetches (progress can advance the cursor meanwhile).
+    const isCurrent = () =>
+      activeBotId.current === id &&
+      epoch === historyEpoch.current &&
+      request === threadRefreshEpoch.current;
+    const snap = await readThreadSnapshot({ botId: id }, signal, isCurrent, opening);
+    markOnce("rk:renderer:thread-response");
+    if (
+      activeBotId.current !== id ||
+      epoch !== historyEpoch.current ||
+      request !== threadRefreshEpoch.current
+    ) {
+      return snap;
+    }
+    const reconciled = reconcileRefreshedThread(
+      snapshotRef.current,
+      snap,
+      computerRef.current,
+      expandedHistoryThread.current === snap.threadId,
+    );
+    validatedThreadEpoch.current = epoch;
+    commitSnapshot(reconciled.snapshot);
+    commitComputer(reconciled.computer);
+    cacheComputerFor(id, { computer: reconciled.computer });
+    if (
+      stickToEnd &&
+      (!scrollElement || transcriptIsNearEnd(scrollElement)) &&
+      expandedHistoryThread.current !== snap.threadId
+    ) {
+      snapTranscriptToEndAfterFrame();
+    }
+    void Promise.all([
+      rpc.routines.list({ botId: id }).catch(() => null),
+      rpc.skills.list({ botId: id }).catch(() => null),
+      refreshComputerScreen(id).catch(() => null),
+    ]).then(([routines, skills]) => {
+      if (
+        activeBotId.current !== id ||
+        epoch !== historyEpoch.current ||
+        request !== threadRefreshEpoch.current
+      ) {
+        return;
+      }
+      if (routines) {
+        setRoutines(routines);
+        setRoutinesBotId(id);
+      }
+      if (skills) {
+        setTaughtSkills(skills);
+        setTaughtSkillsBotId(id);
+      }
+    });
+    return snap;
+  }
+
+  async function refreshComputerScreen(id: string) {
+    if (!computerVisible.current) return null;
+    const request = ++screenRequest.current;
+    return loadComputerScreen({
+      load: () => rpc.computer.screenUrl({ botId: id }),
+      isCurrent: () =>
+        request === screenRequest.current &&
+        (activeBotId.current === id || computerBotIdRef.current === id) &&
+        computerVisible.current,
+      commit: (screen) => {
+        setScreenUrl(screen.url);
+        setComputerError(screen.error);
+        setComputerErrorFromScreen(Boolean(screen.error));
+        cacheComputerFor(id, { screenUrl: screen.url });
+      },
+      fallbackError: t`Could not connect to the computer screen`,
+    });
+  }
+
+  async function loadOlderMessages() {
+    const targetBotId = inGroup ? undefined : active?.id;
+    const targetGroupId = inGroup ? groupId : undefined;
+    const snapshotMatchesTarget = targetGroupId
+      ? snapshot?.groupId === targetGroupId
+      : snapshot?.botId === targetBotId;
+    if (
+      (!targetBotId && !targetGroupId) ||
+      !snapshotMatchesTarget ||
+      snapshot?.olderCursor == null ||
+      loadingOlder
+    )
+      return;
+    pinnedAroundRef.current = null;
+    const scrollElement = messageScroll.current;
+    const previousHeight = scrollElement?.scrollHeight ?? 0;
+    const epoch = historyEpoch.current;
+    const before = snapshot.olderCursor;
+    setLoadingOlder(true);
+    try {
+      const page = await rpc.threads.messages({
+        ...(targetGroupId ? { groupId: targetGroupId } : { botId: targetBotId! }),
+        before,
+      });
+      if (
+        epoch !== historyEpoch.current ||
+        activeBotId.current !== targetBotId ||
+        activeGroupId.current !== targetGroupId
+      )
+        return;
+      expandedHistoryThread.current = page.threadId;
+      updateSnapshot((prev) => prependThreadMessagePage(prev, page));
+      window.requestAnimationFrame(() => {
+        const element = messageScroll.current;
+        if (element) element.scrollTop += element.scrollHeight - previousHeight;
+      });
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    const bootstrapAbort = new AbortController();
+    const user = { id: userId };
+    botsRefreshUser.current = user;
+    let bootstrapReady = false;
+    let refreshTimer: number | undefined;
+    const canRefresh = () =>
+      !cancelled &&
+      bootstrapReady &&
+      botsRefreshUser.current === user &&
+      document.visibilityState === "visible" &&
+      document.hasFocus();
+    const scheduleRefresh = (delay = 15_000) => {
+      window.clearTimeout(refreshTimer);
+      if (!canRefresh()) return;
+      // ponytail: active-thread events miss other clients' roles; reconcile only while focused.
+      refreshTimer = window.setTimeout(() => {
+        refreshTimer = undefined;
+        if (!canRefresh()) return;
+        void (botsRefreshInFlight.current ?? refreshBots())
+          .catch(() => undefined)
+          .finally(() => scheduleRefresh());
+      }, delay);
+    };
+    const refreshVisibleBots = () => scheduleRefresh(50);
+    const providerConfigRevision = memoryProviderConfigRevision.current;
+    void rpc.memory
+      .providerConfig()
+      .then((providerConfig) => {
+        if (!cancelled && memoryProviderConfigRevision.current === providerConfigRevision) {
+          setMemoryProviderConfig(providerConfig);
+        }
+      })
+      .catch(() => {
+        if (!cancelled && memoryProviderConfigRevision.current === providerConfigRevision) {
+          setMemoryProviderConfig(null);
+        }
+      });
+    const appliedAtStart = botsRefreshApplied.current;
+    void takeInitialBootstrap(botId, groupId)
+      .then((bootstrap) => {
+        if (cancelled || botsRefreshUser.current !== user) return;
+        const groupList = bootstrap.groups;
+        const recruiting = !getToolActivityEnabled(bootstrap.me.isDeploymentOwner === true);
+        showToolActivityRef.current = !recruiting;
+        setBootstrapMe(bootstrap.me);
+        // Skip list/route writes only if a later refreshBots() successfully
+        // committed (failed refreshes bump epoch but not botsRefreshApplied).
+        const applyBotLists = appliedAtStart === botsRefreshApplied.current;
+        if (applyBotLists) {
+          setBots(bootstrap.bots);
+          setBotSections(bootstrap.botSections);
+          setArchivedBots(bootstrap.archivedBots);
+          setArchivedGroups(bootstrap.archivedGroups);
+          setGroups(groupList);
+          setSpaces(bootstrap.spaces);
+          setInitialBotsLoaded(true);
+        }
+        const selectedThread =
+          bootstrap.thread &&
+          (groupId
+            ? routeGroupId.current === groupId && bootstrap.thread.groupId === groupId
+            : !routeGroupId.current &&
+              routeBotId.current === botId &&
+              bootstrap.thread.botId === botId);
+        if (
+          applyBotLists &&
+          selectedThread &&
+          bootstrap.thread &&
+          !(groupId && searchParamsRef.current.get("m"))
+        ) {
+          bootstrappedThread.current = bootstrap.thread;
+          commitSnapshot(bootstrap.thread);
+          commitComputer(bootstrap.thread.computer ?? null);
+          setRoutines(bootstrap.routines);
+          setRoutinesBotId(bootstrap.thread.botId ?? null);
+          markOnce("rk:renderer:bots-response");
+          markOnce("rk:renderer:thread-response");
+        }
+        if (!applyBotLists) return;
+        if (
+          bootstrap.bots.length === 0 &&
+          bootstrap.archivedBots.length === 0 &&
+          groupList.length === 0 &&
+          bootstrap.archivedGroups.length === 0 &&
+          !bootstrap.spaces.some((space) => space.hasContent)
+        ) {
+          navigate("/onboarding", { replace: true });
+          return;
+        }
+        if (routeGroupId.current) {
+          // An archived role's link shows that role as archived, never a different role.
+          if (
+            !groupList.some((group) => group.id === routeGroupId.current) &&
+            !bootstrap.archivedGroups.some((group) => group.id === routeGroupId.current)
+          ) {
+            navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
+          }
+          return;
+        }
+        if (!bootstrap.bots.some((bot) => bot.id === routeBotId.current)) {
+          navigate(firstThreadRoute(bootstrap.bots, groupList, recruiting), { replace: true });
+        }
+      })
+      .catch(() => {
+        if (cancelled || botsRefreshUser.current !== user) return;
+        setBootstrapMe(null);
+        showToolActivityRef.current = null;
+        const spaceId = selectedSpaceId();
+        // A deploy can refuse requests for about a minute; keep trying until the account answers.
+        return retryTransientRead(() => rpc.me(), bootstrapAbort.signal)
+          .then((me) => {
+            if (
+              cancelled ||
+              botsRefreshUser.current !== user ||
+              me.userId !== user.id ||
+              spaceId !== selectedSpaceId() ||
+              (spaceId !== null && me.spaceId !== spaceId)
+            )
+              return;
+            setBootstrapMe(me);
+            showToolActivityRef.current = getToolActivityEnabled(me.isDeploymentOwner === true);
+            return refreshBots(true);
+          })
+          .catch(() => undefined);
+      })
+      .finally(() => {
+        bootstrapReady = true;
+        scheduleRefresh();
+      });
+    window.addEventListener("focus", refreshVisibleBots);
+    window.addEventListener("blur", refreshVisibleBots);
+    document.addEventListener("visibilitychange", refreshVisibleBots);
+    return () => {
+      cancelled = true;
+      bootstrapAbort.abort();
+      botsRefreshUser.current = { id: undefined };
+      pendingBotsRefresh.current = null;
+      botsRefreshEpoch.current++;
+      archivedBotsRefreshEpoch.current++;
+      window.clearTimeout(refreshTimer);
+      window.removeEventListener("focus", refreshVisibleBots);
+      window.removeEventListener("blur", refreshVisibleBots);
+      document.removeEventListener("visibilitychange", refreshVisibleBots);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showToolActivity) return;
+    let cancelled = false;
+    void rpc.agentSkills
+      .list()
+      .then((skills) => {
+        if (!cancelled) setAgentSkills(skills);
+      })
+      .catch(() => {
+        if (!cancelled) setAgentSkills([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [showToolActivity]);
+
+  const refreshAgentSkills = useCallback(() => {
+    void rpc.agentSkills
+      .list()
+      .then(setAgentSkills)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    void rpc.voice
+      .status()
+      .then(setVoiceStatus)
+      .catch(() => undefined);
+    const unsubSpeech = speaker.subscribe((state) => {
+      setSpeakingMessageId(state.status === "idle" ? null : (state.messageId ?? null));
+    });
+    return () => {
+      unsubSpeech();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!active || !snapshot || snapshot.botId !== active.id) return;
+    const lastBot = [...snapshot.messages].reverse().find((message) => message.role === "bot");
+    if (autoSpokenBotId.current !== active.id) {
+      autoSpokenBotId.current = active.id;
+      autoSpoken.current = lastBot?.id ?? null;
+      return;
+    }
+    if (call?.botId === active.id || !active.autoSpeak) {
+      autoSpoken.current = lastBot?.id ?? null;
+      return;
+    }
+    if (snapshot.run && ["running", "queued", "leased"].includes(snapshot.run.status)) return;
+    if (!lastBot || lastBot.id === autoSpoken.current) return;
+    const text = speechFromBlocks(lastBot.blocks);
+    if (!text) return;
+    autoSpoken.current = lastBot.id;
+    void speaker.speak(text, { botId: active.id, messageId: lastBot.id });
+  }, [
+    snapshot?.messages,
+    snapshot?.run?.status,
+    snapshot?.botId,
+    active?.autoSpeak,
+    active?.id,
+    call?.botId,
+  ]);
+
+  useEffect(() => {
+    if (!active) return;
+    // Opening a bot clears the manual unread flag so it can auto-read again.
+    manuallyUnread.current.delete(active.id);
+    const markVisibleBotRead = () => {
+      markBotReadIfVisible(active.id);
+    };
+    markVisibleBotRead();
+    window.addEventListener("focus", markVisibleBotRead);
+    document.addEventListener("visibilitychange", markVisibleBotRead);
+    return () => {
+      window.removeEventListener("focus", markVisibleBotRead);
+      document.removeEventListener("visibilitychange", markVisibleBotRead);
+    };
+  }, [active?.id, markBotReadIfVisible]);
+
+  useEffect(() => {
+    if (!active) return;
+    const pendingJump = searchParamsRef.current.get("m");
+    if (!pendingJump) {
+      pinnedAroundRef.current = null;
+    }
+    screenRequest.current += 1;
+    setComputerError(null);
+    setComputerErrorFromScreen(false);
+    const cached = computerCacheRef.current.get(active.id);
+    if (cached) {
+      // Paint the last-known computer instantly; refreshThread/refreshComputerScreen
+      // below still run and reconcile with fresh data in the background.
+      setScreenUrl(cached.screenUrl);
+      commitComputer(cached.computer);
+    } else {
+      setScreenUrl(null);
+    }
+    expandedHistoryThread.current = null;
+    const epoch = ++historyEpoch.current;
+    const abort = new AbortController();
+    void runThreadSubscription({
+      signal: abort.signal,
+      loadInitial: async () => {
+        const primed = bootstrappedThread.current;
+        bootstrappedThread.current = null;
+        // Pending search jumps load the around-page separately; avoid replacing it with latest.
+        if (primed?.botId === active.id) {
+          validatedThreadEpoch.current = epoch;
+          commitSnapshot({ ...primed });
+          return primed;
+        }
+        return pendingJump
+          ? readThreadSnapshot(
+              { botId: active.id },
+              threadSnapshotSignal(abort.signal),
+              () => epoch === historyEpoch.current && activeBotId.current === active.id,
+            )
+          : refreshThread(active.id, threadSnapshotSignal(abort.signal), true);
+      },
+      loadHead: () =>
+        rpc.threads.head({ botId: active.id }, { signal: threadSnapshotSignal(abort.signal) }),
+      refresh: async () => {
+        const before = snapshotRef.current;
+        const fresh = await refreshThread(active.id, threadSnapshotSignal(abort.signal)).catch(
+          (error: unknown) => {
+            if (!abort.signal.aborted) recruitingOutage.current = true;
+            throw error;
+          },
+        );
+        if (
+          !abort.signal.aborted &&
+          epoch === historyEpoch.current &&
+          activeBotId.current === active.id
+        )
+          if (reconnectNeedsRecruitingRead(before, fresh))
+            refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+        return fresh;
+      },
+      currentSnapshot: () =>
+        validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
+      subscribe: (cursor) =>
+        rpc.threads.subscribe({ botId: active.id, cursor }, { signal: abort.signal }),
+      beforeEvent: (event) => {
+        if (isRunTerminalEvent(event) && event.runId) {
+          terminalRunReceipts.current.add(event.runId);
+          if (terminalRunReceipts.current.size > 100) {
+            const oldest = terminalRunReceipts.current.values().next().value;
+            if (oldest !== undefined) terminalRunReceipts.current.delete(oldest);
+          }
+        }
+      },
+      applyEvent: (event) =>
+        applyThreadEvent(event, commitSnapshot, commitComputer, snapshotRef, computerRef),
+      onEvent: (event, initial, sync) => {
+        observeThreadEvent(event, initial.cursor);
+        observeRunSignal(event);
+        applyRunStatus(event);
+        invalidateRecruiting(event);
+        const currentBot = botsRef.current.find((bot) => bot.id === active.id);
+        notifyBrowserForEvent(
+          event,
+          initial.threadId,
+          initial.cursor,
+          true,
+          currentBot?.name ?? active.name,
+          currentBot?.notifyOnFinish ?? false,
+          false,
+        );
+        if (event.type === "thread.cleared") {
+          expandedHistoryThread.current = null;
+          pinnedAroundRef.current = null;
+          historyEpoch.current += 1;
+        }
+        if (event.type === "bot.archived") {
+          void refreshBots(true).catch(() => undefined);
+        } else if (
+          event.type === "bot.spawned" ||
+          event.type === "bot.deleted" ||
+          event.type === "bot.updated" ||
+          isRunTerminalEvent(event) ||
+          event.type === "thread.cleared"
+        ) {
+          void refreshBots().catch(() => undefined);
+        }
+        if (event.type === "thread.message.created") {
+          const blocks = (event.payload.blocks as Array<{ kind?: string }>) ?? [];
+          if (blocks.some((block) => block.kind === "child_bot")) {
+            void refreshBots().catch(() => undefined);
+          }
+          if (event.payload.role === "bot") markBotReadIfVisible(active.id);
+        }
+        if (sync?.snapshotStale || event.type === "skill.teaching.stopped") {
+          // The event log already holds the run's final state unless something was not folded.
+          void refreshThread(active.id).catch(() => undefined);
+        } else if (isComputerStatusEvent(event)) {
+          void refreshComputerScreen(active.id).catch(() => undefined);
+        }
+      },
+    });
+    return () => {
+      abort.abort();
+    };
+  }, [
+    active?.id,
+    markBotReadIfVisible,
+    notifyBrowserForEvent,
+    invalidateRecruiting,
+    refreshRecruitingReads,
+  ]);
+
+  useEffect(() => {
+    if (!groupId || !activeGroup) return;
+    manuallyUnread.current.delete(activeGroup.id);
+    readVisibleGroups.current.delete(groupId);
+    const markVisibleGroupRead = () => {
+      if (
+        document.visibilityState !== "visible" ||
+        !document.hasFocus() ||
+        readVisibleGroups.current.has(groupId)
+      )
+        return;
+      readVisibleGroups.current.add(groupId);
+      void rpc.threads
+        .markRead({ groupId })
+        .then(() => {
+          setGroups((current) => {
+            const group = current.find((candidate) => candidate.id === groupId);
+            if (!group?.unread) return current;
+            return current.map((candidate) =>
+              candidate.id === groupId ? { ...candidate, unread: false } : candidate,
+            );
+          });
+        })
+        .catch(() => {
+          readVisibleGroups.current.delete(groupId);
+        });
+    };
+    markVisibleGroupRead();
+    window.addEventListener("focus", markVisibleGroupRead);
+    document.addEventListener("visibilitychange", markVisibleGroupRead);
+    const pendingJump = searchParamsRef.current.get("m");
+    if (!pendingJump) {
+      pinnedAroundRef.current = null;
+      expandedHistoryThread.current = null;
+    }
+    const epoch = ++historyEpoch.current;
+    const abort = new AbortController();
+    void runThreadSubscription({
+      signal: abort.signal,
+      loadInitial: async () => {
+        const primed = bootstrappedThread.current;
+        bootstrappedThread.current = null;
+        if (!pendingJump && primed?.groupId === groupId) {
+          validatedThreadEpoch.current = epoch;
+          commitSnapshot({ ...primed });
+          return primed;
+        }
+        return pendingJump
+          ? readThreadSnapshot(
+              { groupId },
+              threadSnapshotSignal(abort.signal),
+              () => epoch === historyEpoch.current && activeGroupId.current === groupId,
+            )
+          : refreshGroupThread(groupId, threadSnapshotSignal(abort.signal), true);
+      },
+      loadHead: () => rpc.threads.head({ groupId }, { signal: threadSnapshotSignal(abort.signal) }),
+      refresh: async () => {
+        const before = snapshotRef.current;
+        const fresh = await refreshGroupThread(groupId, threadSnapshotSignal(abort.signal)).catch(
+          (error: unknown) => {
+            if (!abort.signal.aborted) recruitingOutage.current = true;
+            throw error;
+          },
+        );
+        if (
+          !abort.signal.aborted &&
+          epoch === historyEpoch.current &&
+          activeGroupId.current === groupId
+        )
+          if (reconnectNeedsRecruitingRead(before, fresh))
+            refreshRecruitingReads(fresh.threadId, bootstrapMe?.spaceId);
+        return fresh;
+      },
+      currentSnapshot: () =>
+        validatedThreadEpoch.current === historyEpoch.current ? snapshotRef.current : null,
+      subscribe: (cursor) => rpc.threads.subscribe({ groupId, cursor }, { signal: abort.signal }),
+      applyEvent: (event) =>
+        applyThreadEvent(
+          event,
+          commitSnapshot,
+          (next) => {
+            if (isComputerStatusEvent(event) && event.botId !== computerBotIdRef.current) return;
+            commitComputer(next);
+          },
+          snapshotRef,
+          computerRef,
+        ),
+      onEvent: (event, initial, sync) => {
+        observeThreadEvent(event, initial.cursor);
+        observeRunSignal(event);
+        applyRunStatus(event);
+        invalidateRecruiting(event);
+        const eventBot = botsRef.current.find((bot) => bot.id === event.botId);
+        notifyBrowserForEvent(
+          event,
+          initial.threadId,
+          initial.cursor,
+          true,
+          eventBot?.name ?? activeGroup.name,
+          true,
+          true,
+        );
+        if (event.type === "thread.message.created" && event.payload.role === "bot") {
+          readVisibleGroups.current.delete(groupId);
+          markVisibleGroupRead();
+        }
+        // A new role's group is renamed when its title is saved; show the title at once.
+        const listed = groupsRef.current.find((group) => group.id === groupId);
+        const placeholderName =
+          event.type === "recruiting.changed" && newRoleNames.current.includes(listed?.name ?? "");
+        // The sidebar marks a role that waits on the recruiter, and clears it once answered.
+        const inputChanged =
+          event.type === "run.waiting_input" ||
+          (event.type === "run.started" && Boolean(listed?.needsInput));
+        if (
+          event.type === "bot.updated" ||
+          isRunTerminalEvent(event) ||
+          placeholderName ||
+          inputChanged
+        ) {
+          void refreshBots().catch(() => undefined);
+        }
+        if (sync?.snapshotStale) void refreshGroupThread(groupId).catch(() => undefined);
+      },
+    });
+    return () => {
+      window.removeEventListener("focus", markVisibleGroupRead);
+      document.removeEventListener("visibilitychange", markVisibleGroupRead);
+      abort.abort();
+    };
+  }, [
+    activeGroup?.id,
+    groupId,
+    notifyBrowserForEvent,
+    invalidateRecruiting,
+    refreshRecruitingReads,
+  ]);
+
+  const sidebarGroups = useMemo(() => {
+    const sidebarSpaces =
+      spaces.length > 0
+        ? spaces.map((space) =>
+            space.id === bootstrapMe?.spaceId ? { ...space, bots, groups, botSections } : space,
+          )
+        : bootstrapMe
+          ? [
+              {
+                id: bootstrapMe.spaceId,
+                name: "Personal",
+                isDefault: true,
+                hasContent: true,
+                canRename: false,
+                canDelete: false,
+                bots,
+                groups,
+                botSections,
+              },
+            ]
+          : [];
+    return sidebarGroupsForSpaces(sidebarSpaces, query);
+  }, [bootstrapMe, botSections, bots, groups, spaces, query]);
+
+  const openSpaceChat = useCallback(
+    (spaceId: string, path: string) => {
+      setMobileSidebarOpen(false);
+      const previousSpaceId = selectedSpaceId();
+      // Persist the active space (including primary) so voice/RPC headers match the chat.
+      const selectionStored = selectSpace(spaceId);
+      if (!selectionStored) return;
+      const previousEffective = previousSpaceId ?? bootstrapMe?.spaceId;
+      const boundaryChanged = previousEffective !== spaceId;
+      // Soft-navigate within the same space; reload only when the auth boundary changes
+      // so bootstrapped bots/groups match the request header.
+      if (boundaryChanged) {
+        window.location.assign(path);
+        return;
+      }
+      navigate(path);
+    },
+    [bootstrapMe?.spaceId, navigate],
+  );
+  const flushBotOrder = useCallback(async () => {
+    if (savingBotOrderRef.current) return;
+    savingBotOrderRef.current = true;
+    try {
+      while (pendingBotOrderRef.current) {
+        const botIds = pendingBotOrderRef.current;
+        pendingBotOrderRef.current = null;
+        try {
+          await rpc.bots.reorder({ botIds });
+        } catch {
+          // Keep a newer order queued during this failed save; only roll back
+          // when nothing else is pending.
+          if (pendingBotOrderRef.current === null) {
+            await refreshBots(false, true).catch(() => undefined);
+          }
+        }
+      }
+    } finally {
+      savingBotOrderRef.current = false;
+      // A reorder may have arrived while saving=true and returned early.
+      if (pendingBotOrderRef.current) {
+        void flushBotOrder();
+      }
+    }
+  }, [refreshBots]);
+  const reorderRosterBot = useCallback(
+    (sourceId: string, targetId: string, groupBotIds: string[]) => {
+      if (!groupBotIds.includes(sourceId) || !groupBotIds.includes(targetId)) return;
+      const current = botsRef.current;
+      const reordered = reorderBotTo(current, sourceId, targetId);
+      if (reordered === current) return;
+      const next = [...reordered];
+      botOrderEpochRef.current += 1;
+      botsRef.current = next;
+      setBots(next);
+      pendingBotOrderRef.current = next.map((bot) => bot.id);
+      void flushBotOrder();
+    },
+    [flushBotOrder],
+  );
+  const toggleSidebarSection = useCallback(
+    (key: string) => {
+      setCollapsedSidebarSections((previous) =>
+        toggleCollapsedIdSet(previous, key, collapsedSidebarSectionsStorageKey(userId)),
+      );
+    },
+    [userId],
+  );
+  const toggleRosterParent = useCallback(
+    (botId: string) => {
+      setCollapsedRosterParents((previous) =>
+        toggleCollapsedIdSet(previous, botId, collapsedRosterParentsStorageKey(userId)),
+      );
+    },
+    [userId],
+  );
+  const spaceQuery = query.trim();
+  const showSpaceSearch = spaceQuery.length > 0;
+
+  useEffect(() => {
+    if (!showSpaceSearch) {
+      setSearchHits([]);
+      setSearchLoading(false);
+      return;
+    }
+    const abort = new AbortController();
+    const timer = window.setTimeout(() => {
+      setSearchLoading(true);
+      void rpc.search
+        .query({ q: spaceQuery })
+        .then((result) => {
+          if (!abort.signal.aborted) setSearchHits(result.hits);
+        })
+        .catch(() => {
+          if (!abort.signal.aborted) setSearchHits([]);
+        })
+        .finally(() => {
+          if (!abort.signal.aborted) setSearchLoading(false);
+        });
+    }, 200);
+    return () => {
+      abort.abort();
+      window.clearTimeout(timer);
+    };
+  }, [showSpaceSearch, spaceQuery]);
+
+  async function jumpToSearchHit(hit: SearchHit) {
+    setQuery("");
+    setSearchHits([]);
+    const params = new URLSearchParams();
+    if (hit.messageId) params.set("m", hit.messageId);
+    if (hit.routineId) params.set("routine", hit.routineId);
+    navigate({
+      pathname: hit.groupId ? `/app/g/${hit.groupId}` : `/app/${hit.botId}`,
+      search: params.toString() ? `?${params.toString()}` : undefined,
+    });
+  }
+
+  async function jumpToMessage(target: { botId?: string; groupId?: string; messageId: string }) {
+    const threadTarget = searchHitThreadTarget(target);
+    const epoch = historyEpoch.current;
+    jumpGeneration.current += 1;
+    const jumpId = jumpGeneration.current;
+    const [snap, page] = await Promise.all([
+      readThreadSnapshot(
+        threadTarget,
+        undefined,
+        () =>
+          epoch === historyEpoch.current &&
+          jumpId === jumpGeneration.current &&
+          (target.groupId
+            ? activeGroupId.current === target.groupId
+            : activeBotId.current === target.botId),
+      ),
+      rpc.threads.messages({ ...threadTarget, around: { messageId: target.messageId } }),
+    ]);
+    // The epoch check drops a jump that raced a conversation clear (or a bot switch): applying
+    // the fetched page would pin deleted messages that every later refresh keeps restoring.
+    // jumpId drops an older jump that finished after a newer click.
+    if (epoch !== historyEpoch.current || jumpId !== jumpGeneration.current) return;
+    if (target.groupId && activeGroupId.current !== target.groupId) return;
+    if (target.botId && activeBotId.current !== target.botId) return;
+    const targetInPage = userVisibleMessages(page.messages, { includePeerReceipts: true }).some(
+      (message) => message.id === target.messageId,
+    );
+    expandedHistoryThread.current = targetInPage ? page.threadId : null;
+    pinnedAroundRef.current = targetInPage
+      ? {
+          ...threadTarget,
+          messageId: target.messageId,
+          threadId: page.threadId,
+          messages: page.messages,
+          olderCursor: page.olderCursor,
+        }
+      : null;
+    if (targetInPage) initiallyScrolledThread.current = page.threadId;
+    validatedThreadEpoch.current = epoch;
+    commitSnapshot({
+      ...snap,
+      messages: targetInPage ? page.messages : snap.messages,
+      olderCursor: targetInPage ? page.olderCursor : snap.olderCursor,
+    });
+    if (threadTarget.botId) {
+      commitComputer(snap.computer ?? null);
+      // Don't block parent-scroll on routines metadata; a list failure must not abort the jump.
+      void rpc.routines
+        .list({ botId: threadTarget.botId })
+        .then((routines) => {
+          if (epoch !== historyEpoch.current || jumpId !== jumpGeneration.current) return;
+          if (activeBotId.current !== threadTarget.botId) return;
+          setRoutines(routines);
+          setRoutinesBotId(threadTarget.botId);
+        })
+        .catch(() => undefined);
+    } else {
+      commitComputer(null);
+      setRoutines([]);
+      setRoutinesBotId(null);
+    }
+    if (targetInPage) {
+      // The transcript owns the scroll: it retries until the pinned row is
+      // mounted and unfollows the tail, so live commits cannot cancel it.
+      setScrollRequest({ messageId: target.messageId, nonce: jumpId });
+    } else {
+      window.requestAnimationFrame(() => {
+        if (epoch !== historyEpoch.current || jumpId !== jumpGeneration.current) return;
+        const element = messageScroll.current;
+        if (element) {
+          element.scrollTop = element.scrollHeight;
+          initiallyScrolledThread.current = page.threadId;
+        }
+      });
+    }
+  }
+
+  // The routine panel copies a routine's data into local draft state at click time
+  // rather than deriving it from `active`, so it goes stale across a bot switch —
+  // without this, Save on bot B could silently update bot A's routine.
+  useEffect(() => {
+    setEditingRoutine(null);
+    setDeleteRoutineTarget(null);
+    setPanelState((current) => (current === "routine" ? null : current));
+  }, [active?.id]);
+
+  useEffect(() => {
+    const messageId = searchParams.get("m");
+    const routineId = searchParams.get("routine");
+    if (inGroup && groupId && messageId) {
+      void jumpToMessage({ groupId, messageId }).finally(() => {
+        // Keep expandedHistoryThread; only strip the jump URL so refresh does not remount.
+        const next = new URLSearchParams(searchParams);
+        next.delete("m");
+        setSearchParams(next, { replace: true });
+      });
+      return;
+    }
+    if (!active) return;
+    if (routineId && routinesBotId === active.id) {
+      const routine = routines.find((item) => item.id === routineId);
+      if (routine) {
+        setRoutineDraft(draftFromRoutine(routine));
+        setRoutineWebhookSecret(null);
+        setEditingRoutine(routine);
+        setPanel("routine");
+      } else {
+        setPanel("computer");
+      }
+      const next = new URLSearchParams(searchParams);
+      next.delete("routine");
+      setSearchParams(next, { replace: true });
+    }
+    if (messageId) {
+      void jumpToMessage({ botId: active.id, messageId }).finally(() => {
+        const next = new URLSearchParams(searchParams);
+        next.delete("m");
+        setSearchParams(next, { replace: true });
+      });
+    }
+  }, [active?.id, groupId, inGroup, routines, routinesBotId, searchParams, setSearchParams]);
+  const activeSnapshot =
+    (inGroup
+      ? snapshot?.groupId === groupId
+        ? snapshot
+        : null
+      : snapshot?.botId === active?.id
+        ? snapshot
+        : null) ??
+    threadSnapshotCache.current.get(inGroup ? `group:${groupId}` : `bot:${active?.id}`) ??
+    null;
+  const workspaceViews: readonly RecruitingWorkspaceView[] = [
+    "home",
+    "conversation",
+    "results",
+    "brief",
+    "feedback",
+    "shortlist",
+    "contacts",
+    "sequence",
+    "inbox",
+    "interview",
+    "workflow",
+  ];
+  const requestedWorkspaceView = searchParams.get("view") as RecruitingWorkspaceView | null;
+  const recruitingWorkspaceView: RecruitingWorkspaceView =
+    requestedWorkspaceView && workspaceViews.includes(requestedWorkspaceView)
+      ? requestedWorkspaceView
+      : inGroup
+        ? "results"
+        : "conversation";
+  const workspaceNewRole = !showToolActivity && panel === "create-group";
+  const crmMode = !showToolActivity && !workspaceNewRole && searchParams.has("crmServer");
+  const homeView =
+    !showToolActivity &&
+    !workspaceNewRole &&
+    !crmMode &&
+    recruitingWorkspaceView === "home" &&
+    groups.length > 0;
+  const crmRevision = Number(searchParams.get("crmRevision"));
+  const crmSelection: CrmBrowseSelection | undefined =
+    crmMode &&
+    searchParams.get("crmServer") &&
+    searchParams.get("crmOrganization") &&
+    Number.isSafeInteger(crmRevision) &&
+    crmRevision > 0
+      ? {
+          serverId: searchParams.get("crmServer")!,
+          serverRevision: crmRevision,
+          organizationId: searchParams.get("crmOrganization")!,
+          ...(searchParams.get("crmRole") ? { crmRoleId: searchParams.get("crmRole")! } : {}),
+        }
+      : undefined;
+  // The authorized navigation already names the thread, so role reads need not wait for threads.get.
+  const knownThreadId =
+    activeSnapshot?.threadId ?? (inGroup ? activeGroup?.threadId : active?.threadId);
+  const knownThreadIdRef = useRef(knownThreadId);
+  knownThreadIdRef.current = knownThreadId;
+  const recruitingCacheScope =
+    userId && bootstrapMe?.spaceId && knownThreadId
+      ? JSON.stringify([userId, bootstrapMe.spaceId, knownThreadId])
+      : undefined;
+  const boundRoleView =
+    !showToolActivity &&
+    !crmMode &&
+    !workspaceNewRole &&
+    inGroup &&
+    recruitingWorkspaceView !== "conversation";
+  const bindingReadKey = JSON.stringify([recruitingCacheScope, recruitingRefresh]);
+  const [bindingRead, setBindingRead] = useState<{
+    key: string;
+    scope: string;
+    workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
+    failed?: boolean;
+  }>();
+  useEffect(() => {
+    if (!boundRoleView || !recruitingCacheScope || !knownThreadId) {
+      setBindingRead(undefined);
+      return;
+    }
+    let cancelled = false;
+    const abort = new AbortController();
+    const cache = recruitingReadCache.current;
+    const epoch = cache.epoch;
+    const threadId = knownThreadId;
+    const isCurrent = () =>
+      !cancelled &&
+      botsRefreshUser.current.id === userId &&
+      (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
+      knownThreadIdRef.current === threadId &&
+      activeGroupId.current === groupId;
+    const cached = cache.entries.get(`${recruitingCacheScope}:workspace`) as
+      | { workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
+      | undefined;
+    setBindingRead({
+      key: bindingReadKey,
+      scope: recruitingCacheScope,
+      workspace: cached?.workspace,
+    });
+    void retryTransientRead(() => rpc.recruiting.getWorkspace({ threadId }), abort.signal)
+      .then((workspace) => {
+        if (!isCurrent()) return;
+        // A read invalidated in flight is not trusted, but must not leave the view loading.
+        if (epoch !== cache.epoch)
+          return setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, failed: true });
+        rememberRecruitingRead(cache, `${recruitingCacheScope}:workspace`, { workspace }, epoch);
+        setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, workspace });
+      })
+      .catch((error: unknown) => {
+        if (!isCurrent()) return;
+        // An outage keeps sibling reads; only a denial drops this conversation's saved reads.
+        if (
+          error instanceof ORPCError &&
+          ["UNAUTHORIZED", "FORBIDDEN", "NOT_FOUND"].includes(error.code)
+        )
+          clearRecruitingReads(cache, recruitingCacheScope);
+        // A conversation without a recruiting role has no CRM binding; that is not a failure.
+        if (error instanceof ORPCError && error.code === "NOT_FOUND")
+          return setBindingRead({
+            key: bindingReadKey,
+            scope: recruitingCacheScope,
+            workspace: null,
+          });
+        setBindingRead({ key: bindingReadKey, scope: recruitingCacheScope, failed: true });
+      });
+    return () => {
+      cancelled = true;
+      abort.abort();
+    };
+  }, [
+    boundRoleView,
+    recruitingCacheScope,
+    bindingReadKey,
+    knownThreadId,
+    userId,
+    bootstrapMe?.spaceId,
+    groupId,
+  ]);
+  // Until a refresh's effect runs, keep this conversation's binding so the workbench is not remounted.
+  const currentBindingRead =
+    bindingRead?.key === bindingReadKey
+      ? bindingRead
+      : bindingRead?.workspace && bindingRead.scope === recruitingCacheScope
+        ? { key: bindingReadKey, scope: bindingRead.scope, workspace: bindingRead.workspace }
+        : undefined;
+  const boundCrmTarget = currentBindingRead?.workspace?.crmTarget;
+  const boundCrmSelection: CrmBrowseSelection | undefined = boundCrmTarget
+    ? {
+        serverId: boundCrmTarget.target.mcpServerId,
+        serverRevision: boundCrmTarget.target.serverRevision,
+        organizationId: boundCrmTarget.target.organizationId,
+        crmRoleId: boundCrmTarget.target.crmRoleId,
+      }
+    : undefined;
+  const groupCrmReference = activeGroup?.crmRoleReference;
+  const groupCrmSelection: CrmBrowseSelection | undefined = groupCrmReference
+    ? {
+        serverId: groupCrmReference.sourceId,
+        serverRevision: groupCrmReference.serverRevision,
+        organizationId: groupCrmReference.organizationId,
+        crmRoleId: groupCrmReference.crmRoleId,
+      }
+    : undefined;
+  const matchesCrmRole = (
+    left: CrmBrowseSelection | undefined,
+    right: CrmBrowseSelection | undefined,
+  ) =>
+    Boolean(
+      left &&
+        right &&
+        left.serverId === right.serverId &&
+        left.organizationId === right.organizationId &&
+        left.crmRoleId === right.crmRoleId,
+    );
+  const emptyCrmChat =
+    crmMode &&
+    !matchesCrmRole(crmSelection, groupCrmSelection) &&
+    !matchesCrmRole(crmSelection, boundCrmSelection);
+  const composerDraftKey = emptyCrmChat
+    ? `crm-role:${JSON.stringify([userId, bootstrapMe?.spaceId, crmSelection])}`
+    : inGroup
+      ? `group:${groupId}`
+      : `bot:${active?.id}`;
+  const crmComposerScope = JSON.stringify([
+    userId,
+    bootstrapMe?.spaceId,
+    groupId,
+    composerDraftKey,
+  ]);
+  const currentCrmComposerScope = useRef(crmComposerScope);
+  currentCrmComposerScope.current = crmComposerScope;
+  // A failed binding read keeps the role's own results on screen with a retry for its CRM part.
+  const boundRoleCrmMode =
+    boundRoleView &&
+    !currentBindingRead?.failed &&
+    (!currentBindingRead ||
+      currentBindingRead.workspace === undefined ||
+      Boolean(boundCrmSelection || groupCrmSelection));
+  const effectiveCrmSelection = crmMode
+    ? crmSelection
+    : (boundCrmSelection ??
+      (currentBindingRead &&
+      !currentBindingRead.failed &&
+      currentBindingRead.workspace !== undefined
+        ? groupCrmSelection
+        : undefined));
+  const workspaceCandidates =
+    !showToolActivity &&
+    !crmMode &&
+    !boundRoleCrmMode &&
+    !workspaceNewRole &&
+    ["results", "shortlist", "contacts", "workflow"].includes(recruitingWorkspaceView);
+  const workspaceCorrespondence =
+    !showToolActivity &&
+    !crmMode &&
+    !boundRoleCrmMode &&
+    !workspaceNewRole &&
+    ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
+  const workspaceFull =
+    crmMode ||
+    boundRoleCrmMode ||
+    workspaceNewRole ||
+    workspaceCandidates ||
+    workspaceCorrespondence;
+  const roleChatWorkspace = workspaceFull && !workspaceNewRole && Boolean(activeSnapshot?.threadId);
+  // Hidden and inert together: a closed role chat's composer must not be reachable or typed into.
+  const roleChatHidden = workspaceFull && !(roleChatWorkspace && roleChatOpen);
+  useEffect(() => {
+    if (roleChatWorkspace && roleChatOpen)
+      roleChatSection.current
+        ?.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')
+        ?.focus();
+  }, [roleChatWorkspace, roleChatOpen, activeSnapshot?.threadId]);
+  const workspaceBrief =
+    !showToolActivity &&
+    !crmMode &&
+    !boundRoleCrmMode &&
+    !workspaceNewRole &&
+    ["brief", "feedback"].includes(recruitingWorkspaceView);
+  function openRecruitingView(view: RecruitingWorkspaceView) {
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.set("view", view);
+        return next;
+      },
+      { replace: true },
+    );
+    setMobileSidebarOpen(false);
+    setPanel(null);
+  }
+  const activeRecruitingTab =
+    recruitingTab?.threadId === activeSnapshot?.threadId ? recruitingTab?.tab : undefined;
+  const changeRecruitingTab = useCallback(
+    (tab: RecruitingPanelState["tab"]) => {
+      const threadId = activeSnapshot?.threadId;
+      if (!threadId) return;
+      setRecruitingTab((current) =>
+        current?.threadId === threadId && current.tab === tab ? current : { threadId, tab },
+      );
+    },
+    [activeSnapshot?.threadId],
+  );
+  const composerRef = useMemo(
+    () => createRef<ComposerHandle>(),
+    [userId, bootstrapMe?.spaceId, composerDraftKey, activeSnapshot?.threadId],
+  );
+  const correspondenceScope = useMemo(
+    () => ({}),
+    [
+      composerRef,
+      recruitingWorkspaceView,
+      recruitingRefresh,
+      workspaceNewRole,
+      boundRoleCrmMode,
+      boundCrmTarget?.bindingEffectId,
+      searchParams.get("crmCandidate"),
+    ],
+  );
+  const currentCorrespondenceScope = useRef(correspondenceScope);
+  currentCorrespondenceScope.current = correspondenceScope;
+  const [selectedSchedulingPlan, setSelectedSchedulingPlan] = useState<{
+    scope: string | undefined;
+    threadId: string;
+    emailId: string;
+    id: string;
+  } | null>(null);
+  const [selectedCorrespondence, setSelectedCorrespondence] = useState<{
+    scope: typeof correspondenceScope;
+    reference: RecruitingCorrespondenceReference;
+  } | null>(null);
+  const selectCorrespondence = useCallback(
+    (reference: RecruitingCorrespondenceReference | undefined) => {
+      if (
+        currentCorrespondenceScope.current !== correspondenceScope ||
+        !discussionScope.current.active
+      )
+        return;
+      setSelectedSchedulingPlan((current) =>
+        current &&
+        reference &&
+        current.threadId === reference.threadId &&
+        current.emailId === reference.emailId
+          ? current
+          : null,
+      );
+      setSelectedCorrespondence(
+        reference && recruitingWorkspaceView === "inbox" && !workspaceNewRole
+          ? { scope: correspondenceScope, reference }
+          : null,
+      );
+    },
+    [correspondenceScope, recruitingWorkspaceView, workspaceNewRole],
+  );
+  const currentRecruitingCacheScope = useRef(recruitingCacheScope);
+  currentRecruitingCacheScope.current = recruitingCacheScope;
+  const [selectedContact, setSelectedContact] = useState<{
+    scope: string | undefined;
+    contact: RecruitingChatContact;
+  } | null>(null);
+  const chatContextApi = useMemo(
+    () => ({
+      setSelectedContact: (contact: RecruitingChatContact | null) =>
+        setSelectedContact(
+          contact ? { scope: currentRecruitingCacheScope.current, contact } : null,
+        ),
+      setSelectedEmail: selectCorrespondence,
+    }),
+    [selectCorrespondence],
+  );
+  const recruitingDetail = useRecruitingDetailController(activeSnapshot?.threadId);
+  // The candidate whose email the workbench (Inbox tab or detail panel) has selected.
+  const selectedReplyCandidate = useRef<string>(undefined);
+  selectedReplyCandidate.current =
+    selectedContact && selectedContact.scope === recruitingCacheScope
+      ? selectedContact.contact.reference
+      : undefined;
+  const chatRoleTitle =
+    !showToolActivity && inGroup ? (activeGroup?.name ?? activeSnapshot?.groupName) : undefined;
+  // A message sent while the role chat is closed opens it, so the send and its reply are seen.
+  const sendFromComposer: typeof sendMessage = (...args) => {
+    if (roleChatWorkspace && !roleChatOpen) setRoleChatOpen(true);
+    return (emptyCrmChat ? sendCrmRoleMessage : sendMessage)(...args);
+  };
+  function openRoleChat(text?: string) {
+    if (text) composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
+    if (roleChatWorkspace) setRoleChatOpen(true);
+    else openRecruitingView("conversation");
+  }
+  const candidateFeedbackRecipients = inGroup
+    ? (activeSnapshot?.members ?? activeGroup?.members ?? [])
+        .filter((_member, index) => showToolActivity || index === 0)
+        .map((member) => ({
+          id: member.botId,
+          name: member.name,
+        }))
+    : undefined;
+  const discussionScope = useRef({
+    composerRef,
+    panel,
+    workspaceCandidates,
+    active: true,
+    candidateFeedbackRecipients,
+  });
+  discussionScope.current.composerRef = composerRef;
+  discussionScope.current.panel = panel;
+  discussionScope.current.workspaceCandidates = workspaceCandidates;
+  discussionScope.current.candidateFeedbackRecipients = candidateFeedbackRecipients;
+  useLayoutEffect(() => {
+    discussionScope.current.active = true;
+    return () => {
+      discussionScope.current.active = false;
+    };
+  }, []);
+  async function draftCrmReply(draft: CrmReplyDraftContext) {
+    const role = currentBindingRead?.workspace;
+    const bound = boundCrmTarget;
+    const isCurrent = () =>
+      Boolean(
+        userId &&
+          bootstrapMe?.spaceId &&
+          boundRoleCrmMode &&
+          !crmMode &&
+          inGroup &&
+          role &&
+          bound &&
+          discussionScope.current.active &&
+          discussionScope.current.composerRef === composerRef &&
+          currentCorrespondenceScope.current === correspondenceScope &&
+          botsRefreshUser.current.id === userId &&
+          (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId &&
+          activeGroupId.current === groupId &&
+          snapshotRef.current?.threadId === draft.threadId &&
+          draft.threadId === activeSnapshot?.threadId &&
+          ((recruitingWorkspaceView === "inbox" &&
+            draft.candidateId === searchParams.get("crmCandidate")) ||
+            draft.candidateId === selectedReplyCandidate.current) &&
+          draft.source.serverId === bound.target.mcpServerId &&
+          draft.source.serverRevision === bound.target.serverRevision &&
+          draft.source.organizationId === bound.target.organizationId &&
+          draft.crmRoleId === bound.target.crmRoleId,
+      );
+    if (!isCurrent() || !role || !bound) return;
+    try {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId: draft.threadId });
+      if (!isCurrent()) return;
+      const target = workspace?.crmTarget?.target;
+      if (
+        workspace?.role.id !== role.role.id ||
+        workspace.revision.id !== role.revision.id ||
+        workspace.crmTarget?.bindingEffectId !== bound.bindingEffectId ||
+        target?.mcpServerId !== bound.target.mcpServerId ||
+        target.serverRevision !== bound.target.serverRevision ||
+        target.organizationId !== bound.target.organizationId ||
+        target.crmRoleId !== bound.target.crmRoleId ||
+        target.crmClientId !== bound.target.crmClientId ||
+        target.clientLabel !== bound.target.clientLabel ||
+        target.roleLabel !== bound.target.roleLabel
+      )
+        throw new Error(t`This role changed. Select the candidate again.`);
+      const reference = [
+        t`Role: ${workspace.role.title}`,
+        ...(draft.candidateName ? [t`Name: ${draft.candidateName}`] : []),
+        ...(draft.candidateEmail ? [t`Email: ${draft.candidateEmail}`] : []),
+        ...(draft.email.sender ? [t`Original sender: ${draft.email.sender}`] : []),
+        ...(draft.email.recipients.length
+          ? [t`Original recipients: ${draft.email.recipients.join(", ")}`]
+          : []),
+        ...(draft.email.subject ? [t`Subject: ${draft.email.subject}`] : []),
+        ...(draft.email.date ? [t`Date: ${draft.email.date}`] : []),
+      ].join("\n");
+      openRoleChat(
+        `${t`Reply to the selected email`}\n${reference.replace(/(^|\r\n|[\r\n\u2028\u2029])/g, "$1> ")}\n\n${t`Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send.`}`,
+      );
+    } catch (error) {
+      if (isCurrent()) setSendError(errorText(error, t`Failed to load recruiting data`));
+    }
+  }
+  function candidateScopeCurrent(candidate: CandidateDiscussionContext) {
+    return Boolean(
+      userId &&
+        bootstrapMe?.spaceId &&
+        discussionScope.current.active &&
+        discussionScope.current.composerRef === composerRef &&
+        (discussionScope.current.panel === "recruiting" ||
+          discussionScope.current.workspaceCandidates) &&
+        (selectedSpaceId() ?? bootstrapMe.spaceId) === bootstrapMe.spaceId &&
+        candidate.threadId === activeSnapshot?.threadId &&
+        (inGroup ? activeGroupId.current === groupId : activeBotId.current === active?.id),
+    );
+  }
+  const candidateRequests = useRef(new Map<string, string>());
+  async function discussCandidate(candidate: CandidateDiscussionContext) {
+    if (!candidateScopeCurrent(candidate)) return;
+    const text =
+      candidate.intent === "email_draft"
+        ? `${candidateReferenceText(candidate)}${t`Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending.`}`
+        : candidate.intent === "contact_lookup"
+          ? `${candidateReferenceText(candidate)}${t`Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message.`}`
+          : candidateReferenceText(candidate);
+    if (!candidate.intent) {
+      composerRef.current?.insertContext({ draftKey: composerDraftKey, text });
+      if (!showToolActivity) openRoleChat();
+      return;
+    }
+    if (
+      sendingRef.current ||
+      !candidate.roleId ||
+      !candidate.roleRevisionId ||
+      !candidate.candidateKey ||
+      validatedThreadEpoch.current !== historyEpoch.current
+    )
+      return;
+    const key = JSON.stringify([
+      userId,
+      bootstrapMe?.spaceId,
+      composerDraftKey,
+      candidate.threadId,
+      candidate.roleId,
+      candidate.roleRevisionId,
+      candidate.candidateKey,
+      candidate.intent,
+      text,
+    ]);
+    sendingRef.current = true;
+    setSending(true);
+    setSendError(null);
+    if (!showToolActivity) openRoleChat();
+    try {
+      const workspace = await rpc.recruiting.getWorkspace({ threadId: candidate.threadId });
+      if (!candidateScopeCurrent(candidate)) return;
+      if (
+        workspace?.role.id !== candidate.roleId ||
+        workspace?.revision.id !== candidate.roleRevisionId
+      )
+        throw new Error(t`This role changed. Select the candidate again.`);
+      const clientNonce = candidateRequests.current.get(key) ?? newClientNonce();
+      candidateRequests.current.set(key, clientNonce);
+      await rpc.threads.followUp({
+        ...(inGroup ? { groupId: groupId! } : { botId: active!.id }),
+        text,
+        clientNonce,
+      });
+      if (candidateRequests.current.get(key) === clientNonce) candidateRequests.current.delete(key);
+      if (candidateScopeCurrent(candidate)) {
+        if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+        else void refreshThreadRef.current(active!.id).catch(() => undefined);
+      }
+    } catch (error) {
+      if (candidateScopeCurrent(candidate))
+        setSendError(errorText(error, t`Failed to send message`));
+    } finally {
+      sendingRef.current = false;
+      setSending(false);
+    }
+  }
+  async function feedbackCandidate(
+    candidate: CandidateDiscussionContext,
+    feedback: CandidateFeedback,
+    clientNonce: string,
+  ): Promise<boolean> {
+    if (!candidateScopeCurrent(candidate)) return false;
+    if (
+      !candidate.roleId ||
+      !candidate.roleRevisionId ||
+      !candidate.roleVersion ||
+      !candidate.candidateKey
+    )
+      return false;
+    const decision =
+      feedback.choice === "hold" || feedback.choice === "pass" || feedback.choice === "resume";
+    if (
+      decision &&
+      (candidate.candidateRevision === undefined ||
+        !Number.isSafeInteger(candidate.candidateRevision) ||
+        candidate.candidateRevision < 0)
+    )
+      return false;
+    if (feedback.recipientBotId && !inGroup) return false;
+    if (
+      inGroup &&
+      !discussionScope.current.candidateFeedbackRecipients?.some(
+        (member) => member.id === feedback.recipientBotId,
+      )
+    )
+      return false;
+    const choice = {
+      good_example: t`Good example`,
+      not_fit: t`Not a fit`,
+      skip: t`Skip for now`,
+      hold: t`Pause consideration`,
+      pass: t`Stop considering`,
+      resume: t`Resume consideration`,
+    }[feedback.choice];
+    const text = `${candidateReferenceText(candidate)}${t`Candidate feedback`}: ${choice}\n\n${feedback.reason}`;
+    const receipt = await rpc.threads.followUp({
+      ...(inGroup
+        ? { groupId: groupId!, mentions: [feedback.recipientBotId!] }
+        : { botId: active!.id }),
+      text,
+      recruitingFeedback: {
+        roleId: candidate.roleId,
+        roleRevisionId: candidate.roleRevisionId,
+        expectedRoleRevision: candidate.roleVersion,
+        candidateKeys: [candidate.candidateKey],
+        ...(decision
+          ? {
+              candidateRevisions: [
+                {
+                  candidateKey: candidate.candidateKey,
+                  expectedRevision: candidate.candidateRevision!,
+                },
+              ],
+            }
+          : {}),
+        choice: feedback.choice,
+      },
+      clientNonce,
+    });
+    if (candidateScopeCurrent(candidate)) {
+      if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+      else void refreshThreadRef.current(active!.id).catch(() => undefined);
+    }
+    return receipt.ok;
+  }
+  /** The recruiter's own text into the role conversation; the coordinator routes it. */
+  async function sendRoleText(text: string): Promise<boolean> {
+    if (!inGroup && !active) return false;
+    const receipt = await rpc.threads.followUp({
+      ...(inGroup ? { groupId: groupId! } : { botId: active!.id }),
+      text,
+      clientNonce: crypto.randomUUID(),
+    });
+    if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+    else void refreshThreadRef.current(active!.id).catch(() => undefined);
+    return receipt.ok;
+  }
+  // Keep the armed reply even when its parent leaves the loaded page: the
+  // server resolves a paged-out target and degrades a deleted one to a plain
+  // reply instead of failing the send.
+  const activeReplyTarget = replyTarget;
+  const activeReplyQuote = replyTarget ? replyQuote : null;
+  const clearReply = useCallback(() => {
+    setReplyTarget(null);
+    setReplyQuote(null);
+  }, []);
+  const managedConnectionBots =
+    !booting &&
+    bootstrapMe?.userId === userId &&
+    (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId
+      ? bots.filter((bot) => !bot.archivedAt && bot.spaceId === bootstrapMe?.spaceId)
+      : [];
+  const managedConnectionMain = managedConnectionBots.find(
+    (bot) => bot.spawnKey === `recruiting:${userId}:main`,
+  );
+  const connectionMemberIds = workspaceNewRole
+    ? managedConnectionMain
+      ? ["main", "outreach", "scheduling"].flatMap((key) => {
+          const bot = managedConnectionBots.find(
+            (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
+          );
+          return bot ? [bot.id] : [];
+        })
+      : []
+    : validatedThreadEpoch.current === historyEpoch.current &&
+        (inGroup
+          ? snapshotRef.current?.groupId === groupId
+          : snapshotRef.current?.botId === active?.id)
+      ? inGroup
+        ? (snapshotRef.current?.members ?? []).map((member) => member.botId)
+        : active
+          ? [active.id]
+          : []
+      : [];
+  const recruitingConnectionBot = (key: "outreach" | "scheduling") =>
+    managedConnectionBots.find(
+      (bot) =>
+        connectionMemberIds.includes(bot.id) && bot.spawnKey === `recruiting:${userId}:${key}`,
+    )?.id;
+  const currentRuns = activeThreadRuns(activeSnapshot);
+  const answerableAskIds = answerableAskMessageIds(
+    validatedThreadEpoch.current === historyEpoch.current &&
+      (inGroup
+        ? snapshotRef.current?.groupId === groupId
+        : snapshotRef.current?.botId === active?.id)
+      ? snapshotRef.current
+      : null,
+  );
+  // A waiting question or confirmation reopens a collapsed role chat once per new card.
+  const pendingAskKey = answerableAskIds.join(",");
+  useEffect(() => {
+    if (pendingAskKey && roleChatWorkspace) setRoleChatOpen(true);
+  }, [pendingAskKey, roleChatWorkspace]);
+  const workingRuns = currentRuns.filter((run) =>
+    ["running", "queued", "leased"].includes(run.status),
+  );
+  const transcriptRunning = workingRuns.length > 0;
+  const composerRunning = currentRuns.some((run) => isActive(run.status));
+  useEffect(() => {
+    setPreloadRecoveryActiveWork(composerRunning);
+    return () => setPreloadRecoveryActiveWork(false);
+  }, [composerRunning]);
+  // Only a reply that is still working takes an interjection; one waiting on a card does not.
+  const composerRunningRef = useRef(transcriptRunning);
+  composerRunningRef.current = transcriptRunning;
+  const runningThreadId = transcriptRunning ? activeSnapshot?.threadId : undefined;
+  const shownSteer = steer && steer.threadId === runningThreadId ? steer.state : null;
+  // A reply whose worker stopped is queued again and resumes on its own; say so until it does.
+  const resuming = currentRuns.some(
+    (run) => requeuedRunIds.includes(run.id) && ["queued", "waiting_takeover"].includes(run.status),
+  );
+  const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
+  const displayedRunError =
+    !sendError && runError
+      ? showToolActivity
+        ? runError
+        : t`Something went wrong. Try again.`
+      : null;
+  const displayedRunErrorId = displayedRunError ? (activeSnapshot?.run?.id ?? null) : null;
+  const handleRunErrorPresented = useCallback((runId: string) => {
+    rememberSeenRunErrorId(runId);
+  }, []);
+  const transcriptMessages = useMemo(
+    () =>
+      userVisibleMessages(activeSnapshot?.messages ?? [], {
+        includePeerReceipts: showToolActivity,
+      }),
+    [activeSnapshot?.messages, showToolActivity],
+  );
+  const transcriptArtifactTarget = useMemo<ArtifactTarget>(
+    () => (inGroup ? { groupId: groupId ?? "" } : { botId: active?.id ?? "" }),
+    [active?.id, groupId, inGroup],
+  );
+  const sequenceScopeKey = JSON.stringify([
+    userId,
+    bootstrapMe?.spaceId,
+    activeSnapshot?.threadId,
+    transcriptArtifactTarget,
+    workspaceCorrespondence,
+  ]);
+  const sequenceScope = useRef(sequenceScopeKey);
+  sequenceScope.current = sequenceScopeKey;
+  async function saveSequenceDraft(input: RecruitingSequenceSaveInput) {
+    const scopeCurrent = () =>
+      discussionScope.current.active &&
+      sequenceScope.current === sequenceScopeKey &&
+      (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId;
+    if (!userId || !bootstrapMe?.spaceId || !activeSnapshot?.threadId || !scopeCurrent())
+      throw new Error(t`Return to the original role before saving this draft.`);
+    const recipient = activeSnapshot.members?.[0] ?? activeGroup?.members?.[0];
+    if (inGroup && !recipient)
+      throw new Error(t`Wait for this role to finish loading before saving.`);
+    const source = transcriptMessages
+      .flatMap((message) => message.blocks)
+      .find((block) => block.kind === "file" && block.artifactId === input.sourceArtifactId);
+    if (source?.kind !== "file" || source.mimeType !== "application/json")
+      throw new Error(t`Open the saved sequence before editing it.`);
+    const sequence = RecruitingOutreachSequenceSchema.parse({
+      ...input.sequence,
+      revisesArtifactId: input.sourceArtifactId,
+    });
+    const contentBase64 = await readFileAsBase64(
+      new File([JSON.stringify(sequence, null, 2)], source.name, { type: "application/json" }),
+    );
+    if (!scopeCurrent()) throw new Error(t`Return to the original role before saving this draft.`);
+    const artifact = await rpc.artifacts.create({
+      ...transcriptArtifactTarget,
+      name: source.name,
+      mimeType: "application/json",
+      contentBase64,
+      clientNonce: input.clientNonce,
+    });
+    if (!scopeCurrent())
+      throw new Error(
+        t`The file was saved. Return to the original role and retry to share it there.`,
+      );
+    await rpc.threads.followUp({
+      ...transcriptArtifactTarget,
+      ...(inGroup ? { mentions: [recipient!.botId] } : {}),
+      artifactIds: [artifact.id],
+      clientNonce: input.clientNonce,
+      text: t`I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone.`,
+    });
+    if (scopeCurrent()) {
+      if (inGroup) void refreshGroupThreadRef.current(groupId!).catch(() => undefined);
+      else void refreshThreadRef.current(active!.id).catch(() => undefined);
+    }
+  }
+  const transcriptMembers = activeSnapshot?.members ?? activeGroup?.members;
+  const resolveTranscriptBot = useCallback(
+    (botId: string) => {
+      const bot = bots.find((candidate) => candidate.id === botId);
+      if (bot) return bot;
+      return transcriptMembers?.find((member) => member.botId === botId);
+    },
+    [bots, transcriptMembers],
+  );
+  const workingBots: GroupAvatarMember[] = workingRuns.map((run) => {
+    const bot = resolveTranscriptBot(run.botId);
+    return {
+      botId: run.botId,
+      color: bot?.color ?? FALLBACK_BOT_COLOR,
+      name: bot?.name,
+      status: run.status,
+    };
+  });
+  const resolveTranscriptMemberName = useCallback(
+    (botId: string | undefined) => memberName(transcriptMembers, botId),
+    [transcriptMembers],
+  );
+  const replyTargetName = activeReplyTarget
+    ? activeReplyTarget.role === "user"
+      ? t`You`
+      : showToolActivity
+        ? (resolveTranscriptMemberName(activeReplyTarget.botId) ?? active?.name ?? t`Bot`)
+        : "WeKruit"
+    : undefined;
+  const composerMentionTargets = useMemo(
+    () =>
+      buildComposerMentionOptions({
+        query: "",
+        includeEveryone: inGroup,
+        currentGroupId: groupId,
+        bots: bots.map((bot) => ({ id: bot.id, name: bot.name, color: bot.color })),
+        groups: groups.map((group) => ({ id: group.id, name: group.name })),
+        routines: mentionRoutines.map((routine) => ({
+          id: routine.id,
+          name: routine.name,
+          crons: routine.crons,
+          botId: routine.botId,
+          botName: routine.botName,
+        })),
+        connectors: mentionConnectors,
+      }),
+    [bots, groupId, groups, inGroup, mentionConnectors, mentionRoutines],
+  );
+  const shellReady =
+    initialBotsLoaded &&
+    (inGroup
+      ? Boolean(activeGroup && activeSnapshot)
+      : bots.length === 0 || Boolean(active && activeSnapshot));
+  const refreshThreadRef = useRef(refreshThread);
+  refreshThreadRef.current = refreshThread;
+  const refreshGroupThreadRef = useRef(refreshGroupThread);
+  refreshGroupThreadRef.current = refreshGroupThread;
+  const loadOlderMessagesRef = useRef(loadOlderMessages);
+  loadOlderMessagesRef.current = loadOlderMessages;
+  const jumpToMessageRef = useRef(jumpToMessage);
+  jumpToMessageRef.current = jumpToMessage;
+
+  const mentionBotsKey = useMemo(
+    () => bots.map((bot) => `${bot.id}:${bot.name}`).join(","),
+    [bots],
+  );
+  const botsForMentionsRef = useRef(bots);
+  botsForMentionsRef.current = bots;
+
+  useEffect(() => {
+    const bots = botsForMentionsRef.current;
+    if (!initialBotsLoaded || bots.length === 0) {
+      setMentionRoutines([]);
+      setMentionConnectors([]);
+      return;
+    }
+    let cancelled = false;
+    const botNameById = new Map(bots.map((bot) => [bot.id, bot.name]));
+    void Promise.all(
+      bots.map((bot) =>
+        rpc.routines
+          .list({ botId: bot.id })
+          .then((rows) =>
+            rows.map((routine) => ({
+              ...routine,
+              botName: botNameById.get(bot.id) ?? bot.name,
+            })),
+          )
+          .catch(() => [] as Array<Routine & { botName?: string }>),
+      ),
+    ).then((lists) => {
+      if (!cancelled) setMentionRoutines(lists.flat());
+    });
+    void Promise.all([
+      rpc.connections.list().catch(() => [] as Connection[]),
+      rpc.connections.catalog({}).catch(() => [] as ConnectionCatalogItem[]),
+    ]).then(([connections, catalog]) => {
+      if (cancelled) return;
+      const connected = connections.filter((row) => row.status === "connected");
+      const options: Array<{
+        id: string;
+        name: string;
+        authStatus: "connected" | "needs_auth";
+        connectionId?: string;
+      }> = connected.map((row) => ({
+        id: row.id,
+        name: row.displayName,
+        authStatus: "connected" as const,
+        connectionId: row.id,
+      }));
+      for (const item of catalog) {
+        if (item.connected || item.noAuth) continue;
+        if (
+          connected.some(
+            (row) =>
+              row.provider.toLowerCase() === item.slug.toLowerCase() ||
+              row.displayName.toLowerCase() === item.name.toLowerCase(),
+          )
+        ) {
+          continue;
+        }
+        options.push({
+          id: `catalog:${item.connectorId}:${item.slug}`,
+          name: item.name,
+          authStatus: "needs_auth",
+        });
+      }
+      setMentionConnectors(options);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [initialBotsLoaded, mentionBotsKey]);
+
+  useLayoutEffect(() => {
+    if (initialBotsLoaded) {
+      markOnce("rk:renderer:bots-committed");
+      markAfterPaint("rk:renderer:bots-painted");
+    }
+    if (active && snapshot?.botId === active.id) {
+      markOnce("rk:renderer:thread-committed");
+      markAfterPaint("rk:renderer:thread-painted");
+    }
+    if (shellReady) {
+      markOnce("rk:renderer:shell-ready");
+      markAfterPaint("rk:renderer:shell-painted");
+    }
+  }, [active, initialBotsLoaded, shellReady, snapshot?.botId]);
+
+  useLayoutEffect(() => {
+    const pin = pinnedAroundRef.current;
+    if (inGroup) {
+      if (!groupId || !activeSnapshot || activeSnapshot.groupId !== groupId) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
+      if (pin?.groupId === groupId) return;
+    } else {
+      if (!active || !activeSnapshot || activeSnapshot.botId !== active.id) return;
+      if (initiallyScrolledThread.current === activeSnapshot.threadId) return;
+      if (expandedHistoryThread.current === activeSnapshot.threadId) return;
+      if (pin?.botId === active.id) return;
+    }
+    const element = messageScroll.current;
+    if (!element) return;
+    element.scrollTop = element.scrollHeight;
+    initiallyScrolledThread.current = activeSnapshot.threadId;
+  }, [
+    active,
+    groupId,
+    inGroup,
+    activeSnapshot?.botId,
+    activeSnapshot?.groupId,
+    activeSnapshot?.threadId,
+  ]);
+
+  const openBot = useCallback((id: string) => navigate(`/app/${id}`), [navigate]);
+  const loadOlder = useCallback(() => loadOlderMessagesRef.current(), []);
+  const jumpToReplyMessage = useCallback((messageId: string) => {
+    const existing = document.querySelector(`[data-message-id="${CSS.escape(messageId)}"]`);
+    if (existing) {
+      // Cancel any in-flight around-fetch so it cannot overwrite this scroll.
+      jumpGeneration.current += 1;
+      setScrollRequest({ messageId, nonce: jumpGeneration.current });
+      return;
+    }
+    const groupId = activeGroupId.current;
+    if (groupId) {
+      void jumpToMessageRef.current({ groupId, messageId }).catch(() => undefined);
+      return;
+    }
+    const botId = activeBotId.current;
+    if (botId) void jumpToMessageRef.current({ botId, messageId }).catch(() => undefined);
+  }, []);
+  const answerMessage = useCallback(
+    async (message: ThreadMessage, text: AskAnswer, username?: string) => {
+      const botId = activeBotId.current;
+      const groupId = activeGroupId.current;
+      if (!botId && !groupId) return;
+      const current = snapshotRef.current;
+      if (
+        validatedThreadEpoch.current !== historyEpoch.current ||
+        !current ||
+        current.threadId !== message.threadId ||
+        (groupId ? current.groupId !== groupId : current.botId !== botId) ||
+        !answerableAskMessageIds(current).includes(message.id) ||
+        !current.messages.some((item) => item.id === message.id && item.runId === message.runId)
+      )
+        return;
+      await rpc.threads.answer({
+        ...(groupId ? { groupId } : { botId: botId! }),
+        runId: message.runId ?? "",
+        messageId: message.id,
+        answer: text,
+        ...(username ? { username } : {}),
+      });
+      if (groupId && activeGroupId.current === groupId) {
+        await refreshGroupThreadRef.current(groupId);
+      } else if (botId && activeBotId.current === botId) {
+        await refreshThreadRef.current(botId);
+      }
+    },
+    [],
+  );
+  const reactToMessage = useCallback(
+    async (message: ThreadMessage, reaction: MessageReaction) => {
+      const botId = activeBotId.current;
+      const groupId = activeGroupId.current;
+      if (!botId && !groupId) return;
+      try {
+        await rpc.threads.react({
+          ...(groupId ? { groupId } : { botId: botId! }),
+          messageId: message.id,
+          reaction,
+          clientNonce: newClientNonce(),
+        });
+      } catch (error) {
+        const stillHere = groupId
+          ? activeGroupId.current === groupId
+          : activeBotId.current === botId;
+        if (!stillHere) return;
+        setSendError(errorText(error, t`Could not update reaction`));
+      }
+    },
+    [t],
+  );
+  const attachmentUploads = useRef(
+    createAttachmentUploads(async (file, contentBase64, target, options) => {
+      const mimeType = inferAttachmentMimeType(file.name, file.type);
+      if (!mimeType)
+        throw new Error(
+          isXlsxFileName(file.name)
+            ? t`XLSX is not supported yet. Save as CSV and upload again.`
+            : t`Unsupported file type: ${file.name}`,
+        );
+      const artifact = await rpc.artifacts.create({
+        ...target,
+        name: file.name,
+        mimeType,
+        contentBase64,
+        ...(options?.clientNonce ? { clientNonce: options.clientNonce } : {}),
+      });
+      return artifact.id;
+    }),
+  );
+  const onAttachmentPick = useCallback(
+    (files: FileList | null, threadKey = activeGroupId.current ?? activeBotId.current) => {
+      if (!threadKey || !files?.length) return false;
+      const existing = attachmentsForThread(pendingAttachments, threadKey);
+      const next: PendingAttachment[] = [];
+      const skipped: string[] = [];
+      for (const file of Array.from(files)) {
+        if (existing.length + next.length >= ATTACHMENT_MAX_COUNT) {
+          skipped.push(t`${file.name} (max ${ATTACHMENT_MAX_COUNT} attachments)`);
+          continue;
+        }
+        if (file.size > ATTACHMENT_MAX_BYTES) {
+          skipped.push(t`${file.name} (over 10 MiB)`);
+          continue;
+        }
+        const mimeType = inferAttachmentMimeType(file.name, file.type);
+        if (!mimeType) {
+          skipped.push(
+            isXlsxFileName(file.name)
+              ? t`${file.name} (XLSX is not supported yet. Save as CSV and upload again.)`
+              : file.name,
+          );
+          continue;
+        }
+        next.push({
+          id: `${file.name}-${file.size}-${file.lastModified}-${crypto.randomUUID()}`,
+          threadKey,
+          file,
+          previewUrl: mimeType.startsWith("image/") ? URL.createObjectURL(file) : undefined,
+        });
+      }
+      if (next.length) setPendingAttachments((current) => [...current, ...next]);
+      for (const item of next)
+        attachmentUploads.current.start(attachmentUploadKey(item), item.file);
+      setAttachmentNotice(skipped.length ? t`Skipped ${skipped.join(", ")}` : null);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return next.length > 0;
+    },
+    [pendingAttachments, t],
+  );
+  const removeAttachment = useCallback((attachment: PendingAttachment) => {
+    attachmentUploads.current.discard(attachmentUploadKey(attachment));
+    revokePendingAttachmentPreviews([attachment]);
+    setPendingAttachments((current) =>
+      current.filter(
+        (item) => item.id !== attachment.id || item.threadKey !== attachment.threadKey,
+      ),
+    );
+  }, []);
+  const sendMessage = useCallback(
+    async (text: string, mentions: ComposerMention[], clientNonce: string) => {
+      const initialBotTarget = activeBotId.current;
+      const initialGroupTarget = activeGroupId.current;
+      if ((!initialBotTarget && !initialGroupTarget) || sending) return false;
+      const originThreadKey = initialGroupTarget ?? initialBotTarget;
+      const attachments = attachmentsForThread(pendingAttachments, originThreadKey);
+      const plan = resolveComposerSendPlan({
+        text,
+        mentions,
+        hasAttachments: attachments.length > 0,
+      });
+      if (plan.isNoOp) return false;
+      const reroutedToGroup = Boolean(
+        plan.rerouteGroupId && plan.rerouteGroupId !== initialGroupTarget,
+      );
+      const groupTarget = plan.rerouteGroupId ?? initialGroupTarget;
+      const botTarget = reroutedToGroup ? undefined : initialBotTarget;
+      const submittedComposer = composerRef;
+      const submittedUser = botsRefreshUser.current;
+      const selectedEmail = selectedCorrespondence;
+      const recruitingContext = reroutedToGroup
+        ? undefined
+        : recruitingChatContext(
+            chatRoleTitle,
+            selectedContact?.scope === currentRecruitingCacheScope.current
+              ? selectedContact?.contact
+              : undefined,
+            selectedSchedulingPlan &&
+              selectedSchedulingPlan.scope === currentRecruitingCacheScope.current &&
+              selectedSchedulingPlan.threadId === knownThreadId
+              ? selectedSchedulingPlan.id
+              : undefined,
+          );
+      const correspondenceReference =
+        !reroutedToGroup &&
+        selectedEmail?.scope === currentCorrespondenceScope.current &&
+        discussionScope.current.active
+          ? selectedEmail.reference
+          : undefined;
+      if (
+        plan.shouldSend &&
+        (groupTarget || botsRef.current.find((bot) => bot.id === botTarget)?.notifyOnFinish)
+      ) {
+        const permissionRequest = requestBrowserNotificationPermission();
+        if (permissionRequest) void permissionRequest.then(flushPendingBrowserNotifications);
+      }
+      const trimmed = plan.trimmed;
+      sendingRef.current = true;
+      setSending(true);
+      setSendError(null);
+      // Echo the message right away; the durable message.created event replaces it.
+      const echoed = plan.shouldSend && !reroutedToGroup && Boolean(trimmed);
+      if (echoed) {
+        turnTimer.submit(clientNonce);
+        updateSnapshot(
+          (current) =>
+            current &&
+            addPendingUserMessage(current, {
+              clientNonce,
+              text: trimmed,
+              createdAt: new Date().toISOString(),
+              replyToMessageId: activeReplyTarget?.id,
+              replyQuote: activeReplyQuote ?? undefined,
+            }),
+        );
+        requestAnimationFrame(() => turnTimer.echoed(clientNonce));
+      }
+      const withdrawEcho = () => {
+        if (!echoed) return;
+        turnTimer.failed(clientNonce);
+        updateSnapshot((current) => current && removePendingUserMessage(current, clientNonce));
+      };
+      const dropDelayedSetup = () => {
+        // Only after successful engagement so a failed upload/send keeps the setup card.
+        if (initialBotTarget && focusPromptBotIdRef.current === initialBotTarget) {
+          cancelFocusPrompt();
+        }
+      };
+      // Keep the draft cleared once any part of the submission is confirmed accepted.
+      let accepted = false;
+      try {
+        if (plan.shouldRunRoutines) {
+          // Settle every run first so one that was accepted is never repeated.
+          const runs = await Promise.allSettled(
+            plan.routineIds.map((routineId) =>
+              rpc.routines.testRun({
+                routineId,
+                clientNonce: `routine-mention:${clientNonce}:${routineId}`,
+              }),
+            ),
+          );
+          accepted = runs.some((run) => run.status === "fulfilled");
+          for (const run of runs) if (run.status === "rejected") throw run.reason;
+        }
+        if (!plan.shouldSend) {
+          dropDelayedSetup();
+          clearReply();
+          revokePendingAttachmentPreviews(attachments);
+          setPendingAttachments((current) =>
+            current.filter((attachment) => attachment.threadKey !== originThreadKey),
+          );
+          setAttachmentNotice(null);
+          if (reroutedToGroup && groupTarget) {
+            navigate(`/app/g/${groupTarget}`);
+            return true;
+          }
+          if (groupTarget && activeGroupId.current === groupTarget) {
+            await refreshGroupThreadRef.current(groupTarget);
+          } else if (botTarget && activeBotId.current === botTarget) {
+            await refreshThreadRef.current(botTarget);
+          }
+          return true;
+        }
+        // Files were read when picked; upload them together instead of one by one.
+        const artifactIds = await attachmentUploads.current.resolve(
+          attachments.map((pending) => ({ id: attachmentUploadKey(pending), file: pending.file })),
+          groupTarget ? { groupId: groupTarget } : { botId: botTarget! },
+        );
+        if (
+          !discussionScope.current.active ||
+          (selectedSpaceId() ?? bootstrapMe?.spaceId) !== bootstrapMe?.spaceId ||
+          botsRefreshUser.current !== submittedUser ||
+          discussionScope.current.composerRef !== submittedComposer ||
+          (correspondenceReference && currentCorrespondenceScope.current !== selectedEmail?.scope)
+        ) {
+          withdrawEcho();
+          return false;
+        }
+        const interjectThreadId = composerRunningRef.current
+          ? snapshotRef.current?.threadId
+          : undefined;
+        const interject = Boolean(interjectThreadId && !reroutedToGroup);
+        if (groupTarget) {
+          const sent = await rpc.threads.send({
+            groupId: groupTarget,
+            addressing: showToolActivity ? undefined : "coordinator",
+            clientNonce,
+            text: trimmed || undefined,
+            ...(correspondenceReference ? { correspondenceReference } : {}),
+            ...(recruitingContext ? { recruitingContext } : {}),
+            mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
+            artifactIds: artifactIds.length ? artifactIds : undefined,
+            replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
+            replyQuote: reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
+            ...(interject ? { interrupt: true } : {}),
+          });
+          accepted = true;
+          if (echoed) turnTimer.accepted(clientNonce, sent.runId);
+        } else if (botTarget) {
+          const sent = await rpc.threads.send({
+            botId: botTarget,
+            clientNonce,
+            text: trimmed || undefined,
+            ...(correspondenceReference ? { correspondenceReference } : {}),
+            ...(recruitingContext ? { recruitingContext } : {}),
+            mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
+            artifactIds: artifactIds.length ? artifactIds : undefined,
+            replyToMessageId: activeReplyTarget?.id,
+            replyQuote: activeReplyQuote ?? undefined,
+            ...(interject ? { interrupt: true } : {}),
+          });
+          accepted = true;
+          if (echoed) turnTimer.accepted(clientNonce, sent.runId);
+          if (activeBotId.current === botTarget) {
+            updateSnapshot((current) =>
+              applyThreadSendReceipt(
+                current,
+                {
+                  botId: botTarget,
+                  runId: sent.runId,
+                  taskId: sent.taskId,
+                },
+                terminalRunReceipts.current,
+              ),
+            );
+          }
+        }
+        if (interject && interjectThreadId)
+          setSteer({ threadId: interjectThreadId, state: "queued" });
+        dropDelayedSetup();
+        clearReply();
+        revokePendingAttachmentPreviews(attachments);
+        setPendingAttachments((current) =>
+          current.filter((attachment) => attachment.threadKey !== originThreadKey),
+        );
+        if (reroutedToGroup && groupTarget) {
+          // The group's sidebar row changes too; the open thread's events cannot say so.
+          void refreshBots().catch(() => undefined);
+          navigate(`/app/g/${groupTarget}`);
+          return true;
+        }
+        if (groupTarget && activeGroupId.current === groupTarget) setAttachmentNotice(null);
+        if (botTarget && activeBotId.current === botTarget) setAttachmentNotice(null);
+        // The receipt and the event stream carry the rest. Read only if no event or echo
+        // arrived in time (stream down), or the message carried no text to echo.
+        window.setTimeout(() => {
+          const current = snapshotRef.current;
+          const stillEchoed = current?.messages.some(
+            (message) => message.id === pendingUserMessageId(clientNonce),
+          );
+          if (!echoed || !stillEchoed) return;
+          if (groupTarget && activeGroupId.current === groupTarget)
+            void refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
+          else if (botTarget && activeBotId.current === botTarget)
+            void refreshThreadRef.current(botTarget).catch(() => undefined);
+        }, SEND_ECHO_GRACE_MS);
+        return true;
+      } catch (error) {
+        if (!accepted) withdrawEcho();
+        if (reroutedToGroup && groupTarget) {
+          setSendError(errorText(error, t`Failed to send message`));
+        } else if (groupTarget && activeGroupId.current === groupTarget) {
+          setSendError(errorText(error, t`Failed to send message`));
+        } else if (botTarget && activeBotId.current === botTarget) {
+          setSendError(errorText(error, t`Failed to send message`));
+        }
+        return accepted;
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
+      }
+    },
+    [
+      activeReplyTarget?.id,
+      activeReplyQuote,
+      clearReply,
+      composerRef,
+      bootstrapMe?.spaceId,
+      flushPendingBrowserNotifications,
+      navigate,
+      pendingAttachments,
+      sending,
+      selectedCorrespondence,
+      selectedSchedulingPlan,
+      knownThreadId,
+      selectedContact,
+      chatRoleTitle,
+      showToolActivity,
+      t,
+    ],
+  );
+  const [openingCrmRole, setOpeningCrmRole] = useState<{
+    selection: CrmBrowseSelection;
+    view: RecruitingWorkspaceView;
+    error?: string;
+  } | null>(null);
+  const crmRoleOpenRequest = useRef(0);
+  const crmOpenLocation = JSON.stringify([groupId, active?.id, searchParams.toString()]);
+  const currentCrmOpenLocation = useRef(crmOpenLocation);
+  currentCrmOpenLocation.current = crmOpenLocation;
+  function crmRoleBotIds() {
+    return activeGroup && canCreateRoleFrom(activeGroup.id)
+      ? activeGroup.members.map((member) => member.botId)
+      : ["main", "outreach", "scheduling"].flatMap((key) => {
+          const bot = managedConnectionBots.find(
+            (bot) => bot.spawnKey === `recruiting:${userId}:${key}`,
+          );
+          return bot ? [bot.id] : [];
+        });
+  }
+  async function openCrmRole(
+    selection: CrmBrowseSelection,
+    view: RecruitingWorkspaceView = "results",
+  ) {
+    if (!selection.crmRoleId) return;
+    const request = ++crmRoleOpenRequest.current;
+    const submittedScope = crmComposerScope;
+    const submittedUser = botsRefreshUser.current;
+    const submittedSpace = bootstrapMe?.spaceId;
+    const stillCurrent = () =>
+      request === crmRoleOpenRequest.current &&
+      currentCrmOpenLocation.current === crmOpenLocation &&
+      currentCrmComposerScope.current === submittedScope &&
+      botsRefreshUser.current === submittedUser &&
+      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
+    setOpeningCrmRole({ selection, view });
+    try {
+      const botIds = crmRoleBotIds();
+      if (botIds.length < GROUP_MEMBER_MIN)
+        throw new Error(t`The recruiting team is not ready yet.`);
+      const group = await rpc.groups.create({
+        name: t`Recruiting`,
+        botIds,
+        crmRoleReference: {
+          sourceId: selection.serverId,
+          serverRevision: selection.serverRevision,
+          organizationId: selection.organizationId,
+          crmRoleId: selection.crmRoleId,
+        },
+      });
+      if (!stillCurrent()) return;
+      setGroups((current) =>
+        current.some((item) => item.id === group.id)
+          ? current.map((item) => (item.id === group.id ? group : item))
+          : [group, ...current],
+      );
+      setSelectedContact(null);
+      setSelectedCorrespondence(null);
+      setPanel(null);
+      setMobileSidebarOpen(false);
+      setRoleChatOpen(true);
+      setOpeningCrmRole(null);
+      const search = new URLSearchParams({ view });
+      // Preserve an exact person link while converting an older role URL.
+      if (matchesCrmRole(selection, crmSelection) && searchParams.get("crmCandidate"))
+        search.set("crmCandidate", searchParams.get("crmCandidate")!);
+      navigate(`/app/g/${group.id}?${search}`);
+      void refreshBots().catch(() => undefined);
+    } catch (error) {
+      if (stillCurrent())
+        setOpeningCrmRole({
+          selection,
+          view,
+          error: errorText(error, t`Could not open this role.`),
+        });
+    } finally {
+      if (!stillCurrent() && request === crmRoleOpenRequest.current) setOpeningCrmRole(null);
+    }
+  }
+  const legacyCrmOpenKey =
+    crmMode && crmSelection?.crmRoleId
+      ? JSON.stringify([userId, bootstrapMe?.spaceId, crmSelection])
+      : null;
+  const openedLegacyCrmKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!legacyCrmOpenKey) {
+      openedLegacyCrmKey.current = null;
+      return;
+    }
+    if (!initialBotsLoaded || !crmSelection || openedLegacyCrmKey.current === legacyCrmOpenKey)
+      return;
+    openedLegacyCrmKey.current = legacyCrmOpenKey;
+    void openCrmRole(crmSelection, recruitingWorkspaceView);
+  }, [legacyCrmOpenKey, initialBotsLoaded]);
+  const pendingCrmRoleSends = useRef(
+    new Map<
+      string,
+      {
+        group: Awaited<ReturnType<typeof rpc.groups.create>>;
+        artifactIds: string[];
+      }
+    >(),
+  );
+  async function sendCrmRoleMessage(
+    text: string,
+    mentions: ComposerMention[],
+    clientNonce: string,
+  ) {
+    if (!crmSelection?.crmRoleId || !emptyCrmChat || sending || mentions.length) return false;
+    const submittedScope = crmComposerScope;
+    const submittedUser = botsRefreshUser.current;
+    const submittedSpace = bootstrapMe?.spaceId;
+    const stillCurrent = () =>
+      currentCrmComposerScope.current === submittedScope &&
+      botsRefreshUser.current === submittedUser &&
+      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
+    const attachments = attachmentsForThread(pendingAttachments, composerDraftKey);
+    if (!text.trim() && !attachments.length) return false;
+    const botIds = crmRoleBotIds();
+    if (botIds.length < GROUP_MEMBER_MIN) return false;
+    const reference = {
+      sourceId: crmSelection.serverId,
+      serverRevision: crmSelection.serverRevision,
+      organizationId: crmSelection.organizationId,
+      crmRoleId: crmSelection.crmRoleId,
+    };
+    const key = JSON.stringify([
+      submittedScope,
+      clientNonce,
+      text,
+      attachments.map((item) => item.id),
+    ]);
+    setSending(true);
+    sendingRef.current = true;
+    setSendError(null);
+    try {
+      let attempt = pendingCrmRoleSends.current.get(key);
+      if (!attempt) {
+        const group = await rpc.groups.create({
+          name: t`Recruiting`,
+          botIds,
+          crmRoleReference: reference,
+        });
+        attempt = { group, artifactIds: [] };
+        pendingCrmRoleSends.current.set(key, attempt);
+      }
+      if (!stillCurrent()) return false;
+      const group = attempt.group;
+      setGroups((current) =>
+        current.some((item) => item.id === group.id)
+          ? current.map((item) => (item.id === group.id ? group : item))
+          : [group, ...current],
+      );
+      for (const pending of attachments.slice(attempt.artifactIds.length)) {
+        const mimeType = inferAttachmentMimeType(pending.file.name, pending.file.type);
+        if (!mimeType)
+          throw new Error(
+            isXlsxFileName(pending.file.name)
+              ? t`XLSX is not supported yet. Save as CSV and upload again.`
+              : t`Unsupported file type: ${pending.file.name}`,
+          );
+        const contentBase64 = await readFileAsBase64(pending.file);
+        if (!stillCurrent()) return false;
+        const artifact = await rpc.artifacts.create({
+          groupId: group.id,
+          name: pending.file.name,
+          mimeType,
+          contentBase64,
+        });
+        attempt.artifactIds.push(artifact.id);
+      }
+      if (!stillCurrent()) return false;
+      const recruitingContext = recruitingChatContext(
+        group.name,
+        selectedContact?.scope === currentRecruitingCacheScope.current
+          ? selectedContact?.contact
+          : undefined,
+      );
+      await rpc.threads.followUp({
+        groupId: group.id,
+        text: text.trim() ? text : t`Read the attached materials for this role.`,
+        crmRoleReference: reference,
+        ...(recruitingContext ? { recruitingContext } : {}),
+        mentions: [group.members[0]!.botId],
+        clientNonce,
+        ...(attempt.artifactIds.length ? { artifactIds: attempt.artifactIds } : {}),
+      });
+      pendingCrmRoleSends.current.delete(key);
+      revokePendingAttachmentPreviews(attachments);
+      setPendingAttachments((current) =>
+        current.filter((item) => item.threadKey !== composerDraftKey),
+      );
+      if (stillCurrent()) {
+        navigate(`/app/g/${group.id}?view=${recruitingWorkspaceView}`);
+        void refreshBots().catch(() => undefined);
+      }
+      return true;
+    } catch (error) {
+      if (stillCurrent()) setSendError(errorText(error, t`Failed to send message`));
+      return false;
+    } finally {
+      setSending(false);
+      sendingRef.current = false;
+    }
+  }
+  const stopRun = useCallback(
+    async (runId?: string) => {
+      if (sending) return;
+      sendingRef.current = true;
+      setSending(true);
+      try {
+        const botTarget = activeBotId.current;
+        const groupTarget = activeGroupId.current;
+        if (groupTarget) {
+          setSendError(null);
+          try {
+            await rpc.threads.stop({
+              groupId: groupTarget,
+              ...(runId !== undefined ? { runId } : {}),
+            });
+          } catch (error) {
+            if (activeGroupId.current === groupTarget) {
+              setSendError(errorText(error, t`Failed to stop`));
+            }
+            return;
+          }
+          // Clear run UI ahead of the run.cancelled event so refresh races with in-flight gets.
+          if (activeGroupId.current === groupTarget) {
+            updateSnapshot((prev) =>
+              prev && prev.groupId === groupTarget ? clearActiveThreadRuns(prev, runId) : prev,
+            );
+          }
+          await refreshGroupThreadRef.current(groupTarget).catch(() => undefined);
+          return;
+        }
+        if (!botTarget) return;
+        setSendError(null);
+        try {
+          await rpc.threads.stop({ botId: botTarget, ...(runId !== undefined ? { runId } : {}) });
+        } catch (error) {
+          if (activeBotId.current === botTarget) {
+            setSendError(errorText(error, t`Failed to stop`));
+          }
+          return;
+        }
+        // Clear local run/busy immediately rather than waiting for run.cancelled so a
+        // superseded in-flight refresh (older cursor) cannot leave Stop enabled / Take control
+        // blocked while the API is already idle.
+        if (activeBotId.current === botTarget) {
+          updateSnapshot((prev) =>
+            !prev || (prev.botId !== botTarget && prev.botId)
+              ? prev
+              : clearActiveThreadRuns(prev, runId),
+          );
+          const currentComputer = computerRef.current;
+          if (runId === undefined && currentComputer?.busyBotName) {
+            commitComputer({ ...currentComputer, busyBotName: null });
+          }
+        }
+        await refreshThreadRef.current(botTarget).catch(() => undefined);
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
+      }
+    },
+    [sending, t],
+  );
+  const stopTeaching = useCallback(async () => {
+    const id = activeBotId.current;
+    if (!id || teachBusy) return;
+    const recording = taughtSkills.find(
+      (skill) => skill.status === "recording" && taughtSkillsBotId === id,
+    );
+    if (!recording) return;
+    setTeachBusy(true);
+    try {
+      await rpc.skills.stop({ skillId: recording.id });
+      await refreshThreadRef.current(id);
+      setComputerOpen(false);
+    } finally {
+      setTeachBusy(false);
+    }
+  }, [teachBusy, taughtSkills, taughtSkillsBotId]);
+  // Transcript and MessageView are memoized; these must stay referentially stable or every
+  // Shell state change re-renders the whole transcript.
+  const refreshActiveThread = useCallback(async () => {
+    const groupId = activeGroupId.current;
+    if (groupId) {
+      await refreshGroupThreadRef.current(groupId);
+      return;
+    }
+    const id = activeBotId.current;
+    if (!id) return;
+    await refreshThreadRef.current(id);
+  }, []);
+  // Teach chrome needs skills applied before this resolves — refreshThread only
+  // kicks skills.list off in the background, so Stop teaching would never mount
+  // if that background call failed or lagged behind local recovery.
+  const refreshActiveTeaching = useCallback(async () => {
+    const id = activeBotId.current;
+    if (!id) return;
+    await refreshThreadRef.current(id);
+    const skills = await rpc.skills.list({ botId: id });
+    if (activeBotId.current !== id) return;
+    setTaughtSkills(skills);
+    setTaughtSkillsBotId(id);
+  }, []);
+  const addSkillRoutine = useCallback((name: string, prompt: string) => {
+    setRoutineDraft({ ...emptyRoutineDraft(), name, prompt });
+    setRoutineWebhookSecret(null);
+    setEditingRoutine(null);
+    setPanel("routine");
+  }, []);
+  const speakingMessageIdRef = useRef(speakingMessageId);
+  speakingMessageIdRef.current = speakingMessageId;
+  const speakMessage = useCallback((message: ThreadMessage) => {
+    if (speakingMessageIdRef.current === message.id) {
+      speaker.stop();
+      return;
+    }
+    const text = speechFromBlocks(message.blocks);
+    const id = message.botId ?? activeBotId.current;
+    if (text && id) void speaker.speak(text, { botId: id, messageId: message.id });
+  }, []);
+
+  const pendingRoleCreation = useRef<{
+    key: string;
+    group: Group;
+    clientNonce: string;
+    uploads: Map<string, { clientNonce: string; artifactId?: string }>;
+  } | null>(null);
+  async function createGroup(input: { name: string; botIds: string[]; description?: string }) {
+    const attachments = showToolActivity
+      ? []
+      : attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
+    if (attachments.length && !input.description)
+      input = {
+        ...input,
+        description: t`Use the attached files to define this role and start the search.`,
+      };
+    const submittedUser = botsRefreshUser.current;
+    const submittedSpace = bootstrapMe?.spaceId;
+    const submittedTarget = activeGroupId.current ?? activeBotId.current;
+    const stillCurrent = () =>
+      discussionScope.current.active &&
+      discussionScope.current.panel === "create-group" &&
+      submittedUser.id === userId &&
+      botsRefreshUser.current === submittedUser &&
+      (activeGroupId.current ?? activeBotId.current) === submittedTarget &&
+      (selectedSpaceId() ?? submittedSpace) === submittedSpace;
+
+    setCreatingGroup(true);
+    try {
+      const key = JSON.stringify([
+        userId,
+        bootstrapMe?.spaceId,
+        input,
+        attachments.map((item) => item.id),
+      ]);
+      let attempt =
+        input.description && pendingRoleCreation.current?.key === key
+          ? pendingRoleCreation.current
+          : null;
+      const group =
+        attempt?.group ?? (await rpc.groups.create({ name: input.name, botIds: input.botIds }));
+      if (input.description && !attempt) {
+        attempt = {
+          key,
+          group,
+          clientNonce: crypto.randomUUID(),
+          uploads: new Map(
+            attachments.map((pending) => [
+              attachmentUploadKey(pending),
+              { clientNonce: crypto.randomUUID() },
+            ]),
+          ),
+        };
+        pendingRoleCreation.current = attempt;
+      }
+      if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
+      setGroups((current) =>
+        current.some((item) => item.id === group.id) ? current : [group, ...current],
+      );
+      if (input.description && attempt) {
+        const currentAttempt = attempt;
+        const settled = await Promise.allSettled(
+          attachments.map(async (pending) => {
+            const id = attachmentUploadKey(pending);
+            const upload = currentAttempt.uploads.get(id);
+            if (!upload) throw new Error(t`The workspace changed. Open the role again.`);
+            if (upload.artifactId) return;
+            upload.artifactId = await attachmentUploads.current.resolveOne(
+              { id, file: pending.file },
+              { groupId: group.id },
+              { clientNonce: upload.clientNonce },
+            );
+            attachmentUploads.current.discard(id);
+          }),
+        );
+        const failed = settled.find(
+          (result): result is PromiseRejectedResult => result.status === "rejected",
+        );
+        if (failed) throw failed.reason;
+        const artifactIds = attachments.map((pending) => {
+          const artifactId = currentAttempt.uploads.get(attachmentUploadKey(pending))?.artifactId;
+          if (!artifactId) throw new Error(t`Could not upload file`);
+          return artifactId;
+        });
+        if (!stillCurrent()) throw new Error(t`The workspace changed. Open the role again.`);
+        await rpc.threads.followUp({
+          groupId: group.id,
+          text: input.description,
+          ...(artifactIds.length ? { artifactIds } : {}),
+          mentions: [input.botIds[0]!],
+          clientNonce: currentAttempt.clientNonce,
+        });
+        pendingRoleCreation.current = null;
+      }
+      if (!stillCurrent()) return;
+      navigate(`/app/g/${group.id}${input.description ? "?view=brief" : ""}`);
+      setPanel(null);
+      setNewRoleSourceId(null);
+      setNewRoleDescription("");
+      await refreshBots().catch(() => undefined);
+    } finally {
+      setCreatingGroup(false);
+    }
+  }
+
+  function startNewRole(sourceId: string, description = "") {
+    if (!canCreateRoleFrom(sourceId)) return;
+    setNewRoleSourceId(sourceId);
+    setNewRoleDescription(description);
+    setPanel("create-group");
+    setMobileSidebarOpen(false);
+  }
+
+  function restoreGroup(groupId: string) {
+    return rpc.groups
+      .restore({ groupId })
+      .then(() => refreshBots(true))
+      .catch((error) => setSendError(errorText(error, t`Could not continue`)));
+  }
+
+  function cancelFocusPrompt() {
+    focusPromptAbortRef.current?.abort();
+    focusPromptAbortRef.current = null;
+    focusPromptBotIdRef.current = null;
+  }
+
+  function setBotsSidebarCollapsedPref(collapsed: boolean) {
+    setBotsSidebarCollapsed(collapsed);
+    writeBotsSidebarCollapsed(userId, collapsed);
+  }
+
+  function openSettings(section: SettingsSection = "general") {
+    setSettingsSection(section);
+    setSettingsOpen(true);
+  }
+
+  async function createBot(input: {
+    name: string;
+    title: string;
+    description: string;
+    computerMode: ComputerMode;
+  }) {
+    const isFirstBot = botsRef.current.length === 0;
+    const bot = await rpc.bots.create({
+      ...normalizeCreateBotProfile(input),
+      notifyOnFinish: true,
+      computerMode: input.computerMode,
+    });
+    setBots((current) =>
+      current.some((item) => item.id === bot.id) ? current : [bot, ...current],
+    );
+    navigate(`/app/${bot.id}`);
+    setPanel(null);
+    // Register cancellation before awaiting start so leaving the bot during
+    // startup cannot miss the abort and still schedule a late focus card.
+    cancelFocusPrompt();
+    const controller = new AbortController();
+    focusPromptAbortRef.current = controller;
+    focusPromptBotIdRef.current = bot.id;
+    const started = await rpc.onboarding
+      .start({ botId: bot.id })
+      .then(() => true)
+      .catch(() => false);
+    if (!started || controller.signal.aborted || focusPromptBotIdRef.current !== bot.id) {
+      if (focusPromptAbortRef.current === controller) {
+        focusPromptAbortRef.current = null;
+        focusPromptBotIdRef.current = null;
+      }
+      await refreshBots().catch(() => undefined);
+      return;
+    }
+    void scheduleFocusPrompt({
+      immediate: isFirstBot,
+      signal: controller.signal,
+      shouldSkip: () => sendingRef.current,
+      prompt: async () => {
+        if (focusPromptBotIdRef.current !== bot.id || activeBotId.current !== bot.id) return;
+        await rpc.onboarding.promptFocus({ botId: bot.id }).catch(() => undefined);
+      },
+    }).finally(() => {
+      if (focusPromptAbortRef.current === controller) {
+        focusPromptAbortRef.current = null;
+        focusPromptBotIdRef.current = null;
+      }
+    });
+    await refreshBots().catch(() => undefined);
+  }
+
+  async function bootComputer({
+    botId: targetBotId,
+    takeControl,
+    overlay,
+    force = false,
+  }: {
+    botId: string;
+    takeControl: boolean;
+    overlay: boolean;
+    force?: boolean;
+  }) {
+    const epoch = ++computerBootEpoch.current;
+    const stillThisBoot = () => computerBootEpoch.current === epoch;
+    const stillThisBot = () =>
+      computerBotIdRef.current === targetBotId || activeBotId.current === targetBotId;
+    const cached = computerCacheRef.current.get(targetBotId);
+    const targetComputer = computer?.botId === targetBotId ? computer : (cached?.computer ?? null);
+    const targetScreen = computer?.botId === targetBotId ? screenUrl : (cached?.screenUrl ?? null);
+    const needsBoot = force || targetComputer?.state !== "running" || !targetScreen;
+    if (overlay && needsBoot) setBooting(true);
+    setComputerError(null);
+    setComputerErrorFromScreen(false);
+    try {
+      if (needsBoot) {
+        const status = await rpc.computer.boot({ botId: targetBotId });
+        if (!stillThisBoot() || !stillThisBot()) return;
+        commitComputer(status);
+        cacheComputerFor(targetBotId, { computer: status });
+      }
+      if (takeControl) {
+        await rpc.computer.takeover({ botId: targetBotId });
+        if (!stillThisBoot() || !stillThisBot()) return;
+      }
+      await refreshComputerFor(targetBotId);
+    } catch (error) {
+      if (!stillThisBoot() || !stillThisBot()) return;
+      setComputerError(errorText(error, t`Could not take control`));
+      setComputerErrorFromScreen(false);
+      throw error;
+    } finally {
+      if (stillThisBoot()) setBooting(false);
+    }
+  }
+
+  async function refreshComputerFor(targetBotId: string) {
+    if (activeBotId.current === targetBotId) {
+      await refreshThread(targetBotId);
+      return;
+    }
+    if (computerBotIdRef.current !== targetBotId) return;
+    const status = await rpc.computer.status({ botId: targetBotId });
+    if (computerBotIdRef.current !== targetBotId) return;
+    commitComputer(status);
+    cacheComputerFor(targetBotId, { computer: status });
+    await refreshComputerScreen(targetBotId);
+  }
+
+  useEffect(() => {
+    if (panel !== "computer") {
+      autoBooted.current = null;
+      return;
+    }
+    if (!active) return;
+    const botId = active.id;
+    let cancelled = false;
+    void (async () => {
+      // Refresh from the server first. A stale SSE "booting" snapshot used to
+      // skip this effect, so an RPC takeover never showed "You have control".
+      const snap = await refreshThread(botId).catch(() => null);
+      if (cancelled || activeBotId.current !== botId) return;
+      const state = snap?.computer?.state;
+      const screen = state === "running" ? await refreshComputerScreen(botId) : null;
+      if (cancelled || activeBotId.current !== botId) return;
+      const action = computerPanelAutoBoot(state, screen);
+      if (action === "wait") {
+        if (state === "running") autoBooted.current = botId;
+        return;
+      }
+      if (action === "boot" && autoBooted.current === botId) return;
+      autoBooted.current = botId;
+      if (!computerPanelAutoUsesBoot(action)) return;
+      await bootComputer({
+        botId,
+        takeControl: false,
+        overlay: action === "boot",
+        force: true,
+      }).catch(() => undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [panel, active?.id]);
+
+  useEffect(() => {
+    setComputerOpen(false);
+    setComputerError(null);
+    setComputerErrorFromScreen(false);
+    setComputerBotId(active?.id);
+  }, [active?.id]);
+
+  useEffect(() => {
+    if (focusPromptBotIdRef.current && focusPromptBotIdRef.current !== active?.id) {
+      cancelFocusPrompt();
+    }
+  }, [active?.id]);
+
+  useEffect(() => () => cancelFocusPrompt(), []);
+
+  useEffect(() => {
+    if (!computer?.busyBotName) {
+      setComputerError(null);
+      setComputerErrorFromScreen(false);
+    }
+  }, [computer?.busyBotName]);
+
+  useEffect(() => {
+    if (panel !== "routine") {
+      routineSaveRequest.current += 1;
+      setRoutineError(null);
+    }
+  }, [panel]);
+
+  useEffect(() => {
+    if (!panelStorageKey) return;
+    if (observedPanelKey.current !== panelStorageKey) {
+      observedPanelKey.current = panelStorageKey;
+      if (pendingExplicitPanel.current || explicitPanelTarget.current === panelStorageKey) {
+        pendingExplicitPanel.current = false;
+        explicitPanelTarget.current = null;
+        pendingPanelRestore.current = null;
+        setRestoredPanelKey(panelStorageKey);
+        return;
+      }
+      explicitPanelTarget.current = null;
+      // Reload starts with panel=null so storage restores. In-session chat switches used to
+      // keep computer/settings open; only routine was cleared (handled above). Carry is
+      // session-only — do not write the carried panel onto the destination's saved prefs.
+      if (panel === "computer" || panel === "settings" || panel === "group-settings") {
+        const carried = panel === "computer" ? "computer" : inGroup ? "group-settings" : "settings";
+        pendingPanelRestore.current = null;
+        if (carried !== panel) setPanelState(carried);
+        setRestoredPanelKey(null);
+        return;
+      }
+      pendingPanelRestore.current = readRightPanelState(panelStorageKey);
+    }
+    const saved = pendingPanelRestore.current;
+    if (!saved) return;
+    // Explicit routine links take precedence over a local layout preference.
+    if (searchParams.has("routine")) {
+      pendingPanelRestore.current = null;
+      return;
+    }
+    if (saved.panel === "routine" && saved.routineId && routinesBotId !== active?.id) return;
+    let next = saved.panel;
+    if (next === "routine") {
+      const routine = saved.routineId
+        ? routines.find((item) => item.id === saved.routineId)
+        : undefined;
+      if (saved.routineId && !routine) next = "computer";
+      setEditingRoutine(routine ?? null);
+      setRoutineDraft(routine ? draftFromRoutine(routine) : emptyRoutineDraft());
+      setRoutineWebhookSecret(null);
+    }
+    pendingPanelRestore.current = null;
+    setPanelState(next);
+    setRestoredPanelKey(panelStorageKey);
+  }, [panelStorageKey, active?.id, inGroup, panel, routinesBotId, routines, searchParams]);
+
+  useEffect(() => {
+    // Do not gate writes on ?routine= staying in the URL — a stuck/failed routine
+    // list would freeze layout prefs. Deep-link handling uses setPanelState for the
+    // bot-switch close so restoredPanelKey stays unset until an intentional setPanel.
+    if (!panelStorageKey || restoredPanelKey !== panelStorageKey || pendingPanelRestore.current)
+      return;
+    writeRightPanelState(panelStorageKey, panel, editingRoutine?.id);
+  }, [panelStorageKey, restoredPanelKey, panel, editingRoutine?.id]);
+
+  useEffect(() => {
+    const threadKey = inGroup ? groupId : active?.id;
+    setPendingAttachments((current) => {
+      const stale = current.filter((attachment) => attachment.threadKey !== threadKey);
+      revokePendingAttachmentPreviews(stale);
+      return attachmentsForThread(current, threadKey);
+    });
+    clearReply();
+    setAttachmentNotice(null);
+    setSendError(null);
+  }, [active?.id, clearReply, groupId, inGroup]);
+
+  useEffect(() => {
+    if (!computerOpen) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setComputerOpen(false);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [computerOpen]);
+
+  useEffect(() => {
+    if (!showToolActivity) {
+      setCommandPaletteOpen(false);
+      return;
+    }
+    function onKey(event: KeyboardEvent) {
+      if (!isCommandPaletteHotkey(event)) return;
+      event.preventDefault();
+      setCommandPaletteOpen((open) => !open);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showToolActivity]);
+
+  useEffect(() => {
+    const heartbeatBotId = computerBot?.id ?? active?.id;
+    if ((panel !== "computer" && !computerOpen) || !heartbeatBotId || computer?.state !== "running")
+      return;
+    const ping = () =>
+      void rpc.computer.heartbeat({ botId: heartbeatBotId }).catch(() => undefined);
+    ping();
+    const timer = window.setInterval(ping, 60_000);
+    return () => window.clearInterval(timer);
+  }, [panel, computerOpen, computerBot?.id, active?.id, computer?.state]);
+
+  /** Open the computer view. Only an explicit Take control asks for the lease. */
+  async function openComputer(botId?: string, takeControl = false) {
+    const id = botId ?? active?.id;
+    if (!id) return false;
+    const bot = botsRef.current.find((candidate) => candidate.id === id);
+    if (!bot) return false;
+    computerBotIdRef.current = id;
+    setComputerBotId(id);
+    const cached = computerCacheRef.current.get(id);
+    const targetComputer = computer?.botId === id ? computer : (cached?.computer ?? null);
+    const targetScreen = computer?.botId === id ? screenUrl : (cached?.screenUrl ?? null);
+    if (computer?.botId !== id) {
+      commitComputer(targetComputer);
+      setScreenUrl(targetScreen);
+    }
+    setComputerOpen(true);
+    computerVisible.current = true;
+    const needsTakeover = takeControl && !userHoldsComputerControl(targetComputer, id);
+    const blocked = computerTakeoverBlocked(targetComputer, snapshot?.run?.status);
+    try {
+      await bootComputer({
+        botId: id,
+        takeControl: needsTakeover && !blocked,
+        overlay: (needsTakeover && !blocked) || targetComputer?.state !== "running",
+        force: targetComputer?.state !== "running",
+      });
+      return true;
+    } catch {
+      // computerError already set in bootComputer
+      return false;
+    }
+  }
+  openComputerRef.current = openComputer;
+  const onOpenComputer = useCallback((botId?: string) => {
+    void openComputerRef.current(botId);
+  }, []);
+
+  async function releaseComputer(reason?: ComputerReleaseReason) {
+    const botId = computerBotIdRef.current ?? activeBotId.current;
+    if (!botId) return;
+    try {
+      await rpc.computer.release({ botId, reason });
+      if (computerBotIdRef.current !== botId && activeBotId.current !== botId) return;
+      await refreshComputerFor(botId).catch(() => undefined);
+      const groupId = activeGroupId.current;
+      if (groupId) {
+        await refreshGroupThreadRef.current(groupId).catch(() => undefined);
+      }
+    } catch {
+      if (computerBotIdRef.current !== botId && activeBotId.current !== botId) return;
+      setComputerError(t`Could not continue`);
+      setComputerErrorFromScreen(false);
+    }
+  }
+
+  function dismissComposerError() {
+    // The strip shows one message at a time, so only dismiss the run failure when it is the
+    // one on screen; otherwise a live run would be silenced before it has even failed.
+    const failedRunId = displayedRunErrorId;
+    setSendError(null);
+    if (failedRunId) {
+      rememberSeenRunErrorId(failedRunId);
+      setDismissedRunErrorIds((current) => new Set(current).add(failedRunId));
+    }
+  }
+
+  const embeddedScreenUrl = embeddableScreenUrl(screenUrl);
+  const hasControl = userHoldsComputerControl(computer, computerBot?.id);
+  const hideScreenLoadError = computerErrorFromScreen && Boolean(embeddedScreenUrl);
+  const computerScreenError =
+    computerError && !hideScreenLoadError ? (
+      <div role="alert" className="flex flex-col items-center gap-3 px-6 text-center text-sm">
+        <p className="text-destructive">{computerError}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => computerBot && void refreshComputerScreen(computerBot.id)}
+        >
+          <Trans>Retry screen</Trans>
+        </Button>
+      </div>
+    ) : null;
+  const computerPreviewScreen =
+    !computerOpen &&
+    computer?.kind !== "desktop" &&
+    computer?.state === "running" &&
+    Boolean(embeddedScreenUrl) &&
+    !computerScreenError;
+  const showingRecoveryHint =
+    !computerOpen &&
+    computer?.kind !== "desktop" &&
+    !computerPreviewScreen &&
+    !computerScreenError &&
+    showComputerRecoveryHint;
+
+  const userName = session.data?.user.name ?? t`You`;
+  const initials = userName
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  const newRoleAttachmentKey = JSON.stringify([
+    "new-role",
+    userId,
+    bootstrapMe?.spaceId,
+    roleSourceGroup?.id,
+  ]);
+  const newRoleAttachments = attachmentsForThread(pendingAttachments, newRoleAttachmentKey);
+  return {
+    t,
+    linkFavicons,
+    botId,
+    groupId,
+    navigate,
+    searchParams,
+    setSearchParams,
+    session,
+    userId,
+    groups,
+    setGroups,
+    bots,
+    setBots,
+    botSections,
+    spaces,
+    setSpaces,
+    archivedBots,
+    archivedGroups,
+    archivedOpen,
+    setArchivedOpen,
+    setNewRoleSourceId,
+    newRoleDescription,
+    setNewRoleDescription,
+    collapsedSidebarSections,
+    collapsedRosterParents,
+    query,
+    setQuery,
+    searchHits,
+    searchLoading,
+    snapshot,
+    botsSidebarDensity,
+    enterToSend,
+    pendingAttachments,
+    replyTarget,
+    setReplyTarget,
+    replyQuote,
+    setReplyQuote,
+    sending,
+    sendError,
+    setSendError,
+    exportingConversation,
+    setExportingConversation,
+    attachmentNotice,
+    setAttachmentNotice,
+    fileInputRef,
+    panel,
+    setPanelState,
+    recruitingRefresh,
+    setRecruitingRefresh,
+    roleChatOpen,
+    setRoleChatOpen,
+    roleChatId,
+    roleChatTrigger,
+    roleChatSection,
+    recruitingReadCache,
+    setRestoredPanelKey,
+    explicitPanelTarget,
+    pendingPanelRestore,
+    setPanel,
+    peerConversation,
+    setPeerConversation,
+    routines,
+    agentSkills,
+    setAgentSkills,
+    teachBusy,
+    computer,
+    setComputer,
+    botsRefreshUser,
+    updateSnapshot,
+    pluginsOpen,
+    setPluginsOpen,
+    mcpOpen,
+    setMcpOpen,
+    settingsOpen,
+    setSettingsOpen,
+    settingsSection,
+    setSettingsSection,
+    messagingSettingsOpen,
+    setMessagingSettingsOpen,
+    messagingSurfaceEnabled,
+    messagingProviders,
+    memoryProviderConfig,
+    setMemoryProviderConfig,
+    memoryProviderConfigRevision,
+    voiceStatus,
+    setVoiceStatus,
+    speakingMessageId,
+    dismissedRunErrorIds,
+    menuOpen,
+    setMenuOpen,
+    mobileSidebarOpen,
+    setMobileSidebarOpen,
+    mobileSidebarSwipeRef,
+    draggedBotId,
+    setDraggedBotId,
+    createMenuOpen,
+    setCreateMenuOpen,
+    botsSidebarCollapsed,
+    botsSidebarEdgeDragRef,
+    newSpaceOpen,
+    setNewSpaceOpen,
+    pickerInfoTopic,
+    setPickerInfoTopic,
+    commandPaletteOpen,
+    setCommandPaletteOpen,
+    activityMode,
+    toggleActivityMode,
+    botMenu,
+    setBotMenu,
+    botMenuAnchor,
+    deleteTarget,
+    setDeleteTarget,
+    deleteGroupTarget,
+    setDeleteGroupTarget,
+    deleteSpaceTarget,
+    setDeleteSpaceTarget,
+    renameSpaceTarget,
+    setRenameSpaceTarget,
+    spaceMenu,
+    setSpaceMenu,
+    spaceMenuAnchor,
+    closeSpaceMenu,
+    spaceMenuTarget,
+    clearTarget,
+    setClearTarget,
+    newSectionTarget,
+    setNewSectionTarget,
+    renameSectionTarget,
+    setRenameSectionTarget,
+    sectionMenu,
+    setSectionMenu,
+    sectionMenuAnchor,
+    closeSectionMenu,
+    booting,
+    loadingOlder,
+    initialBotsLoaded,
+    bootstrapMe,
+    setBootstrapMe,
+    call,
+    showToolActivity,
+    viewportWidth,
+    botsSidebarWidth,
+    setBotsSidebarWidth,
+    botsSidebarMaxWidth,
+    visibleSidebarWidth,
+    roleChatWidth,
+    setRoleChatWidth,
+    roleChatMaxWidth,
+    showComputerRecoveryHint,
+    releaseComputerRecovery,
+    holdComputerRecovery,
+    routineDraft,
+    setRoutineDraft,
+    routineWebhookSecret,
+    setRoutineWebhookSecret,
+    editingRoutine,
+    setEditingRoutine,
+    deleteRoutineTarget,
+    setDeleteRoutineTarget,
+    savingRoutine,
+    setSavingRoutine,
+    runningRoutine,
+    setRunningRoutine,
+    routineError,
+    setRoutineError,
+    computerOpen,
+    setComputerOpen,
+    computerViewport,
+    usage,
+    refreshUsage,
+    routineSavePending,
+    ensureWebhookSecret,
+    routineSaveRequest,
+    routineRunPending,
+    expandedHistoryThread,
+    historyEpoch,
+    scrollRequest,
+    clearScrollRequest,
+    messageScroll,
+    pinnedAroundRef,
+    inGroup,
+    active,
+    computerBot,
+    activeGroup,
+    archivedRouteGroup,
+    roleSourceGroup,
+    canCreateRoleFrom,
+    roleCrewBots,
+    activePendingAttachments,
+    activeRoutines,
+    panelTarget,
+    recordingSkill,
+    activeBotId,
+    contextBot,
+    contextGroup,
+    contextChat,
+    closeBotMenu,
+    markBotRead,
+    markBotUnread,
+    refreshBots,
+    prefetchThread,
+    prefetchSidebarChat,
+    refreshGroupThread,
+    refreshThread,
+    refreshAgentSkills,
+    sidebarGroups,
+    openSpaceChat,
+    reorderRosterBot,
+    toggleSidebarSection,
+    toggleRosterParent,
+    showSpaceSearch,
+    jumpToSearchHit,
+    activeSnapshot,
+    recruitingWorkspaceView,
+    workspaceNewRole,
+    crmMode,
+    homeView,
+    crmSelection,
+    knownThreadId,
+    recruitingCacheScope,
+    boundRoleView,
+    currentBindingRead,
+    emptyCrmChat,
+    composerDraftKey,
+    boundRoleCrmMode,
+    effectiveCrmSelection,
+    workspaceCandidates,
+    workspaceCorrespondence,
+    workspaceFull,
+    roleChatWorkspace,
+    roleChatHidden,
+    workspaceBrief,
+    openRecruitingView,
+    activeRecruitingTab,
+    changeRecruitingTab,
+    composerRef,
+    correspondenceScope,
+    setSelectedSchedulingPlan,
+    selectedCorrespondence,
+    selectCorrespondence,
+    chatContextApi,
+    recruitingDetail,
+    sendFromComposer,
+    openRoleChat,
+    candidateFeedbackRecipients,
+    discussionScope,
+    draftCrmReply,
+    discussCandidate,
+    feedbackCandidate,
+    sendRoleText,
+    activeReplyTarget,
+    activeReplyQuote,
+    clearReply,
+    connectionMemberIds,
+    recruitingConnectionBot,
+    currentRuns,
+    answerableAskIds,
+    workingRuns,
+    transcriptRunning,
+    composerRunning,
+    shownSteer,
+    resuming,
+    runError,
+    displayedRunError,
+    displayedRunErrorId,
+    handleRunErrorPresented,
+    transcriptMessages,
+    transcriptArtifactTarget,
+    saveSequenceDraft,
+    resolveTranscriptBot,
+    workingBots,
+    resolveTranscriptMemberName,
+    replyTargetName,
+    composerMentionTargets,
+    shellReady,
+    openBot,
+    loadOlder,
+    jumpToReplyMessage,
+    answerMessage,
+    reactToMessage,
+    onAttachmentPick,
+    removeAttachment,
+    openingCrmRole,
+    openCrmRole,
+    stopRun,
+    stopTeaching,
+    refreshActiveThread,
+    refreshActiveTeaching,
+    addSkillRoutine,
+    speakMessage,
+    createGroup,
+    startNewRole,
+    restoreGroup,
+    setBotsSidebarCollapsedPref,
+    openSettings,
+    createBot,
+    refreshComputerFor,
+    openComputer,
+    onOpenComputer,
+    releaseComputer,
+    dismissComposerError,
+    embeddedScreenUrl,
+    hasControl,
+    computerScreenError,
+    showingRecoveryHint,
+    userName,
+    initials,
+    newRoleAttachmentKey,
+    newRoleAttachments,
+  };
+}
+export function firstThreadRoute(
+  bots: readonly Pick<Bot, "id">[],
+  groups: readonly Pick<Group, "id">[],
+  recruiting = false,
+): string {
+  if (recruiting && groups[0]) return `/app/g/${groups[0].id}?view=home`;
+  if (bots[0]) return `/app/${bots[0].id}`;
+  if (groups[0]) return `/app/g/${groups[0].id}`;
+  return "/app";
+}
+function applyThreadEvent(
+  event: ProductEvent,
+  commitSnapshot: (next: ThreadSnapshot | null) => void,
+  commitComputer: (next: ComputerStatus | null) => void,
+  snapshotRef: MutableRefObject<ThreadSnapshot | null>,
+  computerRef: MutableRefObject<ComputerStatus | null>,
+) {
+  publishComputerCommand(event);
+  if (isThreadSnapshotEvent(event)) {
+    const next = reduceThreadSnapshot(snapshotRef.current, event);
+    commitSnapshot(next);
+  }
+  if (isComputerStatusEvent(event)) {
+    const next = reduceComputerStatus(computerRef.current, event);
+    commitComputer(next);
+  }
+}
+function newClientNonce(): string {
+  return newClientId();
+}
