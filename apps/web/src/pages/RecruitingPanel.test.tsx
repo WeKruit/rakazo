@@ -1,4 +1,3 @@
-import "../lib/query.test-support";
 // @vitest-environment jsdom
 import { createHash, webcrypto } from "node:crypto";
 import { ORPCError } from "@orpc/client";
@@ -20,6 +19,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { recruitingReadViewFixture } from "../lib/query.test-support";
 import {
   createRecruitingReadCache,
   rememberRecruitingRead,
@@ -35,6 +35,7 @@ import {
 const api = vi.hoisted(() => ({
   session: { data: { user: { id: "actor-1" } } },
   getWorkspace: vi.fn(),
+  readView: vi.fn(),
   correspondence: vi.fn(),
   crmData: vi.fn(),
   readSource: vi.fn(),
@@ -1480,6 +1481,7 @@ function candidateFixture(candidateKey = "candidate-1", assessed = true) {
   };
 }
 beforeEach(() => {
+  api.readView.mockImplementation(recruitingReadViewFixture(api));
   Element.prototype.scrollIntoView ??= () => {};
   api.session.data.user.id = "actor-1";
   const request = artifactSourceFixture("{}", "application/json", "artifact-request");
@@ -1613,6 +1615,7 @@ async function mounted(
     | "groupId"
     | "readCache"
     | "readCacheScope"
+    | "workspaceRead"
     | "crmBrowse"
     | "roleConversation"
   > = {},
@@ -9018,3 +9021,39 @@ it.each(["contacts", "shortlist"] as const)(
   },
 );
 
+it("uses only the Shell navigation's fresh workspace and waits for its next refresh generation", async () => {
+  const page = candidatePage([
+    { ...candidateFixture("shared-person", false), name: "Shared person" },
+  ]);
+  api.readView.mockImplementation(async (input) => ({
+    kind: input.kind,
+    workspace: { role, revision },
+    data: input.kind === "candidates" ? page : { tasks: [], actions: [], observations: [] },
+  }));
+  api.getWorkspace.mockRejectedValue(new Error("Unexpected duplicate workspace RPC"));
+  const options = {
+    presentation: "workspace" as const,
+    view: "results" as const,
+    workspaceRead: {
+      threadId: "thread-1",
+      refreshSignal: 0,
+      workspace: { role, revision, crmTarget: null },
+    },
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, options);
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+  expect(view.container.textContent).toContain("Shared person");
+  api.readView.mockClear();
+  await view.render("thread-1", 1, false, undefined, {
+    ...options,
+    workspaceRead: { threadId: "thread-1", refreshSignal: 1, workspace: undefined },
+  });
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+  expect(api.readView).not.toHaveBeenCalled();
+  await view.render("thread-1", 1, false, undefined, {
+    ...options,
+    workspaceRead: { ...options.workspaceRead, refreshSignal: 1 },
+  });
+  expect(api.readView).toHaveBeenCalled();
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+});

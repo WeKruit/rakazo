@@ -53,7 +53,15 @@ export type CandidateFeedback = {
   recipientBotId?: string;
 };
 
+export type RecruitingWorkspaceRead = {
+  threadId: string;
+  refreshSignal: number;
+  workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>>;
+};
+
 export type Props = {
+  /** Fresh only for the Shell navigation and refresh generation that performed the read. */
+  workspaceRead?: RecruitingWorkspaceRead;
   shortlistWeekFilter?: ShortlistWeekFilter;
   onClearShortlistWeekFilter?: () => void;
   onReviewSchedulingPlan?: (handoff: SchedulingPlanHandoff) => void;

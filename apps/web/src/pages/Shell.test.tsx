@@ -1,4 +1,4 @@
-import "../lib/query.test-support";
+import { recruitingReadViewFixture } from "../lib/query.test-support";
 import { createRecruitingReadCache } from "../lib/recruiting-read-cache";
 // @vitest-environment jsdom
 
@@ -78,6 +78,7 @@ const shellApi = vi.hoisted(() => ({
     crmData: vi.fn(),
     correspondence: vi.fn(),
     getWorkspace: vi.fn(),
+    readView: vi.fn(),
     listAssessments: vi.fn(),
     listCandidates: vi.fn(),
     listFeedback: vi.fn(),
@@ -5740,3 +5741,4 @@ it("shows ordinary users the turn's work in plain words and folds it once the re
   expect(container!.textContent).not.toMatch(/autumn|Recruiting role|mcp/i);
 });
 
+shellApi.recruiting.readView.mockImplementation(recruitingReadViewFixture(shellApi.recruiting));

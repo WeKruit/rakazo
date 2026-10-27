@@ -19,6 +19,7 @@ import { useArrivals } from "../recruiting/shared";
 import type { CandidateDiscussionContext, Props, Snapshot } from "../recruiting/workspace-types";
 
 export function useRecruitingWorkspace({
+  workspaceRead,
   shortlistWeekFilter,
   onClearShortlistWeekFilter,
   userId,
@@ -192,7 +193,19 @@ export function useRecruitingWorkspace({
       candidateHandoff.current = null;
     };
   }, []);
+  const sharedWorkspaceRead =
+    workspaceRead?.threadId === threadId &&
+    workspaceRead.refreshSignal === (refreshSignal ?? 0) &&
+    refresh === 0
+      ? workspaceRead
+      : undefined;
   useEffect(() => {
+    if (sharedWorkspaceRead && sharedWorkspaceRead.workspace === undefined) {
+      setLoading(true);
+      setValidatedWorkspaceRead(undefined);
+      candidateValidation.current = undefined;
+      return;
+    }
     let cancelled = false;
     const epoch = readEpoch.current;
     let cacheEpoch = readCache?.epoch;
@@ -240,7 +253,9 @@ export function useRecruitingWorkspace({
       retryTransientRead(call, abort.signal).catch(onReadError);
     async function load() {
       try {
-        let workspace = await read(() => rpc.recruiting.getWorkspace({ threadId }));
+        let workspace = sharedWorkspaceRead
+          ? sharedWorkspaceRead.workspace!
+          : await read(() => rpc.recruiting.getWorkspace({ threadId }));
         while (!cancelled && epoch === readEpoch.current) {
           updateEditScope(workspace);
           setSnapshot((current) =>
@@ -258,12 +273,37 @@ export function useRecruitingWorkspace({
           setValidatedWorkspaceRead(workspaceReadKey);
           if (summary) return;
           const roleId = workspace?.role.id;
+          let verifiedResearch: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> | undefined;
           const [assessments, research, questions, documents] = await Promise.all([
             roleId && !candidateWorkspace
               ? read(() => rpc.recruiting.listAssessments({ roleId }))
               : Promise.resolve([]),
             roleId
-              ? read(() => rpc.recruiting.listResearch({ roleId }))
+              ? candidateWorkspace
+                ? read(async () => {
+                    const view = await rpc.recruiting.readView({
+                      kind: "research",
+                      threadId,
+                      roleId,
+                      roleRevisionId: workspace!.revision.id,
+                    });
+                    if (view.kind !== "research") throw new Error("Recruiting read kind changed");
+                    verifiedResearch = view.workspace;
+                    if (
+                      !view.data &&
+                      view.workspace?.role.id === roleId &&
+                      view.workspace.revision.id === workspace!.revision.id
+                    ) {
+                      setCandidatePage(null);
+                      candidateValidation.current = undefined;
+                      clearRecruitingReads(readCache, readCacheScope);
+                      throw new ORPCError("CONFLICT", {
+                        message: "Recruiting read provenance changed",
+                      });
+                    }
+                    return view.data ?? { tasks: [], actions: [], observations: [] };
+                  })
+                : read(() => rpc.recruiting.listResearch({ roleId }))
               : Promise.resolve({ tasks: [], actions: [], observations: [] }),
             roleId && !candidateWorkspace
               ? read(() => rpc.recruiting.listQuestions({ threadId, roleId }))
@@ -276,12 +316,18 @@ export function useRecruitingWorkspace({
                 ]).then((lists) => lists.flat()),
           ]);
           if (cancelled || epoch !== readEpoch.current) return;
-          const verified = await read(() => rpc.recruiting.getWorkspace({ threadId }));
+          const verified =
+            verifiedResearch !== undefined
+              ? verifiedResearch
+              : await read(() => rpc.recruiting.getWorkspace({ threadId }));
           if (cancelled || epoch !== readEpoch.current) return;
           if (
             workspace?.role.id !== verified?.role.id ||
             workspace?.revision.id !== verified?.revision.id
           ) {
+            setCandidatePage(null);
+            candidateValidation.current = undefined;
+            clearRecruitingReads(readCache, readCacheScope);
             workspace = verified;
             continue;
           }
@@ -317,6 +363,7 @@ export function useRecruitingWorkspace({
     readCache,
     workspaceCacheKey,
     workspaceReadKey,
+    sharedWorkspaceRead,
   ]);
   const workspace = workspaceSnapshot?.workspace;
   const criteria = workspace?.revision.criteria ?? [];
@@ -507,26 +554,31 @@ export function useRecruitingWorkspace({
       previousCandidateSearch.current.query !== candidateRequestFilters.query;
     previousCandidateSearch.current = { scope, query: candidateRequestFilters.query };
     const load = async () => {
-      let page = await rpc.recruiting.listCandidates(
+      const result = await rpc.recruiting.readView(
         {
+          kind: "candidates",
+          threadId,
           roleId,
-          limit: 30,
-          ...candidateRequestFilters,
+          roleRevisionId: roleRevisionId!,
+          query: { limit: 30, ...candidateRequestFilters },
         },
         { signal: abort.signal },
       );
       if (!isCurrent()) return;
-      if (page.roleId !== roleId || page.roleRevisionId !== roleRevisionId) {
+      if (
+        result.kind !== "candidates" ||
+        !result.data ||
+        result.workspace?.role.id !== roleId ||
+        result.workspace.revision.id !== roleRevisionId
+      ) {
+        setCandidatePage(null);
+        candidateValidation.current = undefined;
+        clearRecruitingReads(readCache, readCacheScope);
         setRefresh((value) => value + 1);
         return;
       }
+      let page = result.data;
       if (resetUnavailableCandidateSort(page, candidateRequestFilters)) return;
-      const verified = await rpc.recruiting.getWorkspace({ threadId });
-      if (!isCurrent()) return;
-      if (verified?.role.id !== roleId || verified?.revision.id !== roleRevisionId) {
-        setRefresh((value) => value + 1);
-        return;
-      }
       candidateValidation.current = cacheEpoch;
       candidateValidatedRead.current = `${workspaceReadKey}:${candidateQueryKey}`;
       setCandidatePage(page);

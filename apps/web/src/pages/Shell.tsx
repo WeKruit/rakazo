@@ -95,6 +95,7 @@ const MOBILE_SIDEBAR_SWIPE_DISTANCE_PX = 56;
 export function ShellPage() {
   const model = useShellController();
   const {
+    currentWorkspaceRead,
     t,
     navigate,
     session,
@@ -627,6 +628,7 @@ export function ShellPage() {
             ) : null}
             {panel === "recruiting" && activeSnapshot?.threadId ? (
               <RecruitingPanel
+ workspaceRead={currentWorkspaceRead}
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}

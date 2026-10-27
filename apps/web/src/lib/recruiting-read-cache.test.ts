@@ -120,13 +120,15 @@ it("clears a previous account's in-flight read without accepting its late data",
 });
 
 it("garbage collects inactive display data after five minutes", async () => {
- vi.useFakeTimers();
- try {
-  const cache = createRecruitingReadCache();
-  rememberRecruitingRead(cache, "actor:space:role:rows", ["saved"]);
-  await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
-  expect(savedRecruitingRead(cache, "actor:space:role:rows")).toEqual(["saved"]);
-  await vi.advanceTimersByTimeAsync(1);
-  expect(cache.client.getQueryCache().getAll()).toHaveLength(0);
- } finally { vi.useRealTimers(); }
+  vi.useFakeTimers();
+  try {
+    const cache = createRecruitingReadCache();
+    rememberRecruitingRead(cache, "actor:space:role:rows", ["saved"]);
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1);
+    expect(savedRecruitingRead(cache, "actor:space:role:rows")).toEqual(["saved"]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(cache.client.getQueryCache().getAll()).toHaveLength(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });

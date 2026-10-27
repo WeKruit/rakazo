@@ -43,19 +43,8 @@ test("measures role RPC duplication while retaining live binding validation", as
     contentType: "application/json",
   });
   expect(fixture.unknown).toEqual([]);
-  if (process.env.RECRUITING_QUERY_REQUIRE_ZERO) expect(duplicateRequests).toBe(0);
-  else if (!process.env.RECRUITING_QUERY_BASELINE) {
-    // These remaining requests independently validate workspace and candidate snapshots before
-    // rendering actions. An atomic server snapshot is needed to remove them safely.
-    expect(duplicates).toEqual([
-      [
-        JSON.stringify({
-          method: "recruiting/getWorkspace",
-          input: { threadId: "fixture-thread" },
-        }),
-        4,
-      ],
-    ]);
-    expect(reads).toHaveLength(11);
+  if (!process.env.RECRUITING_QUERY_BASELINE) {
+    expect(duplicateRequests).toBe(0);
+    expect(reads).toHaveLength(8);
   }
 });
