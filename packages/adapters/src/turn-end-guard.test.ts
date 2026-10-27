@@ -39,6 +39,8 @@ function fixture(
     source?: MessageBlock[];
     /** The run's last recruiting_feedback call was rejected with this error. */
     feedbackError?: string;
+    /** People were saved after the round was accepted. */
+    scaledPage?: boolean;
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -66,12 +68,13 @@ function fixture(
       },
       recruitingCandidatePage: {
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
+        findFirst: vi.fn(async () => (options.scaledPage ? { effectId: "page-9" } : null)),
       },
       recruitingCalibrationRound: {
         findFirst: vi.fn(async (args: { where: { approvedAt?: unknown } }) =>
           args.where.approvedAt
             ? options.acceptedRound
-              ? { id: "round-0" }
+              ? { approvedAt: new Date("2026-10-27T17:00:00Z") }
               : null
             : (options.round ?? null),
         ),
@@ -656,7 +659,7 @@ describe("guardRecruitingTurnEnd", () => {
     );
 
     // The coordinator's own continuation still gets the step.
-    const own = fixture({ stage: "scale", savedCandidates: 232 });
+    const own = fixture({ stage: "scale", savedCandidates: 40 });
     await expect(
       guardRecruitingTurnEnd(own.deps, {
         run: { ...run, trigger: "follow_up", sourceMessageId: "nudge-1" },
@@ -920,5 +923,30 @@ describe("answeredAsk", () => {
     expect(answeredAsk("这个岗位的地点要求如何设定？", answers)).toBeUndefined();
     expect(answeredAsk("这个岗位的语言要求怎么定？", answers)).toBeUndefined();
     expect(answeredAsk("Why?", answers)).toBeUndefined();
+  });
+
+  // 2026-10-27: a scale turn on a role that already held 137 people was pushed three times.
+  it("treats scale as delivered once people were saved after acceptance or the pool holds 100", async () => {
+    const reply: MessageBlock[] = [
+      { kind: "text", text: "结果中已有137位候选人，超过本轮100人的目标，无需追加搜索。" },
+    ];
+    for (const options of [
+      { savedCandidates: 137 },
+      { savedCandidates: 60, acceptedRound: true, scaledPage: true },
+    ]) {
+      const met = fixture({ stage: "scale", ...options });
+      await expect(
+        guardRecruitingTurnEnd(met.deps, {
+          run: { ...run, trigger: "follow_up", sourceMessageId: "nudge-1" },
+          roleId: "role-1",
+          blocks: reply,
+          handedOff: false,
+          pendingApproval: false,
+          postAssistant: met.postAssistant,
+        }),
+      ).resolves.toMatchObject({ action: "ended" });
+      expect(met.sendUserMessage).not.toHaveBeenCalled();
+      expect(met.postAssistant).not.toHaveBeenCalled();
+    }
   });
 });

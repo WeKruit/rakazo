@@ -173,6 +173,8 @@ function stageAfter(role: { playbookStage?: string }, next: RecruitingPlaybookSt
 }
 
 const CALIBRATION_FEEDBACK_THRESHOLD = 10;
+/** The scale step's target when the recruiter names none (the scale prompt's default). */
+const RECRUITING_SCALE_DEFAULT_TARGET = 100;
 
 /** After candidates are saved: ten or more saved people move the role into the feedback loop. */
 /** Saved people reach the feedback stage only once a calibration round has shown ten of them. */
@@ -197,6 +199,7 @@ export async function readRecruitingPlaybookStep(
     | "recruitingRoleRevision"
     | "recruitingCandidate"
     | "recruitingCalibrationRound"
+    | "recruitingCandidatePage"
   >,
   roleId: string,
 ): Promise<{
@@ -217,7 +220,8 @@ export async function readRecruitingPlaybookStep(
     tx.recruitingCandidate.count({ where: { roleId } }),
     tx.recruitingCalibrationRound.findFirst({
       where: { roleId, approvedAt: { not: null } },
-      select: { id: true },
+      orderBy: { approvedAt: "asc" },
+      select: { approvedAt: true },
     }),
     tx.recruitingCalibrationRound.findFirst({ where: { roleId }, select: { id: true } }),
   ]);
@@ -235,15 +239,27 @@ export async function readRecruitingPlaybookStep(
   if (stage === "feedback" && !anyRound) stage = "calibration_10";
   if (acceptedRound) stage = laterPlaybookStage(stage, "scale");
   const openClarifications = brief?.success ? recruitingBriefClarifications(brief.data).length : 0;
+  // Scale is delivered once people were saved after the round was accepted, or the pool already
+  // holds the default target; the next move is then the recruiter's, so nothing is pushed.
+  const scaled =
+    stage === "scale" &&
+    (savedCandidates >= RECRUITING_SCALE_DEFAULT_TARGET ||
+      (acceptedRound?.approvedAt != null &&
+        (await tx.recruitingCandidatePage.findFirst({
+          where: { roleId, observedAt: { gt: acceptedRound.approvedAt } },
+          select: { effectId: true },
+        })) !== null));
   return {
     stage,
     savedCandidates,
-    step: nextPlaybookStep(stage, {
-      title: role.title,
-      hasBrief: Boolean(revision?.brief),
-      openClarifications,
-      savedCandidates,
-    }),
+    step: scaled
+      ? null
+      : nextPlaybookStep(stage, {
+          title: role.title,
+          hasBrief: Boolean(revision?.brief),
+          openClarifications,
+          savedCandidates,
+        }),
   };
 }
 
