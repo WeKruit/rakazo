@@ -2898,6 +2898,9 @@ it("bounds legacy workspace candidate rows without discarding the loaded result 
     presentation: "workspace",
     view: "results",
   });
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(view.container.querySelector("table")?.getAttribute("aria-rowcount")).toBe("1001");
   expect(view.container.querySelectorAll("[data-candidate-index]").length).toBeLessThanOrEqual(100);
   await view.click("Cards");
