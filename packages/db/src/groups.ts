@@ -16,6 +16,7 @@ import { getRecruitingGroupCrmReferences, recruitingCrmConversationId } from "./
 import { IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
 import { activeRunSelection, activeRunStatuses, previewFromBlocks } from "./thread-listing.js";
+import { withTransactionRetry } from "./transaction-retry.js";
 
 type GroupRecord = {
   id: string;
@@ -546,46 +547,50 @@ export function createGroupRepos(prisma: PrismaClient) {
     },
 
     async archiveGroup(actor: Actor, groupId: string) {
-      return prisma.$transaction(async (tx) => {
-        await lockOwnedGroup(tx, actor, groupId);
-        const current = await tx.chatGroup.findFirst({
-          where: {
-            id: groupId,
-            spaceId: actor.spaceId,
-            userId: actor.userId,
-          },
-          select: { archivedAt: true, thread: { select: { id: true } } },
-        });
-        if (!current?.thread) throw new IsolationError();
-        if (current.archivedAt) return resumeArchivedGroupTeardown(tx, current.thread.id);
-
-        const activeRuns = await tx.run.findMany({
-          where: {
-            threadId: current.thread.id,
-            status: { in: activeRunStatuses },
-          },
-          select: { id: true, taskId: true },
-        });
-        const runIds = activeRuns.map((run) => run.id);
-        const now = new Date();
-        // Snapshot before cancellation commits. An expired lease that has not been
-        // reclaimed still names this run's screen.
-        const { targets } = await snapshotRunTeardownTargets(tx, runIds);
-
-        if (runIds.length) {
-          await cancelRunsInTransaction(tx, activeRuns, now);
-          await tx.event.deleteMany({
-            where: { type: "thread.progress", runId: { in: runIds } },
+      // Cancelling runs can deadlock with the worker finishing one of them; the retry sees the
+      // finished run, or resumes an archive that already committed.
+      return withTransactionRetry(() =>
+        prisma.$transaction(async (tx) => {
+          await lockOwnedGroup(tx, actor, groupId);
+          const current = await tx.chatGroup.findFirst({
+            where: {
+              id: groupId,
+              spaceId: actor.spaceId,
+              userId: actor.userId,
+            },
+            select: { archivedAt: true, thread: { select: { id: true } } },
           });
-        }
+          if (!current?.thread) throw new IsolationError();
+          if (current.archivedAt) return resumeArchivedGroupTeardown(tx, current.thread.id);
 
-        await tx.chatGroup.update({
-          where: { id: groupId },
-          data: { archivedAt: now, pinned: false },
-        });
+          const activeRuns = await tx.run.findMany({
+            where: {
+              threadId: current.thread.id,
+              status: { in: activeRunStatuses },
+            },
+            select: { id: true, taskId: true },
+          });
+          const runIds = activeRuns.map((run) => run.id);
+          const now = new Date();
+          // Snapshot before cancellation commits. An expired lease that has not been
+          // reclaimed still names this run's screen.
+          const { targets } = await snapshotRunTeardownTargets(tx, runIds);
 
-        return { cancelledRunIds: runIds, computers: targets };
-      });
+          if (runIds.length) {
+            await cancelRunsInTransaction(tx, activeRuns, now);
+            await tx.event.deleteMany({
+              where: { type: "thread.progress", runId: { in: runIds } },
+            });
+          }
+
+          await tx.chatGroup.update({
+            where: { id: groupId },
+            data: { archivedAt: now, pinned: false },
+          });
+
+          return { cancelledRunIds: runIds, computers: targets };
+        }),
+      );
     },
 
     /** After an archive's teardown: expire the cancelled runs' leases and legacy columns. */

@@ -219,6 +219,23 @@ describe("archiveGroup", () => {
     } as unknown as PrismaClient;
   });
 
+  it("retries an archive that deadlocked with the worker finishing a run", async () => {
+    const deadlock = Object.assign(
+      new Error("Transaction failed due to a write conflict or a deadlock"),
+      {
+        code: "P2034",
+      },
+    );
+    runUpdateMany.mockRejectedValueOnce(deadlock);
+    const repos = createGroupRepos(prisma);
+
+    await expect(repos.archiveGroup(actor, "group-1")).resolves.toMatchObject({
+      cancelledRunIds: ["run-1", "run-legacy"],
+    });
+    expect(prisma.$transaction).toHaveBeenCalledTimes(2);
+    expect(groupUpdate).toHaveBeenCalledOnce();
+  });
+
   it("tears down only this thread's runs, each under its own lease", async () => {
     const repos = createGroupRepos(prisma);
 
