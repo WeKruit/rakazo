@@ -4,6 +4,7 @@ import type {
   Space,
   SpaceNavigation,
 } from "@rakazo/contracts";
+import { ARRAY_LIST_RPC_PATHS, STRUCTURED_LIST_RPC_FIELDS } from "@rakazo/contracts";
 /** Drain bounded RPC pages, preserving sparse pages and rejecting a non-advancing server cursor. */
 export async function collectListPages<T>(
   read: (offset: number) => Promise<{ items: T[]; nextOffset: number | null }>,
@@ -110,4 +111,41 @@ export async function collectContactPages(
     offset = next;
   }
   return result;
+}
+
+const arrayListPaths: ReadonlySet<string> = new Set(ARRAY_LIST_RPC_PATHS);
+export function isOffsetListRpc(path: string): boolean {
+  return arrayListPaths.has(path) || Object.hasOwn(STRUCTURED_LIST_RPC_FIELDS, path);
+}
+/** Settings/catalog reads use 200-row pages; an exact full page requires one final read. */
+export async function collectOffsetListPages(
+  path: string,
+  read: (offset: number) => Promise<unknown>,
+): Promise<unknown> {
+  if (arrayListPaths.has(path)) {
+    return collectListPages(async (offset) => {
+      const items = await read(offset);
+      if (!Array.isArray(items) || items.length > 200) throw new Error("Invalid list page");
+      return { items, nextOffset: items.length === 200 ? offset + 200 : null };
+    });
+  }
+  const fields = STRUCTURED_LIST_RPC_FIELDS[path];
+  if (!fields) throw new Error("Unknown list procedure");
+  let result: Record<string, unknown> = {};
+  for (let offset = 0; ; offset += 200) {
+    const page = await read(offset);
+    if (!page || typeof page !== "object" || Array.isArray(page))
+      throw new Error("Invalid list page");
+    const record = page as Record<string, unknown>;
+    const combined: Record<string, unknown> = { ...record };
+    let more = false;
+    for (const field of fields) {
+      const items = record[field];
+      if (!Array.isArray(items) || items.length > 200) throw new Error("Invalid list page");
+      combined[field] = [...((result[field] as unknown[] | undefined) ?? []), ...items];
+      more ||= items.length === 200;
+    }
+    result = combined;
+    if (!more) return result;
+  }
 }

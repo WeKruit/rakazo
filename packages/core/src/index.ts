@@ -29,7 +29,13 @@ export * from "./format-file-size.js";
 export * from "./group-mentions.js";
 export * from "./hosted-staging.js";
 export * from "./http-response.js";
-export { collectContactPages, collectListPages, collectNavigationPages } from "./list-pages.js";
+export {
+  collectContactPages,
+  collectListPages,
+  collectNavigationPages,
+  collectOffsetListPages,
+  isOffsetListRpc,
+} from "./list-pages.js";
 export * from "./live-work.js";
 export * from "./markdown-plain.js";
 export * from "./match-score.js";

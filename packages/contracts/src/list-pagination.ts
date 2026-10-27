@@ -34,6 +34,7 @@ export const ARRAY_LIST_RPC_PATHS = [
 ] as const;
 
 export const STRUCTURED_LIST_RPC_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  "recruiting/schedulingPlans": ["plans", "slots"],
   "recruiting/listQuestions": ["questions"],
   "recruiting/listResearch": ["tasks", "actions", "observations"],
   "runs/list": ["runs"],

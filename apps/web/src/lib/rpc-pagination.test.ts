@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const calls = vi.hoisted(() => ({ bots: vi.fn(), groups: vi.fn(), get: vi.fn() }));
+const calls = vi.hoisted(() => ({
+  bots: vi.fn(),
+  groups: vi.fn(),
+  get: vi.fn(),
+  models: vi.fn(),
+  assignments: vi.fn(),
+}));
 vi.mock("@orpc/client", () => ({
   createORPCClient: () => ({
+    models: { list: calls.models },
+    mcp: { assignments: { all: calls.assignments } },
     bots: { page: calls.bots, get: calls.get },
     groups: { page: calls.groups },
   }),
@@ -40,4 +48,21 @@ describe("existing web list callers", () => {
     await rpc.bots.get({ botId: "one" });
     expect(calls.get).toHaveBeenCalledWith({ botId: "one" });
   });
+});
+
+it("collects nested and root settings pages without dropping records", async () => {
+  const rows = Array.from({ length: 1000 }, (_, id) => ({ id }));
+  for (const mock of [calls.models, calls.assignments])
+    mock.mockImplementation(async ({ offset }) => rows.slice(offset, offset + 200));
+  expect(await rpc.models.list()).toEqual(rows);
+  expect(await rpc.mcp.assignments.all()).toEqual(rows);
+  expect(calls.models.mock.calls.map(([input]) => input.offset)).toEqual([
+    0, 200, 400, 600, 800, 1000,
+  ]);
+  expect(calls.assignments).toHaveBeenCalledTimes(6);
+});
+it("honors explicit settings page requests", async () => {
+  calls.models.mockResolvedValue([]);
+  await rpc.models.list({ offset: 400 });
+  expect(calls.models).toHaveBeenCalledExactlyOnceWith({ offset: 400 }, undefined);
 });

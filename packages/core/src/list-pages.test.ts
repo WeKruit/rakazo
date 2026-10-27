@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { collectContactPages, collectListPages, collectNavigationPages } from "./list-pages.js";
+import {
+  collectContactPages,
+  collectListPages,
+  collectNavigationPages,
+  collectOffsetListPages,
+} from "./list-pages.js";
 
 describe("bounded list continuation", () => {
   it("collects all 1000 entries in five requests of at most 200 rows", async () => {
@@ -66,4 +71,15 @@ describe("aggregate page continuation", () => {
     expect(result.contacts).toEqual([{ candidateKey: "0" }, { candidateKey: "200" }]);
     expect(result.partial).toBe(false);
   });
+});
+
+it("drains differently sized structured lists without duplicate or dropped rows", async () => {
+  const tasks = Array.from({ length: 1000 }, (_, id) => ({ id }));
+  const actions = tasks.slice(0, 250);
+  const result = await collectOffsetListPages("recruiting/listResearch", async (offset) => ({
+    tasks: tasks.slice(offset, offset + 200),
+    actions: actions.slice(offset, offset + 200),
+    observations: [],
+  }));
+  expect(result).toEqual({ tasks, actions, observations: [] });
 });

@@ -267,6 +267,7 @@ import {
   toComputerStatus,
 } from "./computer-status.js";
 import { searchIntegrationCatalog } from "./integration-catalog.js";
+import { paginateListOutput } from "./list-pagination.js";
 import {
   dismissMcpServerApprovals,
   resolveMcpApprovalCards,
@@ -1018,9 +1019,10 @@ export function createRouter(deps: RouterDeps) {
   });
   const agentSkills = createAgentSkillsService(deps.prisma);
 
-  const authed = os.use(async ({ context, next }) => {
+  const authed = os.use(async ({ context, next, path }, input) => {
     if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-    return next({ context: { ...context, actor: context.actor } });
+    const result = await next({ context: { ...context, actor: context.actor } });
+    return { ...result, output: paginateListOutput(path, input, result.output) };
   });
 
   const boardEnabled = os
@@ -1028,9 +1030,10 @@ export function createRouter(deps: RouterDeps) {
       if (!deps.env?.ticketBoardEnabled) throw new ORPCError("NOT_FOUND");
       return next();
     })
-    .use(async ({ context, next }) => {
+    .use(async ({ context, next, path }, input) => {
       if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-      return next({ context: { ...context, actor: context.actor } });
+      const result = await next({ context: { ...context, actor: context.actor } });
+      return { ...result, output: paginateListOutput(path, input, result.output) };
     });
   const ticketDeps = {
     prisma: deps.prisma,

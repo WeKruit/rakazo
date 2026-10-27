@@ -30,7 +30,9 @@ import {
   collectContactPages,
   collectListPages,
   collectNavigationPages,
+  collectOffsetListPages,
   ensureAiDataConsent,
+  isOffsetListRpc,
   isServerUnreachable,
   isUnreachableStatus,
   mergeThreadHistory,
@@ -721,6 +723,23 @@ export async function rpc<T>(
     skipSpaceAuthRecovery?: boolean;
   } = {},
 ): Promise<T> {
+  if (isOffsetListRpc(proc) && !(body && typeof body === "object" && "offset" in body)) {
+    const generation = spaceSelectionGeneration;
+    const session = currentSessionGeneration();
+    return (await collectOffsetListPages(proc, async (offset) => {
+      if (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+        throw new Error("Request context changed");
+      const page = await rpc(
+        proc,
+        { ...(body && typeof body === "object" ? body : {}), offset },
+        options,
+      );
+      if (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+        throw new Error("Request context changed");
+      return page;
+    })) as T;
+  }
+
   if (
     proc === "recruiting/correspondence" &&
     body &&

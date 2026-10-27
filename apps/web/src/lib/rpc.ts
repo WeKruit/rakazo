@@ -3,7 +3,13 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
 import type { AppContract } from "@rakazo/contracts";
 import { LOCAL_SETTINGS_PAGE, LOCAL_SETTINGS_RPC } from "@rakazo/contracts";
-import { collectContactPages, collectListPages, collectNavigationPages } from "@rakazo/core";
+import {
+  collectContactPages,
+  collectListPages,
+  collectNavigationPages,
+  collectOffsetListPages,
+  isOffsetListRpc,
+} from "@rakazo/core";
 import { desktopBridge } from "./desktop";
 
 const SPACE_STORAGE_KEY = "rakazo:space-id";
@@ -154,7 +160,35 @@ const link = new RPCLink<RpcClientContext>({
   },
 });
 
-const client: ContractRouterClient<AppContract, RpcClientContext> = createORPCClient(link);
+const rawClient: ContractRouterClient<AppContract, RpcClientContext> = createORPCClient(link);
+function withOffsetLists<T extends object>(target: T, path: string[] = []): T {
+  return new Proxy(target, {
+    get(object, property, receiver) {
+      const value: unknown = Reflect.get(object, property, receiver);
+      if (typeof property !== "string") return value;
+      const next = [...path, property];
+      const key = next.join("/");
+      if (isOffsetListRpc(key) && typeof value === "function")
+        return (
+          input?: Record<string, unknown>,
+          options?: { signal?: AbortSignal; context?: RpcClientContext },
+        ) => {
+          if (input?.offset !== undefined) return value(input, options);
+          const context = {
+            ...options?.context,
+            spaceId: options?.context?.spaceId ?? selectedSpaceId(),
+          };
+          return collectOffsetListPages(key, (offset) =>
+            value({ ...input, offset }, { ...options, context }),
+          );
+        };
+      return value && (typeof value === "object" || typeof value === "function")
+        ? withOffsetLists(value, next)
+        : value;
+    },
+  });
+}
+const client = withOffsetLists(rawClient);
 // Keep existing callers' all-items contract while each network response stays bounded.
 export const rpc: typeof client = new Proxy(client, {
   get(target, namespace, receiver) {

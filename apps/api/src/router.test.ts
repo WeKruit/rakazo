@@ -3182,6 +3182,17 @@ describe("codex catalog auth", () => {
   const apiKey = "sk-test-api-key-12345678";
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
@@ -3283,6 +3294,17 @@ describe("codex live catalog", () => {
   }
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
@@ -3791,6 +3813,17 @@ describe("model set default auth", () => {
   const apiKey = "sk-test-api-key-12345678";
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
@@ -4112,6 +4145,17 @@ describe("bot model auth on save", () => {
   const apiKey = "sk-test-api-key-12345678";
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
