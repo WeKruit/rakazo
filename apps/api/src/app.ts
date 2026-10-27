@@ -405,7 +405,7 @@ export async function createApp(
       : new PiAgentRuntime({
           sessionRoot: env.piSessionRecording ? piSessionsRoot(env.dataDir) : undefined,
         }));
-  const notifications = new ExpoPushProvider(env.dataDir, (sessionId) =>
+  const notifications = new ExpoPushProvider(prisma, (sessionId) =>
     pushSessionExpiresAt(prisma, sessionId),
   );
   const auth = createAuth(prisma, {
@@ -444,19 +444,19 @@ export async function createApp(
         ),
       );
       await removePiUserSessions(env.dataDir, userId);
-      await deletePushToken(env.dataDir, userId).catch((error) =>
+      await deletePushToken(prisma, userId).catch((error) =>
         getLogger().error("push token removal failed", error),
       );
     },
-    // The session change already happened, so a token file failure must not fail sign-out.
+    // The session change already happened, so a token update failure must not fail sign-out.
     afterDeleteSession: async (session) => {
-      await endSessionPushToken(env.dataDir, session.userId, session.id).catch((error) =>
+      await endSessionPushToken(prisma, session.userId, session.id).catch((error) =>
         getLogger().error("push token removal failed", error),
       );
     },
     afterReplaceSession: async (previous, session) => {
-      await endSessionPushToken(env.dataDir, session.userId, previous.id, session.id).catch(
-        (error) => getLogger().error("push token session update failed", error),
+      await endSessionPushToken(prisma, session.userId, previous.id, session.id).catch((error) =>
+        getLogger().error("push token session update failed", error),
       );
     },
   });
