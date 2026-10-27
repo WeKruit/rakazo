@@ -52,3 +52,13 @@ A1/B1/B2 need deployed pool/queue measurements. A2's29-table opt-in pilot passes
 - Final combined source through #309 passed all 11 package checks (`EXPO_OFFLINE=1`); no production deployment or #263-to-main merge occurred.
 - Further D1 work remains local only on `adam/architecture-d1-link-confirmation` at `bc5c94d44dd38295a2c095376a86da66f322e4d9`: commits `003f0fade` and `c5e42f043`. Contacts 322,135 B, plain chat 284,874 B, linked message 291,476 B, sign-in 177,577 B. Contacts remains 72,135 B above the final 250 KB target. 1,854 unit tests, two package checks, build, 16 production browser cases and 10-language/2,006-message parity passed. Its push/PR creation was denied before execution by automatic approval; no retry or alternate publication was attempted. These bytes are not claimed for the integrated branch.
 - C5 decision, D1 final budget, A2 latency thresholds and external acceptance gates remain open. This is not an all-plan completion declaration.
+
+## Subsequent integration
+
+Publishing resumed after explicit confirmation. #329 documentation merged as `4ec4a2cc3b9358653e8cefae6cb6da30bc3d5d84`; #331 translation failure preservation merged as `a9e2312c7fe2b0af0b6839fa7ccfdbcbd4f8ba7e`; #330 D1 merged as `60ccba9a666e9080c948f68aaaa35b4e0c405d4a`. The earlier publishing denials above are historical and resolved.
+
+#330's reviewed followup `59568cde957e2df113ab75d0f555e695ed8b464e` warns explicitly before a failed-import Refresh can discard transient state. Actual browser verification preserves an unsent draft and synthetic attachment when the warning is dismissed, then verifies confirmation again after accepted refresh. Final measured contacts is **322,286 B**, 7 JS / 35 requests / 17 RPC / zero duplicate recruiting reads; the earlier 322,135 B predates that safety fix. Final 250 KB remains unmet.
+
+At integrated `60ccba9a6`, locale and link-confirmation regression passed **38 tests / 6 files, 1.86s**; Web typecheck passed. C5 slot design is approved for code and local tests only; creating/deploying Apps and initial stopped-writer cutover remain outside execution scope.
+
+D1 followup experiments were excluded from integration: the matched action-boundary experiment saved only 558 B (322,313 → 321,755 B) while adding asynchronous race handling. The isolated canonical Zod Mini prototype failed public schema-method and error-class compatibility (3 parity checks passed, 2 failed), so it was not measured or published as a product change. See [the exact compatibility evidence](D1-ZOD-MINI-PROTOTYPE.md). Types/build success did not override the failed prerequisites. No new performance claim is made for that prototype.
