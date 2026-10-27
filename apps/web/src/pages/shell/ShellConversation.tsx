@@ -49,7 +49,6 @@ const InterviewTab = lazyPanel(() =>
 const SequenceTab = lazyPanel(() =>
   import("../recruiting/SequenceTab").then((module) => module.SequenceTab),
 );
-const _VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 
 import type { ReactNode } from "react";
 export function ShellConversation({

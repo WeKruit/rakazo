@@ -91,7 +91,6 @@ export { eventChangesRecruitingPanel } from "./shell/useShellController";
 
 const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
 const MOBILE_SIDEBAR_SWIPE_DISTANCE_PX = 56;
-const _VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 
 export function ShellPage() {
   const model = useShellController();
