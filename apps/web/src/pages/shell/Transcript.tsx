@@ -38,6 +38,7 @@ import { isRunPhase, rosterWorkStatusLabel, threadTailLabel } from "../../lib/ro
 import { messageHasVisibleBlocks } from "../../lib/tool-activity-view";
 import { transcriptIsNearEnd, transcriptMovedDown } from "../../lib/transcript-scroll";
 import { TimeSeparator } from "./chat-context";
+import { TranscriptWindow } from "./TranscriptWindow";
 
 const MessageHoverActions = lazyPanel(() =>
   import("../ShellMessage").then((module) => module.MessageHoverActions),
@@ -356,9 +357,16 @@ export const Transcript = memo(function Transcript({
 
   return (
     <div className="relative flex min-h-0 flex-1">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Observes bubbled scroll keys without changing native keyboard behavior. */}
       <div
         ref={scrollRef}
         data-testid="transcript"
+        onKeyDown={(event) => {
+          if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+            following.current = false;
+            autoScrolling.current = false;
+          }
+        }}
         onPointerDown={(event) => {
           lastScrollTop.current = event.currentTarget.scrollTop;
           autoScrolling.current = false;
@@ -419,155 +427,171 @@ export const Transcript = memo(function Transcript({
             {loadingOlder ? t`Loading…` : t`Load earlier messages`}
           </button>
         ) : null}
-        {groupVoiceChats(reactionView.visibleMessages).map((item) => {
-          if (item.kind === "voiceChat") {
-            return (
-              <div key={item.key}>
-                {item.messages[0] && separatorIds.has(item.messages[0].id) ? (
-                  <TimeSeparator
-                    createdAt={item.messages[0].createdAt}
-                    locale={i18n.locale || "en"}
-                  />
-                ) : null}
-                <VoiceChatCard group={item} revealMessageId={scrollRequest?.messageId} />
-              </div>
-            );
+        <TranscriptWindow
+          items={groupVoiceChats(reactionView.visibleMessages).filter(
+            (item) =>
+              item.kind === "voiceChat" ||
+              messageHasVisibleBlocks(item.message.blocks, showToolActivity),
+          )}
+          itemKey={(item) => (item.kind === "voiceChat" ? item.key : item.message.id)}
+          containsMessage={(item, id) =>
+            item.kind === "voiceChat"
+              ? item.messages.some((message) => message.id === id)
+              : item.message.id === id
           }
-          const message = item.message;
-          if (!messageHasVisibleBlocks(message.blocks, showToolActivity)) return null;
-          const peerReceipt = isPeerReceiptBlocks(message.blocks);
-          const messageReactions = reactionView.reactions.get(message.id);
-          return (
-            <Fragment key={message.id}>
-              {separatorIds.has(message.id) ? (
-                <TimeSeparator createdAt={message.createdAt} locale={i18n.locale || "en"} />
-              ) : null}
-              <div
-                data-message-id={message.id}
-                data-message-role={message.role}
-                className={peerReceipt ? "relative py-0.5" : "group/message relative hover:z-20"}
-              >
+          scrollRef={scrollRef}
+          following={following}
+          jumpMessageId={scrollRequest?.messageId}
+          renderItem={(item) => {
+            if (item.kind === "voiceChat") {
+              return (
+                <div key={item.key}>
+                  {item.messages[0] && separatorIds.has(item.messages[0].id) ? (
+                    <TimeSeparator
+                      createdAt={item.messages[0].createdAt}
+                      locale={i18n.locale || "en"}
+                    />
+                  ) : null}
+                  <VoiceChatCard group={item} revealMessageId={scrollRequest?.messageId} />
+                </div>
+              );
+            }
+            const message = item.message;
+            if (!messageHasVisibleBlocks(message.blocks, showToolActivity)) return null;
+            const peerReceipt = isPeerReceiptBlocks(message.blocks);
+            const messageReactions = reactionView.reactions.get(message.id);
+            return (
+              <Fragment key={message.id}>
+                {separatorIds.has(message.id) ? (
+                  <TimeSeparator createdAt={message.createdAt} locale={i18n.locale || "en"} />
+                ) : null}
                 <div
-                  className={
-                    peerReceipt
-                      ? undefined
-                      : `relative flex ${message.role === "user" ? "justify-end" : "justify-start"}`
-                  }
+                  data-message-id={message.id}
+                  data-message-role={message.role}
+                  className={peerReceipt ? "relative py-0.5" : "group/message relative hover:z-20"}
                 >
                   <div
-                    data-testid={peerReceipt ? undefined : "message-bubble-frame"}
                     className={
                       peerReceipt
                         ? undefined
-                        : `relative w-fit min-w-0 ${
-                            narrow
-                              ? message.role === "user"
-                                ? "max-w-[88%]"
-                                : "max-w-full"
-                              : message.role === "user"
-                                ? "max-w-[min(84%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[84%]"
-                                : "max-w-[min(88%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[88%]"
-                          }`
+                        : `relative flex ${message.role === "user" ? "justify-end" : "justify-start"}`
                     }
                   >
-                    <MessageView
-                      artifactTarget={artifactTarget}
-                      message={message}
-                      canAnswer={answerableAskMessageIds.includes(message.id)}
-                      onOpenBot={onOpenBot}
-                      onOpenPeerMessages={onOpenPeerMessages}
-                      onAnswer={onAnswer}
-                      speakerName={
+                    <div
+                      data-testid={peerReceipt ? undefined : "message-bubble-frame"}
+                      className={
                         peerReceipt
                           ? undefined
-                          : message.role === "bot"
-                            ? showToolActivity
-                              ? memberName?.(message.botId)
-                              : undefined
-                            : undefined
+                          : `relative w-fit min-w-0 ${
+                              narrow
+                                ? message.role === "user"
+                                  ? "max-w-[88%]"
+                                  : "max-w-full"
+                                : message.role === "user"
+                                  ? "max-w-[min(84%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[84%]"
+                                  : "max-w-[min(88%,calc(100%_-_8rem))] [@media(hover:none)]:max-w-[88%]"
+                            }`
                       }
-                      memberName={memberName}
-                      peerBot={peerBot}
-                      replyParent={
-                        message.replyToMessageId
-                          ? messageById.get(message.replyToMessageId)
-                          : undefined
-                      }
-                      onJumpToMessage={onJumpToMessage}
-                      onRefresh={onRefresh}
-                      onBotChanged={onBotChanged}
-                      onAddRoutine={onAddRoutine}
-                      voiceReady={voiceReady}
-                      speaking={speakingMessageId === message.id}
-                      onSpeak={() => onSpeak(message)}
-                      onOpenComputer={onOpenComputer}
-                      showToolActivity={showToolActivity}
-                    />
-                    {peerReceipt ? null : (
-                      <MessageHoverActions
+                    >
+                      <MessageView
+                        artifactTarget={artifactTarget}
                         message={message}
-                        below={narrow}
-                        side={message.role === "user" ? "start" : "end"}
-                        onReply={onReply}
-                        onReact={onReact}
+                        canAnswer={answerableAskMessageIds.includes(message.id)}
+                        onOpenBot={onOpenBot}
+                        onOpenPeerMessages={onOpenPeerMessages}
+                        onAnswer={onAnswer}
+                        speakerName={
+                          peerReceipt
+                            ? undefined
+                            : message.role === "bot"
+                              ? showToolActivity
+                                ? memberName?.(message.botId)
+                                : undefined
+                              : undefined
+                        }
+                        memberName={memberName}
+                        peerBot={peerBot}
+                        replyParent={
+                          message.replyToMessageId
+                            ? messageById.get(message.replyToMessageId)
+                            : undefined
+                        }
+                        onJumpToMessage={onJumpToMessage}
+                        onRefresh={onRefresh}
+                        onBotChanged={onBotChanged}
+                        onAddRoutine={onAddRoutine}
+                        voiceReady={voiceReady}
+                        speaking={speakingMessageId === message.id}
+                        onSpeak={() => onSpeak(message)}
+                        onOpenComputer={onOpenComputer}
+                        showToolActivity={showToolActivity}
                       />
-                    )}
+                      {peerReceipt ? null : (
+                        <MessageHoverActions
+                          message={message}
+                          below={narrow}
+                          side={message.role === "user" ? "start" : "end"}
+                          onReply={onReply}
+                          onReact={onReact}
+                        />
+                      )}
+                    </div>
                   </div>
+                  {!peerReceipt && !message.id.startsWith("progress:") ? (
+                    <time
+                      dateTime={message.createdAt}
+                      data-testid="message-hover-time"
+                      className={cn(
+                        "pointer-events-none absolute z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 group-has-[[aria-expanded=true]]/message:opacity-100 [@media(hover:none)]:transition-none",
+                        narrow
+                          ? [
+                              "bottom-1 max-w-[50%]",
+                              message.role === "user" ? "start-0 text-start" : "end-0 text-end",
+                            ]
+                          : [
+                              "top-1",
+                              // Hover keeps the date in the side margin. Touch leaves that margin for the bubble and drops the revealed time under it.
+                              message.role === "user"
+                                ? "start-0 max-w-[max(8rem,16%)] text-start"
+                                : "end-0 max-w-[max(8rem,12%)] text-end",
+                              "[@media(hover:none)]:group-hover/message:static [@media(hover:none)]:group-focus-within/message:static [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:static",
+                              "[@media(hover:none)]:group-hover/message:block [@media(hover:none)]:group-focus-within/message:block [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:block",
+                              "[@media(hover:none)]:group-hover/message:mt-1 [@media(hover:none)]:group-focus-within/message:mt-1 [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:mt-1",
+                              "[@media(hover:none)]:group-hover/message:w-full [@media(hover:none)]:group-focus-within/message:w-full [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:w-full",
+                              "[@media(hover:none)]:group-hover/message:max-w-none [@media(hover:none)]:group-focus-within/message:max-w-none [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:max-w-none",
+                              message.role === "user"
+                                ? "[@media(hover:none)]:group-hover/message:text-end [@media(hover:none)]:group-focus-within/message:text-end [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-end"
+                                : "[@media(hover:none)]:group-hover/message:text-start [@media(hover:none)]:group-focus-within/message:text-start [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-start",
+                            ],
+                      )}
+                    >
+                      {formatMessageTime(message.createdAt, i18n.locale || "en")}
+                    </time>
+                  ) : null}
+                  {!peerReceipt && messageReactions ? (
+                    <div
+                      data-testid="message-reactions"
+                      className={cn(
+                        "mt-1 flex flex-wrap gap-1",
+                        message.role === "user" && "justify-end",
+                      )}
+                    >
+                      {[...messageReactions].map(([emoji, count]) => (
+                        <span
+                          key={emoji}
+                          className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs"
+                        >
+                          {emoji}
+                          {count > 1 ? ` ${count}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-                {!peerReceipt && !message.id.startsWith("progress:") ? (
-                  <time
-                    dateTime={message.createdAt}
-                    data-testid="message-hover-time"
-                    className={cn(
-                      "pointer-events-none absolute z-10 text-xs tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 group-has-[[aria-expanded=true]]/message:opacity-100 [@media(hover:none)]:transition-none",
-                      narrow
-                        ? [
-                            "bottom-1 max-w-[50%]",
-                            message.role === "user" ? "start-0 text-start" : "end-0 text-end",
-                          ]
-                        : [
-                            "top-1",
-                            // Hover keeps the date in the side margin. Touch leaves that margin for the bubble and drops the revealed time under it.
-                            message.role === "user"
-                              ? "start-0 max-w-[max(8rem,16%)] text-start"
-                              : "end-0 max-w-[max(8rem,12%)] text-end",
-                            "[@media(hover:none)]:group-hover/message:static [@media(hover:none)]:group-focus-within/message:static [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:static",
-                            "[@media(hover:none)]:group-hover/message:block [@media(hover:none)]:group-focus-within/message:block [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:block",
-                            "[@media(hover:none)]:group-hover/message:mt-1 [@media(hover:none)]:group-focus-within/message:mt-1 [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:mt-1",
-                            "[@media(hover:none)]:group-hover/message:w-full [@media(hover:none)]:group-focus-within/message:w-full [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:w-full",
-                            "[@media(hover:none)]:group-hover/message:max-w-none [@media(hover:none)]:group-focus-within/message:max-w-none [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:max-w-none",
-                            message.role === "user"
-                              ? "[@media(hover:none)]:group-hover/message:text-end [@media(hover:none)]:group-focus-within/message:text-end [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-end"
-                              : "[@media(hover:none)]:group-hover/message:text-start [@media(hover:none)]:group-focus-within/message:text-start [@media(hover:none)]:group-has-[[aria-expanded=true]]/message:text-start",
-                          ],
-                    )}
-                  >
-                    {formatMessageTime(message.createdAt, i18n.locale || "en")}
-                  </time>
-                ) : null}
-                {!peerReceipt && messageReactions ? (
-                  <div
-                    data-testid="message-reactions"
-                    className={cn(
-                      "mt-1 flex flex-wrap gap-1",
-                      message.role === "user" && "justify-end",
-                    )}
-                  >
-                    {[...messageReactions].map(([emoji, count]) => (
-                      <span
-                        key={emoji}
-                        className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs"
-                      >
-                        {emoji}
-                        {count > 1 ? ` ${count}` : ""}
-                      </span>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
-            </Fragment>
-          );
-        })}
+              </Fragment>
+            );
+          }}
+        />
         {workingLabel &&
         // Streaming reply text is its own progress; the run label steps aside for it.
         !(

@@ -13,23 +13,46 @@ export function CandidateWindow({
   header,
   renderRow,
   offsets,
+  cardGridClassName = "grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3",
+  className = "",
+  tableClassName = "w-full min-w-[960px] table-fixed border-collapse text-left text-sm",
 }: {
   itemKeys: readonly string[];
   mode: "table" | "cards";
   label: string;
   header?: ReactNode;
+  cardGridClassName?: string;
+  tableClassName?: string;
+  className?: string;
   renderRow: (index: number) => RowElement;
   offsets: RefObject<Record<"table" | "cards", { offset: number; measurements: VirtualItem[] }>>;
 }) {
   const scrollRef = useRef<HTMLElement>(null);
-  const [width, setWidth] = useState(() => (typeof window === "undefined" ? 0 : window.innerWidth));
+  const [cardGrid, setCardGrid] = useState({ columns: 1, gap: 12 });
   const [focusedKey, setFocusedKey] = useState<string>();
   useEffect(() => {
-    const resize = () => setWidth(window.innerWidth);
-    window.addEventListener("resize", resize);
-    return () => window.removeEventListener("resize", resize);
-  }, []);
-  const columns = mode === "table" ? 1 : width >= 1280 ? 3 : width >= 640 ? 2 : 1;
+    const scroll = scrollRef.current;
+    if (!scroll || mode !== "cards") return;
+    const measureGrid = () => {
+      const grid = scroll.querySelector<HTMLElement>("[data-candidate-grid]");
+      if (!grid) return;
+      const style = getComputedStyle(grid);
+      const columns = Math.max(1, style.gridTemplateColumns.split(" ").filter(Boolean).length);
+      const gap = Number.parseFloat(style.rowGap) || 0;
+      setCardGrid((current) =>
+        current.columns === columns && current.gap === gap ? current : { columns, gap },
+      );
+    };
+    measureGrid();
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measureGrid);
+    observer?.observe(scroll);
+    window.addEventListener("resize", measureGrid);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener("resize", measureGrid);
+    };
+  }, [mode, cardGridClassName]);
+  const columns = mode === "table" ? 1 : cardGrid.columns;
   const count = Math.ceil(itemKeys.length / columns);
   const enabled = itemKeys.length > 80;
   const focusedIndex = focusedKey ? itemKeys.indexOf(focusedKey) : -1;
@@ -138,11 +161,13 @@ export function CandidateWindow({
                 role="presentation"
                 ref={virtualizer.measureElement}
                 data-index={item.index}
-                className="pb-3"
+                style={{ paddingBottom: cardGrid.gap }}
               >
                 <ul
                   role="presentation"
-                  className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+                  data-candidate-grid
+                  className={cardGridClassName}
+                  style={{ paddingBlock: 0 }}
                 >
                   {Array.from(
                     { length: Math.min(columns, itemKeys.length - item.index * columns) },
@@ -189,12 +214,9 @@ export function CandidateWindow({
         // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users must focus the scrollable candidate viewport.
         tabIndex={0}
         {...events}
-        className="max-h-[70vh] max-w-full overflow-auto rounded-xl border border-border bg-card focus-visible:outline-2 focus-visible:outline-ring"
+        className={`max-h-[70vh] max-w-full overflow-auto rounded-xl border border-border bg-card focus-visible:outline-2 focus-visible:outline-ring ${className}`}
       >
-        <table
-          aria-rowcount={itemKeys.length + 1}
-          className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm"
-        >
+        <table aria-rowcount={itemKeys.length + 1} className={tableClassName}>
           {header}
           <tbody>{content}</tbody>
         </table>
@@ -215,9 +237,8 @@ export function CandidateWindow({
     >
       <ul
         aria-label={label}
-        className={
-          enabled ? "min-w-0" : "grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
-        }
+        data-candidate-grid={!enabled || undefined}
+        className={enabled ? "min-w-0" : cardGridClassName}
       >
         {content}
       </ul>

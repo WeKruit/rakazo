@@ -1,0 +1,38 @@
+# D3 independent follow-up
+
+Base: D4 `e0eb80130b7c64b5c3cb55ff23925dd1c071678b`. Local only; publication and integration are serialized by the parent task.
+
+Ports the previously reviewed TranscriptWindow and measured transcript rows, plus the legacy results view now extracted to RecruitingEvidenceTab. Candidate actions and full loaded count remain available; cards use their actual container grid columns. Focused and selected transcript rows remain mounted; distant jumps, dynamic streaming heights, tail following and earlier-message loading retain their existing policies. No D1 lazyLiveWork/windowinglazy or D2 changes are included.
+
+## Measured results
+
+All data is synthetic, Chromium on the local fixture server. The comparison substitutes only the base Transcript module in the same fixture build; bundle sizes are fixture assets, not production initial-page budgets.
+
+| Measurement | Base | Follow-up |
+| --- | ---: | ---: |
+| Transcript initial rows, 1,000 messages | 1,000 | 17 |
+| Transcript max mounted rows over 30 scroll steps | 1,030 | 24 |
+| Transcript scroll long tasks | 259 ms, 177 ms | none |
+| Transcript total / JS requests | 9 / 4 | 9 / 4 |
+| Transcript fixture JS raw bytes | 1,510,469 | 1,510,836 |
+| Transcript fixture JS gzip bytes | 486,183 | 486,741 |
+
+The baseline max includes automatic prepend of 30 synthetic older messages. Current candidate fixture mounts 14 initial rows, maximum 19 table rows / 36 cards, with no scroll long tasks, 5 total / 1 JS request, 429,304 raw / 145,206 gzip JS bytes. Candidate browser checks include keyboard and selection. Transcript checks include distant jump, retained focus and text selection after scrolling, streaming growth with tail gap 0 px, automatic prepend and return to latest, and append. Legacy results view has a 1,000-candidate unit regression bounding mounted rows/cards while preserving the full count; it has not received a separate browser-level route fixture.
+
+## Commands and results
+
+Use the repository's pinned pnpm and Node runtime; browser binaries were already installed locally. No cloud resources or real records were used.
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @rakazo/web check
+pnpm --filter @rakazo/web test
+pnpm --filter @rakazo/web build
+pnpm --filter @rakazo/web exec playwright test --config playwright.candidates.config.ts
+D3_TRANSCRIPT_BASE_REF=e0eb80130 pnpm --filter @rakazo/web exec playwright test --config playwright.candidates.config.ts transcript-virtualization --grep 'real Transcript'
+git diff --check
+```
+
+Typecheck passed. Web unit tests: **1,656 passed, 142 files**. Production build passed. Current browser run: **3 passed**; baseline comparison: **1 passed**. An initial extra prepend assertion clicked a button that automatic scrolling had already consumed; the corrected test explicitly exercises the automatic scroll path and verifies older rows plus return to latest. No product failure was hidden by that correction.
+
+Not tested: deployment/online environment, real API/page integration, other browsers, CPU throttling, manual assistive technology, and pixel-stable anchor location across all prepend/image-resize combinations. CI remains disabled. This local follow-up does not claim whole-plan completion.

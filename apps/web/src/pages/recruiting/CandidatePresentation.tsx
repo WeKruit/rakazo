@@ -381,6 +381,7 @@ export function SourcingCandidateCard({
           type="button"
           ref={triggerRef}
           className="hire-candidate-identity"
+          data-candidate-name
           aria-haspopup="dialog"
           aria-pressed={selected}
           onClick={(event) => onOpen(event.currentTarget)}
@@ -487,6 +488,7 @@ export function SourcingCandidateCard({
         <button
           type="button"
           aria-label={t`View ${name}`}
+          data-candidate-name
           aria-haspopup="dialog"
           onClick={(event) => onOpen(event.currentTarget)}
         >
