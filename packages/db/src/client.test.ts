@@ -1,5 +1,11 @@
 import { EventEmitter } from "node:events";
-import { createLogger, createTestSink, installLogger, runWithLogContext } from "@rakazo/logging";
+import {
+  createLogger,
+  createTestSink,
+  installLogger,
+  runCorrelatedJob,
+  runWithLogContext,
+} from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -164,6 +170,30 @@ describe("pool wait log", () => {
       waited: 0,
       queries: 4,
       queryP50Ms: 150,
+    });
+  });
+
+  it("counts a job's statements under the line that sent them", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
+    const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo");
+    pools.push(pool);
+    const client = Object.assign(new EventEmitter(), { query: async () => undefined });
+    pool.emit("connect", client);
+    await runCorrelatedJob({
+      name: "run.continue",
+      payload: { runId: "run-1" },
+      run: async () => {
+        await client.query();
+        await client.query();
+      },
+    });
+    expect(sink.events.at(-1)).toMatchObject({
+      message: "job.completed",
+      "db.statements": 2,
+      "db.sites": expect.stringMatching(
+        /^db\/src\/client\.test\.ts:\d+ ×1 \d+ms; db\/src\/client\.test\.ts:\d+ ×1 /,
+      ),
     });
   });
 

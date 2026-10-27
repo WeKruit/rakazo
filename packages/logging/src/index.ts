@@ -22,6 +22,7 @@ export {
 export {
   createJobCorrelation,
   jobPayloadBindings,
+  recordJobStatement,
   runCorrelatedJob,
   unwrapJobPayload,
   wrapJobPayload,
