@@ -165,13 +165,11 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
         },
       ]),
     );
+    const concurrency = this.options.concurrency ?? 4;
     const runner = await run({
       pgPool: this.pgPool,
-      concurrency: this.options.concurrency ?? 4,
-      // New jobs arrive at once through graphile's LISTEN; polling only picks up scheduled jobs
-      // and missed notifications. Every idle slot polls on its own, so 500 ms with 10 slots was
-      // 20 checkouts a second from a pool of 5.
-      pollInterval: this.options.pollInterval ?? 2_000,
+      concurrency,
+      pollInterval: this.options.pollInterval ?? idlePollInterval(concurrency),
       noHandleSignals: this.options.noHandleSignals,
       taskList,
     });
@@ -232,6 +230,16 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
       }
     }
   }
+}
+
+/**
+ * New jobs arrive at once through graphile's LISTEN; polling only picks up scheduled jobs and
+ * missed notifications. Every idle slot polls on its own, so the interval grows with the slots to
+ * keep idle polling near 5 fetches a second: 50 slots at 2 s were 25 a second, which kept the
+ * worker's 4 session connections busy and queued every job fetch and completion behind them.
+ */
+export function idlePollInterval(concurrency: number): number {
+  return Math.max(2_000, concurrency * 200);
 }
 
 /** Graphile's default when a job sets no cap. */
