@@ -44,7 +44,9 @@ const [{ createApp }, { ComposioEmulator, EmailEmulator }, { serve }] = await Pr
 ]);
 const results = [];
 try {
-  for (const mode of ["baseline", "rls"] as const) {
+  for (const [sample, mode] of (
+    ["baseline", "rls", "rls", "baseline", "baseline", "rls"] as const
+  ).entries()) {
     // A fixed local port keeps Better Auth's configured origin equal to the served one.
     const origin = "http://127.0.0.1:3194";
     Object.assign(process.env, {
@@ -97,6 +99,7 @@ try {
         timings.push(...(await Promise.all(Array.from({ length: 5 }, read))));
       timings.sort((a, b) => a - b);
       results.push({
+        sample: sample + 1,
         mode,
         warmup: 20,
         requests: 200,

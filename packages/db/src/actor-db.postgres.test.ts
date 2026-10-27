@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createActorDb, withDatabaseActor } from "./actor-db.js";
+import { actorRlsTables, createActorDb, withDatabaseActor } from "./actor-db.js";
 import { createDb } from "./client.js";
 
 const url = process.env.RLS_TEST_DATABASE_URL;
@@ -117,6 +117,205 @@ suite("first-batch RLS with a real restricted role", () => {
     target.password = "";
     restricted = createActorDb(target.href, { poolMax: 1 });
     await restricted.prisma.$connect();
+    for (const [index, { userId: id, spaceId }] of actors.entries()) {
+      await run(index, async () => {
+        const now = new Date();
+        const db = restricted.prisma;
+        const owner = { userId: id, spaceId };
+        await db.task.create({
+          data: { id, ...owner, botId: id, threadId: id, prompt: "Synthetic", status: "completed" },
+        });
+        await db.run.create({
+          data: {
+            id,
+            ...owner,
+            botId: id,
+            threadId: id,
+            taskId: id,
+            status: "completed",
+            trigger: "user",
+          },
+        });
+        for (const kind of ["page", "import", "reply", "binding", "read"]) {
+          await db.externalEffect.create({
+            data: {
+              id: `${id}-${kind}`,
+              spaceId,
+              runId: id,
+              kind: "test",
+              idempotencyKey: `${id}-${kind}`,
+              status: "completed",
+              request: {},
+              result: { synthetic: true },
+            },
+          });
+        }
+        await db.event.create({
+          data: { id, spaceId, threadId: id, botId: id, seq: 1, type: "synthetic", payload: {} },
+        });
+        await db.mcpServer.create({
+          data: {
+            id,
+            ...owner,
+            slug: "synthetic",
+            name: "Synthetic",
+            transport: "http",
+            endpoint: "https://example.test",
+          },
+        });
+        await db.recruitingResearchTask.create({
+          data: { id, roleId: id, mcpServerId: id, serverRevision: 1, createdByRunId: id },
+        });
+        await db.recruitingResearchAction.create({
+          data: {
+            id,
+            taskId: id,
+            roleRevisionId: id,
+            runId: id,
+            sourceMessageId: id,
+            clientNonce: id,
+            kind: "create",
+            requestArtifactId: id,
+            requestArtifactHash: "a".repeat(64),
+            contextArtifactId: id,
+            contextArtifactHash: "a".repeat(64),
+          },
+        });
+        await db.recruitingAssessment.create({
+          data: {
+            roleId: id,
+            candidateKey: "synthetic",
+            version: 1,
+            roleRevisionId: id,
+            facts: [],
+            judgments: [],
+            questions: [],
+            sourceRefs: [],
+            createdByRunId: id,
+          },
+        });
+        await db.recruitingCandidatePage.create({
+          data: {
+            effectId: `${id}-page`,
+            roleId: id,
+            taskId: id,
+            actionId: id,
+            roleRevisionId: id,
+            artifactId: id,
+            artifactHash: "synthetic",
+            observedAt: now,
+            rowCount: 1,
+          },
+        });
+        await db.recruitingCandidateOccurrence.create({
+          data: {
+            pageId: `${id}-page`,
+            rowIndex: 0,
+            roleId: id,
+            candidateKey: "synthetic",
+            name: "Synthetic",
+            issues: [],
+          },
+        });
+        await db.recruitingCrmImport.create({
+          data: {
+            effectId: `${id}-import`,
+            bindingEffectId: `${id}-binding`,
+            pageId: `${id}-page`,
+            rowIndex: 0,
+          },
+        });
+        await db.recruitingReply.create({
+          data: {
+            effectId: `${id}-reply`,
+            roleRevisionId: id,
+            crmImportEffectId: `${id}-import`,
+            emailReadEffectId: `${id}-read`,
+            crmContextReadEffectId: `${id}-read`,
+          },
+        });
+        const mirror = {
+          id,
+          ...owner,
+          mcpServerId: id,
+          organizationId: "synthetic-external-organization",
+          syncedAt: now,
+        };
+        await db.recruitingCrmRole.create({
+          data: {
+            ...mirror,
+            crmRoleId: id,
+            clientId: "synthetic",
+            clientLabel: "Synthetic",
+            roleLabel: "Synthetic",
+          },
+        });
+        await db.recruitingCrmContact.create({
+          data: {
+            ...mirror,
+            crmCandidateId: id,
+            name: "Synthetic",
+            contactStatus: "synthetic",
+            outreachStatus: "none",
+            clientLabel: "Synthetic",
+            roleLabel: "Synthetic",
+          },
+        });
+        await db.recruitingCrmRoleContact.create({
+          data: { roleId: id, contactId: id, syncedAt: now },
+        });
+        await db.recruitingCrmMessage.create({
+          data: { ...mirror, crmMessageId: id, crmCandidateId: id, crmRoleId: id, recipients: [] },
+        });
+        await db.recruitingCrmCampaign.create({
+          data: { ...mirror, crmCampaignId: id, name: "Synthetic", mirrorSyncedAt: now },
+        });
+        await db.recruitingCrmLead.create({
+          data: { ...mirror, crmLeadId: id, mirrorSyncedAt: now },
+        });
+        await db.recruitingCrmSyncProgress.create({
+          data: { ...owner, targetKey: id, token: id, progress: {} },
+        });
+        await db.recruitingCrmWorkspaceAttachment.create({
+          data: {
+            roleId: id,
+            ...owner,
+            mcpServerId: id,
+            serverRevision: 1,
+            organizationId: "synthetic-external-organization",
+            crmRoleId: id,
+            sourceMaterial: "synthetic",
+            target: {},
+            observedAt: now,
+          },
+        });
+        await db.recruitingReminder.create({
+          data: { id, spaceId, ownerUserId: id, roleId: id, title: "Synthetic", dueAt: now },
+        });
+        await db.recruitingCandidateNote.create({
+          data: {
+            id,
+            spaceId,
+            ownerUserId: id,
+            roleId: id,
+            candidateKey: "synthetic",
+            body: "Synthetic",
+          },
+        });
+        await db.recruitingSavedProfile.create({
+          data: {
+            id,
+            spaceId,
+            ownerUserId: id,
+            personKey: "synthetic",
+            provider: "synthetic",
+            sourceEffectId: `${id}-read`,
+            profile: {},
+            fetchedAt: now,
+          },
+        });
+      });
+    }
   });
   afterAll(async () => {
     await restricted?.prisma.$disconnect();
@@ -229,17 +428,133 @@ suite("first-batch RLS with a real restricted role", () => {
       }),
     );
   });
-  it("revokes access when organization membership disappears even with a stale Space membership", async () => {
+  it("requires both owner and active Space even when the actor belongs to both Spaces", async () => {
+    const id = `cross-membership-${suffix}`;
+    await admin.prisma.member.create({
+      data: {
+        id,
+        userId: actors[0]!.userId,
+        organizationId: actors[1]!.spaceId,
+        role: "member",
+        createdAt: new Date(),
+      },
+    });
+    try {
+      expect(
+        await admin.prisma.spaceMember.count({
+          where: { userId: actors[0]!.userId, spaceId: actors[1]!.spaceId },
+        }),
+      ).toBe(1);
+      for (const table of actorRlsTables) {
+        const result = await withDatabaseActor(
+          { userId: actors[0]!.userId, spaceId: actors[1]!.spaceId },
+          async () => ({
+            output: await restricted.prisma.$queryRawUnsafe(`SELECT * FROM "${table}"`),
+          }),
+        );
+        expect(result.output, table).toEqual([]);
+      }
+    } finally {
+      await admin.prisma.member.delete({ where: { id } });
+    }
+  });
+  it("revokes all first-batch access when organization membership is removed", async () => {
     const membership = await admin.prisma.member.findUniqueOrThrow({
       where: { id: actors[0]!.userId },
     });
     await admin.prisma.member.delete({ where: { id: membership.id } });
     try {
-      expect(await run(0, () => restricted.prisma.recruitingRoleRevision.findMany())).toEqual([]);
-      expect(await run(0, () => restricted.prisma.message.findMany())).toEqual([]);
+      expect(await admin.prisma.spaceMember.count({ where: { userId: membership.userId } })).toBe(
+        0,
+      );
+      for (const table of actorRlsTables) {
+        expect(
+          await run(0, () => restricted.prisma.$queryRawUnsafe(`SELECT * FROM "${table}"`)),
+          table,
+        ).toEqual([]);
+      }
     } finally {
       await admin.prisma.member.create({ data: membership });
     }
+  });
+  it("covers every first-batch table with nonempty own reads, zero foreign rows and allowed own writes", async () => {
+    for (const table of actorRlsTables) {
+      for (const index of [0, 1]) {
+        const rows = await run(index, () =>
+          restricted.prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM "${table}"`),
+        );
+        expect(rows.length, table).toBeGreaterThan(0);
+        for (const row of rows) {
+          const ownerKey = row.userId ?? row.ownerUserId ?? row.roleId ?? row.id ?? row.effectId;
+          expect(String(ownerKey), table).toContain(actors[index]!.userId);
+        }
+        // Exercise each WITH CHECK predicate without mutating the fixture values.
+        if (table === "recruiting_role_revisions" || table === "recruiting_assessments") continue;
+        const column = Object.keys(rows[0]!)[0]!;
+        const updated = await run(index, () =>
+          restricted.prisma.$executeRawUnsafe(`UPDATE "${table}" SET "${column}"="${column}"`),
+        );
+        expect(updated, table).toBe(rows.length);
+      }
+    }
+  });
+  it("rejects cross-account receipt and CRM parent relinking", async () => {
+    const own = actors[0]!.userId;
+    const foreign = actors[1]!.userId;
+    const mutations: Array<() => Promise<unknown>> = [
+      () =>
+        restricted.prisma.recruitingResearchTask.update({
+          where: { id: own },
+          data: { createdByRunId: foreign },
+        }),
+      () =>
+        restricted.prisma.recruitingResearchAction.update({
+          where: { id: own },
+          data: { contextArtifactId: foreign },
+        }),
+      () =>
+        restricted.prisma.recruitingCandidatePage.update({
+          where: { effectId: `${own}-page` },
+          data: { artifactId: foreign },
+        }),
+      () =>
+        restricted.prisma.recruitingCandidateOccurrence.updateMany({
+          where: { roleId: own },
+          data: { pageId: `${foreign}-page` },
+        }),
+      () =>
+        restricted.prisma.recruitingCrmImport.update({
+          where: { effectId: `${own}-import` },
+          data: { bindingEffectId: `${foreign}-binding` },
+        }),
+      () =>
+        restricted.prisma.recruitingReply.update({
+          where: { effectId: `${own}-reply` },
+          data: { crmImportEffectId: `${foreign}-import` },
+        }),
+      () =>
+        restricted.prisma.recruitingCrmRoleContact.updateMany({
+          where: { roleId: own },
+          data: { contactId: foreign },
+        }),
+      () =>
+        restricted.prisma.recruitingSavedProfile.update({
+          where: { id: own },
+          data: { sourceEffectId: `${foreign}-read` },
+        }),
+      () =>
+        restricted.prisma.recruitingCandidateNote.update({
+          where: { id: own },
+          data: { roleId: foreign },
+        }),
+      () =>
+        restricted.prisma.recruitingCrmRole.update({
+          where: { id: own },
+          data: { mcpServerId: foreign },
+        }),
+    ];
+    for (const mutation of mutations)
+      await expect(run(0, mutation)).rejects.toThrow(/row-level security/);
   });
   it("preserves native batch and callback transactions without identity leakage", async () => {
     await run(0, async () => {

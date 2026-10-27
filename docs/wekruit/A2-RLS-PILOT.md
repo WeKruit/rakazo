@@ -1,6 +1,6 @@
 # A2 first-batch RLS pilot
 
-This is an opt-in, locally tested first batch, not a completed deployment or whole-schema RLS rollout. The protected tables are `artifacts`, `messages`, `recruiting_roles`, `recruiting_role_revisions`, `recruiting_candidates` and `recruiting_calibration_rounds`. See [the full 92-table coverage inventory](A2-RLS-COVERAGE.md) for the remaining implementation work. Other tables retain their existing application-level filters.
+This is an opt-in, locally tested first batch, not a completed deployment or whole-schema RLS rollout. The first batch protects all 22 recruiting tables, messages/artifacts, and the thread/task/run/event/effect ownership dependencies (29 tables). See [the precise batch boundary and full-schema inventory](A2-RLS-COVERAGE.md). General assistant data, shared collaboration, auth and system tables are separate later batches or authority boundaries; they retain existing application authorization.
 
 ## Identity and transaction boundary
 
@@ -72,3 +72,9 @@ Current authorization forbids production role/grant/credential changes, policy a
 ## Local core-recruiting follow-up
 
 The expanded six-table policy script passes eight real-PostgreSQL tests, including foreign revision parent insertion, foreign shortlist-message links, forged calibration approver, own revision transaction and organization membership revocation. DB/API/testkit typechecks pass. The original API isolation fixture was rerun against all six policies in a new synthetic database: 143 OK, zero leaks/warnings, 99 reads empty for the owner too. Latency figures above still describe the original three-table script and are not a six-table measurement. Parent integration separately fixed the original 12 recruiting failures and reports 283/283 on its integrated branch; that result is not claimed for this branch.
+
+## Complete recruiting receipt batch
+
+The final local first-batch policies cover 29 tables; 11/11 PostgreSQL tests pass. Every table has nonempty data for both synthetic accounts, with restricted-role insertion/update and omitted-filter reads. All 29 reject access after organization membership removal and enforce both user and active Space when a user belongs to both Spaces. The schema cascades removed organization membership to Space membership; prior “stale membership” phrasing did not reflect that constraint. Ten cross-parent mutation cases reject specifically through RLS. The enhanced original API isolation fixture returns 144 OK, zero leaks/warnings, and 98 owner-empty reads still unexercised.
+
+First full-batch latency run: baseline p50/p95/max 7.02/9.32/19.44 ms; RLS 10.49/16.25/26.09 ms; zero errors, p95 **+74.36%**, exceeding the target. Earlier three-table +2.99% is historical and must not be used for this batch. Production performance remains untested, and local performance is not yet accepted.

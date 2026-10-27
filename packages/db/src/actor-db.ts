@@ -8,6 +8,38 @@ type Identity = Pick<Actor, "userId" | "spaceId">;
 type Adapter = Awaited<ReturnType<PrismaPg["connect"]>>;
 type Query = Parameters<Adapter["queryRaw"]>[0];
 type Transaction = Awaited<ReturnType<Adapter["startTransaction"]>>;
+export const actorRlsTables = [
+  "artifacts",
+  "messages",
+  "recruiting_roles",
+  "recruiting_role_revisions",
+  "recruiting_candidates",
+  "recruiting_calibration_rounds",
+  "threads",
+  "tasks",
+  "runs",
+  "external_effects",
+  "events",
+  "recruiting_crm_roles",
+  "recruiting_crm_contacts",
+  "recruiting_crm_messages",
+  "recruiting_crm_sync_progress",
+  "recruiting_crm_campaigns",
+  "recruiting_crm_leads",
+  "recruiting_crm_workspace_attachments",
+  "recruiting_reminders",
+  "recruiting_candidate_notes",
+  "recruiting_saved_profiles",
+  "recruiting_research_tasks",
+  "recruiting_assessments",
+  "recruiting_candidate_pages",
+  "recruiting_candidate_occurrences",
+  "recruiting_research_actions",
+  "recruiting_crm_imports",
+  "recruiting_replies",
+  "recruiting_crm_role_contacts",
+] as const;
+const protectedSqlNames = actorRlsTables.map((name) => `'${name}'`).join(", ");
 const identity = new AsyncLocalStorage<Readonly<Identity>>();
 
 /** Bind lazy iterators too: consuming an RPC stream happens after its middleware returns. */
@@ -73,7 +105,7 @@ export function createActorDb(connectionString: string, options: DbClientOptions
       const role = await inner.queryRaw(
         sql(`SELECT r.rolsuper, r.rolbypassrls,
         EXISTS (SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-          WHERE n.nspname='public' AND c.relname IN ('artifacts', 'messages', 'recruiting_roles', 'recruiting_role_revisions', 'recruiting_candidates', 'recruiting_calibration_rounds')
+          WHERE n.nspname='public' AND c.relname IN (${protectedSqlNames})
           AND pg_has_role(current_user, c.relowner, 'MEMBER'))
         OR EXISTS (SELECT 1 FROM pg_roles privileged WHERE (privileged.rolsuper OR privileged.rolbypassrls)
           AND pg_has_role(current_user, privileged.oid, 'MEMBER'))
@@ -86,11 +118,11 @@ export function createActorDb(connectionString: string, options: DbClientOptions
       const policies = await inner.queryRaw(
         sql(`SELECT count(*)::int FROM pg_class c
         JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public'
-        AND c.relname IN ('artifacts', 'messages', 'recruiting_roles', 'recruiting_role_revisions', 'recruiting_candidates', 'recruiting_calibration_rounds') AND c.relrowsecurity
+        AND c.relname IN (${protectedSqlNames}) AND c.relrowsecurity
         AND EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid AND p.polname='rakazo_actor_isolation')
         AND NOT EXISTS (SELECT 1 FROM pg_policy p WHERE p.polrelid=c.oid AND p.polpermissive AND p.polname<>'rakazo_actor_isolation')`),
       );
-      if (policies.rows[0]?.[0] !== 6) {
+      if (policies.rows[0]?.[0] !== actorRlsTables.length) {
         await inner.dispose();
         throw new Error("Protected database requires the first-batch RLS policies");
       }

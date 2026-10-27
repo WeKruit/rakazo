@@ -1,45 +1,50 @@
-# A2 full-schema policy coverage inventory
+# A2 first-batch boundary and full-schema inventory
 
-All 92 application tables are accounted for below. Six have opt-in policies and restricted-role PostgreSQL tests; the remaining 86 still rely on application authorization. This inventory is not an implementation claim. No remote or production operation was performed.
+The first rollout batch is **all 22 `recruiting_*` tables, messages and artifacts, plus threads/tasks/runs/events/external effects as the ownership and receipt dependencies**: 29 tables. Direct queries to a recruiting child no longer depend on the caller remembering its parent filter. Each protected table has nonempty synthetic data for two users, real non-owner/NOBYPASSRLS reads and legal writes. The authenticated actor composition is opt-in and fails closed; workers/auth/migrations retain their explicit system identity.
 
-## Implemented / tested (6)
+This is a staged rollout as specified by A2, not whole-schema RLS. The 63 other tables are enumerated for later batches or separate system authorization, not all counted as missing user-data policies in this batch. No production activation or publication occurred.
 
-`artifacts`, `messages`, `recruiting_roles`, `recruiting_role_revisions`, `recruiting_candidates`, `recruiting_calibration_rounds`.
+## First batch (29)
 
-## Auth / system / membership boundary (14)
+`artifacts`, `recruiting_roles`, `messages`, `recruiting_role_revisions`, `recruiting_candidates`, `recruiting_calibration_rounds`, `threads`, `tasks`, `runs`, `external_effects`, `events`, `recruiting_crm_roles`, `recruiting_crm_contacts`, `recruiting_crm_messages`, `recruiting_crm_sync_progress`, `recruiting_crm_campaigns`, `recruiting_crm_leads`, `recruiting_crm_workspace_attachments`, `recruiting_reminders`, `recruiting_candidate_notes`, `recruiting_saved_profiles`, `recruiting_research_tasks`, `recruiting_assessments`, `recruiting_candidate_pages`, `recruiting_candidate_occurrences`, `recruiting_research_actions`, `recruiting_crm_imports`, `recruiting_replies`, `recruiting_crm_role_contacts`.
+
+## Outside this batch: Auth / system / membership boundary (14)
 
 `user`, `session`, `account`, `verification`, `rateLimit`, `organization`, `billing_accounts`, `member`, `spaces`, `space_members`, `invitation`, `deployment_settings`, `integration_provider_configs`, `push_tokens`.
 
-## Shared Space authority (6)
+## Outside this batch: Shared Space authority (6)
 
 `action_approval_rules`, `bot_deletions`, `agent_secrets`, `boards`, `tickets`, `ticket_comments`.
 
-## Personal across Spaces (3)
+## Outside this batch: Personal across Spaces (3)
 
 `user_model_credentials`, `user_voice_credentials`, `secrets`.
 
-## Child ownership / multiple parent consistency (21)
+## Outside this batch: Child ownership / multiple parent consistency (11)
 
-`chat_group_members`, `events`, `attempts`, `external_effects`, `memory_revisions`, `computer_updates`, `computer_execution_leases`, `messaging_channels`, `messaging_channel_members`, `messaging_outbound`, `agent_connections`, `external_messages`, `recruiting_research_tasks`, `recruiting_research_actions`, `recruiting_assessments`, `recruiting_candidate_pages`, `recruiting_candidate_occurrences`, `recruiting_crm_imports`, `recruiting_replies`, `recruiting_crm_role_contacts`, `steering_messages`.
+`chat_group_members`, `attempts`, `memory_revisions`, `computer_updates`, `computer_execution_leases`, `messaging_channels`, `messaging_channel_members`, `messaging_outbound`, `agent_connections`, `external_messages`, `steering_messages`.
 
-## Personal Space rows (42)
+## Outside this batch: Personal Space rows (29)
 
-`ai_data_consents`, `action_auto_review_preferences`, `space_model_preferences`, `space_backup_models`, `space_voice_preferences`, `bots`, `bot_sections`, `chat_groups`, `threads`, `tasks`, `runs`, `cloud_agents`, `routines`, `scratchpad_items`, `taught_skills`, `agent_skills`, `connections`, `capability_installs`, `memory_documents`, `agent_homes`, `browser_profiles`, `computers`, `usage_records`, `notification_preferences`, `space_memory_configs`, `mcp_servers`, `mcp_oauth_sessions`, `bot_mcp_servers`, `messaging_identities`, `messaging_link_codes`, `bot_secrets`, `external_conversations`, `recruiting_reminders`, `recruiting_crm_roles`, `recruiting_crm_contacts`, `recruiting_crm_messages`, `recruiting_crm_sync_progress`, `recruiting_candidate_notes`, `recruiting_saved_profiles`, `recruiting_crm_workspace_attachments`, `recruiting_crm_campaigns`, `recruiting_crm_leads`.
+`ai_data_consents`, `action_auto_review_preferences`, `space_model_preferences`, `space_backup_models`, `space_voice_preferences`, `bots`, `bot_sections`, `chat_groups`, `cloud_agents`, `routines`, `scratchpad_items`, `taught_skills`, `agent_skills`, `connections`, `capability_installs`, `memory_documents`, `agent_homes`, `browser_profiles`, `computers`, `usage_records`, `notification_preferences`, `space_memory_configs`, `mcp_servers`, `mcp_oauth_sessions`, `bot_mcp_servers`, `messaging_identities`, `messaging_link_codes`, `bot_secrets`, `external_conversations`.
 
-## Remaining work and concrete semantic dependencies
+## Why the other categories are separate
 
-- Personal Space rows have usable owner keys today. They are not permission-blocked. Add owner/Space/current-membership policies and positive and cross-owner fixtures per delegate. Reminders, notes and saved profiles use `ownerUserId`, not bot attribution. `usage_records` needs a separately authorized deployment-owner aggregate path before restricting operator reports.
-- Research tasks/actions/assessments/pages/occurrences have independent parent references. The schema does not prove all parents have one owner. Actions must match task/revision/run/source message/artifacts; pages must match role/revision/task/action/effect/artifact; occurrences must match both page and candidate role. Add coordinated `WITH CHECK` clauses and mismatched-parent fixtures. A role-only predicate is insufficient for writes. Avoid policy recursion through pendingActionId and currentRevisionId.
-- CRM imports/replies inherit occurrence/revision ownership plus native effect references for binding, provider evidence and send approval. Complete `external_effects` -> `runs` ownership before covering those relationships. CRM role/contact links must validate both endpoints. External organization IDs are not product authorization; CRM mirrors retain local user/Space isolation.
-- Events/attempts/effects/leases inherit thread/run/computer scope. Agent connections have two bots; confirm intended visibility to requester and target before choosing one-parent isolation. Messaging channels/members/outbound have optional identity/thread links; orphan/shared-channel visibility needs explicit tests, not NULL-as-allow-all. Steering messages must validate both their message and optional run.
-- Boards/tickets/comments intentionally support Space collaboration. Creator IDs are attribution, not exclusive ownership. Action rules and agent secrets also use Space authority. Separate member reads from administrative writes and test shared members before enabling policies.
-- Auth/session/account/verification/rate-limit queries run before actor resolution and keep their explicit system client. That is not a reason to grant actor roles unrestricted access: audit actual RPC use and reduce grants or add user policies. Push tokens link both session and user. Membership/Space/invitation/billing paths support creation/removal and switching Spaces; active-Space-only isolation would hide valid navigation. Define navigation reads and membership-admin writes, and avoid membership policy recursion.
-- Credentials span a user's Spaces; nullable-Space secrets may be user-global. Deployment settings/provider configuration are system-level authority. Audit actor reads and grant only necessary operations; do not add implicit privileged fallback.
+- Auth, sessions, verification and rate-limit state are used before an actor exists. They require an explicit auth/system role, not a personal active-Space policy. User/member/Space/invitation/billing tables also support authenticated navigation and membership administration across Spaces. A future least-privilege grant review must distinguish these paths and avoid recursive membership policies. Deployment settings/provider configuration are deployment authority. These are not automatically “user rows missing RLS.”
+- Shared boards/tickets/comments, action rules and agent secrets use deliberate Space collaboration. Creator IDs are attribution, not exclusive ownership. Their later policy batch must distinguish member reads and authorized administrative mutations; a personal userId policy would break the current sharing contract.
+- Personal credentials and nullable-Space secrets can span a user's Spaces. They need a separate secret/credential boundary review. General assistant memory, bots, computers, connectors, routines and messaging are later user-data batches. They retain application authorization now; this release does not claim all possible copies of recruiting text in general assistant memory are database-isolated.
+- Remaining child tables belong to general messaging/computer/agent graphs, not the recruiting receipt chain. Agent connections have two parties and messaging links can be optional; define intended visibility in those later batches rather than inventing it here.
 
-These are outstanding local design, implementation and regression tasks, not cloud permission blockers. Only production role/credential/grant/policy activation, deployment, actual transaction-pooler execution and online p95 require unavailable production authorization. The separate publication pause prevents push/PR/merge.
+## Receipt chain policy and remaining business authorization
 
-## Expanded local batch
+Recruiting children inherit a protected role/revision/task/page/occurrence. CRM role-contact links require both protected endpoints. Direct mirrors retain local user and Space keys; an external CRM organization ID never grants product access. Candidate notes/reminders use ownerUserId; saved profiles validate their native source effect. Mutation checks reject foreign runs, artifacts, messages, MCP servers and receipt effects. Native effects inherit their protected run; events inherit their protected thread. Role policies do not query revisions, avoiding a cycle with the role's deferred currentRevision foreign key.
 
-The script now protects role revisions, candidate selections and calibration rounds in addition to the original three tables. Roles do not query revisions in their policy, avoiding a policy cycle. Candidate writes require an accessible shortlist message; approval attribution must match the actor. Membership predicates now include the organization/Space/member joins used by `requireMembership`.
+RLS establishes account/Space isolation, not a new recruiting workflow engine. Existing revision matching, approval proof, source validity and tool authorization remain enforced by business services and schema constraints. The tests explicitly distinguish synthetic fixtures from real provider receipts; no source data was fetched and no outreach or external action ran.
 
-`RLS_TEST_DATABASE_URL=<dedicated-local-db> pnpm test packages/db/src/actor-db.postgres.test.ts`: 8/8 passed. Coverage includes missing owner filters, foreign parent links, own revision transaction, stale organization membership, native transactions, actor cleanup, startup validation and deferred iterators. The existing API isolation fixture also passed against all six policies: 143 OK, zero leaks/warnings, 99 owner-empty reads unexercised. This does not prove unimplemented policies or production latency.
+## Local evidence
+
+`RLS_TEST_DATABASE_URL=<dedicated-local-db> pnpm test packages/db/src/actor-db.postgres.test.ts`: **11/11 passed**. The 29-table matrix checks nonempty owner reads and absence of foreign rows without application filters. Fixtures for the 23 expanded tables are inserted through the restricted actor client; immutable snapshots use legal inserts, not updates. Legal mutable-row updates exercise WITH CHECK. Ten representative cross-parent mutations fail specifically with a row-level-security error. All 29 tables become unreadable after organization membership removal. The schema cascades Space membership deletion; earlier “stale membership” wording was inaccurate and is corrected here. A user who belongs to both synthetic Spaces still sees neither another owner's rows nor their own rows from the inactive Space. Missing actor, privileged role, extra permissive policy, transaction cleanup and async iterators remain covered.
+
+The enhanced original API isolation fixture creates a real synthetic reminder via RPC: **144 OK, 0 leaks, 0 warnings, 98 owner-empty reads** (previously 143/0/0/99). The 98 remain unexercised API paths, not passes. Nonempty database fixtures now separately cover all recruiting tables, including receipts/CRM tables without a direct public list endpoint. This distinction is intentional; it does not turn a database row into a provider-approved product action.
+
+First complete-batch local latency run: baseline p95 9.32 ms, RLS 16.25 ms, **+74.36%**, zero errors (200 requests per mode, concurrency 5). It does not meet the <10% target. Parallel local load may affect results; the benchmark now records all samples in a counterbalanced three-pair run. Transaction-local identity is not weakened for performance: native callback/batch transactions bind once; standalone queries still BEGIN, bind identity, query, COMMIT. Constant membership lookups avoid repeated correlated membership joins. Final repeated results are recorded in the pilot report; online/transaction-pooler performance remains untested.
