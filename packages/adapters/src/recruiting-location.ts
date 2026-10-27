@@ -27,15 +27,17 @@ const STATE_CODES: Record<string, string> = Object.fromEntries(
 const CODES = new Set(Object.values(STATE_CODES));
 
 let placeIndex: Map<string, string> | undefined;
-/** Coordinates of a place, in the named state when one is given, else the largest of that name. */
+/** Coordinates of a place in the named state, or the largest of that name when no state is named. */
 function coordinates(place: string, state: string | undefined): [number, number] | undefined {
   placeIndex ??= new Map(
     US_PLACES.split("\n").map((line) => line.split("|", 2) as [string, string]),
   );
   const entries = placeIndex.get(place)?.split(";");
   if (!entries) return undefined;
-  const entry = (state && entries.find((item) => item.startsWith(`${state},`))) || entries[0];
-  const [, lat, lon] = (entry as string).split(",");
+  // A place the named state lacks (an unincorporated community) stays unknown, never another state's.
+  const entry = state ? entries.find((item) => item.startsWith(`${state},`)) : entries[0];
+  if (!entry) return undefined;
+  const [, lat, lon] = entry.split(",");
   return [Number(lat), Number(lon)];
 }
 

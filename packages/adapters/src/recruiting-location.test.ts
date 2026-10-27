@@ -41,6 +41,12 @@ describe("locationOutliers", () => {
     expect(locate("Duluth, Minnesota, United States")?.[0]).toBeCloseTo(46.8, 0);
   });
 
+  it("leaves a place the named state lacks unknown instead of using another state's", () => {
+    expect(locate("Rex, Georgia, United States")).toBeUndefined();
+    const people = new Map([...atlanta, ["h", "Rex, Georgia, United States"]]);
+    expect(locationOutliers(people)).toEqual([]);
+  });
+
   it("names no one when too few locations are known", () => {
     const people = new Map([
       ["a", "Austin, Texas, United States"],
