@@ -1260,6 +1260,147 @@ describe("explicit artifact workspace writes", () => {
   });
 });
 
+describe("intake questions follow agent instructions", () => {
+  it.each([
+    { plannedSearches: undefined },
+    { plannedSearches: [] },
+    { plannedSearches: ["one focused query"] },
+  ])(
+    "accepts a material question without a fixed four-search plan: %j",
+    async ({ plannedSearches }) => {
+      const f = fixture("intake-question-policy");
+      f.thread.activeRecruitingRoleId = "role-1";
+      const rounds = vi.fn(async () => null);
+      Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
+      Object.assign(f.prisma, { recruitingCalibrationRound: { findFirst: rounds } });
+      Object.assign(f.prisma.event, { findFirst: vi.fn(async () => null) });
+      f.connector.discoverTools.mockResolvedValue([
+        {
+          name: "fixture_web_search_advanced_exa",
+          description: "Test people search",
+          readOnly: true,
+          inputSchema: { type: "object" },
+          route: {
+            connectorId: "mcp",
+            resourceId: "fixture-server",
+            resourceRevision: 1,
+            toolName: "web_search_advanced_exa",
+          },
+        },
+      ]);
+      const decisions: unknown[] = [];
+      f.runtimeRun.mockImplementation(async function* (request) {
+        decisions.push(
+          await request.beforeAsk?.("Which city should this role cover?", plannedSearches),
+        );
+        yield { type: "done" as const, text: "Clarification prepared." };
+      });
+      await f.run();
+      expect(rounds).toHaveBeenCalled();
+      expect(decisions).toEqual([undefined]);
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.effects).toEqual([]);
+    },
+  );
+});
+
+describe("recruiting selection remains an agent decision", () => {
+  it.each(["United States", "California", "London, UK", null])(
+    "shows a saved selection with location %s and permits a material clarification",
+    async (location) => {
+      const f = fixture("saved-selection-policy");
+      f.thread.activeRecruitingRoleId = "role-1";
+      Object.assign(f.prisma, {
+        recruitingCandidateOccurrence: {
+          findMany: vi.fn(async () => [
+            { candidateKey: "linkedin:/in/fixture", name: "Fixture Person", location },
+          ]),
+        },
+        recruitingCalibrationRound: { findFirst: vi.fn(async () => null) },
+      });
+      Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
+      Object.assign(f.prisma.event, { findFirst: vi.fn(async () => null) });
+      const decisions: unknown[] = [];
+      f.runtimeRun.mockImplementation(async function* (request) {
+        f.results.push(
+          await request.executeTool!(
+            "recruiting_research",
+            {
+              operation: "show_picks",
+              candidateKeys: ["linkedin:/in/fixture"],
+            },
+            "show-fixture",
+          ),
+        );
+        decisions.push(await request.beforeAsk?.("Does the revised role allow remote work?"));
+        yield { type: "done" as const, text: "Clarification prepared." };
+      });
+      await f.run();
+      expect(f.results).toEqual([{ shown: 1, roundRecorded: false }]);
+      expect(decisions).toEqual([undefined]);
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.effects).toEqual([]);
+    },
+  );
+
+  it("passes post-round clarification through scoped assessment validation", async () => {
+    const f = fixture("post-round-clarification");
+    f.thread.activeRecruitingRoleId = "role-1";
+    const originalFindMany = f.prisma.externalEffect.findMany;
+    f.prisma.externalEffect.findMany = vi.fn(async (query: any) =>
+      query.where?.request?.equals === "calibration_round"
+        ? [{ id: "completed-round" }]
+        : originalFindMany(query),
+    ) as typeof originalFindMany;
+    vi.mocked(executeRecruitingAssessmentTool).mockRejectedValueOnce(new IsolationError());
+    f.setCalls([
+      {
+        name: "recruiting_assess",
+        args: {
+          operation: "ask",
+          roleId: "role-1",
+          roleRevisionId: "revision-1",
+          target: {
+            kind: "candidate",
+            candidateKey: "candidate-1",
+            assessmentVersion: 1,
+            criterionIds: [],
+          },
+          question: "Which implementation?",
+          options: ["Personal", "Team"],
+        },
+        executionId: "clarification",
+      },
+    ]);
+    await f.run();
+    expect(executeRecruitingAssessmentTool).toHaveBeenCalledOnce();
+    expect(f.results).toEqual([{ error: "Recruiting assessment or source is unavailable" }]);
+    expect(f.connector.execute).not.toHaveBeenCalled();
+  });
+
+  it("still rejects unsaved candidate identities", async () => {
+    const f = fixture("unknown-selection-policy");
+    f.thread.activeRecruitingRoleId = "role-1";
+    Object.assign(f.prisma, { recruitingCandidateOccurrence: { findMany: vi.fn(async () => []) } });
+    f.setCalls([
+      {
+        name: "recruiting_research",
+        args: { operation: "show_picks", candidateKeys: ["linkedin:/in/unknown"] },
+        executionId: "show-unknown",
+      },
+    ]);
+    await f.run();
+    expect(f.results).toEqual([
+      {
+        error:
+          "None of these is a saved person of this role. Use the exact candidateKeys from the people rows.",
+      },
+    ]);
+    expect(f.connector.execute).not.toHaveBeenCalled();
+    expect(f.effects).toEqual([]);
+  });
+});
+
 describe("tool audit ordering", () => {
   it("appends agent.tool.called before agent.tool.completed for a tool that finishes while narration is pending", async () => {
     const f = fixture("tool-audit-order");

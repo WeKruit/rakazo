@@ -21,6 +21,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-rou
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type * as ChatContextModule from "./shell/recruiting-chat-context";
 
+vi.mock("./recruiting/LazyViews", () => import("./recruiting/lazy-views-eager"));
 vi.mock("@lingui/react/macro", () => {
   const t = (parts: TemplateStringsArray, ...values: unknown[]) =>
     parts.reduce((text, part, index) => `${text}${index > 0 ? values[index - 1] : ""}${part}`, "");

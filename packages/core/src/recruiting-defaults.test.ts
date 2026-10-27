@@ -12,6 +12,22 @@ import {
   recruitingBriefConfirmedNextStep,
 } from "./recruiting-defaults.js";
 
+describe("intake continuation policy", () => {
+  it("keeps planned-search reuse and selection in the native skill", () => {
+    const intake = RECRUITING_DEFAULT_SKILLS.find(
+      (skill) => skill.name === "Recruitment intake and handoff",
+    )!.body;
+    expect(intake).toContain("Reuse those rows and their exact candidateKey values");
+    expect(intake).toContain(
+      "If the answer changes the requirements, apply that change before selecting people",
+    );
+    expect(intake).toContain(
+      "a material clarification can be asked without searches or with fewer queries",
+    );
+    expect(intake).toContain("Honor own-list-only requests");
+  });
+});
+
 describe("calibration fast path", () => {
   it("hands the new revision on with the confirmed brief", () => {
     expect(recruitingBriefConfirmedNextStep(5)).toContain("expectedRoleRevision 5");

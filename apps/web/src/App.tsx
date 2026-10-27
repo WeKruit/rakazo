@@ -34,15 +34,9 @@ import {
   showSessionUnavailable,
 } from "./lib/session-gate";
 import { completeSsoCallback, SSO_CALLBACK_PATH } from "./lib/sso-flow";
-import { IntegrationSetupPage } from "./pages/IntegrationSetup";
-
-import { McpOAuthCallbackPage } from "./pages/McpOAuthCallback";
 
 const ShellPage = lazy(() =>
   import("./pages/Shell").then((module) => ({ default: module.ShellPage })),
-);
-const LocalSettingsPage = lazy(() =>
-  import("./pages/LocalSettings").then((module) => ({ default: module.LocalSettingsPage })),
 );
 
 const AuthPage = lazy(() =>
@@ -59,6 +53,15 @@ const WelcomePage = lazy(() =>
 );
 const ArtifactsPage = lazy(() =>
   import("./pages/Artifacts").then((module) => ({ default: module.ArtifactsPage })),
+);
+const IntegrationSetupPage = lazy(() =>
+  import("./pages/IntegrationSetup").then((module) => ({ default: module.IntegrationSetupPage })),
+);
+const LocalSettingsPage = lazy(() =>
+  import("./pages/LocalSettings").then((module) => ({ default: module.LocalSettingsPage })),
+);
+const McpOAuthCallbackPage = lazy(() =>
+  import("./pages/McpOAuthCallback").then((module) => ({ default: module.McpOAuthCallbackPage })),
 );
 const BoardPage = lazy(() =>
   import("./pages/Board").then((module) => ({ default: module.BoardPage })),
@@ -89,13 +92,7 @@ export function App() {
           {window.location.pathname === SSO_CALLBACK_PATH ? (
             <SsoCallbackPage />
           ) : window.location.pathname === LOCAL_SETTINGS_PAGE ? (
-            <Suspense
-              fallback={
-                <div className="p-6">
-                  <Skeleton className="h-24 w-full" />
-                </div>
-              }
-            >
+            <Suspense fallback={<GateFallback />}>
               <LocalSettingsPage />
             </Suspense>
           ) : (

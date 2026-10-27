@@ -1725,7 +1725,7 @@ describe("task-backed candidate page proof reads", () => {
       .filter((where) => where.type === "recruiting.read");
     expect(reads.length).toBeGreaterThan(0);
     for (const where of reads)
-      expect(where).toMatchObject({ spaceId: actor.spaceId, runId: "run" });
+      expect(where).toMatchObject({ spaceId: actor.spaceId, runId: { in: ["run"] } });
   });
 });
 
