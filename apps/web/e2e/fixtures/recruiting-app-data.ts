@@ -368,6 +368,7 @@ const bootstrap: AppBootstrap = {
 export async function mockRecruitingApp(
   page: Page,
   options: {
+    locale?: string;
     scheduling?: boolean;
     nativeScheduling?: boolean;
     emptyCalendar?: boolean;
@@ -381,11 +382,11 @@ export async function mockRecruitingApp(
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
   const views: Record<string, unknown>[] = [];
-  await page.addInitScript(() => {
+  await page.addInitScript((locale) => {
     localStorage.setItem("rakazo.uiAppearance", "light");
-    localStorage.setItem("rakazo.uiLocale", "en");
+    localStorage.setItem("rakazo.uiLocale", locale);
     localStorage.setItem("rakazo:space-id", "fixture-space");
-  });
+  }, options.locale ?? "en");
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (

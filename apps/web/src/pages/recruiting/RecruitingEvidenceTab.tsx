@@ -13,6 +13,7 @@ import {
 import type { VirtualItem } from "@tanstack/react-virtual";
 import { LayoutGrid, List } from "lucide-react";
 import { useMemo, useRef } from "react";
+import { lazyPanel } from "../../components/ErrorBoundary";
 import { readRecruitingPanelState } from "../../lib/right-panel-state";
 import {
   CandidateAssessment,
@@ -28,7 +29,9 @@ import {
 } from "../recruiting/CandidatePresentation";
 import { ContactsTab } from "../recruiting/ContactsTab";
 import { RetryNotice } from "../recruiting/RetryNotice";
-import { ResearchResults } from "../recruiting/SourceDocuments";
+
+const ResearchResults = lazyPanel(() => import("./SourceDocuments").then((m) => m.ResearchResults));
+
 import { TabLoading } from "../recruiting/shared";
 import type { useRecruitingWorkspace } from "../recruiting/useRecruitingWorkspace";
 import { CandidateWindow } from "./CandidateWindow";

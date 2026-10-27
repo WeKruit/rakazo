@@ -1837,6 +1837,9 @@ it.each(["results", "shortlist", "contacts"] as const)(
         )!
         .click(),
     );
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(api.getAssessment).toHaveBeenCalledWith({
       roleId: role.id,
       candidateKey: "candidate-1",
@@ -7542,6 +7545,9 @@ it("answers the original native group question and reloads its persisted answere
   const view = await mounted("thread-1", "current-bot");
   expect(api.listQuestions).toHaveBeenCalledWith({ threadId: "thread-1", roleId: role.id });
   await view.click("Missing info");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(view.container.textContent).toContain(nativeQuestion.block.text);
   expect(view.container.textContent).toContain("candidate-1");
   api.listQuestions.mockResolvedValue({
@@ -7574,6 +7580,9 @@ it("submits custom input to the native originating bot without creating a new ta
   api.listQuestions.mockResolvedValue({ questions: [{ ...nativeQuestion, groupId: null }] });
   const view = await mounted();
   await view.click("Missing info");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   const answer = " \n  Implemented the geometry library in C++ 😀\n  ";
   const input = view.container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Answer"]')!;
   await act(async () => {

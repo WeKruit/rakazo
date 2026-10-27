@@ -1,23 +1,26 @@
-import {
-  CandidateCounts,
-  CandidateDecision,
-  CandidateProfile,
-  CandidateResearchMatch,
-  CrmDetails,
-  ResearchActionStatus,
-} from "./recruiting/CandidatePresentation";
+import { lazyPanel } from "../components/ErrorBoundary";
+
+const CandidateDetailDialog = lazyPanel(() =>
+  import("./recruiting/CandidateDetailDialog").then((m) => m.CandidateDetailDialog),
+);
+
+import { CandidateCounts, ResearchActionStatus } from "./recruiting/CandidatePresentation";
 import { CriteriaExpression } from "./recruiting/CriteriaEditor";
 import { CrmRecruitingPanel } from "./recruiting/CrmWorkbench";
 import { RecruitingEvidenceTab } from "./recruiting/RecruitingEvidenceTab";
-import { RecruitingRoleTab } from "./recruiting/RecruitingRoleTab";
-import {
-  ArtifactReference,
-  CandidateSources,
-  MemoryDocumentView,
-  Sources,
-} from "./recruiting/SourceDocuments";
+
+const RecruitingRoleTab = lazyPanel(() =>
+  import("./recruiting/RecruitingRoleTab").then((m) => m.RecruitingRoleTab),
+);
+const ArtifactReference = lazyPanel(() =>
+  import("./recruiting/SourceDocuments").then((m) => m.ArtifactReference),
+);
+const MemoryDocumentView = lazyPanel(() =>
+  import("./recruiting/SourceDocuments").then((m) => m.MemoryDocumentView),
+);
+const Sources = lazyPanel(() => import("./recruiting/SourceDocuments").then((m) => m.Sources));
+
 import { useRecruitingWorkspace } from "./recruiting/useRecruitingWorkspace";
-import { VerdictLabel } from "./recruiting/VerdictLabel";
 import type { Props } from "./recruiting/workspace-types";
 
 export type {
@@ -28,24 +31,18 @@ export type {
 } from "./recruiting/workspace-types";
 
 import { Plural, Trans } from "@lingui/react/macro";
-import {
-  Button,
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogTitle,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@rakazo/ui-web";
+import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "@rakazo/ui-web";
 import { BriefcaseBusiness, Building2, Check, RefreshCw, X } from "lucide-react";
-import { AskCard } from "../components/AskCard";
+
+const AskCard = lazyPanel(() => import("../components/AskCard").then((m) => m.AskCard));
+
 import { authClient } from "../lib/auth";
-import { clearRecruitingReads } from "../lib/recruiting-read-cache";
 import type { RecruitingPanelState } from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
-import { CandidateFeedbackForm, FeedbackHistory } from "./recruiting/CandidateFeedback";
+
+const FeedbackHistory = lazyPanel(() =>
+  import("./recruiting/CandidateFeedback").then((m) => m.FeedbackHistory),
+);
 
 import { RetryNotice } from "./recruiting/RetryNotice";
 import { TabLoading } from "./recruiting/shared";
@@ -106,9 +103,6 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
     refreshSignal,
     onClose,
     onRevealMessage,
-    onDiscussCandidate,
-    onCandidateFeedback,
-    candidateFeedbackRecipients,
     showDiagnostics,
     presentation,
     summary,
@@ -119,7 +113,6 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
     refresh,
     setRefresh,
     feedbackRefresh,
-    setFeedbackRefresh,
     loading,
     failed,
     setCandidateList,
@@ -127,18 +120,10 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
     contactsView,
     shortlistView,
     tabsList,
-    candidateDetailOpen,
     selection,
-    candidateTrigger,
-    candidateClose,
-    candidateHandoff,
     candidatePage,
-    setCandidateDetailOpen,
     candidateLoading,
     candidateFailed,
-    selectedEvidence,
-    evidenceFailed,
-    candidateValidation,
     denyAccess,
     workspace,
     criteria,
@@ -148,12 +133,6 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
     roleQuestions,
     roleSources,
     assessments,
-    selected,
-    assessment,
-    candidateFresh,
-    selectedCrm,
-    selectedCrmTarget,
-    revealCandidateMessage,
   } = model;
   if (summary) {
     const CriteriaBody = summary === "feedback" ? "details" : "div";
@@ -538,7 +517,7 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
               </ul>
             ) : null}
           </TabsContent>
-          <RecruitingRoleTab model={model} />
+          {activeTab === "role" ? <RecruitingRoleTab model={model} /> : null}
           <RecruitingEvidenceTab model={model} />
           <TabsContent value="missing" className="space-y-5">
             {snapshot?.questions.map((question) => {
@@ -817,306 +796,7 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
           </TabsContent>
         </Tabs>
       ) : null}
-      <Dialog
-        open={candidateDetailOpen && !!selection}
-        onOpenChange={setCandidateDetailOpen}
-        onOpenChangeComplete={(open) => {
-          if (open) return;
-          const handoff = candidateHandoff.current;
-          if (!handoff) return;
-          // Let the popup unmount before the native chat callback takes focus.
-          queueMicrotask(() => {
-            if (candidateHandoff.current !== handoff) return;
-            candidateHandoff.current = null;
-            handoff();
-          });
-        }}
-      >
-        <DialogContent
-          showCloseButton={false}
-          initialFocus={candidateClose}
-          data-product-view={presentation === "workspace" ? "recruiting" : undefined}
-          finalFocus={candidateHandoff.current ? false : candidateTrigger}
-          className={
-            presentation === "workspace"
-              ? "hire-profile-drawer inset-y-0 right-0 left-auto top-0 h-dvh max-h-dvh translate-x-0 translate-y-0 overflow-y-auto rounded-none text-sm leading-relaxed sm:max-w-2xl"
-              : "max-h-[85dvh] overflow-y-auto text-base leading-relaxed sm:max-w-2xl"
-          }
-        >
-          {selection ? (
-            <div className="hire-candidate-body space-y-3">
-              <div className="hire-candidate-header flex items-start justify-between gap-3">
-                <DialogTitle className="break-words">
-                  {selection.name ??
-                    (showDiagnostics ? selection.candidateKey : t`Unnamed candidate`)}
-                  <CandidateDecision decision={selection.decision} />
-                </DialogTitle>
-                <DialogClose
-                  ref={candidateClose}
-                  aria-label={t`Close`}
-                  render={<Button variant="ghost" size="icon-sm" />}
-                >
-                  <X size={16} aria-hidden />
-                </DialogClose>
-              </div>
-              {selection.title || selection.company || selection.location ? (
-                <p className="text-muted-foreground">
-                  {[selection.title, selection.company, selection.location]
-                    .filter(Boolean)
-                    .join(" · ")}
-                </p>
-              ) : null}
-              <CandidateProfile candidate={selection} showDiagnostics={showDiagnostics} />
-              <CandidateResearchMatch
-                candidate={selection}
-                roleRevisionId={workspace?.revision.id}
-                showDiagnostics={showDiagnostics}
-              />
-              <div className="hire-candidate-actions">
-                {onDiscussCandidate && workspace ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      candidateHandoff.current = () =>
-                        onDiscussCandidate({
-                          threadId,
-                          roleTitle: workspace.role.title,
-                          name: selection.name,
-                          title: selection.title,
-                          company: selection.company,
-                          linkedinUrl: selection.linkedinUrl,
-                          resumeUrl: selection.resumeUrl,
-                        });
-                      setCandidateDetailOpen(false);
-                    }}
-                  >
-                    <Trans>Discuss candidate</Trans>
-                  </Button>
-                ) : null}
-                {onCandidateFeedback && workspace && candidateDetailOpen ? (
-                  <CandidateFeedbackForm
-                    key={`${threadId}:${workspace.role.id}:${workspace.revision.id}:${selection.candidateKey}`}
-                    candidate={{
-                      threadId,
-                      roleTitle: workspace.role.title,
-                      roleVersion: workspace.revision.revision,
-                      roleId: workspace.role.id,
-                      roleRevisionId: workspace.revision.id,
-                      candidateKey: selection.candidateKey,
-                      candidateRevision: selection.revision,
-                      name: selection.name,
-                      title: selection.title,
-                      company: selection.company,
-                      linkedinUrl: selection.linkedinUrl,
-                      resumeUrl: selection.resumeUrl,
-                    }}
-                    onSend={(...args) =>
-                      candidateFresh &&
-                      (!readCache || candidateValidation.current === readCache.epoch)
-                        ? onCandidateFeedback(...args)
-                        : Promise.resolve(false)
-                    }
-                    disabled={!candidateFresh}
-                    recipients={candidateFeedbackRecipients}
-                    onAccessError={denyAccess}
-                    onRecorded={() => {
-                      clearRecruitingReads(readCache, readCacheScope);
-                      setRefresh((value) => value + 1);
-                      setFeedbackRefresh((value) => value + 1);
-                    }}
-                  />
-                ) : null}
-              </div>
-              {workspace ? (
-                <FeedbackHistory
-                  key={`feedback:${workspace.role.id}:${selection.candidateKey}`}
-                  roleId={workspace.role.id}
-                  candidateKey={selection.candidateKey}
-                  refreshSignal={(refreshSignal ?? 0) + feedbackRefresh}
-                  readCache={readCache}
-                  readCacheScope={readCacheScope}
-                  onAccessError={denyAccess}
-                  collapsed
-                />
-              ) : null}
-              {selectedCrmTarget ? (
-                <section aria-label={t`Candidate pipeline`}>
-                  <CrmDetails
-                    sync={selectedCrm}
-                    target={selectedCrmTarget}
-                    showDiagnostics={showDiagnostics}
-                  />
-                </section>
-              ) : null}
-              {selection.latestAssessment && evidenceFailed ? (
-                <p role="alert">
-                  <Trans>Could not load assessment</Trans>
-                </p>
-              ) : selection.latestAssessment && !selectedEvidence ? (
-                <p role="status">
-                  <Trans>Loading…</Trans>
-                </p>
-              ) : selection.latestAssessment && !selected ? (
-                <p role="alert">
-                  <Trans>Assessment unavailable</Trans>
-                </p>
-              ) : null}
-              {workspace && snapshot ? (
-                <CandidateSources
-                  key={`${selection.roleId}:${selection.candidateKey}`}
-                  candidate={selection}
-                  research={snapshot.research}
-                  refreshSignal={candidateFresh ? candidatePage : null}
-                  roleRevisionId={workspace.revision.id}
-                  onAccessError={denyAccess}
-                  showDiagnostics={showDiagnostics}
-                />
-              ) : null}
-            </div>
-          ) : null}
-          {assessment && selected ? (
-            <section
-              key={`${assessment.roleId}:${assessment.candidateKey}:${assessment.version}`}
-              aria-label={showDiagnostics ? assessment.candidateKey : t`Candidate assessment`}
-              className="space-y-4 border-t border-border pt-4"
-            >
-              <h3 className="font-medium">
-                {showDiagnostics
-                  ? assessment.candidateKey
-                  : (selection?.name ?? t`Unnamed candidate`)}
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                <Trans>Internal assessment</Trans> · <Trans>Role</Trans> ·{" "}
-                <Trans>Version {selected.roleRevision.revision}</Trans>
-              </p>
-              <p className="flex items-center gap-2">
-                <span>
-                  <Trans>Hard criteria</Trans>
-                </span>
-                <VerdictLabel verdict={assessment.judgments.hardGate} />
-              </p>
-              {assessment.judgments.employment.map((employment) => {
-                const count =
-                  employment.upperMonths === employment.lowerMonths
-                    ? String(employment.lowerMonths)
-                    : `${employment.lowerMonths}–${employment.upperMonths ?? "?"}`;
-                const cutoff = `${employment.cutoff.year}-${String(employment.cutoff.month).padStart(2, "0")}-${String(employment.cutoff.day).padStart(2, "0")}`;
-                return (
-                  <div key={employment.atomId} className="space-y-1">
-                    <p>{employment.qualificationDefinition}</p>
-                    <p className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <span>
-                        <Trans>{count} months</Trans> · ≥ {employment.minimumMonths} · {cutoff}
-                      </span>
-                      <VerdictLabel verdict={employment.verdict} />
-                    </p>
-                  </div>
-                );
-              })}
-              {assessment.judgments.criteria.map((judgment) => {
-                const criterion = selected.roleRevision.criteria.find(
-                  (item) => item.id === judgment.criterionId,
-                );
-                const facts = assessment.facts.filter((fact) => judgment.factIds.includes(fact.id));
-                const sourceIds = new Set([
-                  ...facts.flatMap((fact) => fact.sourceRefIds),
-                  ...judgment.evidence,
-                ]);
-                return (
-                  <details key={judgment.criterionId} open className="space-y-2">
-                    <summary className="cursor-pointer">
-                      <span className="me-2">
-                        {criterion?.expression.kind === "atom"
-                          ? criterion.expression.statement
-                          : t`Criterion`}
-                      </span>
-                      <VerdictLabel verdict={judgment.verdict} />
-                      {criterion ? (
-                        <span className="ms-2 text-xs text-muted-foreground">
-                          {criterion.priority === "hard" ? (
-                            <Trans>Hard criteria</Trans>
-                          ) : (
-                            <Trans>Preferred criteria</Trans>
-                          )}
-                        </span>
-                      ) : null}
-                    </summary>
-                    {criterion && criterion.expression.kind !== "atom" ? (
-                      <CriteriaExpression expression={criterion.expression} />
-                    ) : null}
-                    {facts.map((fact) => (
-                      <p key={fact.id}>{fact.statement}</p>
-                    ))}
-                    <Sources
-                      sourceTarget={{
-                        kind: "assessment",
-                        roleId: assessment.roleId,
-                        candidateKey: assessment.candidateKey,
-                        version: assessment.version,
-                      }}
-                      sources={assessment.sourceRefs.filter((source) => sourceIds.has(source.id))}
-                      messageTargets={selected.sourceMessageTargets}
-                      onRevealMessage={revealCandidateMessage}
-                      showDiagnostics={showDiagnostics}
-                    />
-                    {judgment.missing.map((question) => (
-                      <p key={question} className="text-muted-foreground">
-                        {question}
-                      </p>
-                    ))}
-                  </details>
-                );
-              })}
-              <details>
-                <summary className="cursor-pointer text-muted-foreground">
-                  <Trans>Saved facts</Trans>
-                </summary>
-                <ul className="mt-2 space-y-3">
-                  {assessment.facts.map((fact) => (
-                    <li key={fact.id} className="space-y-2">
-                      <p>{fact.statement}</p>
-                      <Sources
-                        sourceTarget={{
-                          kind: "assessment",
-                          roleId: assessment.roleId,
-                          candidateKey: assessment.candidateKey,
-                          version: assessment.version,
-                        }}
-                        sources={assessment.sourceRefs.filter((source) =>
-                          fact.sourceRefIds.includes(source.id),
-                        )}
-                        messageTargets={selected.sourceMessageTargets}
-                        onRevealMessage={revealCandidateMessage}
-                        showDiagnostics={showDiagnostics}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </details>
-              <details>
-                <summary className="cursor-pointer text-muted-foreground">
-                  <Trans>Sources</Trans>
-                </summary>
-                <div className="mt-2">
-                  <Sources
-                    sourceTarget={{
-                      kind: "assessment",
-                      roleId: assessment.roleId,
-                      candidateKey: assessment.candidateKey,
-                      version: assessment.version,
-                    }}
-                    showDiagnostics={showDiagnostics}
-                    sources={assessment.sourceRefs}
-                    messageTargets={selected.sourceMessageTargets}
-                    onRevealMessage={revealCandidateMessage}
-                  />
-                </div>
-              </details>
-            </section>
-          ) : null}
-        </DialogContent>
-      </Dialog>
+      {selection ? <CandidateDetailDialog model={model} /> : null}
     </section>
   );
 }

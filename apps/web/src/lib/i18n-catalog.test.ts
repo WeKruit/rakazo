@@ -128,6 +128,7 @@ describe("lingui catalogs", () => {
       "../pages/shell/ShellPanelContent.tsx",
       "../pages/shell/computer-presentation.tsx",
       "../pages/RecruitingPanel.tsx",
+      "../pages/recruiting/CandidateDetailDialog.tsx",
       "../pages/shell/ShellSidebar.tsx",
       "../pages/shell/DeveloperSidebar.tsx",
       "../pages/shell/ShellConversation.tsx",
