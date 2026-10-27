@@ -1,3 +1,4 @@
+export * from "./actor-db.js";
 export * from "./artifact-versions.js";
 export * from "./billing.js";
 export * from "./board.js";

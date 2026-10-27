@@ -71,3 +71,7 @@ D1's first-stage dependency is necessary for `lazyPanel` and `ShellMessage` impo
 D3 follow-up can then target `recruiting/CrmWorkbench.tsx`, `RecruitingEvidenceTab.tsx` and `shell/Transcript.tsx`, preserving its shared window primitives. D2 can subsequently adapt the focused recruiting/state hooks to its scoped Query/read-view contracts. Those follow-ups require their own regression and measured acceptance; they are not included here.
 
 Only synthetic local UI was used. No deployment, production interactions, cloud configuration, real roles/candidates, live-provider validation or remote publication occurred. This document does not claim D1's final payload/LCP target or the entire architecture plan is complete.
+
+## Publication refresh
+
+After D1 prerequisite PR295 merged, ordinary merge of integration8016114c0 changed only documentation. Re-ran `pnpm --filter @rakazo/web check` and `pnpm --filter @rakazo/web test`:1,655/1,655 tests,142 files,19.99s. `node apps/web/scripts/check-component-size.mjs`:242production files,max1,499,zero violations; `git diff --check` passed. Earlier production build and24browser cases remain applicable to the unchanged product tree.

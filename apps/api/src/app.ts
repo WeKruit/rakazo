@@ -38,6 +38,7 @@ import {
   createSecretStore,
   createTicketChangeNotifier,
   createWebProvider,
+  DurablePiOAuthLogins,
   deletePushToken,
   destroyBot,
   EmailEmulator,
@@ -55,7 +56,6 @@ import {
   McpOAuthBroker,
   messagingPlatformsFromEnv,
   PiAgentRuntime,
-  PiOAuthLogins,
   PipedreamConnector,
   PostgresRealtimeFanout,
   pipedreamConfigFromEnv,
@@ -83,6 +83,7 @@ import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
 import {
   closePoolSessions,
+  createActorDb,
   createBoardEvents,
   createDb,
   createPool,
@@ -309,7 +310,7 @@ export async function createApp(
     env.mcpAllowPrivateEndpoint,
   );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
-  const oauthLogins = new PiOAuthLogins();
+  const oauthLogins = new DurablePiOAuthLogins(prisma, secrets, realtime);
   const home = createAgentHomeStore(env.dataDir, env.artifactStorage);
   const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
@@ -549,18 +550,35 @@ export async function createApp(
     : undefined;
   reconciler?.start();
 
+  // Auth, webhook and worker composition retain their explicit privileged client.
+  // The protected RPC client has no privileged fallback when actor context is missing.
+  const actorDb = env.actorDatabaseUrl
+    ? createActorDb(env.actorDatabaseUrl, {
+        poolMax: parsePositiveInteger(process.env.DB_POOL_MAX, 4),
+        applicationName: "rakazo-api-actor",
+      })
+    : undefined;
+  const actorPrisma = actorDb ? withSecretPersistence(actorDb.prisma, secrets) : prisma;
+  if (actorDb) await actorDb.prisma.$connect();
+  const actorEvents = actorDb
+    ? createThreadEvents(actorPrisma, realtime, {
+        runSecretWriter: createRunSecretWriter(secrets),
+      })
+    : events;
   const router = createRouter({
     cloudAgent,
     codexCatalog,
-    prisma,
-    events,
+    prisma: actorPrisma,
+    events: actorEvents,
     ticketChanges,
     boardEvents,
     auth,
     jobs,
     sandbox,
-    memory,
-    memoryProviders,
+    memory: actorDb ? new MarkdownMemoryStore(actorPrisma) : memory,
+    memoryProviders: actorDb
+      ? new SpaceMemoryProviderResolver(actorPrisma, secrets)
+      : memoryProviders,
     home,
     secrets,
     oauthLogins,
@@ -1052,13 +1070,13 @@ export async function createApp(
       auth.disposeOidcDiscovery();
       shutdown.abort();
       // The drain below can outlast the kill deadline; say goodbye to the pooler first.
-      const pool = created.pool;
-      if (pool)
+      const pools = [created.pool, actorDb?.pool].filter((pool) => pool !== undefined);
+      if (pools.length)
         setTimeout(() => {
           void realtime.close();
-          void closePoolSessions(pool);
+          for (const pool of pools) void closePoolSessions(pool);
         }, SESSION_RELEASE_MS).unref();
-      oauthLogins.abortAll();
+      await oauthLogins.abortAll();
       messagingStopped = true;
       clearMessagingRetryDelay?.();
       clearTeamChatRetryDelay?.();
@@ -1080,6 +1098,8 @@ export async function createApp(
       await realtime.close();
       await connector.stop();
       await mcp.close();
+      await actorDb?.prisma.$disconnect().catch(() => undefined);
+      await actorDb?.pool.end().catch(() => undefined);
       await prisma.$disconnect().catch(() => undefined);
       await created.pool?.end().catch(() => undefined);
       await ownedJobPool?.end().catch(() => undefined);
