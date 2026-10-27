@@ -31,7 +31,7 @@ node scripts/bundle-server.mjs api worker slot-control
 
 The three dedicated PostgreSQL suites passed 23/23 (5.43 seconds): concurrent global budget, actor isolation, exact backend identity, physical shutdown races, failed close, actual child-process death, generation fencing, slow platform observations, and replacement with two real local Node workers and loopback health endpoints. Their work is synthetic tick work, not a real provider job. The separate earlier C5 drain suite tests actual Graphile jobs. Final migration source was deployed from empty into the isolated database; no production migration ran. Schema diff has no new admission-table difference; four pre-existing FK onUpdate differences remain outside this change.
 
-Python tests passed 29/29, including real SDK 1.6.1 offline registration and negative App/entry/container/build-manifest binding. The realtime/drain/manifest/operator-plan focused suites passed 14/14. Four relevant package typechecks passed. Full regression and final committed-build evidence are recorded in the PR.
+Python tests passed 29/29, including real SDK 1.6.1 offline registration and negative App/entry/container/build-manifest binding. The realtime/drain/manifest/operator-plan focused suites passed 14/14. Four relevant package typechecks passed. Full regression (`SESSION_ADMISSION_TEST_DATABASE_URL="$LOCAL_TEST_DATABASE_URL" pnpm exec vitest run packages/db/src packages/adapters/src apps/api/src apps/worker/src --maxWorkers=2`) passed 7,762 tests, with 510 skipped, across 335 passing files (115.71 seconds). Skipped tests are not claimed verified. Final committed-build evidence is recorded in the PR.
 
 ## Remaining external acceptance
 
