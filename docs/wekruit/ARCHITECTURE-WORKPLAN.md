@@ -248,6 +248,8 @@ CHECK
 
 ### D1 首屏 JS
 
+- **独立后续本地验收：** 以 D4/D2/D3 独立依赖为基线的 D1-only 重放已完成；中文合成已登录聊天实际首屏 JS 529,849 → 325,964 gzip B，完整 Web 1,676 测试、五包类型检查及冷加载即时反馈检查通过。350 KB 第一阶段通过；250 KB 最终目标和线上 LCP 尚未完成。依赖顺序、逐提交映射、其他页面限制与复现命令见 [D1-INDEPENDENT-FOLLOWUP.md](./D1-INDEPENDENT-FOLLOWUP.md)。暂未发布该后续 PR。
+
 - **现状（本地 `vite build` 实测）：** 首屏要加载的 JS 合计 594 KB（gzip 后）。主包 1.18 MB（未压缩），gzip 后 338 KB。主包里占得最多的是：react-dom 171 KB、`Shell.tsx` 147 KB、`RecruitingPanel.tsx` 113 KB、`ModelSettingsOverlay` 29 KB、`RecruitingCorrespondence` 24 KB、`RoutineEditor`、`InterviewCalendar`、`SchedulingPlan`、`DetailPanel`、markdown 解析器。路由页面已经是按需加载的。
 - **本 PR 已做：** 本地设置页、集成设置页和 MCP 授权回调页改成按需加载，联系人、面试、邮件往来这几个视图也改成按需加载（`recruiting/LazyViews.tsx`）。另外把 `PersonAvatar` 移进 `ProfileImage.tsx`，断开了 DetailPanel 和 CandidateDirectory 之间的循环引用。首屏 JS（gzip -9）从 592,955 字节降到 561,040 字节。
 - **剩下的做法：** 第一屏用不到的面板改成 `lazy()` 加载：设置浮层、例行任务编辑器、邮件序列编辑、面试日历、排期计划、候选人详情。markdown 解析器在第一条消息渲染时再加载。打开这些面板时要有加载占位，不能出现空白。
