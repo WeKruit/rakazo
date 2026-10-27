@@ -31,6 +31,18 @@ SERVICE_ENV = {
     "api": {"DB_POOL_MAX": "6"},
     "worker": {"DB_POOL_MAX": "5", "GRAPHILE_WORKER_CONCURRENCY": "10"},
 }
+# With DATABASE_URL on the transaction-mode pooler, queries borrow a database backend only while
+# they run, so pools and job slots can grow; only the session clients count against the 15.
+SPLIT_SERVICE_ENV = {
+    "api": {"DB_POOL_MAX": "20"},
+    "worker": {"DB_POOL_MAX": "20", "GRAPHILE_WORKER_CONCURRENCY": "50"},
+}
+
+
+def service_budget(environ):
+    """Session URL separate from DATABASE_URL means queries go through a transaction-mode pooler."""
+    session = environ.get("REALTIME_DATABASE_URL")
+    return SPLIT_SERVICE_ENV if session and session != environ.get("DATABASE_URL") else SERVICE_ENV
 
 app = modal.App(APP_NAME)
 
@@ -146,9 +158,11 @@ class Recruiting:
         phase("migrate.start")
         migrate = time.monotonic()
         # Runs even with nothing pending; migrate.done shows what that costs.
+        # Prisma migrate holds a session advisory lock, so it needs the session connection.
+        migrate_env = {**env, "DATABASE_URL": env.get("REALTIME_DATABASE_URL") or env["DATABASE_URL"]}
         result = subprocess.run(
             ["node_modules/.bin/prisma", "migrate", "deploy"],
-            cwd="/app/packages/db", env=env, timeout=120,
+            cwd="/app/packages/db", env=migrate_env, timeout=120,
         )
         phase("migrate.done", migrate_ms=int((time.monotonic() - migrate) * 1000), exit_code=result.returncode)
         result.check_returncode()
@@ -159,14 +173,14 @@ class Recruiting:
         ]
         for package, command in services:
             phase(f"{package}.spawn")
-            # The session-mode pooler admits 15 clients in total: API 6 + worker 5 + one realtime
-            # LISTEN client each = 13, two spare. Migrations finish before the services start.
-            # The worker's pool also holds graphile's LISTEN client and the reconciler's advisory
-            # lock for its lifetime, so 5 leaves 3 for chat turns (4 left 2, and two concurrent
-            # chats queued behind each other). Each job slot holds a whole run, mostly waiting
-            # on the model, so 10 slots keep long research runs from queueing a recruiter's turn;
-            # background runs also queue behind it when every slot is busy.
-            service_env = {**env, **SERVICE_ENV.get(package, {})}
+            # The session-mode pooler admits 15 clients in total, and a recreate can briefly run
+            # two containers. With everything on it: API 6 + worker 5 + one realtime LISTEN each
+            # = 13, so an overlapping container or a stale client fills it. With queries on the
+            # transaction-mode pooler, each container holds only 6 session clients (two LISTEN,
+            # graphile's runner pool of 4 with its LISTEN and the reconciler's lock), 12 for two.
+            # Each job slot holds a whole run, mostly waiting on the model, so slots, not
+            # connections, set how many recruiters run at once.
+            service_env = {**env, **service_budget(env).get(package, {})}
             self.processes.append(subprocess.Popen(
                 command, cwd=f"/app/apps/{package}", env=service_env, start_new_session=True,
             ))

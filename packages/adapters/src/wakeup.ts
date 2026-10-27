@@ -77,7 +77,9 @@ export class GraphileJobPublisher implements JobPublisher {
 
   private getUtils(): Promise<WorkerUtils> {
     if (this.closed) throw new Error("Background job publisher is closed");
-    this.utils ??= makeWorkerUtils({ pgPool: this.pgPool });
+    // Publishing shares the query pool, which may be a transaction-mode pooler; those hand each
+    // statement to any backend, so a prepared statement may not exist where it runs.
+    this.utils ??= makeWorkerUtils({ pgPool: this.pgPool, noPreparedStatements: true });
     return this.utils;
   }
 

@@ -251,7 +251,7 @@ describe("GraphileJobWorkerHost runner lifecycle", () => {
       new URL("../../../apps/worker/src/index.ts", import.meta.url),
       "utf8",
     );
-    const options = source.match(/new GraphileJobWorkerHost\(pool,\s*\{([^}]*)\}\)/)?.[1] ?? "";
+    const options = source.match(/new GraphileJobWorkerHost\(sessionPool,\s*\{([^}]*)\}\)/)?.[1] ?? "";
     const noHandleSignals = /\bnoHandleSignals:\s*true\b/.test(options);
     expect(noHandleSignals).toBe(true);
     expect(source).toContain('process.once("SIGTERM", () => void stop())');
