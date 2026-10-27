@@ -4,6 +4,7 @@ import type { PoolClient } from "pg";
 import { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  closePoolSessions,
   createDb,
   createPool,
   isTooManyDatabaseConnections,
@@ -155,6 +156,22 @@ describe("parsePositiveInteger", () => {
     expect(parsePositiveInteger("0", 8)).toBe(8);
     expect(parsePositiveInteger("nope", 8)).toBe(8);
     expect(parsePositiveInteger("6", 8)).toBe(6);
+  });
+});
+
+describe("closePoolSessions", () => {
+  it("ends checked-out sessions too, and forgets ones that already ended", async () => {
+    const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo");
+    pools.push(pool);
+    const session = () => Object.assign(new EventEmitter(), { end: vi.fn(async () => undefined) });
+    const held = session();
+    const gone = session();
+    pool.emit("connect", held);
+    pool.emit("connect", gone);
+    gone.emit("end");
+    await closePoolSessions(pool);
+    expect(held.end).toHaveBeenCalledOnce();
+    expect(gone.end).not.toHaveBeenCalled();
   });
 });
 

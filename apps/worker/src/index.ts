@@ -58,12 +58,14 @@ import {
 import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
 import { resolveAuthSecret, resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
+  closePoolSessions,
   createBoardEvents,
   createDb,
   createThreadEvents,
   isTooManyDatabaseConnections,
   parsePositiveInteger,
   pushSessionExpiresAt,
+  SESSION_RELEASE_MS,
 } from "@rakazo/db";
 import { SERVICE_NAMES } from "@rakazo/logging";
 import { createRootLogger } from "@rakazo/logging/axiom";
@@ -340,6 +342,11 @@ async function main() {
     if (stopping) return;
     stopping = true;
     shutdown.abort();
+    // Draining running jobs can outlast the kill deadline; say goodbye to the pooler first.
+    setTimeout(() => {
+      void realtime.close();
+      void closePoolSessions(pool);
+    }, SESSION_RELEASE_MS).unref();
     try {
       await reconciler.stop();
       await jobHost.stop();
