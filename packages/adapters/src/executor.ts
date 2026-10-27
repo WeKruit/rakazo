@@ -6325,19 +6325,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     next: recruitingBriefConfirmedNextStep(saved.role.revision),
                   };
                 } catch (error) {
-                  // After the ten are shown the brief stays saved unconfirmed: an open question
-                  // is never asked after the search.
-                  if (
-                    error instanceof RecruitingPlaybookValidationError &&
-                    (await deps.prisma.recruitingCalibrationRound.findFirst({
-                      where: { roleId: call.data.roleId, role: { spaceId: run.spaceId } },
-                      select: { id: true },
-                    }))
-                  )
-                    return {
-                      confirmed: false,
-                      next: "The brief stays saved as it is; the ten are already shown. Ask nothing about the brief: end the turn with the next-step card (ask_user).",
-                    };
                   return { error: sanitizeConnectorError(error, runSecrets) };
                 }
               }
