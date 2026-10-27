@@ -18,7 +18,7 @@
 | B2 | 任务队列 | 每分钟记录一次排队情况 | 本 PR | — |
 | C1 | 多容器 | 附件放对象存储 | 已合并（#260），等存储配置 | — |
 | C2 | 多容器 | 电脑工作目录放对象存储 | 已合并（#262），等存储配置 | — |
-| C3 | 多容器 | 手机推送 token 放数据库 | 回归修复中（#262，过期会话时区边界） | Adam |
+| C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 进行中 | Adam |
 | C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 待做（依赖 C1–C4） | |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
@@ -176,6 +176,13 @@ ORDER BY conrelid::regclass::text, conname;
 ## C. 多容器
 
 C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret 值）生效之后，执行 `pnpm --filter @rakazo/api artifacts:copy`，把卷上已有的附件和工作目录拷进桶里。
+
+### C3 推送 token 持久化 — 本地回归修复
+
+- **2026-10-27 实测发现：** 本地 PostgreSQL 会话时区为 America/Chicago 时，已过期会话仍能注册 token。Prisma 的 UTC 无时区 `expiresAt` 与 `now()` 隐式比较会引入数据库时区偏移；已有真实 PostgreSQL 测试出现 1 失败 / 9 通过。
+- **修复：** 比较 `expiresAt > (now() AT TIME ZONE 'UTC')`，保留事务内行锁与 token 唯一归属。新增 UTC、America/Chicago、Asia/Tokyo 下过期拒绝和有效接受的 PostgreSQL 测试。运行时新增连接为 0，连接池预算不变。
+- **结果：** `DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_root VERIFY_DATABASE=1 pnpm test packages/adapters/src/expo-push.postgres.test.ts packages/adapters/src/expo-push.test.ts apps/api/src/artifacts.postgres.test.ts`：35/35 通过；`pnpm --filter @rakazo/adapters check`、两文件 Biome 和 `git diff --check` 通过。全是本地合成用户/会话/token，无真实设备推送。
+- **记录：** 认领 `9c967a3bb`，实现 `9d28721fd`，[PR #272](https://github.com/WeKruit/rakazo/pull/272) base 为 #263 的分支。真实跨容器推送、生产部署尚未测。
 
 ### C4 应用内模型订阅登录
 
