@@ -1,5 +1,5 @@
 import { PrismaPg } from "@prisma/adapter-pg";
-import { getLogContext, getLogger } from "@rakazo/logging";
+import { getLogContext, getLogger, recordJobStatement } from "@rakazo/logging";
 import type { Client, PoolClient } from "pg";
 import { Pool } from "pg";
 import { PrismaClient } from "./generated/prisma/client.js";
@@ -175,18 +175,25 @@ let checkoutSeq = 0;
 function sampleCaller(): string | undefined {
   checkoutSeq += 1;
   if (checkoutSeq % POOL_CALLER_SAMPLE) return undefined;
+  const context = getLogContext();
+  const work = context["job.type"] ?? context["rpc.procedure"] ?? "-";
+  return `${String(work)} ${callerFrame() ?? "?"}`;
+}
+
+/** Frames that sit under every query and would hide the code that asked for it. */
+const WRAPPER_FRAMES = ["db/src/client.ts", "adapters/src/secret-persistence.ts"];
+
+/** The first app source line on the current (async) stack outside the query wrappers. */
+function callerFrame(): string | undefined {
   const limit = Error.stackTraceLimit;
   Error.stackTraceLimit = 40;
   const stack = new Error().stack ?? "";
   Error.stackTraceLimit = limit;
-  const frame = stack
+  return stack
     .split("\n")
     .slice(1)
     .map((line) => /(?:packages|apps)\/([^/]+\/src\/[^:)\s]+:\d+)/.exec(line)?.[1])
-    .find((found) => found && !found.startsWith("db/src/client.ts"));
-  const context = getLogContext();
-  const work = context["job.type"] ?? context["rpc.procedure"] ?? "-";
-  return `${String(work)} ${frame ?? "?"}`;
+    .find((found) => found && !WRAPPER_FRAMES.some((wrapper) => found.startsWith(wrapper)));
 }
 
 /**
@@ -265,7 +272,13 @@ function timeQueries(client: PoolClient, queried: (ms: number) => void): void {
   const query = client.query.bind(client) as (...args: unknown[]) => unknown;
   client.query = ((...args: unknown[]) => {
     const startedAt = performance.now();
-    const done = () => queried(performance.now() - startedAt);
+    // Inside a background job, name the statement's source line for that job's tally.
+    const site = getLogContext()["job.id"] ? (callerFrame() ?? "?") : undefined;
+    const done = () => {
+      const ms = performance.now() - startedAt;
+      queried(ms);
+      if (site) recordJobStatement(site, ms);
+    };
     const last = args.length - 1;
     const callback = args[last];
     if (typeof callback === "function") {
