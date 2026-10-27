@@ -8983,6 +8983,191 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       latestAssessment: { version: 1, isCurrent: true },
     });
   });
+  it("pages latest distinct assessments before the 200-row bound", async () => {
+    const f = await assessmentFixture();
+    await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
+    const original = await prisma.recruitingAssessment.findFirstOrThrow({
+      where: { roleId: f.role.role.id },
+    });
+    await prisma.recruitingAssessment.deleteMany({ where: { roleId: f.role.role.id } });
+    await prisma.recruitingAssessment.createMany({
+      data: Array.from({ length: 205 }, (_, index) =>
+        [1, 2].map((version) => ({
+          ...original,
+          candidateKey: `candidate-${String(index).padStart(3, "0")}`,
+          version,
+          basedOnVersion: version === 1 ? null : 1,
+          facts: original.facts as Prisma.InputJsonValue,
+          judgments: original.judgments as Prisma.InputJsonValue,
+          questions: original.questions as Prisma.InputJsonValue,
+          sourceRefs: original.sourceRefs as Prisma.InputJsonValue,
+        })),
+      ).flat(),
+    });
+    const first = await recruiting.listRecruitingAssessments(prisma, actor, {
+      roleId: f.role.role.id,
+      offset: 0,
+    });
+    const second = await recruiting.listRecruitingAssessments(prisma, actor, {
+      roleId: f.role.role.id,
+      offset: 200,
+    });
+    expect(first).toHaveLength(200);
+    expect(second).toHaveLength(5);
+    expect(
+      [...first, ...second].map((row) => [row.assessment.candidateKey, row.assessment.version]),
+    ).toEqual(
+      Array.from({ length: 205 }, (_, index) => [`candidate-${String(index).padStart(3, "0")}`, 2]),
+    );
+    expect(
+      await recruiting.listRecruitingAssessments(prisma, actor, {
+        roleId: f.role.role.id,
+        offset: 400,
+      }),
+    ).toEqual([]);
+    await expect(
+      recruiting.listRecruitingAssessments(
+        prisma,
+        { ...actor, userId: otherUserId },
+        { roleId: f.role.role.id, offset: 0 },
+      ),
+    ).rejects.toThrow(IsolationError);
+  });
+
+  it("pages research tasks and actions independently including over 200 actions on one task", async () => {
+    const f = await assessmentFixture();
+    const server = await prisma.mcpServer.create({
+      data: {
+        spaceId,
+        userId,
+        name: "Pagination fixture",
+        slug: `pagination-${f.role.role.id}`,
+        transport: "http",
+      },
+    });
+    const prefix = `paged-${f.role.role.id}`;
+    const taskIds = Array.from(
+      { length: 205 },
+      (_, index) => `${prefix}-${String(index).padStart(3, "0")}`,
+    );
+    await prisma.recruitingResearchTask.createMany({
+      data: taskIds.map((id) => ({
+        id,
+        roleId: f.role.role.id,
+        mcpServerId: server.id,
+        serverRevision: 1,
+        state: "unknown",
+        createdByRunId: f.run.id,
+      })),
+    });
+    const actionIds = Array.from(
+      { length: 206 },
+      (_, index) => `${prefix}-action-${String(index).padStart(3, "0")}`,
+    );
+    await prisma.recruitingResearchAction.createMany({
+      data: actionIds.map((id, index) => ({
+        id,
+        taskId: index < 205 ? taskIds[0]! : taskIds[204]!,
+        roleRevisionId: f.role.revision.id,
+        runId: f.run.id,
+        sourceMessageId: f.message.id,
+        clientNonce: id,
+        kind: "create",
+        requestArtifactId: artifactId,
+        requestArtifactHash: hash,
+        contextArtifactId: artifactId,
+        contextArtifactHash: hash,
+        outputArtifacts: [],
+      })),
+    });
+    await prisma.recruitingResearchTask.update({
+      where: { id: taskIds[0] },
+      data: { pendingActionId: actionIds[204] },
+    });
+    const first = await recruiting.listRecruitingResearch(prisma, actor, {
+      roleId: f.role.role.id,
+      offset: 0,
+    });
+    const second = await recruiting.listRecruitingResearch(prisma, actor, {
+      roleId: f.role.role.id,
+      offset: 200,
+    });
+    expect(first.tasks.map((row) => row.id)).toEqual(taskIds.slice(0, 200));
+    expect(second.tasks.map((row) => row.id)).toEqual(taskIds.slice(200));
+    expect(first.actions.map((row) => row.id)).toEqual(actionIds.slice(0, 200));
+    expect(second.actions.map((row) => row.id)).toEqual(actionIds.slice(200));
+    expect(first.tasks[0]?.pendingActionId).toBe(actionIds[204]);
+    expect(
+      await recruiting.listRecruitingResearch(prisma, actor, {
+        roleId: f.role.role.id,
+        offset: 400,
+      }),
+    ).toEqual({ tasks: [], actions: [], observations: [] });
+    await prisma.recruitingResearchAction.update({
+      where: { id: actionIds[204] },
+      data: { requestArtifactHash: "b".repeat(64) },
+    });
+    await expect(
+      recruiting.listRecruitingResearch(prisma, actor, { roleId: f.role.role.id, offset: 200 }),
+    ).rejects.toThrow(IsolationError);
+  });
+
+  it("filters candidate questions before applying the 200-row offset", async () => {
+    const f = await questionFixture(true);
+    await recruiting.pauseRunForInput(prisma, f.pause);
+    const original = await prisma.event.findFirstOrThrow({
+      where: { runId: f.run.id, type: "recruiting.question.asked" },
+    });
+    const { id: _id, seq: _seq, ...event } = original;
+    const payload = original.payload as Record<string, Prisma.InputJsonValue>;
+    let seq = (
+      await prisma.event.aggregate({ where: { threadId: f.thread.id }, _max: { seq: true } })
+    )._max.seq!;
+    // Interleaved unrelated candidate receipts must not consume this candidate's page.
+    for (let index = 0; index < 204; index++) {
+      await prisma.event.create({
+        data: {
+          ...event,
+          seq: ++seq,
+          payload: {
+            ...payload,
+            target: {
+              kind: "candidate",
+              candidateKey: "different",
+              assessmentVersion: 1,
+              criterionIds: [],
+            },
+          },
+        },
+      });
+      await prisma.event.create({
+        data: { ...event, seq: ++seq, payload: payload as Prisma.InputJsonValue },
+      });
+    }
+    const input = {
+      threadId: f.thread.id,
+      roleId: f.role.role.id,
+      candidateKey: f.input.candidateKey,
+    };
+    const first = await recruiting.listRecruitingQuestions(prisma, actor, { ...input, offset: 0 });
+    const second = await recruiting.listRecruitingQuestions(prisma, actor, {
+      ...input,
+      offset: 200,
+    });
+    expect(first).toHaveLength(200);
+    expect(second).toHaveLength(5);
+    expect([...first, ...second].every((question) => question.effectId === f.effect.id)).toBe(true);
+    expect(
+      await recruiting.listRecruitingQuestions(prisma, actor, { ...input, offset: 400 }),
+    ).toEqual([]);
+    await expect(
+      recruiting.listRecruitingQuestions(
+        prisma,
+        { ...actor, userId: otherUserId },
+        { ...input, offset: 0 },
+      ),
+    ).rejects.toThrow(IsolationError);
+  });
 });
 
 describe("research uncertainty settlement (offline)", () => {
