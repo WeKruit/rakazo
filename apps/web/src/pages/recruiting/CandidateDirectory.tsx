@@ -3,8 +3,8 @@ import { Badge, Button } from "@rakazo/ui-web";
 import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { PersonAvatar } from "./DetailPanel";
 import { CompanyLogo } from "./OrgBadge";
+import { PersonAvatar } from "./ProfileImage";
 import type { ProfileCriterionRevision } from "./profile";
 import { candidateSections, withSavedProfile } from "./profile";
 import {
