@@ -7,6 +7,29 @@ const base = {
 };
 
 describe("loadEnv", () => {
+  it("keeps actor RLS opt-in and requires a transaction pooler in production", () => {
+    expect(loadEnv(base).actorDatabaseUrl).toBeUndefined();
+    expect(
+      loadEnv({ ...base, ACTOR_DATABASE_URL: "postgres://actor@127.0.0.1:55434/test" })
+        .actorDatabaseUrl,
+    ).toBe("postgres://actor@127.0.0.1:55434/test");
+    const production = {
+      DATABASE_URL: base.DATABASE_URL,
+      NODE_ENV: "production",
+      BETTER_AUTH_SECRET: "test-auth-secret-at-least-thirty-two-characters",
+      ENCRYPTION_KEY: "test-encryption-key-at-least-thirty-two-characters",
+      SCREEN_PROXY_SECRET: "test-screen-secret-at-least-thirty-two-characters",
+      SANDBOX_PROVIDER: "none",
+    };
+    expect(() =>
+      loadEnv({ ...production, ACTOR_DATABASE_URL: "postgres://actor@db.example.test:5432/test" }),
+    ).toThrow("transaction pooler on port 6543");
+    expect(
+      loadEnv({ ...production, ACTOR_DATABASE_URL: "postgres://actor@db.example.test:6543/test" })
+        .actorDatabaseUrl,
+    ).toBe("postgres://actor@db.example.test:6543/test");
+  });
+
   it("keeps the ticket board off unless explicitly enabled", () => {
     expect(loadEnv(base).ticketBoardEnabled).toBe(false);
     for (const value of ["false", "1", ""])

@@ -240,6 +240,7 @@ import {
   toTicketDto,
   touchGroupUpdatedAt,
   upgradeRecruitingWorkspace,
+  withDatabaseActor,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { deleteAgentSecret, listAgentSecrets, putAgentSecret } from "./agent-secrets.js";
@@ -1020,7 +1021,9 @@ export function createRouter(deps: RouterDeps) {
 
   const authed = os.use(async ({ context, next }) => {
     if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-    return next({ context: { ...context, actor: context.actor } });
+    return withDatabaseActor(context.actor, () =>
+      Promise.resolve(next({ context: { ...context, actor: context.actor! } })),
+    );
   });
 
   const boardEnabled = os
@@ -1030,7 +1033,9 @@ export function createRouter(deps: RouterDeps) {
     })
     .use(async ({ context, next }) => {
       if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-      return next({ context: { ...context, actor: context.actor } });
+      return withDatabaseActor(context.actor, () =>
+        Promise.resolve(next({ context: { ...context, actor: context.actor! } })),
+      );
     });
   const ticketDeps = {
     prisma: deps.prisma,

@@ -11,7 +11,7 @@
 | # | 方向 | 项目 | 状态 | 负责 |
 |---|---|---|---|---|
 | A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已上线（#259） | — |
-| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 未完成：本地审计已做；实现待做，线上角色/配置和 p95 验收受限 | Adam |
+| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 首批实现及本地验收通过；整体未完成，线上角色/配置和 p95 验收受限 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
 | A4 | 数据库 | schema 和迁移文件不一致 | 进行中 | Adam |
 | B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本 PR | — |
@@ -51,9 +51,9 @@
 - **本地审计（2026-10-27，认领 `7fbaf515e`）：** 在全新、仅含合成数据的本地 PostgreSQL 16 数据库重放现有迁移，得到 92 张应用表、0 张启用 RLS、0 张 FORCE RLS、0 条 policy。以本地 fixture 的 superuser/BYPASSRLS 连接执行事务内 `set_config('app.user_id', synthetic_user_id, true)` 后，直接查询另一个合成账号的附件和招聘岗位仍分别返回 5 行和 1 行，**不满足漏过滤条件必须 0 行的验收**。这不是线上角色权限检查，也不证明生产账号可绕过应用层。
 - **现有隔离基线：** 运行原 `infra/acceptance/account-isolation.mjs`，由原 testkit harness 启动本地 API、scripted runtime、fake sandbox 和 emulated email；只把 Docker 数据库启动替换为独立本地 PostgreSQL。报告为 `isolated`，143 项 `ok`、0 leak、0 warning；另有 99 项因测试副本缺少对应数据未触达。不能把这个结果写成历史 268 项全过，也不能当作新增 RLS 验收通过。`pnpm --filter @rakazo/db check` 通过（包含 cross-package tests 类型检查）。
 - **真实数据库回归未全过：** 在未修改产品代码的 `e6b8446de` 上，`VERIFY_DATABASE=1` 的 recruiting 与 space-membership PostgreSQL 测试为 271 通过、12 失败；只把本地数据库默认时区设为 UTC 并重连后仍是 271/12。失败涉及 native source/role recovery、排序、calibration 和候选页可见性；不能把这些已有失败归因于尚未实现的 RLS，也不能忽略为已通过。数据库回归门禁仍未满足。
-- **尚未实现，非权限阻塞：** `createDb` 返回共享 Prisma client；`createApp` 把它传给 auth、RPC 和后台回调，RPC context 有 actor 但没有绑定数据库事务身份。`recruiting.ts` 当前有 70 处 `$transaction` 调用，不能通过给整个 RPC 包一层长事务安全替代。还需明确并实现按调用传递的用户数据库 client、嵌套事务复用、流式订阅与后台操作的生命周期边界，以及消息通过 thread 归属访问的策略；然后加入非 superuser/非 BYPASSRLS 测试、漏条件 0 行测试、提交/回滚后身份不残留测试和全量隔离回归。没有加入未接线 helper、没有启用会阻断现有身份的 RLS 迁移。
+- **首次审计时的实现缺口（后续首批实现见下）：** `createDb` 返回共享 Prisma client；`createApp` 把它传给 auth、RPC 和后台回调，RPC context 有 actor 但没有绑定数据库事务身份。`recruiting.ts` 当前有 70 处 `$transaction` 调用，不能通过给整个 RPC 包一层长事务安全替代。还需明确并实现按调用传递的用户数据库 client、嵌套事务复用、流式订阅与后台操作的生命周期边界，以及消息通过 thread 归属访问的策略；然后加入非 superuser/非 BYPASSRLS 测试、漏条件 0 行测试、提交/回滚后身份不残留测试和全量隔离回归。没有加入未接线 helper、没有启用会阻断现有身份的 RLS 迁移。
 - **确切权限阻塞：** 生产 API/worker/迁移角色分离、非 BYPASSRLS 运行身份和对应连接凭据的配置，需要数据库角色/授权及云配置变更；当前禁止这些操作，也禁止部署，所以没有尝试这些写入，状态为**待授权、未执行**，不是工具拒绝或结果不明。线上开启策略前后 RPC p95 <10% 的测量同样待部署授权。不能仅以本地 fixture 的角色配置替代生产身份验证。
-- **连接预算：** 此审计未改应用、池或角色；生产约束仍是 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432，每容器 session 连接不超过 6。后续身份实现须使用事务内 `SET LOCAL`/`set_config(..., true)`，不能新增每用户常驻连接或把 SSE 生命周期变成长数据库事务。当前没有声称该后续实现已验证。
+- **连接预算：** 此审计未改应用、池或角色；生产约束仍是 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432，每容器 session 连接不超过 6。后续身份实现须使用事务内 `SET LOCAL`/`set_config(..., true)`，不能新增每用户常驻连接或把 SSE 生命周期变成长数据库事务。首批实现的本地验证见下，不替代生产池实测。
 
 A2 本地审计复现（全新合成数据库，不能替换为生产 URL）：
 
@@ -91,6 +91,17 @@ ROLLBACK;
 SQL
 ```
 
+
+### A2 首批实现（默认关闭，尚未上线）
+
+- 新增独立受限角色的 `ACTOR_DATABASE_URL`，仅用于已认证 RPC 的 Prisma、events 和 memory composition；auth、webhook、worker 和迁移继续使用原有明确的系统身份。受保护 client 缺 actor 时直接报错，绝不退回系统 client。启动拒绝 superuser、BYPASSRLS、受保护表 owner/owner 成员及附加 permissive policy。
+- 通过 Prisma 原生 driver-adapter 边界在每个短查询事务或原生 batch/callback 事务中 `set_config(..., true)` 绑定 user/space；事务提交/回滚恢复身份，异步迭代器每次拉取重新绑定同一 actor，不为整个 SSE 持有事务。RPC 使用已有原语，没有第二套业务服务。
+- 首批策略明确覆盖 `artifacts`、`messages`、`recruiting_roles`；用户、Space 和当前 membership 都须匹配。脚本 `packages/db/prisma/rls/first-batch.sql` 只显式执行，不混入自动迁移。其他用户数据表仍待分批策略覆盖；不把这三张表的验收当成全部 92 张表的数据库级隔离。
+- 本地真实 PostgreSQL：新增 6 项通过，覆盖省略所有应用层 owner 条件仍不见他人行、跨用户写入拒绝、membership 撤销、缺 actor 拒绝、权限过大角色/额外宽松策略拒绝、native batch/callback 事务回滚后不残留身份，以及同一连接上并发 actor 和延后消费流的隔离。每个 actor client 测试池只有 1 条连接，流等待期间连接处于 idle。
+- 启用该路径后的原 API synthetic isolation：143 项 OK、0 leak、0 warning、99 项未触达，与关闭时相同。db/api/testkit 类型检查通过；db 单测 1,216 通过 / 362 跳过；API 单测 1,322 通过 / 50 跳过。上述历史真实数据库 12 个回归失败仍需集成修复后复验，未被此处掩盖。
+- 可复现本地 artifact RPC benchmark：同一个合成数据库与账号，先预热 20 次，再每种配置请求 200 次，并发 5；关闭时 p50/p95/max = 6.84/11.71/15.04 ms，开启后 = 7.45/12.06/20.50 ms，错误均为 0，p95 增幅 **2.99%**。仅为 loopback 本地测量，不是线上 p95 <10% 验收。
+- 池影响：默认不开启时无变化；启用时新增受限身份的 transaction-pooler pool（上限同 `DB_POOL_MAX`），API 最大 transaction checkout 客户端数从 N 增至 2N。生产 `ACTOR_DATABASE_URL` 强制 6543；原 `DATABASE_URL` 6543、`REALTIME_DATABASE_URL` 5432 不变，不新增 LISTEN/session pool，每容器原 6 条 session 预算不变。两个 API pool 都参与退出清理。实际生产后端并发占用和连接等待还没测。
+- 完整首批配置与命令见 [A2-RLS-PILOT.md](./A2-RLS-PILOT.md)。生产角色、grants、凭据、策略启用和发布均未执行；这些依然需要当前范围之外的授权。
 
 ### A3 列表分页
 
