@@ -3,21 +3,10 @@ import { ChatMarkdown, LinkifiedText } from "@rakazo/chat-ui/web-lazy";
 import type { AskAnswer, MessageReaction, ThreadMessage } from "@rakazo/contracts";
 import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
 import { isPendingUserMessage, isToolActivityBlock } from "@rakazo/core";
-import {
-  BotAvatar,
-  Button,
-  cn,
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-  resolvePersonaColorDef,
-} from "@rakazo/ui-web";
+import { BotAvatar, Button, cn, resolvePersonaColorDef } from "@rakazo/ui-web";
 import { Copy, MoreHorizontal, Reply, Smile } from "lucide-react";
 import { memo, useMemo, useState } from "react";
+import { DeferredMenu, DeferredPopover } from "../components/DeferredPopover";
 import { lazyPanel } from "../components/ErrorBoundary";
 
 const ArtifactFileCard = lazyPanel(() =>
@@ -32,13 +21,20 @@ const CloudAgentCard = lazyPanel(() =>
 );
 
 import { MessageHoverMetadata } from "../components/MessageHoverMetadata";
-import {
-  LIVE_TOOL_STEP_WINDOW,
-  StandaloneToolActivity,
-  ToolActivityDisclosure,
-  ToolOnlyNarration,
-  ToolSteps,
-} from "../components/ToolActivityDisclosure";
+import { LIVE_TOOL_STEP_WINDOW } from "../components/tool-activity-window";
+
+const StandaloneToolActivity = lazyPanel(() =>
+  import("../components/ToolActivityDisclosure").then((m) => m.StandaloneToolActivity),
+);
+const ToolActivityDisclosure = lazyPanel(() =>
+  import("../components/ToolActivityDisclosure").then((m) => m.ToolActivityDisclosure),
+);
+const ToolOnlyNarration = lazyPanel(() =>
+  import("../components/ToolActivityDisclosure").then((m) => m.ToolOnlyNarration),
+);
+const ToolSteps = lazyPanel(() =>
+  import("../components/ToolActivityDisclosure").then((m) => m.ToolSteps),
+);
 
 const SkillDraftCard = lazyPanel(() =>
   import("../components/teach/SkillDraftCard").then((m) => m.SkillDraftCard),
@@ -54,13 +50,18 @@ import {
   toolStepCount,
 } from "../lib/tool-activity-view";
 import { ReplyLine } from "./shell/chat-context";
-import {
-  AppConnectCard,
-  ArtifactImage,
-  ChartBlockView,
-  ChoiceCard,
-  McpApprovalCard,
-} from "./shell/message-cards";
+
+const AppConnectCard = lazyPanel(() =>
+  import("./shell/message-cards").then((m) => m.AppConnectCard),
+);
+const ArtifactImage = lazyPanel(() => import("./shell/message-cards").then((m) => m.ArtifactImage));
+const ChartBlockView = lazyPanel(() =>
+  import("./shell/message-cards").then((m) => m.ChartBlockView),
+);
+const ChoiceCard = lazyPanel(() => import("./shell/message-cards").then((m) => m.ChoiceCard));
+const McpApprovalCard = lazyPanel(() =>
+  import("./shell/message-cards").then((m) => m.McpApprovalCard),
+);
 
 const FALLBACK_BOT_COLOR = "#85858A";
 export function MessageHoverActions({
@@ -97,37 +98,36 @@ export function MessageHoverActions({
     <MessageHoverMetadata pinned={moreOpen || reactionsOpen} side={side} below={below}>
       <div data-testid="message-hover-actions" className="flex items-center gap-0.5">
         {canReactToThreadMessage(message) ? (
-          <Popover open={reactionsOpen} onOpenChange={setReactionsOpen}>
-            <PopoverTrigger
-              aria-label={t`React`}
-              className={cn(
+          <DeferredPopover
+            open={reactionsOpen}
+            onOpenChange={setReactionsOpen}
+            trigger={<Smile size={15} strokeWidth={1.7} />}
+            triggerProps={{
+              "aria-label": t`React`,
+              className: cn(
                 iconButtonClass,
                 "h-11 w-11 [@media(hover:hover)_and_(pointer:fine)]:h-7 [@media(hover:hover)_and_(pointer:fine)]:w-7",
-              )}
-            >
-              <Smile size={15} strokeWidth={1.7} />
-            </PopoverTrigger>
-            <PopoverContent
-              align={side === "end" ? "start" : "end"}
-              className="w-auto flex-row gap-0 rounded-2xl p-1.5"
-              aria-label={t`Reactions`}
-            >
-              {MESSAGE_REACTIONS.map((emoji) => (
-                <button
-                  key={emoji}
-                  type="button"
-                  aria-label={emoji}
-                  className="grid h-11 w-11 place-items-center rounded-xl text-2xl hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
-                  onClick={() => {
-                    setReactionsOpen(false);
-                    void onReact(message, emoji);
-                  }}
-                >
-                  {emoji}
-                </button>
-              ))}
-            </PopoverContent>
-          </Popover>
+              ),
+            }}
+            align={side === "end" ? "start" : "end"}
+            className="w-auto flex-row gap-0 rounded-2xl p-1.5"
+            label={t`Reactions`}
+          >
+            {MESSAGE_REACTIONS.map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                aria-label={emoji}
+                className="grid h-11 w-11 place-items-center rounded-xl text-2xl hover:bg-accent focus-visible:outline-2 focus-visible:outline-ring"
+                onClick={() => {
+                  setReactionsOpen(false);
+                  void onReact(message, emoji);
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </DeferredPopover>
         ) : null}
         <button
           type="button"
@@ -140,32 +140,33 @@ export function MessageHoverActions({
         >
           <Reply size={15} strokeWidth={1.7} />
         </button>
-        <DropdownMenu open={moreOpen} onOpenChange={setMoreOpen}>
-          <DropdownMenuTrigger
-            aria-label={t`More`}
-            className={cn(
+        <DeferredMenu
+          open={moreOpen}
+          onOpenChange={setMoreOpen}
+          trigger={<MoreHorizontal size={15} strokeWidth={1.7} />}
+          triggerProps={{
+            "aria-label": t`More`,
+            className: cn(
               iconButtonClass,
               "h-11 w-11 [@media(hover:hover)_and_(pointer:fine)]:h-7 [@media(hover:hover)_and_(pointer:fine)]:w-7",
-            )}
-          >
-            <MoreHorizontal size={15} strokeWidth={1.7} />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align={side === "end" ? "start" : "end"}>
-            <DropdownMenuItem
-              onClick={() => {
-                setMoreOpen(false);
-                onReply(message);
-              }}
-            >
-              <Reply size={14} strokeWidth={1.7} />
-              <Trans>Reply</Trans>
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={copyMessage}>
-              <Copy size={14} strokeWidth={1.7} />
-              <Trans>Copy</Trans>
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+            ),
+          }}
+          align={side === "end" ? "start" : "end"}
+          items={[
+            {
+              id: "reply",
+              label: t`Reply`,
+              icon: <Reply size={14} strokeWidth={1.7} />,
+              onSelect: () => onReply(message),
+            },
+            {
+              id: "copy",
+              label: t`Copy`,
+              icon: <Copy size={14} strokeWidth={1.7} />,
+              onSelect: copyMessage,
+            },
+          ]}
+        />
       </div>
     </MessageHoverMetadata>
   );
