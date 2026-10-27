@@ -20,7 +20,7 @@
 //            --out <file>                     JSON report path (default ./latency-<time>.json)
 //            --area <regex>                   locations the role accepts; others are flagged
 //            --hiring-company <name>          flag people who work there now
-//            --archive                        archive the test role when the run ends
+//            --keep                           keep the test copy in the sidebar (it is archived by default)
 //   RAKAZO_TOKEN may replace email/password (a session token sent as a bearer credential).
 //   --signup creates the test account on first use (the deployment's signup policy applies).
 //   RAKAZO_RELEASE_SHA labels the report with the live release.
@@ -715,6 +715,12 @@ function measureFirstTen(events, round) {
 
 const TEST_MARK = "测试副本 · ";
 
+/** A copy this run created leaves the recruiter's sidebar when the run ends, unless --keep. */
+async function archiveCopy() {
+  if (report.groupId && !option("--group") && !flag("--keep"))
+    await rpc("groups/archive", { groupId: report.groupId });
+}
+
 async function main() {
   await signIn();
   // The API does not publish its source revision; the runner passes the released SHA.
@@ -932,18 +938,19 @@ async function main() {
     const { name } = await rpc("groups/get", { groupId });
     if (!name.startsWith(TEST_MARK))
       await rpc("groups/update", { groupId, name: `${TEST_MARK}${name}`.slice(0, 80) });
-    if (flag("--archive")) await rpc("groups/archive", { groupId });
   }
+  await archiveCopy();
   report.finishedAt = new Date().toISOString();
   save();
   log(`result ${report.result}; latency ${JSON.stringify(report.latency)}; report ${OUT}`);
   process.exit(report.result === "pass" ? 0 : 1);
 }
 
-main().catch((error) => {
+main().catch(async (error) => {
   report.result = "error";
   report.error = error.message;
   save();
   log(`error: ${error.message}`);
+  await archiveCopy().catch((failure) => log(`archive failed: ${failure.message}`));
   process.exit(2);
 });
