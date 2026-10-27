@@ -223,7 +223,7 @@ export function buildApprovalAskBlock(
 }
 
 const MAX_RECIPIENT_LINES = 20;
-/** The 「确认发送」 card body: no ids, only what the human is approving. */
+/** The send-confirmation card body: no ids, only what the human is approving. */
 function formatInstantlyActivation(display: InstantlyActivationDisplay) {
   const unknown = (value: string | number | null) => (value === null ? "unknown" : String(value));
   const count =
@@ -234,19 +234,23 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
         : String(display.recipientCount);
   const shown = display.recipients.slice(0, MAX_RECIPIENT_LINES);
   return [
-    `岗位: ${display.campaignName ?? "this role"}`,
-    `发件人: ${unknown(display.mailbox)}`,
-    `收件人 (${count}):`,
+    `Role: ${display.campaignName ?? "this role"}`,
+    `From: ${unknown(display.mailbox)}`,
+    `To (${count}):`,
     ...shown.map((r) => `- ${r.name ? `${r.name} <${r.email}>` : r.email}`),
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]
       : []),
-    `发送时间: ${unknown(display.schedule)}`,
+    `Send time: ${unknown(display.schedule)}`,
     ...(display.firstEmail === undefined
       ? []
       : display.firstEmail
-        ? [`主题: ${display.firstEmail.subject}`, "正文:", htmlToPlainText(display.firstEmail.body)]
-        : ["正文: 还没有邮件内容"]),
+        ? [
+            `Subject: ${display.firstEmail.subject}`,
+            "Body:",
+            htmlToPlainText(display.firstEmail.body),
+          ]
+        : ["Body: no email content yet"]),
     ...(display.status && display.status !== "Draft" ? [`Status: ${display.status}`] : []),
     "",
     "Confirm sending the first email to these recipients",

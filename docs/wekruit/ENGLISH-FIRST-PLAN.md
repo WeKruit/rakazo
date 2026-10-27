@@ -1,40 +1,32 @@
 # English-first product language
 
-The recruiting product should speak English by default. Chinese stays fully supported: a recruiter who picks 简体中文 in the language menu sees the Chinese UI, and a recruiter who writes in Chinese gets Chinese replies, cards and summaries.
+The recruiting product speaks English. The user asked for the whole product to be English, so English no longer just follows the recruiter's language. Chinese remains available in two ways: a recruiter who picks 简体中文 in the language menu gets the Chinese UI, and a recruiter who explicitly asks the agent to use Chinese gets Chinese replies.
 
 This replaces the earlier project rule "Chinese titles and buttons".
 
-## Target behavior
+## Behavior
 
-- **UI.** A new visitor sees English unless they pick another language in the language menu. A saved choice wins.
-- **Agent replies.** The agent replies in the language of the recruiter's latest own message. With no signal, it uses English.
-- **Server-written text** (auto-continue notes, stop messages, list headers, card bodies, suggested next steps, stage labels). This text follows the recruiter's language and defaults to English. Never hard-code Chinese.
-- **Parsers keep accepting Chinese input.** Regexes that read 至今, 符合, 发送, 新岗位: and similar stay as they are. They read human or model text. They do not decide output language.
-
-## How the language is chosen (one source of truth)
-
-Server code that writes recruiter-facing text gets one `language: "en" | "zh"` value. It is derived once per turn from the recruiter's latest human message (CJK test, as `vendor-names.ts` already does). Pass it down to the writers. Do not add a per-feature language detector. Do not add a new env var or setting. If a stored per-account locale already exists (mobile `ACCOUNT_UI_LOCALES`), use it only as the tie-breaker when there is no human message yet.
-
-Model prompts (the instructions sent to the model) should be in English everywhere. Each prompt that asks for recruiter-facing text says "in the recruiter's language". `RECRUITER_LANGUAGE` already says this for most cases. Chinese example phrases inside English prompts become English examples. A Chinese alias can stay only where the model needs it to recognize Chinese input.
+- **UI.** A visitor sees English unless they picked another language in the language menu. A saved choice wins.
+- **Agent replies.** Everything the recruiter sees is written in English: replies, cards, questions, progress, summaries, brief labels and emails. This holds even when the recruiter or the JD is written in Chinese. Another language is used only when the recruiter explicitly asks for it. `RECRUITER_LANGUAGE` in `packages/core/src/recruiting-defaults.ts` carries this rule to every recruiting run.
+- **Server-written text** is English: auto-continue notes, stop messages, list headers, the next-step card, the send-confirmation card, stage and step labels, connect cards and Dashboard action prompts. No `chinese ?` branches remain that decide output text.
+- **Parsers keep accepting Chinese input.** Regexes that read 至今, 符合, 发送, 新岗位: and similar stay. They read human or model text and do not decide output language. The vendor-name filter still writes Chinese plain words inside Chinese model text, so a reply the recruiter asked for in Chinese stays readable.
 
 ## Work items
 
-Put your name in **Owner** before starting an item, and update **Status** when it is done. Use one small PR per item or per two related items.
+| ID | Area | Status |
+| --- | --- | --- |
+| L1 | Web default locale | done |
+| L2 | Playbook step labels and prompts | done |
+| L3 | Auto-continue and stop messages | done |
+| L4 | Next-step card and server-suggested prompts | done |
+| L5 | Send-approval card body | done |
+| L6 | Plain names for vendors in recruiter text and connect cards | done |
+| L7 | Default search-filter statement and other `chinese ?` branches | done |
+| L8 | Chinese examples inside English prompts and tool schemas | done |
+| L9 | Unit tests updated; acceptance harnesses still use their Chinese briefs | partly |
+| L10 | Project rules (memory) | done |
 
-| ID | Area | Owner | Status |
-| --- | --- | --- | --- |
-| L1 | Web default locale | this PR | done (needs release) |
-| L2 | Playbook step labels and prompts | | todo |
-| L3 | Auto-continue and stop messages | | todo |
-| L4 | Next-step card and server-suggested prompts | | todo |
-| L5 | Send-approval card body | | todo |
-| L6 | Plain names for vendors in recruiter text | | todo |
-| L7 | Default search-filter statement and other `chinese ?` branches | | todo |
-| L8 | Chinese examples inside English prompts and tool schemas | | todo |
-| L9 | Tests, e2e and acceptance harness defaults | | todo |
-| L10 | Project rules and docs | | todo |
-
-### L1 — Web default locale (done in this PR)
+### L1 — Web default locale
 
 - `infra/modal/app.py` built the web app with `VITE_DEFAULT_UI_LOCALE=zh-CN`. That forced Chinese on every visitor who had not picked a language, whatever their browser language. It is now `en`.
 - A saved choice in `localStorage` (`rakazo.uiLocale`) still wins. The env default is never written to storage. So everyone who did not choose explicitly sees English after the next release, and anyone who picked 简体中文 keeps it.
@@ -103,28 +95,11 @@ Keep the Chinese tokens in parsers: `quickOutput.ts`, `profile.ts`, `profileTime
 - Project memory: replace "Chinese titles and buttons" with "English-first; Chinese when the recruiter writes Chinese or picks 简体中文". The coordinator owns memory.
 - `AGENTS.md` does not require Chinese, so no change is needed there. `docs/wekruit/PLAN.md` and `PRODUCT-SCOPE.md` are Chinese planning docs. Leave them; they are not product text.
 
-## Acceptance (whole plan)
+## Acceptance
 
-1. A fresh browser and a new role with an English JD and no Chinese typed: every visible word in chat, cards, Dashboard, progress, stop/continue messages and the send-approval card is English.
-2. The same flow with a Chinese JD and Chinese replies, in a UI switched to 简体中文: the replies, cards and server text are Chinese, as today.
-3. Switching language mid-role follows the recruiter's latest message. Saved candidates, feedback and approvals are unaffected.
-4. The first10 suite still passes 9/9 with an English brief.
+1. A fresh browser and a new role: every visible word in chat, cards, Dashboard, progress, stop/continue messages and the send-confirmation card is English, whether the JD and replies are written in English or Chinese.
+2. A recruiter who explicitly asks the agent to reply in Chinese gets Chinese replies. Server text stays English.
+3. Picking 简体中文 in the language menu still switches the UI chrome.
+4. Saved candidates, feedback and approvals are unaffected. The first10 suite still passes.
 
-## Handoff prompt for the other session
-
-Copy everything in the block below into the other session:
-
-```
-You are taking over the English-first language work in WeKruit/rakazo.
-Read docs/wekruit/ENGLISH-FIRST-PLAN.md on branch claude/project-thread-wsh8yb (draft PR "English-first product language plan").
-Goal: English is the default for UI, agent replies and server-written text; Chinese still works when the recruiter writes Chinese or picks 简体中文.
-
-Rules:
-- Claim an item (L2–L10) by putting your name in its Owner cell in that doc (commit to that branch), then work it in its own small PR off main (one item, or two related items, per PR).
-- Follow the "How the language is chosen" section: one per-turn language value from the recruiter's latest message; no new env vars, settings or per-feature detectors.
-- Model prompts in English; recruiter-visible text follows the language value. Do not touch parsers that read Chinese input.
-- Never change the meaning of playbook rules, approval cards, recipients, content or send scope. Labels only.
-- Test locally: pnpm --filter <pkg> test for touched packages, typecheck, biome on changed files. Add one English and one Chinese case per writer you change.
-- Do not deploy, do not touch Modal Secrets or any config/Secret, do not run the desktop e2e, do not re-enable CI.
-- When an item is done, set its Status in the doc to "PR #n" and post the PR link back.
-```
+The item notes above record the original audit. Where they say "follow the recruiter's language", the shipped rule is English.

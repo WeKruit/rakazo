@@ -470,38 +470,39 @@ describe("playbook stage machine", () => {
       openClarifications: 2,
       savedCandidates: 0,
     });
-    expect(step?.label).toBe("还有 2 个待确认问题");
+    expect(step?.label).toBe("2 open questions to confirm");
+    expect(step?.openClarifications).toBe(2);
   });
 
   it("starts calibration once title and brief exist", () => {
     expect(
       nextPlaybookStep("intake", { title: "后端", hasBrief: true, savedCandidates: 0 })?.label,
-    ).toBe("开始校准搜寻");
+    ).toBe("Start the calibration search");
     expect(
       nextPlaybookStep("intake", { title: "后端", hasBrief: false, savedCandidates: 0 })?.label,
-    ).toBe("完成岗位信息");
+    ).toBe("Complete the role details");
   });
 
   it("counts remaining calibration profiles and stops at human-owned stages", () => {
     expect(
       nextPlaybookStep("calibration_10", { title: "x", hasBrief: true, savedCandidates: 4 })?.label,
-    ).toBe("校准搜寻（还差 6 人）");
+    ).toBe("Calibration search (6 more needed)");
     const present = nextPlaybookStep("calibration_10", {
       title: "x",
       hasBrief: true,
       savedCandidates: 10,
     })?.prompt;
     expect(present).toContain("calibration_round");
-    expect(present).toContain("不要求逐人评分");
-    expect(present).toContain("Results 校准面板");
-    expect(present).toContain("下一步选择");
+    expect(present).toContain("do not require a rating for every person");
+    expect(present).toContain("Results calibration panel");
+    expect(present).toContain("offer the next step");
     expect(nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt).toContain(
-      "10 位全新的人",
+      "pick 10 new people",
     );
     const feedback = nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt;
-    expect(feedback).toContain("「找 100 个」");
+    expect(feedback).toContain('"find 100"');
     expect(feedback).toContain("operation approve");
-    expect(feedback).toContain("下一步选择");
+    expect(feedback).toContain("offer the next step");
     expect(nextPlaybookStep("scale", { hasBrief: true, savedCandidates: 20 })?.prompt).toContain(
       "save_search",
     );

@@ -12,7 +12,7 @@ type HiddenVendor = {
   en: string;
   /** Host fragments whose links are dropped from recruiter text. */
   hosts: readonly string[];
-  /** What a connect card calls the service, e.g. 连接人才资料库. */
+  /** What a connect card calls the service, e.g. "Connect Profile data". */
   label: string;
 };
 
@@ -29,7 +29,7 @@ const HIDDEN_VENDORS: readonly HiddenVendor[] = [
     zh: "人才搜索",
     en: "the search",
     hosts: ["autumn"],
-    label: "人才搜索",
+    label: "People search",
   },
   {
     pattern: new RegExp(
@@ -47,14 +47,14 @@ const HIDDEN_VENDORS: readonly HiddenVendor[] = [
       "crustdata",
       "apollo.io",
     ],
-    label: "人才资料库",
+    label: "Profile data",
   },
   {
     pattern: new RegExp(`\\bPDL${POSSESSIVE}(?!\\w|[.-]\\w)`, "g"),
     zh: "资料库",
     en: "profile data",
     hosts: [],
-    label: "人才资料库",
+    label: "Profile data",
   },
   {
     pattern: new RegExp(
@@ -64,35 +64,35 @@ const HIDDEN_VENDORS: readonly HiddenVendor[] = [
     zh: "联系方式补全",
     en: "contact lookup",
     hosts: ["contactout", "leadmagic", "lusha.com", "rocketreach"],
-    label: "联系方式补全",
+    label: "Contact lookup",
   },
   {
     pattern: new RegExp(`\\b(?:Serper|Firecrawl)(?:\\.dev)?${POSSESSIVE}(?!\\w|[.-]\\w)`, "gi"),
     zh: "搜索",
     en: "search",
     hosts: ["serper.dev", "firecrawl"],
-    label: "人才搜索",
+    label: "People search",
   },
   {
     pattern: new RegExp(`\\bExa(?:\\.ai)?${POSSESSIVE}(?!\\w|[.-]\\w)`, "g"),
     zh: "搜索",
     en: "search",
     hosts: ["exa.ai"],
-    label: "人才搜索",
+    label: "People search",
   },
   {
     pattern: new RegExp(`\\bInstantly(?:\\.ai)?${POSSESSIVE}(?!\\w|[.-]\\w)`, "g"),
     zh: "邮件",
     en: "email",
     hosts: ["instantly.ai"],
-    label: "邮件发送",
+    label: "Email sending",
   },
   {
     pattern: new RegExp(`\\bComposio${POSSESSIVE}(?!\\w|[.-]\\w)`, "gi"),
     zh: "连接",
     en: "connection",
     hosts: ["composio"],
-    label: "集成服务",
+    label: "Integrations",
   },
 ];
 
@@ -272,7 +272,7 @@ export function hideVendorBlocks<T extends MessageBlock>(blocks: readonly T[]): 
 
 /**
  * A connect card's service name for a recruiter: a hidden provider becomes what it does
- * (Coresignal → 人才资料库); the user's own accounts (Gmail, a calendar) keep their names.
+ * (Coresignal → Profile data); the user's own accounts (Gmail, a calendar) keep their names.
  */
 export function vendorNeutralServiceName(name: string): string {
   for (const vendor of HIDDEN_VENDORS) {
@@ -285,7 +285,7 @@ export function vendorNeutralServiceName(name: string): string {
   return name;
 }
 
-/** A recruiter's connect card names what the service does, in their language, not its brand. */
+/** A recruiter's connect card names what the service does, not its brand. */
 export function recruiterConnectBlock<
   T extends { text: string; connection?: { name: string; reason: string } },
 >(block: T): T {
@@ -294,22 +294,19 @@ export function recruiterConnectBlock<
   if (name === block.connection.name) return block;
   return {
     ...block,
-    text: `连接${name}`,
+    text: `Connect ${name}`,
     connection: {
       ...block.connection,
       name,
-      // Cards are for Chinese recruiters; an English reason saved earlier becomes the plain purpose.
-      reason: CJK.test(block.connection.reason)
-        ? hideVendorNames(block.connection.reason)
-        : (SERVICE_PURPOSE[name] ?? hideVendorNames(block.connection.reason)),
+      reason: SERVICE_PURPOSE[name] ?? hideVendorNames(block.connection.reason),
     },
   };
 }
 
 const SERVICE_PURPOSE: Record<string, string> = {
-  人才搜索: "用于为这个岗位搜索候选人。",
-  人才资料库: "用于补全候选人的完整经历、学历和公司信息。",
-  联系方式补全: "用于查找候选人的联系方式。",
-  邮件发送: "用于给候选人发送和查看邮件。",
-  集成服务: "用于连接这项工作需要的服务。",
+  "People search": "Used to search for candidates for this role.",
+  "Profile data": "Used to fill in candidates' full experience, education and company details.",
+  "Contact lookup": "Used to find candidates' contact details.",
+  "Email sending": "Used to send and read emails with candidates.",
+  Integrations: "Used to connect the services this work needs.",
 };

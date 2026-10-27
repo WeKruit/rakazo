@@ -959,7 +959,7 @@ export function shortQuestion(question: string, max = 240): string {
  * slow tools. Its first step runs at low thinking and opens with one line the recruiter sees.
  */
 const HANDOFF_OPENING_NOTE =
-  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in the language they write in, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history.";
+  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in English, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history.";
 
 /** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
 const PLANNED_SEARCHES_NOTE =
@@ -5345,7 +5345,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             select: { role: true, blocks: true },
           });
           const answers = intakeAnswers(messages);
-          const chinese = /\p{Script=Han}/u.test(quote);
           const saved = (await applyTool(
             "recruiting_role",
             {
@@ -5368,9 +5367,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     id: "tenure",
                     mode: "prefer",
                     origin: "inferred",
-                    statement: chinese
-                      ? `现任岗位满 ${MIN_CURRENT_ROLE_MONTHS} 个月以上的人`
-                      : `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
+                    statement: `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
                   },
                 ],
               },
@@ -5397,14 +5394,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             take: 1,
           });
           if (!round) return undefined;
-          const human = await deps.prisma.message.findFirst({
-            where: { threadId: thread.id, role: "user" },
-            orderBy: { seq: "desc" },
-            select: { blocks: true },
-          });
-          return recruitingNextStepCard(
-            /\p{Script=Han}/u.test(JSON.stringify(human?.blocks ?? "")),
-          );
+          return recruitingNextStepCard();
         };
         const applyToolNow = async (
           name: string,
@@ -10967,7 +10957,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in English, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
           try {
             if (pasted) {
               const title = pastedJobTitle(pasted.text)!;
@@ -11640,7 +11630,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   orderBy: { seq: "asc" },
                   select: { role: true, blocks: true },
                 });
-                const nextStep = [true, false].map((zh) => recruitingNextStepCard(zh).text);
+                // Older rounds asked this card in Chinese; its answer is not an intake answer either.
+                const nextStep = [
+                  recruitingNextStepCard().text,
+                  "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
+                ];
                 const known = answeredAsk(
                   question,
                   intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),

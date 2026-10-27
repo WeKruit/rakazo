@@ -25,7 +25,7 @@ export const RECRUITING_CANDIDATE_PROFILE_COLUMNS = [
   "Return these six short columns under exactly these English names: headline, highlights, key_works, concerns, criteria_brief, entities. Never rename, translate or suffix them (no _zh). Write their text in Simplified Chinese except proper names (people, schools, companies, papers, venues stay as written). Each list column is a JSON array of strings, one element per item, never one joined string. Values hold no sources, check dates, page status or caveats: put sources in source_id. Respect every length limit; cut rather than exceed it.",
   "- headline: str, one line of at most 30 characters on who the person is for this role.",
   "- highlights: list[str], 3 to 6 tags of at most 12 characters each (school, location, first-author record, awards, notable employers).",
-  '- key_works: list[str], up to 4, each "Title | Venue Year or kind | role such as 一作 | URL", at most 60 characters.',
+  '- key_works: list[str], up to 4, each "Title | Venue Year or kind | role such as first author | URL", at most 60 characters.',
   "- concerns: list[str], up to 3 open questions or gaps from your own assessment, at most 20 characters each.",
   '- criteria_brief: list[str], one per assessed criterion, "criterion column name exactly as returned | short name of at most 8 characters | verdict of at most 20 characters".',
   '- entities: list[str], every organization named in highlights, experience, education or key_works, "Name as written in those fields | company/school/lab/award/venue | official website URL | one-line description of at most 20 characters".',

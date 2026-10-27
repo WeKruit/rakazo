@@ -159,7 +159,7 @@ describe("guardRecruitingTurnEnd", () => {
         trigger: "follow_up",
         internal: true,
         clientNonce: "autocontinue:run-1:1",
-        prompt: expect.stringContaining("继续下一步："),
+        prompt: expect.stringContaining("Continue with the next step: "),
       }),
     );
     expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
@@ -331,7 +331,7 @@ describe("guardRecruitingTurnEnd", () => {
       candidateKeys: ["linkedin:/in/bo-lee", "linkedin:/in/ana"],
       lastMayBeCut: true,
     });
-    expect(whole).toContain("本轮 2 位人选");
+    expect(whole).toContain("2 people this round");
     expect(whole).toContain("2. **[Ana](https://www.linkedin.com/in/ana)**");
     // "bo" may still become "bo-lee": not shown yet.
     const cut = await recruitingRoundListText(prisma, {
@@ -339,7 +339,7 @@ describe("guardRecruitingTurnEnd", () => {
       candidateKeys: ["linkedin:/in/ana", "linkedin:/in/bo"],
       lastMayBeCut: true,
     });
-    expect(cut).toContain("本轮 1 位人选");
+    expect(cut).toContain("1 person this round");
     expect(cut).not.toContain("Bo");
   });
 
@@ -357,7 +357,7 @@ describe("guardRecruitingTurnEnd", () => {
       candidateKeys: ["person-1"],
       unverified: { "person-1": "初创公司经历" },
     });
-    expect(text).toContain("1. **Person 1**\n   未核实：初创公司经历");
+    expect(text).toContain("1. **Person 1**\n   Not verified: 初创公司经历");
   });
 
   it.each([
@@ -465,7 +465,7 @@ describe("guardRecruitingTurnEnd", () => {
     });
     expect(result).toMatchObject({ action: "continued", count: 1 });
     expect(f.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining("「恢复后我会先提交完整简报") }),
+      expect.objectContaining({ prompt: expect.stringContaining('"恢复后我会先提交完整简报') }),
     );
     // Without a promise, a stage the recruiter owns still ends quietly.
     const quiet = fixture({ stage: "interview" });
@@ -507,7 +507,7 @@ describe("guardRecruitingTurnEnd", () => {
       max: 3,
     });
     expect(early.sendUserMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining("最后一次") }),
+      expect.objectContaining({ prompt: expect.stringContaining("last automatic continuation") }),
     );
   });
 
@@ -524,7 +524,9 @@ describe("guardRecruitingTurnEnd", () => {
     });
     expect(result).toMatchObject({ action: "capped", count: 3 });
     expect(f.sendUserMessage).not.toHaveBeenCalled();
-    expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("完成岗位信息"));
+    expect(f.postAssistant).toHaveBeenCalledWith(
+      expect.stringContaining("Complete the role details"),
+    );
   });
 
   it("says what was saved when the cap is reached after results were saved", async () => {
@@ -539,8 +541,10 @@ describe("guardRecruitingTurnEnd", () => {
       max: 3,
     });
     expect(result).toMatchObject({ action: "capped" });
-    expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("已保存 4 位候选人"));
-    expect(f.postAssistant).not.toHaveBeenCalledWith(expect.stringContaining("没有产出"));
+    expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("4 candidates are saved"));
+    expect(f.postAssistant).not.toHaveBeenCalledWith(
+      expect.stringContaining("did not produce a result"),
+    );
   });
 
   it("is disabled by RAKAZO_AUTOCONTINUE_MAX=0 and skips non-human triggers", async () => {
@@ -607,10 +611,12 @@ describe("guardRecruitingTurnEnd", () => {
     const failed = fixture({ stage: "feedback", feedbackError: "Not recorded: operation" });
     await expect(
       guardRecruitingTurnEnd(failed.deps, { ...input, postAssistant: failed.postAssistant }),
-    ).resolves.toMatchObject({ action: "continued", label: "保存反馈" });
+    ).resolves.toMatchObject({ action: "continued", label: "Save feedback" });
     expect(failed.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: expect.stringMatching(/没有成功[\s\S]*Not recorded: operation[\s\S]*不要说已记录/),
+        prompt: expect.stringMatching(
+          /just failed[\s\S]*Not recorded: operation[\s\S]*Do not say it is recorded/,
+        ),
       }),
     );
     // One retry per recruiter message.
@@ -621,7 +627,7 @@ describe("guardRecruitingTurnEnd", () => {
     });
     await guardRecruitingTurnEnd(again.deps, { ...input, postAssistant: again.postAssistant });
     expect(again.sendUserMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining("没有成功") }),
+      expect.objectContaining({ prompt: expect.stringContaining("just failed") }),
     );
   });
 
@@ -655,7 +661,7 @@ describe("guardRecruitingTurnEnd", () => {
       postAssistant: promisedFix.postAssistant,
     });
     expect(promisedFix.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.not.stringContaining("规模化搜寻") }),
+      expect.objectContaining({ prompt: expect.not.stringContaining("Scaled search") }),
     );
 
     // The coordinator's own continuation still gets the step.
@@ -726,7 +732,11 @@ describe("guardRecruitingTurnEnd", () => {
       pendingApproval: false,
       postAssistant: f.postAssistant,
     });
-    expect(result).toMatchObject({ action: "continued", stage: "feedback", label: "收集校准反馈" });
+    expect(result).toMatchObject({
+      action: "continued",
+      stage: "feedback",
+      label: "Collect calibration feedback",
+    });
   });
 
   it("presents the first ten from saved people before asking for feedback", async () => {
@@ -744,7 +754,7 @@ describe("guardRecruitingTurnEnd", () => {
       expect(result).toMatchObject({
         action: "continued",
         stage: "calibration_10",
-        label: "展示 10 人校准名单",
+        label: "Show the 10-person calibration list",
       });
     }
   });
@@ -812,7 +822,7 @@ describe("guardRecruitingRoleCreate", () => {
     expect(result).toMatchObject({ action: "continued", runId: "run-2" });
     expect(f.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: expect.stringContaining("「我会在修复保存问题后继续。」"),
+        prompt: expect.stringContaining('"我会在修复保存问题后继续。"'),
       }),
     );
     const again = roleFixture(null, 1);
@@ -837,9 +847,9 @@ describe("guardRecruitingRoleCreate", () => {
         },
       ],
     });
-    expect(result).toMatchObject({ action: "continued", label: "保存岗位" });
+    expect(result).toMatchObject({ action: "continued", label: "Save the role" });
     expect(f.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining("直到展示十位人选") }),
+      expect.objectContaining({ prompt: expect.stringContaining("until ten are shown") }),
     );
   });
 
@@ -852,7 +862,7 @@ describe("guardRecruitingRoleCreate", () => {
       ...input,
       blocks: [{ kind: "text", text: "已记录。" }],
     });
-    expect(result).toMatchObject({ action: "continued", label: "保存岗位" });
+    expect(result).toMatchObject({ action: "continued", label: "Save the role" });
     expect(f.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({ prompt: expect.stringContaining("must match exactly one schema") }),
     );

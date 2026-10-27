@@ -122,9 +122,9 @@ describe("hideVendorBlocks", () => {
 
 describe("vendorNeutralServiceName", () => {
   it("names what a hidden provider does and keeps the user's own accounts", () => {
-    expect(vendorNeutralServiceName("Coresignal")).toBe("人才资料库");
-    expect(vendorNeutralServiceName("Autumn")).toBe("人才搜索");
-    expect(vendorNeutralServiceName("ContactOut")).toBe("联系方式补全");
+    expect(vendorNeutralServiceName("Coresignal")).toBe("Profile data");
+    expect(vendorNeutralServiceName("Autumn")).toBe("People search");
+    expect(vendorNeutralServiceName("ContactOut")).toBe("Contact lookup");
     expect(vendorNeutralServiceName("Gmail")).toBe("Gmail");
   });
 });
@@ -144,11 +144,11 @@ describe("recruiterConnectBlock", () => {
     expect(hideVendorBlocks([saved])).toEqual([
       {
         ...saved,
-        text: "连接人才资料库",
+        text: "Connect Profile data",
         connection: {
           serverId: "server",
-          name: "人才资料库",
-          reason: "用于补全候选人的完整经历、学历和公司信息。",
+          name: "Profile data",
+          reason: "Used to fill in candidates' full experience, education and company details.",
         },
       },
     ]);
