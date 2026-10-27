@@ -17,3 +17,17 @@ git diff --check
 ```
 
 **12 tests passed**. Scenarios cover serialized order, drain deadlines, independent process/session confirmation, readiness failure, peer preservation, global capacity including unrelated sessions, failed admission, lease contention, driver errors, disappearing workers, duplicate selections and per-worker/API limits. No actual Modal actions, resources, secrets, deployment, live database connections or real jobs/candidates were involved. Production driver, real session release latency and live replacement remain untested.
+
+## Offline SDK service factory
+
+`split_services.py` defines two real Modal 1.6.1 servers using injected image and secret references, without importing the deployment app or resolving resources. API: port 8000, min 1/max 2; worker: private health port 3101, min/max 2. Each decorated enter/exit calls the shared ServiceRuntime for only its own process, with no startup migrations and disposable `/tmp/rakazo-data`; no shared writable volume is mounted. Stable worst-case sessions are 2 + 2×5 = 12. Whole-generation replacement is not authorized by this factory; use the serialized replacement policy.
+
+Every enter requires an injected preflight callable that must query activation state and verify the deployment writer fence, raising on failure. Boolean return values are rejected. This contract has no production implementation here, so these definitions do not prove cutover readiness. One-shot migrations, real activation checks, writer fencing, storage configuration, concrete image/secret binding and deployment remain external prerequisites.
+
+Installed fixed `modal==1.6.1` in an isolated temporary virtual environment, leaving the system's older SDK unchanged. Tests construct real SDK Server objects and execute their registered decorated lifecycle functions with a fake runtime; no authentication, hydration, named-resource resolution, network/cloud calls or deployment occurs. SDK tests **5 passed**; all `infra/modal/test_*.py` tests **25 passed** under 1.6.1. Python compilation and diff checks passed. These tests validate accepted signatures and local orchestration wiring, not remote serialization or live service behavior.
+
+```sh
+python -m unittest discover -s infra/modal -p test_split_services.py -v
+python -m unittest discover -s infra/modal -p 'test_*.py' -v
+python -m py_compile infra/modal/split_services.py infra/modal/test_split_services.py
+```
