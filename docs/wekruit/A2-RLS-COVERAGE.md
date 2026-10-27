@@ -2,11 +2,17 @@
 
 The first rollout batch is **all 22 `recruiting_*` tables, messages and artifacts, plus threads/tasks/runs/events/external effects as the ownership and receipt dependencies**: 29 tables. Direct queries to a recruiting child no longer depend on the caller remembering its parent filter. Each protected table has nonempty synthetic data for two users, real non-owner/NOBYPASSRLS reads and legal writes. The authenticated actor composition is opt-in and fails closed; workers/auth/migrations retain their explicit system identity.
 
-This is a staged rollout as specified by A2, not whole-schema RLS. The current Prisma schema contains **99 application models/tables**: the 29-table actor pilot and 70 outside that pilot. The original audit had 92; the seven additions are classified below. The 70 other tables are enumerated for later batches or separate system authorization, not all counted as missing user-data policies in this batch. No production activation occurred. The first-batch pilot was subsequently integrated through PR #296; this inventory does not imply whole-schema protection.
+This is a staged rollout as specified by A2, not whole-schema RLS. The current Prisma schema contains **99 application models/tables**: the original 29-table actor pilot, four personal preference tables, and 66 outside those actor batches. The original audit had 92; the seven additions are classified below. The 66 other tables are enumerated for later batches or separate system authorization, not all counted as missing user-data policies in this batch. No production activation occurred. The first-batch pilot was subsequently integrated through PR #296; this inventory does not imply whole-schema protection.
 
 ## First batch (29)
 
 `artifacts`, `recruiting_roles`, `messages`, `recruiting_role_revisions`, `recruiting_candidates`, `recruiting_calibration_rounds`, `threads`, `tasks`, `runs`, `external_effects`, `events`, `recruiting_crm_roles`, `recruiting_crm_contacts`, `recruiting_crm_messages`, `recruiting_crm_sync_progress`, `recruiting_crm_campaigns`, `recruiting_crm_leads`, `recruiting_crm_workspace_attachments`, `recruiting_reminders`, `recruiting_candidate_notes`, `recruiting_saved_profiles`, `recruiting_research_tasks`, `recruiting_assessments`, `recruiting_candidate_pages`, `recruiting_candidate_occurrences`, `recruiting_research_actions`, `recruiting_crm_imports`, `recruiting_replies`, `recruiting_crm_role_contacts`.
+
+## Personal preference batch (4)
+
+`ai_data_consents`, `action_auto_review_preferences`, `notification_preferences`, `space_backup_models` now use the same explicit opt-in SQL installation and actor startup validation. Every operation requires the row's user, the active Space, and current organization/Space membership. This preserves the existing personal preference contract; it does not turn creator-owned shared data into personal data. No identity or membership result is cached.
+
+Each table has real nonempty two-user/two-Space PostgreSQL coverage: system-created defaults, legal actor insert/update, omitted-filter reads, foreign insert/reassignment/delete denial and revoked UPDATE/DELETE affecting zero rows, active-Space switching while belonging to both Spaces, and membership revocation. Notification and action-review preferences lack a composite membership FK: tests explicitly prove retained rows remain available to the system client while actor access is revoked. Consent/backup rows cascade with membership, as before.
 
 ## Outside this batch: Auth / system / membership boundary (14)
 
@@ -24,9 +30,9 @@ This is a staged rollout as specified by A2, not whole-schema RLS. The current P
 
 `chat_group_members`, `attempts`, `memory_revisions`, `computer_updates`, `computer_execution_leases`, `messaging_channels`, `messaging_channel_members`, `messaging_outbound`, `agent_connections`, `external_messages`, `steering_messages`.
 
-## Outside this batch: Personal Space rows (29)
+## Outside these batches: Personal Space rows (25)
 
-`ai_data_consents`, `action_auto_review_preferences`, `space_model_preferences`, `space_backup_models`, `space_voice_preferences`, `bots`, `bot_sections`, `chat_groups`, `cloud_agents`, `routines`, `scratchpad_items`, `taught_skills`, `agent_skills`, `connections`, `capability_installs`, `memory_documents`, `agent_homes`, `browser_profiles`, `computers`, `usage_records`, `notification_preferences`, `space_memory_configs`, `mcp_servers`, `mcp_oauth_sessions`, `bot_mcp_servers`, `messaging_identities`, `messaging_link_codes`, `bot_secrets`, `external_conversations`.
+`space_model_preferences`, `space_voice_preferences`, `bots`, `bot_sections`, `chat_groups`, `cloud_agents`, `routines`, `scratchpad_items`, `taught_skills`, `agent_skills`, `connections`, `capability_installs`, `memory_documents`, `agent_homes`, `browser_profiles`, `computers`, `usage_records`, `space_memory_configs`, `mcp_servers`, `mcp_oauth_sessions`, `bot_mcp_servers`, `messaging_identities`, `messaging_link_codes`, `bot_secrets`, `external_conversations`.
 
 ## Since the original 92-table audit: seven additional tables
 
@@ -34,13 +40,13 @@ This is a staged rollout as specified by A2, not whole-schema RLS. The current P
 - `home_authority_tombstones` and `home_authority_cutover`: system-only irreversible authority fences and verified cutover receipts. They carry deployment/storage authority, not personal preferences. Their migration enables RLS without actor policies; the actor startup guard rejects missing, disabled or policy-bearing metadata. The narrow retired-home helper intentionally returns only collision existence while keeping metadata mutation unavailable to actors.
 - `session_admission_generations`, `session_admissions`, `session_admission_connections`, `session_admission_budget`: system-only generation fences, reservations, observed physical connections and global capacity/replacement claim. Repository transactions use the explicit system client. Migrations enable RLS with no actor policies, and startup checks the boundary. These four tables must not receive a user/Space policy merely to increase the actor-table count.
 
-Arithmetic: original 29 + 14 + 6 + 3 + 11 + 29 = 92; OAuth coordination 1 + home authority 2 + admission 4 = 7; current total 99. The six system metadata tables have deny-all actor RLS already; the other 64 outside-pilot tables retain their documented separate/application authorization boundaries.
+Arithmetic: original 29 + 14 + 6 + 3 + 11 + 29 = 92; OAuth coordination 1 + home authority 2 + admission 4 = 7; current total 99. After the separate four-table preference batch, the actor total is 33 and the outside total is 66. The six system metadata tables have deny-all actor RLS already; the other 60 outside-actor tables retain their documented separate/application authorization boundaries.
 
 ## Current combined-source API isolation rerun
 
 On integration revision `ba744c11842a55905fd1c8301269774b73f325f8`, after the public pg pipeline and all current migrations, the complete existing account-isolation fixture was rerun against a new synthetic PostgreSQL database with a real non-owner/NOBYPASSRLS actor role. Only Docker database startup was replaced with a dedicated loopback database; fixture seeding and acceptance logic were unchanged. Scripted runtime, fake sandbox and email/provider emulators were used; no provider jobs or external messages ran.
 
-Command: `API_PORT=3196 ACTOR_DATABASE_URL=<restricted-local-fixture-url> pnpm exec tsx packages/testkit/src/cli/.a2-local-isolation.ts --out <temporary-report.json>`; database setup used `prisma migrate deploy`, the opt-in `first-batch.sql`, and a local restricted role. The temporary harness was removed after the run. Acceptance started at 2026-10-27 19:51:01.920 UTC and finished at 19:51:04.018 UTC (**2.098 seconds**, excluding setup), exit **0**, result **isolated**: **144 checks, 0 leaks, 0 warnings, 98 unexercised owner-empty paths**. The 98 paths are not newly verified, and this does not establish production or provider-workflow acceptance. No product regression was found in this run.
+Command: `API_PORT=3196 ACTOR_DATABASE_URL=<restricted-local-fixture-url> pnpm exec tsx packages/testkit/src/cli/.a2-local-isolation.ts --out <temporary-report.json>`; database setup used `prisma migrate deploy`, the opt-in `first-batch.sql`, and a local restricted role. The temporary harness was removed after the run. Acceptance started at 2026-10-27 19:51:01.920 UTC and finished at 19:51:04.018 UTC (**2.098 seconds**, excluding setup), exit **0**, result **isolated**: **144 executed checks with verdict `ok`, 0 leaks, 0 warnings, plus a separate array of 98 unexercised owner-empty paths**. The 98 paths are not newly verified, and this does not establish production or provider-workflow acceptance. No product regression was found in this run.
 
 This rerun is correctness evidence, not a latency benchmark. The latest retained pipeline measurements are in `A2-RLS-PILOT.md`: pooled p95 changes +8.36% (serial warmup) and +2.50% (parallel warmup), but individual pairs still exceeded 10%. Earlier failed measurements below remain historical evidence. The formal online <10% gate remains unmeasured; A2 is not marked complete.
 
@@ -68,3 +74,12 @@ First complete-batch local latency run: baseline p95 9.32 ms, RLS 16.25 ms, **+7
 Membership checks now use the wired STABLE SECURITY INVOKER function with a fixed search_path. Startup validates its non-definer/stable attributes; tests reject unsafe changes. This reduces plan expansion without changing transaction-local identity or caching membership. The pilot report contains corrected callback/Promise SQL timing and before/after EXPLAIN evidence; these do not replace HTTP measurement. The final quiet-window HTTP pairs were +58.16%, +5.93%, +16.52%; the local comparison is not consistently within 10%. The formal online gate remains unmeasured because deployment is prohibited.
 
 The latest local helper uses a static PL/pgSQL RETURN EXISTS instead of the SQL-language body. Only PostgreSQL's query plan is reused; actor settings and membership data are read fresh per statement. All 12 safety tests still pass. This refinement's quiet HTTP comparison also did not meet the target: pairs +16.17%/+48.85%/+74.33%, true pooled 600-request p95 +59.21%. All raw durations and prior complete measurements are retained; formal online acceptance is still unmeasured.
+
+## Preference-batch validation
+
+- `RLS_TEST_DATABASE_URL=<dedicated-local-db> pnpm exec vitest run packages/db/src/actor-db.postgres.test.ts --maxWorkers=1 --no-file-parallelism`: **22/22 passed**, 745 ms; includes the original 18 isolation/pipeline tests and four nonempty preference matrices.
+- `pnpm exec vitest run packages/db/src/model-backups.test.ts apps/api/src/models-backups.test.ts apps/api/src/ai-consent.test.ts --maxWorkers=1 --no-file-parallelism`: **19/19 passed**, 3 files, 5.03 seconds.
+- `pnpm --filter @rakazo/db --filter @rakazo/api check`: both passed, including DB cross-package test types.
+- Repeated the same full API isolation fixture on a second fresh synthetic database after installing all 33 policies: **144 executed `ok` checks, 0 leaks, 0 warnings, plus 98 separately recorded owner-empty paths unexercised**, exit 0, isolated, 2026-10-27 19:54:17.853–19:54:20.318 UTC (**2.465 seconds** excluding setup). Actual signup/bootstrap with the system client and actor RPC seeding remained functional.
+
+No new physical pool or connection was added. Identity remains transaction-local with the existing query pool and explicit system composition. Production 6543 transaction-pooler behavior, 5432 realtime connections, per-container session limits, and online latency are unmeasured here. This small batch establishes correctness only; it does not replace or relax A2's still-unmet online performance acceptance.
