@@ -24,8 +24,8 @@
 | C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | Adam 已认领；本地实现进行中，线上部署仍禁止 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
-| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 本地验收通过，待独立 PR 发布/合并 | Adam |
-| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息及旧结果视图后续已本地验收，待串行集成） | Adam |
+| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 本地验收通过，已合入 [#301](https://github.com/WeKruit/rakazo/pull/301) | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息及旧结果视图后续已本地验收，[#300](https://github.com/WeKruit/rakazo/pull/300) 待串行集成） | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
 | F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
 | E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
@@ -498,7 +498,10 @@ pnpm --filter @rakazo/worker --filter @rakazo/adapters check
 ### D3 独立后续本地验收
 
 基于 D4 `e0eb80130b7c64b5c3cb55ff23925dd1c071678b` 移植消息窗口与旧结果视图窗口；仅本地提交，尚未发布/合并。没有带入 D1 后续 lazyLiveWork/windowinglazy 或 D2 缓存改动。完整命令与范围见 [D3-INDEPENDENT-FOLLOWUP.md](D3-INDEPENDENT-FOLLOWUP.md)。Web 类型检查、1,656 项单测、生产构建通过；Chromium 三项合成浏览器测试通过。1,000 消息首屏 DOM 1,000→17，滚动最大 1,030→24（含自动加载 30 条旧消息）；候选目录最大 19 行/36 卡片，滚动无长任务。整项保持待集成，线上和人工辅助技术检查还没测。
-
 ### C4 refreshed independent branch
 
 Ordinary merge of #263 through `8188c88f3` into C4 succeeded without conflicts (`4406d0e134a5c2a26fa961ec2ebbb8075d3eaa5b`). `pnpm --filter @rakazo/api --filter @rakazo/db --filter @rakazo/adapters check` passed. Local synthetic `VERIFY_DATABASE=1 pnpm exec vitest run packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/pi-oauth.test.ts`:120/120 passed in7.89s. `pnpm --filter @rakazo/api test`:1376 passed/51 skipped in17.41s. No provider or multi-container acceptance is claimed. This refresh is local only while remaining-item publication confirmation is pending; #274 has not been merged.
+
+### 串行发布核对（2026-10-27）
+
+D1初始#295、A2#296、C4#274、D4#298、D2#301、D3后续#300均已合入本集成分支。上文各阶段“待发布/待合并”是当时记录，以本段和总览最新状态为准。D1后续生产冷入口实测联系人347,938B/7JS/35总请求、17RPC/0重复；聊天310,672B/8JS/39总请求；登录203,469B/7JS/15总请求。最终250KB和线上LCP仍不达/未测。A2本地部分配对超过10%，整体未完成。F2保留Claude所有权；仅复核已有reconciler/turn-end-guard/question-nudge59/59单测，未替代其崩溃/上线业务验收。新增A5保留Claude认领。
