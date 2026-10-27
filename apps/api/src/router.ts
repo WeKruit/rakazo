@@ -334,6 +334,7 @@ import {
   updateRecruitingReminder,
 } from "./recruiting.js";
 import { syncRecruitingCrm } from "./recruiting-crm-sync.js";
+import { readRecruitingView } from "./recruiting-read-view.js";
 import {
   getRecruitingSchedulingPlans,
   saveRecruitingSchedulingPlan,
@@ -3877,6 +3878,9 @@ export function createRouter(deps: RouterDeps) {
       ),
       readSource: authed.recruiting.readSource.handler(({ context, input }) =>
         readRecruitingSource(deps, context.actor, input),
+      ),
+      readView: authed.recruiting.readView.handler(({ context, input }) =>
+        readRecruitingView(deps, context.actor, input, context.stillAuthorized),
       ),
       listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
         listRecruitingCandidates(deps, context.actor, input),

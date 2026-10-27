@@ -31,7 +31,12 @@ import { newClientId } from "../../lib/client-id";
 import { readFileAsBase64, revokePendingAttachmentPreviews } from "../../lib/pending-attachments";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { clearRecruitingReads, rememberRecruitingRead } from "../../lib/recruiting-read-cache";
+import {
+  clearRecruitingReads,
+  fetchRecruitingRead,
+  rememberRecruitingRead,
+  savedRecruitingRead,
+} from "../../lib/recruiting-read-cache";
 import type { Panel, RecruitingPanelState } from "../../lib/right-panel-state";
 import { rpc, selectedSpaceId } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
@@ -233,7 +238,7 @@ export function useShellRecruiting({
       (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
       knownThreadIdRef.current === threadId &&
       activeGroupId.current === groupId;
-    const cached = cache.entries.get(`${recruitingCacheScope}:workspace`) as
+    const cached = savedRecruitingRead(cache, `${recruitingCacheScope}:workspace`) as
       | { workspace?: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
       | undefined;
     setBindingRead({
@@ -241,7 +246,9 @@ export function useShellRecruiting({
       scope: recruitingCacheScope,
       workspace: cached?.workspace,
     });
-    void retryTransientRead(() => rpc.recruiting.getWorkspace({ threadId }), abort.signal)
+    void fetchRecruitingRead(cache, recruitingCacheScope, "getWorkspace", { threadId }, () =>
+      retryTransientRead(() => rpc.recruiting.getWorkspace({ threadId }), abort.signal),
+    )
       .then((workspace) => {
         if (!isCurrent()) return;
         // A read invalidated in flight is not trusted, but must not leave the view loading.
@@ -270,6 +277,9 @@ export function useShellRecruiting({
     return () => {
       cancelled = true;
       abort.abort();
+      const queryKey = ["recruiting", `${recruitingCacheScope}:rpc`, "getWorkspace", { threadId }];
+      void cache.client.cancelQueries({ queryKey, exact: true });
+      cache.client.removeQueries({ queryKey, exact: true });
     };
   }, [
     boundRoleView,
@@ -287,6 +297,17 @@ export function useShellRecruiting({
       : bindingRead?.workspace && bindingRead.scope === recruitingCacheScope
         ? { key: bindingReadKey, scope: bindingRead.scope, workspace: bindingRead.workspace }
         : undefined;
+  const currentWorkspaceRead = useMemo(
+    () =>
+      boundRoleView && knownThreadId
+        ? {
+            threadId: knownThreadId,
+            refreshSignal: recruitingRefresh,
+            workspace: bindingRead?.key === bindingReadKey ? bindingRead.workspace : undefined,
+          }
+        : undefined,
+    [boundRoleView, knownThreadId, recruitingRefresh, bindingRead, bindingReadKey],
+  );
   const boundCrmTarget = currentBindingRead?.workspace?.crmTarget;
   const boundCrmSelection: CrmBrowseSelection | undefined = boundCrmTarget
     ? {
@@ -1048,6 +1069,7 @@ export function useShellRecruiting({
   }
 
   return {
+    currentWorkspaceRead,
     activeSnapshot,
     recruitingWorkspaceView,
     workspaceNewRole,

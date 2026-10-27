@@ -14,6 +14,7 @@
 | A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 招聘首批隔离通过；本地性能未稳定达标，线上门禁未测，整体未完成 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
 | A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
+| A5 | 数据库 | 对话开头到第一次搜索的查询次数（现 150–220 条，约 3–5 秒）：合并重复读取，缩短对话行锁 | 进行中 | Claude（工具出错率线程） |
 | B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本分支；本地回归通过，线上未测 | — |
 | B2 | 任务队列 | 每分钟记录一次排队情况 | 本分支；部署后分钟日志未测 | — |
 | C1 | 多容器 | 附件放对象存储 | 代码已合并（#260）；存储配置阻塞 | — |
@@ -23,8 +24,8 @@
 | C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | Adam 已认领；本地实现进行中，线上部署仍禁止 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
-| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 进行中 | Adam |
-| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息及旧结果视图后续已本地验收，待串行集成） | Adam |
+| D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 本地验收通过，已合入 [#301](https://github.com/WeKruit/rakazo/pull/301) | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息及旧结果视图后续已本地验收，[#300](https://github.com/WeKruit/rakazo/pull/300) 待串行集成） | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
 | F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
 | E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
@@ -320,6 +321,8 @@ RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec tsx scripts/measure-fi
 - **现状：** 服务端数据都靠组件里的 `useEffect` 加手写缓存来取，例如 `Shell.tsx` 里的 `recruitingReadCache`。`Shell.tsx` 一个文件里就有 51 个 `useEffect`、109 个 `useState`。没有统一的请求去重、过期和失效机制。
 - **做法：** 引入 TanStack Query 管理服务端数据。实时事件到达时，只让相关的查询失效。先迁移招聘面板的读取，再迁移其他部分。
 - **验收（代码检查）：** 打开一个岗位页面时，同一个 RPC 带同样参数的重复调用次数为 0（在 e2e 里统计）。
+
+- **D2 独立验收：** 基于 D4 `e0eb80130`；Query 缓存、带授权/新鲜绑定校验的 readView 与 A3 分页均保留。生产合成浏览器前后各三次：重复 RPC 4 → 0，总 RPC 21 → 17，JS gzip 515,958 → 526,190 字节（增加 10,232），JS 请求 70 → 70。web 1,664/1,664、API/readView+招聘合同 76/76、web/API/contracts 类型检查通过。详见 [D2 独立验收](D2-INDEPENDENT-RELEASE.md)。本地门禁通过，发布/合并尚待父任务串行操作，未声称线上验收。
 
 ### D3 长列表虚拟滚动
 

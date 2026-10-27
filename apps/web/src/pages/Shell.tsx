@@ -96,6 +96,7 @@ export function ShellPage() {
   const model = useShellController();
   const { t } = useLingui();
   const {
+    currentWorkspaceRead,
     navigate,
     session,
     userId,
@@ -627,6 +628,7 @@ export function ShellPage() {
             ) : null}
             {panel === "recruiting" && activeSnapshot?.threadId ? (
               <RecruitingPanel
+                workspaceRead={currentWorkspaceRead}
                 key={`${userId}:${bootstrapMe?.spaceId}:${activeSnapshot.threadId}`}
                 threadId={activeSnapshot.threadId}
                 botId={inGroup ? undefined : active?.id}

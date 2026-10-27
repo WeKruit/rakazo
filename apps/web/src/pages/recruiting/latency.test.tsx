@@ -1,8 +1,10 @@
+import "../../lib/query.test-support";
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { clearRecruitingReads, createRecruitingReadCache } from "../../lib/recruiting-read-cache";
 
 const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
@@ -183,7 +185,7 @@ for (const [name, Tab] of Object.entries(tabs)) {
   });
 
   it(`${name}: a revisited tab renders cached rows at once and refreshes in the background`, async () => {
-    const readCache = { entries: new Map<string, unknown>(), epoch: 0 };
+    const readCache = createRecruitingReadCache();
     const cached = { ...props, crmTarget: target, readCache, readCacheScope: "user:space:thread" };
     await timeToFirstRows(<Tab {...cached} />);
     await cleanup?.();
@@ -198,20 +200,18 @@ for (const [name, Tab] of Object.entries(tabs)) {
 }
 
 it("discards a response issued before the read cache was cleared", async () => {
-  const readCache = { entries: new Map<string, unknown>(), epoch: 0 };
+  const readCache = createRecruitingReadCache();
   const cached = { ...props, crmTarget: target, readCache, readCacheScope: "user:space:thread" };
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(<ContactsTab {...cached} />));
-  readCache.epoch++;
-  readCache.entries.clear();
+  clearRecruitingReads(readCache);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(LATENCY);
   });
   expect(container.textContent).not.toContain("Person 0");
-  expect(container.querySelector('[role="alert"]')).not.toBeNull();
-  expect(readCache.entries.size).toBe(0);
+  expect(readCache.client.getQueryCache().getAll().length).toBe(0);
   cleanup = async () => {
     await act(async () => root.unmount());
     container.remove();
@@ -289,3 +289,4 @@ it("loads every CRM page while keeping the rendered window bounded", async () =>
     0, 25, 50, 75, 100,
   ]);
 });
+

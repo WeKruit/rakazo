@@ -19,6 +19,12 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { recruitingReadViewFixture } from "../lib/query.test-support";
+import {
+  createRecruitingReadCache,
+  rememberRecruitingRead,
+  savedRecruitingRead,
+} from "../lib/recruiting-read-cache";
 import {
   readRecruitingPanelState,
   readRightPanelState,
@@ -29,6 +35,7 @@ import {
 const api = vi.hoisted(() => ({
   session: { data: { user: { id: "actor-1" } } },
   getWorkspace: vi.fn(),
+  readView: vi.fn(),
   correspondence: vi.fn(),
   crmData: vi.fn(),
   readSource: vi.fn(),
@@ -878,7 +885,7 @@ it("restarts an invalidated pending CRM read using the existing refresh signal",
       }),
     )
     .mockResolvedValue(page);
-  const cache = { epoch: 0, entries: new Map<string, unknown>() };
+  const cache = createRecruitingReadCache();
   const options = {
     groupId: "group-1",
     readCache: cache,
@@ -1474,6 +1481,7 @@ function candidateFixture(candidateKey = "candidate-1", assessed = true) {
   };
 }
 beforeEach(() => {
+  api.readView.mockImplementation(recruitingReadViewFixture(api));
   Element.prototype.scrollIntoView ??= () => {};
   api.session.data.user.id = "actor-1";
   const request = artifactSourceFixture("{}", "application/json", "artifact-request");
@@ -1607,6 +1615,7 @@ async function mounted(
     | "groupId"
     | "readCache"
     | "readCacheScope"
+    | "workspaceRead"
     | "crmBrowse"
     | "roleConversation"
   > = {},
@@ -1858,7 +1867,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
 );
 
 it("shows a warm scoped pool read-only until current validation and evicts it on denial without restoring late rows", async () => {
-  const cache = { entries: new Map<string, unknown>(), epoch: 0 };
+  const cache = createRecruitingReadCache();
   const scope = JSON.stringify(["actor-1", role.spaceId, "thread-1"]);
   const options = {
     presentation: "workspace" as const,
@@ -1872,7 +1881,7 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
   await mounted("thread-1", undefined, false, undefined, options);
   await cleanup?.();
   cleanup = undefined;
-  cache.entries.set("another-role:workspace", { title: "Other role" });
+  rememberRecruitingRead(cache, "another-role:workspace", { title: "Other role" });
   let finishWorkspace!: (value: unknown) => void;
   let finishRows!: (value: unknown) => void;
   api.getWorkspace.mockReturnValueOnce(
@@ -1900,11 +1909,21 @@ it("shows a warm scoped pool read-only until current validation and evicts it on
   api.getWorkspace.mockRejectedValueOnce(new ORPCError("FORBIDDEN"));
   await view.render("thread-1", 1);
   expect(view.container.querySelector(".hire-table-wrap")).toBeNull();
-  expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
-  expect(cache.entries.has("another-role:workspace")).toBe(true);
+  expect(
+    cache.client
+      .getQueryCache()
+      .getAll()
+      .some(({ queryKey }) => String(queryKey[1]).startsWith(`${scope}:`)),
+  ).toBe(false);
+  expect(Boolean(savedRecruitingRead(cache, "another-role:workspace"))).toBe(true);
   await act(async () => finishRows(page));
   expect(view.container.querySelector(".hire-table-wrap")).toBeNull();
-  expect([...cache.entries.keys()].some((key) => key.startsWith(`${scope}:`))).toBe(false);
+  expect(
+    cache.client
+      .getQueryCache()
+      .getAll()
+      .some(({ queryKey }) => String(queryKey[1]).startsWith(`${scope}:`)),
+  ).toBe(false);
 });
 
 it("preserves an explicit workspace assessment filter when a refreshed pool has no assessments", async () => {
@@ -4389,7 +4408,7 @@ it("persists shortlist with the candidate revision and leaves conflicts visibly 
     }),
   );
   const view = await mounted("thread-1", undefined, true, undefined, {
-    readCache: { entries: new Map(), epoch: 0 },
+    readCache: createRecruitingReadCache(),
     readCacheScope: JSON.stringify(["actor-1", role.spaceId, "thread-1"]),
   });
   await view.click("Evidence");
@@ -8732,7 +8751,7 @@ it("does not display the Contacts pool as a pending Shortlist query and retains 
   const navigation = {
     presentation: "workspace" as const,
     groupId: "group-1",
-    readCache: { entries: new Map<string, unknown>(), epoch: 0 },
+    readCache: createRecruitingReadCache(),
     readCacheScope: JSON.stringify(["actor-1", role.spaceId, "thread-1"]),
   };
   const view = await mounted("thread-1", undefined, false, undefined, {
@@ -9017,3 +9036,40 @@ it.each(["contacts", "shortlist"] as const)(
     expect(view.container.querySelector(".hire-standard-view > .hire-section-header")).toBeNull();
   },
 );
+
+it("uses only the Shell navigation's fresh workspace and waits for its next refresh generation", async () => {
+  const page = candidatePage([
+    { ...candidateFixture("shared-person", false), name: "Shared person" },
+  ]);
+  api.readView.mockImplementation(async (input) => ({
+    kind: input.kind,
+    workspace: { role, revision },
+    data: input.kind === "candidates" ? page : { tasks: [], actions: [], observations: [] },
+  }));
+  api.getWorkspace.mockRejectedValue(new Error("Unexpected duplicate workspace RPC"));
+  const options = {
+    presentation: "workspace" as const,
+    view: "results" as const,
+    workspaceRead: {
+      threadId: "thread-1",
+      refreshSignal: 0,
+      workspace: { role, revision, crmTarget: null },
+    },
+  };
+  const view = await mounted("thread-1", undefined, false, undefined, options);
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+  expect(view.container.textContent).toContain("Shared person");
+  api.readView.mockClear();
+  await view.render("thread-1", 1, false, undefined, {
+    ...options,
+    workspaceRead: { threadId: "thread-1", refreshSignal: 1, workspace: undefined },
+  });
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+  expect(api.readView).not.toHaveBeenCalled();
+  await view.render("thread-1", 1, false, undefined, {
+    ...options,
+    workspaceRead: { ...options.workspaceRead, refreshSignal: 1 },
+  });
+  expect(api.readView).toHaveBeenCalled();
+  expect(api.getWorkspace).not.toHaveBeenCalled();
+});
