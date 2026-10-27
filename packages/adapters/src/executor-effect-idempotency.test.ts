@@ -14,7 +14,11 @@ import {
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
-import { boundDirectApprovalRequest, RecruitingAssessmentValidationError } from "@rakazo/core";
+import {
+  boundDirectApprovalRequest,
+  RecruitingAssessmentValidationError,
+  RecruitingPlaybookValidationError,
+} from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
   toolEffectIdempotencyKey,
@@ -24,6 +28,7 @@ import type { RecruitingRoleToolResult, ThreadEvents } from "@rakazo/db";
 import {
   claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
+  confirmRecruitingBrief,
   IsolationError,
   Prisma,
   prepareNativeRecruitingCandidateDecision,
@@ -103,6 +108,7 @@ vi.mock("./recruiting-tools.js", async (importOriginal) => ({
 }));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof DatabaseModule>()),
+  confirmRecruitingBrief: vi.fn(),
   claimRecruitingResearchAction: vi.fn(),
   claimRecruitingResearchReadEffect: vi.fn(),
   settleUncertainRecruitingResearchAction: vi.fn(),
@@ -1258,6 +1264,42 @@ describe("explicit artifact workspace writes", () => {
     expect(f.sandbox.writeFile).not.toHaveBeenCalled();
     expect(checkpointWorkspace).not.toHaveBeenCalled();
   });
+});
+
+describe("brief validation is independent of calibration timing", () => {
+  it.each([false, true])(
+    "preserves a material validation error with recorded round=%s",
+    async (hasRound) => {
+      const f = fixture("brief-validation-timing");
+      f.thread.activeRecruitingRoleId = "role-1";
+      Object.assign(f.prisma, {
+        recruitingCalibrationRound: {
+          findFirst: vi.fn(async () => (hasRound ? { id: "round-1" } : null)),
+        },
+      });
+      Object.assign(f.prisma.event, { findFirst: vi.fn(async () => null) });
+      vi.mocked(confirmRecruitingBrief).mockRejectedValueOnce(
+        new RecruitingPlaybookValidationError("A material requirement still conflicts"),
+      );
+      f.setCalls([
+        {
+          name: "recruiting_request_approval",
+          args: { stage: "brief", roleId: "role-1", expectedRoleRevision: 1 },
+          executionId: "brief-confirm",
+        },
+      ]);
+      await f.run();
+      expect(confirmRecruitingBrief).toHaveBeenCalledWith(
+        f.prisma,
+        expect.anything(),
+        { threadId: f.thread.id, roleId: "role-1", expectedRevision: 1 },
+        expect.anything(),
+      );
+      expect(f.results).toEqual([{ error: "A material requirement still conflicts" }]);
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.effects).toEqual([]);
+    },
+  );
 });
 
 describe("intake questions follow agent instructions", () => {
