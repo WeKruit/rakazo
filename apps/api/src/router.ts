@@ -240,6 +240,7 @@ import {
   toTicketDto,
   touchGroupUpdatedAt,
   upgradeRecruitingWorkspace,
+  withDatabaseActor,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { deleteAgentSecret, listAgentSecrets, putAgentSecret } from "./agent-secrets.js";
@@ -1021,8 +1022,10 @@ export function createRouter(deps: RouterDeps) {
 
   const authed = os.use(async ({ context, next, path }, input) => {
     if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-    const result = await next({ context: { ...context, actor: context.actor } });
-    return { ...result, output: paginateListOutput(path, input, result.output) };
+    return withDatabaseActor(context.actor, async () => {
+      const result = await next({ context: { ...context, actor: context.actor! } });
+      return { ...result, output: paginateListOutput(path, input, result.output) };
+    });
   });
 
   const boardEnabled = os
@@ -1032,8 +1035,10 @@ export function createRouter(deps: RouterDeps) {
     })
     .use(async ({ context, next, path }, input) => {
       if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-      const result = await next({ context: { ...context, actor: context.actor } });
-      return { ...result, output: paginateListOutput(path, input, result.output) };
+      return withDatabaseActor(context.actor, async () => {
+        const result = await next({ context: { ...context, actor: context.actor! } });
+        return { ...result, output: paginateListOutput(path, input, result.output) };
+      });
     });
   const ticketDeps = {
     prisma: deps.prisma,
