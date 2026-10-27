@@ -4,19 +4,22 @@
 -- Auth/background/migration connections retain their separately authorized role.
 BEGIN;
 -- SECURITY INVOKER preserves the caller's grants. A fixed search_path prevents
--- shadowing and SQL-function inlining; each policy InitPlan evaluates current
+-- shadowing. PL/pgSQL reuses the static query plan, never its result; each
+-- policy InitPlan evaluates current
 -- transaction identity and membership without expanding these joins per parent.
 CREATE OR REPLACE FUNCTION public.rakazo_actor_member() RETURNS boolean
-LANGUAGE sql STABLE SECURITY INVOKER
+LANGUAGE plpgsql STABLE SECURITY INVOKER
 SET search_path = pg_catalog
 AS $membership$
-  SELECT EXISTS (
+BEGIN
+  RETURN EXISTS (
     SELECT 1 FROM public.space_members sm
     JOIN public.spaces s ON s.id=sm."spaceId" AND s."organizationId"=sm."organizationId"
     JOIN public.member m ON m."organizationId"=sm."organizationId" AND m."userId"=sm."userId"
     WHERE sm."userId"=NULLIF(current_setting('app.user_id', true), '')
       AND sm."spaceId"=NULLIF(current_setting('app.space_id', true), '')
   );
+END;
 $membership$;
 ALTER TABLE artifacts ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON artifacts;

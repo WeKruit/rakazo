@@ -141,3 +141,21 @@ The measured endpoint has one business SQL statement. The restricted adapter exe
 Further options require evidence and separate review: reduce policy parent expansion with explicit, integrity-constrained ownership columns on selected child tables; identify genuinely database-only multi-query services that can use one existing native transaction; and verify transaction-pooler behavior in the authorized staging/online environment. Prepared statements were not enabled because compatibility with the actual 6543 transaction pooler has not been verified. No SQL parameter concatenation, session identity reuse, membership cache or SECURITY DEFINER workaround is acceptable. No additional architecture change is justified by selecting one favorable local percentile.
 
 Final post-function API isolation rerun on a new synthetic database: **144 OK, zero leaks/warnings, 98 owner-empty reads still unexercised**. The final DB/API/testkit typechecks pass. No production database, roles, cloud configuration, deployment, real candidate/job, or outbound service was used. Publication remains paused; the implementation branch has no new PR or remote merge.
+
+### Continued diagnosis: static membership query plan
+
+A narrow follow-up changes only the helper's implementation language from SQL to PL/pgSQL with a static `RETURN EXISTS` query. SECURITY INVOKER, STABLE, fixed `pg_catalog` search_path, fully qualified relations and the policy InitPlan calls remain unchanged. PostgreSQL may reuse the static query's plan; **neither membership results nor actor values are cached**. Current settings and membership rows are evaluated on every statement. This is internal server-side function planning, not named client prepared statements or session identity reuse. Existing 12 PostgreSQL safety tests pass, including one-connection actor switching, two-Space membership, all-table revocation and unsafe helper-attribute rejection.
+
+Same diagnostic method, 20 warmups and 200 sequential direct `listSpaceArtifacts` calls:
+
+| Mode / SQL | Calls | Mean ms | p95 ms |
+| --- | ---: | ---: | ---: |
+| Baseline business | 200 | 0.5429 | 0.6350 |
+| RLS BEGIN | 200 | 0.0467 | 0.0702 |
+| RLS SET LOCAL | 200 | 0.0697 | 0.0971 |
+| RLS business | 200 | 0.8169 | 0.9299 |
+| RLS COMMIT | 200 | 0.0634 | 0.0876 |
+
+Total baseline 129.081 ms; RLS 220.614 ms. The prior SQL-helper sample had RLS business mean 1.1078 ms and total 286.181 ms. EXPLAIN planning/execution: baseline 0.237/0.096 ms; RLS 0.444/0.181 ms (prior SQL helper 0.411/0.566 ms). This supports reducing helper execution overhead, not declaring HTTP acceptance. A coordinated six-sample HTTP rerun is pending.
+
+The explicit BEGIN/bound SET LOCAL/business/COMMIT sequence still adds three commands per standalone read. node-postgres processes queued commands after ReadyForQuery; merely submitting four Promises without awaiting is not a supported wire-protocol pipeline and complicates rollback/error safety. No protocol internals, concatenated identity values, dynamic SQL gateway, wider connection lifetime, or permission-result cache was introduced. Removing the remaining commands would require a separate transaction/driver architecture decision and end-to-end error, cancellation and pooler validation.
