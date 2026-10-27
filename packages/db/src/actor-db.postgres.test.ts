@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { actorRlsTables, createActorDb, withDatabaseActor } from "./actor-db.js";
 import { createDb } from "./client.js";
 
@@ -639,6 +639,152 @@ suite("first-batch RLS with a real restricted role", () => {
       ).output,
     ).toEqual([]);
   });
+  it("enqueues bound SET before business SQL on the public checked-out client", async () => {
+    const client = await restricted.pool.connect();
+    const query = vi.spyOn(client, "query");
+    client.release();
+    try {
+      const rows = await run(
+        0,
+        () => restricted.prisma.$queryRaw<Array<{ probe: string; actor: string }>>`
+        SELECT ${"pipelined-probe"}::text AS probe, current_setting('app.user_id') AS actor
+      `,
+      );
+      expect(rows).toEqual([{ probe: "pipelined-probe", actor: actors[0]!.userId }]);
+      const commands = query.mock.calls.map(([config]) => {
+        if (typeof config === "string") return { text: config, values: undefined };
+        if (config && typeof config === "object" && "text" in config) return config;
+        throw new Error("Expected a public pg query config");
+      });
+      expect(commands).toHaveLength(4);
+      expect(commands[0]!.text).toBe("BEGIN");
+      expect(commands[1]!.text).toContain("SELECT set_config('app.user_id', $1, true)");
+      expect(commands[1]!.values).toEqual([actors[0]!.userId, actors[0]!.spaceId]);
+      expect(commands[2]!.text).toContain("SELECT $1::text AS probe");
+      expect(commands[2]!.values).toEqual(["pipelined-probe"]);
+      expect(commands[3]!.text).toBe("COMMIT");
+    } finally {
+      query.mockRestore();
+    }
+  });
+  it("rolls back a successful SQL write when result decoding fails before COMMIT", async () => {
+    const original = await admin.prisma.artifact.findUniqueOrThrow({
+      where: { id: actors[0]!.userId },
+    });
+    await expect(
+      run(
+        0,
+        () => restricted.prisma.$queryRaw`
+      UPDATE artifacts SET name=${"decode-must-rollback"} WHERE id=${original.id}
+      RETURNING point(1, 2) AS unsupported_result
+    `,
+      ),
+    ).rejects.toThrow();
+    expect(
+      (await admin.prisma.artifact.findUniqueOrThrow({ where: { id: original.id } })).name,
+    ).toBe(original.name);
+  });
+  it("drains a failed pipelined identity bind before reusing the connection", async () => {
+    const original = await admin.prisma.artifact.findUniqueOrThrow({
+      where: { id: actors[0]!.userId },
+    });
+    await expect(
+      withDatabaseActor({ ...actors[0]!, userId: "invalid\0actor" }, async () => ({
+        output: await restricted.prisma.artifact.updateMany({ data: { name: "must-not-commit" } }),
+      })),
+    ).rejects.toThrow();
+    expect(
+      (await admin.prisma.artifact.findUniqueOrThrow({ where: { id: original.id } })).name,
+    ).toBe(original.name);
+    expect(
+      await run(1, () => restricted.prisma.artifact.findMany({ select: { id: true } })),
+    ).toEqual([{ id: actors[1]!.userId }]);
+    const cleared = await restricted.pool.query(
+      "SELECT nullif(current_setting('app.user_id', true), '') AS actor",
+    );
+    expect(cleared.rows[0].actor).toBeNull();
+  });
+  it("keeps bound parameters ordered on one pipelined backend across actors", async () => {
+    const client = await restricted.pool.connect();
+    expect(client.pipeline).toBe(true);
+    const pid = (await client.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+    client.release();
+    for (let round = 0; round < 4; round++) {
+      const results = await Promise.all(
+        actors.map((actor, index) =>
+          run(
+            index,
+            () =>
+              restricted.prisma.$queryRaw<
+                Array<{ actor: string; space: string; supplied: string; pid: number }>
+              >`
+          SELECT current_setting('app.user_id') AS actor, current_setting('app.space_id') AS space,
+                 ${`quoted-'value-${round}-${index}`}::text AS supplied, pg_backend_pid() AS pid
+        `,
+          ),
+        ),
+      );
+      for (const [index, rows] of results.entries())
+        expect(rows).toEqual([
+          {
+            actor: actors[index]!.userId,
+            space: actors[index]!.spaceId,
+            supplied: `quoted-'value-${round}-${index}`,
+            pid,
+          },
+        ]);
+    }
+  });
+  for (const stop of ["cancel", "terminate"] as const) {
+    it(`drains pipelined work after backend ${stop} before another actor checks out`, async () => {
+      const connection = await restricted.pool.connect();
+      const pid = (await connection.query("SELECT pg_backend_pid() AS pid")).rows[0].pid;
+      connection.release();
+      // Attach rejection handling immediately, so no rejected queued query can be unhandled.
+      const original = await admin.prisma.artifact.findUniqueOrThrow({
+        where: { id: actors[0]!.userId },
+      });
+      const pending = run(
+        0,
+        () => restricted.prisma.$queryRaw`
+        UPDATE artifacts SET name=${"cancel-must-rollback"} WHERE id=${original.id}
+        RETURNING pg_sleep(10)
+      `,
+      ).then(
+        () => ({ rejected: false }),
+        () => ({ rejected: true }),
+      );
+      let active = false;
+      for (let poll = 0; poll < 100; poll++) {
+        const state = await sql.query(
+          "SELECT state='active' AND query LIKE '%pg_sleep%' AS active FROM pg_stat_activity WHERE pid=$1",
+          [pid],
+        );
+        if (state.rows[0]?.active) {
+          active = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      // The backend id comes only from this suite's own dedicated one-client pool.
+      await sql.query(
+        stop === "cancel" ? "SELECT pg_cancel_backend($1)" : "SELECT pg_terminate_backend($1)",
+        [pid],
+      );
+      expect((await pending).rejected).toBe(true);
+      expect(active).toBe(true);
+      expect(
+        (await admin.prisma.artifact.findUniqueOrThrow({ where: { id: original.id } })).name,
+      ).toBe(original.name);
+      expect(
+        await run(1, () => restricted.prisma.artifact.findMany({ select: { id: true } })),
+      ).toEqual([{ id: actors[1]!.userId }]);
+      const cleared = await restricted.pool.query(
+        "SELECT nullif(current_setting('app.user_id', true), '') AS actor",
+      );
+      expect(cleared.rows[0].actor).toBeNull();
+    });
+  }
   it("rejects a membership function changed to SECURITY DEFINER or IMMUTABLE", async () => {
     const target = new URL(url!);
     target.username = role;

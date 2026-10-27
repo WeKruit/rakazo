@@ -95,7 +95,7 @@ async function bindIdentity(tx: Transaction, actor: Identity) {
 
 /** Restricted-role client: never falls back to the auth/background database identity. */
 export function createActorDb(connectionString: string, options: DbClientOptions = {}) {
-  const pool = createPool(connectionString, options);
+  const pool = createPool(connectionString, { ...options, pipeline: true });
   const base = new PrismaPg(pool);
   const adapter = {
     provider: "postgres" as const,
@@ -145,9 +145,22 @@ export function createActorDb(connectionString: string, options: DbClientOptions
         }
       }
       async function standalone<T>(run: (tx: Transaction) => Promise<T>): Promise<T> {
-        const tx = await startTransaction();
+        const actor = actorIdentity();
+        // BEGIN must complete on the exclusively checked-out native transaction.
+        const tx = await inner.startTransaction();
         try {
-          const result = await run(tx);
+          // Both public adapter calls enqueue synchronously before their first
+          // await in the pinned PrismaPg version. pg's public pipeline sends SET
+          // first, then the parameterized business query, on this same client.
+          // Drain both outcomes before rollback/release; never enqueue COMMIT
+          // until parameter binding and result decoding have both succeeded.
+          const [bound, queried] = await Promise.allSettled([
+            bindIdentity(tx, actor),
+            Promise.resolve().then(() => run(tx)),
+          ]);
+          if (bound.status === "rejected") throw bound.reason;
+          if (queried.status === "rejected") throw queried.reason;
+          const result = queried.value;
           await tx.executeRaw(sql("COMMIT"));
           await tx.commit();
           return result;

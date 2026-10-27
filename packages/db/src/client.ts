@@ -9,6 +9,8 @@ export type Db = PrismaClient;
 export interface DbClientOptions {
   poolMax?: number;
   applicationName?: string;
+  /** Use the driver's public ordered-query pipeline on checked-out clients. */
+  pipeline?: boolean;
 }
 
 const DEFAULT_POOL_MAX = 4;
@@ -28,6 +30,7 @@ export const SESSION_RELEASE_MS = 4_000;
 export function createPool(connectionString: string, options: DbClientOptions = {}): Pool {
   const pool = new Pool({
     connectionString,
+    pipeline: options.pipeline ?? false,
     max: options.poolMax ?? DEFAULT_POOL_MAX,
     // Fail a checkout instead of queueing forever when Postgres is already at
     // max_connections (53300) or the pool is saturated.

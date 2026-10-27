@@ -16,11 +16,16 @@ for (const value of [databaseUrl, actorUrl]) {
     throw new Error("Benchmark requires the dedicated local synthetic RLS database");
   }
 }
+const warmupSetting = process.env.RLS_BENCH_WARMUP_CONCURRENCY ?? "1";
+if (warmupSetting !== "1" && warmupSetting !== "5")
+  throw new Error("Warmup concurrency must be 1 or 5");
+const warmupConcurrency = Number(warmupSetting);
 const dataDir = await mkdtemp(path.join(tmpdir(), "rakazo-rls-bench-"));
 Object.assign(process.env, {
   DATABASE_URL: databaseUrl,
   REALTIME_DATABASE_URL: databaseUrl,
   NODE_ENV: "test",
+  DB_POOL_MAX: "4",
   WAKEUP_DRIVER: "memory",
   SANDBOX_PROVIDER: "fake",
   AGENT_RUNTIME: "scripted",
@@ -94,7 +99,16 @@ try {
         if (!response.ok) throw new Error(`Synthetic RPC failed: ${response.status}`);
         return performance.now() - start;
       };
-      for (let index = 0; index < 20; index++) await read();
+      for (let index = 0; index < 20; index += warmupConcurrency)
+        await Promise.all(Array.from({ length: warmupConcurrency }, read));
+      const warmedSessions = await handles.prisma.$queryRaw<
+        Array<{ application: string; sessions: number }>
+      >`
+        SELECT application_name AS application, count(*)::int AS sessions
+        FROM pg_stat_activity WHERE datname=current_database()
+          AND application_name IN ('rakazo-api', 'rakazo-api-actor')
+        GROUP BY application_name ORDER BY application_name
+      `;
       const timings: number[] = [];
       for (let index = 0; index < 200; index += 5)
         timings.push(...(await Promise.all(Array.from({ length: 5 }, read))));
@@ -106,6 +120,9 @@ try {
         sample: sample + 1,
         mode,
         warmup: 20,
+        warmupConcurrency,
+        queryPoolMax: 4,
+        warmedSessions,
         requests: 200,
         concurrency: 5,
         p50Ms: +timings[99]!.toFixed(2),

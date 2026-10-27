@@ -158,7 +158,7 @@ Same diagnostic method, 20 warmups and 200 sequential direct `listSpaceArtifacts
 
 Total baseline 129.081 ms; RLS 220.614 ms. The prior SQL-helper sample had RLS business mean 1.1078 ms and total 286.181 ms. EXPLAIN planning/execution: baseline 0.237/0.096 ms; RLS 0.444/0.181 ms (prior SQL helper 0.411/0.566 ms). This supports reducing helper execution overhead, not declaring HTTP acceptance. A coordinated six-sample HTTP rerun is pending.
 
-The explicit BEGIN/bound SET LOCAL/business/COMMIT sequence still adds three commands per standalone read. node-postgres processes queued commands after ReadyForQuery; merely submitting four Promises without awaiting is not a supported wire-protocol pipeline and complicates rollback/error safety. No protocol internals, concatenated identity values, dynamic SQL gateway, wider connection lifetime, or permission-result cache was introduced. Removing the remaining commands would require a separate transaction/driver architecture decision and end-to-end error, cancellation and pooler validation.
+The explicit BEGIN/bound SET LOCAL/business/COMMIT sequence still adds three commands per standalone read. The default node-postgres mode waits for ReadyForQuery. The earlier claim that no supported pipeline exists was incorrect: pinned pg 8.23.0 has a public opt-in pipeline mode, evaluated below. No protocol internals, concatenated identity values, dynamic SQL gateway, wider connection lifetime, or permission-result cache was introduced. Removing the remaining commands would require a separate transaction/driver architecture decision and end-to-end error, cancellation and pooler validation.
 
 ### Final static-plan HTTP measurement and remaining cost
 
@@ -177,7 +177,7 @@ Paired p95 changes: **+16.17%, +48.85%, +74.33%**. True pooled 600-request p95 p
 
 A separate concurrency-five diagnostic retained pool max four, matching the configured default rather than increasing connection budget. For 200 calls: baseline pool checkout mean/p95 0.2684/0.5642 ms; RLS 0.3312/1.2461 ms. Baseline business SQL mean/p95 0.7413/0.7377 ms; RLS 0.8736/1.0138 ms. RLS BEGIN/SET/COMMIT each ran 200 times, with means 0.0922/0.1009/0.0982 ms. Total concurrent workload elapsed 62.846 ms baseline versus 97.367 ms RLS. This supports longer checked-out transaction lifetime and queue-tail amplification in addition to remaining policy execution. It is not a replacement for the HTTP result.
 
-No further unsupported architecture change was made. The standalone transaction boundary requires three extra commands with the current supported driver API; increasing pool capacity requires a connection-budget decision, and a protocol pipeline/new transactional gateway requires error/cancellation/pooler validation. Wider transactions around I/O, cross-request permission caching, parameter concatenation, definer privileges, and unverified named prepared statements remain excluded. The safe static-plan improvement is retained because direct SQL execution improved while all isolation tests pass, but **local HTTP target remains unmet; formal online gate remains unmeasured**.
+No further unsupported architecture change was made. The standalone transaction boundary still executes three extra commands; public pipelining can overlap submission as evaluated below; increasing pool capacity requires a connection-budget decision, and a protocol pipeline/new transactional gateway requires error/cancellation/pooler validation. Wider transactions around I/O, cross-request permission caching, parameter concatenation, definer privileges, and unverified named prepared statements remain excluded. The safe static-plan improvement is retained because direct SQL execution improved while all isolation tests pass, but **local HTTP target remains unmet; formal online gate remains unmeasured**.
 
 ## Final integration gates before Draft publication
 
@@ -192,3 +192,35 @@ Publication is authorized for review, but this remains a Draft with the formal o
 ### Publication attempt outcome
 
 The ordinary push of the reviewed implementation branch was rejected by automatic approval before process launch: the reviewer did not recognize trusted end-user authorization for that exact external publication. The push did not execute. No alternative publication path, PR creation or merge was attempted after rejection. The local implementation and validation commits remain available; publication requires a new authorization recognized by the approval boundary. This is separate from the unmet performance acceptance.
+
+
+## Public driver pipeline: bounded follow-up
+
+The pinned `pg@8.23.0` exposes `pipeline: true` in its public client/pool configuration ([documentation](https://node-postgres.com/features/pipelining)). Only the restricted actor pool enables it; system clients keep their existing default. Prisma's native adapter still awaits BEGIN and owns one exclusive transaction client. After BEGIN completes, parameterized transaction-local identity SET is submitted synchronously, then the business query is submitted in a microtask on that same client. Both outcomes settle before rollback or release. COMMIT is deliberately not queued: a successful SQL write may still fail client result decoding, which must roll back. Native callback/batch transactions retain one binding per transaction. No actor interpolation, permission cache, private protocol access, wider pool or request-wide transaction is introduced.
+
+The public query spy proves enqueue order BEGIN → bound SET (actor user/space values) → bound business query → COMMIT. Six new PostgreSQL cases cover that order, server-success/client-decoding-failure rollback, SET failure with queued write, repeated pool-one A/B parameter isolation, real backend cancellation during a write, and backend termination/replacement. Existing membership revocation, all 29 tables, foreign-parent rejection and iterator tests remain. Command: `RLS_TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2_rls pnpm test packages/db/src/actor-db.postgres.test.ts packages/db/src/client.test.ts`: **30 passed (18 PostgreSQL + 12 client), 2.85 s**.
+
+Correct callback/Promise-completion instrumentation, same 20 warmups/200 sequential business queries: baseline business mean 0.509 ms, total 117.953 ms; actor BEGIN/SET/business/COMMIT means 0.0647/0.0920/0.7735/0.0742 ms, total 199.756 ms. SET/business timers overlap and must not be added as exclusive service times. Four SQL commands remain. EXPLAIN actor planning/execution 0.452/0.178 ms. Five membership InitPlans exist; three execute once each (0.027/0.014/0.015 ms), two do not execute. This does not show per-row membership recomputation to eliminate. Cross-policy sharing would need a separately justified design; no cross-statement cache was added.
+
+### Quiet HTTP comparison, both protocols retained
+
+Both runs use the same synthetic fixture, explicit query pool max four, 20 warmups, 200 measured requests per sample, concurrency five and B/R/R/B/B/R. Original serial warmup is retained; supplemental parallel warmup uses concurrency five. Neither migrations nor fixture reset occur between modes. Actual warmed sessions: baseline system four in both protocols; actor mode system four plus actor one with serial warmup, actor four with parallel warmup. Thus partial actor-pool warmup was real, rather than evidence that a larger query pool is necessary. Separate system/actor pools are existing composition, not a claim of equal total connections.
+
+| Protocol | Sample/mode | p50 ms | p95 ms | Max ms | Errors |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Serial | 1 B | 6.72 | 9.63 | 14.81 | 0 |
+| Serial | 2 R | 6.73 | 9.57 | 13.72 | 0 |
+| Serial | 3 R | 6.56 | 9.02 | 11.73 | 0 |
+| Serial | 4 B | 5.78 | 8.10 | 9.73 | 0 |
+| Serial | 5 B | 5.36 | 7.58 | 9.18 | 0 |
+| Serial | 6 R | 6.19 | 8.93 | 11.34 | 0 |
+| Parallel | 1 B | 6.61 | 9.47 | 15.02 | 0 |
+| Parallel | 2 R | 7.05 | 10.95 | 20.35 | 0 |
+| Parallel | 3 R | 6.55 | 8.90 | 11.95 | 0 |
+| Parallel | 4 B | 5.41 | 8.22 | 10.36 | 0 |
+| Parallel | 5 B | 5.20 | 7.99 | 9.74 | 0 |
+| Parallel | 6 R | 6.06 | 8.61 | 12.48 | 0 |
+
+True pooled p95, 600 requests per mode: serial **8.700708 → 9.427667 ms (+8.36%)**, parallel **9.117208 → 9.345500 ms (+2.50%)**. These local pooled comparisons pass <10%; paired changes remain serial -0.62/+11.36/+17.81%, parallel +15.63/+8.27/+7.76%. This is not stable all-pair acceptance or the formal online gate. Protocols are not pooled together. All earlier failures remain above.
+
+Reproduce each protocol separately with `RLS_BENCH_WARMUP_CONCURRENCY=1` or `5`, `RLS_BENCH_DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2_api_rls`, `RLS_BENCH_ACTOR_DATABASE_URL=postgres://rakazo_a2_api_actor@127.0.0.1:55434/rakazo_a2_api_rls`, then `pnpm exec tsx packages/testkit/src/cli/rls-benchmark.ts`. Checked-in evidence files retain complete measured durations and summaries, without HTTP identity logs. Production transaction-pooler pipeline behavior and online p95 remain untested; activation remains opt-in, and publication remains rejected.
