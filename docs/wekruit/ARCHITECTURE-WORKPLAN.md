@@ -140,7 +140,7 @@ C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret �
 - **验收（代码检查）：** 新增测试：两个 `PiOAuthLogins` 实例共用一个数据库，在 A 上开始登录，在 B 上粘贴授权码并完成，凭证只保存一次。
 
 - **实现与认领：** Adam 认领已先提交并推送（`995ec0ede`）；实现 `dcf40ab3b`、旧收据替换修正 `48eccac6c`，Draft [#274](https://github.com/WeKruit/rakazo/pull/274) base 为 `claude/project-thread-f1cbzk`。保留原 Pi 流程，新增持久化协调器和 `model_oauth_sessions` 加法迁移；发起进程自动保存凭证，其他进程只读结果收据。授权码使用现有 SecretStore 的 ephemeral 加密，NOTIFY 只含不透明会话 ID，复用现有 realtime LISTEN；丢失通知由仅针对本进程活跃登录的轮询补查。
-- **本地实测（Node 24.19.0 / pnpm 9.15.0 / PostgreSQL 16）：** 10 个新 PostgreSQL 场景和 108 个既有 OAuth 测试，共 118/118 通过。A 开始、B 提交并完成；保存回调 1 次、凭证行 1 行；重复和并发 finish 不重复保存。覆盖用户/空间隔离、远程取消和保存竞态、provider 全空间取消、设备码自动保存、过期、替换、丢失 NOTIFY、owner 丢失时不重放不确定写入、错误脱敏。API 1,321 通过 / 50 跳过；adapters 全包当次 5,125 通过 / 52 跳过（包含当时 8 个 C4 DB 场景，已另行实跑；之后另加 2 场景并纳入上述 118 个实跑）。db/adapters/api 类型检查、API bundle、Biome 和 diff 检查通过。
+- **本地实测（Node 24.19.0 / pnpm 9.15.0 / PostgreSQL 16）：** 12 个新 PostgreSQL 场景和 108 个既有 OAuth 测试，共 120/120 通过。A 开始、B 提交并完成；保存回调 1 次、凭证行 1 行；重复和并发 finish 不重复保存。覆盖用户/空间隔离、远程取消和保存竞态、provider 全空间取消、设备码自动保存、过期、替换、丢失 NOTIFY、owner 丢失时不重放不确定写入、错误脱敏；America/Chicago 和 Asia/Tokyo 连接下未过期会话成功、已过期会话拒绝。所有 SQL 时间比较和初始过期时间以 UTC 计算；持久化结果经现有 ModelCredentialSchema 过滤，只保留公开模型 DTO，不保存 access/refresh 或多余 credential 字段。API 1,321 通过 / 50 跳过；adapters 全包当次 5,125 通过 / 52 跳过（包含当时 8 个 C4 DB 场景，已另行实跑；之后另加 2 场景并纳入上述 118 个实跑）。db/adapters/api 类型检查、API bundle、Biome 和 diff 检查通过。
 - **连接预算：** 没有创建新连接池或 LISTEN 客户端；查询走现有事务池，通知复用现有 listener。保持 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432 和现有 API 1 + worker 5 = 6 会话预算。预算未因本项改动，线上连接数还没测。
 - **限制：** 仅本地合成用户和凭证，未部署、未变更云配置/Secret/资源/CI。实际多容器路由、真实 OAuth 提供方、线上会话数、硬杀进程后的恢复还没测。owner 死亡不会重跑不确定保存，也不会接管 pi 库登录流程；会话到期后用户重新登录，成功收据在有效期内可从任何实例读取。迁移尚未在线上执行。既有跳过场景未验证。
 

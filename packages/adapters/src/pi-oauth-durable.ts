@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { RealtimeFanout, SecretStore } from "@rakazo/adapter-kit";
+import { ModelCredentialSchema } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 import type { PiOAuthConnected, PiOAuthFinish } from "./pi-oauth.js";
 import { PiOAuthLogins } from "./pi-oauth.js";
@@ -63,11 +64,11 @@ export class DurablePiOAuthLogins {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`model-oauth:${input.userId}:${input.provider}`}, 0))`;
       const saving = await tx.$queryRaw<
         Row[]
-      >`SELECT * FROM model_oauth_sessions WHERE "userId" = ${input.userId} AND provider = ${input.provider} AND state = 'saving' AND "expiresAt" > now()`;
+      >`SELECT * FROM model_oauth_sessions WHERE "userId" = ${input.userId} AND provider = ${input.provider} AND state = 'saving' AND "expiresAt" > (now() AT TIME ZONE 'UTC')`;
       if (saving.length) throw new Error("Sign-in is finishing. Try again.");
       await tx.$executeRaw`UPDATE model_oauth_sessions SET state = 'cancelled', "codeCiphertext" = NULL WHERE "userId" = ${input.userId} AND "spaceId" = ${input.spaceId} AND provider = ${input.provider} AND state IN ('pending', 'starting', 'connected')`;
-      await tx.$executeRaw`DELETE FROM model_oauth_sessions WHERE "expiresAt" < now()`;
-      await tx.$executeRaw`INSERT INTO model_oauth_sessions (id, "userId", "spaceId", provider, "ownerId", state, "expiresAt") VALUES (${id}, ${input.userId}, ${input.spaceId}, ${input.provider}, ${this.ownerId}, 'starting', now() + interval '15 minutes')`;
+      await tx.$executeRaw`DELETE FROM model_oauth_sessions WHERE "expiresAt" < (now() AT TIME ZONE 'UTC')`;
+      await tx.$executeRaw`INSERT INTO model_oauth_sessions (id, "userId", "spaceId", provider, "ownerId", state, "expiresAt") VALUES (${id}, ${input.userId}, ${input.spaceId}, ${input.provider}, ${this.ownerId}, 'starting', (now() AT TIME ZONE 'UTC') + interval '15 minutes')`;
     });
     try {
       const started = await this.local.begin(input);
@@ -95,7 +96,7 @@ export class DurablePiOAuthLogins {
   private async row(id: string, actor: Actor) {
     const rows = await this.prisma.$queryRaw<
       Row[]
-    >`SELECT * FROM model_oauth_sessions WHERE id = ${id} AND "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId} AND "expiresAt" > now()`;
+    >`SELECT * FROM model_oauth_sessions WHERE id = ${id} AND "userId" = ${actor.userId} AND "spaceId" = ${actor.spaceId} AND "expiresAt" > (now() AT TIME ZONE 'UTC')`;
     return rows[0];
   }
 
@@ -147,7 +148,7 @@ export class DurablePiOAuthLogins {
     for (let attempt = 0; attempt < 100; attempt++) {
       const rows = await this.prisma.$queryRaw<
         Row[]
-      >`SELECT * FROM model_oauth_sessions WHERE "userId" = ${actor.userId} AND (${actor.provider ?? null}::text IS NULL OR provider = ${actor.provider ?? null}) AND state = 'saving' AND "expiresAt" > now()`;
+      >`SELECT * FROM model_oauth_sessions WHERE "userId" = ${actor.userId} AND (${actor.provider ?? null}::text IS NULL OR provider = ${actor.provider ?? null}) AND state = 'saving' AND "expiresAt" > (now() AT TIME ZONE 'UTC')`;
       if (!rows.length) return;
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
@@ -179,7 +180,7 @@ export class DurablePiOAuthLogins {
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`model-oauth:${input.userId}:${input.provider}`}, 0))`;
       const saving = await tx.$queryRaw<
         Row[]
-      >`SELECT * FROM model_oauth_sessions WHERE "userId" = ${input.userId} AND provider = ${input.provider} AND state = 'saving' AND "expiresAt" > now()`;
+      >`SELECT * FROM model_oauth_sessions WHERE "userId" = ${input.userId} AND provider = ${input.provider} AND state = 'saving' AND "expiresAt" > (now() AT TIME ZONE 'UTC')`;
       if (saving.length) throw new Error("Sign-in is finishing. Try again.");
       await tx.$executeRaw`UPDATE model_oauth_sessions SET state = 'cancelled', "codeCiphertext" = NULL, result = NULL WHERE "userId" = ${input.userId} AND provider = ${input.provider}`;
     });
@@ -218,7 +219,7 @@ export class DurablePiOAuthLogins {
           }
           const claimed = await this.prisma.$transaction(async (tx) => {
             await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtextextended(${`model-oauth:${session.actor.userId}:${row.provider}`}, 0))`;
-            return tx.$executeRaw`UPDATE model_oauth_sessions SET state = 'saving', "codeCiphertext" = NULL WHERE id = ${id} AND "ownerId" = ${this.ownerId} AND state = 'pending' AND "expiresAt" > now()`;
+            return tx.$executeRaw`UPDATE model_oauth_sessions SET state = 'saving', "codeCiphertext" = NULL WHERE id = ${id} AND "ownerId" = ${this.ownerId} AND state = 'pending' AND "expiresAt" > (now() AT TIME ZONE 'UTC')`;
           });
           if (!claimed) return;
           // The committed saving claim is never replayed: owner loss must not duplicate an uncertain write.
@@ -230,7 +231,7 @@ export class DurablePiOAuthLogins {
           );
           if (saved.status !== "connected") throw new Error(FAILED);
           await this.prisma
-            .$executeRaw`UPDATE model_oauth_sessions SET state = 'connected', result = ${JSON.stringify(saved.value)} WHERE id = ${id} AND "ownerId" = ${this.ownerId} AND state = 'saving' AND "expiresAt" > now()`;
+            .$executeRaw`UPDATE model_oauth_sessions SET state = 'connected', result = ${JSON.stringify(ModelCredentialSchema.parse(saved.value))} WHERE id = ${id} AND "ownerId" = ${this.ownerId} AND state = 'saving' AND "expiresAt" > (now() AT TIME ZONE 'UTC')`;
           this.owned.delete(id);
         } catch {
           await this.fail(id).catch(() => undefined);

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AuthInteraction } from "@earendil-works/pi-ai";
 import { createDb } from "@rakazo/db";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { modelCredentialDto } from "./model-connect.js";
 import { ANTHROPIC_OAUTH_PROVIDER, PiOAuthLogins } from "./pi-oauth.js";
 import { DurablePiOAuthLogins } from "./pi-oauth-durable.js";
 import { PostgresRealtimeFanout } from "./realtime.js";
@@ -32,8 +33,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
       await d.pool.end();
     }
   });
-  async function fixture(login?: ConstructorParameters<typeof PiOAuthLogins>[0]) {
-    const instance = createDb(process.env.DATABASE_URL!, { poolMax: 2 });
+  async function fixture(
+    login?: ConstructorParameters<typeof PiOAuthLogins>[0],
+    timezone?: string,
+  ) {
+    const url = new URL(process.env.DATABASE_URL!);
+    if (timezone) url.searchParams.set("options", `-c timezone=${timezone}`);
+    const instance = createDb(url.toString(), { poolMax: 2 });
     databases.push(instance);
     const realtime = new PostgresRealtimeFanout({
       connectionString: process.env.DATABASE_URL!,
@@ -86,7 +92,21 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
           label: "Synthetic OAuth",
         },
       });
-      return { id: credential.id, provider: credential.provider };
+      return {
+        ...modelCredentialDto(
+          { ...credential, isDefault: true },
+          JSON.stringify({
+            kind: "oauth",
+            credential: {
+              type: "oauth",
+              access: "synthetic-access",
+              refresh: "synthetic-refresh",
+              expires: Date.now() + 60000,
+            },
+          }),
+        ),
+        credential: { access: "must-not-be-in-receipt" },
+      };
     });
     const begun = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     expect(await b.service.complete(begun.loginId, owner)).toEqual({ status: "pending" });
@@ -108,6 +128,9 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     ]);
     expect(first).toEqual(second);
     expect(first.status).toBe("connected");
+    expect(JSON.stringify(first)).not.toContain("synthetic-access");
+    expect(JSON.stringify(first)).not.toContain("must-not-be-in-receipt");
+    expect(JSON.stringify(first)).not.toContain("refresh");
     expect(forbiddenPersist).not.toHaveBeenCalled();
     expect(persist).toHaveBeenCalledTimes(1);
     expect(await db.prisma.userModelCredential.count({ where: { userId: owner.userId } })).toBe(1);
@@ -142,7 +165,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     const a = await fixture(login);
     const b = await fixture(login);
     b.publish.mockRejectedValue(new Error("notification unavailable"));
-    const persist = vi.fn(async () => ({ id: "synthetic-result" }));
+    const persist = vi.fn(async () => ({
+      id: "synthetic-result",
+      provider: "synthetic",
+      label: "Synthetic",
+      hasKey: false,
+      isDefault: true,
+    }));
     const first = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     const second = await b.service.begin({
       userId: owner.userId,
@@ -165,7 +194,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     const owner = await actor();
     const a = await fixture(login);
     const b = await fixture(login);
-    const persist = vi.fn(async () => ({ id: "synthetic-result" }));
+    const persist = vi.fn(async () => ({
+      id: "synthetic-result",
+      provider: "synthetic",
+      label: "Synthetic",
+      hasKey: false,
+      isDefault: true,
+    }));
     const first = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     const replacement = await b.service.begin({
       ...owner,
@@ -197,7 +232,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
       };
     });
     const b = await fixture(login);
-    const persist = vi.fn(async () => ({ id: "device-result" }));
+    const persist = vi.fn(async () => ({
+      id: "device-result",
+      provider: "synthetic",
+      label: "Synthetic",
+      hasKey: false,
+      isDefault: true,
+    }));
     const begun = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     await vi.waitFor(
       async () => expect((await b.service.complete(begun.loginId, owner)).status).toBe("connected"),
@@ -218,7 +259,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     });
     const persist = vi.fn(async () => {
       await gate;
-      return { id: "saved" };
+      return {
+        id: "saved",
+        provider: "synthetic",
+        label: "Synthetic",
+        hasKey: false,
+        isDefault: true,
+      };
     });
     const begun = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     await b.service.submit(begun.loginId, owner, "synthetic-code");
@@ -241,7 +288,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     const owner = await actor();
     const a = await fixture(login);
     const b = await fixture(login);
-    const persist = vi.fn(async () => ({ id: "expired" }));
+    const persist = vi.fn(async () => ({
+      id: "expired",
+      provider: "synthetic",
+      label: "Synthetic",
+      hasKey: false,
+      isDefault: true,
+    }));
     const begun = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     await db.prisma.modelOAuthSession.update({
       where: { id: begun.loginId },
@@ -264,7 +317,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     const other = await actor();
     const a = await fixture(login);
     const b = await fixture(login);
-    const persist = vi.fn(async () => ({ id: "unused" }));
+    const persist = vi.fn(async () => ({
+      id: "unused",
+      provider: "synthetic",
+      label: "Synthetic",
+      hasKey: false,
+      isDefault: true,
+    }));
     const first = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     const second = await b.service.begin({
       userId: owner.userId,
@@ -286,7 +345,13 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     const owner = await actor();
     const a = await fixture(login);
     const b = await fixture(login);
-    const persist = vi.fn(async () => ({ id: "not-replayed" }));
+    const persist = vi.fn(async () => ({
+      id: "not-replayed",
+      provider: "synthetic",
+      label: "Synthetic",
+      hasKey: false,
+      isDefault: true,
+    }));
     const begun = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
     await db.prisma.modelOAuthSession.update({
       where: { id: begun.loginId },
@@ -329,4 +394,46 @@ describePostgres("durable model OAuth (PostgreSQL)", () => {
     expect(row.codeCiphertext).toBeNull();
     expect(persist).toHaveBeenCalledTimes(1);
   });
+  it.each(["America/Chicago", "Asia/Tokyo"])(
+    "uses UTC expiry under database timezone %s",
+    async (timezone) => {
+      const owner = await actor();
+      const a = await fixture(login, timezone);
+      const b = await fixture(login, timezone);
+      const persist = vi.fn(async () => ({
+        id: "timezone-result",
+        provider: "synthetic",
+        label: "Synthetic",
+        hasKey: false,
+        isDefault: true,
+      }));
+      const live = await a.service.begin({ ...owner, provider: ANTHROPIC_OAUTH_PROVIDER, persist });
+      expect((await b.service.complete(live.loginId, owner)).status).toBe("pending");
+      const record = await db.prisma.modelOAuthSession.findUniqueOrThrow({
+        where: { id: live.loginId },
+      });
+      expect(record.expiresAt.getTime() - Date.now()).toBeGreaterThan(14 * 60 * 1000);
+      await b.service.submit(live.loginId, owner, "synthetic-code");
+      await vi.waitFor(
+        async () =>
+          expect((await b.service.complete(live.loginId, owner)).status).toBe("connected"),
+        { timeout: 5000 },
+      );
+      const expired = await a.service.begin({
+        ...owner,
+        provider: ANTHROPIC_OAUTH_PROVIDER,
+        persist,
+      });
+      await db.prisma.modelOAuthSession.update({
+        where: { id: expired.loginId },
+        data: { expiresAt: new Date(Date.now() - 60_000) },
+      });
+      expect((await b.service.complete(expired.loginId, owner)).status).toBe("error");
+      await expect(b.service.submit(expired.loginId, owner, "synthetic-code")).rejects.toThrow(
+        "not found",
+      );
+      expect((await b.service.finish(expired.loginId, owner, persist)).status).toBe("error");
+      expect(persist).toHaveBeenCalledTimes(1);
+    },
+  );
 });
