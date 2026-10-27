@@ -160,3 +160,21 @@ it("shows a scoped skeleton then mounts a deferred panel without removing the sh
   expect(container.querySelector('[aria-busy="true"]')).toBeNull();
   expect(container.querySelector("input")?.value).toBe("draft");
 });
+
+it("keeps the current localized progress visible while a panel chunk is still pending", async () => {
+  type Props = { label: string };
+  let loaded!: (component: (props: Props) => ReactNode) => void;
+  const Progress = lazyPanel<Props>(
+    () =>
+      new Promise((resolve) => {
+        loaded = resolve;
+      }),
+    ({ label }) => <p role="status">{label}</p>,
+  );
+  await renderInShell(<Progress label="正在启动…" />);
+  expect(container.querySelector('[role="status"]')?.textContent).toBe("正在启动…");
+  await renderInShell(<Progress label="正在重试…" />);
+  expect(container.querySelector('[role="status"]')?.textContent).toBe("正在重试…");
+  await act(async () => loaded(({ label }) => <p data-testid="loaded-progress">{label}</p>));
+  expect(container.querySelector('[data-testid="loaded-progress"]')?.textContent).toBe("正在重试…");
+});

@@ -31,17 +31,22 @@ export function SectionLoadFailed() {
 }
 
 /** A panel keeps its own loading/error boundary so a cold chunk cannot blank the shell. */
-export function lazyPanel<Props extends object>(load: () => Promise<ComponentType<Props>>) {
+export function lazyPanel<Props extends object>(
+  load: () => Promise<ComponentType<Props>>,
+  pending?: (props: Props) => ReactNode,
+) {
   const Panel = lazy(() => load().then((component) => ({ default: component })));
   return function LazyPanel(props: Props) {
     return (
       <ErrorBoundary fallback={<SectionLoadFailed />}>
         <Suspense
           fallback={
-            <div aria-busy="true" className="space-y-3 p-4">
-              <Skeleton className="h-5 w-2/3" />
-              <Skeleton className="h-24 w-full" />
-            </div>
+            pending?.(props) ?? (
+              <div aria-busy="true" className="space-y-3 p-4">
+                <Skeleton className="h-5 w-2/3" />
+                <Skeleton className="h-24 w-full" />
+              </div>
+            )
           }
         >
           <Panel {...props} />

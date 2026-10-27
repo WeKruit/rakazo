@@ -32,7 +32,20 @@ import { LoadingState, Shimmer } from "../../components/ai/primitives";
 import { VoiceChatCard } from "../../components/call/VoiceChatCard";
 import { lazyPanel } from "../../components/ErrorBoundary";
 
-const LiveWork = lazyPanel(() => import("../../components/LiveWork").then((m) => m.LiveWork));
+const LiveWork = lazyPanel(
+  () => import("../../components/LiveWork").then((m) => m.LiveWork),
+  ({ live, label }) =>
+    live ? (
+      <LoadingState
+        label={label}
+        indicator={
+          <span aria-hidden>
+            <Shimmer>{label}</Shimmer>
+          </span>
+        }
+      />
+    ) : undefined,
+);
 
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { quoteDraftForSelection } from "../../lib/quote-selection";
