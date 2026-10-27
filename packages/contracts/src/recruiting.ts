@@ -1,9 +1,13 @@
+import { ListRecruitingCandidatesInput } from "./recruiting-candidate-filters.js";
+import { RecruitingId, VerdictSchema } from "./recruiting-identifiers.js";
+
+export * from "./recruiting-candidate-filters.js";
+export * from "./recruiting-identifiers.js";
+
 import * as z from "zod";
 import { ArtifactJsonStringPathSchema } from "./builtin-tools.js";
 import { Id, IsoDate } from "./ids.js";
 import { RecruitingCrmCandidateSyncSchema, RecruitingCrmTargetSchema } from "./recruiting-crm.js";
-
-export const RecruitingId = Id.refine((value) => value.trim().length > 0, "ID must not be blank");
 
 export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -24,9 +28,6 @@ export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput
 
 const Text = z.string().trim().min(1);
 const Revision = z.number().int().positive();
-
-export const VerdictSchema = z.enum(["met", "unmet", "unknown"]);
-export type Verdict = z.infer<typeof VerdictSchema>;
 
 /** artifactId is the native Artifact row for one exact version, never a family/name lookup. */
 export const RecruitingArtifactRefSchema = z
@@ -1273,19 +1274,6 @@ export const RecruitingAssessmentToolInputSchema = z.discriminatedUnion("operati
 ]);
 export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentToolInputSchema>;
 
-export const ListRecruitingCandidatesInput = z.strictObject({
-  roleId: RecruitingId,
-  cursor: Text.optional(),
-  limit: z.number().int().min(1).max(200).optional(),
-  query: z.string().max(240).optional(),
-  assessmentState: z.enum(["unassessed", "current", "outdated"]).optional(),
-  verdict: VerdictSchema.optional(),
-  shortlisted: z.boolean().optional(),
-  actionId: RecruitingId.optional(),
-  sourceEffectId: RecruitingId.optional(),
-  sort: z.enum(["name", "recent", "rank", "tier", "score"]).optional(),
-});
-export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
 /** One display read followed by a fresh thread binding check; not a serializable DB snapshot. */
 export const ReadRecruitingViewInput = z.discriminatedUnion("kind", [
   z.strictObject({
