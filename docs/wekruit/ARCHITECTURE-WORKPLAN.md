@@ -24,7 +24,7 @@
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 本地验收通过，待独立 PR 发布/合并 | Adam |
-| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息待做） | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息及旧结果视图后续已本地验收，待串行集成） | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
 | F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
 | E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
@@ -445,3 +445,8 @@ pnpm --filter @rakazo/worker --filter @rakazo/adapters check
 ```
 
 结果：7 个文件、85 个测试通过；两个包类型检查通过。C3 在额外真实本地 PostgreSQL 测试发现时区回归，已单独通过 #272 修复并列出35项实测，不把此前漏测说成已验证。
+
+
+### D3 独立后续本地验收
+
+基于 D4 `e0eb80130b7c64b5c3cb55ff23925dd1c071678b` 移植消息窗口与旧结果视图窗口；仅本地提交，尚未发布/合并。没有带入 D1 后续 lazyLiveWork/windowinglazy 或 D2 缓存改动。完整命令与范围见 [D3-INDEPENDENT-FOLLOWUP.md](D3-INDEPENDENT-FOLLOWUP.md)。Web 类型检查、1,656 项单测、生产构建通过；Chromium 三项合成浏览器测试通过。1,000 消息首屏 DOM 1,000→17，滚动最大 1,030→24（含自动加载 30 条旧消息）；候选目录最大 19 行/36 卡片，滚动无长任务。整项保持待集成，线上和人工辅助技术检查还没测。
