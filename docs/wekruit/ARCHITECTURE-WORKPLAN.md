@@ -11,7 +11,7 @@
 | # | 方向 | 项目 | 状态 | 负责 |
 |---|---|---|---|---|
 | A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已有上线记录（#259）；50 并发验收未测 | — |
-| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 未完成：本地审计已做；实现待做，线上角色/配置和 p95 验收受限 | Adam |
+| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 招聘首批隔离通过；本地性能未稳定达标，线上门禁未测，整体未完成 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
 | A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
 | B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本分支；本地回归通过，线上未测 | — |
@@ -19,8 +19,8 @@
 | C1 | 多容器 | 附件放对象存储 | 代码已合并（#260）；存储配置阻塞 | — |
 | C2 | 多容器 | 电脑工作目录放对象存储 | 代码已合并（#262）；存储配置阻塞 | — |
 | C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
-| C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 进行中 | Adam |
-| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 阻塞（共享存储配置、C4 与部署授权） | |
+| C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，线上未测） | Adam |
+| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | Adam 已认领；本地实现进行中，线上部署仍禁止 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 本地验收通过，待独立 PR 发布/合并 | Adam |
@@ -52,9 +52,9 @@
 - **本地审计（2026-10-27，认领 `7fbaf515e`）：** 在全新、仅含合成数据的本地 PostgreSQL 16 数据库重放现有迁移，得到 92 张应用表、0 张启用 RLS、0 张 FORCE RLS、0 条 policy。以本地 fixture 的 superuser/BYPASSRLS 连接执行事务内 `set_config('app.user_id', synthetic_user_id, true)` 后，直接查询另一个合成账号的附件和招聘岗位仍分别返回 5 行和 1 行，**不满足漏过滤条件必须 0 行的验收**。这不是线上角色权限检查，也不证明生产账号可绕过应用层。
 - **现有隔离基线：** 运行原 `infra/acceptance/account-isolation.mjs`，由原 testkit harness 启动本地 API、scripted runtime、fake sandbox 和 emulated email；只把 Docker 数据库启动替换为独立本地 PostgreSQL。报告为 `isolated`，143 项 `ok`、0 leak、0 warning；另有 99 项因测试副本缺少对应数据未触达。不能把这个结果写成历史 268 项全过，也不能当作新增 RLS 验收通过。`pnpm --filter @rakazo/db check` 通过（包含 cross-package tests 类型检查）。
 - **真实数据库回归未全过：** 在未修改产品代码的 `e6b8446de` 上，`VERIFY_DATABASE=1` 的 recruiting 与 space-membership PostgreSQL 测试为 271 通过、12 失败；只把本地数据库默认时区设为 UTC 并重连后仍是 271/12。失败涉及 native source/role recovery、排序、calibration 和候选页可见性；不能把这些已有失败归因于尚未实现的 RLS，也不能忽略为已通过。数据库回归门禁仍未满足。
-- **尚未实现，非权限阻塞：** `createDb` 返回共享 Prisma client；`createApp` 把它传给 auth、RPC 和后台回调，RPC context 有 actor 但没有绑定数据库事务身份。`recruiting.ts` 当前有 70 处 `$transaction` 调用，不能通过给整个 RPC 包一层长事务安全替代。还需明确并实现按调用传递的用户数据库 client、嵌套事务复用、流式订阅与后台操作的生命周期边界，以及消息通过 thread 归属访问的策略；然后加入非 superuser/非 BYPASSRLS 测试、漏条件 0 行测试、提交/回滚后身份不残留测试和全量隔离回归。没有加入未接线 helper、没有启用会阻断现有身份的 RLS 迁移。
+- **首次审计时的实现缺口（后续首批实现见下）：** `createDb` 返回共享 Prisma client；`createApp` 把它传给 auth、RPC 和后台回调，RPC context 有 actor 但没有绑定数据库事务身份。`recruiting.ts` 当前有 70 处 `$transaction` 调用，不能通过给整个 RPC 包一层长事务安全替代。还需明确并实现按调用传递的用户数据库 client、嵌套事务复用、流式订阅与后台操作的生命周期边界，以及消息通过 thread 归属访问的策略；然后加入非 superuser/非 BYPASSRLS 测试、漏条件 0 行测试、提交/回滚后身份不残留测试和全量隔离回归。没有加入未接线 helper、没有启用会阻断现有身份的 RLS 迁移。
 - **确切权限阻塞：** 生产 API/worker/迁移角色分离、非 BYPASSRLS 运行身份和对应连接凭据的配置，需要数据库角色/授权及云配置变更；当前禁止这些操作，也禁止部署，所以没有尝试这些写入，状态为**待授权、未执行**，不是工具拒绝或结果不明。线上开启策略前后 RPC p95 <10% 的测量同样待部署授权。不能仅以本地 fixture 的角色配置替代生产身份验证。
-- **连接预算：** 此审计未改应用、池或角色；生产约束仍是 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432，每容器 session 连接不超过 6。后续身份实现须使用事务内 `SET LOCAL`/`set_config(..., true)`，不能新增每用户常驻连接或把 SSE 生命周期变成长数据库事务。当前没有声称该后续实现已验证。
+- **连接预算：** 此审计未改应用、池或角色；生产约束仍是 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432，每容器 session 连接不超过 6。后续身份实现须使用事务内 `SET LOCAL`/`set_config(..., true)`，不能新增每用户常驻连接或把 SSE 生命周期变成长数据库事务。首批实现的本地验证见下，不替代生产池实测。
 
 A2 本地审计复现（全新合成数据库，不能替换为生产 URL）：
 
@@ -92,6 +92,33 @@ ROLLBACK;
 SQL
 ```
 
+
+### A2 首批实现（默认关闭，尚未上线）
+
+- 新增独立受限角色的 `ACTOR_DATABASE_URL`，仅用于已认证 RPC 的 Prisma、events 和 memory composition；auth、webhook、worker 和迁移继续使用原有明确的系统身份。受保护 client 缺 actor 时直接报错，绝不退回系统 client。启动拒绝 superuser、BYPASSRLS、受保护表 owner/owner 成员及附加 permissive policy。
+- 通过 Prisma 原生 driver-adapter 边界在每个短查询事务或原生 batch/callback 事务中 `set_config(..., true)` 绑定 user/space；事务提交/回滚恢复身份，异步迭代器每次拉取重新绑定同一 actor，不为整个 SSE 持有事务。RPC 使用已有原语，没有第二套业务服务。
+- 首批策略明确覆盖 `artifacts`、`messages`、`recruiting_roles`；用户、Space 和当前 membership 都须匹配。脚本 `packages/db/prisma/rls/first-batch.sql` 只显式执行，不混入自动迁移。其他用户数据表仍待分批策略覆盖；不把这三张表的验收当成全部 92 张表的数据库级隔离。
+- 本地真实 PostgreSQL：新增 6 项通过，覆盖省略所有应用层 owner 条件仍不见他人行、跨用户写入拒绝、membership 撤销、缺 actor 拒绝、权限过大角色/额外宽松策略拒绝、native batch/callback 事务回滚后不残留身份，以及同一连接上并发 actor 和延后消费流的隔离。每个 actor client 测试池只有 1 条连接，流等待期间连接处于 idle。
+- 启用该路径后的原 API synthetic isolation：143 项 OK、0 leak、0 warning、99 项未触达，与关闭时相同。db/api/testkit 类型检查通过；db 单测 1,216 通过 / 362 跳过；API 单测 1,322 通过 / 50 跳过。上述历史真实数据库 12 个回归失败仍需集成修复后复验，未被此处掩盖。
+- 可复现本地 artifact RPC benchmark：同一个合成数据库与账号，先预热 20 次，再每种配置请求 200 次，并发 5；关闭时 p50/p95/max = 6.84/11.71/15.04 ms，开启后 = 7.45/12.06/20.50 ms，错误均为 0，p95 增幅 **2.99%**。仅为 loopback 本地测量，不是线上 p95 <10% 验收。
+- 池影响：默认不开启时无变化；启用时新增受限身份的 transaction-pooler pool（上限同 `DB_POOL_MAX`），API 最大 transaction checkout 客户端数从 N 增至 2N。生产 `ACTOR_DATABASE_URL` 强制 6543；原 `DATABASE_URL` 6543、`REALTIME_DATABASE_URL` 5432 不变，不新增 LISTEN/session pool，每容器原 6 条 session 预算不变。两个 API pool 都参与退出清理。实际生产后端并发占用和连接等待还没测。
+- 完整首批配置与命令见 [A2-RLS-PILOT.md](./A2-RLS-PILOT.md)。生产角色、grants、凭据、策略启用和发布均未执行；这些依然需要当前范围之外的授权。
+
+- **后续本地策略批次（未发布）：** 扩至 6 表，新增岗位版本、候选人选择、校准轮次；组织成员撤销与跨父记录写入增加真实 PG 验证，8/8 通过；db/api/testkit 类型检查通过。全部 92 表已分类，86 表仍待实现和各自验收，见 [A2 覆盖清单](A2-RLS-COVERAGE.md)。六表 API 隔离复测 143 OK、0 leak/warning、99 owner-empty 未触达；原三表延迟数字不代表此扩展批次复测；A2 整体仍未完成。远端 push/PR/merge 按父线程通知暂停，未重试。
+
+- **招聘首批完整边界（本地、未发布）：** 全部 22 张 recruiting 表及消息/附件/线程/任务/运行/事件/回执依赖，共 29 表；11/11 真实 PostgreSQL 测试通过，每表双账号非空、漏过滤无外账号数据、合法 own 写入、15 类跨父关联 RLS 拒绝、双 Space 成员及组织撤销。增强 API fixture 为 144 OK、0 leak/warning、98 owner-empty 未触达；db/api/testkit 类型检查通过。其他 63 表属于后续个人数据批次或独立认证/共享/系统语义，不全部计作本批缺口。首轮完整批次本地 p95 9.32→16.25 ms（+74.36%，0 errors），**性能尚未达标**；统一静默窗口 B/R/R/B/B/R 六轮中三对 p95 +19.51%/+60.52%/+42.72%，全部未达 <10%；不能沿用历史三表 +2.99%。见 [边界及证据](A2-RLS-COVERAGE.md)。线上激活和 p95 尚未测，发布暂停；整体不标完成。
+
+- **策略规划窄优化（未发布）：** 重复 membership 联结改为接线的 STABLE / SECURITY INVOKER 函数，固定 search_path，禁止跨请求身份/权限缓存；startup 拒绝 DEFINER/IMMUTABLE。15 类跨父写入与 29 表非空/撤销/双 Space 验证保留，12/12 真实 PG 测试通过。修正 callback/Promise 完成计时后，同一业务 SQL 平均 2.2746→1.1078 ms，EXPLAIN planning 1.724→0.411 ms；不是 HTTP p95 达标证明。第二次静默 HTTP 六轮完整保留，三对 p95 +58.16%/+5.93%/+16.52%，仅一对 <10%，本地对照未稳定达标，须上线前性能评审。正式线上 <10% 门禁因禁止部署仍是「还没测」，与本地开销证据分别记录。
+
+- **继续性能定位（本地）：** membership helper 改为静态 PL/pgSQL RETURN EXISTS，保留 INVOKER/STABLE/固定 search_path，只复用查询计划、不缓存 actor/权限结果。12/12 安全测试通过；200 次微基准 RLS business mean 1.1078→0.8169 ms，总 286.181→220.614 ms；EXPLAIN execution 0.566→0.181 ms。后续统一静默 HTTP 六轮三对 +16.17%/+48.85%/+74.33%；保留全部 raw trace 后真实 pooled p95 8.183625→13.029083 ms（+59.21%，600/600 请求，0 errors），仍未达本地目标。并发5/pool4诊断指出 checkout p95 0.5642→1.2461 ms及3条额外事务命令；不加连接预算、不缓存权限、不降低指标。正式线上门禁仍未测。
+
+- **最新集成门禁：** 普通合入 #263 `8188c88f3c58299030b8dbfb2ea128144c2a8755`，保留分页与 actor middleware。db/api/testkit 类型检查通过；DB 单元 1216 pass/373 skip、API 单元 1377 pass/51 skip、真实 PG RLS+recruiting+membership 298/298。最终 API 合成隔离 144 OK/0 leak/0 warning/98 owner-empty 未触达。发布仅为 Draft 审查，性能未达与线上未测状态不变，不自行合并。
+
+- **发布操作结果：** 普通 push 在进程启动前再次被自动审批拒绝（未识别该次外部发布的可信用户授权），已知未执行；未换路径、未创建 Draft PR、未合并。保留本地提交与上述实测，待可被审批识别的新授权；性能门禁状态不因此改变。
+
+- **公开 pipeline 后续（仅本地）：** actor 专用池使用 pg 8.23 公共 pipeline，将参数化事务内 SET 与业务查询顺序入队；全部结算后才提交或回滚，不缓存身份/权限。30 项针对性测试通过（18 PG +12 client），包含取消、断连、SET 失败、解码失败回滚。两套独立静默六轮原始样本已保存：串行预热 pooled600/600 p95 8.700708→9.427667 ms（+8.36%），并行预热 9.117208→9.345500（+2.50%）；局部 pooled <10%，但配对仍有超限，不能称稳定/线上达标。查询池均显式 max4；预热差异及完整记录见 pilot 文档。生产 pooler/线上门禁未测，发布被审批拒绝后未重试。
+
+- **发布状态更新：** 新授权后普通 push 成功，首批实现 Draft PR [#296](https://github.com/WeKruit/rakazo/pull/296)，base 为 `claude/project-thread-f1cbzk`；尚未合并。此前审批拒绝记录保留为历史，当前不再是发布阻塞。线上门禁及稳定性能限制不变，A2 仍未完成。
 
 ### A3 列表分页
 
@@ -193,6 +220,24 @@ C1–C3 的代码已经合并。存储配置（一个存储桶加 3 个 Secret �
 - **现状：** `pi-oauth.ts` 里的 `PiOAuthLogins` 把整个登录流程放在进程内存里，包括设备码轮询、等用户粘贴授权码，以及登录结果。如果用户的 `complete`/`submit` 请求落到了另一个容器，就会报「找不到登录会话」。MCP 授权和令牌刷新已经通过数据库协调，没有这个问题。
 - **做法：** 登录流程继续留在发起它的容器里跑（流程由 pi 库驱动，不重写），但把会话状态写进数据库：状态、错误和归属的容器。拿到凭证以后，由发起登录的那个容器自己保存，不再等客户端来取。任何容器收到 `complete` 都去读数据库里的状态。用户粘贴的授权码先加密存进数据库，再用 Postgres `NOTIFY` 通知发起登录的容器。
 - **验收（代码检查）：** 新增测试：两个 `PiOAuthLogins` 实例共用一个数据库，在 A 上开始登录，在 B 上粘贴授权码并完成，凭证只保存一次。
+
+- **实现与认领：** Adam 认领已先提交并推送（`995ec0ede`）；实现 `dcf40ab3b`、旧收据替换修正 `48eccac6c`，Draft [#274](https://github.com/WeKruit/rakazo/pull/274) base 为 `claude/project-thread-f1cbzk`。保留原 Pi 流程，新增持久化协调器和 `model_oauth_sessions` 加法迁移；发起进程自动保存凭证，其他进程只读结果收据。授权码使用现有 SecretStore 的 ephemeral 加密，NOTIFY 只含不透明会话 ID，复用现有 realtime LISTEN；丢失通知由仅针对本进程活跃登录的轮询补查。
+- **本地实测（Node 24.19.0 / pnpm 9.15.0 / PostgreSQL 16）：** 12 个新 PostgreSQL 场景和 108 个既有 OAuth 测试，共 120/120 通过。A 开始、B 提交并完成；保存回调 1 次、凭证行 1 行；重复和并发 finish 不重复保存。覆盖用户/空间隔离、远程取消和保存竞态、provider 全空间取消、设备码自动保存、过期、替换、丢失 NOTIFY、owner 丢失时不重放不确定写入、错误脱敏；America/Chicago 和 Asia/Tokyo 连接下未过期会话成功、已过期会话拒绝。所有 SQL 时间比较和初始过期时间以 UTC 计算；持久化结果经现有 ModelCredentialSchema 过滤，只保留公开模型 DTO，不保存 access/refresh 或多余 credential 字段。API 1,321 通过 / 50 跳过；adapters 全包当次 5,125 通过 / 52 跳过（包含当时 8 个 C4 DB 场景，已另行实跑；之后另加 2 场景并纳入上述 118 个实跑）。db/adapters/api 类型检查、API bundle、Biome 和 diff 检查通过。
+- **连接预算：** 没有创建新连接池或 LISTEN 客户端；查询走现有事务池，通知复用现有 listener。保持 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432 和现有 API 1 + worker 5 = 6 会话预算。预算未因本项改动，线上连接数还没测。
+- **限制：** 仅本地合成用户和凭证，未部署、未变更云配置/Secret/资源/CI。实际多容器路由、真实 OAuth 提供方、线上会话数、硬杀进程后的恢复还没测。owner 死亡不会重跑不确定保存，也不会接管 pi 库登录流程；会话到期后用户重新登录，成功收据在有效期内可从任何实例读取。迁移尚未在线上执行。既有跳过场景未验证。
+
+```sh
+pnpm --filter @rakazo/db generate
+DATABASE_URL=postgres://postgres@127.0.0.1:55484/rakazo_c4 pnpm --filter @rakazo/db migrate
+VERIFY_DATABASE=1 DATABASE_URL=postgres://postgres@127.0.0.1:55484/rakazo_c4 pnpm test packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/pi-oauth.test.ts
+pnpm --filter @rakazo/adapters test
+pnpm --filter @rakazo/api test
+pnpm --filter @rakazo/adapters --filter @rakazo/api --filter @rakazo/db check
+node scripts/bundle-server.mjs api
+pnpm exec biome check apps/api/src/app.ts apps/api/src/router.ts packages/adapters/src/index.ts packages/adapters/src/pi-oauth.ts packages/adapters/src/pi-oauth-durable.ts packages/adapters/src/pi-oauth-durable.postgres.test.ts
+git diff --check
+```
+
 
 ### C5 拆服务、多容器、滚动发布
 
@@ -452,3 +497,7 @@ pnpm --filter @rakazo/worker --filter @rakazo/adapters check
 ### D3 独立后续本地验收
 
 基于 D4 `e0eb80130b7c64b5c3cb55ff23925dd1c071678b` 移植消息窗口与旧结果视图窗口；仅本地提交，尚未发布/合并。没有带入 D1 后续 lazyLiveWork/windowinglazy 或 D2 缓存改动。完整命令与范围见 [D3-INDEPENDENT-FOLLOWUP.md](D3-INDEPENDENT-FOLLOWUP.md)。Web 类型检查、1,656 项单测、生产构建通过；Chromium 三项合成浏览器测试通过。1,000 消息首屏 DOM 1,000→17，滚动最大 1,030→24（含自动加载 30 条旧消息）；候选目录最大 19 行/36 卡片，滚动无长任务。整项保持待集成，线上和人工辅助技术检查还没测。
+
+### C4 refreshed independent branch
+
+Ordinary merge of #263 through `8188c88f3` into C4 succeeded without conflicts (`4406d0e134a5c2a26fa961ec2ebbb8075d3eaa5b`). `pnpm --filter @rakazo/api --filter @rakazo/db --filter @rakazo/adapters check` passed. Local synthetic `VERIFY_DATABASE=1 pnpm exec vitest run packages/adapters/src/pi-oauth-durable.postgres.test.ts packages/adapters/src/pi-oauth.test.ts`:120/120 passed in7.89s. `pnpm --filter @rakazo/api test`:1376 passed/51 skipped in17.41s. No provider or multi-container acceptance is claimed. This refresh is local only while remaining-item publication confirmation is pending; #274 has not been merged.

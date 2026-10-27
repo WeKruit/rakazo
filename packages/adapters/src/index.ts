@@ -109,6 +109,7 @@ export * from "./pi-codex-catalog.js";
 export * from "./pi-credentials.js";
 export * from "./pi-models.js";
 export * from "./pi-oauth.js";
+export { DurablePiOAuthLogins } from "./pi-oauth-durable.js";
 export * from "./pi-openai-compatible-provider.js";
 export * from "./pi-runtime.js";
 export * from "./pi-session.js";

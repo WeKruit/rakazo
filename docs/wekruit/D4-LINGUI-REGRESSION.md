@@ -1,22 +1,27 @@
-# D4 translated labels and error fallback regression
+# D4 Lingui macro regression correction
 
-The unchanged production route test on pre-contact-optimization baseline `f4ad6b091` failed to find `Collapse role chat`. DOM inspection showed the chat was present, open and visible, with a valid active thread snapshot; its accessible names were empty. D4 extraction commit `7c3f0361e` moved template tags into view files while passing `t` through the controller model. These calls no longer had a local Lingui macro binding. D4 baseline `e0eb80130` contains the same affected source. This is not caused by D2 caching or the later contacts lazy-loading work. The exact D4 binary was not separately executed.
+Component extraction moved tagged `t` templates into view files but obtained `t` from the controller/model object. Lingui's compile-time transform requires a local macro binding; a runtime translator passed through an object is not equivalent. The real production browser investigation on the combined branch found empty accessible names despite an otherwise visible conversation. This independent D4 branch contained the same defect, which mocked unit tests and source catalog checks did not catch.
 
-Nine extracted view components now obtain `t` locally from `useLingui` imported from `@lingui/react/macro`. Text and interpolation expressions remain unchanged. The controller's output contract remains compatible. Source scanning found no remaining production tagged-template calls without a local macro binding in this baseline; D1's newly extracted views are being corrected separately.
+This correction applies local `const { t } = useLingui()` from `@lingui/react/macro` to all seven affected components present at this stage: Shell, RecruitingPanel, RecruitingRoleTab, RecruitingEvidenceTab, ShellConversation, ShellOverlays and ShellSidebar. Strings and interpolation expressions are unchanged. The controller output contract remains compatible. Later D1-only DeveloperSidebar and ShellPanelContent files do not exist here and are not introduced; their still-inline UI is covered by the local Shell/Sidebar bindings.
 
-Production browser regression keeps the original route assertions, adds English and Chinese accessible names, and triggers a synthetic export RPC failure to verify the translated error fallback. No actual export data or external service is used. The fixture supports an explicit locale while retaining English by default.
+Only the fixture's optional locale setting and the bilingual production regression were reused from `fb9c4c3ce`; newer D2 fixture contracts and product code were not copied. The original route assertions remain unchanged; readiness synchronization is described below. The new test asserts exact English/Chinese region, export, collapse and candidate-search accessible names, and returns a synthetic ORPC error from threads/messages to assert translated export-error feedback. It never reads or exports real conversation data.
+
+A TypeScript6 compiler-API diagnostic scanned all242 non-test/non-locale production TS/TSX files. It resolved each1543 tagged-template `t` binding to either a `useLingui` macro destructuring or an imported core macro, rather than merely searching for the word useLingui in the file: **zero invalid bindings**. The temporary scanner was not added as a product dependency. The repository's TypeScript7 package exposes only version metadata to require; the installed TypeScript6 compiler API was used for this diagnostic without changing dependencies.
 
 Validation commands:
 
 ```sh
-pnpm --filter @rakazo/web build
-RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec vite preview --host 127.0.0.1 --port 5208
-PLAYWRIGHT_BASE_URL=http://127.0.0.1:5208 pnpm --filter @rakazo/web exec playwright test e2e/recruiting-app-routes.spec.ts e2e/recruiting-lingui.spec.ts --workers=1
 pnpm --filter @rakazo/web check
 pnpm --filter @rakazo/web test
+RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec vite build --manifest
+RAKAZO_ALLOW_DEV_SECRETS=1 pnpm --filter @rakazo/web exec vite preview --host 127.0.0.1 --port 5214 --strictPort
+PLAYWRIGHT_BASE_URL=http://127.0.0.1:5214 pnpm --filter @rakazo/web exec playwright test e2e/recruiting-app-routes.spec.ts e2e/recruiting-lingui.spec.ts --workers=1
+node apps/web/scripts/check-component-size.mjs
 git diff --check
 ```
 
-Web check/build passed. Full unit suite: 1,676 passed across 144 files, including production catalog tests. Original route suite: 10 passed, covering 1440px and 390px. English/Chinese production accessible-name cases passed. The final English/Chinese run including translated export failure feedback passed both cases (2/2). An initial error fixture omitted ORPC's required `defined` field; corrected to the actual wire envelope before evaluating the fallback.
+Web typecheck/build passed. Full Web unit suite: **1655passed/142files**,20.76s. Targeted Biome passed. Size audit remains242production files with zero files above1500lines. The first browser run passed both bilingual cases and8/10original routes. The mobile navigation case timed out because its loop read an enabled arrow before a pending scroll event disabled it. The scroll-reset case tried to scroll the lazy Sequence panel before its real campaign row existed. Both failures reproduced in an unchanged two-case rerun.
 
-No publication, cloud changes or real candidate/job tests. Other locales and deployed runtime remain untested.
+Test synchronization now waits for the actual campaign row before setting scrollTop, preserving the positive-scroll and reset-to-zero assertions. Navigation waits until rAF-observed scrollLeft is unchanged for100ms and the arrow disabled state matches the actual edge after both right and left navigation, then evaluates the next loop iteration. A preliminary two-frame wait passed12/12 but was replaced because it could still observe an animation mid-flight. No product scrolling behavior, disabled condition, accessible-name check or final viewport/ancestor-scroll assertion was weakened. Final repeated browser results are recorded below. Other locales, deployed runtime and external providers remain untested. No publication or cloud changes occurred.
+
+Final production browser run used `--repeat-each=2`: **24/24 passed**, covering the unchanged1440px/390px route assertions twice and English/Chinese names plus error feedback twice. These results apply to the independent D4 production build, not only the combined integration baseline. The earlier failed runs remain recorded above; no assertion was deleted. The temporary loopback preview was stopped after validation.

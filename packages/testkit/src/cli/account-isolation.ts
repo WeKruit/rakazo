@@ -141,7 +141,7 @@ async function seedAccount(email: string, password: string) {
   };
   const message = page.messages.find((item) => item.role === "user");
   if (!message) throw new Error("A's message was not saved");
-  await rpc("recruiting/createRole", {
+  const saved = (await rpc("recruiting/createRole", {
     title: "A role",
     sourceRefs: [
       {
@@ -157,5 +157,10 @@ async function seedAccount(email: string, password: string) {
     definitionQuestions: [],
     sourceThreadId: head.threadId,
     expectedRevision: 0,
+  })) as { role: { id: string } };
+  await rpc("recruiting/reminders/create", {
+    roleId: saved.role.id,
+    title: "Synthetic follow-up",
+    dueAt: new Date(Date.now() + 86_400_000).toISOString(),
   });
 }

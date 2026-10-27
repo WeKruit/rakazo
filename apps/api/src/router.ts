@@ -26,10 +26,12 @@ import type {
   ComposioProvider,
   ComputerExecutionLease,
   ConnectorRegistry,
+  DurablePiOAuthLogins,
   FaviconResolver,
   getBotSecretMetadata,
   IntegrationProviderSettings,
   MemoryProviderResolver,
+  PiOAuthConnected,
   PiOAuthLogins,
   RemoteConnectorDependencies,
   TicketChangeNotifier,
@@ -240,6 +242,7 @@ import {
   toTicketDto,
   touchGroupUpdatedAt,
   upgradeRecruitingWorkspace,
+  withDatabaseActor,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { deleteAgentSecret, listAgentSecrets, putAgentSecret } from "./agent-secrets.js";
@@ -639,7 +642,7 @@ export interface RouterDeps {
   memoryProviders: MemoryProviderResolver;
   home: AgentHomeStore;
   secrets: SecretStore;
-  oauthLogins: PiOAuthLogins;
+  oauthLogins: PiOAuthLogins | DurablePiOAuthLogins;
   /** Live Codex catalog seam; defaults to the shared per-process cache. */
   codexCatalog?: CodexLiveCatalog;
   /** Site icons for links; defaults to the per-process cache that fetches them. */
@@ -874,6 +877,23 @@ export function createRouter(deps: RouterDeps) {
     );
   }
   const codexCatalog = deps.codexCatalog ?? new CodexCatalogCache();
+  const persistOAuth = (actor: Actor, login: PiOAuthConnected) =>
+    persistModelCredential(
+      deps,
+      actor,
+      {
+        provider: login.provider,
+        plaintext: serializeModelSecret({ kind: "oauth", credential: login.credential }),
+        label:
+          login.label ??
+          listPiCatalog().find((entry) => entry.provider === login.provider)?.providerName,
+        modelId: login.modelId,
+        thinkingLevel: login.thinkingLevel,
+        signal: login.signal,
+      },
+      codexCatalog,
+    );
+
   const deploymentModel = deps.env.deploymentModelConfigured
     ? { provider: deps.env.defaultProvider }
     : null;
@@ -1022,8 +1042,10 @@ export function createRouter(deps: RouterDeps) {
 
   const authed = os.use(async ({ context, next, path }, input) => {
     if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-    const result = await next({ context: { ...context, actor: context.actor } });
-    return { ...result, output: paginateListOutput(path, input, result.output) };
+    return withDatabaseActor(context.actor, async () => {
+      const result = await next({ context: { ...context, actor: context.actor! } });
+      return { ...result, output: paginateListOutput(path, input, result.output) };
+    });
   });
 
   const boardEnabled = os
@@ -1033,8 +1055,10 @@ export function createRouter(deps: RouterDeps) {
     })
     .use(async ({ context, next, path }, input) => {
       if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-      const result = await next({ context: { ...context, actor: context.actor } });
-      return { ...result, output: paginateListOutput(path, input, result.output) };
+      return withDatabaseActor(context.actor, async () => {
+        const result = await next({ context: { ...context, actor: context.actor! } });
+        return { ...result, output: paginateListOutput(path, input, result.output) };
+      });
     });
   const ticketDeps = {
     prisma: deps.prisma,
@@ -1683,6 +1707,7 @@ export function createRouter(deps: RouterDeps) {
           thinkingLevel: input.thinkingLevel,
           label: input.label,
           signal: context.signal,
+          persist: (login) => persistOAuth(context.actor, login),
         });
       }),
       submitOAuthCode: authed.models.submitOAuthCode.handler(async ({ context, input }) => {
@@ -1697,26 +1722,8 @@ export function createRouter(deps: RouterDeps) {
       }),
       finishOAuth: authed.models.finishOAuth.handler(async ({ context, input }) => {
         throwIfAborted(context.signal);
-        const result = await deps.oauthLogins.finish(
-          input.loginId,
-          context.actor,
-          async (login) => {
-            return persistModelCredential(
-              deps,
-              context.actor,
-              {
-                provider: login.provider,
-                plaintext: serializeModelSecret({ kind: "oauth", credential: login.credential }),
-                label:
-                  login.label ??
-                  listPiCatalog().find((entry) => entry.provider === login.provider)?.providerName,
-                modelId: login.modelId,
-                thinkingLevel: login.thinkingLevel,
-                signal: login.signal,
-              },
-              codexCatalog,
-            );
-          },
+        const result = await deps.oauthLogins.finish(input.loginId, context.actor, (login) =>
+          persistOAuth(context.actor, login),
         );
         if (result.status === "pending") {
           throw new ORPCError("CONFLICT", { message: "Sign-in has not finished yet." });
