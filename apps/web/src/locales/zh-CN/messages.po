@@ -916,10 +916,6 @@ msgid "Automated senders will appear after they post here."
 msgstr "自动发送方在这里发消息后会显示。"
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Autumn rank"
-msgstr "Autumn 排名"
-
-#: src/pages/RecruitingPanel.tsx
 msgid "Available"
 msgstr "有空"
 

@@ -916,10 +916,6 @@ msgid "Automated senders will appear after they post here."
 msgstr "Automated senders will appear after they post here."
 
 #: src/pages/RecruitingPanel.tsx
-msgid "Autumn rank"
-msgstr "Autumn rank"
-
-#: src/pages/RecruitingPanel.tsx
 msgid "Available"
 msgstr "Available"
 
