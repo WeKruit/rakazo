@@ -140,6 +140,35 @@ describe("browser notifications", () => {
     expect(show).toHaveBeenCalledTimes(3);
   });
 
+  it("sends one ordinary notification per thread per 15 minutes but always a question", () => {
+    const shownAt = new Map<string, number>();
+    const show = vi.fn();
+    const delivery = (nextEvent: ReturnType<typeof event>, now: number) =>
+      deliverBrowserNotification(nextEvent, "Chief", {
+        enabled: true,
+        pageVisible: false,
+        windowFocused: false,
+        permission: "granted",
+        notifiedEventIds: new Set(),
+        show,
+        shownAt,
+        now,
+      });
+    const ask = (id: string, status?: "answered") =>
+      event({
+        id,
+        payload: { role: "bot", blocks: [{ kind: "ask", text: "Remote in the US only?", status }] },
+      });
+
+    expect(delivery(event({ id: "a" }), 0)).toBe("delivered");
+    expect(delivery(event({ id: "b" }), 60_000)).toBe("discarded");
+    expect(delivery(event({ id: "c", threadId: "thread-2" }), 60_000)).toBe("delivered");
+    expect(delivery(ask("d"), 120_000)).toBe("delivered");
+    expect(delivery(ask("e", "answered"), 180_000)).toBe("discarded");
+    expect(delivery(event({ id: "f", type: "run.failed" }), 240_000)).toBe("delivered");
+    expect(delivery(event({ id: "g" }), 240_000 + 15 * 60_000)).toBe("delivered");
+  });
+
   it("allows a later send gesture to retry a dismissed permission prompt", async () => {
     let resolvePermission: ((permission: "default") => void) | undefined;
     const requestPermission = vi.fn(
