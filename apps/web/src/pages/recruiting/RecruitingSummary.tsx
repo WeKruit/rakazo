@@ -4,7 +4,7 @@ import { CriteriaExpression } from "./CriteriaEditor";
 
 const Sources = lazyPanel(() => import("./SourceDocuments").then((m) => m.Sources));
 
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Button } from "@rakazo/ui-web";
 import { BriefcaseBusiness, Building2, Check, RefreshCw } from "lucide-react";
 import type { useRecruitingWorkspace } from "./useRecruitingWorkspace";
@@ -14,13 +14,13 @@ const FeedbackHistory = lazyPanel(() =>
 );
 
 export function RecruitingSummary({ model }: { model: ReturnType<typeof useRecruitingWorkspace> }) {
+  const { t } = useLingui();
   const {
     threadId,
     readCache,
     readCacheScope,
     refreshSignal,
     summary,
-    t,
     workspaceSnapshot,
     refresh,
     setRefresh,

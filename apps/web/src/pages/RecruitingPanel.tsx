@@ -28,7 +28,7 @@ export type {
   CrmReplyDraftContext,
 } from "./recruiting/workspace-types";
 
-import { Plural, Trans } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { Button, Tabs, TabsList, TabsTrigger } from "@rakazo/ui-web";
 import { RefreshCw, X } from "lucide-react";
 
@@ -85,13 +85,13 @@ function NativeRecruitingPanel(props: Props) {
 }
 
 function RecruitingWorkspace(props: Props & { userId?: string }) {
+  const { t } = useLingui();
   const model = useRecruitingWorkspace(props);
   const {
     onClose,
     presentation,
     summary,
     onTabChange,
-    t,
     workspaceSnapshot,
     setRefresh,
     loading,

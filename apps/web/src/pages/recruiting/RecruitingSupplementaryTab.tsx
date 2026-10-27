@@ -10,7 +10,7 @@ const MemoryDocumentView = lazyPanel(() =>
 );
 const Sources = lazyPanel(() => import("./SourceDocuments").then((m) => m.Sources));
 
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Button, TabsContent } from "@rakazo/ui-web";
 import type { useRecruitingWorkspace } from "./useRecruitingWorkspace";
 
@@ -27,6 +27,7 @@ export function RecruitingSupplementaryTab({
 }: {
   model: ReturnType<typeof useRecruitingWorkspace>;
 }) {
+  const { t } = useLingui();
   const {
     threadId,
     botId,
@@ -35,7 +36,6 @@ export function RecruitingSupplementaryTab({
     refreshSignal,
     onRevealMessage,
     showDiagnostics,
-    t,
     snapshot,
     setRefresh,
     feedbackRefresh,

@@ -1,4 +1,4 @@
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import { clearRecruitingReads } from "../../lib/recruiting-read-cache";
@@ -19,6 +19,7 @@ export function CandidateDetailDialog({
 }: {
   model: ReturnType<typeof useRecruitingWorkspace>;
 }) {
+  const { t } = useLingui();
   const {
     threadId,
     readCache,
@@ -29,7 +30,6 @@ export function CandidateDetailDialog({
     candidateFeedbackRecipients,
     showDiagnostics,
     presentation,
-    t,
     snapshot,
     setRefresh,
     feedbackRefresh,
