@@ -2,6 +2,8 @@ import type { JobPublisher, JobWorkerHost } from "@rakazo/adapter-kit";
 import { ComposioConnector, IntegrationProviderSettings } from "@rakazo/adapters";
 import { hostedStagingConfig } from "@rakazo/core";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
+import { createWorkerDrain } from "./drain.js";
+import { startWorkerHealth } from "./health.js";
 import { startStagingWorker } from "./release-staging.js";
 import { createWorkerSecretStore } from "./secret-store.js";
 
@@ -348,10 +350,27 @@ async function main() {
   });
   reconciler.start();
 
+  const drain = createWorkerDrain({
+    stopJobs: () => jobHost.stop(),
+    stopReconciler: () => reconciler.stop(),
+  });
+  // No cancellation or pool release here: active runs retain their leases and heartbeats.
+  const requestDrain = () => {
+    void drain.begin().catch((error) => logger.error("worker drain failed", error));
+  };
+  process.on("SIGUSR2", requestDrain);
+  const health = process.env.WORKER_HEALTH_PORT
+    ? await startWorkerHealth(
+        drain.state,
+        parsePositiveInteger(process.env.WORKER_HEALTH_PORT, 8001),
+      )
+    : undefined;
+
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
+    process.off("SIGUSR2", requestDrain);
     shutdown.abort();
     // Draining running jobs can outlast the kill deadline; say goodbye to the pooler first.
     setTimeout(() => {
@@ -360,8 +379,8 @@ async function main() {
       void closePoolSessions(sessionPool);
     }, SESSION_RELEASE_MS).unref();
     try {
-      await reconciler.stop();
-      await jobHost.stop();
+      await health?.close();
+      await drain.begin();
       await jobs.close();
       await secrets.close();
       await realtime.close();
