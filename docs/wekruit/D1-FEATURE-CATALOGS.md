@@ -1,6 +1,9 @@
 # D1: defer optional-page translation catalogs
 
-This local follow-up keeps the existing UI and parser contracts. It does not claim the
+Draft [#304](https://github.com/WeKruit/rakazo/pull/304) targets
+`claude/project-thread-f1cbzk`; it has not been merged by this task.
+
+This follow-up keeps the existing UI and parser contracts. It does not claim the
 final 250 KB goal is complete. It builds on `34b9eb587` / `d2ad4af8f`; earlier D1 work
 and its measurements remain separate. Ordinary merge `bb10b0f3e` integrates the published
 `d4fae3df1` dependency base, including the existing timer and lazy-palette fixes.
