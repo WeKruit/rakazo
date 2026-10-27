@@ -65,7 +65,7 @@ export class DurablePiOAuthLogins {
         Row[]
       >`SELECT * FROM model_oauth_sessions WHERE "userId" = ${input.userId} AND provider = ${input.provider} AND state = 'saving' AND "expiresAt" > now()`;
       if (saving.length) throw new Error("Sign-in is finishing. Try again.");
-      await tx.$executeRaw`UPDATE model_oauth_sessions SET state = 'cancelled', "codeCiphertext" = NULL WHERE "userId" = ${input.userId} AND "spaceId" = ${input.spaceId} AND provider = ${input.provider} AND state IN ('pending', 'starting')`;
+      await tx.$executeRaw`UPDATE model_oauth_sessions SET state = 'cancelled', "codeCiphertext" = NULL WHERE "userId" = ${input.userId} AND "spaceId" = ${input.spaceId} AND provider = ${input.provider} AND state IN ('pending', 'starting', 'connected')`;
       await tx.$executeRaw`DELETE FROM model_oauth_sessions WHERE "expiresAt" < now()`;
       await tx.$executeRaw`INSERT INTO model_oauth_sessions (id, "userId", "spaceId", provider, "ownerId", state, "expiresAt") VALUES (${id}, ${input.userId}, ${input.spaceId}, ${input.provider}, ${this.ownerId}, 'starting', now() + interval '15 minutes')`;
     });
