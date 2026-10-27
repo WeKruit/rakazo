@@ -273,3 +273,32 @@ An earlier sandboxed attempt was deliberately stopped after a loopback listener 
 A failed preferred and English optional catalog previously activated empty English, replacing a usable Chinese startup view with untranslated message IDs. Preserve the last activated catalog and keep the unopened optional feature blocked; first-bootstrap fallback remains unchanged. A later successful load can still open the feature, and failed locale changes preserve already translated mounted features.
 
 Validation: `pnpm exec vitest run apps/web/src/lib/i18n-features.test.ts apps/web/src/lib/i18n-activate.test.ts apps/web/src/lib/i18n-startup.test.ts apps/web/src/lib/i18n-catalog.test.ts apps/web/src/lib/ui-locale.test.ts` passed **36 tests / 5 files, 1.84s**. `pnpm --filter @rakazo/web check`, `pnpm --filter @rakazo/web build` (2.56s) and `git diff --check` passed. This is failure-path correctness, not a new route-size or deployed LCP measurement; those acceptance gaps remain open.
+
+## Final bounded A2/F1/D1 integration
+
+At `cc867dff3f834a4b5877590a1b51a91dcd47a685`, all 11 package checks passed with `EXPO_OFFLINE=1`. API isolation: 144 executed checks, all `ok`; a separate 98-entry `unexercised` array; zero leaks/warnings; exit 0; 2.116s excluding setup. Real PostgreSQL actor matrix:22/22,832ms. These runs include the four preference policies, F1 validation preservation and the D1 predicate import together. Online p95 and full API coverage remain unverified.
+
+The existing testkit fixture is unchanged except replacing its Docker database launcher. Reproduction uses the prerequisites in [A2-RLS-PILOT.md](A2-RLS-PILOT.md): a dedicated empty synthetic system database with current Prisma migrations and `packages/db/prisma/rls/first-batch.sql`; a non-owner, NOSUPERUSER/NOBYPASSRLS actor with schema USAGE and table DML grants. Never substitute production databases.
+
+Copy `packages/testkit/src/cli/account-isolation.ts` temporarily beside itself as `.a2-local-isolation.ts` to retain relative imports. Remove only `import { PostgreSqlContainer } from "@testcontainers/postgresql";` and replace `const container = await new PostgreSqlContainer("postgres:16-alpine").start();` with:
+
+```ts
+const container = {
+  getConnectionUri: () => "<dedicated-local-synthetic-system-database-url>",
+  stop: async () => {},
+};
+```
+
+All account seeding, API setup and `infra/acceptance/account-isolation.mjs` invocation remain unchanged. Run:
+
+```sh
+API_PORT=3196 ACTOR_DATABASE_URL='<dedicated-local-synthetic-restricted-actor-url>' \
+  pnpm exec tsx packages/testkit/src/cli/.a2-local-isolation.ts \
+  --out /tmp/a2-integrated-final-isolation.json
+RLS_TEST_DATABASE_URL='<dedicated-local-synthetic-rls-database-url>' \
+  pnpm exec vitest run packages/db/src/actor-db.postgres.test.ts \
+  --maxWorkers=1 --no-file-parallelism
+EXPO_OFFLINE=1 pnpm --filter @rakazo/contracts --filter @rakazo/core --filter @rakazo/db --filter @rakazo/adapters --filter @rakazo/api --filter @rakazo/worker --filter @rakazo/testkit --filter @rakazo/mobile --filter @rakazo/web --filter @rakazo/ui-web --filter @rakazo/chat-ui check
+```
+
+Delete only the temporary harness after the run. No test source or generated harness was left in the product change. New batch evidence is in #336/#337; F1 characterization in #339; D1 matched browser bytes and real recovery controls in #338. Historical latency failures, skipped tests and unexercised paths remain recorded.
