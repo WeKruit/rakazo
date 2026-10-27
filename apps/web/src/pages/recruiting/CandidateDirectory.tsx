@@ -1,8 +1,10 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Badge, Button } from "@rakazo/ui-web";
+import type { VirtualItem } from "@tanstack/react-virtual";
 import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { CandidateWindow } from "./CandidateWindow";
 import { PersonAvatar } from "./DetailPanel";
 import { CompanyLogo } from "./OrgBadge";
 import type { ProfileCriterionRevision } from "./profile";
@@ -258,7 +260,15 @@ export function CandidateDirectory({
 }: CandidateDirectoryProps) {
   const { t } = useLingui();
   const [view, setView] = useState<"table" | "cards">("table");
-  const profiles = rows.map((row) => directoryProfile(row, criterionRevision));
+  const profiles = useMemo(
+    () => rows.map((row) => directoryProfile(row, criterionRevision)),
+    [rows, criterionRevision],
+  );
+  const itemKeys = useMemo(() => rows.map((row) => row.key), [rows]);
+  const offsets = useRef({
+    table: { offset: 0, measurements: [] as VirtualItem[] },
+    cards: { offset: 0, measurements: [] as VirtualItem[] },
+  });
   const showEducation = profiles.some((profile) => profile.school);
   const sourceLink = (profile: DirectoryProfile, name: string) =>
     profile.profileUrl ? (
@@ -276,6 +286,7 @@ export function CandidateDirectory({
   const nameButton = (row: RoleCandidate, index: number) => (
     <button
       type="button"
+      data-candidate-name
       aria-haspopup="dialog"
       aria-current={selectedKey === row.key ? "true" : undefined}
       className={`${view === "table" ? "truncate" : "line-clamp-2 break-words"} w-full text-left font-semibold hover:underline focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2`}
@@ -314,13 +325,13 @@ export function CandidateDirectory({
         </fieldset>
       </div>
       {view === "table" ? (
-        <section
-          aria-label={t`Candidate table`}
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to focus and scroll the overflowing table.
-          tabIndex={0}
-          className="max-h-[70vh] max-w-full overflow-auto rounded-xl border border-border bg-card focus-visible:outline-2 focus-visible:outline-ring"
-        >
-          <table className="w-full min-w-[960px] table-fixed border-collapse text-left text-sm">
+        <CandidateWindow
+          key="table"
+          mode="table"
+          itemKeys={itemKeys}
+          offsets={offsets}
+          label={t`Candidate table`}
+          header={
             <thead className="sticky top-0 z-10 bg-muted text-xs text-muted-foreground">
               <tr>
                 <th scope="col" className="w-[16%] px-3 py-2 font-medium">
@@ -350,61 +361,63 @@ export function CandidateDirectory({
                 ) : null}
               </tr>
             </thead>
-            <tbody>
-              {rows.map((row, index) => {
-                const profile = profiles[index]!;
-                const name = row.name ?? t`Unnamed candidate`;
-                return (
-                  <tr
-                    key={row.key}
-                    data-selected={selectedKey === row.key || undefined}
-                    className="border-t border-border align-middle hover:bg-muted/40 data-selected:bg-muted"
-                  >
-                    <th scope="row" className="px-3 py-2 font-normal">
-                      <div className="flex min-w-0 items-center gap-2">
-                        <PersonAvatar name={name} src={profile.assets.photo} size="sm" />
-                        <div className="min-w-0 space-y-0.5">
-                          {nameButton(row, index)}
-                          {sourceLink(profile, name)}
-                        </div>
-                      </div>
-                    </th>
-                    <td className="px-3 py-2">
-                      <Company profile={profile} title={row.title} />
-                    </td>
-                    {showEducation ? (
-                      <td className="px-3 py-2">
-                        <Education profile={profile} compact />
-                      </td>
-                    ) : null}
-                    <td className="break-words px-3 py-2 text-xs text-muted-foreground">
-                      {row.location ?? "—"}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Status row={row} />
-                    </td>
-                    <td className="px-3 py-2">
-                      <Fit sections={profile.sections} compact />
-                    </td>
-                    {renderActions ? (
-                      <td className="px-3 py-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          {renderActions(row, index)}
-                        </div>
-                      </td>
-                    ) : null}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </section>
+          }
+          renderRow={(index) => {
+            const row = rows[index]!;
+            const profile = profiles[index]!;
+            const name = row.name ?? t`Unnamed candidate`;
+            return (
+              <tr
+                key={row.key}
+                data-selected={selectedKey === row.key || undefined}
+                className="border-t border-border align-middle hover:bg-muted/40 data-selected:bg-muted"
+              >
+                <th scope="row" className="px-3 py-2 font-normal">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <PersonAvatar name={name} src={profile.assets.photo} size="sm" />
+                    <div className="min-w-0 space-y-0.5">
+                      {nameButton(row, index)}
+                      {sourceLink(profile, name)}
+                    </div>
+                  </div>
+                </th>
+                <td className="px-3 py-2">
+                  <Company profile={profile} title={row.title} />
+                </td>
+                {showEducation ? (
+                  <td className="px-3 py-2">
+                    <Education profile={profile} compact />
+                  </td>
+                ) : null}
+                <td className="break-words px-3 py-2 text-xs text-muted-foreground">
+                  {row.location ?? "—"}
+                </td>
+                <td className="px-3 py-2">
+                  <Status row={row} />
+                </td>
+                <td className="px-3 py-2">
+                  <Fit sections={profile.sections} compact />
+                </td>
+                {renderActions ? (
+                  <td className="px-3 py-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      {renderActions(row, index)}
+                    </div>
+                  </td>
+                ) : null}
+              </tr>
+            );
+          }}
+        />
       ) : (
-        <ul
-          aria-label={t`Candidate cards`}
-          className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
-        >
-          {rows.map((row, index) => {
+        <CandidateWindow
+          key="cards"
+          mode="cards"
+          itemKeys={itemKeys}
+          offsets={offsets}
+          label={t`Candidate cards`}
+          renderRow={(index) => {
+            const row = rows[index]!;
             const profile = profiles[index]!;
             const name = row.name ?? t`Unnamed candidate`;
             return (
@@ -464,8 +477,8 @@ export function CandidateDirectory({
                 ) : null}
               </li>
             );
-          })}
-        </ul>
+          }}
+        />
       )}
     </div>
   );
