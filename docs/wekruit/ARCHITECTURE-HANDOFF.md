@@ -2,9 +2,34 @@
 
 This is the current handoff, not a declaration that every architecture item passed. The target is PR263's `claude/project-thread-f1cbzk`; never merge it into main or deploy from this task. The live plan now has23rows: original21 plus Claude-owned F2 and A5. Preserve their ownership.
 
+## Implementation status — separate from release acceptance
+
+Release-owner checks below do not undo completed implementation and are not a reason to repeat local mock work.
+
+| Scope | Implementation state |
+| --- | --- |
+| A1, A3, B1, B2 | Pool routing/budgets, bounded list reads, conversation-slot reservation and queue reporting are implemented. |
+| C1–C6 | Object-storage adapters, durable push/OAuth state, home authority, independent slot admission/replacement and production static serving are implemented. Cloud resources/configuration and data cutover have not been performed. |
+| D2–D4 | Shared server-state cache, bounded virtualized lists and component decomposition meet their documented local code criteria. |
+| F1 | The scoped executor business-heuristic removals and the post-calibration validation fix are implemented. Identity, consent, receipts, approval and paid-effect idempotency remain. This does not claim every recruiting reference must or has been removed. |
+| **A2 — implementation still partial** | 33 actor tables are protected; six system metadata tables reject actor access. The remaining 60 tables are not all system-only: 25 personal Space tables, shared-Space/credential/child-association categories and OAuth coordination still require policy/composition work according to their actual semantics. Some auth/system tables need separate system authorization rather than actor policies. This is a code/design backlog, not merely an online acceptance task. See the complete 99-model inventory. |
+| **A4 — decision/evidence required before code** | Four existing foreign keys have NoAction versus implicit Cascade differences. Correct-database metadata and intended parent-key update semantics are still needed; no cascade behavior was guessed or changed. |
+| **D1 — code budget unmet** | Actual contacts is 321,748 gzip bytes; the final 250,000-byte target still requires 71,748 bytes of reduction. No claim of implementation completion at this target. [Measured graph and explicit design choices](D1-FINAL-BUDGET-DESIGN.md) document the remaining compatibility decision. |
+| A5 / F2 | Claude-owned work is preserved. Refer to that owner's implementation evidence; this task does not take over or certify unobserved changes. |
+
+## Release-owner acceptance — independent handoff
+
+- A1/B1/B2/A3: actual pool routing and session counts, 50-conversation pool wait, queue bursts/minute logs and deployed list RPC latency.
+- A2: production role/grant setup and opt-in activation, actual transaction-pooler compatibility and before/after RPC p95. These release steps are separate from the still-unimplemented later table batches.
+- C1/C2/C5: approved object-store configuration, stopped-writer inventory/cutover, actual cloud slot ordering and session visibility, 1 Hz availability and uninterrupted conversations. C3/C4/C6: actual push/provider/multi-container behavior and production image/TLS serving.
+- D1: deployed Fast4G LCP, separate from the unresolved local JS-byte implementation target. F1: provider-backed test-copy recruiting workflow, separate from its completed scoped code removals.
+- E1–E4: configure/trigger alerts, authorized 20/50-conversation provider load, restore an approved real backup and measure RTO/RPO, and exercise configured fallback connections. Existing local evidence/runbooks are preparation, not these operational outcomes.
+
+No production deployment, cloud configuration, Secret change, new cloud resource, real recruiting-data test or #263-to-main merge was performed. Publisher-owned acceptance may be completed separately; it must not be used to conceal the A2/D1 code backlog or the A4 decision.
+
 ## Current result after the bounded A2/F1/D1 followups
 
-- **A2:** [#336](https://github.com/WeKruit/rakazo/pull/336) inventories all 99 Prisma models, distinguishing OAuth application authorization from the six system-only home/admission metadata tables. [#337](https://github.com/WeKruit/rakazo/pull/337) extends the opt-in actor policies from 29 to 33 tables with four personal preferences; both users and Spaces are populated, legitimate/foreign writes and membership revocation are tested, and system/bootstrap behavior is preserved. Restricted PostgreSQL 22/22 and related units 19/19 passed. API fixture results are **144 executed OK checks plus a separate 98 unexercised owner-empty paths**, not 144 checks containing 98 empty paths. No full API coverage or online latency claim is made.
+- **A2:** [#336](https://github.com/WeKruit/rakazo/pull/336) inventories all 99 Prisma models, distinguishing OAuth application authorization from the six system-only home/admission metadata tables. [#337](https://github.com/WeKruit/rakazo/pull/337) extends the opt-in actor policies from 29 to 33 tables with four personal preferences; both users and Spaces are populated, legitimate/foreign writes and membership revocation are tested, and the tested system/bootstrap paths are preserved. A subsequent audit found that `spaces.create` cross-Space default creation is not covered by that fixture and is rejected by the new active-Space policy; a narrow authorized initialization fix and real RPC regression are in progress. Restricted PostgreSQL 22/22 and related units 19/19 passed. API fixture results are **144 executed OK checks plus a separate 98 unexercised owner-empty paths**, not 144 checks containing 98 empty paths. No full API coverage or online latency claim is made.
 - **F1:** [#339](https://github.com/WeKruit/rakazo/pull/339) removes only the rule that hid brief-validation errors after a calibration round and forced a next-step card. Characterization failed before the fix and passed after it; 246 related tests and adapter typecheck passed on the refreshed base. Identity, consent, source receipts, approval and paid-effect idempotency remain intact. Real-provider business acceptance is still untested.
 - **D1:** [#338](https://github.com/WeKruit/rakazo/pull/338) imports a pure predicate from its existing leaf instead of through recovery UI. Matched actual contacts gzip is **322,313 → 321,748 B**, with 7 JS / 35 requests / 17 RPC / zero duplicate reads unchanged. 217 tests, Web typecheck/build and real synthetic recovery-panel failure/retry checks passed. No active control was delayed. The final 250,000 B goal is still missed by **71,748 B**; the rejected Mini prototype was not resumed.
 - **C5:** [#334](https://github.com/WeKruit/rakazo/pull/334) and its [publication handoff #335](https://github.com/WeKruit/rakazo/pull/335) are complete. Code-only local implementation is not a new TODO. Actual storage cutover and cloud rolling/conversation acceptance remain untested; no Apps were created or deployed.
