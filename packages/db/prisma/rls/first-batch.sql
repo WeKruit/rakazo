@@ -193,4 +193,26 @@ DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_crm_role_contacts;
 CREATE POLICY rakazo_actor_isolation ON recruiting_crm_role_contacts FOR ALL
 USING (EXISTS (SELECT 1 FROM recruiting_crm_roles parent WHERE parent."id"=recruiting_crm_role_contacts."roleId") AND EXISTS (SELECT 1 FROM recruiting_crm_contacts parent WHERE parent."id"=recruiting_crm_role_contacts."contactId"))
 WITH CHECK (EXISTS (SELECT 1 FROM recruiting_crm_roles parent WHERE parent."id"=recruiting_crm_role_contacts."roleId") AND EXISTS (SELECT 1 FROM recruiting_crm_contacts parent WHERE parent."id"=recruiting_crm_role_contacts."contactId"));
+
+-- Personal preferences: owner and active membership are required for every operation.
+ALTER TABLE ai_data_consents ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rakazo_actor_isolation ON ai_data_consents;
+CREATE POLICY rakazo_actor_isolation ON ai_data_consents FOR ALL
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
+ALTER TABLE action_auto_review_preferences ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rakazo_actor_isolation ON action_auto_review_preferences;
+CREATE POLICY rakazo_actor_isolation ON action_auto_review_preferences FOR ALL
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
+ALTER TABLE notification_preferences ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rakazo_actor_isolation ON notification_preferences;
+CREATE POLICY rakazo_actor_isolation ON notification_preferences FOR ALL
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
+ALTER TABLE space_backup_models ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rakazo_actor_isolation ON space_backup_models;
+CREATE POLICY rakazo_actor_isolation ON space_backup_models FOR ALL
+USING ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("userId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
 COMMIT;
