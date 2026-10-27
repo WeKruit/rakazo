@@ -4040,6 +4040,12 @@ it.each([
     // Hover/focus prefetches pass no request options; count only conversation opens.
     const opens = () => shellApi.get.mock.calls.filter((call) => call.length > 1).length;
     const reads = opens();
+    const extraReads: string[] = [];
+    const getImpl = shellApi.get.getMockImplementation()!;
+    shellApi.get.mockImplementation((...args) => {
+      extraReads.push(JSON.stringify(args[0]) + new Error().stack);
+      return getImpl(...args);
+    });
     const shortcut = async (key: string, modifier: "metaKey" | "ctrlKey") =>
       act(async () => {
         window.dispatchEvent(
@@ -4056,7 +4062,7 @@ it.each([
       await shortcut("k", "ctrlKey");
       await shortcut("2", "metaKey");
       expect(palette()).toBeNull();
-      expect(opens()).toBe(reads);
+      expect(opens(), extraReads.join("\n")).toBe(reads);
       expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
       return;
     }
@@ -4067,7 +4073,7 @@ it.each([
     await shortcut("k", "ctrlKey");
     await shortcut("2", "metaKey");
     expect(palette()).toBeNull();
-    expect(opens()).toBe(reads);
+    expect(opens(), extraReads.join("\n")).toBe(reads);
     await act(async () => {
       setToolActivityPreference("on");
     });
@@ -5408,6 +5414,44 @@ it("clears accepted saved text when only an attachment was picked during the sen
   expect(localStorage.getItem("rakazo.composerDraft.bot:bot-1")).toBeNull();
 });
 
+it.each(["mounted", "unmounted", "late-receipt"] as const)(
+  "cleans up send echo refresh: %s",
+  async (mode) => {
+    const unmount = mode !== "mounted";
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("bot", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+    });
+    const receipt = { runId: "unmounted-echo", taskId: "unmounted-task" };
+    let accept!: (value: typeof receipt) => void;
+    if (mode === "late-receipt") {
+      shellApi.send.mockReturnValue(
+        new Promise((resolve) => {
+          accept = resolve;
+        }),
+      );
+    } else shellApi.send.mockResolvedValue(receipt);
+    const composer = container!.querySelector<HTMLTextAreaElement>(
+      'textarea[name="chat-message"]',
+    )!;
+    type(composer, "Synthetic unmounted message");
+    await view.click("Send");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
+    expect(container!.textContent).toContain("Synthetic unmounted message");
+    if (unmount) {
+      await act(async () => root!.unmount());
+      root = null;
+    }
+    if (mode === "late-receipt") await act(async () => accept(receipt));
+    const reads = shellApi.get.mock.calls.length;
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 3_100)));
+    expect(shellApi.get.mock.calls.length).toBe(reads + (unmount ? 0 : 1));
+  },
+);
+
 it("shows a sent message at once and finishes the turn from events without re-reading", async () => {
   const streams: Array<{
     options: Parameters<typeof CoreModule.runThreadSubscription>[0];
@@ -5476,6 +5520,8 @@ it("shows a sent message at once and finishes the turn from events without re-re
   expect(container!.textContent?.match(/Find three robotics leads/g)).toHaveLength(1);
   expect(container!.textContent).toContain("Here are three.");
   expect(container!.textContent).not.toContain("Starting…");
+  expect(shellApi.get.mock.calls.length).toBe(reads);
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 3_100)));
   expect(shellApi.get.mock.calls.length).toBe(reads);
   // One navigation read at run end for the sidebar preview; none for send or run start.
   expect(shellApi.listSpaces.mock.calls.length).toBe(navigationReads + 1);
