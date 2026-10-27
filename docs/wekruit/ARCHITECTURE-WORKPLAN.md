@@ -21,7 +21,7 @@
 | C2 | 多容器 | 电脑工作目录放对象存储 | 代码已合并（#262）；存储配置阻塞 | — |
 | C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，线上未测） | Adam |
-| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 基础[#303](https://github.com/WeKruit/rakazo/pull/303)及存储保护[#309](https://github.com/WeKruit/rakazo/pull/309)已合入；用户已选择API+两个独立worker slot，代码/本地验证继续，未部署 | Adam |
+| C5 | 多容器 | web/API 和 worker 拆分、独立 slot 与滚动发布 | 代码与本地验收已合入 [#334](https://github.com/WeKruit/rakazo/pull/334)：7,762通过/510跳过、真实PG与子进程23/23、Python17/17；实际云端滚动与连续对话未测，不标整体验收完成 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
 | D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#295](https://github.com/WeKruit/rakazo/pull/295)、[#302](https://github.com/WeKruit/rakazo/pull/302) 已合入，后续[#307](https://github.com/WeKruit/rakazo/pull/307)、[#308](https://github.com/WeKruit/rakazo/pull/308)、[#330](https://github.com/WeKruit/rakazo/pull/330)已合入，联系人322,286B gzip/7JS/35请求/17RPC/零重复读取；最终250KB未达，线上LCP未测 | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 完成（本项代码验收）：重复RPC为0，[#301](https://github.com/WeKruit/rakazo/pull/301) 已合入 | Adam |
@@ -243,6 +243,7 @@ git diff --check
 ### C5 拆服务、多容器、滚动发布
 
 - **本地基础实现（线上验收仍未完成）：** 认领 `558f876037ae931f8a8a47508adf06d3075fe756` 普通 push 后，[#303](https://github.com/WeKruit/rakazo/pull/303) 已合入 #263（`afdf729217a5ceecbf34a06d990a7578335209a3`）。独立 API/worker 进程生命周期、SIGUSR2 非取消排空、只读健康状态、超时拒绝替换，真实本地 PostgreSQL/Graphile 双 worker 证明旧任务完成一次且新任务由另一 worker 执行。原门禁与命令见 [C5-LOCAL-DRAIN.md](./C5-LOCAL-DRAIN.md)。
+- **独立 worker slots 后续：** 已实现三 App 离线定义、全局15会话原子admission、worker代际fence、真实进程/session释放证明、串行替换控制器与构建manifest双层校验；23/23真实PG、29/29 Python SDK离线、14/14专项、四包check通过。实际云端滚动及对话不中断仍未测，C5不标完成；详见 [C5-WORKER-SLOTS.md](./C5-WORKER-SLOTS.md)。
 - **本地后续实现：** Draft [#309](https://github.com/WeKruit/rakazo/pull/309)，base `claude/project-thread-f1cbzk`；`d41e2b3ca` 增加 DB 权威 homeRevision CAS、摘要校验的独立快照 namespace、maintenance/run/lifecycle fence、合法 Team 成员验证、旧写者 trigger、删除后仍有效的内部 tombstone、完整迁移清单和 verified receipt。新建 home 由 DB 保留为 pending-v2，再经快照上传/readback/CAS 初始化；配置丢失、缺失已提交对象、旧 writer、未验证旧数据均 fail closed。SDK 1.6.1 源码审计确认固定 min=2 自动补容会绕过串行admission，已移除候选双服务factory及专属测试；保留假驱动replacement policy，不声称已有可用云端拆分定义。设计、命令与精确限制见 [C5-HOME-AUTHORITY.md](./C5-HOME-AUTHORITY.md) 和 [C5-REPLACEMENT.md](./C5-REPLACEMENT.md)。
 - **实测门禁：** 最终迁移源从空白隔离 PostgreSQL 全量重放成功；authority **14/14**、restricted actor/RLS **6/6**，涵盖并发 CAS、旧写者、delete/recreate、Team 成员与租约、新建 pending 并发初始化、存储失败重试和配置撤回。adapters 全量 **5,118 通过 / 73 跳过**；API/worker/db **2,616 通过 / 437 跳过**；5 包 check、API/worker bundle、Python **20/20**、Biome/diff 通过。Prisma schema diff 的新 C5 模型无差异；存在4个既有外键 onUpdate 差异，未把它们改入本项。首次 sandbox 网络fixture超时的运行已停止；最终全量使用允许loopback的执行环境通过，跳过项未验证。
 - **全局预算与真实边界：** API 1、worker 5 会话，各两容器稳定 **12**；额外 worker **17**、整代重叠 **24** 均超过 **15**，只能先排空/确认 stop+sessions0 再替换，不能擅自增额度。无新增常驻连接；DATABASE_URL 6543、REALTIME_DATABASE_URL 5432 边界不变。完整cutover需真实旧 API/worker 停止且持续阻断重启/admission 的部署driver，现有存储全部快照验证，以及真实发布driver的全局lease/容量预留；本地假驱动未证明云端能力。Docker/desktop本地目录数据不能自动进入本远程fleet，清单拒绝且不会静默清空。未部署/改资源/Secret，未测每秒首页/RPC零失败、真实对话不中断、生产连接high-water；不标整项完成。
@@ -484,7 +485,7 @@ rg -i -c recruiting packages/adapters/src/executor.ts
 | B2 | 源码 reporter 每60秒记录 slots/ready/readyChats/oldestReadySeconds/running/exhausted | 部署后连续观察每分钟日志 | 部署与目标日志读取范围；当前未测 |
 | C1 | 本地 artifact adapter 与上传nonce回归通过 | 配置对象存储并迁移现有附件后做跨容器读取 | 现有桶/Secret配置及迁移授权；本轮禁止，未尝试 |
 | C2 | 本地 computer-workspace adapter 回归通过 | 配置共享对象存储并迁移工作目录后跨容器验证 | 同上；不创建桶或更改Volume/Secret |
-| C5 | C6 已把网页进程合并到API；C4单独推进 | 拆分部署服务、启用多个容器、滚动发布并每秒探测首页/RPC与不中断对话 | C1/C2配置和C4验证完成，另需部署/资源配置授权；未执行 |
+| C5 | 多容器 | web/API 和 worker 拆分、独立 slot 与滚动发布 | 代码与本地验收已合入 [#334](https://github.com/WeKruit/rakazo/pull/334)：7,762通过/510跳过、真实PG与子进程23/23、Python17/17；实际云端滚动与连续对话未测，不标整体验收完成 | Adam |
 | E1 | 已有队列/连接池/运行日志，告警清单保留 | 在现有日志平台创建6类告警，并逐一触发确认送达 | 云日志配置及测试通知目标授权；本轮禁止配置与外发，未执行 |
 | E2 | 本地单测不等于20/50并发对话压测 | 在隔离部署的副本岗位运行20/50并发，测首问<10s、前10人选<20s、readyChats=0、无5xx | 提供获准的测试副本、内部账号、在线服务调用/额度范围；不得用真实岗位或本地模型假响应冒充 |
 | E3 | 无恢复演练证据 | 获取最新备份，在获准隔离目标恢复并记录真实RTO/RPO | 备份访问与恢复目标授权；不自行建立云资源，也不复制真实候选人到未批准测试库 |

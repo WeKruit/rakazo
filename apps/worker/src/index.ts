@@ -26,6 +26,7 @@ import {
   createRunExecutor,
   createRunSandbox,
   createRunSecretWriter,
+  createSessionAdmissionRuntime,
   createTicketChangeNotifier,
   createWebProvider,
   DISCOVERY_PREWARM_REFRESH_MS,
@@ -109,16 +110,26 @@ async function main() {
   });
   const { pool } = created;
   let { prisma } = created;
+  const sessionAdmission = await createSessionAdmissionRuntime(prisma, "worker", process.env);
   const sessionUrl = process.env.REALTIME_DATABASE_URL ?? databaseUrl;
   // LISTEN, the lock, and two for fetching and completing jobs.
   const sessionPool =
     sessionUrl === databaseUrl
       ? pool
-      : createPool(sessionUrl, { poolMax: 4, applicationName: "rakazo-worker-session" });
+      : createPool(sessionUrl, {
+          poolMax: 4,
+          applicationName:
+            sessionAdmission?.admission.sessionApplicationName ?? "rakazo-worker-session",
+          verifyConnection: sessionAdmission?.verifyConnection,
+        });
   const realtime = new PostgresRealtimeFanout({
     connectionString: sessionUrl,
     publisher: pool,
+    applicationName: sessionAdmission?.admission.sessionApplicationName,
+    verifyConnection: sessionAdmission?.verifyConnection,
+    assertConnectionAdmission: sessionAdmission?.assertConnectionAdmission,
   });
+  sessionAdmission?.bindOwners(realtime, sessionPool);
   const secrets = await createWorkerSecretStore(process.env, realtime);
   if (secrets.describe().capabilities.degraded)
     logger.warn("Secret storage degraded; encrypted credentials remain available");
@@ -355,8 +366,9 @@ async function main() {
   const drain = createWorkerDrain({
     stopJobs: () => jobHost.stop(),
     stopReconciler: () => reconciler.stop(),
+    afterDrain: sessionAdmission ? () => sessionAdmission.beginShutdown() : undefined,
   });
-  // No cancellation or pool release here: active runs retain their leases and heartbeats.
+  // Active runs retain leases/heartbeats until job drain completes; only then close slot sessions.
   const requestDrain = () => {
     void drain.begin().catch((error) => logger.error("worker drain failed", error));
   };
@@ -365,6 +377,14 @@ async function main() {
     ? await startWorkerHealth(
         drain.state,
         parsePositiveInteger(process.env.WORKER_HEALTH_PORT, 8001),
+        "0.0.0.0",
+        sessionAdmission
+          ? {
+              instanceId: sessionAdmission.admission.instanceId,
+              generation: sessionAdmission.admission.generation,
+              service: sessionAdmission.admission.service,
+            }
+          : undefined,
       )
     : undefined;
 
@@ -389,9 +409,14 @@ async function main() {
       await connector.stop();
       await mcp.close();
       firstPartyAuth?.disposeOidcDiscovery();
+      if (sessionAdmission) {
+        // A failed release keeps its reservation; no TTL or silent reclaim.
+        await sessionAdmission
+          .closeAndRelease()
+          .catch((error) => logger.error("session admission retained after shutdown", error));
+      } else if (sessionPool !== pool) await sessionPool.end().catch(() => undefined);
       await prisma.$disconnect().catch(() => undefined);
       await pool.end().catch(() => undefined);
-      if (sessionPool !== pool) await sessionPool.end().catch(() => undefined);
     } finally {
       await logger.flush({ timeoutMs: 2_000 });
     }

@@ -188,4 +188,59 @@ describe("PostgresRealtimeFanout", () => {
     await unsubscribe();
     await realtime.close();
   });
+  it("shares shutdown completion across concurrent closes and delayed connect/end", async () => {
+    let connected!: () => void;
+    let ended!: () => void;
+    const connecting = new Promise<void>((resolve) => {
+      connected = resolve;
+    });
+    const ending = new Promise<void>((resolve) => {
+      ended = resolve;
+    });
+    const client = new FakeClient(connecting);
+    vi.spyOn(client, "end").mockImplementation(async () => {
+      await ending;
+      client.ended = true;
+    });
+    const realtime = new PostgresRealtimeFanout({
+      connectionString: "postgres://unused",
+      publisher: { query: async () => undefined },
+      clientFactory: () => client,
+      verifyConnection: async () => undefined,
+    });
+    await realtime.subscribe("thread:a", () => undefined);
+    const first = realtime.close();
+    const second = realtime.close();
+    expect(first).toBe(second);
+    let complete = false;
+    void second.then(() => {
+      complete = true;
+    });
+    ended();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(complete).toBe(false);
+    connected();
+    await first;
+    expect(client.queries).toEqual([]);
+    expect(complete).toBe(true);
+  });
+
+  it("keeps a session-owner shutdown failure sticky for every close caller", async () => {
+    const client = new FakeClient();
+    const realtime = new PostgresRealtimeFanout({
+      connectionString: "postgres://unused",
+      publisher: { query: async () => undefined },
+      clientFactory: () => client,
+      verifyConnection: async () => undefined,
+    });
+    await realtime.subscribe("thread:a", () => undefined);
+    await Promise.resolve();
+    await Promise.resolve();
+    vi.spyOn(client, "end").mockRejectedValue(new Error("socket close unconfirmed"));
+    const first = realtime.close();
+    await expect(first).rejects.toThrow("unconfirmed");
+    expect(realtime.close()).toBe(first);
+    await expect(realtime.close()).rejects.toThrow("unconfirmed");
+  });
 });
