@@ -2111,5 +2111,53 @@ model HomeAuthorityCutover {
   id String @id
   manifestDigest String
   activatedAt DateTime @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)"))
+  sessionBudgets SessionAdmissionBudget[]
+  sessionGenerations SessionAdmissionGeneration[]
+  sessionAdmissions SessionAdmission[]
   @@map("home_authority_cutover")
+}
+
+/// System-only desired worker deployment generation; no automatic takeover.
+model SessionAdmissionGeneration {
+  service String @id
+  generation String
+  cutoverId String @default("verified")
+  cutover HomeAuthorityCutover @relation(fields: [cutoverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  @@map("session_admission_generations")
+}
+
+/// Global direct-session capacity, held until verified stopped-instance release.
+model SessionAdmission {
+  token String @id
+  service String
+  instanceId String @unique
+  observerRole String
+  generation String
+  sessionApplicationName String @unique
+  reservedSessions Int
+  status String @default("active")
+  cutoverId String @default("verified")
+  cutover HomeAuthorityCutover @relation(fields: [cutoverId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  createdAt DateTime @default(now()) @db.Timestamptz(6)
+  connections SessionAdmissionConnection[]
+  @@map("session_admissions")
+}
+
+model SessionAdmissionConnection {
+  token String
+  pid Int
+  backendStart DateTime @db.Timestamptz(6)
+  admission SessionAdmission @relation(fields:[token], references:[token], onDelete:Cascade, onUpdate:NoAction)
+  @@id([token,pid])
+  @@map("session_admission_connections")
+}
+
+/// Explicit external/migration session headroom; never silently defaulted to zero.
+model SessionAdmissionBudget {
+  id String @id
+  totalSessions Int
+  externalReservedSessions Int
+  cutoverId String @default("verified")
+  cutover HomeAuthorityCutover @relation(fields:[cutoverId], references:[id], onDelete:NoAction,onUpdate:NoAction)
+  @@map("session_admission_budget")
 }
