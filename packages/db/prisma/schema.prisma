@@ -2099,3 +2099,17 @@ model ModelOAuthSession {
   @@index([expiresAt])
   @@map("model_oauth_sessions")
 }
+
+// Irreversible home-key activation marker; stores no files, user identity or credentials.
+model HomeAuthorityTombstone {
+  homeKeyHash String @id
+  @@map("home_authority_tombstones")
+}
+
+/// Verified complete home migration receipt; no actor access or foreign-key cascade.
+model HomeAuthorityCutover {
+  id String @id
+  manifestDigest String
+  activatedAt DateTime @default(dbgenerated("(now() AT TIME ZONE 'UTC'::text)"))
+  @@map("home_authority_cutover")
+}
