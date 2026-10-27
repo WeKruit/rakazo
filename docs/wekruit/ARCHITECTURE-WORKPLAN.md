@@ -100,7 +100,7 @@ SQL
   - 机器人列表和群组列表是一次全部读出。
 - **验收（代码检查）：** 任何列表 RPC 单次返回不超过 200 行。
 - **验收（线上实测）：** 有 1,000 个候选人的岗位，联系人视图的 RPC p95 小于 300 ms。
-- **Adam 实施记录（仍进行中）：** [PR #277](https://github.com/WeKruit/rakazo/pull/277) 为第一批：机器人/群组、导航/bootstrap、联系人有界读取及 Web/Mobile 自动续页；后续本地实现为另外 31 个数组列表与 5 个结构化列表增加明确 offset，认证后的 RPC 响应每个列表最多 200 条，客户端完整续页。没有截断写操作的回执。后续已将其中 28 个读接口分页下推到数据库（稳定排序、take/skip 或 SQL LIMIT/OFFSET），其余 8 个为静态/外部 provider 目录或已有 10/100 条上限的集合，边界区别见验收记录。
+- **Adam 实施记录（仍进行中）：** [PR #277](https://github.com/WeKruit/rakazo/pull/277) 覆盖机器人/群组、导航/bootstrap、联系人有界读取及 Web/Mobile 自动续页；为另外 31 个数组列表与 5 个结构化列表增加明确 offset，认证后的 RPC 响应每个列表最多 200 条，客户端完整续页。没有截断写操作的回执。后续已将其中 28 个读接口分页下推到数据库（稳定排序、take/skip 或 SQL LIMIT/OFFSET），其余 8 个为静态/外部 provider 目录或已有 10/100 条上限的集合，边界区别见验收记录。
 - **实测与限制：** 见 [A3 本地验收记录](./A3-PAGINATION-VALIDATION.md)。合成 PostgreSQL 数据 1,000 候选人，100 次采样：原全岗位查询 1,000 行、p95 0.88 ms；按已观察身份查询 20 行、p95 0.49 ms。机器人 1,000 条在 `200/200/200/200/200/0` 六页中无遗漏、无重复。真实本地 HTTP+PostgreSQL 的 1,000 人联系人 RPC：首轮 p95 32.44 ms，最终复测 p95 26.37 ms（各 100 samples/10 warmups）；固定合成 session actor，其余授权和 DB 查询真实。实际浏览器 contacts 1×1000→5×200 请求，JS gzip 625,224→626,840 bytes。后续整份 recruiting PostgreSQL 回归 285 passed、候选人单元 425 passed、DB 含 cross-package 类型检查通过。**线上联系人 RPC p95 还没测，不标完成**。没有部署、云配置变更或真实岗位/候选人测试。
 
 

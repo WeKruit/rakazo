@@ -1,6 +1,6 @@
 # A3 local pagination validation
 
-Status: implementation validated locally; online acceptance and integration remain pending. Initial Draft PR: https://github.com/WeKruit/rakazo/pull/277 (base `claude/project-thread-f1cbzk`, never `main`). Adam claim: `6540579bf`. Initial implementation: `8a5764a4622c753516caac575ef93d0a435c6557`.
+Status: implementation validated locally; online acceptance and integration remain pending. Draft PR: https://github.com/WeKruit/rakazo/pull/277 (base `claude/project-thread-f1cbzk`, never `main`). Adam claim: `6540579bf`. Initial implementation: `8a5764a4622c753516caac575ef93d0a435c6557`.
 
 ## Scope
 
@@ -81,6 +81,8 @@ Final query-layer checks: API/DB/adapters/contracts/core all passed (including D
 
 A subsequent attempted filtered recruiting PostgreSQL run used `pnpm test ... -t`; the package runner did not pass the filter through, and the complete file ran: **273 passed / 12 failed** against this branch before the separately developed recruiting fixture/source-receipt fixes were integrated. That run is not a passing gate. After integrating the separately validated source/receipt and fixture fixes, the **complete** file was deliberately rerun with `pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts`: **285 passed**, including all three new real-PostgreSQL pagination cases. DB TypeScript and cross-package checks then passed, and `pnpm exec vitest run packages/db/src/recruiting-candidates.test.ts` passed **425 tests**. The initial failed run is retained here as history rather than silently omitted. Final combined-branch regression remains required.
 
+Publication preparation merged upstream `9b2705c66fe952aa90c1a011dcb51ed22c82ef82` normally. API/DB/adapters/contracts/core/web/mobile checks passed; web and mobile suites reran with **1,654 / 1,004 passed**.
+
 ## Remaining acceptance
 
-Online 1,000-candidate contacts-view RPC p95 < 300 ms is **not tested**. The verified remote initial PR remains open and Draft, head `8a5764a4622c753516caac575ef93d0a435c6557`, with no merge commit; the later query and validation commits are local integration work. No deployment, live provider call, real candidate/job test, cloud configuration change, or CI enablement was performed. Final integration tests must run on the combined #263 branch; this worktree's results do not substitute for that run.
+Online 1,000-candidate contacts-view RPC p95 < 300 ms is **not tested**. PR #277 targets only the #263 integration branch; final merge status is tracked on that PR. No deployment, live provider call, real candidate/job test, cloud configuration change, or CI enablement was performed. Final integration tests must run on the combined #263 branch; this worktree's results do not substitute for that run.
