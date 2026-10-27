@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
@@ -51,18 +52,32 @@ describe("maintained recruiting defaults", () => {
     expect(bot.instructions).toContain(
       "create it with schedule_create only after the recruiter says yes",
     );
-    expect(bot.instructions).toContain(
-      "keep IDs, tool names, gate codes, cursors and JSON internal",
-    );
   });
 
-  it.each(RECRUITING_DEFAULT_BOTS)("$name never names a vendor to the recruiter", (bot) => {
-    expect(bot.instructions).toContain(
+  it("never names a vendor or exposes setup to the recruiter", () => {
+    for (const part of [
+      "keep IDs, tool names, gate codes, cursors and JSON internal",
       "Never name a vendor or tool (Autumn, Coresignal, FullEnrich, ContactOut, LeadMagic, Instantly, Composio, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API, REST) in chat replies, cards, progress lines, questions or emails",
-    );
-    expect(bot.instructions).toContain(
       "the only exception is a connect-request card, which names the provider to connect",
-    );
+      'never say CRM, campaign, leads, lead list, mailbox or sending-account binding, mapping or "setup" to the recruiter',
+      "do that setup silently and speak only in recruiter language",
+      "Give a zoned ETA only for background work that keeps running after this turn",
+      "you do now and never promise for a later time",
+    ])
+      expect(RECRUITER_LANGUAGE).toContain(part);
+  });
+
+  // Each shared rule has one source: the executor adds recruiter language to every recruiting
+  // run and the role context carries the calibration, scale and PDF rules.
+  it.each([
+    RECRUITER_LANGUAGE,
+    RECRUITING_CALIBRATION_QUICK_SEARCH,
+    RECRUITING_ROUND_NEXT_STEP,
+    RECRUITING_SCALE_START,
+    RECRUITING_PDF_RENDERING,
+  ])("keeps a shared rule out of bot instructions and skills (%#)", (rule) => {
+    for (const bot of RECRUITING_DEFAULT_BOTS) expect(bot.instructions).not.toContain(rule);
+    for (const skill of RECRUITING_DEFAULT_SKILLS) expect(skill.body).not.toContain(rule);
   });
 
   it.each(["main", "outreach"])(
@@ -99,9 +114,13 @@ describe("maintained recruiting defaults", () => {
     expect(main.instructions).toContain(
       "Round feedback before the calibration is accepted goes into your next quick search",
     );
-    expect(main.instructions).toContain("each search is saved to Results the moment it returns");
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
+      "each search is saved to Results the moment it returns",
+    );
     expect(main.instructions).not.toContain("Deep check, started in parallel");
-    expect(main.instructions).toContain("never for a calibration round except that top-up");
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
+      "never for a calibration round except that top-up",
+    );
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
@@ -126,16 +145,13 @@ describe("maintained recruiting defaults", () => {
     const skill = (name: string) => RECRUITING_DEFAULT_SKILLS.find((s) => s.name === name)!.body;
     expect(skill("Recruitment sourcing continuation")).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
     const intake = skill("Recruitment intake and handoff");
-    for (const { body } of RECRUITING_DEFAULT_SKILLS)
-      expect(body).toContain("Never name a vendor or tool (Autumn");
-    expect(intake).toContain("Calibration rounds are quick searches you run yourself");
-    expect(intake).toContain('web_search_advanced_exa call with category "people"');
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
+      'web_search_advanced_exa call with category "people"',
+    );
     expect(intake).toContain("Always settle the language requirement");
     expect(intake).toContain("stays a preference, never a reject rule");
-    expect(intake).toContain("rather than a matching title");
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
-    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("rather than just a matching title");
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain("rather than just a matching title");
     expect(sourcer.instructions).toContain("show that person as needing a check");
     const draft = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Review recruiting draft",
@@ -183,10 +199,6 @@ describe("maintained recruiting defaults", () => {
     (bot) => {
       expect(bot.instructions).not.toContain("with an honest zoned ETA for unfinished work");
       expect(bot.instructions).toContain(
-        "Give a zoned ETA only for background work that keeps running after this turn",
-      );
-      expect(bot.instructions).toContain("you do now and never promise for a later time");
-      expect(bot.instructions).toContain(
         "A turn never ends on a bare save or acknowledgement: after an answer, ask the next clarifying question at once, or when none is missing run the calibration search in the same turn.",
       );
       expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
@@ -206,21 +218,12 @@ describe("maintained recruiting defaults", () => {
   });
 
   it.each(RECRUITING_DEFAULT_BOTS)("$name never exposes CRM, campaign or lead setup", (bot) => {
-    expect(bot.instructions).toContain(
-      'never say CRM, campaign, leads, lead list, mailbox or sending-account binding, mapping or "setup" to the recruiter',
-    );
-    expect(bot.instructions).toContain(
-      "do that setup silently and speak only in recruiter language",
-    );
     expect(bot.instructions).not.toContain("no CRM role is linked");
     expect(bot.instructions).not.toContain("set up a campaign, pick a mailbox");
   });
 
-  it("ships the PDF rendering rule in the intake skill", () => {
-    const intake = RECRUITING_DEFAULT_SKILLS.find(
-      (skill) => skill.name === "Recruitment intake and handoff",
-    )!;
-    expect(intake.body).toContain(RECRUITING_PDF_RENDERING);
+  it("keeps role documents off the calibration path", () => {
+    expect(RECRUITING_PDF_RENDERING).toContain("Noto Sans CJK SC");
     expect(RECRUITING_INTAKE_FLOW).toContain("Role documents never hold up the calibration search");
   });
 
@@ -270,10 +273,6 @@ describe("maintained recruiting defaults", () => {
     );
     for (const part of ["That request is the acceptance"])
       expect(RECRUITING_SCALE_START).toContain(part);
-    for (const bot of RECRUITING_DEFAULT_BOTS) {
-      expect(bot.instructions).toContain(RECRUITING_SCALE_START);
-      expect(bot.instructions).toContain(RECRUITING_ROUND_NEXT_STEP);
-    }
     expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
       "nobody already returned for this role is ever shown again",
     );

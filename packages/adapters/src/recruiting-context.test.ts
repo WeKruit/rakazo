@@ -1,5 +1,11 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
+import {
+  RECRUITING_CALIBRATION_QUICK_SEARCH,
+  RECRUITING_PDF_RENDERING,
+  RECRUITING_ROUND_NEXT_STEP,
+  RECRUITING_SCALE_START,
+} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
@@ -436,6 +442,13 @@ describe("recruiting run context", () => {
       );
       expect(text).toContain("Scheduling and outbound require their native approvals");
       expect(text).toContain("Internal record keeping does not require human approval by default");
+      for (const rule of [
+        RECRUITING_CALIBRATION_QUICK_SEARCH,
+        RECRUITING_ROUND_NEXT_STEP,
+        RECRUITING_SCALE_START,
+        RECRUITING_PDF_RENDERING,
+      ])
+        expect(text).toContain(rule);
       expect(text).not.toContain("research requires G0 on the current brief revision");
       expect(text).not.toContain("Candidate sourcing requires actual human G0 approval");
       expect(loaded!.text).toContain(text);
