@@ -1,7 +1,8 @@
 import { Trans } from "@lingui/react/macro";
-import { Button, Popover, PopoverContent, PopoverTrigger } from "@rakazo/ui-web";
+import { Button } from "@rakazo/ui-web";
 import { FolderOpen, Gauge, LayoutGrid, LogOut, Settings, SquareKanban } from "lucide-react";
 import type { CSSProperties } from "react";
+import { DeferredPopover } from "../../components/DeferredPopover";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
 import { authClient } from "../../lib/auth";
@@ -148,88 +149,90 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
           <Trans>Integrations</Trans>
         </span>
       </button>
-      <Popover open={menuOpen} onOpenChange={setMenuOpen}>
-        <PopoverTrigger
-          data-testid="user-menu-trigger"
-          className="flex items-center gap-[11px] px-[18px] py-3.5"
-        >
-          <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-[12px] text-foreground/75">
-            {initials}
-          </span>
-          <span className="text-[14.5px] text-foreground/90">{userName}</span>
-        </PopoverTrigger>
-        {menuOpen ? (
-          <PopoverContent
-            side="top"
-            align="start"
-            className="w-[calc(316px-1.5rem)] max-w-[calc(100vw-3rem)] gap-0 p-1 data-closed:animate-none"
+      <DeferredPopover
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        trigger={
+          <>
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-accent text-[12px] text-foreground/75">
+              {initials}
+            </span>
+            <span className="text-[14.5px] text-foreground/90">{userName}</span>
+          </>
+        }
+        triggerProps={{
+          "data-testid": "user-menu-trigger",
+          className: "flex items-center gap-[11px] px-[18px] py-3.5",
+        }}
+        side="top"
+        align="start"
+        label={userName}
+        className="w-[calc(316px-1.5rem)] max-w-[calc(100vw-3rem)] gap-0 p-1 data-closed:animate-none"
+      >
+        {showToolActivity && bootstrapMe?.ticketBoardEnabled ? (
+          <Button
+            variant="ghost"
+            className="w-full justify-start font-normal"
+            onClick={() => {
+              setMenuOpen(false);
+              setMobileSidebarOpen(false);
+              navigate("/app/board");
+            }}
           >
-            {showToolActivity && bootstrapMe?.ticketBoardEnabled ? (
-              <Button
-                variant="ghost"
-                className="w-full justify-start font-normal"
-                onClick={() => {
-                  setMenuOpen(false);
-                  setMobileSidebarOpen(false);
-                  navigate("/app/board");
-                }}
-              >
-                <SquareKanban className="text-muted-foreground" strokeWidth={1.75} />
-                <Trans>Board</Trans>
-              </Button>
-            ) : null}
-            <Button
-              variant="ghost"
-              className="w-full justify-start font-normal"
-              onClick={() => {
-                setMenuOpen(false);
-                setMobileSidebarOpen(false);
-                navigate("/app/artifacts");
-              }}
-            >
-              <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
-              {showToolActivity ? <Trans>Artifacts</Trans> : <Trans>Files</Trans>}
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full justify-start font-normal"
-              aria-label={t`Settings`}
-              onClick={() => {
-                setMenuOpen(false);
-                openSettings("general");
-              }}
-            >
-              <Settings className="text-muted-foreground" strokeWidth={1.75} />
-              <Trans>Settings</Trans>
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full justify-start font-normal"
-              aria-label={t`Usage`}
-              onClick={() => {
-                setMenuOpen(false);
-                openSettings("usage");
-              }}
-            >
-              <Gauge className="text-muted-foreground" strokeWidth={1.75} />
-              <Trans>Usage</Trans>
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full justify-start font-normal"
-              onClick={() =>
-                void authClient.signOut().then(() => {
-                  clearSpaceSelection();
-                  navigate("/");
-                })
-              }
-            >
-              <LogOut className="text-muted-foreground" strokeWidth={1.75} />
-              <Trans>Log out</Trans>
-            </Button>
-          </PopoverContent>
+            <SquareKanban className="text-muted-foreground" strokeWidth={1.75} />
+            <Trans>Board</Trans>
+          </Button>
         ) : null}
-      </Popover>
+        <Button
+          variant="ghost"
+          className="w-full justify-start font-normal"
+          onClick={() => {
+            setMenuOpen(false);
+            setMobileSidebarOpen(false);
+            navigate("/app/artifacts");
+          }}
+        >
+          <FolderOpen className="text-muted-foreground" strokeWidth={1.75} />
+          {showToolActivity ? <Trans>Artifacts</Trans> : <Trans>Files</Trans>}
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start font-normal"
+          aria-label={t`Settings`}
+          onClick={() => {
+            setMenuOpen(false);
+            openSettings("general");
+          }}
+        >
+          <Settings className="text-muted-foreground" strokeWidth={1.75} />
+          <Trans>Settings</Trans>
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start font-normal"
+          aria-label={t`Usage`}
+          onClick={() => {
+            setMenuOpen(false);
+            openSettings("usage");
+          }}
+        >
+          <Gauge className="text-muted-foreground" strokeWidth={1.75} />
+          <Trans>Usage</Trans>
+        </Button>
+        <Button
+          variant="ghost"
+          className="w-full justify-start font-normal"
+          onClick={() =>
+            void authClient.signOut().then(() => {
+              clearSpaceSelection();
+              navigate("/");
+            })
+          }
+        >
+          <LogOut className="text-muted-foreground" strokeWidth={1.75} />
+          <Trans>Log out</Trans>
+        </Button>
+      </DeferredPopover>
       {!botsSidebarCollapsed ? (
         <PaneResizeHandle
           label={t`Resize navigation`}

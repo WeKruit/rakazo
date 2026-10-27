@@ -11,7 +11,7 @@ const MenuSurface = lazyPanel(() =>
 type TriggerProps = Omit<
   ButtonHTMLAttributes<HTMLButtonElement>,
   "children" | "onClick" | "onKeyDown"
->;
+> & { [attribute: `data-${string}`]: string | undefined };
 export type DeferredPopupProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
