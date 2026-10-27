@@ -12,6 +12,7 @@ if (process.env.RAKAZO_RELEASE_PROFILE !== "staging") loadRootEnv();
 import {
   AutumnFileConnector,
   artifactStorageOptionsFromEnv,
+  assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   createAgentHomeStore,
@@ -232,7 +233,8 @@ async function main() {
   prewarm();
   setInterval(prewarm, DISCOVERY_PREWARM_REFRESH_MS).unref();
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
-  const home = createAgentHomeStore(dataDir, artifactStorage);
+  await assertHomeStorageConfiguration(prisma, artifactStorage);
+  const home = createAgentHomeStore(dataDir, artifactStorage, prisma);
   const workerConcurrency = parsePositiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 4);
   const inMemoryJobs = process.env.WAKEUP_DRIVER === "memory" ? new InMemoryJobQueue() : undefined;
   const jobs: JobPublisher = inMemoryJobs ?? new GraphileJobPublisher(pool);

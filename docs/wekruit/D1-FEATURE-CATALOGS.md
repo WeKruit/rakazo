@@ -96,3 +96,144 @@ two baselines. The final table uses the merged build and published dependency ba
 Deployed Fast4G LCP and other browsers remain untested. See
 [D1-250KB-OPTIONS.md](D1-250KB-OPTIONS.md) for further design choices; these results do not
 establish that a different rendering stack is necessary or sufficient.
+
+## Second bounded slice: deferred recruiting views
+
+On published integration `f0752e539`, actual chunk/module attribution found 17 recruiting
+view/helper sources absent from both the contacts entry graph and its immediately rendered
+content. These include CRM history, candidate detail/presentation, scheduling/calendar,
+role/summary/legacy views and feedback. Their existing dynamic boundaries now wait for
+optional messages; static children are covered by those parent boundaries. The source audit
+also checked the recruiting barrel's current type-only consumer. No new feature registry or
+UI hiding is involved.
+
+Startup now has 984 extracted entries; the optional catalog has 1,225 (shared IDs appear
+in both). Compared with the preceding published catalog build, Chinese cold contacts is
+**339,147 → 332,440 gzip B**, chat **301,872 → 295,153**, sign-in
+**194,711 → 187,986**. Contacts retains 7 JS / 35 total requests, 17 RPC / zero duplicates;
+chat and sign-in retain their preceding counts. This additional 6,707-byte contact saving
+is measured, not the earlier maximal catalog estimate. Contacts remains 82,440 bytes above
+250,000.
+
+Web **1,694/1,694** (149 files, 31.73 s), web check, production build, all locale catalog
+checks, and the same **15/15** production browser cases (40.5 s) pass. Commands are the
+same as above. First-stage and second-slice measurements are kept separate. No schema,
+authentication plugin, or server behavior was changed in this slice.
+
+## Separate unused web organization-client registration
+
+The web app consumes no Better Auth organization actions, hooks, reflected properties or
+organization endpoints. Space membership/selection uses the existing authorized product
+RPCs. Removing only the unused browser plugin leaves the server organization plugin,
+session client, permission enforcement and RPC behavior intact. A named session-state
+interface keeps the controller's exported type portable; session fields are unchanged.
+
+After the second catalog slice, this independently measured change takes contacts
+**332,440 → 329,543 gzip B**, chat **295,153 → 292,260**, and sign-in
+**187,986 → 185,083**. The 2,897-byte contacts saving is actual route gzip, not the
+roughly 13 KB rendered-source attribution that motivated the audit.
+
+Web **1,694/1,694**, web type check and production build pass. A new actual local Chromium
+test passes (**1/1**, 3.1 s) through session display, selected-Space request-header change,
+logout/selection clearing and login. It observes no organization endpoint requests.
+All endpoints are synthetic. The fixed synthetic server verifies client transport, not
+server authorization; the existing App/Shell tests still verify scoped state replacement.
+No real account was used, no email sent and no server auth configuration changed.
+
+## Canonical link parser boundary (local follow-up)
+
+The existing Linkify parser and its exact rules now live in a canonical leaf;
+`markdown.ts` retains its public exports. Initial contexts and URL helpers use a
+light shared module. Plain text without a colon or at-sign cannot match the
+existing explicit-scheme/email grammar and renders synchronously. Potential
+links load the original parser and original link component; no replacement
+parser or weaker URL sanitation is introduced. Fullwidth markers conservatively
+load the parser. Bare domains remain literal, matching the existing
+`fuzzyLink: false` behavior. Pending imports retain visible text with `aria-busy`.
+
+Matched production builds, Chinese locale, synthetic fixtures:
+
+| Cold entry | Before gzip bytes | After gzip bytes |
+| --- | ---: | ---: |
+| Contacts with visible contacts | 329543 | 325302 |
+| Plain-text chat | 292260 | 288026 |
+| Sign-in | 185083 | 180756 |
+| User message with URL, email and bare domain | 410505 | 411345 |
+
+The linked-message case deliberately waits for both original anchors before
+measuring. Its URL and mailto hrefs are unchanged; the bare domain stays literal.
+It costs 840 additional bytes from the deferred boundary. This is a reduction
+for plain entries, not a claim that every message or route gets smaller.
+Contacts retains 7 JS requests, 35 total requests, 17 RPC requests and zero
+duplicate recruiting reads. The 250000-byte final goal remains unmet (contacts
+75302 bytes above it); linked-message rendering is also above 350000 bytes.
+
+Validation commands:
+
+```sh
+pnpm --filter @rakazo/chat-ui check
+pnpm --filter @rakazo/web check
+pnpm exec vitest run packages/chat-ui/src apps/web/src
+VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web build
+MEASURE_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec tsx scripts/measure-first-load.ts BEFORE_DIST dist
+MEASURE_UI_LOCALE=zh-CN MEASURE_MESSAGE_ROLE=user MEASURE_MESSAGE_TEXT='See https://example.com/path and user@example.com plus example.com' MEASURE_EXPECT_LINKS=2 pnpm --filter @rakazo/web exec tsx scripts/measure-first-load.ts BEFORE_DIST dist
+MEASURE_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec tsx scripts/measure-contacts-load.ts dist
+pnpm --filter @rakazo/web exec playwright test --config playwright.catalog.config.ts
+```
+
+Both type checks and production build passed. Combined web/chat-ui tests:
+1852 passed across 158 files (32.23 seconds), including canonical parser parity,
+Unicode/punycode/email/protocol/newline cases and actual cold first-link rendering.
+The source-isolated baseline uses the previous committed chat-ui package with
+identical application/catalog/auth sources; its measured plain-entry values
+match the preceding committed results. No deployed LCP or real-user data was used.
+
+Production browser gate: all 16 cases passed in 44.0 seconds, covering real
+responsive recruiting routes, contacts keyboard/focus, EN/ZH labels, optional
+catalog loading/language switching, and auth/session/selected-space behavior.
+
+Follow-up review: https://github.com/WeKruit/rakazo/pull/307 (Draft, targeting the
+#263 branch; this document does not assert it has merged).
+
+## Plain-link presentation follow-up
+
+`link-presentation.web.tsx` now owns the original confirmation context/dialog,
+anchor, favicon and website-link components. Both Markdown and plain links use
+these same canonical components; the public Markdown exports remain compatible.
+Plain links no longer import ReactMarkdown, GFM/CJK parsing or table rendering.
+No math/highlighting engine was found in this dependency path.
+
+Matched Chinese cold-message production results (same content and visible links):
+
+| Case | Before gzip bytes | After gzip bytes |
+| --- | ---: | ---: |
+| User URL + email + literal bare domain | 411345 | 354913 |
+| Bot formatted Markdown, link and inline code | 410702 | 411337 |
+| Contacts | 325302 | 325328 |
+| Sign-in | 180756 | 180757 |
+
+The 56432-byte plain-link reduction is real; complete Markdown costs 635 extra
+bytes because its presentation is now shared across a module boundary. Contacts
+has no meaningful benefit (+26 bytes), so this does not reduce its remaining
+75328-byte distance to 250000. The linked-message case remains 4913 bytes above
+350000. All values include loaded dynamic dependencies, not just the entry file.
+
+Commands are the previous measurement command with user text unchanged, plus
+`MEASURE_MESSAGE_ROLE=bot MEASURE_MESSAGE_TEXT='**Important**: See [example](https://example.com/path) and code.' MEASURE_EXPECT_LINKS=1` for formatted content
+(the measured case used inline-code backticks around code). Both browser cases
+waited for the actual anchors before collecting their final asset set.
+
+Further ordinary opportunities are not exhausted: an unopened confirmation
+dialog still shares the link presentation module, and some optional chat
+controls still contribute startup translations. Their net savings have not been
+measured. Neither is evidence that contacts can reach 250000. The visible
+React DOM/router, client auth/RPC, Zod validation, Shell state and visible
+recruiting controls remain in the loaded graph. Removing them changes behavior;
+selective schema API migration or server-rendered/partial-hydration work needs
+separate design and parity verification. These are alternatives to study, not
+claims that a stack replacement is required or guaranteed to meet the target.
+
+Follow-up validation: web/chat-ui typechecks, production build and Biome passed;
+`pnpm exec vitest run apps/web/src/pages/Shell.test.tsx packages/chat-ui/src`
+passed all 370 tests in 10 files (31.73 seconds). Existing confirmation,
+sanitization, table and Markdown assertions remain intact.

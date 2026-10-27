@@ -273,7 +273,14 @@ export interface JobWorkerHost {
 export interface AgentHomeStore {
   describe(): AdapterDescriptor<{ revisions: boolean }>;
   checkout(botId: string, dest: string, context: AdapterContext): Promise<string>;
-  commit(botId: string, src: string, context: AdapterContext): Promise<string>;
+  commit(
+    botId: string,
+    src: string,
+    context: AdapterContext,
+    expectedRevision?: string,
+  ): Promise<string>;
+  /** Capture before exporting an external workspace so stale exports cannot overwrite a new revision. */
+  captureRevision?(botId: string, context: AdapterContext): Promise<string | undefined>;
   restore(botId: string, revision: string, dest: string, context: AdapterContext): Promise<void>;
   /**
    * Paths are relative to `directory`; a missing or linked directory exports nothing.

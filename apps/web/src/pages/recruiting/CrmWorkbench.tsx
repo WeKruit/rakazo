@@ -1,9 +1,16 @@
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { withFeatureMessages } from "../../lib/i18n";
 import type { RecruitingInboxEmail, RecruitingTabProps } from "../recruiting";
 
-const CrmHistory = lazyPanel(() => import("./CrmHistory").then((m) => m.CrmHistory));
-const SequenceTab = lazyPanel(() => import("./SequenceTab").then((m) => m.SequenceTab));
-const InterviewTab = lazyPanel(() => import("./InterviewTab").then((m) => m.InterviewTab));
+const CrmHistory = lazyPanel(() =>
+  withFeatureMessages(() => import("./CrmHistory")).then((m) => m.CrmHistory),
+);
+const SequenceTab = lazyPanel(() =>
+  withFeatureMessages(() => import("./SequenceTab")).then((m) => m.SequenceTab),
+);
+const InterviewTab = lazyPanel(() =>
+  withFeatureMessages(() => import("./InterviewTab")).then((m) => m.InterviewTab),
+);
 const InboxWithReply = lazyPanel(() => import("./InboxTab").then((m) => m.InboxWithReply));
 
 import { Trans, useLingui } from "@lingui/react/macro";

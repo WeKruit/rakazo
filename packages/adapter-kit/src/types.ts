@@ -13,6 +13,8 @@ export interface AdapterContext {
   userId: string;
   botId?: string;
   runId?: string;
+  /** Internal lifecycle CAS captured after claiming suspending; never accepted from RPC input. */
+  homeLifecycleClaim?: { computerId: string; providerRef: string | null; updatedAt: Date };
   /** Trusted in-process scheduling confirmation binding; never a provider argument. */
   schedulingConfirmationEffectId?: string;
   /** Opaque fence for releasing a graphical screen without tearing down its replacement. */

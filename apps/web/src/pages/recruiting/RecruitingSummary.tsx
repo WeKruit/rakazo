@@ -1,8 +1,11 @@
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { withFeatureMessages } from "../../lib/i18n";
 
 import { CriteriaExpression } from "./CriteriaEditor";
 
-const Sources = lazyPanel(() => import("./SourceDocuments").then((m) => m.Sources));
+const Sources = lazyPanel(() =>
+  withFeatureMessages(() => import("./SourceDocuments")).then((m) => m.Sources),
+);
 
 import { Trans, useLingui } from "@lingui/react/macro";
 import { Button } from "@rakazo/ui-web";
@@ -10,7 +13,7 @@ import { BriefcaseBusiness, Building2, Check, RefreshCw } from "lucide-react";
 import type { useRecruitingWorkspace } from "./useRecruitingWorkspace";
 
 const FeedbackHistory = lazyPanel(() =>
-  import("./CandidateFeedback").then((m) => m.FeedbackHistory),
+  withFeatureMessages(() => import("./CandidateFeedback")).then((m) => m.FeedbackHistory),
 );
 
 export function RecruitingSummary({ model }: { model: ReturnType<typeof useRecruitingWorkspace> }) {

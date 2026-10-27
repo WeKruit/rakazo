@@ -72,7 +72,9 @@ const ComputerWorkspace = lazyPanel(() =>
   import("../components/computer/ComputerWorkspace").then((module) => module.ComputerWorkspace),
 );
 const HomeDashboard = lazyPanel(() =>
-  import("./recruiting/HomeDashboard").then((module) => module.HomeDashboard),
+  withFeatureMessages(() => import("./recruiting/HomeDashboard")).then(
+    (module) => module.HomeDashboard,
+  ),
 );
 
 const RecruitingCorrespondence = lazyPanel(() =>
