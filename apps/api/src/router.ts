@@ -1080,8 +1080,8 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     spaces: {
-      list: authed.spaces.list.handler(async ({ context }) =>
-        spaceNavigationDto(deps, context.actor, repos, groupRepos),
+      list: authed.spaces.list.handler(async ({ context, input }) =>
+        spaceNavigationDto(deps, context.actor, repos, groupRepos, input?.offset ?? 0),
       ),
       subscribe: authed.spaces.subscribe.handler(async function* ({ context }) {
         // Signals are hints only: every wake re-reads the actor-scoped roster (bots + latest run +
@@ -1311,21 +1311,23 @@ export function createRouter(deps: RouterDeps) {
     },
     bootstrap: authed.bootstrap.handler(async ({ context, input }) => {
       const actor = context.actor;
-      await upgradeRecruitingWorkspace(deps.prisma, actor, {
-        sandboxKind: deps.env.sandboxProvider,
-        firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-      });
+      if (!input.offset)
+        await upgradeRecruitingWorkspace(deps.prisma, actor, {
+          sandboxKind: deps.env.sandboxProvider,
+          firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+        });
       // Additive setup for older crews; a failure must not block sign-in.
-      await ensurePlatformPeopleSearch(deps.prisma, actor).catch((error: unknown) =>
-        getLogger().error("platform people search setup failed", error),
-      );
+      if (!input.offset)
+        await ensurePlatformPeopleSearch(deps.prisma, actor).catch((error: unknown) =>
+          getLogger().error("platform people search setup failed", error),
+        );
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
-      void prewarmTeamComputer(deps, actor).catch(() => undefined);
+      if (!input.offset) void prewarmTeamComputer(deps, actor).catch(() => undefined);
       const [me, navigation, archivedBots, archivedGroups, groupThread] = await Promise.all([
         meDto(deps, actor),
-        spaceNavigationDto(deps, actor, repos, groupRepos),
-        repos.listBots(actor, { archived: true }),
-        groupRepos.listGroups(actor, { archived: true }),
+        spaceNavigationDto(deps, actor, repos, groupRepos, input.offset ?? 0),
+        repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+        groupRepos.listGroups(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
         input.groupId
           ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
               threadSnapshot(deps, target),
@@ -1333,15 +1335,24 @@ export function createRouter(deps: RouterDeps) {
           : Promise.resolve(null),
       ]);
       const { bots, groups, botSections } = navigation.current;
-      const active = bots.find((bot) => bot.id === input.botId);
+      const active = input.botId
+        ? await deps.prisma.bot.findFirst({
+            where: {
+              id: input.botId,
+              userId: actor.userId,
+              spaceId: actor.spaceId,
+              archivedAt: null,
+            },
+          })
+        : null;
       const [thread, routines] = input.groupId
-        ? [groups.some((group) => group.id === input.groupId) ? groupThread : null, []]
+        ? [groupThread, []]
         : active
           ? await Promise.all([
               resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
                 threadSnapshot(deps, target),
               ),
-              listRoutinesDto(deps, actor, active.id),
+              listRoutinesDto(deps, actor, active.id, input.offset ?? 0),
             ])
           : [null, []];
       return {
@@ -1364,6 +1375,13 @@ export function createRouter(deps: RouterDeps) {
           : null,
         routines,
         spaces: navigation.spaces,
+        nextOffset:
+          navigation.nextOffset !== null ||
+          archivedBots.length === 200 ||
+          archivedGroups.length === 200 ||
+          routines.length === 200
+            ? (input.offset ?? 0) + 200
+            : null,
       };
     }),
     deployment: {
@@ -1906,9 +1924,15 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     bots: {
-      list: authed.bots.list.handler(async ({ context }) => repos.listBots(context.actor)),
+      page: authed.bots.page.handler(async ({ context, input }) => {
+        const items = await repos.listBots(context.actor, { ...input, limit: 200 });
+        return { items, nextOffset: items.length === 200 ? input.offset + 200 : null };
+      }),
+      list: authed.bots.list.handler(async ({ context }) =>
+        repos.listBots(context.actor, { limit: 200 }),
+      ),
       listArchived: authed.bots.listArchived.handler(async ({ context }) =>
-        repos.listBots(context.actor, { archived: true }),
+        repos.listBots(context.actor, { archived: true, limit: 200 }),
       ),
       get: authed.bots.get.handler(async ({ context, input }) => {
         const found = (await repos.listBots(context.actor)).find((bot) => bot.id === input.botId);
@@ -2331,9 +2355,26 @@ export function createRouter(deps: RouterDeps) {
           throw mapSpaceLifecycleError(error);
         }
       }),
-      list: authed.groups.list.handler(async ({ context }) => groupRepos.listGroups(context.actor)),
+      page: authed.groups.page.handler(async ({ context, input }) => {
+        const [items, total] = await Promise.all([
+          groupRepos.listGroups(context.actor, { ...input, limit: 200 }),
+          deps.prisma.chatGroup.count({
+            where: {
+              spaceId: context.actor.spaceId,
+              userId: context.actor.userId,
+              archivedAt: input.archived ? { not: null } : null,
+            },
+          }),
+        ]);
+        // Some persisted groups have fewer than two active members and are filtered out.
+        // Advance by database rows, not returned rows, so a sparse page is not the last page.
+        return { items, nextOffset: input.offset + 200 < total ? input.offset + 200 : null };
+      }),
+      list: authed.groups.list.handler(async ({ context }) =>
+        groupRepos.listGroups(context.actor, { limit: 200 }),
+      ),
       listArchived: authed.groups.listArchived.handler(async ({ context }) =>
-        groupRepos.listGroups(context.actor, { archived: true }),
+        groupRepos.listGroups(context.actor, { archived: true, limit: 200 }),
       ),
       get: authed.groups.get.handler(async ({ context, input }) => {
         const group = await groupRepos.getGroup(context.actor, input.groupId);
@@ -6826,6 +6867,7 @@ async function spaceNavigationDto(
   actor: Actor,
   repos: ReturnType<typeof createRepos>,
   groupRepos: ReturnType<typeof createGroupRepos>,
+  offset = 0,
 ): Promise<SpaceNavigation> {
   const currentSpace = await deps.prisma.space.findUnique({
     where: { id: actor.spaceId },
@@ -6853,12 +6895,12 @@ async function spaceNavigationDto(
     contentBots,
     contentGroups,
   ] = await Promise.all([
-    repos.listBots(actor),
-    groupRepos.listGroups(actor),
-    repos.listSpaceBotsForSpaces(actor, inactiveSpaceIds),
-    groupRepos.listSpaceGroupsForSpaces(actor, inactiveSpaceIds),
-    repos.listBotSectionsForSpaces(actor, spaceIds),
-    createExternalConversationRepos(deps.prisma).listForSpaces(actor, spaceIds),
+    repos.listBots(actor, { limit: 200, offset }),
+    groupRepos.listGroups(actor, { limit: 200, offset }),
+    repos.listSpaceBotsForSpaces(actor, inactiveSpaceIds, { offset }),
+    groupRepos.listSpaceGroupsForSpaces(actor, inactiveSpaceIds, { offset }),
+    repos.listBotSectionsForSpaces(actor, spaceIds, { offset }),
+    createExternalConversationRepos(deps.prisma).listForSpaces(actor, spaceIds, { offset }),
     // Active-only navigation lists miss archived content in other spaces; count any
     // bot/group in the actor's spaces (including another member's) so a shared
     // non-empty space cannot look empty for onboarding redirects.
@@ -6887,7 +6929,16 @@ async function spaceNavigationDto(
   const sectionsFor = (spaceId: string) => sectionsBySpace.get(spaceId) ?? [];
   const staleClaimBefore = new Date(Date.now() - SPACE_DELETION_CLAIM_TIMEOUT_MS);
 
+  // Counts include filtered-out groups; an empty mapped page must still advance.
+  const scope = { userId: actor.userId, spaceId: { in: spaceIds } };
+  const totals = await Promise.all([
+    deps.prisma.bot.count({ where: scope }),
+    deps.prisma.chatGroup.count({ where: scope }),
+    deps.prisma.botSection.count({ where: scope }),
+    deps.prisma.externalConversation.count({ where: scope }),
+  ]);
   return {
+    nextOffset: Math.max(0, ...totals) > offset + 200 ? offset + 200 : null,
     current: {
       id: actor.spaceId,
       name: currentMembership.space.name,
@@ -7562,8 +7613,9 @@ function mapRoutine(row: {
   };
 }
 
-async function listRoutinesDto(deps: RouterDeps, actor: Actor, botId: string) {
+async function listRoutinesDto(deps: RouterDeps, actor: Actor, botId: string, offset?: number) {
   const rows = await deps.prisma.routine.findMany({
+    ...(offset === undefined ? {} : { take: 200, skip: offset, orderBy: { id: "asc" as const } }),
     where: { botId, spaceId: actor.spaceId },
   });
   return rows.map(mapRoutine);

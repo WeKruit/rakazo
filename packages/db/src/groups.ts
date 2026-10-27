@@ -323,9 +323,14 @@ export function createGroupRepos(prisma: PrismaClient) {
     );
     return { ...mapGroup(group), ...(reference ? { crmRoleReference: reference } : {}) };
   }
-  async function listSpaceGroupsForSpaces(actor: Actor, spaceIds: string[]): Promise<SpaceGroup[]> {
+  async function listSpaceGroupsForSpaces(
+    actor: Actor,
+    spaceIds: string[],
+    page?: { offset: number },
+  ): Promise<SpaceGroup[]> {
     if (spaceIds.length === 0) return [];
     const groups = await prisma.chatGroup.findMany({
+      ...(page ? { take: 200, skip: page.offset } : {}),
       where: {
         spaceId: { in: spaceIds },
         userId: actor.userId,
@@ -351,7 +356,7 @@ export function createGroupRepos(prisma: PrismaClient) {
         },
         members: groupInclude.members,
       },
-      orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
+      orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
     });
     return groups
       .filter((group) => hasMinimumActiveMembers(group.members))
@@ -359,7 +364,10 @@ export function createGroupRepos(prisma: PrismaClient) {
   }
 
   return {
-    async listGroups(actor: Actor, options: { archived?: boolean } = {}): Promise<Group[]> {
+    async listGroups(
+      actor: Actor,
+      options: { archived?: boolean; offset?: number; limit?: number } = {},
+    ): Promise<Group[]> {
       const groups = await prisma.chatGroup.findMany({
         where: {
           spaceId: actor.spaceId,
@@ -367,7 +375,10 @@ export function createGroupRepos(prisma: PrismaClient) {
           archivedAt: options.archived ? { not: null } : null,
         },
         include: groupInclude,
-        orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }],
+        orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
+        ...(options.limit === undefined
+          ? {}
+          : { take: Math.min(200, Math.max(1, options.limit)), skip: options.offset ?? 0 }),
       });
       const waitingRunIds = groups.flatMap(
         (group) => group.thread?.runs.map((run) => run.id) ?? [],

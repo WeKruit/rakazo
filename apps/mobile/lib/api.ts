@@ -1,5 +1,6 @@
 import type {
   AccountSecurity,
+  AppBootstrap,
   AuthCapabilities,
   AvatarStyle,
   Bot,
@@ -10,6 +11,7 @@ import type {
   MessageBlock,
   ModelCatalogEntry,
   ModelCredential,
+  RecruitingCorrespondence,
   ReplyPreview,
   Space,
   SpaceNavigation,
@@ -25,6 +27,9 @@ import {
   aiConsentTarget,
   aiDataUsesForProcedure,
   cancelResponseBody,
+  collectContactPages,
+  collectListPages,
+  collectNavigationPages,
   ensureAiDataConsent,
   isServerUnreachable,
   isUnreachableStatus,
@@ -716,6 +721,65 @@ export async function rpc<T>(
     skipSpaceAuthRecovery?: boolean;
   } = {},
 ): Promise<T> {
+  if (
+    proc === "recruiting/correspondence" &&
+    body &&
+    typeof body === "object" &&
+    "view" in body &&
+    body.view === "contacts" &&
+    !("cursor" in body)
+  ) {
+    const generation = spaceSelectionGeneration;
+    const session = currentSessionGeneration();
+    return (await collectContactPages(async (cursor) => {
+      if (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+        throw new Error("Request context changed");
+      const page = await rpc<RecruitingCorrespondence>(proc, { ...body, cursor }, options);
+      if (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+        throw new Error("Request context changed");
+      return page;
+    })) as T;
+  }
+  if (
+    (proc === "spaces/list" || proc === "bootstrap") &&
+    !(body && typeof body === "object" && "offset" in body)
+  ) {
+    const generation = spaceSelectionGeneration;
+    const session = currentSessionGeneration();
+    return (await collectNavigationPages(async (offset) => {
+      if (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+        throw new Error("Request context changed");
+      const page = await rpc<SpaceNavigation | AppBootstrap>(
+        proc,
+        { ...(body && typeof body === "object" ? body : {}), offset },
+        options,
+      );
+      // The first request may legitimately recover an inaccessible Space. Never combine pages across a later switch.
+      if (
+        offset > 0 &&
+        (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+      )
+        throw new Error("Request context changed");
+      return page;
+    })) as T;
+  }
+  if (/^(bots|groups)\/list(?:Archived)?$/.test(proc)) {
+    const generation = spaceSelectionGeneration;
+    const session = currentSessionGeneration();
+    const namespace = proc.split("/")[0];
+    return (await collectListPages<unknown>(async (offset) => {
+      if (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+        throw new Error("Request context changed");
+      const page = await rpc<{ items: unknown[]; nextOffset: number | null }>(
+        `${namespace}/page`,
+        { offset, archived: proc.endsWith("Archived") },
+        options,
+      );
+      if (generation !== spaceSelectionGeneration || session !== currentSessionGeneration())
+        throw new Error("Request context changed");
+      return page;
+    })) as T;
+  }
   const requestSpaceGeneration = spaceSelectionGeneration;
   const requestSessionGeneration = currentSessionGeneration();
   const requestApiBase = options.requestContext?.apiBase ?? currentApiBase();

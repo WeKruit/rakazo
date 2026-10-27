@@ -106,14 +106,17 @@ describe("account preferences", () => {
       bot: {
         findFirst: target,
         findMany: vi.fn(async (input) =>
-          input.select || input.where.archivedAt !== null ? [] : [bot],
+          input.select || input!.where!.archivedAt !== null ? [] : [bot],
         ),
         // A crew without Main and Sourcer is not a recruiting workspace to upgrade.
         count: vi.fn().mockResolvedValue(0),
       },
-      chatGroup: { findMany: vi.fn().mockResolvedValue([]) },
-      botSection: { findMany: vi.fn().mockResolvedValue([]) },
-      externalConversation: { findMany: vi.fn().mockResolvedValue([]) },
+      chatGroup: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      botSection: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      externalConversation: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
       routine: { findMany: routines },
       capabilityInstall: { findFirst: vi.fn().mockResolvedValue(null) },
       message: { findMany: vi.fn().mockResolvedValue([]) },
@@ -146,6 +149,36 @@ describe("account preferences", () => {
     expect(f.snapshot).not.toHaveBeenCalled();
     expect(f.routines).not.toHaveBeenCalled();
   }, 500);
+
+  it("pages 1000 bots through list, navigation and bootstrap without losing the selected thread", async () => {
+    const f = bootstrapDeps();
+    const base = await f.target();
+    const rows = Array.from({ length: 1000 }, (_, index) => ({ ...base, id: `bot-${index}` }));
+    vi.mocked(f.deps.prisma.bot.findMany).mockImplementation(async (input) =>
+      input!.select || input!.where!.archivedAt !== null
+        ? []
+        : rows.slice(input!.skip ?? 0, (input!.skip ?? 0) + (input!.take ?? rows.length)),
+    );
+    vi.mocked(f.deps.prisma.bot.count).mockImplementation(async (input) =>
+      input?.where?.name ? 0 : 1000,
+    );
+    const ids: string[] = [];
+    for (let offset = 0; offset < 1000; offset += 200) {
+      const page = await f.client.bots.page({ offset, archived: false });
+      expect(page.items).toHaveLength(200);
+      ids.push(...page.items.map((bot) => bot.id));
+      const navigation = await f.client.spaces.list({ offset });
+      expect(navigation.current.bots).toHaveLength(200);
+      expect(navigation.nextOffset).toBe(offset < 800 ? offset + 200 : null);
+    }
+    expect(new Set(ids).size).toBe(1000);
+    expect(await f.client.bots.list()).toHaveLength(200);
+    f.target.mockResolvedValue(rows[999]);
+    const bootstrap = await f.client.bootstrap({ botId: "bot-999" });
+    expect(bootstrap.bots).toHaveLength(200);
+    expect(bootstrap.nextOffset).toBe(200);
+    expect(bootstrap.thread?.botId).toBe("bot-999");
+  });
 
   it("returns bootstrap without waiting for the computer pre-warm", async () => {
     const f = bootstrapDeps();
@@ -252,6 +285,9 @@ describe("account preferences", () => {
     );
     expect(f.snapshot).toHaveBeenCalledOnce();
     expect(f.routines).toHaveBeenCalledWith({
+      take: 200,
+      skip: 0,
+      orderBy: { id: "asc" },
       where: { botId: "bot-1", spaceId: f.actor.spaceId },
     });
   });
@@ -274,6 +310,7 @@ describe("account preferences", () => {
     const groupTarget = vi.fn().mockResolvedValue(group);
     Object.assign(f.deps.prisma, {
       chatGroup: {
+        count: vi.fn().mockResolvedValue(1),
         findFirst: groupTarget,
         findMany: vi.fn(async (input) => (input.where.archivedAt === null ? [group] : [])),
       },

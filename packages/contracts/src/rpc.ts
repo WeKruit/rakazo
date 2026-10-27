@@ -178,6 +178,11 @@ import {
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
+const sidebarPage = z.object({
+  offset: z.number().int().min(0).default(0),
+  archived: z.boolean().default(false),
+});
+
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
 const recruitingWorkspace = z.strictObject({
@@ -332,7 +337,9 @@ export const appContract = {
     update: oc.input(z.object({ avatarStyle: AvatarStyleSchema })).output(MeSchema),
   },
   spaces: {
-    list: oc.output(SpaceNavigationSchema),
+    list: oc
+      .input(z.object({ offset: z.number().int().min(0).max(1000000).optional() }).optional())
+      .output(SpaceNavigationSchema),
     /**
      * Sidebar live state for the caller's own bots in the current space. Opens with every bot's
      * current state (durable rows, not replayed events), then one frame per change; a frame
@@ -353,7 +360,11 @@ export const appContract = {
   bootstrap: oc
     .input(
       z
-        .object({ botId: Id.optional(), groupId: Id.optional() })
+        .object({
+          botId: Id.optional(),
+          groupId: Id.optional(),
+          offset: z.number().int().min(0).max(1000000).optional(),
+        })
         .refine((input) => !(input.botId && input.groupId), {
           message: "Provide at most one of botId or groupId",
           path: ["botId"],
@@ -454,8 +465,13 @@ export const appContract = {
       .output(z.object({ ok: z.literal(true) })),
   },
   bots: {
-    list: oc.output(z.array(BotSchema)),
-    listArchived: oc.output(z.array(BotSchema)),
+    page: oc
+      .input(sidebarPage)
+      .output(
+        z.object({ items: z.array(BotSchema).max(200), nextOffset: z.number().int().nullable() }),
+      ),
+    list: oc.output(z.array(BotSchema).max(200)),
+    listArchived: oc.output(z.array(BotSchema).max(200)),
     get: oc.input(botId).output(BotSchema),
     create: oc.input(CreateBotInput).output(BotSchema),
     duplicate: oc.input(botId).output(BotSchema),
@@ -477,8 +493,13 @@ export const appContract = {
   },
   groups: {
     create: oc.input(CreateGroupInput).output(GroupSchema),
-    list: oc.output(z.array(GroupSchema)),
-    listArchived: oc.output(z.array(GroupSchema)),
+    page: oc
+      .input(sidebarPage)
+      .output(
+        z.object({ items: z.array(GroupSchema).max(200), nextOffset: z.number().int().nullable() }),
+      ),
+    list: oc.output(z.array(GroupSchema).max(200)),
+    listArchived: oc.output(z.array(GroupSchema).max(200)),
     get: oc.input(groupId).output(GroupDetailSchema),
     duplicate: oc.input(groupId).output(GroupSchema),
     update: oc.input(UpdateGroupInput).output(GroupSchema),

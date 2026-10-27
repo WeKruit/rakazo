@@ -3,6 +3,7 @@ import { RPCLink } from "@orpc/client/fetch";
 import type { ContractRouterClient } from "@orpc/contract";
 import type { AppContract } from "@rakazo/contracts";
 import { LOCAL_SETTINGS_PAGE, LOCAL_SETTINGS_RPC } from "@rakazo/contracts";
+import { collectContactPages, collectListPages, collectNavigationPages } from "@rakazo/core";
 import { desktopBridge } from "./desktop";
 
 const SPACE_STORAGE_KEY = "rakazo:space-id";
@@ -153,4 +154,81 @@ const link = new RPCLink<RpcClientContext>({
   },
 });
 
-export const rpc: ContractRouterClient<AppContract, RpcClientContext> = createORPCClient(link);
+const client: ContractRouterClient<AppContract, RpcClientContext> = createORPCClient(link);
+// Keep existing callers' all-items contract while each network response stays bounded.
+export const rpc: typeof client = new Proxy(client, {
+  get(target, namespace, receiver) {
+    if (namespace === "recruiting")
+      return new Proxy(target.recruiting, {
+        get(procedures, method, procedureReceiver) {
+          if (method !== "correspondence")
+            return Reflect.get(procedures, method, procedureReceiver);
+          return (
+            input: Parameters<typeof client.recruiting.correspondence>[0],
+            options?: Parameters<typeof client.recruiting.correspondence>[1],
+          ) => {
+            if (input.view !== "contacts" || input.cursor !== undefined)
+              return procedures.correspondence(input, options);
+            const context = {
+              ...options?.context,
+              spaceId: options?.context?.spaceId ?? selectedSpaceId(),
+            };
+            return collectContactPages((cursor) =>
+              procedures.correspondence({ ...input, cursor }, { ...options, context }),
+            );
+          };
+        },
+      });
+    if (namespace === "bootstrap")
+      return (
+        input: Parameters<typeof client.bootstrap>[0],
+        options?: Parameters<typeof client.bootstrap>[1],
+      ) => {
+        const context = {
+          ...options?.context,
+          spaceId: options?.context?.spaceId ?? selectedSpaceId(),
+        };
+        return collectNavigationPages((offset) =>
+          client.bootstrap({ ...input, offset }, { ...options, context }),
+        );
+      };
+    if (namespace === "spaces")
+      return new Proxy(target.spaces, {
+        get(procedures, method, procedureReceiver) {
+          if (method !== "list") return Reflect.get(procedures, method, procedureReceiver);
+          return (_input?: unknown, options?: Parameters<typeof client.spaces.list>[1]) => {
+            const context = {
+              ...options?.context,
+              spaceId: options?.context?.spaceId ?? selectedSpaceId(),
+            };
+            return collectNavigationPages((offset) =>
+              client.spaces.list({ offset }, { ...options, context }),
+            );
+          };
+        },
+      });
+    if (namespace !== "bots" && namespace !== "groups")
+      return Reflect.get(target, namespace, receiver);
+    return new Proxy(target[namespace], {
+      get(procedures, method, procedureReceiver) {
+        if (method !== "list" && method !== "listArchived")
+          return Reflect.get(procedures, method, procedureReceiver);
+        return (
+          _input?: unknown,
+          options?: { signal?: AbortSignal; context?: RpcClientContext },
+        ) => {
+          const context = {
+            ...options?.context,
+            spaceId: options?.context?.spaceId ?? selectedSpaceId(),
+          };
+          return collectListPages<unknown>(async (offset) =>
+            procedures.page(
+              { offset, archived: method === "listArchived" },
+              { ...options, context },
+            ),
+          );
+        };
+      },
+    });
+  },
+});
