@@ -281,3 +281,8 @@ VERIFY_DATABASE=1 DATABASE_URL=postgresql://postgres@127.0.0.1:55434/rakazo_f1 p
 VERIFY_DATABASE=1 DATABASE_URL=postgresql://postgres@127.0.0.1:55434/rakazo_f1 pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts
 pnpm --filter @rakazo/db --filter @rakazo/adapters check
 ```
+
+- **F1 第二轮本地审查（未发布）：** executor 招聘匹配行 481 → 477（相对起点 482），总行数 14,327 → 14,231（起点 14,351）。移除基于美国地名/多数候选人位置的通勤距离筛选及州/国家级位置自动拒绝：地理匹配属于现有 agent/skill 的证据判断，不能由执行器在不知道岗位实际地域范围时替代判断。删除失去调用者的 location 模块、地名表及其旧算法测试。移除已显示部分候选人/已记录一轮之后禁止实质澄清的两处时序门槛；展示回执只报告 `shown` 和 `roundRecorded`，不强制四查询或下一工具步骤。
+- **保留边界逐类审查：** (1) 当前 role/thread/actor 绑定、revision CAS、候选人必须来自该岗位的已存来源：保留，属于身份与事实完整性；(2) 候选人评估 source、精确人类引用、已答卡复用、历史 run 回执和付费读取重放：保留，删除会伪造证据或重复外部效果；(3) outreach/email/calendar 精确批准请求、recipient/account 匹配、预算和提供方任务所有权：保留，属于授权；(4) 正式 calibration 提交的十人完整性、真实反馈与批准记录：保留，未把 display-only 的选中人数当作已完成校准；(5) 工具 DTO/持久化与 chat 展示：保留，不通过改名或搬文件减少计数；(6) planned-search 调度、brief 自动保存、next-step card、turn-end 自动续跑、approval-stage 拦截仍包含业务时序，尚未完成剥离。它们涉及原生等待卡、恢复和实际人类决策，不能只删除后宣称工作流无回退，须有相应业务验收再继续。
+- **本轮反例与实测：** 新增六个运行时反例：美国/州/英国/缺失位置的已存人选可展示且可提出实质澄清；未知候选人仍拒绝；完成轮次后的澄清仍进入带作用域的 assessment 验证，验证拒绝照常传播。无提供方执行或外发。相关三文件共 244 测试通过；这些实现证据不替代真实提供方测试副本的全流程验收。F1 仍为部分实现，不标完成。
+- 第二轮全 adapters 实测：5,118 通过 / 44 跳过（删除 16 个失去生产调用者的地域算法测试、增加 6 个运行时反例；第一轮 5,128）。`pnpm --filter @rakazo/adapters check` 通过。初次沙箱运行因本地 socket/网络夹具权限失败，随后允许本地服务的完整运行通过；未把权限失败当作产品失败或忽略未过测试。

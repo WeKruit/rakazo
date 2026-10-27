@@ -446,7 +446,6 @@ import {
   RecruitingFeedbackValidationError,
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
-import { COMMUTE_MILES, isRegionOnlyLocation, locationOutliers } from "./recruiting-location.js";
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
@@ -5162,39 +5161,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let briefSaving: Promise<unknown> | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
-        // show_picks put the first people in chat; the turn owes the recorded ten.
-        let firstPicksShown = false;
-        // People whose location the run already asked the model about once.
-        const locationAsked = new Set<string>();
-        /**
-         * Picked people whose saved location names only a country or a state, and those whose
-         * location shares no place with where the rest of the picks are.
-         */
-        const locationSlips = async (roleId: string, keys: readonly string[]) => {
-          const rows = await deps.prisma.recruitingCandidateOccurrence.findMany({
-            where: { roleId, candidateKey: { in: [...keys] } },
-            select: { candidateKey: true, name: true, location: true },
-          });
-          const regionOnly = new Map<string, string>();
-          const located = new Map<string, string>();
-          const labels = new Map<string, string>();
-          for (const key of keys) {
-            const seen = rows.filter((row) => row.candidateKey === key);
-            if (!seen.length) continue;
-            const location = seen.find((row) => !isRegionOnlyLocation(row.location))?.location;
-            const shown = seen.find((row) => row.location?.trim())?.location?.trim();
-            labels.set(
-              key,
-              `${seen.find((row) => row.name)?.name ?? key} (${shown || "no location"})`,
-            );
-            if (location) located.set(key, location);
-            else regionOnly.set(key, labels.get(key) as string);
-          }
-          const outliers = new Map(
-            locationOutliers(located).map((key) => [key, labels.get(key) as string]),
-          );
-          return { regionOnly, outliers };
-        };
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
@@ -5417,24 +5383,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             feedbackArgsError = filled.error;
           }
           if (name === "recruiting_assess" && args.operation === "ask") {
-            // Clarifying questions come before the search: once this turn shows the ten, it
-            // ends on the next-step card instead of another question.
-            const rounds = await deps.prisma.externalEffect.findMany({
-              where: {
-                runId,
-                spaceId: run.spaceId,
-                kind: "recruiting_research",
-                status: "completed",
-                request: { path: ["operation"], equals: "calibration_round" },
-              },
-              select: { id: true },
-              take: 1,
-            });
-            if (rounds.length)
-              return {
-                error:
-                  "Clarifying questions come before the search, and the ten are already shown. Do not ask it: end the turn with the next-step card (ask_user).",
-              };
             if (typeof args.question === "string")
               args = { ...args, question: shortQuestion(args.question) };
           }
@@ -5472,15 +5420,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // run; calibration_round records the ten and replaces the list.
             const roleId = thread.activeRecruitingRoleId;
             if (!roleId) return { error: "This conversation has no active role." };
-            const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
-            // Someone whose profile shows only a country or a state is left out of the first
-            // picks rather than costing a step; the round itself asks about them.
-            const { regionOnly } = await locationSlips(roleId, picked);
-            const keys = picked.filter((key) => !regionOnly.has(key));
-            if (!keys.length)
-              return {
-                error: `Not shown: ${[...regionOnly.values()].join(", ")} show only a country or a state. Pick people whose location is inside the role's location scope.`,
-              };
+            const keys = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
             const text = await recruitingRoundListText(deps.prisma, {
               threadId: run.threadId,
               spaceId: run.spaceId,
@@ -5498,15 +5438,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             stream.shown = Math.max(stream.shown, keys.length);
             stream.posting = stream.posting.then(() => showRoundList(text));
             await stream.posting;
-            firstPicksShown = true;
             return {
               shown: keys.length,
-              ...(regionOnly.size
-                ? {
-                    notShown: `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
-                  }
-                : {}),
-              next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have; search again only if fewer than ten of all those rows fit, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten.",
+              roundRecorded: false,
             };
           }
           if (
@@ -5519,31 +5453,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               spaceId: run.spaceId,
             });
             if (unsaved) return { error: unsaved };
-            const { regionOnly, outliers } = await locationSlips(
-              thread.activeRecruitingRoleId,
-              researchInput.data.candidateKeys,
-            );
-            // Asked once per person: when the same people come back the model has decided they fit
-            // (a role open to a whole country or state, or a real commute), and they are recorded.
-            const unasked = (people: Map<string, string>) =>
-              [...people].filter(([key]) => !locationAsked.has(key)).map(([, label]) => label);
-            const vague = unasked(regionOnly);
-            const far = unasked(outliers);
-            if (vague.length || far.length) {
-              for (const key of [...regionOnly.keys(), ...outliers.keys()]) locationAsked.add(key);
-              return {
-                error: [
-                  "Not recorded.",
-                  vague.length &&
-                    `${vague.join(", ")} show only a country or a state, which never counts inside a city or metro location scope.`,
-                  far.length &&
-                    `${far.join(", ")} ${far.length > 1 ? "are" : "is"} more than ${COMMUTE_MILES} miles from where the other picks are; check against the role's location scope.`,
-                  "Replace anyone outside the scope with people from the rows whose location is inside it and record the ten again. If they are all inside the scope, record the same ten again.",
-                ]
-                  .filter(Boolean)
-                  .join(" "),
-              };
-            }
           }
           const candidateOperation =
             name === "recruiting_feedback" &&
@@ -11524,11 +11433,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 await briefSaving;
                 // A run that recorded a round asks the next-step choice, which is asked anew each round.
                 if (await nextStepCardAfterRound()) return undefined;
-                if (firstPicksShown)
-                  return {
-                    instead:
-                      "Not asked: the ten are not recorded yet. Record them now with calibration_round, starting with the people already shown in chat in the same order; then end on the next-step card.",
-                  };
                 const messages = await deps.prisma.message.findMany({
                   where: { threadId: thread.id },
                   orderBy: { seq: "asc" },
