@@ -1,0 +1,6209 @@
+msgid ""
+msgstr ""
+"POT-Creation-Date: 2026-08-26 00:00+0000\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: @lingui/cli\n"
+"Language: ko\n"
+"Project-Id-Version: rakazo-web\n"
+"Report-Msgid-Bugs-To: \n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Plural-Forms: \n"
+
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid " (unread)"
+msgstr " (읽지 않음)"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "— Not reported"
+msgstr ""
+
+#. placeholder {0}: candidatePage.counts.candidates
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
+msgstr ""
+
+#. placeholder {0}: important.total
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "{0, plural, =1 {# candidate-role record} other {# candidate-role records}}"
+msgstr ""
+
+#. placeholder {0}: candidatePage.total
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "{0, plural, =1 {# candidate} other {# candidates}}"
+msgstr ""
+
+#. placeholder {0}: page.total
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "{0, plural, =1 {# contact} other {# contacts}}"
+msgstr ""
+
+#. placeholder {0}: file.name
+#: src/pages/shell/useShellMessages.ts
+msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
+msgstr "{0} (첨부 파일 최대 {ATTACHMENT_MAX_COUNT}개)"
+
+#. placeholder {0}: file.name
+#: src/pages/shell/useShellMessages.ts
+msgid "{0} (over 10 MiB)"
+msgstr "{0} (10 MiB 초과)"
+
+#. placeholder {0}: file.name
+#: src/pages/shell/useShellMessages.ts
+msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
+msgstr ""
+
+#. placeholder {0}: person.title
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{0} at {company}"
+msgstr ""
+
+#. placeholder {0}: block.name
+#: src/pages/shell/message-cards.tsx
+msgid "{0} connection"
+msgstr "{0} 연결"
+
+#. placeholder {0}: archivedRouteGroup.name
+#: src/pages/shell/ShellConversation.tsx
+msgid "{0} is archived."
+msgstr ""
+
+#. placeholder {0}: format(size / 1024)
+#: src/components/ArtifactFileCard.tsx
+msgid "{0} KB"
+msgstr "{0} KB"
+
+#. placeholder {0}: format(size / (1024 * 1024))
+#: src/components/ArtifactFileCard.tsx
+msgid "{0} MB"
+msgstr "{0} MB"
+
+#. placeholder {0}: plan.calendar.lengthInMinutes
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "{0} minutes"
+msgstr ""
+
+#. placeholder {0}: candidate.discoveryCount
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "{0} saved discoveries"
+msgstr ""
+
+#. placeholder {0}: observation.rowCount
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "{0} saved source rows"
+msgstr ""
+
+#. placeholder {0}: active.name
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "{0}'s screen"
+msgstr "{0}의 화면"
+
+#: src/lib/billing.ts
+msgid "{amount} / {period}"
+msgstr ""
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "{botName}’s computer"
+msgstr "{botName}의 컴퓨터"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "{commandVariable} is reserved and cannot be used as a command variable. Choose another name."
+msgstr "{commandVariable}은(는) 예약되어 있어 명령 변수로 사용할 수 없습니다. 다른 이름을 선택하세요."
+
+#: src/lib/billing.ts
+msgid "{count} days"
+msgstr ""
+
+#: src/lib/billing.ts
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "{count} months"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "{count} weeks"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "{count} years"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "{days}d ago"
+msgstr "{days}일 전"
+
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "{hours}h ago"
+msgstr "{hours}시간 전"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "{loadedCount} loaded"
+msgstr "{loadedCount} loaded"
+
+#: src/lib/relative-time.ts
+msgid "{minutes}m ago"
+msgstr "{minutes}분 전"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "{name} failed"
+msgstr "{name} 실패"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "{name} finished"
+msgstr "{name} 완료"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "{name} stopped"
+msgstr "{name} 중지됨"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "{people} people"
+msgstr ""
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "{remaining} left · bot is watching, not acting"
+msgstr "남은 시간 {remaining} · Bot은 화면만 보고 직접 조작하지 않습니다"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mo"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mos"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+msgid "{size} B"
+msgstr "{size} B"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "{sizeFact} employees"
+msgstr ""
+
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{stepCount, plural, one {Done · # tool} other {Done · # tools}}"
+msgstr ""
+
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{stepCount, plural, one {Working… · # tool} other {Working… · # tools}}"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "{total, plural, =1 {# candidate} other {# candidates}}"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "{undated} without a recorded date"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yr"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yrs"
+msgstr ""
+
+#. placeholder {0}: mention.name
+#: src/pages/shell/Composer.tsx
+msgid "@{0}"
+msgstr "@{0}"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "≥ Observed in loaded records"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "A bit of everything"
+msgstr ""
+
+#: src/pages/shell/bot-picker.tsx
+msgid "About groups"
+msgstr ""
+
+#: src/pages/shell/bot-picker.tsx
+msgid "About spaces"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Accepted. Finding more people."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Access token"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Account default"
+msgstr "계정 기본값"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Action confirmations"
+msgstr "작업 실행 전 확인"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Actions"
+msgstr ""
+
+#. placeholder {0}: group.name
+#. placeholder {0}: group.spaceName
+#. placeholder {0}: sectionMenu.section.name
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Actions for {0}"
+msgstr "{0} 작업 메뉴"
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Actions for space"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Active"
+msgstr "활성"
+
+#: src/components/computer/TerminalApp.tsx
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Activity"
+msgstr "활동"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Activity history is unavailable from some sources."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Actor not recorded"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Add {name} to shortlist"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Add a model in Settings to use this."
+msgstr "이 기능을 사용하려면 설정에서 모델을 추가하세요."
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Add a run time for this one-shot."
+msgstr "이 일회성 실행의 시간을 추가하세요."
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Add a schedule, webhook, GitHub, or message trigger"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Add credential"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Add filter"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Add MCP server"
+msgstr "MCP 서버 추가"
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Add note"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Add server URL"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Add to routine"
+msgstr "자동 실행에 추가"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Added"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Advanced"
+msgstr "고급 설정"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Agent"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Agent assessment"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Agent computer"
+msgstr "Agent 컴퓨터"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "AI interpretation"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "All Important records"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All internal assessments"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All internal verdicts"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "All of"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "All projects"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "All roles"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All rounds"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "All statuses"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow {0} actions without asking"
+msgstr "확인 없이 {0} 동작 허용"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow {0} connector without asking"
+msgstr "확인 없이 {0} 커넥터 허용"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow {0} without asking"
+msgstr "확인 없이 {0} 허용"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow email actions without asking"
+msgstr "확인 없이 이메일 동작 허용"
+
+#: src/components/AskCard.tsx
+msgid "Allow once"
+msgstr "한 번 허용"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow purchase actions without asking"
+msgstr "확인 없이 결제 동작 허용"
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Allow writing"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Allowed once"
+msgstr "한 번 허용됨"
+
+#: src/pages/Auth.tsx
+msgid "Already have an account?"
+msgstr "이미 계정이 있나요?"
+
+#: src/components/AskCard.tsx
+msgid "Always allow this tool"
+msgstr "이 도구 항상 허용"
+
+#: src/components/AskCard.tsx
+msgid "Always allowed"
+msgstr "항상 허용됨"
+
+#: src/lib/model-connection-preflight.ts
+msgid "An API key is stored for this provider, not a subscription sign-in."
+msgstr "이 서비스에는 구독 로그인이 아니라 API 키가 저장되어 있습니다."
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "AND"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Answer"
+msgstr "답변"
+
+#: src/components/AskCard.tsx
+msgid "Answered"
+msgstr "응답함"
+
+#. placeholder {0}: label === undefined ? selectedAskActionLabel(answer, actions) : approvalActionLabel(answer, label)
+#. placeholder {0}: selectedAskActionLabel(answer, actions)
+#: src/components/AskCard.tsx
+msgid "Answered: {0}"
+msgstr "응답: {0}"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Any of"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "API is back, but the update did not finish. Check the host logs."
+msgstr "API가 다시 작동하지만 업데이트가 완료되지 않았습니다. 호스트 로그를 확인하세요."
+
+#: src/components/AskCard.tsx
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/lib/localized-provider-hint.ts
+msgid "API key"
+msgstr "API 키"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Approval boundaries"
+msgstr "승인이 필요한 범위"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Approve"
+msgstr "승인"
+
+#: src/components/AskCard.tsx
+msgid "Approve calibration"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Approve documents"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Approve this server to let your agent use its tools."
+msgstr "이 서버를 승인하면 Bot이 제공되는 도구를 사용할 수 있습니다."
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Approved"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Approved in internal review"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "archived"
+msgstr "보관됨"
+
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Archived"
+msgstr "보관됨"
+
+#: src/pages/ShellMessage.tsx
+msgid "Archived. Chat, memory, and files kept."
+msgstr "보관되었습니다. 대화, 기억, 파일은 유지됩니다."
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Artifacts"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Ask an agent to clarify in chat."
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before {0}"
+msgstr "{0} 전에 확인"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before {0} actions"
+msgstr "{0} 동작 전에 확인"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before {0} connector"
+msgstr "{0} 커넥터 전에 확인"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before a specific tool"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before email actions"
+msgstr "이메일 동작 전에 확인"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before purchase actions"
+msgstr "결제 동작 전에 확인"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before purchases"
+msgstr "결제하기 전에 확인"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask before sending external email"
+msgstr "외부 이메일을 보내기 전에 확인"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Ask first"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Ask the server owner to configure this provider."
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Asking a specialist"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Assessment"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Assessment date"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "Assessment unavailable"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Assistant"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Assumption"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Attach file"
+msgstr "파일 첨부"
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Attached {path}"
+msgstr ""
+
+#: src/lib/message-text.ts
+#: src/pages/shell/chat-context.tsx
+msgid "Attachment"
+msgstr "첨부 파일"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Attendees"
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Authentication failed."
+msgstr "인증에 실패했습니다."
+
+#: src/pages/shell/message-cards.tsx
+msgid "Authorization timed out. Please try again."
+msgstr "인증 시간이 만료되었습니다. 다시 시도해 주세요."
+
+#: src/pages/shell/message-cards.tsx
+msgid "Authorize"
+msgstr "인증하기"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Authorize this server so agents can use its tools. A popup opens."
+msgstr "에이전트가 도구를 사용할 수 있도록 이 서버에 권한을 부여하세요. 팝업이 열립니다."
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Autumn rank"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Available"
+msgstr ""
+
+#: src/pages/recruiting/AvailabilityRanges.tsx
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Available time"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Available to this bot's shell commands as {commandVariable}"
+msgstr "이 봇의 셸 명령에서 {commandVariable}(으)로 사용 가능"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Avatar Studio"
+msgstr "아바타 스튜디오"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Avg tenure"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Awaiting feedback"
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Back"
+msgstr "뒤로"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Back to inbox"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Back to results"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Back to sign in"
+msgstr "로그인으로 돌아가기"
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Base URL"
+msgstr "서버 주소"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Basic auth"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Basic auth ({username})"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Bearer token"
+msgstr "Bearer 토큰"
+
+#: src/lib/ticket-status.ts
+msgid "Blocked"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Board"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Booking"
+msgstr ""
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Booting live desktop…"
+msgstr "라이브 데스크톱 시작 중…"
+
+#. placeholder {0}: computerBot?.name ?? active?.name
+#: src/pages/Shell.tsx
+msgid "Booting up {0}’s computer"
+msgstr "{0}의 컴퓨터를 켜는 중"
+
+#: src/pages/ShellMessage.tsx
+msgid "bot"
+msgstr "Bot"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+#: src/pages/shell/useShellController.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Bot"
+msgstr "봇"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Bot"
+msgstr "Bot"
+
+#: src/pages/Shell.tsx
+msgid "Bot screen"
+msgstr "Bot 화면"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Bot screen preview"
+msgstr "Bot 화면 미리보기"
+
+#: src/pages/recruiting/SequenceStats.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Bounced"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Brain label"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Brief changed or could not be confirmed. Refresh and review it."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Brief confirmed"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Browse all candidates"
+msgstr ""
+
+#: src/components/computer/ComputerWorkspace.tsx
+msgid "Browser"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Calendar"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Calendar booking details are not included in these manual CRM workflow records."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Calendar event"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Calendar hours"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar last checked"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Calendar records have not been checked yet."
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Calibration round"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Campaign"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Campaign details unavailable"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Campaign not synced"
+msgstr ""
+
+#: src/App.tsx
+msgid "Can't reach the server."
+msgstr "서버에 연결할 수 없습니다."
+
+#: src/components/AskCard.tsx
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/components/ComputerUpdateProgress.tsx
+#: src/components/markdown-link-prompt.tsx
+#: src/components/teach/TeachComputerOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Cancel"
+msgstr "취소"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Cancel new bot"
+msgstr "새 Bot 만들기 취소"
+
+#: src/pages/shell/chat-context.tsx
+msgid "Cancel reply"
+msgstr "답장 취소"
+
+#: src/components/CloudAgentCard.tsx
+msgid "cancelled"
+msgstr "취소됨"
+
+#: src/components/AskCard.tsx
+msgid "Cancelled"
+msgstr "취소됨"
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Candidate"
+msgstr "후보자"
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "Candidate assessment"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate cards"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate conversations"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Candidate details"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate details unavailable"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Candidate facts"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Candidate feedback"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate interview status"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Candidate link"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Candidate messages"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "Candidate pipeline"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Candidate question"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Candidate record"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Candidate reference"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Candidate sort"
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Candidate statement"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Candidate status"
+msgstr "Candidate status"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate table"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Candidate time zone"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidates"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Cards"
+msgstr "카드"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Change the week or status to review saved records. Empty space does not confirm availability."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Changes could not be saved."
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Chart failed to render: {error}"
+msgstr "차트를 표시하지 못했습니다: {error}"
+
+#: src/pages/shell/Composer.tsx
+msgid "Chat Settings"
+msgstr "채팅 설정"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Chat with WeKruit"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Check actual supported calendar availability for the selected candidate and requested interviewer. Keep the existing candidate, mailbox and thread context. Record exact intervals and event type. Do not book or send anything."
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Check again"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Check and reconcile the recorded booking and confirmation outcomes. Do not rebook or resend."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Check availability in role chat"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Check failed"
+msgstr "확인 실패"
+
+#: src/components/DesktopUpdates.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Check for updates"
+msgstr "업데이트 확인"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Check in."
+msgstr "확인해 주세요."
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Check outcome"
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Check the API key or sign-in, then test again."
+msgstr "API 키 또는 로그인을 확인한 뒤 다시 테스트하세요."
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Check the existing booking and confirmation records. Do not rebook or resend."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Check the server URL and network, then test again."
+msgstr "서버 URL과 네트워크를 확인한 뒤 다시 테스트하세요."
+
+#: src/pages/Auth.tsx
+msgid "Check your email"
+msgstr "이메일을 확인하세요"
+
+#: src/components/LiveWork.tsx
+msgid "Checking availability"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking candidate records"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Checking computer setup…"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking connections"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking email"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Checking saved context"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+#: src/components/DesktopUpdates.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Checking…"
+msgstr "확인 중…"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Checkout has local changes. Clean it before updating."
+msgstr "체크아웃에 로컬 변경 사항이 있습니다. 업데이트하기 전에 정리하세요."
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Choose a bot shape, color, or upload an image"
+msgstr "봇 모양과 색을 고르거나 이미지를 업로드하세요"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Choose a candidate"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Choose a new password"
+msgstr "새 비밀번호 선택"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Choose a role to see its outreach."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Choose day"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Choose feedback"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Choose file"
+msgstr "파일 선택"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Choose the role again."
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Clear"
+msgstr "비우기"
+
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Clear {0}’s conversation?"
+msgstr "{0}와의 대화 내용을 비울까요?"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Clear conversation"
+msgstr "대화 내용 비우기"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Clear date filter"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Clearing…"
+msgstr "비우는 중…"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Clicked"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Client"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Client feedback"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Client ID"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Client secret"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Clock change; see source times"
+msgstr ""
+
+#: src/components/LazyOverlay.tsx
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+#: src/pages/WindowChrome.tsx
+msgid "Close"
+msgstr "닫기"
+
+#: src/components/computer/ComputerWorkspace.tsx
+msgid "Close {title}"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Close chart"
+msgstr "차트 닫기"
+
+#: src/pages/Shell.tsx
+msgid "Close computer"
+msgstr "컴퓨터 닫기"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Close event details"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Close image preview"
+msgstr "이미지 미리보기 닫기"
+
+#: src/pages/Shell.tsx
+msgid "Close navigation"
+msgstr "메뉴 닫기"
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Close panel"
+msgstr "패널 닫기"
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Close preview"
+msgstr "미리보기 닫기"
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Cloud"
+msgstr "클라우드"
+
+#: src/components/AskCard.tsx
+msgid "Code"
+msgstr "코드"
+
+#. placeholder {0}: group.title
+#. placeholder {0}: item.chat.name
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Collapse {0}"
+msgstr "{0} 접기"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Collapse navigation"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Collapse role chat"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Color"
+msgstr "색상"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Color {color}"
+msgstr "색상 {color}"
+
+#: src/components/AskCard.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Command variable"
+msgstr "명령 변수"
+
+#: src/lib/roster-status.ts
+msgid "Compacting…"
+msgstr "압축 중…"
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Company"
+msgstr ""
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Company deck"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Company type"
+msgstr ""
+
+#. placeholder {0}: candidate.company
+#: src/pages/shell/Composer.tsx
+msgid "Company: {0}"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Completed"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Computer"
+msgstr "컴퓨터"
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Computer failed to boot"
+msgstr "컴퓨터를 시작하지 못했습니다"
+
+#: src/pages/Shell.tsx
+msgid "Computer is asleep"
+msgstr "컴퓨터가 절전 상태입니다"
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Computer is asleep. Open it to wake."
+msgstr "컴퓨터가 절전 상태입니다. 열어 깨우세요."
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Computer is stopped"
+msgstr "컴퓨터가 중지됨"
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Computers are available. Reload or open a bot to continue."
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
+msgstr "컴퓨터가 꺼져 있습니다. SANDBOX_PROVIDER=docker와 SANDBOX_SUPERVISOR_TOKEN을 설정하거나, SANDBOX_PROVIDER를 e2b, daytona, box 중 하나로 두고 해당 API 키를 넣으세요. .env 변경 후 스택을 다시 만드세요."
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Concerns"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm adding candidates to the campaign"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm and send"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Confirm brief"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm forwarding email"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview booking"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview cancellation"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm interview change"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Confirm password"
+msgstr "비밀번호 확인"
+
+#: src/components/AskCard.tsx
+msgid "Confirm reply"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm requirements"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending email"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Confirm sending the first email"
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Confirm the URL is reachable from this browser session, then test again."
+msgstr "이 브라우저 세션에서 URL에 연결할 수 있는지 확인한 뒤 다시 테스트하세요."
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Confirmation"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Confirmation sent"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Conflicting information"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Connect"
+msgstr "연결"
+
+#: src/components/AskCard.tsx
+msgid "Connect {name}"
+msgstr "{name} 연결"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Connect an app"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Connect MCP server “{name}”"
+msgstr "MCP 서버 ‘{name}’ 연결"
+
+#: src/components/AskCard.tsx
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/shell/message-cards.tsx
+msgid "Connected"
+msgstr "연결됨"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Connected. Its tools are available from your next message."
+msgstr "연결되었습니다. 다음 메시지부터 이 도구를 사용할 수 있습니다."
+
+#: src/components/AskCard.tsx
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+#: src/pages/shell/message-cards.tsx
+msgid "Connecting…"
+msgstr "연결 중…"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Connection test failed."
+msgstr "연결 테스트에 실패했습니다."
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Consideration resumed"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Contact campaign associations"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Contact details"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Contact details have not been checked yet."
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Contact layout"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Contact status"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Contacted"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Contacts"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Context"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Continue"
+msgstr "계속"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Continue in Background"
+msgstr ""
+
+#. placeholder {0}: reset.sso.name
+#: src/pages/Auth.tsx
+msgid "Continue with {0}"
+msgstr "{0}(으)로 계속"
+
+#: src/pages/Auth.tsx
+msgid "Continue with email"
+msgstr "이메일로 계속하기"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Conversation"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Copied"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Copy"
+msgstr "복사"
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Copy .env example"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core duties"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Core work evidence"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Could not access"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not approve this server"
+msgstr "서버를 승인하지 못했습니다."
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not authorize this app"
+msgstr "앱 인증을 완료하지 못했습니다."
+
+#: src/lib/model-connection-preflight.ts
+msgid "Could not check stored credentials."
+msgstr "저장된 인증 정보를 확인하지 못했습니다."
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Could not check teaching status. Refresh the view to continue."
+msgstr "가르치기 상태를 확인하지 못했습니다. 화면을 새로고침한 뒤 이어가세요."
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not clear conversation"
+msgstr "대화 내용을 비우지 못했습니다."
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Could not complete action"
+msgstr ""
+
+#: src/components/DesktopUpdates.tsx
+msgid "Could not complete the update. Try again."
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Could not confirm feedback. Try again."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Could not connect"
+msgstr "연결하지 못했습니다."
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Could not connect this app. Check your account settings and try again."
+msgstr ""
+
+#: src/pages/shell/useShellComputer.ts
+msgid "Could not connect to the computer screen"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Could not connect. Try again."
+msgstr "연결하지 못했습니다. 다시 시도하세요."
+
+#: src/components/AccountAccess.tsx
+#: src/lib/account-security.ts
+#: src/lib/mcp-connect.ts
+#: src/lib/sso-flow.ts
+#: src/lib/user-error.ts
+#: src/pages/Auth.tsx
+#: src/pages/shell/ShellOverlays.tsx
+#: src/pages/shell/useShellComputer.ts
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not continue"
+msgstr "계속 진행하지 못했습니다."
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Could not create bot"
+msgstr "Bot을 만들지 못했습니다."
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not create section"
+msgstr "섹션을 만들지 못했습니다."
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not create space"
+msgstr "스페이스를 만들 수 없습니다"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete bot"
+msgstr "Bot을 삭제하지 못했습니다."
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete group"
+msgstr "그룹을 삭제할 수 없습니다"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete routine"
+msgstr "자동 실행을 삭제하지 못했습니다."
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not delete space"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not dismiss"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not dismiss this server"
+msgstr ""
+
+#. placeholder {0}: props.name
+#: src/components/ArtifactFileCard.tsx
+msgid "Could not download {0}. Try again."
+msgstr "{0}을 다운로드하지 못했습니다. 다시 시도해 주세요."
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Could not download {name}. Try again."
+msgstr "{name}을 다운로드하지 못했습니다. 다시 시도해 주세요."
+
+#: src/components/computer/FilesApp.tsx
+msgid "Could not download file"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not export conversation"
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+msgid "Could not list files"
+msgstr ""
+
+#: src/components/ErrorBoundary.tsx
+#: src/components/LazyOverlay.tsx
+msgid "Could not load"
+msgstr "불러올 수 없음"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Could not load all activity."
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not load approval rules"
+msgstr "확인 규칙을 불러오지 못했습니다."
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "Could not load assessment"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load candidate records"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/recruiting/shared.tsx
+msgid "Could not load candidate records. Try refreshing."
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Could not load candidate sources"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Could not load candidates"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Could not load commands"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load contact details"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not load credentials."
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Could not load feedback"
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Could not load history"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Could not load integrations"
+msgstr "연동 목록을 불러오지 못했습니다."
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Could not load interview plans."
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not load notes."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load recruiting"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Could not load recruiting. Refresh to try again."
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not load reminders."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Could not load saved availability. Check the calendar in role chat."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Could not load saved calendar records. Try refreshing."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Could not load search results"
+msgstr "검색 결과를 불러올 수 없습니다"
+
+#: src/lib/account-security.ts
+#: src/pages/Auth.tsx
+msgid "Could not load sign-in options"
+msgstr "로그인 옵션을 불러올 수 없습니다"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Could not load stored messages. Try refreshing."
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Could not load this file."
+msgstr "파일을 불러오지 못했습니다."
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not load this role’s candidate records."
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Could not load update status"
+msgstr "업데이트 상태를 불러올 수 없습니다"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Could not load your overview."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Could not load your tasks."
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+msgid "Could not open file"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Could not open terminal"
+msgstr "터미널을 열 수 없습니다"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Could not open this role."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Could not reach the model server."
+msgstr "모델 서버에 연결하지 못했습니다."
+
+#: src/lib/computer-sandbox.ts
+#: src/lib/user-error.ts
+#: src/pages/Auth.tsx
+msgid "Could not reach the server"
+msgstr "서버에 연결할 수 없습니다"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Could not read candidate records."
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Could not read this campaign."
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Could not record this profile view."
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not remove rule"
+msgstr "확인 규칙을 삭제하지 못했습니다."
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not remove the credential"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not rename section"
+msgstr "섹션 이름을 바꿀 수 없습니다"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Could not rename space"
+msgstr "스페이스 이름을 바꿀 수 없습니다"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not render chart"
+msgstr "차트를 만들지 못했습니다."
+
+#: src/pages/Auth.tsx
+msgid "Could not reset password"
+msgstr "비밀번호를 재설정할 수 없습니다"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Could not run routine"
+msgstr "루틴을 실행할 수 없습니다"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Could not save"
+msgstr "저장하지 못했습니다."
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not save Auto Review"
+msgstr "자동 검토를 저장할 수 없습니다"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Could not save routine"
+msgstr "자동 실행을 저장하지 못했습니다."
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Could not save rule"
+msgstr "확인 규칙을 저장하지 못했습니다."
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Could not save shortlist"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Could not save the credential"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not save the note."
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not save the reminder."
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not save this choice"
+msgstr "선택 내용을 저장하지 못했습니다."
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Could not save this plan. Refresh the original conversation and availability, then try again."
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Could not send reset email"
+msgstr "재설정 이메일을 보낼 수 없습니다"
+
+#: src/lib/call-session-engine.ts
+msgid "Could not send that"
+msgstr "메시지를 보내지 못했습니다."
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Could not start teaching"
+msgstr "가르치기를 시작하지 못했습니다."
+
+#: src/components/AskCard.tsx
+msgid "Could not submit this answer"
+msgstr "답변을 보내지 못했습니다."
+
+#: src/pages/shell/useShellComputer.ts
+msgid "Could not take control"
+msgstr "직접 조작으로 전환하지 못했습니다."
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Could not update computer"
+msgstr "컴퓨터를 업데이트할 수 없습니다"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Could not update reaction"
+msgstr "반응을 업데이트할 수 없습니다"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Could not update this task. Try again."
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not upload file"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Could not verify computer setup ({failureMessage}). Fix the connection, then check again."
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Count through"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Create"
+msgstr "만들기"
+
+#. placeholder {0}: bot.name
+#: src/pages/shell/dialogs.tsx
+msgid "Create a section and move {0} into it."
+msgstr "새 섹션을 만들고 {0}을 옮깁니다."
+
+#: src/pages/Auth.tsx
+msgid "Create account"
+msgstr "계정 만들기"
+
+#: src/pages/shell/bot-picker.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Create new Bot"
+msgstr "새 Bot 만들기"
+
+#: src/pages/shell/bot-picker.tsx
+msgid "Create new Group"
+msgstr "새 그룹 만들기"
+
+#: src/pages/shell/bot-picker.tsx
+msgid "Create new Space"
+msgstr "새 스페이스 만들기"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Create reminder"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Create space"
+msgstr "스페이스 만들기"
+
+#: src/pages/Auth.tsx
+msgid "Create your WeKruit Headhunter account"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Created"
+msgstr "생성됨"
+
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Creating…"
+msgstr "만드는 중…"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Credentials"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Criteria"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "Criterion"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Criterion {0}"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion findings"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Criterion name unavailable"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Criterion summary"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "CRM receipt"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Current"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current company"
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+msgid "Current password"
+msgstr "현재 비밀번호"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: approved"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: pooled"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Current result: rejected"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/fieldLabels.ts
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Current role"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Current role not returned"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current role start"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current tenure"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Current time"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Current title"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Current totals · all dates"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Custom header"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Customer support"
+msgstr "고객 지원"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Customize bot avatar"
+msgstr "봇 아바타 맞춤설정"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Cutoff date"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Dashboard"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Date only; time not supplied"
+msgstr ""
+
+#. placeholder {0}: draft.email.date
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Date: {0}"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "day"
+msgstr "일"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Day-to-day work"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Days unavailable."
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Decline"
+msgstr "거절"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Declined"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Default"
+msgstr "기본값"
+
+#. placeholder {0}: thinkingLevelLabel(defaultThinkingLevel)
+#: src/pages/shell/bot-panel.tsx
+msgid "Default ({0})"
+msgstr "기본값 ({0})"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Degree"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay unavailable."
+msgstr ""
+
+#. placeholder {0}: step.delay
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay: {0} days"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Delete"
+msgstr "삭제"
+
+#. placeholder {0}: bot.name
+#. placeholder {0}: group.name
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Delete {0}"
+msgstr "{0} 삭제"
+
+#. placeholder {0}: bot.name
+#. placeholder {0}: item.name
+#: src/pages/shell/dialogs.tsx
+msgid "Delete {0}?"
+msgstr "{0}을 삭제할까요?"
+
+#: src/components/AccountAccess.tsx
+msgid "Delete account"
+msgstr "계정 삭제"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Delete memories too"
+msgstr "기억도 함께 삭제"
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Delete space"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "deleted"
+msgstr "삭제됨"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Deleting…"
+msgstr "삭제 중…"
+
+#: src/components/AccountAccess.tsx
+msgid "Deletion code"
+msgstr "삭제 코드"
+
+#: src/components/AskCard.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Denied"
+msgstr "거부됨"
+
+#: src/components/AskCard.tsx
+msgid "Deny"
+msgstr "거부"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Describe what this bot does"
+msgstr "이 Bot이 하는 일을 짧게 설명하세요"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+#: src/pages/shell/bot-panel.tsx
+msgid "Description"
+msgstr "설명"
+
+#: src/components/DesktopUpdates.tsx
+msgid "Desktop app"
+msgstr ""
+
+#: src/components/DesktopUpdates.tsx
+msgid "Desktop update"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Details"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Direct MCP"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Disabled tools"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Discoveries"
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Discovery details"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "Discuss candidate"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+#: src/components/teach/TeachComputerOverlay.tsx
+#: src/pages/shell/message-cards.tsx
+msgid "Dismiss"
+msgstr "닫기"
+
+#: src/pages/shell/Composer.tsx
+msgid "Dismiss error"
+msgstr "오류 닫기"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Dismissed. Reconnect anytime from MCP settings."
+msgstr "지금은 연결하지 않았습니다. MCP 설정에서 언제든 다시 연결할 수 있습니다."
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Display timezone"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Docker is configured but computers are not responding. Confirm the sandbox supervisor is running, then recreate the stack after changing .env."
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Does not match"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Don’t have an account?"
+msgstr "계정이 없나요?"
+
+#: src/lib/ticket-status.ts
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Done"
+msgstr "완료"
+
+#: src/components/computer/FilesApp.tsx
+msgid "Download"
+msgstr ""
+
+#. placeholder {0}: basename(entry.path)
+#. placeholder {0}: props.name
+#: src/components/ArtifactFileCard.tsx
+#: src/components/computer/FilesApp.tsx
+msgid "Download {0}"
+msgstr "{0} 다운로드"
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Download {name}"
+msgstr "{name} 다운로드"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Download Executor"
+msgstr ""
+
+#: src/components/DesktopUpdates.tsx
+msgid "Downloading…"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Draft"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Draft reply"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Draft skill"
+msgstr "작업 기술 초안"
+
+#: src/components/LiveWork.tsx
+msgid "Drafting email"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Drag, drop, or paste an image"
+msgstr "이미지를 끌어다 놓거나 붙여넣으세요"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Due"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Duration"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "e.g. Hivenet Agent, Presales, Timesheets bot"
+msgstr "예: Hivenet Agent, Presales, 근무표 봇"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Earlier history"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Edit"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Edit criteria"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Edit search filters"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Education"
+msgstr ""
+
+#: src/pages/Auth.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Email"
+msgstr "이메일"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email content unavailable."
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Email draft"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email failed to send"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Email is not allowed to register"
+msgstr "이 이메일은 가입이 허용되지 않습니다"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email opens are not recorded. Profile views appear only after recording starts."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email queued"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email received"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email recorded"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Email reply"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email scheduled"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Email sent"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email step unavailable."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps unavailable."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Email thread or message"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Email verification required"
+msgstr "이메일 인증이 필요합니다"
+
+#. placeholder {0}: draft.candidateEmail
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Email: {0}"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Emails"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Employment rule"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End not recorded"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "End time unavailable"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Enter a password"
+msgstr "비밀번호를 입력하세요"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Enter a username and password"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Enter a valid email"
+msgstr "올바른 이메일을 입력하세요"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Enter an API key before testing."
+msgstr "테스트하기 전에 API 키를 입력하세요."
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Enter both named IANA timezones, such as America/New_York and Europe/London."
+msgstr ""
+
+#: src/lib/roster-status.ts
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Error"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Error details"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event details"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Event status"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Events without usable start times"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
+#: src/pages/RecruitingPanel.tsx
+msgid "Evidence"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Evidence quote"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Exclude"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Expand"
+msgstr "펼치기"
+
+#. placeholder {0}: group.title
+#. placeholder {0}: item.chat.name
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Expand {0}"
+msgstr "{0} 펼치기"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Experience"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Export"
+msgstr "내보내기"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Export conversation"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Export this week's candidate list and drop it in the shared folder"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Extra high"
+msgstr "매우 높음"
+
+#: src/components/CloudAgentCard.tsx
+msgid "failed"
+msgstr "실패"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Failed to load recruiting data"
+msgstr ""
+
+#: src/pages/shell/useShellMessages.ts
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Failed to send message"
+msgstr "메시지를 보내지 못했습니다."
+
+#: src/pages/shell/useShellAgentActions.ts
+msgid "Failed to stop"
+msgstr "작업을 중지하지 못했습니다."
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Failed."
+msgstr "실패했습니다."
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Failure handling"
+msgstr "실패했을 때 처리"
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Feedback"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Feedback history"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Feedback sent"
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+msgid "File is too large to upload."
+msgstr ""
+
+#: src/components/computer/ComputerWorkspace.tsx
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Files"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Find email"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Finish subscription sign-in, then test again."
+msgstr "구독 로그인을 마친 뒤 다시 테스트하세요."
+
+#: src/components/CloudAgentCard.tsx
+msgid "finished"
+msgstr "완료"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Finished"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Finished."
+msgstr "완료되었습니다."
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Fit"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Fit rationale"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Fixed date"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Flag unexpected actions"
+msgstr "예상하지 못한 작업 표시"
+
+#: src/pages/Auth.tsx
+msgid "Forgot password?"
+msgstr "비밀번호를 잊으셨나요?"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "From"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "From this role’s saved requirements"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Full assessment"
+msgstr ""
+
+#: src/pages/WindowChrome.tsx
+msgid "Fullscreen"
+msgstr "전체 화면"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Future confirmed events from saved calendar checks, shown in your local time. This is a recorded subset, not all bookings or availability."
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Gap"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Get credentials"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Get notified when this Bot finishes or needs input"
+msgstr "이 봇이 끝나거나 입력이 필요할 때 알림 받기"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Getting ready"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Give feedback"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Good example"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Good example: {name}"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Grade reason"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Group"
+msgstr "그룹"
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Group bot memory is not included"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Groups"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Guide retrieval; qualification criteria stay unchanged."
+msgstr ""
+
+#: src/components/call/CallCard.tsx
+msgid "Hang up"
+msgstr "통화 종료"
+
+#: src/lib/call-session-engine.ts
+msgid "Hang up first, then answer on screen."
+msgstr ""
+
+#: src/lib/call-session-engine.ts
+msgid "Hang up, then answer on screen."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Hard"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Hard criteria"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Header \"{header}\""
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Header name"
+msgstr "헤더 이름"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Headline"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Hello"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Hello, {name}"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Hide bots"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Hide password"
+msgstr "비밀번호 숨기기"
+
+#: src/components/call/VoiceChatCard.tsx
+msgid "Hide transcript"
+msgstr "대화 기록 숨기기"
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "High"
+msgstr "높음"
+
+#: src/lib/ticket-priority.ts
+msgid "High"
+msgstr "높음"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "High probability"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "High signal"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Highlights"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Hiring manager"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Historical records matched to this client and role. These are not new search results or a verified shortlist."
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "History"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "How to check"
+msgstr "완료 확인 방법"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Human-entered"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "I’m done"
+msgstr "조작 끝내기"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Identified profiles"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Image upload area"
+msgstr "이미지 업로드 영역"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Important"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Imported list"
+msgstr ""
+
+#: src/lib/ticket-status.ts
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "In progress"
+msgstr ""
+
+#: src/lib/ticket-status.ts
+msgid "In review"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Inbox"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Inbox & email"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Include"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Industry"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Inherit default"
+msgstr "기본 설정 사용"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Inputs"
+msgstr "입력값"
+
+#. placeholder {0}: labels[stage.key]
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect {0}"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Inspect week of {label}"
+msgstr ""
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Instance API key"
+msgstr "인스턴스 API 키"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Instructions"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Integration options"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Integrations"
+msgstr "앱·도구 연동"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Interest"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Interested"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Interjection applied"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Interjection queued"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Internal assessment"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal assessment: current"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal assessment: outdated"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Internal review"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict: met"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict: unknown"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict: unmet"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Interrupted, resuming…"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Interview"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Interview plan"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Interview workflow"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Interviewer time zone"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Introduced"
+msgstr ""
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Is a company deck available?"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Isolated"
+msgstr "이 Bot만 사용"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Its conversation, files, and routines will be permanently deleted. Bots it created stay in your list."
+msgstr "대화, 파일, 자동 실행이 영구 삭제됩니다. 이 Bot이 만든 다른 Bot은 목록에 남습니다."
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "JD"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Job Brief"
+msgstr ""
+
+#: src/pages/shell/Transcript.tsx
+msgid "Jump to latest"
+msgstr "최신 메시지로 이동"
+
+#: src/pages/shell/chat-context.tsx
+msgid "Jump to replied message: {excerpt}"
+msgstr "답장한 메시지로 이동: {excerpt}"
+
+#: src/lib/relative-time.ts
+msgid "just now"
+msgstr "방금"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Keep memories"
+msgstr "기억은 유지"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Key work"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Language"
+msgstr "언어"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Language evidence"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Languages"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Last {count} weeks"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Last 7 days · UTC"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Last contacted"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Last reply"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Last synced"
+msgstr ""
+
+#: src/components/DesktopUpdates.tsx
+msgid "Later"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Latest messages"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Launched {app}"
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+msgid "Link SSO"
+msgstr "SSO 연결"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "LinkedIn"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/shell/Composer.tsx
+msgid "LinkedIn missing"
+msgstr ""
+
+#. placeholder {0}: candidate.linkedinUrl ?? t`LinkedIn missing`
+#: src/pages/shell/Composer.tsx
+msgid "LinkedIn: {0}"
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Listed skill"
+msgstr ""
+
+#: src/pages/shell/Transcript.tsx
+msgid "Load earlier messages"
+msgstr "이전 메시지 불러오기"
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/shared.tsx
+msgid "Load more"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Loading candidate records…"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Loading preview…"
+msgstr "미리보기를 불러오는 중…"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading roles…"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Loading rules…"
+msgstr "확인 규칙을 불러오는 중…"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Loading saved availability…"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Loading stored messages…"
+msgstr ""
+
+#: src/App.tsx
+#: src/pages/Auth.tsx
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/recruiting/shared.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+#: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/Transcript.tsx
+msgid "Loading…"
+msgstr "불러오는 중…"
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Local"
+msgstr "로컬"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/fieldLabels.ts
+#: src/pages/recruiting/InterviewCalendar.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Location"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Location not returned"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Log out"
+msgstr "로그아웃"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Looks good, find more"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Looks good, start searching"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Low"
+msgstr "낮음"
+
+#: src/lib/ticket-priority.ts
+msgid "Low"
+msgstr "낮음"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Lowercase letters, numbers, hyphens and underscores, starting with a letter."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Mailbox not recorded"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Make sure nothing is still running on this computer."
+msgstr "이 컴퓨터에서 실행 중인 작업이 없는지 확인하세요."
+
+#. placeholder {0}: reminder.title
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Mark {0} done"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Marked as sent"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Marked high signal"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Match"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Match reasons"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Match score"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Match tier"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Max"
+msgstr "최대"
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "MCP endpoint"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Medium"
+msgstr "보통"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Memory"
+msgstr "기억"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Memory scope"
+msgstr "기억 사용 범위"
+
+#: src/pages/shell/Composer.tsx
+msgid "Mentions"
+msgstr "멘션"
+
+#: src/lib/message-text.ts
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Message"
+msgstr "메시지"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Message"
+msgstr "메시지"
+
+#: src/pages/shell/Composer.tsx
+msgid "Message {activeName}"
+msgstr "{activeName}에게 메시지 보내기"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Message body unavailable"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Message composer"
+msgstr "메시지 작성기"
+
+#: src/pages/ShellMessage.tsx
+msgid "Message from {peer}"
+msgstr "{peer}의 메시지"
+
+#: src/pages/shell/Composer.tsx
+msgid "Message…"
+msgstr "메시지를 입력하세요"
+
+#: src/pages/ShellMessage.tsx
+msgid "Messaged {peer}"
+msgstr "{peer}에게 메시지 보냄"
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Messages"
+msgstr ""
+
+#: src/pages/recruiting/VerdictLabel.tsx
+msgid "Met"
+msgstr ""
+
+#: src/lib/call-session-engine.ts
+msgid "Microphone failed"
+msgstr "마이크를 사용할 수 없습니다."
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Minimal"
+msgstr "최소"
+
+#: src/pages/WindowChrome.tsx
+msgid "Minimize"
+msgstr "최소화"
+
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Minimize bots"
+msgstr ""
+
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Missing"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Missing info"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Model"
+msgstr "모델"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Model \"{modelId}\" was not listed."
+msgstr "\"{modelId}\" 모델이 목록에 없습니다."
+
+#: src/lib/model-connection-preflight.ts
+msgid "Models list OK. {modelCount, plural, one {# model} other {# models}} available. Chat was not tested."
+msgstr "모델 목록이 정상입니다. {modelCount, plural, one {모델 #개} other {모델 #개}}를 사용할 수 있습니다. 채팅은 테스트하지 않았습니다."
+
+#: src/lib/billing.ts
+msgid "month"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/ShellMessage.tsx
+msgid "More"
+msgstr ""
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "More computer actions"
+msgstr "컴퓨터 작업 더보기"
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "More sources"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "Move them to your shared memory."
+msgstr "공용 기억으로 옮깁니다."
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Must not"
+msgstr ""
+
+#: src/components/call/CallCard.tsx
+msgid "Mute"
+msgstr "음소거"
+
+#: src/components/teach/SkillDraftCard.tsx
+#: src/pages/Auth.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Name"
+msgstr "이름"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Name missing"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Name this bot"
+msgstr "Bot 이름"
+
+#. placeholder {0}: candidate.name ?? t`Name missing`
+#. placeholder {0}: draft.candidateName
+#: src/pages/shell/Composer.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Name: {0}"
+msgstr ""
+
+#: src/lib/roster-status.ts
+msgid "Needs an answer"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Needs changes"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Needs confirmation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Needs input"
+msgstr "입력 필요"
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Needs scheduling"
+msgstr ""
+
+#: src/lib/roster-status.ts
+#: src/pages/Shell.tsx
+msgid "Needs you"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "New bot"
+msgstr "새 Bot 만들기"
+
+#: src/pages/Auth.tsx
+msgid "New password"
+msgstr "새 비밀번호"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/useShellController.tsx
+msgid "New role"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New Role"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "New search"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "New section"
+msgstr "새 섹션"
+
+#: src/pages/shell/dialogs.tsx
+msgid "New space"
+msgstr "새 스페이스"
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Next"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Next campaigns"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Next contact campaigns"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Next week"
+msgstr ""
+
+#. placeholder {0}: stage.nextStep
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Next: {0}"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "No activity recorded in the available sources."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "No additional search filters"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No apps found"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "No bot activity yet."
+msgstr "아직 봇 활동이 없습니다."
+
+#: src/pages/shell/command-palette.tsx
+msgid "No bots"
+msgstr ""
+
+#: src/pages/shell/bot-picker.tsx
+msgid "No bots match"
+msgstr ""
+
+#: src/pages/recruiting/shared.tsx
+msgid "No candidate records for this role yet."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No contact campaign associations were returned."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No contacts for this role yet."
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "No credentials saved for this bot."
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No dated sends in the available records."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No email variants returned."
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No evidence provided."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No future confirmed event appears in these saved checks."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No Important records matched this filter."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "No internal assessment"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No internal review was returned."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No interviews in progress for this role."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No loaded candidates match these filters."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "No loaded candidates match this date filter."
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "No longer active"
+msgstr "이미 종료된 요청입니다"
+
+#: src/lib/model-connection-preflight.ts
+msgid "No models listed."
+msgstr "나열된 모델이 없습니다."
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "No notes yet."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No open tasks."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No records matched this search."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No recruiter messages were found."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No remote MCP servers found"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "No research activity"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "No role linked"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "No role linked yet. Describe the role in this conversation."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No roles yet."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "No saved assessments"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "No saved calendar records matched this candidate."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "No saved candidates"
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "No saved discovery sources"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No saved events to show for this week and status."
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "No saved feedback yet."
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "No saved history"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "No saved memory in these scopes"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "No saved overview for these projects."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "No saved questions"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "No saved research"
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "No saved result rows"
+msgstr "저장된 결과 행 없음"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No schedules returned."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No sequences returned."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "No shortlisted candidates match these filters."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "No shortlisted candidates yet."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No steps returned."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "No stored campaign associations were returned for this role."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this candidate."
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this role."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No stored messages were returned for this contact."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "No stored role-interest records were returned."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/ShellMessage.tsx
+msgid "No subject"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "No supported future interval is recorded. Check availability before choosing a time."
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No supporting detail in the saved profile."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "No timed events in this week."
+msgstr ""
+
+#: src/lib/ticket-priority.ts
+msgid "Normal"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "NOT"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Not a fit"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Not a fit: {name}"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Not accepted"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Not checked"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Not interested"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/pages/shell/message-cards.tsx
+msgid "Not now"
+msgstr "나중에"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Not pursuing"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Not recorded"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Not recorded in this source"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Not reported"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Not returned"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Not reviewed"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Note"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/fieldLabels.ts
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Notes"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Nothing is still running"
+msgstr "실행 중인 작업 없음"
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Notifications"
+msgstr "알림"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Observed at"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Observed availability intervals"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Older messages"
+msgstr ""
+
+#. placeholder {0}: call.botName
+#: src/components/call/CallCard.tsx
+msgid "On a call with {0}"
+msgstr "{0}님과 통화 중"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "On hold"
+msgstr ""
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Only empty spaces can be deleted. Delete its bots and groups first."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Only loaded candidate records are shown."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Only part of the saved availability is available."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Only recent saved records are shown. Earlier plans may be missing."
+msgstr ""
+
+#: src/components/markdown-link-prompt.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Open"
+msgstr "열기"
+
+#. placeholder {0}: group.title
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Open {0}"
+msgstr "{0} 열기"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Open {name}'s source profile"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Open calendar event"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Open computer settings"
+msgstr ""
+
+#: src/components/markdown-link-prompt.tsx
+msgid "Open external link?"
+msgstr "외부 링크를 열까요?"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Open in full window"
+msgstr "전체 창으로 열기"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Open navigation"
+msgstr "메뉴 열기"
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Open original question"
+msgstr "원래 질문 열기"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Open role chat"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Open shell"
+msgstr "셸 열기"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Open the role conversation to see its candidates."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Open the role conversation to see saved calendar records."
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Open the saved sequence before editing it."
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Opened"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Opened {opens}"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Opened {path}"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Opened its thread."
+msgstr "대화가 만들어졌습니다."
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Opening role…"
+msgstr ""
+
+#: src/App.tsx
+msgid "Opening your Space…"
+msgstr "작업공간을 여는 중…"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Opens this role’s records. The destination is not filtered to this metric’s exact candidates."
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "OR"
+msgstr ""
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Organization API key"
+msgstr "조직 API 키"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Organization-wide candidate-role records."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Original job description"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Original message"
+msgstr ""
+
+#: src/pages/shell/chat-context.tsx
+msgid "Original message unavailable"
+msgstr "원본 메시지를 사용할 수 없습니다"
+
+#. placeholder {0}: draft.email.recipients.join(", ")
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Original recipients: {0}"
+msgstr ""
+
+#. placeholder {0}: draft.email.sender
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Original sender: {0}"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Original source"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Outbox"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Outcome unknown"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Outdated"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Output"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Outreach"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Outreach drafts"
+msgstr "Outreach drafts"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Outreach funnel"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Outreach status"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall direction"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall: {direction}"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Overdue"
+msgstr ""
+
+#. placeholder {0}: overdue.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Overdue ({0})"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Overview"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Partial data"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Partial match"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/pages/Auth.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Password"
+msgstr "비밀번호"
+
+#: src/pages/Auth.tsx
+msgid "Password recovery is not configured for this server"
+msgstr "이 서버에는 비밀번호 복구가 설정되어 있지 않습니다"
+
+#: src/pages/Auth.tsx
+msgid "Password updated"
+msgstr "비밀번호가 업데이트되었습니다"
+
+#: src/pages/Auth.tsx
+msgid "Passwords do not match"
+msgstr "비밀번호가 일치하지 않습니다"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Paste your API key, then test again."
+msgstr "API 키를 붙여넣은 뒤 다시 테스트하세요."
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Pause consideration"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Paused"
+msgstr "일시 중지됨"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Pending approval"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Phone"
+msgstr ""
+
+#: src/lib/message-text.ts
+#: src/pages/shell/chat-context.tsx
+msgid "Photo"
+msgstr "사진"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Pick a model from the catalog."
+msgstr "모델 목록에서 모델을 선택하세요."
+
+#: src/lib/model-connection-preflight.ts
+msgid "Pick a model from the list or enter a model id served by this endpoint."
+msgstr "목록에서 모델을 선택하거나 이 엔드포인트가 제공하는 모델 ID를 입력하세요."
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Pipeline"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Plan saved. Booking and sending still require approval."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Polished message"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Pooled in internal review"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Prefer"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Preferences"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Preferred"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Preferred criteria"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Prepared"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Preparing a question"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Present"
+msgstr ""
+
+#. placeholder {0}: preview?.label ?? props.name
+#: src/components/ArtifactFileCard.tsx
+msgid "Preview {0}"
+msgstr "{0} 미리보기"
+
+#: src/pages/ShellMessage.tsx
+msgid "Preview only"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Preview only. Ask for the complete message to read the full body."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Previous"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Previous campaigns"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Previous companies"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Previous contact campaigns"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Previous week"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Previously processing"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Primary pipeline campaign"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Priority"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Private"
+msgstr "Bot 전용"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Private workspace with its own bots and groups."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Profile"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Profile details"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Profile navigation"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Profile viewed"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Project"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Project ID"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Projects"
+msgstr ""
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Protected input"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Provider status"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Provider status code"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Provider task"
+msgstr ""
+
+#: src/components/CloudAgentCard.tsx
+msgid "Pull request"
+msgstr "풀 리퀘스트"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Qualifying work"
+msgstr ""
+
+#: src/pages/shell/Transcript.tsx
+msgid "Quote"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Rank"
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Raw search results"
+msgstr "원본 검색 결과"
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Raw value"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "React"
+msgstr "반응하기"
+
+#: src/pages/ShellMessage.tsx
+msgid "Reactions"
+msgstr "반응"
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Read original conversation"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Read replies aloud"
+msgstr "답변을 자동으로 읽기"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Read the attached materials for this role."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Read the original mailbox conversation before preparing a plan."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Read the selected original email and its actual mailbox conversation for interview planning. Preserve the candidate, mailbox and thread. Do not send or book anything."
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reading a page"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reading files"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Reason"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Reason: {name}"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Recall and write"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Recall only"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Receipt"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Received"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Recently discovered"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Recents"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Recheck current availability and prepare the exact booking for approval. Do not book or send before approval."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Recipients unavailable"
+msgstr ""
+
+#: src/App.tsx
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Reconnecting"
+msgstr "다시 연결 중"
+
+#: src/lib/roster-status.ts
+msgid "Reconnecting…"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Recorded event"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Recorded send activity"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Recording feedback"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Recording may have started, but the view could not refresh"
+msgstr "녹화가 시작됐을 수 있지만 화면을 새로고침하지 못했습니다"
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Recording started. Refresh the view to continue."
+msgstr "녹화가 시작되었습니다. 화면을 새로고침한 뒤 이어가세요."
+
+#. placeholder {0}: recording.goal
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Recording: {0}"
+msgstr "녹화 중: {0}"
+
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recover computer"
+msgstr "컴퓨터 복구"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recover computer?"
+msgstr "컴퓨터를 복구할까요?"
+
+#. placeholder {0}: update.name
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovering {0}’s Computer"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovering Team Computer"
+msgstr ""
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recovering…"
+msgstr "복구 중…"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovery failed"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovery is unavailable until the previous operation has stopped."
+msgstr ""
+
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recovery restores the last saved workspace. Unsaved work may be lost."
+msgstr "복구하면 마지막으로 저장된 작업 공간이 복원됩니다. 저장하지 않은 작업은 손실될 수 있습니다."
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recreate a computer that is not working."
+msgstr "작동하지 않는 컴퓨터를 다시 만듭니다."
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Recreating the computer"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Recruiter messages"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Recruiter messages are unavailable for this role."
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Recruiter verified"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Recruiting"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Recruiting assistant"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiting views"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workflow"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Refine in chat"
+msgstr ""
+
+#: src/App.tsx
+#: src/components/LazyOverlay.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Refresh"
+msgstr "새로고침"
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Refresh criteria"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Refresh view"
+msgstr "화면 새로고침"
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Refreshing…"
+msgstr "새로고침 중…"
+
+#: src/lib/user-error.ts
+msgid "Registration is closed"
+msgstr "가입이 마감되었습니다"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Rejected in internal review"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Release computer"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Release control"
+msgstr "제어권 넘기기"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Release interrupted computer?"
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Reminder"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Remove"
+msgstr "삭제"
+
+#. placeholder {0}: attachment.file.name
+#: src/pages/shell/Composer.tsx
+msgid "Remove {0}"
+msgstr "{0} 삭제"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Remove {name} from shortlist"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Remove {secretName}? This bot will no longer be able to use it."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Remove filter"
+msgstr ""
+
+#. placeholder {0}: mention.name
+#: src/pages/shell/Composer.tsx
+msgid "Remove mention {0}"
+msgstr "{0} 멘션 삭제"
+
+#. placeholder {0}: selectedSkill.name
+#: src/pages/shell/Composer.tsx
+msgid "Remove skill {0}"
+msgstr "작업 기술 {0} 삭제"
+
+#: src/pages/ShellMessage.tsx
+msgid "Removed with chat, computer, and memory."
+msgstr "대화, 컴퓨터, 기억과 함께 삭제되었습니다."
+
+#: src/pages/shell/dialogs.tsx
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Rename section"
+msgstr "섹션 이름 바꾸기"
+
+#: src/pages/shell/dialogs.tsx
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Rename space"
+msgstr "스페이스 이름 바꾸기"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Replace value"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Replaced"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Replied"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Replied {replied}"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Reply"
+msgstr "답장"
+
+#: src/pages/shell/Composer.tsx
+msgid "Reply cancelled"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply failed"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Reply mailbox"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply outcome unknown"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Reply outcomes"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Reply to the selected email"
+msgstr ""
+
+#. placeholder {0}: replyNameRef.current
+#: src/pages/shell/Composer.tsx
+msgid "Replying to {0}"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Request"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested interviewer email"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Requested interviewer name"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Required"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Requirements and feedback stay with this role."
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Research & writing"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Research findings"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Research history"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Research match"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Research round"
+msgstr ""
+
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Reset"
+msgstr "재설정"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Reset computer"
+msgstr "컴퓨터 재설정"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Reset computer?"
+msgstr "컴퓨터를 재설정할까요?"
+
+#: src/pages/Auth.tsx
+msgid "Reset password"
+msgstr "비밀번호 재설정"
+
+#: src/pages/Auth.tsx
+msgid "Reset your password"
+msgstr "비밀번호를 재설정하세요"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Resetting…"
+msgstr "재설정 중…"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Resize chat"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Resize navigation"
+msgstr ""
+
+#: src/pages/ResizableSidePanel.tsx
+msgid "Resize panel"
+msgstr "패널 크기 조절"
+
+#: src/components/DesktopUpdates.tsx
+msgid "Restart to update"
+msgstr ""
+
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Restore"
+msgstr "복원"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Restore the last saved workspace."
+msgstr "마지막으로 저장한 작업 공간을 복원합니다."
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Restore the last saved workspace. Unsaved work on the computer is lost."
+msgstr "마지막으로 저장된 작업 공간을 복원합니다. 컴퓨터에서 저장하지 않은 작업은 사라집니다."
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Restoring your workspace"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Results saved"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Resume"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Resume consideration"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Resume missing"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Resume ready"
+msgstr ""
+
+#. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
+#: src/pages/shell/Composer.tsx
+msgid "Resume: {0}"
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+#: src/pages/Auth.tsx
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/recruiting/RetryNotice.tsx
+msgid "Retry"
+msgstr "다시 시도"
+
+#: src/App.tsx
+msgid "Retry now"
+msgstr "지금 다시 시도"
+
+#: src/pages/shell/useShellController.tsx
+msgid "Retry screen"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Return to the original role before saving this draft."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review in role chat"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review only the confirmation in the original mailbox thread for the completed booking. Do not create another booking. Sending requires approval."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review plan"
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Review provider settings and test again."
+msgstr "서비스 설정을 확인한 뒤 다시 테스트하세요."
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Review rationale"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Review status unknown"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review the existing pending approval and recorded attempt. Do not start a fresh booking or send."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review the recorded failure before proposing another action. Do not rebook or resend without a new explicit approval."
+msgstr ""
+
+#. placeholder {0}: plan.candidate.name
+#. placeholder {1}: plan.candidate.email
+#. placeholder {2}: plan.interviewer.name
+#. placeholder {3}: plan.interviewer.email
+#. placeholder {4}: localTime(plan.calendar.start, plan.candidate.timeZone)
+#. placeholder {5}: plan.candidate.timeZone
+#. placeholder {6}: localTime(plan.calendar.start, plan.interviewer.timeZone)
+#. placeholder {7}: plan.interviewer.timeZone
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Review the saved interview plan for {0} ({1}) with {2} ({3}). Candidate time: {4} ({5}); interviewer time: {6} ({7}). {instruction}"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Review updated"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Reviewed"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing candidates"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Reviewing the role"
+msgstr ""
+
+#. placeholder {0}: document.revision
+#. placeholder {0}: entry.revision
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Revision {0}"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Risks"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Role"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Role campaigns"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Role conversation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Role definition"
+msgstr ""
+
+#. placeholder {0}: unphrasedBriefFields.length
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Role details needing clarification: {0}"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Role interest"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Role requirements"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Role revision"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Role sources"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Role stage"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Role status"
+msgstr ""
+
+#. placeholder {0}: record.feedback.expectedRoleRevision
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Role version {0}"
+msgstr ""
+
+#. placeholder {0}: candidate.roleVersion
+#: src/pages/shell/Composer.tsx
+msgid "Role version: {0}"
+msgstr ""
+
+#. placeholder {0}: candidate.roleTitle
+#. placeholder {0}: workspace.role.title
+#: src/pages/shell/Composer.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Role: {0}"
+msgstr ""
+
+#. placeholder {0}: round.round
+#. placeholder {1}: round.candidates.length
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} · {1} people"
+msgstr ""
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} feedback:"
+msgstr ""
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} looks good. Start finding more people."
+msgstr ""
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Routine"
+msgstr "자동 실행"
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Run"
+msgstr ""
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Run time must be in the future."
+msgstr "실행 시간은 미래여야 합니다."
+
+#: src/components/CloudAgentCard.tsx
+msgid "running"
+msgstr "실행 중"
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Salary range"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/components/teach/SkillDraftCard.tsx
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Save"
+msgstr "저장"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Save credential"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Save new value"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Save plan"
+msgstr ""
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Save the workspace and install current software."
+msgstr "작업 공간을 저장하고 최신 소프트웨어를 설치합니다."
+
+#: src/components/AskCard.tsx
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Saved"
+msgstr "저장됨"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Saved before latest role update"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved calendar events"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Saved calendar records are unavailable from this source."
+msgstr ""
+
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Saved candidate sources"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Saved candidate totals"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Saved candidates"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Saved contact lookups"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved correspondence"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Saved email"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Saved emails"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Saved events"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+msgid "Saved facts"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Saved feedback for this role"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Saved interview plans"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Saved mailbox"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Saved plan · not an approval"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Saved research results"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Saved results"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Saved role summary"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Saved source rows"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Saved, not sent"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Saving notes"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Saving this plan does not approve a booking or message."
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Saving your workspace"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/components/teach/SkillDraftCard.tsx
+#: src/pages/recruiting/SchedulingPlan.tsx
+#: src/pages/shell/bot-credentials.tsx
+#: src/pages/shell/dialogs.tsx
+msgid "Saving…"
+msgstr "저장 중…"
+
+#: src/lib/call-session-engine.ts
+msgid "Say yes or no, or answer in a sentence."
+msgstr "예 또는 아니요로 답하거나 문장으로 답해 주세요."
+
+#. placeholder {0}: person.name
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Schedule an interview with {0}. Check availability and prepare the invitation here for my approval; do not send it yet."
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Schedule interview"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Schedule unavailable."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Scheduled"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Score / tier not returned"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation left"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Scroll navigation right"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/shell/bot-picker.tsx
+#: src/pages/shell/command-palette.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Search"
+msgstr "검색"
+
+#. placeholder {0}: index + 1
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Search {0}"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Search apps"
+msgstr "앱 검색"
+
+#: src/pages/shell/command-palette.tsx
+msgid "Search bots and switch conversations"
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "Search candidate records"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Search candidates"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Search contacts"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Search Criteria"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Search filter"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Search filter {0}"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Search filter mode"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Search filters"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Search follow-up"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Search integrations.sh"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Search loaded candidates"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Search query"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Search refinement"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Search update {0}"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Searching candidates"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Searching the web"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Select a bot"
+msgstr "대화할 Bot을 선택하세요"
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Select a campaign"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Select a contact to read their stored details."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Select a contact to read their stored messages."
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Select an event to see its source details. Candidate links are not included in these calendar records."
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Selected recipient unavailable"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Selection basis"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Send"
+msgstr "보내기"
+
+#: src/components/AskCard.tsx
+msgid "Send answer"
+msgstr "답변 보내기"
+
+#: src/components/AccountAccess.tsx
+msgid "Send deletion code"
+msgstr "삭제 코드 보내기"
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Send failed"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Send feedback"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Send outcome unknown"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Send recorded"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Send reset link"
+msgstr "재설정 링크 보내기"
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Send to"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Send totals are not available from these records."
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Send when I say send"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Sender unavailable"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Sending schedule"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateFeedback.tsx
+msgid "Sending…"
+msgstr "보내는 중…"
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Seniority"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Sent"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Sent at"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Sequence status"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Sequence steps and delivery status are not included in these stored campaign associations."
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequences without a role"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Serenity endpoint is required."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Server integrations"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Server URL"
+msgstr "서버 URL"
+
+#: src/components/call/CallCard.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Settings"
+msgstr "설정"
+
+#: src/pages/shell/Composer.tsx
+msgid "Settings: General"
+msgstr "설정: 일반"
+
+#: src/pages/shell/Composer.tsx
+msgid "Settings: Usage"
+msgstr "설정: 사용량"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Setup help"
+msgstr "설정 도움말"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Shape"
+msgstr "모양"
+
+#: src/pages/recruiting/RecruitingSummary.tsx
+msgid "Share the role requirements in the conversation to build this brief."
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Shared"
+msgstr "함께 사용"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Shared chat with 2-6 bots. They all reply in the same thread."
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Shell"
+msgstr "셸"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Shortlist"
+msgstr ""
+
+#. placeholder {0}: candidate.name ?? (showDiagnostics ? candidate.candidateKey : t`Unnamed candidate`)
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Shortlist {0}"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Shortlist {name}"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+msgid "Shortlist people from search results to keep them here."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Shortlist period"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Shortlisted"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Shortlisted only"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Shortlisted profiles"
+msgstr ""
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Show bots"
+msgstr ""
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Show computer"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Show less"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Show more"
+msgstr "더 보기"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Show navigation"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Show password"
+msgstr "비밀번호 표시"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Show settings"
+msgstr "설정 보기"
+
+#: src/components/call/VoiceChatCard.tsx
+msgid "Show transcript"
+msgstr "대화 기록 표시"
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Showing available activity; more history may exist."
+msgstr ""
+
+#. placeholder {0}: rows.length
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Showing the first {0}"
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Showing the most recent records."
+msgstr ""
+
+#: src/lib/localized-provider-hint.ts
+#: src/pages/Auth.tsx
+msgid "Sign in"
+msgstr "로그인"
+
+#: src/components/AccountAccess.tsx
+#: src/lib/user-error.ts
+msgid "Sign in again"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Sign in to WeKruit Headhunter"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Sign in to your existing account to link SSO"
+msgstr "SSO를 연결하려면 기존 계정에 로그인하세요"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Sign in with the subscription, or test the API key instead."
+msgstr "구독으로 로그인하거나 대신 API 키를 테스트하세요."
+
+#: src/pages/Auth.tsx
+msgid "Sign up"
+msgstr "가입하기"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Site"
+msgstr ""
+
+#. placeholder {0}: skill.name
+#: src/pages/shell/Composer.tsx
+msgid "Skill {0}"
+msgstr "작업 기술 {0}"
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Skill evidence"
+msgstr ""
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Skills"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/Shell.tsx
+msgid "Skip"
+msgstr "건너뛰기"
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Skip for now"
+msgstr ""
+
+#: src/lib/localized-provider-hint.ts
+msgid "Skip or deploy key"
+msgstr "건너뛰거나 배포 키"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Skipped"
+msgstr ""
+
+#. placeholder {0}: skipped.join(", ")
+#: src/pages/shell/useShellMessages.ts
+msgid "Skipped {0}"
+msgstr "{0} 건너뜀"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Software update"
+msgstr "소프트웨어 업데이트"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Some role calendar records are unavailable or partial."
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Some roles could not be read."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Some saved contact details could not be displayed."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Some saved records could not be displayed."
+msgstr ""
+
+#: src/App.tsx
+#: src/lib/user-error.ts
+#: src/pages/shell/useShellController.tsx
+msgid "Something went wrong. Try again."
+msgstr "문제가 발생했습니다. 다시 시도하세요."
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Source"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Source Artifact"
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Source context"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Source text"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source times"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Source timezone"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Source unavailable"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Sources"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Space default"
+msgstr "스페이스 기본값"
+
+#: src/pages/shell/dialogs.tsx
+msgid "Spaces"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Speak"
+msgstr "읽기"
+
+#: src/pages/ShellMessage.tsx
+msgid "Speak this reply"
+msgstr "이 답변 읽기"
+
+#: src/lib/user-error.ts
+msgid "SSO is temporarily unavailable. Try again."
+msgstr "SSO를 일시적으로 사용할 수 없습니다. 다시 시도하세요."
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Stage"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Start recording"
+msgstr "작업 녹화 시작"
+
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Start recruiting"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Start time unavailable"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+#: src/lib/roster-status.ts
+msgid "Starting…"
+msgstr "시작하는 중…"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Statement"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Status"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+msgid "Status changed to “{label}”"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Status not recorded"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Steps"
+msgstr "실행 단계"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/Composer.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Stop"
+msgstr "중지"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Stop {name}"
+msgstr ""
+
+#: src/pages/recruiting/CandidateFeedback.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Stop considering"
+msgstr ""
+
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Stop on reply is off, so follow-ups keep going after a candidate replies."
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Stop speaking"
+msgstr "읽기 중지"
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Stop teaching"
+msgstr "가르치기 종료"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Stopped"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Stopped."
+msgstr "중지되었습니다."
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Subject unavailable."
+msgstr ""
+
+#. placeholder {0}: draft.email.subject
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Subject: {0}"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Submitted"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Submitting"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Summary"
+msgstr ""
+
+#: src/pages/shell/command-palette.tsx
+msgid "Switch bot"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Sync not confirmed"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Synced"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Syncing"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Table"
+msgstr "표"
+
+#: src/pages/Shell.tsx
+msgid "Take control"
+msgstr "제어권 가져오기"
+
+#: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Tasks"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Teach a task"
+msgstr "작업 가르치기"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Teaching in progress. Stop teaching before sending a new message."
+msgstr "작업을 가르치는 중입니다. 새 메시지를 보내려면 먼저 가르치기를 종료하세요."
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Team"
+msgstr "팀 공용"
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Team Computer"
+msgstr "팀 컴퓨터"
+
+#: src/components/computer/ComputerWorkspace.tsx
+msgid "Terminal"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Test"
+msgstr "시험 실행"
+
+#: src/components/ModelConnectionPreflightNotice.tsx
+msgid "Test API key"
+msgstr "API 키 테스트"
+
+#: src/components/ModelConnectionPreflightNotice.tsx
+msgid "Test sign-in"
+msgstr "로그인 테스트"
+
+#: src/components/ModelConnectionPreflightNotice.tsx
+msgid "Testing…"
+msgstr "테스트 중…"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "The API did not come back. Refresh this page."
+msgstr "API가 다시 작동하지 않습니다. 이 페이지를 새로 고침하세요."
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "The calendar connection changed. These saved records may be out of date."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "The connection timed out."
+msgstr "연결 시간이 초과되었습니다."
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "The file was saved. Return to the original role and retry to share it there."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "The provider is rate-limiting requests."
+msgstr "서비스가 요청 속도를 제한하고 있습니다."
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "The recruiting team is not ready yet."
+msgstr ""
+
+#: src/pages/shell/useShellCreation.ts
+msgid "The workspace changed. Open the role again."
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "There was a problem sending this message."
+msgstr ""
+
+#: src/pages/recruiting/SchedulingPlan.tsx
+msgid "These are requested participant timezones, not verified calendar-host identity. Availability is rechecked before booking."
+msgstr ""
+
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "These replies are not linked to a specific calendar event."
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "These saved settings can't be read. Remove it and add it again."
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Thinking"
+msgstr "생각 깊이"
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
+msgstr "이 Bot은 별도 Linux 화면이 아니라 현재 컴퓨터에서 실행됩니다. 터미널과 파일 작업은 홈 폴더를 사용합니다."
+
+#: src/pages/shell/dialogs.tsx
+msgid "This cannot be undone."
+msgstr "이 작업은 되돌릴 수 없습니다."
+
+#: src/components/ArtifactFileCard.tsx
+msgid "This file is not valid UTF-8 text."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "This filter belongs to another role."
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+msgid "This permanently deletes your account and data."
+msgstr "계정과 데이터가 영구적으로 삭제됩니다."
+
+#: src/pages/shell/dialogs.tsx
+msgid "This permanently removes every message and stops current work. The chat remains available."
+msgstr "모든 메시지를 영구적으로 삭제하고 진행 중인 작업을 중지합니다. 채팅은 계속 사용할 수 있습니다."
+
+#: src/lib/model-connection-preflight.ts
+msgid "This provider cannot be tested without saving."
+msgstr "이 서비스는 저장하지 않으면 테스트할 수 없습니다."
+
+#: src/lib/model-connection-preflight.ts
+msgid "This provider is not connected yet."
+msgstr "이 서비스는 아직 연결되지 않았습니다."
+
+#: src/pages/Auth.tsx
+msgid "This reset link is invalid or expired"
+msgstr "이 재설정 링크는 유효하지 않거나 만료되었습니다"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "This role changed. Select the candidate again."
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "This server cannot be assigned without a bot."
+msgstr "연결할 Bot이 없어 이 서버를 배정할 수 없습니다."
+
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Thread"
+msgstr ""
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+msgid "Time"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Time in current role"
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Time not recorded"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/shell/bot-panel.tsx
+msgid "Title"
+msgstr "역할"
+
+#. placeholder {0}: candidate.title
+#: src/pages/shell/Composer.tsx
+msgid "Title: {0}"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "To"
+msgstr ""
+
+#: src/lib/ticket-status.ts
+msgid "To do"
+msgstr ""
+
+#: src/pages/shell/bot-picker.tsx
+msgid "To:"
+msgstr "받는 사람:"
+
+#: src/pages/recruiting/InterviewCalendar.tsx
+#: src/pages/shell/chat-context.tsx
+msgid "Today"
+msgstr "오늘"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Tool name"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Total experience"
+msgstr ""
+
+#: src/components/call/CallCard.tsx
+msgid "Transcript"
+msgstr "대화 기록"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Try again"
+msgstr "다시 시도"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Try the test again."
+msgstr "테스트를 다시 시도하세요."
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Type"
+msgstr ""
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Type without recording"
+msgstr ""
+
+#: src/components/AskCard.tsx
+msgid "Type your answer"
+msgstr "답변을 입력하세요"
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Type your note here"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+#: src/pages/recruiting/SourceDocuments.tsx
+msgid "Unavailable"
+msgstr "사용할 수 없음"
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "Unclear"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/HomeDashboard.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+#: src/pages/recruiting/RecruitingSummary.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+#: src/pages/recruiting/VerdictLabel.tsx
+msgid "Unknown"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "Unknown tool"
+msgstr ""
+
+#: src/pages/recruiting/VerdictLabel.tsx
+msgid "Unmet"
+msgstr ""
+
+#: src/components/call/CallCard.tsx
+msgid "Unmute"
+msgstr "음소거 해제"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/RecruitingLegacyResults.tsx
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "Unnamed candidate"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+#: src/pages/recruiting/SequenceTab.tsx
+msgid "Unsubscribed"
+msgstr ""
+
+#. placeholder {0}: file.name
+#. placeholder {0}: pending.file.name
+#: src/pages/shell/useShellMessages.ts
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Unsupported file type: {0}"
+msgstr "지원하지 않는 파일 형식: {0}"
+
+#: src/components/DesktopUpdates.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Up to date"
+msgstr "최신 상태"
+
+#. placeholder {0}: upcoming.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Upcoming ({0})"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Upcoming recorded bookings"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update"
+msgstr "업데이트"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update available"
+msgstr "업데이트 가능"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Update computer"
+msgstr "컴퓨터 업데이트"
+
+#: src/components/ComputerUpdateProgress.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update failed"
+msgstr "업데이트 실패"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update finished with errors"
+msgstr "오류와 함께 업데이트가 완료되었습니다"
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Update progress"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+#: src/pages/recruiting/CrmHistory.tsx
+#: src/pages/recruiting/InterviewTab.tsx
+msgid "Updated"
+msgstr "업데이트됨"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Updated {updated}"
+msgstr ""
+
+#. placeholder {0}: update.name
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Updating {0}’s Computer"
+msgstr ""
+
+#: src/components/ComputerUpdateProgress.tsx
+msgid "Updating Team Computer"
+msgstr ""
+
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Updating…"
+msgstr "업데이트 중…"
+
+#: src/components/computer/FilesApp.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Upload"
+msgstr "업로드"
+
+#: src/lib/ticket-priority.ts
+msgid "Urgent"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Usage"
+msgstr "사용량"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Use Connect to verify the key."
+msgstr "키를 확인하려면 연결을 사용하세요."
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Use Protected input for passwords."
+msgstr ""
+
+#: src/pages/shell/useShellCreation.ts
+msgid "Use the attached files to define this role and start the search."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "User and bot memory"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "User instruction"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+msgid "User memory"
+msgstr ""
+
+#: src/components/AskCard.tsx
+#: src/pages/shell/bot-credentials.tsx
+msgid "Username"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Using a connected app"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Value"
+msgstr ""
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Values are encrypted and never shown again."
+msgstr "값은 암호화되며 다시 표시되지 않습니다."
+
+#. placeholder {0}: assessment.version
+#. placeholder {0}: selected.roleRevision.revision
+#. placeholder {0}: workspace.revision.revision
+#: src/pages/recruiting/CandidateDetailDialog.tsx
+#: src/pages/recruiting/CandidatePresentation.tsx
+#: src/pages/recruiting/RecruitingRoleTab.tsx
+msgid "Version {0}"
+msgstr ""
+
+#: src/pages/recruiting/CandidatePresentation.tsx
+msgid "View {name}"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "View details"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "View messages"
+msgstr ""
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "View role records"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Voice"
+msgstr "음성"
+
+#: src/components/call/VoiceChatCard.tsx
+msgid "Voice chat"
+msgstr "음성 대화"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Wait a moment and test again."
+msgstr "잠시 기다린 뒤 다시 테스트하세요."
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Wait for this role to finish loading before saving."
+msgstr ""
+
+#: src/pages/recruiting/ActivityTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Waiting for resume"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Waiting for the API to come back…"
+msgstr "API가 다시 작동하기를 기다리는 중…"
+
+#: src/lib/roster-status.ts
+msgid "Waiting in line…"
+msgstr "줄에서 기다리는 중…"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Waiting…"
+msgstr "기다리는 중…"
+
+#: src/pages/shell/bot-credentials.tsx
+msgid "Website login"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "week"
+msgstr ""
+
+#. placeholder {0}: week.count
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Week of {label}: {0}"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "WeKruit home"
+msgstr ""
+
+#: src/pages/shell/dialogs.tsx
+msgid "What about its memories?"
+msgstr "이 Bot의 기억은 어떻게 할까요?"
+
+#: src/pages/shell/message-cards.tsx
+msgid "What do you want me on first?"
+msgstr ""
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "What location or remote work scope applies?"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "What result will you demonstrate?"
+msgstr "어떤 작업을 직접 보여줄까요?"
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "What salary range may be stated in outreach?"
+msgstr ""
+
+#: src/pages/shell/bot-panel.tsx
+msgid "What this bot is for"
+msgstr "이 Bot을 언제, 어떤 일에 사용할지 적어주세요"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "What to return"
+msgstr "완료 후 전달할 결과"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "When to use"
+msgstr "언제 사용할지"
+
+#: src/lib/ticket-status.ts
+msgid "Won't do"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Worked for {duration}"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Workflow filter"
+msgstr ""
+
+#: src/pages/recruiting/CrmHistory.tsx
+msgid "Workflow status"
+msgstr ""
+
+#: src/lib/roster-status.ts
+msgid "Working in background…"
+msgstr "백그라운드에서 작업 중…"
+
+#: src/components/LiveWork.tsx
+msgid "Working on it"
+msgstr ""
+
+#: src/lib/roster-status.ts
+#: src/pages/Auth.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Working…"
+msgstr "처리 중…"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Worth checking"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Wrote {path}"
+msgstr ""
+
+#: src/pages/shell/useShellMessages.ts
+#: src/pages/shell/useShellRecruiting.ts
+msgid "XLSX is not supported yet. Save as CSV and upload again."
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "year"
+msgstr ""
+
+#: src/pages/recruiting/fieldLabels.ts
+msgid "Years of experience"
+msgstr ""
+
+#: src/pages/shell/chat-context.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Yesterday"
+msgstr "어제"
+
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/shell/useShellController.tsx
+#: src/pages/ShellMessage.tsx
+msgid "You"
+msgstr "나"
+
+#: src/pages/Shell.tsx
+msgid "You have control"
+msgstr "직접 조작 중"
+
+#: src/pages/Auth.tsx
+msgid "Your email address"
+msgstr "이메일 주소"
+
+#: src/pages/Auth.tsx
+msgid "Your name"
+msgstr "이름"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Your tasks"
+msgstr ""

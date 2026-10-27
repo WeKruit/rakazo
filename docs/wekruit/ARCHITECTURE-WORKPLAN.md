@@ -242,6 +242,9 @@ git diff --check
 
 ### C5 拆服务、多容器、滚动发布
 
+- **本地基础实现（仍未完成）：** 认领 `558f876037ae931f8a8a47508adf06d3075fe756` 普通 push 后，提取可独立启动 API/worker 的进程生命周期，增加 SIGUSR2 非取消排空、只读健康状态和超时拒绝替换工具。真实本地 PostgreSQL/Graphile 双 worker：旧任务完成一次，新任务由另一个 worker 执行；21 个 TS 测试、62 个 Python 测试通过，worker 类型检查和 API/worker 打包通过。Draft [#303](https://github.com/WeKruit/rakazo/pull/303) 的 base 为 #263 分支；实现 `15aeb0421`、补充验证 `c6b1cbb3a`、收敛 `90dca2d89`。详细命令和边界见 [C5-LOCAL-DRAIN.md](./C5-LOCAL-DRAIN.md)。真实 Modal 双服务定义尚未实施，不添加占位入口；现有生产入口/资源/Secret/发布保护不变。
+- **全局预算与剩余：** API 1、worker 5 会话；各两容器稳定 12，新增一个替换 worker 就到 17，整代重叠 24，超过既有总额 15。6543/5432 验证和预算检查已实现，线上 high-water 未测。共享 home 权威指针迁移及旧写者排除、逐 worker 排空替换发布控制器尚未完成；没有用本地通过冒充线上滚动/对话不中断验收。
+
 - **现状：** `infra/modal/app.py` 只有一个服务，设置是 `max_containers=1` 加 `nonpreemptible`，发布方式是 `--strategy recreate`。所以每次发布都会中断服务。
 - **做法：** 拆成 web/API 和 worker 两个服务。worker 本来就靠租约和 fencing 处理多实例，可以直接开多个容器。API 无状态之后，`max_containers` 改成大于 1，再换成滚动发布。
 - **验收（线上实测）：** 发布期间每秒探测一次首页和一个 RPC，失败数为 0，并且发布期间对话没有中断。
@@ -505,3 +508,10 @@ Ordinary merge of #263 through `8188c88f3` into C4 succeeded without conflicts (
 ### 串行发布核对（2026-10-27）
 
 D1初始#295、A2#296、C4#274、D4#298、D2#301、D3后续#300均已合入本集成分支。上文各阶段“待发布/待合并”是当时记录，以本段和总览最新状态为准。D1后续生产冷入口实测联系人347,938B/7JS/35总请求、17RPC/0重复；聊天310,672B/8JS/39总请求；登录203,469B/7JS/15总请求。最终250KB和线上LCP仍不达/未测。A2本地部分配对超过10%，整体未完成。F2保留Claude所有权；仅复核已有reconciler/turn-end-guard/question-nudge59/59单测，未替代其崩溃/上线业务验收。新增A5保留Claude认领。
+
+
+### D1 可选页面语言包后续（Draft #304）
+
+在已发布依赖 `d4fae3df1` 上普通合并、保留 timer/palette 修复后，官方 Lingui catalog 拆分保持十语言原有 2,006 个编译消息 ID 的值完全一致。中文实际冷入口：联系人 **347,938 → 339,147 B gzip**（7 JS / 35 总请求，17 RPC / 0 重复）；聊天 **310,672 → 301,872 B**（8 / 39）；登录 **203,469 → 194,711 B**（7 / 15）。Web **1,694/1,694**、类型和生产构建通过。实现、完整命令和浏览器结果见 [D1-FEATURE-CATALOGS.md](D1-FEATURE-CATALOGS.md)。D1 继续「进行中」：联系人仍比最终 250,000 B 高 89,147 B，线上 LCP 还没测；不把该阶段减包写成整项完成。
+
+该语言包后续 Draft [#304](https://github.com/WeKruit/rakazo/pull/304) 的 base 为 `claude/project-thread-f1cbzk`；本子任务未合并该 PR，交主任务按统一流程处理。

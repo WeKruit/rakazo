@@ -1,5 +1,6 @@
 import type { RecruitingCrmDataInput } from "@rakazo/contracts";
 import { useEffect } from "react";
+import { withFeatureMessages } from "../../lib/i18n";
 
 type ImportantStatus = NonNullable<
   Extract<RecruitingCrmDataInput, { operation: "important" }>["status"]
@@ -12,7 +13,9 @@ import { lazyPanel } from "../../components/ErrorBoundary";
 import type { useCrmWorkbenchModel } from "./CrmWorkbench";
 
 const CorrespondenceEmails = lazyPanel(() =>
-  import("../RecruitingCorrespondence").then((m) => m.CorrespondenceEmails),
+  withFeatureMessages(() => import("../RecruitingCorrespondence")).then(
+    (m) => m.CorrespondenceEmails,
+  ),
 );
 export function CrmHistory({ model }: { model: ReturnType<typeof useCrmWorkbenchModel> }) {
   const { t } = useLingui();

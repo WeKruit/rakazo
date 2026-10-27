@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { transformSync } from "@babel/core";
 import linguiMacro from "@lingui/babel-plugin-lingui-macro";
-import { createCompiledCatalog, getCatalogs } from "@lingui/cli/api";
+import { createCompiledCatalog, getCatalogs as getSplitCatalogs } from "@lingui/cli/api";
 import { getConfig } from "@lingui/conf";
 import { i18n } from "@lingui/core";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -13,6 +13,44 @@ import ko from "../../scripts/translations-ko.json";
 import ptBR from "../../scripts/translations-pt-BR.json";
 import tr from "../../scripts/translations-tr.json";
 import zhCN from "../../scripts/translations-zh-CN.json";
+
+// Test the complete product catalog, now delivered in two complementary chunks.
+async function getCatalogs(config: Parameters<typeof getSplitCatalogs>[0]) {
+  const catalogs = await getSplitCatalogs(config);
+  return [
+    {
+      async getTranslations(
+        locale: string,
+        options: Parameters<(typeof catalogs)[number]["getTranslations"]>[1],
+      ) {
+        const parts = await Promise.all(
+          catalogs.map((catalog) => catalog.getTranslations(locale, options)),
+        );
+        return { ...parts[0]!, messages: Object.assign({}, ...parts.map((part) => part.messages)) };
+      },
+      async read(locale: string) {
+        const merged: NonNullable<Awaited<ReturnType<(typeof catalogs)[number]["read"]>>> = {};
+        for (const catalog of catalogs) {
+          const entries = await catalog.read(locale);
+          for (const [id, entry] of Object.entries(entries ?? {})) {
+            merged[id] = {
+              ...entry,
+              origin: [...(merged[id]?.origin ?? []), ...(entry.origin ?? [])],
+            };
+          }
+        }
+        return merged;
+      },
+    },
+  ];
+}
+function readProductCatalog(path: string, encoding: "utf8") {
+  return (
+    readFileSync(path, encoding) +
+    "\n\n" +
+    readFileSync(path.replace("/messages.po", "/startup.po"), encoding)
+  );
+}
 
 // The product is translated to Chinese; other locales fall back to English.
 const ZH_RECRUITING: Record<string, string> = {
@@ -225,7 +263,10 @@ describe("lingui catalogs", () => {
     const [catalog] = await getCatalogs(config);
     const source = await catalog!.read("en");
     const entries = Object.entries(source ?? {}).filter(([, entry]) =>
-      entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx"),
+      entry.origin?.some(
+        ([path]) =>
+          path === "src/pages/RecruitingPanel.tsx" || path.startsWith("src/pages/recruiting/"),
+      ),
     );
     expect(entries.length).toBeGreaterThan(30);
     for (const message of [
@@ -269,8 +310,10 @@ describe("lingui catalogs", () => {
     const source = await catalog!.read("en");
     const candidateCountId = Object.entries(source ?? {}).find(
       ([, entry]) =>
-        entry.origin?.some(([path]) => path === "src/pages/RecruitingPanel.tsx") &&
-        entry.message === "{0, plural, =1 {# candidate} other {# candidates}}",
+        entry.origin?.some(
+          ([path]) =>
+            path === "src/pages/RecruitingPanel.tsx" || path.startsWith("src/pages/recruiting/"),
+        ) && entry.message === "{0, plural, =1 {# candidate} other {# candidates}}",
     )?.[0];
     expect(candidateCountId).toBeDefined();
     for (const locale of config.locales) {
@@ -487,7 +530,7 @@ describe("lingui catalogs", () => {
   });
 
   it("ships Simplified Chinese translations for the Chief onboarding focus card", () => {
-    const catalog = readFileSync(
+    const catalog = readProductCatalog(
       fileURLToPath(new URL("../locales/zh-CN/messages.po", import.meta.url)),
       "utf8",
     );
@@ -517,7 +560,7 @@ describe("lingui catalogs", () => {
   });
 
   it("ships the Russian runtime catalog with translated chrome and Russian plurals", () => {
-    const catalog = readFileSync(
+    const catalog = readProductCatalog(
       fileURLToPath(new URL("../locales/ru/messages.po", import.meta.url)),
       "utf8",
     );
@@ -531,7 +574,7 @@ describe("lingui catalogs", () => {
   });
 
   it("ships the French runtime catalog with translated chrome and French plurals", () => {
-    const catalog = readFileSync(
+    const catalog = readProductCatalog(
       fileURLToPath(new URL("../locales/fr/messages.po", import.meta.url)),
       "utf8",
     );
@@ -553,7 +596,7 @@ describe("lingui catalogs", () => {
       "Values are encrypted and never shown again.",
     ];
     for (const locale of ["en", "de", "es", "fr", "hi", "ko", "pt-BR", "ru", "tr", "zh-CN"]) {
-      const catalog = readFileSync(
+      const catalog = readProductCatalog(
         fileURLToPath(new URL(`../locales/${locale}/messages.po`, import.meta.url)),
         "utf8",
       );
@@ -581,7 +624,7 @@ describe("lingui catalogs", () => {
       "Testing…",
     ];
     for (const locale of locales) {
-      const catalog = readFileSync(
+      const catalog = readProductCatalog(
         fileURLToPath(new URL(`../locales/${locale}/messages.po`, import.meta.url)),
         "utf8",
       );
@@ -601,7 +644,7 @@ describe("lingui catalogs", () => {
       }
     }
 
-    const russian = readFileSync(
+    const russian = readProductCatalog(
       fileURLToPath(new URL("../locales/ru/messages.po", import.meta.url)),
       "utf8",
     );
@@ -626,7 +669,7 @@ describe("lingui catalogs", () => {
       "zh-CN": "还没有机器人活动。",
     };
     for (const [locale, msgstr] of Object.entries(translations)) {
-      const catalog = readFileSync(
+      const catalog = readProductCatalog(
         fileURLToPath(new URL(`../locales/${locale}/messages.po`, import.meta.url)),
         "utf8",
       );

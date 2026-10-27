@@ -5,6 +5,7 @@ import { Button } from "@rakazo/ui-web";
 import { Maximize2, Settings, X } from "lucide-react";
 import type { ComponentProps } from "react";
 import { lazyPanel } from "../../components/ErrorBoundary";
+import { withFeatureMessages } from "../../lib/i18n";
 import { computerLabel, computerPlaceholder, DesktopKindEmptyState } from "./computer-presentation";
 import { firstThreadRoute } from "./useShellRoster";
 
@@ -30,7 +31,7 @@ import {
 } from "../RoutineList";
 
 const GroupSettings = lazyPanel(() =>
-  import("../GroupPanel").then((module) => module.GroupSettings),
+  withFeatureMessages(() => import("../GroupPanel")).then((module) => module.GroupSettings),
 );
 const BotSettings = lazyPanel(() =>
   import("../shell/bot-panel").then((module) => module.BotSettings),
@@ -39,7 +40,7 @@ const CreateBotForm = lazyPanel(() =>
   import("../shell/bot-panel").then((module) => module.CreateBotForm),
 );
 const RoutineEditor = lazyPanel(() =>
-  import("../RoutineEditor").then((module) => module.RoutineEditor),
+  withFeatureMessages(() => import("../RoutineEditor")).then((module) => module.RoutineEditor),
 );
 const RecruitingPanel = lazyPanel(() =>
   import("../RecruitingPanel").then(
