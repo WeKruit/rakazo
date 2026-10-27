@@ -9173,6 +9173,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     spaceId: run.spaceId,
                     roleId: recorded.roleId,
                     candidateKeys: recorded.candidateKeys as string[],
+                    unverified: Object.fromEntries(
+                      Object.entries(researchInput.data.unverified ?? {}).map(([key, value]) => [
+                        savedCandidateKeyForm(key),
+                        value,
+                      ]),
+                    ),
                   });
                   await roundStream?.posting;
                   await (roundStream?.messageId
@@ -11049,7 +11055,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : result;
             return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
           });
-          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
+          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
           const next =
             plannedNewPeople >= PLANNED_POOL_ENOUGH
               ? `These searches returned ${plannedNewPeople} new people, so the ten come from them. Then record the ten with calibration_round, starting with the people already shown in the same order, with no new searches, web searches or profile lookups. If fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`

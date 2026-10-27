@@ -1100,6 +1100,12 @@ export const RecruitingResearchToolInputSchema = z.discriminatedUnion("operation
             message: `Each person appears once in a round. Repeated: ${[...new Set(repeated)].join(", ")}. Replace each repeat with another saved person's exact candidateKey.`,
           });
       }),
+    unverified: z
+      .record(RecruitingId, z.string().trim().min(1).max(160))
+      .optional()
+      .describe(
+        "candidateKey → the must-haves this person's row does not show, in the recruiter's language (for example 「初创公司经历、曾任 Metrology Engineer」). Shown under that person in chat.",
+      ),
   }),
   // Shows the round's first good fits in chat while more searches run; records nothing.
   z.strictObject({
