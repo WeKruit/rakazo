@@ -619,11 +619,16 @@ async function renderFeedbackShell(
     );
   await render();
   const click = async (name: string) => {
-    const button = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
-      (item) => item.textContent === name || item.getAttribute("aria-label") === name,
-    )!;
-    expect(button, name).toBeDefined();
-    await act(async () => button.click());
+    let button: HTMLButtonElement | undefined;
+    await vi.waitFor(async () => {
+      await act(async () => {
+        button = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
+          (item) => item.textContent === name || item.getAttribute("aria-label") === name,
+        );
+      });
+      expect(button, name).toBeDefined();
+    });
+    await act(async () => button!.click());
   };
   // The role chat opens by default; only a collapsed chat needs its trigger.
   const openRoleChat = async () => {
