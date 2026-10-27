@@ -155,21 +155,25 @@ export async function requireQuickSearchBeforeResearch(
   );
 }
 
-/** Shared contact-enrichment funding does not share another person's job history. */
+/**
+ * Shared contact-enrichment funding does not share another person's job history. Returns the
+ * arguments to send: enrichment_id "latest" reads this person's newest lookup, so a later turn
+ * need not recover the id from history.
+ */
 export async function requireFullEnrichJobOwnership(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId">,
   server: Pick<McpServer, "id" | "revision" | "transport" | "endpoint">,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<void> {
+): Promise<Record<string, unknown>> {
   if (
     server.transport !== "streamable_http" ||
     server.endpoint !== "https://mcp.fullenrich.com/mcp"
   )
-    return;
-  if (toolName === "get_credits" && Object.keys(args).length === 0) return;
-  if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return;
+    return args;
+  if (toolName === "get_credits" && Object.keys(args).length === 0) return args;
+  if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return args;
   if (toolName === "get_enrichment_results") {
     const owned: string[] = [];
     for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "enrich_bulk")) {
@@ -177,13 +181,14 @@ export async function requireFullEnrichJobOwnership(
         continue;
       const body = mcpObject(receipt.result);
       if (body?.error !== undefined || !nonblank(body?.enrichment_id)) continue;
-      if (body.enrichment_id === args.enrichment_id) return;
+      if (body.enrichment_id === args.enrichment_id) return args;
       owned.push(String(body.enrichment_id));
     }
+    if (args.enrichment_id === "latest" && owned[0]) return { ...args, enrichment_id: owned[0] };
     // A mistyped id must not lead to a second paid lookup: name the ones this person started.
     if (owned.length)
       throw new IsolationError(
-        `No lookup with that id. Your latest lookups, newest first: ${owned.slice(0, 3).join(", ")}. Read one of these, copying the id unchanged; do not start a new lookup.`,
+        `No lookup with that id. Your latest lookups, newest first: ${owned.slice(0, 3).join(", ")}. Read one of these, copying the id unchanged, or pass "latest"; do not start a new lookup.`,
       );
   }
   throw new IsolationError(
