@@ -21,9 +21,9 @@
 | C2 | 多容器 | 电脑工作目录放对象存储 | 代码已合并（#262）；存储配置阻塞 | — |
 | C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，线上未测） | Adam |
-| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | Adam 已认领；本地实现进行中，线上部署仍禁止 | Adam |
+| C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 基础[#303](https://github.com/WeKruit/rakazo/pull/303)已合入；存储fence/迁移验证/串行替换本地实现继续，线上部署仍禁止 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
-| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#295](https://github.com/WeKruit/rakazo/pull/295)、[#302](https://github.com/WeKruit/rakazo/pull/302) 已合入，联系人347,938B、聊天310,672B gzip；最终250KB未达，线上LCP未测 | Adam |
+| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#295](https://github.com/WeKruit/rakazo/pull/295)、[#302](https://github.com/WeKruit/rakazo/pull/302) 已合入，联系人339,147B、聊天301,872B gzip（语言包[#304](https://github.com/WeKruit/rakazo/pull/304)）；最终250KB未达，线上LCP未测 | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 完成（本项代码验收）：重复RPC为0，[#301](https://github.com/WeKruit/rakazo/pull/301) 已合入 | Adam |
 | D3 | 前端 | 长列表虚拟滚动 | 完成（本地验收）：最多19行/36卡，无观测>50ms长任务；[#276](https://github.com/WeKruit/rakazo/pull/276)、[#300](https://github.com/WeKruit/rakazo/pull/300) 已合入 | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 完成：生产源文件最多1,499行，零超限；[#298](https://github.com/WeKruit/rakazo/pull/298) 已合入 | Adam |
