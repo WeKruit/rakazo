@@ -574,6 +574,10 @@ function checkToolErrors(events) {
     });
   }
   report.toolErrors = { calls: done.length, errors: errors.length, counts, items: errors, all };
+  // Model calls the server retried after a stalled stream, from each run's end event.
+  report.modelRetries = events
+    .filter((event) => event.type === "run.completed" || event.type === "run.waiting_input")
+    .reduce((sum, event) => sum + (event.payload?.modelRetries ?? 0), 0);
   log(`recruiting tool calls ${done.length}, errors ${errors.length} ${JSON.stringify(counts)}`);
   log(`all tool calls ${all.calls}, errors ${all.errors}`);
 }

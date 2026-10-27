@@ -101,6 +101,8 @@ export const RunCompletedPayloadSchema = RunTimingSchema.extend({
   startedAt: IsoDate.optional(),
   activeMs: z.number().int().nonnegative().optional(),
   steps: z.array(z.object({ category: z.string(), count: z.number().int().positive() })),
+  /** Model calls retried after a stalled stream; absent when none were. */
+  modelRetries: z.number().int().positive().optional(),
 });
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
