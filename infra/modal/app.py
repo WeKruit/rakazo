@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2] if modal.is_local() else Path("/app")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from infra.modal.release_config import release_profile  # noqa: E402
+from infra.modal.topology import split_database_budget  # noqa: E402
 RELEASE_PROFILE = release_profile(os.environ)
 APP_NAME = os.environ.get("MODAL_APP_NAME", "rakazo-recruiting")
 SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")
@@ -23,18 +24,12 @@ SERVICE_ENV = {
     "api": {"DB_POOL_MAX": "6"},
     "worker": {"DB_POOL_MAX": "5", "GRAPHILE_WORKER_CONCURRENCY": "10"},
 }
-# With DATABASE_URL on the transaction-mode pooler, queries borrow a database backend only while
-# they run, so pools and job slots can grow; only the session clients count against the 15.
-SPLIT_SERVICE_ENV = {
-    "api": {"DB_POOL_MAX": "20"},
-    "worker": {"DB_POOL_MAX": "20", "GRAPHILE_WORKER_CONCURRENCY": "50"},
-}
 
 
 def service_budget(environ):
     """Session URL separate from DATABASE_URL means queries go through a transaction-mode pooler."""
     session = environ.get("REALTIME_DATABASE_URL")
-    return SPLIT_SERVICE_ENV if session and session != environ.get("DATABASE_URL") else SERVICE_ENV
+    return split_database_budget(environ) if session and session != environ.get("DATABASE_URL") else SERVICE_ENV
 
 app = modal.App(APP_NAME)
 

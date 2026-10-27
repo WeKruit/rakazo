@@ -9,7 +9,7 @@ C5 remains **in progress**. This change does not enable split deployment, multip
 - Optional `WORKER_HEALTH_PORT` exposes read-only `/health`, `/ready`, `/drain`. Readiness turns 503 once draining starts; drain completion requires successful stop of both jobs and reconciliation. No HTTP method starts a drain. No new authentication credential is introduced.
 - `infra/modal/drain_worker.py` runs inside one selected worker container, sends SIGUSR2 to its recorded PID and polls loopback. Timeout/failure raises and prohibits replacement; it never sends SIGTERM/SIGKILL. A timed-out worker remains draining; operators postpone cutover and recheck, rather than claiming admission resumed.
 - `topology.py` validates the 6543 transaction / 5432 session URL boundary and whole-rollout session budget. API=1 and worker=5 permanent sessions. Two of each consume 12; adding one replacement worker consumes 17 and is rejected. Full overlap consumes 24 and is rejected. Two APIs plus one worker consume 7, full overlap plus one migration consumes 15. Reducing to one worker is not silently selected.
-- `split_app.py` fails before importing Modal or declaring/resolving resources. The existing release scripts remain unchanged and retain their production drain protection. There is no environment switch to bypass this gate.
+- No placeholder split deployment entrypoint is added. Actual two-service Modal definitions remain unimplemented until safe shared-home cutover and worker replacement are ready. The existing release scripts remain unchanged and retain their enforced production drain protection. The existing runtime now rejects distinct database URLs that do not satisfy the required 6543/5432 boundary.
 
 ## Actual local validation
 
@@ -27,8 +27,8 @@ pnpm exec biome check apps/worker/src/drain.ts apps/worker/src/drain.test.ts app
 git diff --check
 ```
 
-- TypeScript: **17/17** passed, including one actual PostgreSQL/Graphile two-worker test. A's active synthetic job finishes exactly once; B accepts/completes a new job while A is draining; A does not report drained before its active job completes. This is two queue hosts, not two Modal containers or an external-agent conversation.
-- Python: **62/62** passed, including topology budgets, independent process plans, failed-migration no-spawn, legacy reap-before-commit, timeout without termination, hard split gate, and existing release/config regression tests.
+- TypeScript: **21/21** passed, including one actual PostgreSQL/Graphile two-worker test. A's active synthetic job finishes exactly once; B accepts/completes a new job while A is draining; A does not report drained before its active job completes. This is two queue hosts, not two Modal containers or an external-agent conversation.
+- Python: **62/62** passed, including topology budgets, independent process plans, failed-migration no-spawn, legacy reap-before-commit, timeout without termination, existing runtime URL validation, and existing release/config regression tests.
 - Worker typecheck and API/worker bundles pass. No production credentials, data, candidates, jobs, messages, cloud resources, Secret/config changes or deployment were used.
 
 ## Exact remaining gates
