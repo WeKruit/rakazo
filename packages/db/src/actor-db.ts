@@ -8,7 +8,14 @@ type Identity = Pick<Actor, "userId" | "spaceId">;
 type Adapter = Awaited<ReturnType<PrismaPg["connect"]>>;
 type Query = Parameters<Adapter["queryRaw"]>[0];
 type Transaction = Awaited<ReturnType<Adapter["startTransaction"]>>;
+export const actorPreferenceRlsTables = [
+  "ai_data_consents",
+  "action_auto_review_preferences",
+  "notification_preferences",
+  "space_backup_models",
+] as const;
 export const actorRlsTables = [
+  ...actorPreferenceRlsTables,
   "artifacts",
   "messages",
   "recruiting_roles",
