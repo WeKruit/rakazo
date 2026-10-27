@@ -969,6 +969,8 @@ const PLANNED_SEARCHES_MISSING =
 
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
+/** With this many new people from the planned searches, the first ten come from them. */
+const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
 /**
@@ -5201,6 +5203,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let firstPicksShown = false;
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
+        // New people the searches planned with the last answer returned. Once the first picks come
+        // from them and there are this many, the ten come from them instead of another search.
+        let plannedNewPeople = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
         /**
@@ -5407,6 +5412,28 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          if (
+            name.endsWith("web_search_advanced_exa") &&
+            firstPicksShown &&
+            plannedNewPeople >= PLANNED_POOL_ENOUGH &&
+            !executionId.startsWith(`${runId}:planned-search:`) &&
+            !(await deps.prisma.externalEffect.findFirst({
+              where: {
+                runId,
+                spaceId: run.spaceId,
+                kind: "recruiting_research",
+                status: "completed",
+                request: { path: ["operation"], equals: "calibration_round" },
+              },
+              select: { id: true },
+            }))
+          ) {
+            // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
+            peopleSearchesRun = Math.max(peopleSearchesRun, 8);
+            return {
+              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people, and the ten come from them. Record the ten now with calibration_round from those rows, starting with the people already shown; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say.`,
+            };
+          }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
           // The model's first tools run once the role from a job link is saved.
           if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
@@ -10995,6 +11022,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ).catch((error) => ({ error: String(error) })),
           );
           const results = await settlePlannedSearches(pendings, startedAt);
+          const fresh = new Set<string>();
+          for (const result of results) {
+            const people =
+              result && typeof result === "object" && "people" in result
+                ? (result as { people: unknown }).people
+                : undefined;
+            if (!Array.isArray(people)) continue;
+            for (const person of people)
+              if (
+                person &&
+                typeof person === "object" &&
+                typeof person.candidateKey === "string" &&
+                person.alreadyInPool === false
+              )
+                fresh.add(person.candidateKey);
+          }
+          plannedNewPeople = fresh.size;
           const searches = planned.data.queries.map((query, index) => {
             const result = results[index];
             if (result === PLANNED_SEARCH_LATE)
@@ -11005,7 +11049,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : result;
             return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
           });
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round; show_picks names only the people who fit. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round; show_picks names only the people who fit. Keep the people already shown unless one clearly fails a hard requirement.${plannedNewPeople >= PLANNED_POOL_ENOUGH ? ` These searches returned ${plannedNewPeople} new people, so unless the answer changes who you are looking for, the ten come from them with no new searches.` : ""}\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
