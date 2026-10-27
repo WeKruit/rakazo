@@ -16,11 +16,7 @@ const Uuid = z.uuid();
 const Email = z.email().max(254);
 const Step = z.strictObject({
   subject: z.string().min(1).max(500),
-  body: z
-    .string()
-    .min(1)
-    .max(20_000)
-    .describe("HTML; use <br/> for line breaks."),
+  body: z.string().min(1).max(20_000).describe("HTML; use <br/> for line breaks."),
   delay_days: z
     .number()
     .int()
@@ -30,31 +26,15 @@ const Step = z.strictObject({
     .describe("Days to wait before this step."),
 });
 const CampaignSetup = {
-  eaccount: Email.describe(
-    "Your connected Instantly sending mailbox. Never a contact address.",
-  ),
-  steps: z
-    .array(Step)
-    .min(1)
-    .max(10)
-    .optional()
-    .describe("Email sequence; first item is email 1."),
-  timezone: z
-    .string()
-    .max(64)
-    .default("America/Chicago")
-    .describe("Instantly schedule timezone."),
+  eaccount: Email.describe("Your connected Instantly sending mailbox. Never a contact address."),
+  steps: z.array(Step).min(1).max(10).optional().describe("Email sequence; first item is email 1."),
+  timezone: z.string().max(64).default("America/Chicago").describe("Instantly schedule timezone."),
   send_hours: z
     .enum(["weekdays_9_to_5", "any_time"])
     .optional()
-    .describe(
-      "When emails may go out; new campaigns default to weekdays_9_to_5.",
-    ),
+    .describe("When emails may go out; new campaigns default to weekdays_9_to_5."),
 };
-const CreateCampaignInput = z.strictObject({
-  name: z.string().min(1).max(200),
-  ...CampaignSetup,
-});
+const CreateCampaignInput = z.strictObject({ name: z.string().min(1).max(200), ...CampaignSetup });
 const Lead = z.strictObject({
   email: Email,
   first_name: z.string().max(200).optional(),
@@ -68,9 +48,7 @@ const AddLeadsInput = z.strictObject({
 });
 const ListLeadsInput = z.strictObject({
   campaign_id: Uuid.optional(),
-  email: Email.optional().describe(
-    "Exact lead email; returns the lead id(s) for it.",
-  ),
+  email: Email.optional().describe("Exact lead email; returns the lead id(s) for it."),
   limit: z.number().int().min(1).max(100).default(50),
   starting_after: z.string().max(1600).optional(),
 });
@@ -78,13 +56,7 @@ const UpdateLeadInterestInput = z.strictObject({
   lead_email: Email,
   campaign_id: Uuid.optional(),
   interest_value: z
-    .union([
-      z.literal(0),
-      z.literal(1),
-      z.literal(2),
-      z.literal(3),
-      z.literal(4),
-    ])
+    .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
     .or(z.union([z.literal(-1), z.literal(-2), z.literal(-3), z.literal(-4)]))
     .nullable()
     .describe(
@@ -97,9 +69,7 @@ const RoleId = z
   .min(1)
   .max(100)
   .optional()
-  .describe(
-    "Recruiting role id; omit inside a role conversation (its linked role is used).",
-  );
+  .describe("Recruiting role id; omit inside a role conversation (its linked role is used).");
 const ActivateCampaignInput = z.strictObject({
   campaign_id: Uuid.optional().describe(
     "Omit inside a role conversation to activate the role's own campaign (created if needed).",
@@ -109,9 +79,7 @@ const EnsureRoleCampaignInput = z.strictObject({
   role_id: RoleId,
   eaccount: CampaignSetup.eaccount
     .optional()
-    .describe(
-      "Sending mailbox; omit to use the last-used or first connected Instantly account.",
-    ),
+    .describe("Sending mailbox; omit to use the last-used or first connected Instantly account."),
   steps: CampaignSetup.steps,
   timezone: CampaignSetup.timezone,
   send_hours: CampaignSetup.send_hours.describe(
@@ -126,9 +94,7 @@ const AddShortlistLeadsInput = z.strictObject({
         candidate_key: z.string().min(1).max(500),
         email: Email.nullable()
           .optional()
-          .describe(
-            "Verified email from enrichment. Omit when unknown; never guess.",
-          ),
+          .describe("Verified email from enrichment. Omit when unknown; never guess."),
         first_name: z.string().max(200).optional(),
         last_name: z.string().max(200).optional(),
         company_name: z.string().max(200).optional(),
@@ -150,32 +116,18 @@ const ReplyToEmailInput = z.strictObject({
   eaccount: Email.optional().describe(
     "Your connected mailbox that sends the reply; omit to use the mailbox that holds the original email.",
   ),
-  subject: z
-    .string()
-    .min(1)
-    .max(500)
-    .optional()
-    .describe('Omit for "Re: <original subject>".'),
+  subject: z.string().min(1).max(500).optional().describe('Omit for "Re: <original subject>".'),
   body: z.strictObject({
     text: z.string().min(1).max(20_000),
     html: z.string().min(1).max(50_000).optional(),
   }),
 });
 
-const LOCAL =
-  "Local native REST integration for the existing authorized Instantly connection.";
-const tool = (
-  name: string,
-  schema: z.ZodType,
-  readOnly: boolean,
-  description: string,
-) => ({
+const LOCAL = "Local native REST integration for the existing authorized Instantly connection.";
+const tool = (name: string, schema: z.ZodType, readOnly: boolean, description: string) => ({
   name,
   toolName: `native_instantly_${name}`,
-  inputSchema: z.toJSONSchema(schema, { io: "input" }) as Record<
-    string,
-    unknown
-  >,
+  inputSchema: z.toJSONSchema(schema, { io: "input" }) as Record<string, unknown>,
   readOnly,
   description: `${LOCAL} ${description}`,
 });
@@ -216,12 +168,7 @@ export const nativeInstantlyWrites = [
     false,
     "Sends the campaign's first email to its leads by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
   ),
-  tool(
-    "pause_campaign",
-    CampaignIdInput,
-    false,
-    "Pauses a campaign; stops further sends.",
-  ),
+  tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
     "get_email",
     EmailIdInput,
@@ -247,11 +194,8 @@ export const nativeInstantlyWrites = [
     "Adds shortlisted candidates of a role to its campaign as leads (ensuring the campaign first). Skips candidates without an email and ones already in the campaign; records candidate_key -> lead id.",
   ),
 ];
-const TOOL_NAMES = new Set(
-  nativeInstantlyWrites.map((entry) => entry.toolName),
-);
-export const isNativeInstantlyWrite = (toolName: string) =>
-  TOOL_NAMES.has(toolName);
+const TOOL_NAMES = new Set(nativeInstantlyWrites.map((entry) => entry.toolName));
+export const isNativeInstantlyWrite = (toolName: string) => TOOL_NAMES.has(toolName);
 
 export type InstantlyRest = (
   method: "GET" | "POST" | "PATCH",
@@ -311,10 +255,7 @@ export function instantlyRest(
     });
     const { text, truncated } = await readBoundedText(response, 1_000_000);
     if (!response.ok)
-      throw new InstantlyRestError(
-        response.status,
-        providerError(response.status, text),
-      );
+      throw new InstantlyRestError(response.status, providerError(response.status, text));
     if (truncated) throw new Error("Instantly response exceeded its bound");
     const value: unknown = text ? JSON.parse(text) : {};
     if (!value || typeof value !== "object" || Array.isArray(value))
@@ -340,9 +281,7 @@ async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
     await rest("GET", `/accounts/${encodeURIComponent(eaccount)}`);
   } catch (error) {
     if (error instanceof InstantlyRestError && error.status === 404)
-      throw new Error(
-        `${eaccount} is not one of your connected Instantly mailboxes`,
-      );
+      throw new Error(`${eaccount} is not one of your connected Instantly mailboxes`);
     throw error;
   }
 }
@@ -364,16 +303,11 @@ const WIDE: Record<string, string> = { "&": "＆", "<": "＜", ">": "＞" };
 function bodyHtml(body: string) {
   if (/<[a-z][^>]*>/i.test(body))
     return body
-      .replace(
-        /&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi,
-        (entity, dec, hex, name) => {
-          if (name) return ENTITY[String(name).toLowerCase()] ?? entity;
-          const char = String.fromCodePoint(
-            Number.parseInt(dec ?? hex, dec ? 10 : 16),
-          );
-          return WIDE[char] ?? char;
-        },
-      )
+      .replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (entity, dec, hex, name) => {
+        if (name) return ENTITY[String(name).toLowerCase()] ?? entity;
+        const char = String.fromCodePoint(Number.parseInt(dec ?? hex, dec ? 10 : 16));
+        return WIDE[char] ?? char;
+      })
       .replace(/&/g, "＆");
   return body
     .replace(/\r\n?/g, "\n")
@@ -392,12 +326,7 @@ function sequences(steps: z.output<typeof Step>[]) {
         type: "email",
         delay: step.delay_days,
         delay_unit: "days",
-        variants: [
-          {
-            subject: step.subject.replace(/&/g, "＆"),
-            body: bodyHtml(step.body),
-          },
-        ],
+        variants: [{ subject: step.subject.replace(/&/g, "＆"), body: bodyHtml(step.body) }],
       })),
     },
   ];
@@ -406,9 +335,7 @@ function sequences(steps: z.output<typeof Step>[]) {
 function firstEmail(campaign: Record<string, unknown> | undefined) {
   const list = Array.isArray(campaign?.sequences) ? campaign.sequences : [];
   const steps = (list[0] as { steps?: unknown } | undefined)?.steps;
-  const step = Array.isArray(steps)
-    ? (steps[0] as { variants?: unknown })
-    : undefined;
+  const step = Array.isArray(steps) ? (steps[0] as { variants?: unknown }) : undefined;
   const variant = Array.isArray(step?.variants)
     ? (step.variants[0] as { subject?: unknown; body?: unknown })
     : undefined;
@@ -425,35 +352,19 @@ function campaignSchedule(hours: "weekdays_9_to_5" | "any_time", zone: string) {
     schedules: [
       {
         name: anyTime ? "Any time" : "Weekdays",
-        timing: anyTime
-          ? { from: "00:00", to: "23:59" }
-          : { from: "09:00", to: "17:00" },
+        timing: anyTime ? { from: "00:00", to: "23:59" } : { from: "09:00", to: "17:00" },
         // ponytail: "1".."5" assumed Mon-Fri (docs do not define the day index); adjust in UI if off.
-        days: {
-          "0": anyTime,
-          "1": true,
-          "2": true,
-          "3": true,
-          "4": true,
-          "5": true,
-          "6": anyTime,
-        },
+        days: { "0": anyTime, "1": true, "2": true, "3": true, "4": true, "5": true, "6": anyTime },
         timezone: providerTimezone(zone),
       },
     ],
   };
 }
 
-function campaignBody(
-  name: string,
-  setup: z.output<typeof CreateCampaignInput>,
-) {
+function campaignBody(name: string, setup: z.output<typeof CreateCampaignInput>) {
   return {
     name,
-    campaign_schedule: campaignSchedule(
-      setup.send_hours ?? "weekdays_9_to_5",
-      setup.timezone,
-    ),
+    campaign_schedule: campaignSchedule(setup.send_hours ?? "weekdays_9_to_5", setup.timezone),
     ...(setup.steps ? { sequences: sequences(setup.steps) } : {}),
     email_list: [setup.eaccount],
     // Instantly has no per-lead stop; the campaign flag is the only native stop on reply.
@@ -462,10 +373,7 @@ function campaignBody(
   };
 }
 
-async function createCampaign(
-  rest: InstantlyRest,
-  input: z.output<typeof CreateCampaignInput>,
-) {
+async function createCampaign(rest: InstantlyRest, input: z.output<typeof CreateCampaignInput>) {
   await requireOwnMailbox(rest, input.eaccount);
   return rest("POST", "/campaigns", campaignBody(input.name, input));
 }
@@ -493,26 +401,15 @@ const bindingKey = (serverId: string, roleId: string) =>
 async function activeRoleId(prisma: PrismaClient, context: AdapterContext) {
   if (!context.runId) return null;
   const run = await prisma.run.findFirst({
-    where: {
-      id: context.runId,
-      spaceId: context.spaceId,
-      userId: context.userId,
-    },
+    where: { id: context.runId, spaceId: context.spaceId, userId: context.userId },
     select: { thread: { select: { activeRecruitingRoleId: true } } },
   });
   return run?.thread.activeRecruitingRoleId ?? null;
 }
 
-async function requireRole(
-  prisma: PrismaClient,
-  context: AdapterContext,
-  roleId?: string,
-) {
+async function requireRole(prisma: PrismaClient, context: AdapterContext, roleId?: string) {
   const id = roleId ?? (await activeRoleId(prisma, context));
-  if (!id)
-    throw new Error(
-      "Pass role_id: this conversation has no linked recruiting role",
-    );
+  if (!id) throw new Error("Pass role_id: this conversation has no linked recruiting role");
   const role = await prisma.recruitingRole.findFirst({
     where: { id, spaceId: context.spaceId, userId: context.userId },
     select: { id: true, title: true },
@@ -549,24 +446,15 @@ async function defaultMailbox(
   serverId: string,
 ) {
   const accounts = await rest("GET", "/accounts?limit=100");
-  const emails = (
-    Array.isArray(accounts.items)
-      ? (accounts.items as { email?: unknown }[])
-      : []
-  )
+  const emails = (Array.isArray(accounts.items) ? (accounts.items as { email?: unknown }[]) : [])
     .map((item) => item.email)
     .filter((email): email is string => typeof email === "string");
   const last = await lastUsedMailbox(prisma, context.spaceId, serverId);
-  const picked =
-    emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
-  if (!picked)
-    throw new Error(
-      "No Instantly mailbox is connected; connect one in Instantly first",
-    );
+  const picked = emails.find((email) => last && sameAddress(email, last)) ?? emails[0];
+  if (!picked) throw new Error("No Instantly mailbox is connected; connect one in Instantly first");
   return picked;
 }
-const sameAddress = (a: string, b: string) =>
-  a.trim().toLowerCase() === b.trim().toLowerCase();
+const sameAddress = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
 
 export const INSTANTLY_CAMPAIGN_STATUS: Record<number, string> = {
   0: "Draft",
@@ -597,12 +485,8 @@ export const EMPTY_ACTIVATION_DISPLAY: InstantlyActivationDisplay = {
 };
 /** "Weekdays 09:00-17:00 America/Chicago" from Instantly's campaign_schedule, or null. */
 function describeSchedule(campaign: Record<string, unknown> | undefined) {
-  const schedules = (
-    campaign?.campaign_schedule as { schedules?: unknown } | undefined
-  )?.schedules;
-  const first = Array.isArray(schedules)
-    ? (schedules[0] as Record<string, unknown>)
-    : undefined;
+  const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
+  const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
   if (!first) return null;
   const timing = first.timing as { from?: unknown; to?: unknown } | undefined;
   return (
@@ -627,12 +511,9 @@ export async function readRoleCampaignBinding(
   const effect = await prisma.externalEffect.findUnique({
     where: { idempotencyKey: bindingKey(serverId, roleId) },
   });
-  if (!effect || effect.spaceId !== spaceId || effect.status !== "completed")
-    return null;
+  if (!effect || effect.spaceId !== spaceId || effect.status !== "completed") return null;
   const binding = effect.result as Partial<RoleBinding> | null;
-  return typeof binding?.campaignId === "string"
-    ? (binding as RoleBinding)
-    : null;
+  return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
 }
 /**
  * What the activate_campaign approval card shows: live name, status, lead count (up to 100) and
@@ -647,25 +528,17 @@ export async function describeCampaignActivation(
   fallbackMailbox: string | null = null,
 ): Promise<InstantlyActivationDisplay> {
   const [campaign, leads] = await Promise.all([
-    read("native_instantly_get_campaign", { campaign_id: campaignId }).catch(
+    read("native_instantly_get_campaign", { campaign_id: campaignId }).catch(() => undefined),
+    read("native_instantly_list_leads", { campaign_id: campaignId, limit: 100 }).catch(
       () => undefined,
     ),
-    read("native_instantly_list_leads", {
-      campaign_id: campaignId,
-      limit: 100,
-    }).catch(() => undefined),
   ]);
   const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
-  const items = Array.isArray(leads?.items)
-    ? (leads.items as Record<string, unknown>[])
-    : null;
+  const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
   const recipients = (items ?? []).flatMap((lead) => {
     if (typeof lead.email !== "string") return [];
     const name = [lead.first_name, lead.last_name]
-      .filter(
-        (part): part is string =>
-          typeof part === "string" && part.trim() !== "",
-      )
+      .filter((part): part is string => typeof part === "string" && part.trim() !== "")
       .join(" ");
     return [{ name: name || null, email: lead.email }];
   });
@@ -673,16 +546,12 @@ export async function describeCampaignActivation(
     campaignName: typeof campaign?.name === "string" ? campaign.name : null,
     status:
       typeof campaign?.status === "number"
-        ? (INSTANTLY_CAMPAIGN_STATUS[campaign.status] ??
-          String(campaign.status))
+        ? (INSTANTLY_CAMPAIGN_STATUS[campaign.status] ?? String(campaign.status))
         : null,
     mailbox: typeof emails[0] === "string" ? emails[0] : fallbackMailbox,
     recipients,
     recipientCount: items ? recipients.length : null,
-    stopOnReply:
-      typeof campaign?.stop_on_reply === "boolean"
-        ? campaign.stop_on_reply
-        : null,
+    stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
     schedule: describeSchedule(campaign),
     ...(campaign ? { firstEmail: firstEmail(campaign) } : {}),
   };
@@ -706,12 +575,9 @@ export async function describeReplyToEmail(
   const input = ReplyToEmailInput.safeParse(args);
   const original =
     input.success && typeof args.reply_to_uuid === "string"
-      ? await read("native_instantly_get_email", {
-          id: args.reply_to_uuid,
-        }).catch(() => undefined)
+      ? await read("native_instantly_get_email", { id: args.reply_to_uuid }).catch(() => undefined)
       : undefined;
-  const text = (value: unknown) =>
-    typeof value === "string" && value.trim() ? value : null;
+  const text = (value: unknown) => (typeof value === "string" && value.trim() ? value : null);
   const originalSubject = text(original?.subject);
   const wanted = input.success ? input.data : undefined;
   return {
@@ -719,9 +585,7 @@ export async function describeReplyToEmail(
     from: text(wanted?.eaccount) ?? text(original?.eaccount),
     subject:
       text(wanted?.subject) ??
-      (originalSubject
-        ? `Re: ${originalSubject.replace(/^(re:\s*)+/iu, "")}`
-        : "unknown"),
+      (originalSubject ? `Re: ${originalSubject.replace(/^(re:\s*)+/iu, "")}` : "unknown"),
     inReplyTo: original
       ? [originalSubject ?? "(no subject)", text(original.timestamp_email)]
           .filter(Boolean)
@@ -733,26 +597,17 @@ export async function describeReplyToEmail(
 
 async function readEmail(rest: InstantlyRest, id: string) {
   const email = await rest("GET", `/emails/${id}`);
-  if (email.id !== id)
-    throw new Error("The provider returned a different email");
+  if (email.id !== id) throw new Error("The provider returned a different email");
   return email;
 }
 
-async function replyToEmail(
-  rest: InstantlyRest,
-  input: z.output<typeof ReplyToEmailInput>,
-) {
+async function replyToEmail(rest: InstantlyRest, input: z.output<typeof ReplyToEmailInput>) {
   const original = await readEmail(rest, input.reply_to_uuid);
   const eaccount =
-    input.eaccount ??
-    (typeof original.eaccount === "string" ? original.eaccount : "");
-  if (!eaccount)
-    throw new Error("The original email names no mailbox; pass eaccount");
+    input.eaccount ?? (typeof original.eaccount === "string" ? original.eaccount : "");
+  if (!eaccount) throw new Error("The original email names no mailbox; pass eaccount");
   await requireOwnMailbox(rest, eaccount);
-  if (
-    typeof original.eaccount === "string" &&
-    !sameAddress(original.eaccount, eaccount)
-  )
+  if (typeof original.eaccount === "string" && !sameAddress(original.eaccount, eaccount))
     throw new Error(`${input.reply_to_uuid} is not in the ${eaccount} mailbox`);
   const subject =
     input.subject ??
@@ -767,14 +622,8 @@ async function replyToEmail(
   });
 }
 
-async function readBinding(
-  prisma: PrismaClient,
-  context: AdapterContext,
-  key: string,
-) {
-  const effect = await prisma.externalEffect.findUnique({
-    where: { idempotencyKey: key },
-  });
+async function readBinding(prisma: PrismaClient, context: AdapterContext, key: string) {
+  const effect = await prisma.externalEffect.findUnique({ where: { idempotencyKey: key } });
   if (!effect) return undefined;
   if (effect.spaceId !== context.spaceId) throw new IsolationError();
   return { effect, binding: effect.result as RoleBinding };
@@ -797,16 +646,14 @@ async function ensureRoleCampaign(
     try {
       campaign = await rest("GET", `/campaigns/${mappedId}`);
     } catch (error) {
-      if (!(error instanceof InstantlyRestError && error.status === 404))
-        throw error;
+      if (!(error instanceof InstantlyRestError && error.status === 404)) throw error;
     }
     // Repair: a deleted mapping, or an empty one beside a same-title campaign that has the leads.
     const better =
       campaign && (await hasLeads(rest, mappedId))
         ? undefined
         : (await sameTitleCampaigns(rest, role)).find(
-            (entry) =>
-              entry.campaign.id !== mappedId && (!campaign || entry.leads),
+            (entry) => entry.campaign.id !== mappedId && (!campaign || entry.leads),
           );
     if (campaign && !better) {
       const patched = campaign.stop_on_reply !== true;
@@ -819,20 +666,14 @@ async function ensureRoleCampaign(
         existing.binding.created === true &&
         current === null;
       // The provider edits only draft or paused campaigns, so a live one is paused for new hours.
-      const pausedForHours =
-        Boolean(input.send_hours) && campaign.status === ACTIVE;
+      const pausedForHours = Boolean(input.send_hours) && campaign.status === ACTIVE;
       if (pausedForHours) await rest("POST", `/campaigns/${mappedId}/pause`);
       if (patched || writeSteps || input.send_hours)
         await rest("PATCH", `/campaigns/${mappedId}`, {
           ...(patched ? { stop_on_reply: true } : {}),
           ...(writeSteps ? { sequences: sequences(input.steps!) } : {}),
           ...(input.send_hours
-            ? {
-                campaign_schedule: campaignSchedule(
-                  input.send_hours,
-                  input.timezone,
-                ),
-              }
+            ? { campaign_schedule: campaignSchedule(input.send_hours, input.timezone) }
             : {}),
         });
       if (writeSteps) await requireSavedEmail(rest, mappedId);
@@ -843,10 +684,7 @@ async function ensureRoleCampaign(
         stepsSaved: writeSteps,
         ...(input.send_hours ? { sendHours: input.send_hours } : {}),
         ...(pausedForHours
-          ? {
-              paused:
-                "Paused to change the hours; call activate_campaign to resume sending",
-            }
+          ? { paused: "Paused to change the hours; call activate_campaign to resume sending" }
           : {}),
         hasEmail: writeSteps || current !== null,
         ...(input.steps && !writeSteps
@@ -867,26 +705,19 @@ async function ensureRoleCampaign(
       to: better ? String(better.campaign.id) : null,
     });
   }
-  if (!context.runId)
-    throw new IsolationError("A run is required to bind a role campaign");
+  if (!context.runId) throw new IsolationError("A run is required to bind a role campaign");
   const eaccount =
     input.eaccount ??
-    (stale
-      ? existing!.binding.eaccount
-      : await defaultMailbox(prisma, rest, context, serverId));
+    (stale ? existing!.binding.eaccount : await defaultMailbox(prisma, rest, context, serverId));
   // The user-visible name is the role title; the role id lives in the stored mapping's request.
   const name = role.title;
   const adopt = (await sameTitleCampaigns(rest, role)).find(
     (entry) => entry.campaign.id !== existing?.binding.campaignId,
   )?.campaign;
-  const campaign =
-    adopt ?? (await createCampaign(rest, { ...input, eaccount, name }));
+  const campaign = adopt ?? (await createCampaign(rest, { ...input, eaccount, name }));
   if (adopt && adopt.stop_on_reply !== true)
-    await rest("PATCH", `/campaigns/${String(adopt.id)}`, {
-      stop_on_reply: true,
-    });
-  if (typeof campaign.id !== "string")
-    throw new Error("Instantly returned no campaign id");
+    await rest("PATCH", `/campaigns/${String(adopt.id)}`, { stop_on_reply: true });
+  if (typeof campaign.id !== "string") throw new Error("Instantly returned no campaign id");
   const binding: RoleBinding = {
     campaignId: campaign.id,
     campaignName: typeof campaign.name === "string" ? campaign.name : name,
@@ -930,10 +761,7 @@ async function recordBinding(
 
 /** An unbound draft/paused campaign already made for this role: named "<title>…" or "…[role <id>]". */
 async function hasLeads(rest: InstantlyRest, campaignId: unknown) {
-  const leads = await rest("POST", "/leads/list", {
-    campaign: campaignId,
-    limit: 1,
-  });
+  const leads = await rest("POST", "/leads/list", { campaign: campaignId, limit: 1 });
   return Array.isArray(leads.items) && leads.items.length > 0;
 }
 
@@ -941,30 +769,19 @@ async function hasLeads(rest: InstantlyRest, campaignId: unknown) {
  * Draft/paused campaigns titled exactly like the role (case-insensitive; a legacy " [role <id>]"
  * suffix is ignored), ordered best first: with leads, then newest.
  */
-async function sameTitleCampaigns(
-  rest: InstantlyRest,
-  role: { id: string; title: string },
-) {
-  const found = await rest(
-    "GET",
-    `/campaigns?search=${encodeURIComponent(role.title)}&limit=100`,
-  );
+async function sameTitleCampaigns(rest: InstantlyRest, role: { id: string; title: string }) {
+  const found = await rest("GET", `/campaigns?search=${encodeURIComponent(role.title)}&limit=100`);
   const title = role.title.trim().toLowerCase();
-  const matches = (
-    Array.isArray(found.items) ? (found.items as Record<string, unknown>[]) : []
-  )
+  const matches = (Array.isArray(found.items) ? (found.items as Record<string, unknown>[]) : [])
     .filter(
       (campaign) =>
         typeof campaign.id === "string" &&
         (campaign.status === 0 || campaign.status === 2) &&
         typeof campaign.name === "string" &&
-        campaign.name.replace(` [role ${role.id}]`, "").trim().toLowerCase() ===
-          title,
+        campaign.name.replace(` [role ${role.id}]`, "").trim().toLowerCase() === title,
     )
     .toSorted((a, b) =>
-      String(b.timestamp_created ?? "").localeCompare(
-        String(a.timestamp_created ?? ""),
-      ),
+      String(b.timestamp_created ?? "").localeCompare(String(a.timestamp_created ?? "")),
     );
   const ranked = [];
   for (const campaign of matches)
@@ -1007,13 +824,8 @@ async function addShortlistLeads(
       role_id: role.id,
       timezone: "America/Chicago",
     });
-  const existing = await readBinding(
-    prisma,
-    context,
-    bindingKey(serverId, role.id),
-  );
-  if (!existing)
-    throw new IsolationError("Role campaign binding missing after ensure");
+  const existing = await readBinding(prisma, context, bindingKey(serverId, role.id));
+  if (!existing) throw new IsolationError("Role campaign binding missing after ensure");
   const { binding } = existing;
   const shortlisted = new Set(
     (
@@ -1021,24 +833,16 @@ async function addShortlistLeads(
         where: {
           roleId: role.id,
           shortlisted: true,
-          candidateKey: {
-            in: input.candidates.map((candidate) => candidate.candidate_key),
-          },
+          candidateKey: { in: input.candidates.map((candidate) => candidate.candidate_key) },
         },
         select: { candidateKey: true },
       })
     ).map((candidate) => candidate.candidateKey),
   );
-  const notShortlisted = input.candidates.filter(
-    (c) => !shortlisted.has(c.candidate_key),
-  );
-  const eligible = input.candidates.filter((c) =>
-    shortlisted.has(c.candidate_key),
-  );
+  const notShortlisted = input.candidates.filter((c) => !shortlisted.has(c.candidate_key));
+  const eligible = input.candidates.filter((c) => shortlisted.has(c.candidate_key));
   const missingEmail = eligible.filter((c) => !c.email);
-  const withEmail = eligible.filter((c): c is typeof c & { email: string } =>
-    Boolean(c.email),
-  );
+  const withEmail = eligible.filter((c): c is typeof c & { email: string } => Boolean(c.email));
   const leads = { ...binding.leads };
   const already: string[] = [];
   let pending = withEmail;
@@ -1054,14 +858,9 @@ async function addShortlistLeads(
     }[];
     pending = withEmail.filter((candidate) => {
       // Instantly stores lead emails case-insensitively; dedup the same way.
-      const hit = items.find(
-        (lead) => lead.email?.toLowerCase() === candidate.email.toLowerCase(),
-      );
+      const hit = items.find((lead) => lead.email?.toLowerCase() === candidate.email.toLowerCase());
       if (!hit) return true;
-      leads[candidate.candidate_key] = {
-        leadId: hit.id,
-        email: candidate.email,
-      };
+      leads[candidate.candidate_key] = { leadId: hit.id, email: candidate.email };
       already.push(candidate.candidate_key);
       return false;
     });
@@ -1080,16 +879,10 @@ async function addShortlistLeads(
         ...(company_name ? { company_name } : {}),
       })),
     });
-    for (const created of (report.created_leads ?? []) as {
-      index: number;
-      id: string;
-    }[]) {
+    for (const created of (report.created_leads ?? []) as { index: number; id: string }[]) {
       const candidate = pending[created.index];
       if (!candidate || typeof created.id !== "string") continue;
-      leads[candidate.candidate_key] = {
-        leadId: created.id,
-        email: candidate.email,
-      };
+      leads[candidate.candidate_key] = { leadId: created.id, email: candidate.email };
       added.push(candidate.candidate_key);
     }
   }
@@ -1123,13 +916,7 @@ export async function runInstantlyWrite(
     case "native_instantly_create_campaign": {
       const input = CreateCampaignInput.parse(args);
       const campaign = await createCampaign(rest, input);
-      await bindCreatedCampaign(
-        prisma,
-        context,
-        serverId,
-        campaign,
-        input.eaccount,
-      );
+      await bindCreatedCampaign(prisma, context, serverId, campaign, input.eaccount);
       return campaign;
     }
     case "native_instantly_add_leads": {
@@ -1139,22 +926,16 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_list_leads": {
       const input = ListLeadsInput.parse(args);
-      if (!input.campaign_id && !input.email)
-        throw new Error("Pass campaign_id and/or email");
+      if (!input.campaign_id && !input.email) throw new Error("Pass campaign_id and/or email");
       return rest("POST", "/leads/list", {
         ...(input.campaign_id ? { campaign: input.campaign_id } : {}),
         ...(input.email ? { contacts: [input.email] } : {}),
         limit: input.limit,
-        ...(input.starting_after
-          ? { starting_after: input.starting_after }
-          : {}),
+        ...(input.starting_after ? { starting_after: input.starting_after } : {}),
       });
     }
     case "native_instantly_get_campaign": {
-      const campaign = await rest(
-        "GET",
-        `/campaigns/${CampaignIdInput.parse(args).campaign_id}`,
-      );
+      const campaign = await rest("GET", `/campaigns/${CampaignIdInput.parse(args).campaign_id}`);
       return {
         id: campaign.id,
         name: campaign.name,
@@ -1166,11 +947,7 @@ export async function runInstantlyWrite(
       };
     }
     case "native_instantly_update_lead_interest":
-      return rest(
-        "POST",
-        "/leads/update-interest-status",
-        UpdateLeadInterestInput.parse(args),
-      );
+      return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));
     case "native_instantly_activate_campaign": {
       const campaignId =
         ActivateCampaignInput.parse(args).campaign_id ??
@@ -1184,30 +961,21 @@ export async function runInstantlyWrite(
           "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
         );
       const campaign = await rest("POST", `/campaigns/${campaignId}/activate`);
-      const leads = await rest("POST", "/leads/list", {
-        campaign: campaignId,
-        limit: 100,
-      });
+      const leads = await rest("POST", "/leads/list", { campaign: campaignId, limit: 100 });
       // The provider echoes the campaign, whose email_list is the sending mailbox, not recipients.
       return {
         activated: true,
         campaignId,
-        sendingMailbox: Array.isArray(campaign.email_list)
-          ? campaign.email_list
-          : [],
-        recipients: (Array.isArray(leads.items) ? leads.items : []).flatMap(
-          (lead) =>
-            typeof (lead as { email?: unknown }).email === "string"
-              ? [(lead as { email: string }).email]
-              : [],
+        sendingMailbox: Array.isArray(campaign.email_list) ? campaign.email_list : [],
+        recipients: (Array.isArray(leads.items) ? leads.items : []).flatMap((lead) =>
+          typeof (lead as { email?: unknown }).email === "string"
+            ? [(lead as { email: string }).email]
+            : [],
         ),
       };
     }
     case "native_instantly_pause_campaign":
-      return rest(
-        "POST",
-        `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`,
-      );
+      return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
     case "native_instantly_get_email":
       return readEmail(rest, EmailIdInput.parse(args).id);
     case "native_instantly_reply_to_email":
@@ -1221,13 +989,7 @@ export async function runInstantlyWrite(
         EnsureRoleCampaignInput.parse(args),
       );
     case "native_instantly_add_shortlist_leads":
-      return addShortlistLeads(
-        prisma,
-        rest,
-        context,
-        serverId,
-        AddShortlistLeadsInput.parse(args),
-      );
+      return addShortlistLeads(prisma, rest, context, serverId, AddShortlistLeadsInput.parse(args));
     default:
       throw new IsolationError();
   }

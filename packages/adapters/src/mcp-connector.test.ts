@@ -1,16 +1,8 @@
 import type { AdapterContext } from "@rakazo/adapter-kit";
-import {
-  toolRequiresApproval,
-  toolRequiresExplicitApproval,
-} from "@rakazo/core";
+import { toolRequiresApproval, toolRequiresExplicitApproval } from "@rakazo/core";
 import * as schedulingDb from "@rakazo/db";
 import { IsolationError } from "@rakazo/db";
-import {
-  createLogger,
-  createTestSink,
-  getLogger,
-  installLogger,
-} from "@rakazo/logging";
+import { createLogger, createTestSink, getLogger, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { calendarEvidenceHash } from "./calendar-approval.js";
 import { InfisicalSecretStore } from "./infisical-secret-store.js";
@@ -61,9 +53,7 @@ describe("MCP assignment denial identity", () => {
   it.each(["context", "assignment", "revision"])(
     "classifies %s denial without changing its message",
     async (failure) => {
-      const findFirst = vi.fn(async () =>
-        failure === "assignment" ? null : ASSIGNMENT,
-      );
+      const findFirst = vi.fn(async () => (failure === "assignment" ? null : ASSIGNMENT));
       const context = {
         spaceId: "w1",
         userId: "u1",
@@ -73,10 +63,7 @@ describe("MCP assignment denial identity", () => {
         requireMcpToolAssignment(
           { botMcpServer: { findFirst } } as never,
           context as never,
-          {
-            resourceId: SERVER.id,
-            resourceRevision: failure === "revision" ? 2 : 1,
-          },
+          { resourceId: SERVER.id, resourceRevision: failure === "revision" ? 2 : 1 },
           "tool",
         ),
       ).rejects.toMatchObject({
@@ -91,10 +78,7 @@ describe("MCP assignment denial identity", () => {
     },
   );
   it("maps local Instantly tools to the assigned get_email + list_emails gate on the official server", async () => {
-    const check = (
-      allowedTools: string[],
-      endpoint = "https://mcp.instantly.ai/mcp",
-    ) =>
+    const check = (allowedTools: string[], endpoint = "https://mcp.instantly.ai/mcp") =>
       requireMcpToolAssignment(
         {
           botMcpServer: {
@@ -110,9 +94,7 @@ describe("MCP assignment denial identity", () => {
         { resourceId: SERVER.id, resourceRevision: 1 },
         "native_instantly_ensure_role_campaign",
       );
-    await expect(check(["get_email", "list_emails"])).resolves.toMatchObject({
-      botId: "bot-1",
-    });
+    await expect(check(["get_email", "list_emails"])).resolves.toMatchObject({ botId: "bot-1" });
     for (const denied of [
       check([]),
       check(["get_email"]),
@@ -126,9 +108,7 @@ describe("MCP assignment denial identity", () => {
   it("preserves an unexpected lookup failure by identity", async () => {
     const error = new Error("Database unavailable");
     const failure = requireMcpToolAssignment(
-      {
-        botMcpServer: { findFirst: vi.fn().mockRejectedValue(error) },
-      } as never,
+      { botMcpServer: { findFirst: vi.fn().mockRejectedValue(error) } } as never,
       { botId: "bot-1" } as never,
       { resourceId: SERVER.id, resourceRevision: 1 },
       "tool",
@@ -140,8 +120,7 @@ describe("MCP assignment denial identity", () => {
 
 const TEST_NETWORK = {
   // Read the global per call so a fetch stubbed after construction still wins.
-  fetch: (input: string | URL | Request, init?: RequestInit) =>
-    globalThis.fetch(input, init),
+  fetch: (input: string | URL | Request, init?: RequestInit) => globalThis.fetch(input, init),
   resolveHostname: async () => [{ address: "203.0.113.10", family: 4 }],
 };
 
@@ -244,57 +223,36 @@ describe("local native Instantly thread history", () => {
       },
     };
     const secrets = {
-      load: vi.fn(async () =>
-        JSON.stringify(state.material ?? { secret: state.key }),
-      ),
+      load: vi.fn(async () => JSON.stringify(state.material ?? { secret: state.key })),
     };
     const native = mcpFetch(state, server.endpoint);
-    const rest = vi.fn(
-      async (input: string | URL | Request, init?: RequestInit) => {
-        const request = new Request(input, init);
-        expect(request.method).toBe("GET");
-        expect(new URL(request.url).origin).toBe("https://api.instantly.ai");
-        expect(request.headers.get("authorization")).toBe(
-          `Bearer ${state.key}`,
-        );
-        if (new URL(request.url).pathname === "/api/v2/accounts")
-          return Response.json({
-            items: state.mailboxes.map((email) => ({ email })),
-          });
-        const account = new URL(request.url).pathname.match(
-          /^\/api\/v2\/accounts\/(.+)$/,
-        );
-        if (account)
-          return new Response("{}", {
-            status: state.accounts.includes(decodeURIComponent(account[1]!))
-              ? 200
-              : 404,
-          });
-        const campaign = new URL(request.url).pathname.match(
-          /^\/api\/v2\/campaigns\/(.+)$/,
-        );
-        if (campaign) {
-          const body = state.campaigns[decodeURIComponent(campaign[1]!)];
-          return new Response(JSON.stringify(body ?? {}), {
-            status: body ? 200 : 404,
-          });
-        }
-        if (new URL(request.url).pathname === `/api/v2/emails/${anchor.id}`)
-          return Response.json(state.callResult.structuredContent);
-        expect(new URL(request.url).pathname).toBe("/api/v2/emails");
-        state.afterRest();
-        return new Response(JSON.stringify(state.page), {
-          status: state.status,
+    const rest = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const request = new Request(input, init);
+      expect(request.method).toBe("GET");
+      expect(new URL(request.url).origin).toBe("https://api.instantly.ai");
+      expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
+      if (new URL(request.url).pathname === "/api/v2/accounts")
+        return Response.json({ items: state.mailboxes.map((email) => ({ email })) });
+      const account = new URL(request.url).pathname.match(/^\/api\/v2\/accounts\/(.+)$/);
+      if (account)
+        return new Response("{}", {
+          status: state.accounts.includes(decodeURIComponent(account[1]!)) ? 200 : 404,
         });
-      },
-    );
+      const campaign = new URL(request.url).pathname.match(/^\/api\/v2\/campaigns\/(.+)$/);
+      if (campaign) {
+        const body = state.campaigns[decodeURIComponent(campaign[1]!)];
+        return new Response(JSON.stringify(body ?? {}), { status: body ? 200 : 404 });
+      }
+      if (new URL(request.url).pathname === `/api/v2/emails/${anchor.id}`)
+        return Response.json(state.callResult.structuredContent);
+      expect(new URL(request.url).pathname).toBe("/api/v2/emails");
+      state.afterRest();
+      return new Response(JSON.stringify(state.page), { status: state.status });
+    });
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        if (
-          new URL(logicalHref(input, init)).origin ===
-          "https://api.instantly.ai"
-        )
+        if (new URL(logicalHref(input, init)).origin === "https://api.instantly.ai")
           return rest(input, init);
         const response = await native(input, init);
         const request = new Request(input, init);
@@ -326,17 +284,7 @@ describe("local native Instantly thread history", () => {
         events.push(event);
       return events;
     };
-    return {
-      connector,
-      context,
-      state,
-      server,
-      assignment,
-      prisma,
-      secrets,
-      rest,
-      collect,
-    };
+    return { connector, context, state, server, assignment, prisma, secrets, rest, collect };
   }
   it("keeps the local mail tools when the remote server cannot list its tools", async () => {
     const f = fixture();
@@ -372,9 +320,7 @@ describe("local native Instantly thread history", () => {
     const f = fixture();
     try {
       const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find(
-        (tool) => tool.route?.toolName === route.toolName,
-      );
+      const tool = tools.find((tool) => tool.route?.toolName === route.toolName);
       expect(tool).toMatchObject({
         name: "instantly__demo__get_thread_history",
         readOnly: true,
@@ -382,9 +328,7 @@ describe("local native Instantly thread history", () => {
       });
       expect(tool?.description).toMatch(/local native REST integration/i);
       expect(tool!.inputSchema.required).toEqual(["anchor_id"]);
-      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(
-        false,
-      );
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
       const events = await f.collect({ anchor_id: anchor.id, limit: 5 });
       expect(events).toEqual([
         {
@@ -421,11 +365,9 @@ describe("local native Instantly thread history", () => {
         },
       ]);
       expect(f.rest).toHaveBeenCalledOnce();
-      expect(
-        new URL(logicalHref(...f.rest.mock.calls[0]!)).searchParams.get(
-          "search",
-        ),
-      ).toBe(`thread:${anchor.thread_id}`);
+      expect(new URL(logicalHref(...f.rest.mock.calls[0]!)).searchParams.get("search")).toBe(
+        `thread:${anchor.thread_id}`,
+      );
       expect(f.state.calls).toEqual(["get_email"]);
       expect(JSON.stringify(events)).not.toContain(f.state.key);
     } finally {
@@ -434,10 +376,7 @@ describe("local native Instantly thread history", () => {
   });
   it("looks up an exact contact through a separate read-only local tool with truthful page coverage", async () => {
     const f = fixture();
-    const contactRoute = {
-      ...route,
-      toolName: "native_instantly_search_contact_emails",
-    };
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     const outbound = {
       ...anchor,
       id: anchor.campaign_id,
@@ -447,24 +386,17 @@ describe("local native Instantly thread history", () => {
       body_fallback_reason: "too_large",
       ue_type: 3,
     };
-    f.state.page = {
-      items: [anchor, outbound],
-      next_starting_after: "provider-next",
-    };
+    f.state.page = { items: [anchor, outbound], next_starting_after: "provider-next" };
     try {
       const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find(
-        (tool) => tool.route?.toolName === contactRoute.toolName,
-      );
+      const tool = tools.find((tool) => tool.route?.toolName === contactRoute.toolName);
       expect(tool).toMatchObject({
         name: "instantly__demo__search_contact_emails",
         readOnly: true,
         route: contactRoute,
       });
       expect(tool?.description).toMatch(/local native REST integration/i);
-      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(
-        false,
-      );
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
       const args = {
         email: anchor.from_address_email,
         eaccount: anchor.eaccount,
@@ -510,9 +442,7 @@ describe("local native Instantly thread history", () => {
       expect(f.state.calls).toEqual([]);
       expect(JSON.stringify(events)).not.toContain(f.state.key);
       f.state.page = { items: [] };
-      expect(
-        await f.collect({ email: args.email }, contactRoute),
-      ).toMatchObject([
+      expect(await f.collect({ email: args.email }, contactRoute)).toMatchObject([
         {
           type: "result",
           data: {
@@ -535,10 +465,7 @@ describe("local native Instantly thread history", () => {
   });
   it("defaults the contact lookup to the one connected mailbox and reports HTTP status + code", async () => {
     const f = fixture();
-    const contactRoute = {
-      ...route,
-      toolName: "native_instantly_search_contact_emails",
-    };
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     f.state.mailboxes = ["team@example.test"];
     f.state.page = { items: [] };
     try {
@@ -550,19 +477,10 @@ describe("local native Instantly thread history", () => {
       expect(emails.searchParams.get("eaccount")).toBe("team@example.test");
       expect(emails.searchParams.get("lead")).toBe("sumeetparekh1@gmail.com");
       f.state.status = 400;
-      f.state.page = {
-        error: "invalid_query",
-        message: "private provider detail",
-      } as never;
-      const failed = await f.collect(
-        { email: "sumeetparekh1@gmail.com" },
-        contactRoute,
-      );
+      f.state.page = { error: "invalid_query", message: "private provider detail" } as never;
+      const failed = await f.collect({ email: "sumeetparekh1@gmail.com" }, contactRoute);
       expect(failed).toMatchObject([
-        {
-          type: "error",
-          message: expect.stringContaining("HTTP 400 (invalid_query)."),
-        },
+        { type: "error", message: expect.stringContaining("HTTP 400 (invalid_query).") },
       ]);
       expect(JSON.stringify(failed)).not.toContain("private provider detail");
     } finally {
@@ -575,25 +493,17 @@ describe("local native Instantly thread history", () => {
       f.connector as unknown as { instantlyCampaignScope: () => Promise<null> },
       "instantlyCampaignScope",
     ).mockResolvedValue(null);
-    const contactRoute = {
-      ...route,
-      toolName: "native_instantly_search_contact_emails",
-    };
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     const run = { ...f.context, runId: "run-contact-gate" };
     f.state.page = { items: [] };
     try {
       await f.connector.discoverTools(f.context as never);
       expect(
-        await f.collect(
-          { email: "sumeet.parekh@gmail.com", name: "Sumeet" },
-          contactRoute,
-          run,
-        ),
+        await f.collect({ email: "sumeet.parekh@gmail.com", name: "Sumeet" }, contactRoute, run),
       ).toEqual([
         {
           type: "error",
-          message:
-            "No stored email for Sumeet; resolve the contact first, never guess an address",
+          message: "No stored email for Sumeet; resolve the contact first, never guess an address",
         },
       ]);
       expect(f.rest).not.toHaveBeenCalled();
@@ -601,23 +511,12 @@ describe("local native Instantly thread history", () => {
         { name: "Sumeet Parekh", email: "SumeetParekh1@gmail.com" } as never,
       ]);
       expect(
-        await f.collect(
-          { email: "sumeetparekh1@gmail.com", name: "Bob" },
-          contactRoute,
-          run,
-        ),
+        await f.collect({ email: "sumeetparekh1@gmail.com", name: "Bob" }, contactRoute, run),
       ).toMatchObject([
-        {
-          type: "error",
-          message: expect.stringMatching(/No stored email for Bob/),
-        },
+        { type: "error", message: expect.stringMatching(/No stored email for Bob/) },
       ]);
       expect(
-        await f.collect(
-          { email: "sumeetparekh1@gmail.com", name: "sumeet" },
-          contactRoute,
-          run,
-        ),
+        await f.collect({ email: "sumeetparekh1@gmail.com", name: "sumeet" }, contactRoute, run),
       ).toMatchObject([{ type: "result" }]);
     } finally {
       await f.connector.close();
@@ -625,10 +524,7 @@ describe("local native Instantly thread history", () => {
   });
   it("checks campaign stop_on_reply once per replied campaign and warns when follow-ups would continue", async () => {
     const f = fixture();
-    const contactRoute = {
-      ...route,
-      toolName: "native_instantly_search_contact_emails",
-    };
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     const offCampaign = "123e4567-e89b-42d3-a456-426614174009";
     const reply = { ...anchor, lead: anchor.from_address_email };
     const outbound = {
@@ -646,10 +542,7 @@ describe("local native Instantly thread history", () => {
       campaign_id: offCampaign,
       lead: null,
     };
-    const secondReply = {
-      ...reply,
-      id: "123e4567-e89b-42d3-a456-426614174005",
-    };
+    const secondReply = { ...reply, id: "123e4567-e89b-42d3-a456-426614174005" };
     f.state.page = { items: [reply, secondReply, outbound, nonLead] };
     f.state.campaigns = {
       [anchor.campaign_id]: { id: anchor.campaign_id, stop_on_reply: false },
@@ -657,10 +550,7 @@ describe("local native Instantly thread history", () => {
     };
     try {
       await f.connector.discoverTools(f.context as never);
-      const events = await f.collect(
-        { email: anchor.from_address_email },
-        contactRoute,
-      );
+      const events = await f.collect({ email: anchor.from_address_email }, contactRoute);
       expect(events).toMatchObject([
         {
           type: "result",
@@ -684,28 +574,18 @@ describe("local native Instantly thread history", () => {
         `https://api.instantly.ai/api/v2/campaigns/${anchor.campaign_id}`,
       ]);
       expect(new Request(...campaignCalls[0]!).method).toBe("GET");
-      f.state.campaigns[anchor.campaign_id] = {
-        id: anchor.campaign_id,
-        stop_on_reply: true,
-      };
-      expect(
-        await f.collect({ email: anchor.from_address_email }, contactRoute),
-      ).toMatchObject([
+      f.state.campaigns[anchor.campaign_id] = { id: anchor.campaign_id, stop_on_reply: true };
+      expect(await f.collect({ email: anchor.from_address_email }, contactRoute)).toMatchObject([
         {
           data: {
             structuredContent: {
-              replyFollowUps: [
-                { campaignId: anchor.campaign_id, stopOnReply: true },
-              ],
+              replyFollowUps: [{ campaignId: anchor.campaign_id, stopOnReply: true }],
             },
           },
         },
       ]);
       delete f.state.campaigns[anchor.campaign_id];
-      const unverified = await f.collect(
-        { email: anchor.from_address_email },
-        contactRoute,
-      );
+      const unverified = await f.collect({ email: anchor.from_address_email }, contactRoute);
       expect(unverified).toMatchObject([
         {
           type: "result",
@@ -723,10 +603,7 @@ describe("local native Instantly thread history", () => {
         },
       ]);
       f.state.page = { items: [outbound, nonLead] };
-      const quiet = await f.collect(
-        { email: anchor.from_address_email },
-        contactRoute,
-      );
+      const quiet = await f.collect({ email: anchor.from_address_email }, contactRoute);
       expect(JSON.stringify(quiet)).not.toContain("replyFollowUps");
     } finally {
       await f.connector.close();
@@ -734,25 +611,18 @@ describe("local native Instantly thread history", () => {
   });
   it("lists one mailbox page, including non-campaign mail, scoped by eaccount, subject search and created window", async () => {
     const f = fixture();
-    const mailboxRoute = {
-      ...route,
-      toolName: "native_instantly_list_mailbox_emails",
-    };
+    const mailboxRoute = { ...route, toolName: "native_instantly_list_mailbox_emails" };
     const direct = { ...anchor, campaign_id: null, subject: "Direct note" };
     f.state.page = { items: [direct] };
     try {
       const tools = await f.connector.discoverTools(f.context as never);
-      const tool = tools.find(
-        (tool) => tool.route?.toolName === mailboxRoute.toolName,
-      );
+      const tool = tools.find((tool) => tool.route?.toolName === mailboxRoute.toolName);
       expect(tool).toMatchObject({
         name: "instantly__demo__list_mailbox_emails",
         readOnly: true,
         route: mailboxRoute,
       });
-      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(
-        false,
-      );
+      expect(toolRequiresApproval(tool!.name, true, tool!.readOnly)).toBe(false);
       const args = {
         eaccount: anchor.eaccount,
         search: "Direct note",
@@ -792,9 +662,7 @@ describe("local native Instantly thread history", () => {
       ]);
       expect(f.rest).toHaveBeenCalledOnce();
       const url = new URL(logicalHref(...f.rest.mock.calls[0]!));
-      expect(`${url.origin}${url.pathname}`).toBe(
-        "https://api.instantly.ai/api/v2/emails",
-      );
+      expect(`${url.origin}${url.pathname}`).toBe("https://api.instantly.ai/api/v2/emails");
       expect(Object.fromEntries(url.searchParams)).toEqual(query);
       expect(f.state.calls).toEqual([]);
       expect(JSON.stringify(events)).not.toContain(f.state.key);
@@ -809,37 +677,22 @@ describe("local native Instantly thread history", () => {
     [{ eaccount: anchor.eaccount, min_timestamp_created: "yesterday" }, false],
     [{ eaccount: anchor.eaccount, limit: 101 }, false],
     [{ eaccount: "other@example.test" }, true],
-    [
-      {
-        eaccount: anchor.eaccount,
-        max_timestamp_created: "2026-10-22T09:00:00Z",
-      },
-      true,
-    ],
-  ])(
-    "rejects malformed or out-of-scope mailbox listing: %j",
-    async (args, reads) => {
-      const f = fixture();
-      f.state.page = { items: [anchor] };
-      try {
-        expect(
-          await f.collect(args, {
-            ...route,
-            toolName: "native_instantly_list_mailbox_emails",
-          }),
-        ).toMatchObject([{ type: "error" }]);
-        expect(f.rest).toHaveBeenCalledTimes(reads ? 1 : 0);
-      } finally {
-        await f.connector.close();
-      }
-    },
-  );
+    [{ eaccount: anchor.eaccount, max_timestamp_created: "2026-10-22T09:00:00Z" }, true],
+  ])("rejects malformed or out-of-scope mailbox listing: %j", async (args, reads) => {
+    const f = fixture();
+    f.state.page = { items: [anchor] };
+    try {
+      expect(
+        await f.collect(args, { ...route, toolName: "native_instantly_list_mailbox_emails" }),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).toHaveBeenCalledTimes(reads ? 1 : 0);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it("explains an empty contact lookup whose contact and mailbox arguments are swapped", async () => {
     const f = fixture();
-    const contactRoute = {
-      ...route,
-      toolName: "native_instantly_search_contact_emails",
-    };
+    const contactRoute = { ...route, toolName: "native_instantly_search_contact_emails" };
     f.state.page = { items: [] };
     f.state.accounts = [anchor.eaccount];
     try {
@@ -850,9 +703,7 @@ describe("local native Instantly thread history", () => {
       expect(swapped).toEqual([
         {
           type: "error",
-          message: expect.stringContaining(
-            "pass the contact as email and the mailbox as eaccount",
-          ),
+          message: expect.stringContaining("pass the contact as email and the mailbox as eaccount"),
         },
       ]);
       expect(JSON.stringify(swapped)).not.toContain(f.state.key);
@@ -866,22 +717,13 @@ describe("local native Instantly thread history", () => {
       await f.connector.close();
     }
   });
-  it.each([
-    "lead",
-    "participant",
-    "account",
-    "missing-body",
-    "shape",
-    "http",
-    "count",
-  ])(
+  it.each(["lead", "participant", "account", "missing-body", "shape", "http", "count"])(
     "checks exact contact %s without silently widening the search or claiming full bodies",
     async (kind) => {
       const f = fixture();
       const row = { ...anchor, lead: anchor.from_address_email };
       if (kind === "lead") row.lead = "different@example.test";
-      if (kind === "participant")
-        row.from_address_email = "different@example.test";
+      if (kind === "participant") row.from_address_email = "different@example.test";
       if (kind === "account") row.eaccount = "different@example.test";
       if (kind === "missing-body") row.body = {} as typeof row.body;
       f.state.page = { items: [row] };
@@ -891,11 +733,7 @@ describe("local native Instantly thread history", () => {
       try {
         expect(
           await f.collect(
-            {
-              email: anchor.from_address_email,
-              eaccount: anchor.eaccount,
-              limit: 1,
-            },
+            { email: anchor.from_address_email, eaccount: anchor.eaccount, limit: 1 },
             { ...route, toolName: "native_instantly_search_contact_emails" },
           ),
         ).toMatchObject(
@@ -903,9 +741,7 @@ describe("local native Instantly thread history", () => {
             ? [
                 {
                   type: "result",
-                  data: {
-                    structuredContent: { coverage: { bodiesComplete: false } },
-                  },
+                  data: { structuredContent: { coverage: { bodiesComplete: false } } },
                 },
               ]
             : [{ type: "error" }],
@@ -918,80 +754,60 @@ describe("local native Instantly thread history", () => {
       }
     },
   );
-  it.each([
-    "get_email",
-    "list_emails",
-    "actor",
-    "revision",
-    "credential",
-    "pointer",
-  ])("fences contact lookup against changed %s", async (kind) => {
-    const f = fixture();
-    const before =
-      kind === "get_email" || kind === "list_emails" || kind === "actor";
-    if (kind === "get_email" || kind === "list_emails")
-      f.assignment.allowedTools = f.assignment.allowedTools.filter(
-        (name) => name !== kind,
-      );
-    f.state.afterRest = () => {
-      if (kind === "revision") f.server.revision++;
-      if (kind === "credential") f.state.key = "rotated-private-key";
-      if (kind === "pointer") f.server.secretId = "rotated-secret";
-    };
-    try {
-      const events = await f.collect(
-        { email: anchor.from_address_email },
-        { ...route, toolName: "native_instantly_search_contact_emails" },
-        kind === "actor" ? { ...f.context, spaceId: "foreign" } : f.context,
-      );
-      expect(events).toMatchObject([{ type: "error" }]);
-      // Default-mailbox lookup, then the contact page.
-      expect(f.rest).toHaveBeenCalledTimes(before ? 0 : 2);
-      expect(JSON.stringify(events)).not.toMatch(
-        /private-key|fixture-private-api-key/,
-      );
-    } finally {
-      await f.connector.close();
-    }
-  });
-  it.each([
-    {},
-    { email: "not-an-address" },
-    { email: anchor.from_address_email, limit: 101 },
-    {
-      email: anchor.from_address_email,
-      eaccount: "team@example.test,other@example.test",
-    },
-    { email: anchor.from_address_email, starting_after: " " },
-    { email: anchor.from_address_email, search: "broad query" },
-  ])(
-    "rejects malformed contact search before provider reads: %j",
-    async (args) => {
+  it.each(["get_email", "list_emails", "actor", "revision", "credential", "pointer"])(
+    "fences contact lookup against changed %s",
+    async (kind) => {
       const f = fixture();
+      const before = kind === "get_email" || kind === "list_emails" || kind === "actor";
+      if (kind === "get_email" || kind === "list_emails")
+        f.assignment.allowedTools = f.assignment.allowedTools.filter((name) => name !== kind);
+      f.state.afterRest = () => {
+        if (kind === "revision") f.server.revision++;
+        if (kind === "credential") f.state.key = "rotated-private-key";
+        if (kind === "pointer") f.server.secretId = "rotated-secret";
+      };
       try {
-        expect(
-          await f.collect(args, {
-            ...route,
-            toolName: "native_instantly_search_contact_emails",
-          }),
-        ).toMatchObject([{ type: "error" }]);
-        expect(f.rest).not.toHaveBeenCalled();
-        expect(f.state.calls).toEqual([]);
+        const events = await f.collect(
+          { email: anchor.from_address_email },
+          { ...route, toolName: "native_instantly_search_contact_emails" },
+          kind === "actor" ? { ...f.context, spaceId: "foreign" } : f.context,
+        );
+        expect(events).toMatchObject([{ type: "error" }]);
+        // Default-mailbox lookup, then the contact page.
+        expect(f.rest).toHaveBeenCalledTimes(before ? 0 : 2);
+        expect(JSON.stringify(events)).not.toMatch(/private-key|fixture-private-api-key/);
       } finally {
         await f.connector.close();
       }
     },
   );
+  it.each([
+    {},
+    { email: "not-an-address" },
+    { email: anchor.from_address_email, limit: 101 },
+    { email: anchor.from_address_email, eaccount: "team@example.test,other@example.test" },
+    { email: anchor.from_address_email, starting_after: " " },
+    { email: anchor.from_address_email, search: "broad query" },
+  ])("rejects malformed contact search before provider reads: %j", async (args) => {
+    const f = fixture();
+    try {
+      expect(
+        await f.collect(args, { ...route, toolName: "native_instantly_search_contact_emails" }),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      expect(f.state.calls).toEqual([]);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it.each(["too_large", "unavailable", "missing-body", "cursor", "empty"])(
     "retains honest %s page coverage without claiming an entire thread",
     async (kind) => {
       const f = fixture();
       if (kind === "too_large" || kind === "unavailable")
         f.state.page = { items: [{ ...anchor, body_fallback_reason: kind }] };
-      if (kind === "missing-body")
-        f.state.page = { items: [{ ...anchor, body: {} }] };
-      if (kind === "cursor")
-        f.state.page = { items: [anchor], next_starting_after: "opaque-next" };
+      if (kind === "missing-body") f.state.page = { items: [{ ...anchor, body: {} }] };
+      if (kind === "cursor") f.state.page = { items: [anchor], next_starting_after: "opaque-next" };
       if (kind === "empty") f.state.page = { items: [] };
       try {
         const events = await f.collect({
@@ -1009,11 +825,7 @@ describe("local native Instantly thread history", () => {
                 nextStartingAfter: kind === "cursor" ? "opaque-next" : null,
                 anchorPresent: kind !== "empty",
                 pageExhausted: kind !== "cursor",
-                bodiesComplete: ![
-                  "too_large",
-                  "unavailable",
-                  "missing-body",
-                ].includes(kind),
+                bodiesComplete: !["too_large", "unavailable", "missing-body"].includes(kind),
               },
             },
           },
@@ -1036,17 +848,12 @@ describe("local native Instantly thread history", () => {
   ])("denies invalid %s before the REST read", async (kind) => {
     const f = fixture();
     if (kind === "get_email" || kind === "list_emails")
-      f.assignment.allowedTools = f.assignment.allowedTools.filter(
-        (name) => name !== kind,
-      );
+      f.assignment.allowedTools = f.assignment.allowedTools.filter((name) => name !== kind);
     if (kind === "revision") f.server.revision++;
-    if (kind === "endpoint")
-      f.server.endpoint = "https://other.example.test/mcp";
+    if (kind === "endpoint") f.server.endpoint = "https://other.example.test/mcp";
     if (kind === "disabled") Object.assign(f.server, { enabled: false });
     if (kind === "oauth")
-      f.state.material = {
-        oauth: { tokens: { access_token: "unrelated-audience" } },
-      };
+      f.state.material = { oauth: { tokens: { access_token: "unrelated-audience" } } };
     if (kind === "ambiguous-key")
       f.state.material = {
         secret: f.state.key,
@@ -1098,42 +905,33 @@ describe("local native Instantly thread history", () => {
     "shape",
     "http",
     "oversize",
-  ])(
-    "rejects %s response without inventing an empty successful page",
-    async (kind) => {
-      const f = fixture();
-      if (
-        ["thread_id", "organization_id", "campaign_id", "eaccount"].includes(
-          kind,
-        )
-      )
-        f.state.page = {
-          items: [
-            {
-              ...anchor,
-              [kind]:
-                kind === "organization_id"
-                  ? anchor.campaign_id
-                  : kind === "campaign_id"
-                    ? anchor.organization_id
-                    : "foreign",
-            },
-          ],
-        };
-      if (kind === "id")
-        f.state.callResult.structuredContent.id = anchor.campaign_id;
-      if (kind === "shape") f.state.page = { items: "invalid" };
-      if (kind === "http") f.state.status = 401;
-      if (kind === "oversize")
-        f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
-      try {
-        expect(await f.collect()).toMatchObject([{ type: "error" }]);
-        expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
-      } finally {
-        await f.connector.close();
-      }
-    },
-  );
+  ])("rejects %s response without inventing an empty successful page", async (kind) => {
+    const f = fixture();
+    if (["thread_id", "organization_id", "campaign_id", "eaccount"].includes(kind))
+      f.state.page = {
+        items: [
+          {
+            ...anchor,
+            [kind]:
+              kind === "organization_id"
+                ? anchor.campaign_id
+                : kind === "campaign_id"
+                  ? anchor.organization_id
+                  : "foreign",
+          },
+        ],
+      };
+    if (kind === "id") f.state.callResult.structuredContent.id = anchor.campaign_id;
+    if (kind === "shape") f.state.page = { items: "invalid" };
+    if (kind === "http") f.state.status = 401;
+    if (kind === "oversize") f.state.page = { items: [anchor], extra: "x".repeat(2_000_000) };
+    try {
+      expect(await f.collect()).toMatchObject([{ type: "error" }]);
+      expect(f.rest).toHaveBeenCalledTimes(kind === "id" ? 0 : 1);
+    } finally {
+      await f.connector.close();
+    }
+  });
   it.each([
     "current",
     "ordinary",
@@ -1149,10 +947,7 @@ describe("local native Instantly thread history", () => {
     async (mutation) => {
       const f = fixture();
       f.assignment.allowedTools.push("reply_to_email");
-      const replyRoute = {
-        ...route,
-        toolName: "native_instantly_reply_to_email",
-      };
+      const replyRoute = { ...route, toolName: "native_instantly_reply_to_email" };
       const args = {
         reply_to_uuid: anchor.id,
         eaccount: anchor.eaccount,
@@ -1193,11 +988,7 @@ describe("local native Instantly thread history", () => {
           email: anchor.from_address_email,
           timeZone: "America/New_York",
         },
-        interviewer: {
-          name: "Host",
-          email: anchor.eaccount,
-          timeZone: "Europe/London",
-        },
+        interviewer: { name: "Host", email: anchor.eaccount, timeZone: "Europe/London" },
         calendar: {
           sourceId: "cal-1",
           sourceRevision: 1,
@@ -1209,21 +1000,13 @@ describe("local native Instantly thread history", () => {
         },
         mailSourceId: route.resourceId,
         mailSourceRevision: route.resourceRevision,
-        mailRead: {
-          effectId: "mail-read",
-          linkedRunId: "run-1",
-          messageId: null,
-        },
+        mailRead: { effectId: "mail-read", linkedRunId: "run-1", messageId: null },
         bookingEffectId: "booking-1",
         confirmationEffectId: "confirmation-1",
         bookingStatus: "completed",
         confirmationStatus: "pending",
       } as const;
-      const request = [
-        "__rakazoCatalogTool",
-        "direct",
-        { route: replyRoute, args },
-      ];
+      const request = ["__rakazoCatalogTool", "direct", { route: replyRoute, args }];
       const evidence = {
         kind: "recruiting_scheduling",
         version: 1,
@@ -1238,14 +1021,12 @@ describe("local native Instantly thread history", () => {
         runId: actor.runId,
         spaceId: actor.spaceId,
         status: "executing",
-        idempotencyKey:
-          mutation === "legacy-key" ? "older-reconciled-key" : "thread-read",
+        idempotencyKey: mutation === "legacy-key" ? "older-reconciled-key" : "thread-read",
         request,
         result: { schedulingApprovalEvidence: evidence },
         run: { threadId: "thread-1", userId: actor.userId, botId: actor.botId },
       };
-      if (mutation === "foreign-owner")
-        confirmationEffect.run.userId = "other-owner";
+      if (mutation === "foreign-owner") confirmationEffect.run.userId = "other-owner";
       if (mutation === "changed-request") evidence.requestHash = "0".repeat(64);
       const findUnique = vi.fn().mockResolvedValue(confirmationEffect);
       if (mutation === "missing-effect") findUnique.mockResolvedValue(null);
@@ -1260,25 +1041,17 @@ describe("local native Instantly thread history", () => {
         .mockImplementation(async () => {
           expect(nativeReads).toBeGreaterThanOrEqual(2);
           if (changed)
-            throw new IsolationError(
-              "Booking changed while native reply evidence was read",
-            );
+            throw new IsolationError("Booking changed while native reply evidence was read");
           return plan;
         });
       vi.spyOn(
-        f.connector as unknown as {
-          instantlyCampaignScope: () => Promise<unknown>;
-        },
+        f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> },
         "instantlyCampaignScope",
-      ).mockResolvedValue({
-        campaignIds: [anchor.campaign_id],
-        workspaceKey: "role-1",
-      });
+      ).mockResolvedValue({ campaignIds: [anchor.campaign_id], workspaceKey: "role-1" });
       f.rest.mockImplementation(async (input, init) => {
         const request = new Request(input, init);
         const path = new URL(request.url).pathname;
-        if (request.method === "POST")
-          return Response.json({ id: "sent-confirmation" });
+        if (request.method === "POST") return Response.json({ id: "sent-confirmation" });
         nativeReads++;
         if (path.includes("/accounts/")) {
           changed = !["current", "legacy-key"].includes(mutation);
@@ -1290,9 +1063,7 @@ describe("local native Instantly thread history", () => {
         const events = await f.collect(
           args,
           replyRoute,
-          mutation === "ordinary"
-            ? ({ ...f.context, runId: "run-1" } as typeof actor)
-            : actor,
+          mutation === "ordinary" ? ({ ...f.context, runId: "run-1" } as typeof actor) : actor,
         );
         if (mutation === "ordinary") expect(findUnique).not.toHaveBeenCalled();
         else
@@ -1309,10 +1080,7 @@ describe("local native Instantly thread history", () => {
         if (!rejectedIdentity)
           expect(bind).toHaveBeenCalledWith(
             f.prisma,
-            expect.objectContaining({
-              userId: actor.userId,
-              spaceId: actor.spaceId,
-            }),
+            expect.objectContaining({ userId: actor.userId, spaceId: actor.spaceId }),
             {
               threadId: "thread-1",
               planId: plan.id,
@@ -1320,16 +1088,12 @@ describe("local native Instantly thread history", () => {
               effectId: "confirmation-1",
             },
           );
-        const posts = f.rest.mock.calls.filter(
-          (call) => new Request(...call).method === "POST",
-        );
+        const posts = f.rest.mock.calls.filter((call) => new Request(...call).method === "POST");
         expect(posts).toHaveLength(
           ["current", "ordinary", "legacy-key"].includes(mutation) ? 1 : 0,
         );
         expect(events[0]).toMatchObject({
-          type: ["current", "ordinary", "legacy-key"].includes(mutation)
-            ? "result"
-            : "error",
+          type: ["current", "ordinary", "legacy-key"].includes(mutation) ? "result" : "error",
         });
       } finally {
         load.mockRestore();
@@ -1358,9 +1122,7 @@ describe("local native Instantly thread history", () => {
                 eaccount: anchor.eaccount,
                 body: { text: "Synthetic reply" },
               };
-        expect(await f.collect(args, { ...route, toolName })).toMatchObject([
-          { type: "error" },
-        ]);
+        expect(await f.collect(args, { ...route, toolName })).toMatchObject([{ type: "error" }]);
         expect(f.rest).toHaveBeenCalledTimes(1);
         expect(new Request(...f.rest.mock.calls[0]!).method).toBe("GET");
       } finally {
@@ -1376,15 +1138,10 @@ describe("local native Instantly thread history", () => {
     const f = fixture();
     f.assignment.allowedTools.push("reply_to_email");
     f.state.accounts = [anchor.eaccount];
-    const stable = {
-      campaignIds: [anchor.campaign_id],
-      workspaceKey: "role-a",
-    };
+    const stable = { campaignIds: [anchor.campaign_id], workspaceKey: "role-a" };
     const scope = vi
       .spyOn(
-        f.connector as unknown as {
-          instantlyCampaignScope: () => Promise<unknown>;
-        },
+        f.connector as unknown as { instantlyCampaignScope: () => Promise<unknown> },
         "instantlyCampaignScope",
       )
       .mockResolvedValueOnce(stable)
@@ -1401,15 +1158,9 @@ describe("local native Instantly thread history", () => {
                 eaccount: anchor.eaccount,
                 body: { text: "Synthetic reply" },
               };
-      expect(await f.collect(args, { ...route, toolName })).toMatchObject([
-        { type: "error" },
-      ]);
+      expect(await f.collect(args, { ...route, toolName })).toMatchObject([{ type: "error" }]);
       expect(scope).toHaveBeenCalledTimes(3);
-      expect(
-        f.rest.mock.calls.every(
-          (call) => new Request(...call).method === "GET",
-        ),
-      ).toBe(true);
+      expect(f.rest.mock.calls.every((call) => new Request(...call).method === "GET")).toBe(true);
       if (toolName === "native_instantly_reply_to_email")
         expect(
           f.rest.mock.calls.some((call) =>
@@ -1450,45 +1201,34 @@ describe("local native Instantly thread history", () => {
     route.toolName,
     "search_contact_emails",
     "native_instantly_search_contact_emails",
-  ])(
-    "handles offered remote %s explicitly without routing it to REST",
-    async (toolName) => {
-      const f = fixture();
-      f.state.tools.push({ name: toolName, inputSchema: { type: "object" } });
-      f.assignment.allowedTools.push(toolName);
-      try {
-        const tools = await f.connector.discoverTools(f.context as never);
-        const isContact = toolName.includes("contact");
-        const localName = isContact
-          ? "search_contact_emails"
-          : "get_thread_history";
-        expect(
-          tools.some((tool) => tool.name === `instantly__demo__${localName}`),
-        ).toBe(false);
-        expect(
-          await f.collect(
-            isContact ? { email: anchor.from_address_email } : undefined,
-            isContact
-              ? { ...route, toolName: "native_instantly_search_contact_emails" }
-              : route,
-          ),
-        ).toMatchObject([{ type: "error" }]);
-        expect(f.rest).not.toHaveBeenCalled();
-        const remote = tools.find(
-          (tool) => tool.name === `mcp__demo__${toolName}`,
-        )!;
-        expect(remote.readOnly).not.toBe(true);
-        if (toolName === localName) {
-          expect(
-            await f.collect({}, remote.route as typeof route),
-          ).toMatchObject([{ type: "result" }]);
-          expect(f.state.calls).toEqual([toolName]);
-        }
-      } finally {
-        await f.connector.close();
+  ])("handles offered remote %s explicitly without routing it to REST", async (toolName) => {
+    const f = fixture();
+    f.state.tools.push({ name: toolName, inputSchema: { type: "object" } });
+    f.assignment.allowedTools.push(toolName);
+    try {
+      const tools = await f.connector.discoverTools(f.context as never);
+      const isContact = toolName.includes("contact");
+      const localName = isContact ? "search_contact_emails" : "get_thread_history";
+      expect(tools.some((tool) => tool.name === `instantly__demo__${localName}`)).toBe(false);
+      expect(
+        await f.collect(
+          isContact ? { email: anchor.from_address_email } : undefined,
+          isContact ? { ...route, toolName: "native_instantly_search_contact_emails" } : route,
+        ),
+      ).toMatchObject([{ type: "error" }]);
+      expect(f.rest).not.toHaveBeenCalled();
+      const remote = tools.find((tool) => tool.name === `mcp__demo__${toolName}`)!;
+      expect(remote.readOnly).not.toBe(true);
+      if (toolName === localName) {
+        expect(await f.collect({}, remote.route as typeof route)).toMatchObject([
+          { type: "result" },
+        ]);
+        expect(f.state.calls).toEqual([toolName]);
       }
-    },
-  );
+    } finally {
+      await f.connector.close();
+    }
+  });
   it.each([
     "get_thread_history",
     route.toolName,
@@ -1502,9 +1242,9 @@ describe("local native Instantly thread history", () => {
       const tools = await f.connector.discoverTools(f.context as never);
       expect(tools).toHaveLength(1);
       expect(tools[0]!.readOnly).not.toBe(true);
-      expect(
-        await f.collect({}, tools[0]!.route as typeof route),
-      ).toMatchObject([{ type: "result" }]);
+      expect(await f.collect({}, tools[0]!.route as typeof route)).toMatchObject([
+        { type: "result" },
+      ]);
       expect(f.state.calls).toEqual([toolName]);
       expect(f.rest).not.toHaveBeenCalled();
     } finally {
@@ -1528,9 +1268,7 @@ describe("local native Instantly thread history", () => {
     f.assignment.allowAllTools = true;
     try {
       const tools = await f.connector.discoverTools(f.context as never);
-      const execute = tools.find(
-        (tool) => tool.route?.toolName === "__catalog_execute",
-      )!;
+      const execute = tools.find((tool) => tool.route?.toolName === "__catalog_execute")!;
       expect(execute).toBeDefined();
       const resolve = async (toolName: string, args: Record<string, unknown>) =>
         f.connector.resolveCall(
@@ -1544,21 +1282,15 @@ describe("local native Instantly thread history", () => {
         );
       const local = await resolve(route.toolName, { anchor_id: anchor.id });
       expect(local!.tool.readOnly).toBe(true);
-      expect(
-        toolRequiresApproval(local!.tool.name, true, local!.tool.readOnly),
-      ).toBe(false);
+      expect(toolRequiresApproval(local!.tool.name, true, local!.tool.readOnly)).toBe(false);
       const contact = await resolve("native_instantly_search_contact_emails", {
         email: anchor.from_address_email,
       });
       expect(contact!.tool.readOnly).toBe(true);
-      expect(
-        toolRequiresApproval(contact!.tool.name, true, contact!.tool.readOnly),
-      ).toBe(false);
+      expect(toolRequiresApproval(contact!.tool.name, true, contact!.tool.readOnly)).toBe(false);
       const remote = await resolve("send_email", {});
       expect(remote!.tool.readOnly).not.toBe(true);
-      expect(
-        toolRequiresApproval(remote!.tool.name, true, remote!.tool.readOnly),
-      ).toBe(true);
+      expect(toolRequiresApproval(remote!.tool.name, true, remote!.tool.readOnly)).toBe(true);
     } finally {
       await f.connector.close();
     }
@@ -1570,19 +1302,16 @@ describe("local native Instantly thread history", () => {
     { anchor_id: anchor.id, limit: 101 },
     { anchor_id: anchor.id, starting_after: " " },
     { anchor_id: anchor.id, search: "anything" },
-  ])(
-    "rejects malformed input before reading provider data: %j",
-    async (args) => {
-      const f = fixture();
-      try {
-        expect(await f.collect(args)).toMatchObject([{ type: "error" }]);
-        expect(f.state.calls).toEqual([]);
-        expect(f.rest).not.toHaveBeenCalled();
-      } finally {
-        await f.connector.close();
-      }
-    },
-  );
+  ])("rejects malformed input before reading provider data: %j", async (args) => {
+    const f = fixture();
+    try {
+      expect(await f.collect(args)).toMatchObject([{ type: "error" }]);
+      expect(f.state.calls).toEqual([]);
+      expect(f.rest).not.toHaveBeenCalled();
+    } finally {
+      await f.connector.close();
+    }
+  });
   it("reuses a raw Authorization API key only in the official REST bearer header", async () => {
     const f = fixture();
     f.state.material = { headers: { Authorization: f.state.key } };
@@ -1595,18 +1324,11 @@ describe("local native Instantly thread history", () => {
   });
 });
 
-function logicalHref(
-  input: string | URL | Request,
-  init?: RequestInit,
-): string {
+function logicalHref(input: string | URL | Request, init?: RequestInit): string {
   const url = new URL(
-    typeof input === "string" || input instanceof URL
-      ? String(input)
-      : input.url,
+    typeof input === "string" || input instanceof URL ? String(input) : input.url,
   );
-  const host = new Headers(
-    input instanceof Request ? input.headers : init?.headers,
-  ).get("host");
+  const host = new Headers(input instanceof Request ? input.headers : init?.headers).get("host");
   if (host) url.host = host;
   return url.href;
 }
@@ -1616,11 +1338,7 @@ function mcpFetch(
     failNext: boolean;
     initializations: number;
     headers?: Record<string, string>[];
-    tools?: Array<{
-      name: string;
-      description?: string;
-      inputSchema: Record<string, unknown>;
-    }>;
+    tools?: Array<{ name: string; description?: string; inputSchema: Record<string, unknown> }>;
     calls?: string[];
     callError?: Error;
     callResult?: Record<string, unknown>;
@@ -1656,9 +1374,7 @@ function mcpFetch(
         jsonrpc: "2.0",
         id: message.id,
         result: {
-          tools: state.tools ?? [
-            { name: "echo", inputSchema: { type: "object" } },
-          ],
+          tools: state.tools ?? [{ name: "echo", inputSchema: { type: "object" } }],
         },
       });
     }
@@ -1690,9 +1406,7 @@ describe("official Autumn task dispatch", () => {
               server: { ...SERVER, endpoint: "https://api.autumn.ai/mcp" },
             }),
           },
-          recruitingResearchTask: {
-            findFirst: vi.fn().mockResolvedValue(null),
-          },
+          recruitingResearchTask: { findFirst: vi.fn().mockResolvedValue(null) },
           externalEffect: { findMany: vi.fn().mockResolvedValue([]) },
         } as never,
         { load } as never,
@@ -1704,12 +1418,7 @@ describe("official Autumn task dispatch", () => {
           {
             tool: `mcp__autumn__${toolName}`,
             executionId: "isolated-call",
-            route: {
-              connectorId: "mcp",
-              resourceId: SERVER.id,
-              resourceRevision: 1,
-              toolName,
-            },
+            route: { connectorId: "mcp", resourceId: SERVER.id, resourceRevision: 1, toolName },
             args: { task_id: "foreign-task" },
           },
           {
@@ -1797,8 +1506,7 @@ describe("MCP connector session cache", () => {
         failNext: false,
         initializations: 0,
         calls: [] as string[],
-        callError: new Error("response timed out: fixture-token") as
-          Error | undefined,
+        callError: new Error("response timed out: fixture-token") as Error | undefined,
         callResult: {
           isError: true,
           content: [{ type: "text", text: "provider rejected fixture-token" }],
@@ -1811,23 +1519,17 @@ describe("MCP connector session cache", () => {
           botMcpServer: {
             findMany: vi
               .fn()
-              .mockResolvedValue([
-                { ...ASSIGNMENT, server: { ...SERVER, secretId: "secret-1" } },
-              ]),
+              .mockResolvedValue([{ ...ASSIGNMENT, server: { ...SERVER, secretId: "secret-1" } }]),
             findFirst: vi.fn().mockResolvedValue({
               ...ASSIGNMENT,
               server: { ...SERVER, secretId: "secret-1" },
             }),
           },
           secret: {
-            findFirst: vi
-              .fn()
-              .mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }),
+            findFirst: vi.fn().mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }),
           },
         } as never,
-        {
-          load: async () => JSON.stringify({ secret: "fixture-token" }),
-        } as never,
+        { load: async () => JSON.stringify({ secret: "fixture-token" }) } as never,
         { network: TEST_NETWORK },
       );
       const context = {
@@ -1841,15 +1543,12 @@ describe("MCP connector session cache", () => {
         tool: path === "direct" ? tool.name : "connectors_execute_tool",
         args: path === "direct" ? {} : { id: "server-1:echo", arguments: {} },
         route:
-          path === "direct"
-            ? tool.route
-            : { connectorId: "mcp", toolName: "__catalog_execute" },
+          path === "direct" ? tool.route : { connectorId: "mcp", toolName: "__catalog_execute" },
         executionId: "transport-test",
       };
       try {
         const failed = [];
-        for await (const event of connector.execute(call, context))
-          failed.push(event);
+        for await (const event of connector.execute(call, context)) failed.push(event);
         expect(failed).toEqual([
           { type: "error", message: expect.any(String), outcome: "uncertain" },
         ]);
@@ -1858,11 +1557,8 @@ describe("MCP connector session cache", () => {
 
         state.callError = undefined;
         const returned = [];
-        for await (const event of connector.execute(call, context))
-          returned.push(event);
-        expect(returned).toMatchObject([
-          { type: "result", data: { isError: true } },
-        ]);
+        for await (const event of connector.execute(call, context)) returned.push(event);
+        expect(returned).toMatchObject([{ type: "result", data: { isError: true } }]);
         expect(JSON.stringify(returned)).not.toContain("fixture-token");
       } finally {
         await connector.close();
@@ -1873,11 +1569,7 @@ describe("MCP connector session cache", () => {
   it.each(["assignment", "authorization", "session", "cancellation"])(
     "keeps a pre-dispatch %s failure an ordinary error",
     async (failure) => {
-      const state = {
-        failNext: failure === "session",
-        initializations: 0,
-        calls: [] as string[],
-      };
+      const state = { failNext: failure === "session", initializations: 0, calls: [] as string[] };
       vi.stubGlobal("fetch", mcpFetch(state));
       const connector = new McpConnector(
         {
@@ -1885,16 +1577,8 @@ describe("MCP connector session cache", () => {
             findMany: vi.fn().mockResolvedValue([ASSIGNMENT]),
             findFirst:
               failure === "authorization"
-                ? vi
-                    .fn()
-                    .mockRejectedValue(
-                      new Error("lookup failed: Bearer fixture-token"),
-                    )
-                : vi
-                    .fn()
-                    .mockResolvedValue(
-                      failure === "assignment" ? null : ASSIGNMENT,
-                    ),
+                ? vi.fn().mockRejectedValue(new Error("lookup failed: Bearer fixture-token"))
+                : vi.fn().mockResolvedValue(failure === "assignment" ? null : ASSIGNMENT),
           },
         } as never,
         {} as never,
@@ -1928,9 +1612,7 @@ describe("MCP connector session cache", () => {
           context,
         ))
           events.push(event);
-        expect(events).toEqual([
-          { type: "error", message: expect.any(String) },
-        ]);
+        expect(events).toEqual([{ type: "error", message: expect.any(String) }]);
         expect(JSON.stringify(events)).not.toContain("fixture-token");
         expect(state.calls).toEqual([]);
       } finally {
@@ -1957,240 +1639,197 @@ describe("MCP connector session cache", () => {
     "digest",
     "later-notification",
     "cancelled",
-  ])(
-    "publishes only the authoritative refreshed MCP connection: %s",
-    async (change) => {
-      const controller = new AbortController();
-      const context = {
-        spaceId: "w1",
-        userId: "u1",
-        botId: "bot-1",
-        signal: controller.signal,
-      };
-      const initial = {
-        oauth: {
-          obtainedAt: 1,
-          tokens: {
-            access_token: "expired-access",
-            refresh_token: "initial-refresh",
-            token_type: "bearer",
-            expires_in: 1,
-          },
+  ])("publishes only the authoritative refreshed MCP connection: %s", async (change) => {
+    const controller = new AbortController();
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: controller.signal,
+    };
+    const initial = {
+      oauth: {
+        obtainedAt: 1,
+        tokens: {
+          access_token: "expired-access",
+          refresh_token: "initial-refresh",
+          token_type: "bearer",
+          expires_in: 1,
         },
-      };
-      const accepted = {
-        oauth: {
-          obtainedAt: Date.now(),
-          tokens: {
-            access_token: "accepted-access",
-            refresh_token: "accepted-refresh",
-            token_type: "bearer",
-            expires_in: 3600,
-          },
+      },
+    };
+    const accepted = {
+      oauth: {
+        obtainedAt: Date.now(),
+        tokens: {
+          access_token: "accepted-access",
+          refresh_token: "accepted-refresh",
+          token_type: "bearer",
+          expires_in: 3600,
         },
-      };
-      const assignment = {
-        ...ASSIGNMENT,
-        server: { ...SERVER, secretId: "initial-secret" },
-      };
-      const current: Omit<typeof assignment.server, "secretId"> & {
-        secretId: string | null;
-        userId: string;
-        spaceId: string;
-        enabled: boolean;
-      } = { ...assignment.server, userId: "u1", spaceId: "w1", enabled: true };
-      let row: { id: string; ciphertext: string } | null = {
-        id: "initial-secret",
-        ciphertext: "initial-ref",
-      };
-      let notify = (_ref: string) => {};
-      let afterLiveRefresh = false;
-      const load = vi.fn(async (ref: string) => {
-        if (ref === "initial-ref") return JSON.stringify(initial);
-        if (
-          change === "later-notification" ||
-          (afterLiveRefresh && change === "live-later-notification")
-        )
-          notify(ref);
-        if (change === "cancelled") controller.abort();
-        return JSON.stringify(change === "digest" ? initial : accepted);
+      },
+    };
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: "initial-secret" } };
+    const current: Omit<typeof assignment.server, "secretId"> & {
+      secretId: string | null;
+      userId: string;
+      spaceId: string;
+      enabled: boolean;
+    } = { ...assignment.server, userId: "u1", spaceId: "w1", enabled: true };
+    let row: { id: string; ciphertext: string } | null = {
+      id: "initial-secret",
+      ciphertext: "initial-ref",
+    };
+    let notify = (_ref: string) => {};
+    let afterLiveRefresh = false;
+    const load = vi.fn(async (ref: string) => {
+      if (ref === "initial-ref") return JSON.stringify(initial);
+      if (
+        change === "later-notification" ||
+        (afterLiveRefresh && change === "live-later-notification")
+      )
+        notify(ref);
+      if (change === "cancelled") controller.abort();
+      return JSON.stringify(change === "digest" ? initial : accepted);
+    });
+    const findServer = vi.fn(
+      async ({
+        where,
+      }: {
+        where: { id: string; spaceId: string; userId: string; enabled: boolean };
+      }) =>
+        current.id === where.id &&
+        current.spaceId === where.spaceId &&
+        current.userId === where.userId &&
+        current.enabled === where.enabled
+          ? current
+          : null,
+    );
+    const prisma = {
+      botMcpServer: {
+        findMany: vi.fn(async () => [assignment]),
+        findFirst: vi.fn(async () => assignment),
+      },
+      mcpServer: { findFirst: findServer },
+      secret: { findFirst: vi.fn(async () => row) },
+    };
+    const refresh = vi.fn();
+    let activeMaterial: OAuthMaterial | undefined;
+    const providerFor: McpOAuthBroker["providerFor"] = async (
+      _server,
+      _context,
+      loaded,
+      persisted,
+    ) => {
+      if (!loaded) throw new Error("expected loaded OAuth material");
+      activeMaterial = loaded.material;
+      return new StoredMcpOAuthProvider(SERVER.id, loaded.material, async () => undefined, {
+        refreshNetwork: async () => ({ fetch: globalThis.fetch, close: async () => undefined }),
+        refresh: async () => {
+          refresh();
+          Object.assign(loaded.material, structuredClone(accepted));
+          row = { id: "accepted-secret", ciphertext: "accepted-ref" };
+          current.secretId = row.id;
+          persisted?.({ id: row.id, ref: row.ciphertext, material: accepted });
+          // The broker adopts its committed grant before flushing the native store notification.
+          notify(row.ciphertext);
+          if (change === "revoked") current.secretId = null;
+          if (change === "disabled") current.enabled = false;
+          if (change === "endpoint") current.endpoint = "https://other.example.test/mcp";
+          if (change === "transport") current.transport = "sse";
+          if (change === "revision") current.revision += 1;
+          if (change === "foreign-owner") current.userId = "u2";
+          if (change === "pointer") current.secretId = "other-secret";
+          if (change === "missing-secret") row = null;
+          if (change === "ref") row!.ciphertext = "other-ref";
+        },
       });
-      const findServer = vi.fn(
-        async ({
-          where,
-        }: {
-          where: {
-            id: string;
-            spaceId: string;
-            userId: string;
-            enabled: boolean;
-          };
-        }) =>
-          current.id === where.id &&
-          current.spaceId === where.spaceId &&
-          current.userId === where.userId &&
-          current.enabled === where.enabled
-            ? current
-            : null,
-      );
-      const prisma = {
-        botMcpServer: {
-          findMany: vi.fn(async () => [assignment]),
-          findFirst: vi.fn(async () => assignment),
+    };
+    const state = { failNext: false, initializations: 0, calls: [] as string[] };
+    vi.stubGlobal("fetch", mcpFetch(state));
+    const connector = new McpConnector(
+      prisma as never,
+      {
+        load,
+        onChange(listener: (ref: string) => void) {
+          notify = listener;
+          return () => {};
         },
-        mcpServer: { findFirst: findServer },
-        secret: { findFirst: vi.fn(async () => row) },
-      };
-      const refresh = vi.fn();
-      let activeMaterial: OAuthMaterial | undefined;
-      const providerFor: McpOAuthBroker["providerFor"] = async (
-        _server,
-        _context,
-        loaded,
-        persisted,
-      ) => {
-        if (!loaded) throw new Error("expected loaded OAuth material");
-        activeMaterial = loaded.material;
-        return new StoredMcpOAuthProvider(
-          SERVER.id,
-          loaded.material,
-          async () => undefined,
-          {
-            refreshNetwork: async () => ({
-              fetch: globalThis.fetch,
-              close: async () => undefined,
-            }),
-            refresh: async () => {
-              refresh();
-              Object.assign(loaded.material, structuredClone(accepted));
-              row = { id: "accepted-secret", ciphertext: "accepted-ref" };
-              current.secretId = row.id;
-              persisted?.({
-                id: row.id,
-                ref: row.ciphertext,
-                material: accepted,
-              });
-              // The broker adopts its committed grant before flushing the native store notification.
-              notify(row.ciphertext);
-              if (change === "revoked") current.secretId = null;
-              if (change === "disabled") current.enabled = false;
-              if (change === "endpoint")
-                current.endpoint = "https://other.example.test/mcp";
-              if (change === "transport") current.transport = "sse";
-              if (change === "revision") current.revision += 1;
-              if (change === "foreign-owner") current.userId = "u2";
-              if (change === "pointer") current.secretId = "other-secret";
-              if (change === "missing-secret") row = null;
-              if (change === "ref") row!.ciphertext = "other-ref";
-            },
-          },
-        );
-      };
-      const state = {
-        failNext: false,
-        initializations: 0,
-        calls: [] as string[],
-      };
-      vi.stubGlobal("fetch", mcpFetch(state));
-      const connector = new McpConnector(
-        prisma as never,
-        {
-          load,
-          onChange(listener: (ref: string) => void) {
-            notify = listener;
-            return () => {};
-          },
-        } as never,
-        { network: TEST_NETWORK },
-        { providerFor } as McpOAuthBroker,
+      } as never,
+      { network: TEST_NETWORK },
+      { providerFor } as McpOAuthBroker,
+    );
+    try {
+      const tools = await connector.discoverTools(context as never);
+      expect(refresh).toHaveBeenCalledOnce();
+      const succeeds = change === "accepted" || change.startsWith("live-");
+      expect(tools).toHaveLength(succeeds ? 1 : 0);
+      expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(
+        succeeds ? 1 : 0,
       );
-      try {
-        const tools = await connector.discoverTools(context as never);
-        expect(refresh).toHaveBeenCalledOnce();
-        const succeeds = change === "accepted" || change.startsWith("live-");
-        expect(tools).toHaveLength(succeeds ? 1 : 0);
-        expect(
-          (connector as unknown as { sessions: Map<string, unknown> }).sessions
-            .size,
-        ).toBe(succeeds ? 1 : 0);
-        expect(prisma.secret.findFirst).toHaveBeenLastCalledWith({
-          where: { id: "accepted-secret", userId: "u1", spaceId: "w1" },
+      expect(prisma.secret.findFirst).toHaveBeenLastCalledWith({
+        where: { id: "accepted-secret", userId: "u1", spaceId: "w1" },
+      });
+      if (["missing-secret", "ref"].includes(change)) expect(findServer).not.toHaveBeenCalled();
+      else
+        expect(findServer).toHaveBeenCalledWith({
+          where: { id: SERVER.id, userId: "u1", spaceId: "w1", enabled: true },
         });
-        if (["missing-secret", "ref"].includes(change))
-          expect(findServer).not.toHaveBeenCalled();
-        else
-          expect(findServer).toHaveBeenCalledWith({
-            where: {
-              id: SERVER.id,
-              userId: "u1",
-              spaceId: "w1",
-              enabled: true,
-            },
-          });
-        if (change.startsWith("live-")) {
-          activeMaterial!.oauth!.obtainedAt = 1;
-          const events = [];
+      if (change.startsWith("live-")) {
+        activeMaterial!.oauth!.obtainedAt = 1;
+        const events = [];
+        for await (const event of connector.execute(
+          {
+            tool: tools[0]!.name,
+            args: {},
+            executionId: "live-refresh",
+            route: tools[0]!.route,
+          },
+          context as never,
+        ))
+          events.push(event);
+        expect(events).toMatchObject([{ type: "result" }]);
+        expect(refresh).toHaveBeenCalledTimes(2);
+        expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(1);
+        afterLiveRefresh = true;
+        if (change === "live-refresh") {
+          await connector.discoverTools(context as never);
+          expect(state.initializations).toBe(1);
+        } else {
+          if (change === "live-revoked") current.secretId = null;
+          if (change === "live-endpoint") current.endpoint = "https://other.example.test/mcp";
+          notify("accepted-ref");
+          const denied = [];
           for await (const event of connector.execute(
             {
               tool: tools[0]!.name,
               args: {},
-              executionId: "live-refresh",
+              executionId: "after-live-change",
               route: tools[0]!.route,
             },
             context as never,
           ))
-            events.push(event);
-          expect(events).toMatchObject([{ type: "result" }]);
-          expect(refresh).toHaveBeenCalledTimes(2);
-          expect(
-            (connector as unknown as { sessions: Map<string, unknown> })
-              .sessions.size,
-          ).toBe(1);
-          afterLiveRefresh = true;
-          if (change === "live-refresh") {
-            await connector.discoverTools(context as never);
-            expect(state.initializations).toBe(1);
-          } else {
-            if (change === "live-revoked") current.secretId = null;
-            if (change === "live-endpoint")
-              current.endpoint = "https://other.example.test/mcp";
-            notify("accepted-ref");
-            const denied = [];
-            for await (const event of connector.execute(
-              {
-                tool: tools[0]!.name,
-                args: {},
-                executionId: "after-live-change",
-                route: tools[0]!.route,
-              },
-              context as never,
-            ))
-              denied.push(event);
-            expect(denied).toMatchObject([{ type: "error" }]);
-            expect(state.calls).toEqual(["echo"]);
-            expect(
-              (connector as unknown as { sessions: Map<string, unknown> })
-                .sessions.size,
-            ).toBe(0);
-          }
-        } else if (change === "accepted") {
-          await connector.discoverTools(context as never);
-          expect(refresh).toHaveBeenCalledOnce();
-          expect(state.initializations).toBe(1);
+            denied.push(event);
+          expect(denied).toMatchObject([{ type: "error" }]);
+          expect(state.calls).toEqual(["echo"]);
+          expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(
+            0,
+          );
         }
-      } finally {
-        await connector.close();
+      } else if (change === "accepted") {
+        await connector.discoverTools(context as never);
+        expect(refresh).toHaveBeenCalledOnce();
+        expect(state.initializations).toBe(1);
       }
-    },
-  );
+    } finally {
+      await connector.close();
+    }
+  });
 
   it("keeps sessions across unchanged TTL reads and reconnects on observed rotation", async () => {
     vi.useFakeTimers();
     const fake = infisicalFake();
-    const store = new InfisicalSecretStore({
-      ...fake.options,
-      cacheTtlMs: 100,
-    });
+    const store = new InfisicalSecretStore({ ...fake.options, cacheTtlMs: 100 });
     const context = {
       operationId: "test",
       traceId: "test",
@@ -2204,31 +1843,17 @@ describe("MCP connector session cache", () => {
       JSON.stringify({ headers: { Authorization: "Bearer initial" } }),
       context,
     );
-    const assignment = {
-      ...ASSIGNMENT,
-      server: { ...SERVER, secretId: record.id },
-    };
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: record.id } };
     const prisma = {
       botMcpServer: {
         findMany: vi.fn(async () => [assignment]),
         findFirst: vi.fn(async () => assignment),
       },
-      secret: {
-        findFirst: vi.fn(async () => ({
-          id: record.id,
-          ciphertext: record.ref,
-        })),
-      },
+      secret: { findFirst: vi.fn(async () => ({ id: record.id, ciphertext: record.ref })) },
     };
-    const state = {
-      failNext: false,
-      initializations: 0,
-      headers: [] as Record<string, string>[],
-    };
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
     vi.stubGlobal("fetch", mcpFetch(state));
-    const connector = new McpConnector(prisma as never, store, {
-      network: TEST_NETWORK,
-    });
+    const connector = new McpConnector(prisma as never, store, { network: TEST_NETWORK });
     try {
       await connector.discoverTools(context);
       expect(state.initializations).toBe(1);
@@ -2250,11 +1875,9 @@ describe("MCP connector session cache", () => {
       await connector.discoverTools(context);
       expect(changed).toHaveBeenCalledExactlyOnceWith(record.ref);
       expect(state.initializations).toBe(2);
-      expect(
-        state.headers.some(
-          (headers) => headers.authorization === "Bearer rotated",
-        ),
-      ).toBe(true);
+      expect(state.headers.some((headers) => headers.authorization === "Bearer rotated")).toBe(
+        true,
+      );
     } finally {
       await connector.close();
       await store.close();
@@ -2283,31 +1906,17 @@ describe("MCP connector session cache", () => {
       JSON.stringify({ headers: { Authorization: "Bearer initial" } }),
       context,
     );
-    const assignment = {
-      ...ASSIGNMENT,
-      server: { ...SERVER, secretId: record.id },
-    };
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: record.id } };
     const prisma = {
       botMcpServer: {
         findMany: vi.fn(async () => [assignment]),
         findFirst: vi.fn(async () => assignment),
       },
-      secret: {
-        findFirst: vi.fn(async () => ({
-          id: record.id,
-          ciphertext: record.ref,
-        })),
-      },
+      secret: { findFirst: vi.fn(async () => ({ id: record.id, ciphertext: record.ref })) },
     };
-    const state = {
-      failNext: false,
-      initializations: 0,
-      headers: [] as Record<string, string>[],
-    };
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
     vi.stubGlobal("fetch", mcpFetch(state));
-    const connector = new McpConnector(prisma as never, store, {
-      network: TEST_NETWORK,
-    });
+    const connector = new McpConnector(prisma as never, store, { network: TEST_NETWORK });
     try {
       await connector.discoverTools(context);
       expect(state.initializations).toBe(1);
@@ -2322,19 +1931,14 @@ describe("MCP connector session cache", () => {
       await connector.discoverTools(context);
       expect(changed).not.toHaveBeenCalledWith(record.ref);
       expect(state.initializations).toBe(2);
-      expect(
-        state.headers.some(
-          (headers) => headers.authorization === "Bearer rotated",
-        ),
-      ).toBe(true);
+      expect(state.headers.some((headers) => headers.authorization === "Bearer rotated")).toBe(
+        true,
+      );
       fake.values.delete(record.ref.split(":").at(-1)!);
       await vi.advanceTimersByTimeAsync(100);
       // Discovery suppresses per-server errors; no tools from the deleted credential survive.
       await expect(connector.discoverTools(context)).resolves.toEqual([]);
-      expect(
-        (connector as unknown as { sessions: Map<string, unknown> }).sessions
-          .size,
-      ).toBe(0);
+      expect((connector as unknown as { sessions: Map<string, unknown> }).sessions.size).toBe(0);
     } finally {
       await connector.close();
       await store.close();
@@ -2348,10 +1952,7 @@ describe("MCP connector session cache", () => {
     const previousLogger = getLogger();
     installLogger(createLogger({ service: "test", sinks: [sink] }));
     const fake = infisicalFake();
-    const store = new InfisicalSecretStore({
-      ...fake.options,
-      cacheTtlMs: 100,
-    });
+    const store = new InfisicalSecretStore({ ...fake.options, cacheTtlMs: 100 });
     const context = {
       operationId: "test",
       traceId: "test",
@@ -2365,31 +1966,17 @@ describe("MCP connector session cache", () => {
       JSON.stringify({ headers: { Authorization: "Bearer initial" } }),
       context,
     );
-    const assignment = {
-      ...ASSIGNMENT,
-      server: { ...SERVER, secretId: record.id },
-    };
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: record.id } };
     const prisma = {
       botMcpServer: {
         findMany: vi.fn(async () => [assignment]),
         findFirst: vi.fn(async () => assignment),
       },
-      secret: {
-        findFirst: vi.fn(async () => ({
-          id: record.id,
-          ciphertext: record.ref,
-        })),
-      },
+      secret: { findFirst: vi.fn(async () => ({ id: record.id, ciphertext: record.ref })) },
     };
-    const state = {
-      failNext: false,
-      initializations: 0,
-      headers: [] as Record<string, string>[],
-    };
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
     vi.stubGlobal("fetch", mcpFetch(state));
-    const connector = new McpConnector(prisma as never, store, {
-      network: TEST_NETWORK,
-    });
+    const connector = new McpConnector(prisma as never, store, { network: TEST_NETWORK });
     try {
       await connector.discoverTools(context);
       expect(state.initializations).toBe(1);
@@ -2403,20 +1990,12 @@ describe("MCP connector session cache", () => {
       expect(state.headers.at(-1)?.authorization).toBe("Bearer initial");
       const events = [];
       for (const tool of tools) {
-        const call = {
-          tool: tool.name,
-          args: {},
-          executionId: "test",
-          route: tool.route,
-        };
-        for await (const event of connector.execute(call, context))
-          events.push(event);
+        const call = { tool: tool.name, args: {}, executionId: "test", route: tool.route };
+        for await (const event of connector.execute(call, context)) events.push(event);
       }
       expect(events).toMatchObject([{ type: "result" }]);
       expect(state.initializations).toBe(1);
-      expect(
-        sink.events.filter((event) => event.message !== "discovery.cache"),
-      ).toHaveLength(2);
+      expect(sink.events.filter((event) => event.message !== "discovery.cache")).toHaveLength(2);
       const log = JSON.stringify(sink.events);
       expect(log).toContain("MCP secret revalidation failed");
       expect(log).not.toContain("private response value");
@@ -2443,11 +2022,7 @@ describe("MCP connector session cache", () => {
   it("reconnects a legacy session when migration publishes the old ref through realtime", async () => {
     const fake = infisicalFake();
     const fanout = new InMemoryRealtimeFanout();
-    const source = new ComposedSecretStore(
-      new EncryptedSecretStore("fake-key"),
-      undefined,
-      fanout,
-    );
+    const source = new ComposedSecretStore(new EncryptedSecretStore("fake-key"), undefined, fanout);
     const target = new ComposedSecretStore(
       new EncryptedSecretStore("fake-key"),
       new InfisicalSecretStore(fake.options),
@@ -2474,10 +2049,7 @@ describe("MCP connector session cache", () => {
       context,
     );
     const row = { id: record.id, ciphertext: record.ref };
-    const assignment = {
-      ...ASSIGNMENT,
-      server: { ...SERVER, secretId: record.id },
-    };
+    const assignment = { ...ASSIGNMENT, server: { ...SERVER, secretId: record.id } };
     const prisma = {
       botMcpServer: {
         findMany: vi.fn(async () => [assignment]),
@@ -2487,21 +2059,14 @@ describe("MCP connector session cache", () => {
     };
     const state = { failNext: false, initializations: 0 };
     vi.stubGlobal("fetch", mcpFetch(state));
-    const connector = new McpConnector(prisma as never, worker, {
-      network: TEST_NETWORK,
-    });
+    const connector = new McpConnector(prisma as never, worker, { network: TEST_NETWORK });
     try {
       await connector.discoverTools(context);
       expect(state.initializations).toBe(1);
       const result = await migrateSecrets(
         {
           async *rows() {
-            yield {
-              id: row.id,
-              recordId: row.id,
-              ref: row.ciphertext,
-              label: "secret",
-            };
+            yield { id: row.id, recordId: row.id, ref: row.ciphertext, label: "secret" };
           },
           async replace(original, ref) {
             if (original.ref !== row.ciphertext) return false;
@@ -2538,9 +2103,7 @@ describe("MCP connector session cache", () => {
         description: `Tool ${index}`,
         inputSchema: {
           type: "object",
-          properties: {
-            value: { type: "string", description: `schema-marker-${index}` },
-          },
+          properties: { value: { type: "string", description: `schema-marker-${index}` } },
           required: ["value"],
         },
       })),
@@ -2587,12 +2150,10 @@ describe("MCP connector session cache", () => {
     };
     const demo = mcpFetch(state);
     const exa = mcpFetch(state, PLATFORM_PEOPLE_SEARCH_ENDPOINT);
-    vi.stubGlobal(
-      "fetch",
-      (input: string | URL | Request, init?: RequestInit) =>
-        logicalHref(input, init) === PLATFORM_PEOPLE_SEARCH_ENDPOINT
-          ? exa(input, init)
-          : demo(input, init),
+    vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) =>
+      logicalHref(input, init) === PLATFORM_PEOPLE_SEARCH_ENDPOINT
+        ? exa(input, init)
+        : demo(input, init),
     );
     const search = {
       ...ASSIGNMENT,
@@ -2715,42 +2276,25 @@ describe("MCP connector session cache", () => {
   it("redacts credentials of a connect that failed before the session was cached", async () => {
     const localAssignment = {
       ...ASSIGNMENT,
-      server: {
-        ...SERVER,
-        endpoint: "http://localhost:8123/api/mcp",
-        secretId: "secret-1",
-      },
+      server: { ...SERVER, endpoint: "http://localhost:8123/api/mcp", secretId: "secret-1" },
     };
     // The connect itself fails, so the session never reaches the cache. The upstream
     // body quotes back the header it was sent, the way a strict server rejects one.
     vi.stubGlobal(
       "fetch",
-      vi.fn(
-        async () =>
-          new Response("rejected credential local-key", { status: 500 }),
-      ),
+      vi.fn(async () => new Response("rejected credential local-key", { status: 500 })),
     );
     const append = vi.fn().mockResolvedValue(undefined);
     const prisma = {
       botMcpServer: { findMany: vi.fn().mockResolvedValue([localAssignment]) },
-      secret: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }),
-      },
+      secret: { findFirst: vi.fn().mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }) },
       run: { findUnique: vi.fn().mockResolvedValue({ threadId: "thread-1" }) },
-      deploymentSettings: {
-        findUnique: vi.fn(async () => ({ ownerUserId: "u1" })),
-      },
+      deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "u1" })) },
     };
     const connector = new McpConnector(
       prisma as never,
       {
-        load: vi
-          .fn()
-          .mockReturnValue(
-            JSON.stringify({ headers: { "X-Api-Key": "local-key" } }),
-          ),
+        load: vi.fn().mockReturnValue(JSON.stringify({ headers: { "X-Api-Key": "local-key" } })),
       } as never,
       { network: TEST_NETWORK, events: { append } },
     );
@@ -2775,18 +2319,11 @@ describe("MCP connector session cache", () => {
   it("redacts the same failed connect for every concurrent waiter", async () => {
     const localAssignment = {
       ...ASSIGNMENT,
-      server: {
-        ...SERVER,
-        endpoint: "http://localhost:8123/api/mcp",
-        secretId: "secret-1",
-      },
+      server: { ...SERVER, endpoint: "http://localhost:8123/api/mcp", secretId: "secret-1" },
     };
     vi.stubGlobal(
       "fetch",
-      vi.fn(
-        async () =>
-          new Response("rejected credential local-key", { status: 500 }),
-      ),
+      vi.fn(async () => new Response("rejected credential local-key", { status: 500 })),
     );
     const append = vi.fn().mockResolvedValue(undefined);
     const prisma = {
@@ -2794,24 +2331,14 @@ describe("MCP connector session cache", () => {
         findMany: vi.fn().mockResolvedValue([localAssignment]),
         findFirst: vi.fn().mockResolvedValue(localAssignment),
       },
-      secret: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }),
-      },
+      secret: { findFirst: vi.fn().mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }) },
       run: { findUnique: vi.fn().mockResolvedValue({ threadId: "thread-1" }) },
-      deploymentSettings: {
-        findUnique: vi.fn(async () => ({ ownerUserId: "u1" })),
-      },
+      deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "u1" })) },
     };
     const connector = new McpConnector(
       prisma as never,
       {
-        load: vi
-          .fn()
-          .mockReturnValue(
-            JSON.stringify({ headers: { "X-Api-Key": "local-key" } }),
-          ),
+        load: vi.fn().mockReturnValue(JSON.stringify({ headers: { "X-Api-Key": "local-key" } })),
       } as never,
       { network: TEST_NETWORK, events: { append } },
     );
@@ -2878,12 +2405,8 @@ describe("MCP connector session cache", () => {
   it("retries a remembered discovery failure on a refresh and serves runs from it", async () => {
     const server = { failNext: true, initializations: 0 };
     vi.stubGlobal("fetch", mcpFetch(server));
-    const prisma = {
-      botMcpServer: { findMany: vi.fn().mockResolvedValue([ASSIGNMENT]) },
-    };
-    const connector = new McpConnector(prisma as never, {} as never, {
-      network: TEST_NETWORK,
-    });
+    const prisma = { botMcpServer: { findMany: vi.fn().mockResolvedValue([ASSIGNMENT]) } };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
     const context = {
       spaceId: "w1",
       userId: "u1",
@@ -2908,9 +2431,7 @@ describe("MCP connector session cache", () => {
     vi.stubGlobal("fetch", mcpFetch({ failNext: true, initializations: 0 }));
     const append = vi.fn().mockResolvedValue(undefined);
     const connector = new McpConnector(
-      {
-        botMcpServer: { findMany: vi.fn().mockResolvedValue([ASSIGNMENT]) },
-      } as never,
+      { botMcpServer: { findMany: vi.fn().mockResolvedValue([ASSIGNMENT]) } } as never,
       {} as never,
       { network: TEST_NETWORK, events: { append } },
     );
@@ -2951,8 +2472,7 @@ describe("MCP connector session cache", () => {
       calls: [] as string[],
       tools: Array.from({ length: 30 }, (_, index) => ({
         name: `tool_${String(index).padStart(2, "0")}`,
-        description:
-          index === 29 ? "Find the final report" : `Utility ${index}`,
+        description: index === 29 ? "Find the final report" : `Utility ${index}`,
         inputSchema: {
           type: "object",
           properties: { value: { type: "string" } },
@@ -2980,8 +2500,7 @@ describe("MCP connector session cache", () => {
     const [search, load, execute] = await connector.discoverTools(context);
     const collect = async (call: Parameters<McpConnector["execute"]>[0]) => {
       const events: unknown[] = [];
-      for await (const event of connector.execute(call as never, context))
-        events.push(event);
+      for await (const event of connector.execute(call as never, context)) events.push(event);
       return events;
     };
 
@@ -3045,10 +2564,7 @@ describe("MCP connector session cache", () => {
         type: "result",
         data: {
           group: "demo",
-          names: Array.from(
-            { length: 30 },
-            (_, index) => `tool_${String(index).padStart(2, "0")}`,
-          ),
+          names: Array.from({ length: 30 }, (_, index) => `tool_${String(index).padStart(2, "0")}`),
         },
       },
     ]);
@@ -3108,11 +2624,7 @@ describe("MCP connector session cache", () => {
       call: {
         tool: "mcp__demo__tool_29",
         args: { value: "ok" },
-        route: {
-          connectorId: "mcp",
-          resourceId: "server-1",
-          toolName: "tool_29",
-        },
+        route: { connectorId: "mcp", resourceId: "server-1", toolName: "tool_29" },
       },
     });
     expect(await collect(resolved!.call)).toMatchObject([{ type: "result" }]);
@@ -3133,16 +2645,10 @@ describe("MCP connector session cache", () => {
         failNext: false,
         initializations: 0,
         calls: [] as string[],
-        tools: Array.from(
-          { length: path === "direct" ? 1 : 21 },
-          (_, index) => ({
-            name: `tool_${index}`,
-            inputSchema: {
-              type: "object",
-              properties: { value: { type: "string" } },
-            },
-          }),
-        ),
+        tools: Array.from({ length: path === "direct" ? 1 : 21 }, (_, index) => ({
+          name: `tool_${index}`,
+          inputSchema: { type: "object", properties: { value: { type: "string" } } },
+        })),
       };
       vi.stubGlobal("fetch", mcpFetch(state));
       const prisma = {
@@ -3151,9 +2657,7 @@ describe("MCP connector session cache", () => {
           findFirst: vi.fn(async () => assignment),
         },
       };
-      const connector = new McpConnector(prisma as never, {} as never, {
-        network: TEST_NETWORK,
-      });
+      const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
       const context = {
         spaceId: "w1",
         userId: "u1",
@@ -3169,9 +2673,7 @@ describe("MCP connector session cache", () => {
           route: exposed[0]!.route,
         };
         if (path === "direct") return call;
-        const execute = exposed.find(
-          (tool) => tool.name === "connectors_execute_tool",
-        )!;
+        const execute = exposed.find((tool) => tool.name === "connectors_execute_tool")!;
         return (await connector.resolveCall(
           {
             ...call,
@@ -3184,8 +2686,7 @@ describe("MCP connector session cache", () => {
       };
       const collect = async (call: Parameters<McpConnector["execute"]>[0]) => {
         const events = [];
-        for await (const event of connector.execute(call, context))
-          events.push(event);
+        for await (const event of connector.execute(call, context)) events.push(event);
         return events;
       };
       try {
@@ -3195,11 +2696,7 @@ describe("MCP connector session cache", () => {
         if (revision === "missing") delete route.resourceRevision;
         const initializations = state.initializations;
         expect(await collect({ ...old, route })).toEqual([
-          {
-            type: "error",
-            message:
-              "MCP server changed; rediscover the tool before trying again",
-          },
+          { type: "error", message: "MCP server changed; rediscover the tool before trying again" },
         ]);
         expect(state.initializations).toBe(initializations);
         expect(state.calls).toEqual([]);
@@ -3222,12 +2719,10 @@ describe("MCP connector session cache", () => {
       failNext: false,
       initializations: 0,
       calls: [] as string[],
-      tools: ["__catalog_search", "__catalog_load", "__catalog_execute"].map(
-        (name) => ({
-          name,
-          inputSchema: { type: "object" },
-        }),
-      ),
+      tools: ["__catalog_search", "__catalog_load", "__catalog_execute"].map((name) => ({
+        name,
+        inputSchema: { type: "object" },
+      })),
     };
     vi.stubGlobal("fetch", mcpFetch(state));
     const prisma = {
@@ -3247,25 +2742,13 @@ describe("MCP connector session cache", () => {
     } as never;
 
     for (const tool of await connector.discoverTools(context)) {
-      const call = {
-        tool: tool.name,
-        args: {},
-        executionId: tool.name,
-        route: tool.route,
-      };
-      await expect(
-        connector.resolveCall(call, context),
-      ).resolves.toBeUndefined();
+      const call = { tool: tool.name, args: {}, executionId: tool.name, route: tool.route };
+      await expect(connector.resolveCall(call, context)).resolves.toBeUndefined();
       const events = [];
-      for await (const event of connector.execute(call, context))
-        events.push(event);
+      for await (const event of connector.execute(call, context)) events.push(event);
       expect(events).toMatchObject([{ type: "result" }]);
     }
-    expect(state.calls).toEqual([
-      "__catalog_search",
-      "__catalog_load",
-      "__catalog_execute",
-    ]);
+    expect(state.calls).toEqual(["__catalog_search", "__catalog_load", "__catalog_execute"]);
     await connector.close();
   });
 
@@ -3304,42 +2787,29 @@ describe("MCP connector session cache", () => {
       );
       const invalidate = vi.spyOn(provider, "invalidateCredentials");
       const connector = new McpConnector(
-        {
-          botMcpServer: { findMany: vi.fn().mockResolvedValue([ASSIGNMENT]) },
-        } as never,
+        { botMcpServer: { findMany: vi.fn().mockResolvedValue([ASSIGNMENT]) } } as never,
         {} as never,
         {
           network: {
-            resolveHostname: async () => [
-              { address: "203.0.113.10", family: 4 },
-            ],
-            fetch: vi.fn(
-              async (input: string | URL | Request, init?: RequestInit) => {
-                const request = new Request(input, init);
-                const url = logicalHref(input, init);
-                requests.push({ method: request.method, url });
-                if (url === SERVER.endpoint) {
-                  return new Response(null, {
-                    status: 401,
-                    headers: {
-                      "WWW-Authenticate": `Bearer resource_metadata="${metadataUrl}"`,
-                    },
-                  });
-                }
-                if (url === "https://auth.example.test/token") {
-                  return Response.json(
-                    { error: "invalid_client" },
-                    { status: 400 },
-                  );
-                }
-                return new Response(null, { status: 404 });
-              },
-            ),
+            resolveHostname: async () => [{ address: "203.0.113.10", family: 4 }],
+            fetch: vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+              const request = new Request(input, init);
+              const url = logicalHref(input, init);
+              requests.push({ method: request.method, url });
+              if (url === SERVER.endpoint) {
+                return new Response(null, {
+                  status: 401,
+                  headers: { "WWW-Authenticate": `Bearer resource_metadata="${metadataUrl}"` },
+                });
+              }
+              if (url === "https://auth.example.test/token") {
+                return Response.json({ error: "invalid_client" }, { status: 400 });
+              }
+              return new Response(null, { status: 404 });
+            }),
           },
         },
-        {
-          providerFor: vi.fn().mockResolvedValue(provider),
-        } as unknown as McpOAuthBroker,
+        { providerFor: vi.fn().mockResolvedValue(provider) } as unknown as McpOAuthBroker,
       );
 
       try {
@@ -3352,29 +2822,17 @@ describe("MCP connector session cache", () => {
           } as never),
         ).resolves.toEqual([]);
 
-        expect(
-          requests
-            .slice(0, 2)
-            .map((request) => `${request.method} ${request.url}`),
-        ).toEqual([
+        expect(requests.slice(0, 2).map((request) => `${request.method} ${request.url}`)).toEqual([
           `POST ${SERVER.endpoint}`,
           "POST https://auth.example.test/token",
         ]);
         expect(invalidate.mock.calls).toEqual([["client"], ["tokens"]]);
         expect(provider.clientInformation()).toBeUndefined();
         await expect(provider.tokens()).resolves.toBeUndefined();
-        expect(requests.some((request) => request.url === metadataUrl)).toBe(
-          false,
-        );
+        expect(requests.some((request) => request.url === metadataUrl)).toBe(false);
         // Native invalid_client recovery retains validated discovery instead of following a new challenge.
-        expect(provider.discoveryState()?.authorizationServerUrl).toBe(
-          "https://auth.example.test",
-        );
-        expect(
-          requests.every(
-            (request) => new URL(request.url).protocol === "https:",
-          ),
-        ).toBe(true);
+        expect(provider.discoveryState()?.authorizationServerUrl).toBe("https://auth.example.test");
+        expect(requests.every((request) => new URL(request.url).protocol === "https:")).toBe(true);
       } finally {
         await connector.close();
       }
@@ -3390,9 +2848,7 @@ describe("MCP connector session cache", () => {
     vi.stubGlobal("fetch", mcpFetch(state, "http://localhost:8123/api/mcp"));
     const prisma = {
       botMcpServer: { findMany: vi.fn().mockResolvedValue([localAssignment]) },
-      deploymentSettings: {
-        findUnique: vi.fn(async () => ({ ownerUserId: "u1" })),
-      },
+      deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "u1" })) },
     };
     const connector = new McpConnector(prisma as never, {} as never);
 
@@ -3408,30 +2864,16 @@ describe("MCP connector session cache", () => {
   });
 
   it("sends stored credentials to an explicitly configured localhost HTTP server", async () => {
-    const state = {
-      failNext: false,
-      initializations: 0,
-      headers: [] as Record<string, string>[],
-    };
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
     const localAssignment = {
       ...ASSIGNMENT,
-      server: {
-        ...SERVER,
-        endpoint: "http://localhost:8123/api/mcp",
-        secretId: "secret-1",
-      },
+      server: { ...SERVER, endpoint: "http://localhost:8123/api/mcp", secretId: "secret-1" },
     };
     vi.stubGlobal("fetch", mcpFetch(state, "http://localhost:8123/api/mcp"));
     const prisma = {
       botMcpServer: { findMany: vi.fn().mockResolvedValue([localAssignment]) },
-      secret: {
-        findFirst: vi
-          .fn()
-          .mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }),
-      },
-      deploymentSettings: {
-        findUnique: vi.fn(async () => ({ ownerUserId: "u1" })),
-      },
+      secret: { findFirst: vi.fn().mockResolvedValue({ id: "secret-1", ciphertext: "encrypted" }) },
+      deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "u1" })) },
     };
     const connector = new McpConnector(
       prisma as never,
@@ -3439,10 +2881,7 @@ describe("MCP connector session cache", () => {
         load: vi
           .fn()
           .mockReturnValue(
-            JSON.stringify({
-              secret: "local-token",
-              headers: { "X-Api-Key": "local-key" },
-            }),
+            JSON.stringify({ secret: "local-token", headers: { "X-Api-Key": "local-key" } }),
           ),
       } as never,
     );
@@ -3494,14 +2933,12 @@ describe("MCP connector session cache", () => {
 
     state.failNext = true;
     const failed: unknown[] = [];
-    for await (const event of connector.execute(call, context))
-      failed.push(event);
+    for await (const event of connector.execute(call, context)) failed.push(event);
     expect(failed).toMatchObject([{ type: "error" }]);
 
     state.failNext = false;
     const events: unknown[] = [];
-    for await (const event of connector.execute(call, context))
-      events.push(event);
+    for await (const event of connector.execute(call, context)) events.push(event);
     expect(events).toMatchObject([{ type: "result" }]);
     expect(state.initializations).toBe(2);
 
@@ -3521,12 +2958,7 @@ describe("MCP connector session cache", () => {
       network: TEST_NETWORK,
     });
     const contextFor = (spaceId: string, userId: string) =>
-      ({
-        spaceId,
-        userId,
-        botId: "bot-1",
-        signal: new AbortController().signal,
-      }) as never;
+      ({ spaceId, userId, botId: "bot-1", signal: new AbortController().signal }) as never;
 
     await connector.discoverTools(contextFor("w1", "u1"));
     expect(state.initializations).toBe(1);
@@ -3559,20 +2991,11 @@ describe("MCP connector private endpoints", () => {
     vi.stubGlobal("fetch", fetch);
     const connector = new McpConnector(
       {
-        botMcpServer: {
-          findMany: vi.fn().mockResolvedValue([privateAssignment]),
-        },
-        deploymentSettings: {
-          findUnique: vi.fn(async () => ({ ownerUserId: "owner" })),
-        },
+        botMcpServer: { findMany: vi.fn().mockResolvedValue([privateAssignment]) },
+        deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "owner" })) },
       } as never,
       {} as never,
-      {
-        network: {
-          fetch,
-          resolveHostname: async () => [{ address: "10.0.0.8", family: 4 }],
-        },
-      },
+      { network: { fetch, resolveHostname: async () => [{ address: "10.0.0.8", family: 4 }] } },
     );
     const tools = await connector.discoverTools({
       spaceId: "w1",
@@ -3585,55 +3008,42 @@ describe("MCP connector private endpoints", () => {
     await connector.close();
   });
 
-  it.each([
-    "http://localhost:3100/api/auth/get-session",
-    "https://127.0.0.1:3100/mcp",
-  ])("does not connect loopback %s for a non-owner", async (endpoint) => {
-    const fetch = vi.fn();
-    vi.stubGlobal("fetch", fetch);
-    const connector = new McpConnector(
-      {
-        botMcpServer: {
-          findMany: vi
-            .fn()
-            .mockResolvedValue([
-              { ...ASSIGNMENT, server: { ...SERVER, endpoint } },
-            ]),
-        },
-        deploymentSettings: {
-          findUnique: vi.fn(async () => ({ ownerUserId: "owner" })),
-        },
-      } as never,
-      {} as never,
-      {
-        network: {
-          fetch,
-          resolveHostname: async () => [{ address: "127.0.0.1", family: 4 }],
-        },
-      },
-    );
-    const tools = await connector.discoverTools({
-      spaceId: "w1",
-      userId: "u1",
-      botId: "bot-1",
-      signal: new AbortController().signal,
-    } as never);
-    expect(tools).toEqual([]);
-    expect(fetch).not.toHaveBeenCalled();
-    await connector.close();
-  });
+  it.each(["http://localhost:3100/api/auth/get-session", "https://127.0.0.1:3100/mcp"])(
+    "does not connect loopback %s for a non-owner",
+    async (endpoint) => {
+      const fetch = vi.fn();
+      vi.stubGlobal("fetch", fetch);
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi
+              .fn()
+              .mockResolvedValue([{ ...ASSIGNMENT, server: { ...SERVER, endpoint } }]),
+          },
+          deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "owner" })) },
+        } as never,
+        {} as never,
+        { network: { fetch, resolveHostname: async () => [{ address: "127.0.0.1", family: 4 }] } },
+      );
+      const tools = await connector.discoverTools({
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      } as never);
+      expect(tools).toEqual([]);
+      expect(fetch).not.toHaveBeenCalled();
+      await connector.close();
+    },
+  );
 
   it("connects a private IP when the current user is the deployment owner", async () => {
     const state = { failNext: false, initializations: 0 };
     vi.stubGlobal("fetch", mcpFetch(state, "http://10.0.0.8:3927/mcp"));
     const connector = new McpConnector(
       {
-        botMcpServer: {
-          findMany: vi.fn().mockResolvedValue([privateAssignment]),
-        },
-        deploymentSettings: {
-          findUnique: vi.fn(async () => ({ ownerUserId: "u1" })),
-        },
+        botMcpServer: { findMany: vi.fn().mockResolvedValue([privateAssignment]) },
+        deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "u1" })) },
       } as never,
       {} as never,
       {
@@ -3658,12 +3068,8 @@ describe("MCP connector private endpoints", () => {
     vi.stubGlobal("fetch", mcpFetch(state, "https://mcp.lan.test/mcp"));
     const connector = new McpConnector(
       {
-        botMcpServer: {
-          findMany: vi.fn().mockResolvedValue([lanDnsAssignment]),
-        },
-        deploymentSettings: {
-          findUnique: vi.fn(async () => ({ ownerUserId: "u1" })),
-        },
+        botMcpServer: { findMany: vi.fn().mockResolvedValue([lanDnsAssignment]) },
+        deploymentSettings: { findUnique: vi.fn(async () => ({ ownerUserId: "u1" })) },
       } as never,
       {} as never,
       {
@@ -3709,18 +3115,8 @@ describe("allowlistDrift", () => {
 });
 
 describe.each([
-  [
-    "Autumn",
-    "https://api.autumn.ai/mcp",
-    "AUTUMN_API_KEY",
-    "Recruiting research",
-  ],
-  [
-    "FullEnrich",
-    "https://mcp.fullenrich.com/mcp",
-    "FULLENRICH_API_KEY",
-    "Contact enrichment",
-  ],
+  ["Autumn", "https://api.autumn.ai/mcp", "AUTUMN_API_KEY", "Recruiting research"],
+  ["FullEnrich", "https://mcp.fullenrich.com/mcp", "FULLENRICH_API_KEY", "Contact enrichment"],
 ])("deployment %s credentials", (name, endpoint, env, label) => {
   afterEach(() => vi.unstubAllEnvs());
   const context = {
@@ -3744,9 +3140,7 @@ describe.each([
       official,
       context as never,
     );
-    expect(JSON.parse(result.plaintext!)).toEqual({
-      secret: "platform-service-key",
-    });
+    expect(JSON.parse(result.plaintext!)).toEqual({ secret: "platform-service-key" });
     expect(result.secret).toBeNull();
     expect(findFirst).not.toHaveBeenCalled();
     expect(load).not.toHaveBeenCalled();
@@ -3760,49 +3154,31 @@ describe.each([
     "https://mcp.fullenrich.com/mcp?redirect=other",
     "https://mcp.fullenrich.com.example.test/mcp",
     "http://mcp.fullenrich.com/mcp",
-  ])(
-    "never supplies a platform key to a different endpoint: %s",
-    async (endpoint) => {
-      vi.stubEnv(env, "platform-service-key");
-      const result = await loadMcpCredentialRecord(
-        {} as never,
-        {} as never,
-        { ...official, endpoint },
-        context as never,
-      );
-      expect(result.plaintext).toBeUndefined();
-    },
-  );
+  ])("never supplies a platform key to a different endpoint: %s", async (endpoint) => {
+    vi.stubEnv(env, "platform-service-key");
+    const result = await loadMcpCredentialRecord(
+      {} as never,
+      {} as never,
+      { ...official, endpoint },
+      context as never,
+    );
+    expect(result.plaintext).toBeUndefined();
+  });
 
   it("preserves actor-scoped personal credentials and refuses a missing owned secret", async () => {
     vi.stubEnv(env, "platform-service-key");
     const row = { id: "personal-secret", ciphertext: "encrypted-reference" };
-    const findFirst = vi
-      .fn()
-      .mockResolvedValueOnce(row)
-      .mockResolvedValueOnce(null);
+    const findFirst = vi.fn().mockResolvedValueOnce(row).mockResolvedValueOnce(null);
     const load = vi.fn().mockResolvedValue('{"secret":"personal-service-key"}');
     const server = { ...official, secretId: row.id };
     const prisma = { secret: { findFirst } } as never;
     const secrets = { load } as never;
-    const personal = await loadMcpCredentialRecord(
-      prisma,
-      secrets,
-      server,
-      context as never,
-    );
-    expect(JSON.parse(personal.plaintext!)).toEqual({
-      secret: "personal-service-key",
-    });
+    const personal = await loadMcpCredentialRecord(prisma, secrets, server, context as never);
+    expect(JSON.parse(personal.plaintext!)).toEqual({ secret: "personal-service-key" });
     expect(findFirst).toHaveBeenCalledWith({
       where: { id: row.id, userId: context.userId, spaceId: context.spaceId },
     });
-    const missing = await loadMcpCredentialRecord(
-      prisma,
-      secrets,
-      server,
-      context as never,
-    );
+    const missing = await loadMcpCredentialRecord(prisma, secrets, server, context as never);
     expect(missing.plaintext).toBeUndefined();
     expect(load).toHaveBeenCalledTimes(1);
   });
@@ -3810,33 +3186,21 @@ describe.each([
   it("reports an unconfigured platform service before authentication when its key is absent", async () => {
     vi.stubEnv(env, " ");
     await expect(
-      loadMcpCredentialRecord(
-        {} as never,
-        {} as never,
-        official,
-        context as never,
-      ),
+      loadMcpCredentialRecord({} as never, {} as never, official, context as never),
     ).rejects.toThrow(`${label} is not configured on this server`);
   });
 
   it("activates the existing service assignment after platform configuration without network or OAuth while unavailable", async () => {
     vi.stubEnv(env, " ");
     vi.useFakeTimers({ toFake: ["Date"] });
-    const state = {
-      failNext: false,
-      initializations: 0,
-      headers: [] as Record<string, string>[],
-    };
+    const state = { failNext: false, initializations: 0, headers: [] as Record<string, string>[] };
     const fetch = mcpFetch(state, official.endpoint);
     vi.stubGlobal("fetch", fetch);
     const providerFor = vi.fn().mockResolvedValue(undefined);
     const findMany = vi
       .fn()
       .mockResolvedValue([
-        {
-          ...ASSIGNMENT,
-          server: { ...SERVER, ...official, slug: name.toLowerCase() },
-        },
+        { ...ASSIGNMENT, server: { ...SERVER, ...official, slug: name.toLowerCase() } },
       ]);
     const load = vi.fn();
     const connector = new McpConnector(
@@ -3847,9 +3211,7 @@ describe.each([
     );
     const scoped = { ...context, botId: ASSIGNMENT.botId };
     try {
-      await expect(connector.discoverTools(scoped as never)).resolves.toEqual(
-        [],
-      );
+      await expect(connector.discoverTools(scoped as never)).resolves.toEqual([]);
       expect(fetch).not.toHaveBeenCalled();
       expect(providerFor).not.toHaveBeenCalled();
       vi.stubEnv(env, "platform-service-key");
@@ -3859,9 +3221,7 @@ describe.each([
         expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
       ]);
       expect(
-        state.headers.every(
-          (headers) => headers.authorization === "Bearer platform-service-key",
-        ),
+        state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),
       ).toBe(true);
       expect(load).not.toHaveBeenCalled();
       expect(findMany).toHaveBeenLastCalledWith(
@@ -3912,17 +3272,13 @@ describe("first-party product OIDC MCP connection", () => {
         secretId: kind === "personal secret" ? "personal-secret" : null,
       };
       vi.stubGlobal("fetch", mcpFetch(state, server.endpoint));
-      const accessToken = vi
-        .fn()
-        .mockRejectedValue(new Error("Must not access product token"));
+      const accessToken = vi.fn().mockRejectedValue(new Error("Must not access product token"));
       const connector = new McpConnector(
         {
           botMcpServer: {
             findMany: vi
               .fn()
-              .mockResolvedValue(
-                kind === "no assignment" ? [] : [{ ...ASSIGNMENT, server }],
-              ),
+              .mockResolvedValue(kind === "no assignment" ? [] : [{ ...ASSIGNMENT, server }]),
           },
           secret: { findFirst: vi.fn().mockResolvedValue(null) },
         } as never,
@@ -3938,11 +3294,7 @@ describe("first-party product OIDC MCP connection", () => {
     },
   );
   it("does not retain a completed run's cancellation signal and denies revoked identity before another dispatch", async () => {
-    const state = {
-      failNext: false,
-      initializations: 0,
-      calls: [] as string[],
-    };
+    const state = { failNext: false, initializations: 0, calls: [] as string[] };
     vi.stubGlobal("fetch", mcpFetch(state, endpoint));
     let revoked = false;
     const accessToken = vi.fn(async (actor: AdapterContext) => {
@@ -3976,21 +3328,16 @@ describe("first-party product OIDC MCP connection", () => {
     };
     try {
       expect(
-        await connector.discoverTools({
-          ...context,
-          signal: firstRun.signal,
-        } as never),
+        await connector.discoverTools({ ...context, signal: firstRun.signal } as never),
       ).toHaveLength(1);
       firstRun.abort();
       const before = [];
-      for await (const event of connector.execute(call, context as never))
-        before.push(event);
+      for await (const event of connector.execute(call, context as never)) before.push(event);
       expect(before.at(-1)).toMatchObject({ type: "result" });
       expect(state.initializations).toBe(1);
       revoked = true;
       const after = [];
-      for await (const event of connector.execute(call, context as never))
-        after.push(event);
+      for await (const event of connector.execute(call, context as never)) after.push(event);
       expect(after.at(-1)).toMatchObject({ type: "error" });
       expect(state.calls).toEqual(["echo"]);
     } finally {
@@ -4003,21 +3350,15 @@ describe("first-party product OIDC MCP connection", () => {
       initializations: 0,
       headers: [] as Record<string, string>[],
       calls: [] as string[],
-      callResult: {
-        content: [{ type: "text", text: "first-access rotated-access" }],
-      },
+      callResult: { content: [{ type: "text", text: "first-access rotated-access" }] },
     };
     const native = mcpFetch(state, endpoint);
     let reject = false;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-        const request =
-          input instanceof Request ? input : new Request(input, init);
-        if (
-          reject &&
-          request.headers.get("authorization") === "Bearer first-access"
-        ) {
+        const request = input instanceof Request ? input : new Request(input, init);
+        if (reject && request.headers.get("authorization") === "Bearer first-access") {
           reject = false;
           return new Response(null, { status: 401 });
         }
@@ -4025,17 +3366,15 @@ describe("first-party product OIDC MCP connection", () => {
       }),
     );
     let token = "first-access";
-    const accessToken = vi.fn(
-      async (actor: AdapterContext, rejected?: string) => {
-        expect(actor.userId).toBe(context.userId);
-        expect(actor.spaceId).toBe(context.spaceId);
-        if (rejected) {
-          expect(rejected).toBe("first-access");
-          token = "rotated-access";
-        }
-        return token;
-      },
-    );
+    const accessToken = vi.fn(async (actor: AdapterContext, rejected?: string) => {
+      expect(actor.userId).toBe(context.userId);
+      expect(actor.spaceId).toBe(context.spaceId);
+      if (rejected) {
+        expect(rejected).toBe("first-access");
+        token = "rotated-access";
+      }
+      return token;
+    });
     const server = { ...SERVER, endpoint };
     const row = { ...ASSIGNMENT, server };
     const prisma = {
@@ -4076,13 +3415,11 @@ describe("first-party product OIDC MCP connection", () => {
       expect(JSON.stringify(events)).not.toContain("first-access");
       expect(JSON.stringify(events)).not.toContain("rotated-access");
       expect(accessToken.mock.calls.length).toBeGreaterThan(before);
+      expect(accessToken.mock.calls.filter(([, rejected]) => rejected !== undefined)).toHaveLength(
+        1,
+      );
       expect(
-        accessToken.mock.calls.filter(([, rejected]) => rejected !== undefined),
-      ).toHaveLength(1);
-      expect(
-        state.headers.some(
-          (headers) => headers.authorization === "Bearer rotated-access",
-        ),
+        state.headers.some((headers) => headers.authorization === "Bearer rotated-access"),
       ).toBe(true);
       expect(providerFor).not.toHaveBeenCalled();
       expect(put).not.toHaveBeenCalled();
@@ -4129,9 +3466,7 @@ describe("local native Instantly campaign and lead tools", () => {
         id: CAMPAIGN,
         status: 0,
         stop_on_reply: true,
-        sequences: [
-          { steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] },
-        ],
+        sequences: [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }],
       } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
       campaigns: [] as Record<string, unknown>[],
@@ -4142,25 +3477,16 @@ describe("local native Instantly campaign and lead tools", () => {
     };
     const prisma = {
       botMcpServer: { findFirst: vi.fn(async () => assignment) },
-      secret: {
-        findFirst: vi.fn(async () => ({
-          id: "key-1",
-          ciphertext: "encrypted",
-        })),
-      },
+      secret: { findFirst: vi.fn(async () => ({ id: "key-1", ciphertext: "encrypted" })) },
       mcpServer: { findFirst: vi.fn(async () => server) },
       run: {
         findFirst: vi.fn(async ({ where }) =>
-          where.id === "run-1"
-            ? { thread: { activeRecruitingRoleId: state.activeRoleId } }
-            : null,
+          where.id === "run-1" ? { thread: { activeRecruitingRoleId: state.activeRoleId } } : null,
         ),
       },
       recruitingRole: {
         findFirst: vi.fn(async ({ where }) =>
-          where.id === "role-1" &&
-          where.spaceId === "w1" &&
-          where.userId === "u1"
+          where.id === "role-1" && where.spaceId === "w1" && where.userId === "u1"
             ? { id: "role-1", title: "Founding Engineer" }
             : null,
         ),
@@ -4173,9 +3499,7 @@ describe("local native Instantly campaign and lead tools", () => {
         ),
       },
       externalEffect: {
-        findUnique: vi.fn(
-          async ({ where }) => state.effects.get(where.idempotencyKey) ?? null,
-        ),
+        findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
         findFirst: vi.fn(async () => {
           const bound = [...state.effects.values()].filter(
             (e) => e.kind === "instantly_role_campaign",
@@ -4188,49 +3512,34 @@ describe("local native Instantly campaign and lead tools", () => {
           return effect;
         }),
         update: vi.fn(async ({ where, data }) => {
-          const effect = [...state.effects.values()].find(
-            (e) => e.id === where.id,
-          )!;
+          const effect = [...state.effects.values()].find((e) => e.id === where.id)!;
           Object.assign(effect, data);
           return effect;
         }),
       },
     };
-    const secrets = {
-      load: vi.fn(async () => JSON.stringify({ secret: state.key })),
-    };
+    const secrets = { load: vi.fn(async () => JSON.stringify({ secret: state.key })) };
     vi.stubGlobal(
       "fetch",
       vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const request = new Request(logicalHref(input, init), init);
         const url = new URL(request.url);
         expect(url.origin).toBe("https://api.instantly.ai");
-        expect(request.headers.get("authorization")).toBe(
-          `Bearer ${state.key}`,
-        );
+        expect(request.headers.get("authorization")).toBe(`Bearer ${state.key}`);
         const text = await request.text();
         const body = text ? JSON.parse(text) : undefined;
         const path = `${url.pathname}${url.search}`;
-        state.requests.push({
-          method: request.method,
-          path,
-          ...(body ? { body } : {}),
-        });
+        state.requests.push({ method: request.method, path, ...(body ? { body } : {}) });
         const account = url.pathname.match(/^\/api\/v2\/accounts\/(.+)$/);
         if (account)
           return new Response("{}", {
-            status: state.accounts.includes(decodeURIComponent(account[1]!))
-              ? 200
-              : 404,
+            status: state.accounts.includes(decodeURIComponent(account[1]!)) ? 200 : 404,
           });
         if (url.pathname === "/api/v2/accounts")
-          return Response.json({
-            items: state.accounts.map((email) => ({ email })),
-          });
+          return Response.json({ items: state.accounts.map((email) => ({ email })) });
         if (url.pathname === "/api/v2/campaigns" && request.method === "GET")
           return Response.json({ items: state.campaigns });
-        if (url.pathname === "/api/v2/campaigns")
-          return Response.json({ id: CAMPAIGN, ...body });
+        if (url.pathname === "/api/v2/campaigns") return Response.json({ id: CAMPAIGN, ...body });
         if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}`) {
           if (state.deleted) return new Response("{}", { status: 404 });
           if (request.method === "PATCH") Object.assign(state.campaign, body);
@@ -4238,18 +3547,10 @@ describe("local native Instantly campaign and lead tools", () => {
         }
         if (url.pathname.startsWith(`/api/v2/campaigns/${CAMPAIGN}/`))
           return Response.json(state.campaign);
-        const listed = state.campaigns.find(
-          (c) => url.pathname === `/api/v2/campaigns/${c.id}`,
-        );
+        const listed = state.campaigns.find((c) => url.pathname === `/api/v2/campaigns/${c.id}`);
         if (listed) return Response.json(listed);
-        if (
-          url.pathname === "/api/v2/leads/list" &&
-          body.campaign &&
-          !body.contacts
-        )
-          return Response.json({
-            items: body.campaign === "with-leads" ? [{ id: "l" }] : [],
-          });
+        if (url.pathname === "/api/v2/leads/list" && body.campaign && !body.contacts)
+          return Response.json({ items: body.campaign === "with-leads" ? [{ id: "l" }] : [] });
         if (url.pathname === "/api/v2/leads/list")
           return Response.json({
             items: state.existingLeads.filter((lead) =>
@@ -4262,13 +3563,11 @@ describe("local native Instantly campaign and lead tools", () => {
           return Response.json({
             status: "success",
             leads_uploaded: body.leads.length,
-            created_leads: body.leads.map(
-              (lead: { email: string }, index: number) => ({
-                index,
-                id: `lead-${lead.email}`,
-                email: lead.email,
-              }),
-            ),
+            created_leads: body.leads.map((lead: { email: string }, index: number) => ({
+              index,
+              id: `lead-${lead.email}`,
+              email: lead.email,
+            })),
           });
         if (url.pathname === "/api/v2/leads/update-interest-status")
           return Response.json({ message: "queued" }, { status: 202 });
@@ -4281,23 +3580,15 @@ describe("local native Instantly campaign and lead tools", () => {
     const run = async (name: string, args: Record<string, unknown>) => {
       const events = [];
       for await (const event of connector.execute(
-        {
-          tool: `instantly__demo__${name}`,
-          route: route(name),
-          args,
-          executionId: name,
-        },
+        { tool: `instantly__demo__${name}`, route: route(name), args, executionId: name },
         context as never,
       ))
         events.push(event);
       return events;
     };
     const result = (events: unknown[]) =>
-      (
-        events[0] as {
-          data: { structuredContent: { result: Record<string, unknown> } };
-        }
-      ).data.structuredContent.result;
+      (events[0] as { data: { structuredContent: { result: Record<string, unknown> } } }).data
+        .structuredContent.result;
     return { state, run, result, prisma };
   }
 
@@ -4366,9 +3657,7 @@ describe("local native Instantly campaign and lead tools", () => {
         },
       },
     });
-    expect(f.state.requests).toEqual([
-      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
-    ]);
+    expect(f.state.requests).toEqual([{ method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` }]);
   });
 
   it("refuses a foreign sending mailbox without creating anything", async () => {
@@ -4378,9 +3667,7 @@ describe("local native Instantly campaign and lead tools", () => {
       eaccount: "someone@else.test",
     });
     expect(events[0]).toMatchObject({ type: "error" });
-    expect((events[0] as { message: string }).message).toMatch(
-      /not one of your connected/,
-    );
+    expect((events[0] as { message: string }).message).toMatch(/not one of your connected/);
     expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([]);
   });
 
@@ -4390,14 +3677,8 @@ describe("local native Instantly campaign and lead tools", () => {
       campaign_id: CAMPAIGN,
       leads: [{ email: "admin1@wekruit.com", first_name: "Adam" }],
     });
-    await f.run("list_leads", {
-      campaign_id: CAMPAIGN,
-      email: "admin1@wekruit.com",
-    });
-    await f.run("update_lead_interest", {
-      lead_email: "admin1@wekruit.com",
-      interest_value: 1,
-    });
+    await f.run("list_leads", { campaign_id: CAMPAIGN, email: "admin1@wekruit.com" });
+    await f.run("update_lead_interest", { lead_email: "admin1@wekruit.com", interest_value: 1 });
     await f.run("pause_campaign", { campaign_id: CAMPAIGN });
     await f.run("activate_campaign", { campaign_id: CAMPAIGN });
     expect(f.state.requests).toEqual([
@@ -4414,11 +3695,7 @@ describe("local native Instantly campaign and lead tools", () => {
       {
         method: "POST",
         path: "/api/v2/leads/list",
-        body: {
-          campaign: CAMPAIGN,
-          contacts: ["admin1@wekruit.com"],
-          limit: 50,
-        },
+        body: { campaign: CAMPAIGN, contacts: ["admin1@wekruit.com"], limit: 50 },
       },
       {
         method: "POST",
@@ -4444,9 +3721,7 @@ describe("local native Instantly campaign and lead tools", () => {
       leads: [{ email: "admin1@wekruit.com" }],
     });
     expect(events[0]).toMatchObject({ type: "error" });
-    expect(f.state.requests.some((r) => r.path === "/api/v2/leads/add")).toBe(
-      false,
-    );
+    expect(f.state.requests.some((r) => r.path === "/api/v2/leads/add")).toBe(false);
   });
 
   it("gates activation behind an explicit one-time approval; lead/campaign writes are not read-only", async () => {
@@ -4456,22 +3731,13 @@ describe("local native Instantly campaign and lead tools", () => {
         toolName: "native_instantly_activate_campaign",
       }),
     ).toBe(true);
-    for (const name of [
-      "create_campaign",
-      "add_leads",
-      "ensure_role_campaign",
-      "pause_campaign",
-    ])
-      expect(
-        toolRequiresApproval(`instantly__demo__${name}`, true, false),
-      ).toBe(true);
+    for (const name of ["create_campaign", "add_leads", "ensure_role_campaign", "pause_campaign"])
+      expect(toolRequiresApproval(`instantly__demo__${name}`, true, false)).toBe(true);
   });
 
   it("ensure_role_campaign is idempotent and keeps stop_on_reply on", async () => {
     const f = fixture();
-    const first = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const first = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(first).toMatchObject({
       created: true,
       campaignId: CAMPAIGN,
@@ -4481,17 +3747,11 @@ describe("local native Instantly campaign and lead tools", () => {
     const create = f.state.requests.find((r) => r.method === "POST")!;
     expect(create).toMatchObject({
       path: "/api/v2/campaigns",
-      body: {
-        name: "Founding Engineer",
-        stop_on_reply: true,
-        email_list: ["team@example.test"],
-      },
+      body: { name: "Founding Engineer", stop_on_reply: true, email_list: ["team@example.test"] },
     });
     expect(JSON.stringify(create.body)).not.toContain("[role");
     f.state.requests.length = 0;
-    const second = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(second).toMatchObject({
       created: false,
       campaignId: CAMPAIGN,
@@ -4499,27 +3759,21 @@ describe("local native Instantly campaign and lead tools", () => {
     });
     // An empty mapped campaign with no same-title alternative stays mapped; nothing is created.
     expect(f.state.requests.filter((r) => r.method !== "GET")).toEqual([
-      {
-        method: "POST",
-        path: "/api/v2/leads/list",
-        body: { campaign: CAMPAIGN, limit: 1 },
-      },
+      { method: "POST", path: "/api/v2/leads/list", body: { campaign: CAMPAIGN, limit: 1 } },
     ]);
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
     f.state.campaign.stop_on_reply = false;
     f.state.requests.length = 0;
-    const third = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const third = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(third).toMatchObject({ created: false, stopOnReplyPatched: true });
     expect(f.state.requests.find((r) => r.method === "PATCH")).toEqual({
       method: "PATCH",
       path: `/api/v2/campaigns/${CAMPAIGN}`,
       body: { stop_on_reply: true },
     });
-    expect(
-      await f.run("ensure_role_campaign", { role_id: "other-role" }),
-    ).toMatchObject([{ type: "error" }]);
+    expect(await f.run("ensure_role_campaign", { role_id: "other-role" })).toMatchObject([
+      { type: "error" },
+    ]);
   });
 
   it("ensure_role_campaign send_hours pauses a live campaign, saves the hours and asks to activate", async () => {
@@ -4528,22 +3782,11 @@ describe("local native Instantly campaign and lead tools", () => {
     f.state.campaign.status = 1;
     f.state.requests.length = 0;
     const result = f.result(
-      await f.run("ensure_role_campaign", {
-        role_id: "role-1",
-        send_hours: "any_time",
-      }),
+      await f.run("ensure_role_campaign", { role_id: "role-1", send_hours: "any_time" }),
     );
-    expect(result).toMatchObject({
-      sendHours: "any_time",
-      paused: expect.any(String),
-    });
-    const writes = f.state.requests.filter(
-      (r) => r.method !== "GET" && !r.path.endsWith("/list"),
-    );
-    expect(writes[0]).toEqual({
-      method: "POST",
-      path: `/api/v2/campaigns/${CAMPAIGN}/pause`,
-    });
+    expect(result).toMatchObject({ sendHours: "any_time", paused: expect.any(String) });
+    const writes = f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/list"));
+    expect(writes[0]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` });
     expect(writes[1]).toMatchObject({
       method: "PATCH",
       body: {
@@ -4568,37 +3811,20 @@ describe("local native Instantly campaign and lead tools", () => {
       eaccount: "team@example.test",
     });
     f.state.requests.length = 0;
-    const ensured = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(ensured).toMatchObject({ created: false, campaignId: CAMPAIGN });
-    expect(
-      f.state.requests.filter((r) => r.path === "/api/v2/campaigns"),
-    ).toEqual([]);
+    expect(f.state.requests.filter((r) => r.path === "/api/v2/campaigns")).toEqual([]);
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
     // A second create never steals an existing mapping.
-    await f.run("create_campaign", {
-      name: "Another",
-      eaccount: "team@example.test",
-    });
+    await f.run("create_campaign", { name: "Another", eaccount: "team@example.test" });
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
   });
 
   it("ensure_role_campaign adopts an unbound same-title draft (leads first) before creating", async () => {
     const f = fixture();
     f.state.campaigns = [
-      {
-        id: "active",
-        name: "Founding Engineer",
-        status: 1,
-        timestamp_created: "2026-10-23",
-      },
-      {
-        id: "empty",
-        name: "founding engineer",
-        status: 0,
-        timestamp_created: "2026-10-22",
-      },
+      { id: "active", name: "Founding Engineer", status: 1, timestamp_created: "2026-10-23" },
+      { id: "empty", name: "founding engineer", status: 0, timestamp_created: "2026-10-22" },
       {
         id: "with-leads",
         name: "Founding Engineer",
@@ -4606,25 +3832,12 @@ describe("local native Instantly campaign and lead tools", () => {
         timestamp_created: "2026-10-01",
         stop_on_reply: true,
       },
-      {
-        id: "prefix",
-        name: "Founding Engineer v2",
-        status: 0,
-        timestamp_created: "2026-10-23",
-      },
+      { id: "prefix", name: "Founding Engineer v2", status: 0, timestamp_created: "2026-10-23" },
     ];
-    const ensured = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
-    expect(ensured).toMatchObject({
-      adopted: true,
-      created: false,
-      campaignId: "with-leads",
-    });
+    const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(ensured).toMatchObject({ adopted: true, created: false, campaignId: "with-leads" });
     expect(
-      f.state.requests.some(
-        (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
-      ),
+      f.state.requests.some((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
     ).toBe(false);
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
   });
@@ -4648,27 +3861,15 @@ describe("local native Instantly campaign and lead tools", () => {
       },
     ];
     f.state.requests.length = 0;
-    const repaired = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
-    expect(repaired).toMatchObject({
-      created: false,
-      adopted: true,
-      campaignId: "with-leads",
-    });
+    const repaired = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(repaired).toMatchObject({ created: false, adopted: true, campaignId: "with-leads" });
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
     expect(f.prisma.externalEffect.update).toHaveBeenCalledTimes(1);
-    expect(f.state.requests.some((r) => r.path.endsWith("/activate"))).toBe(
-      false,
-    );
+    expect(f.state.requests.some((r) => r.path.endsWith("/activate"))).toBe(false);
     expect(
-      f.state.requests.some(
-        (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
-      ),
+      f.state.requests.some((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
     ).toBe(false);
-    const again = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(again).toMatchObject({ created: false, campaignId: "with-leads" });
   });
 
@@ -4685,9 +3886,7 @@ describe("local native Instantly campaign and lead tools", () => {
         stop_on_reply: true,
       },
     ];
-    const readopted = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const readopted = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(readopted).toMatchObject({ adopted: true, campaignId: "empty" });
     expect(f.prisma.externalEffect.update).toHaveBeenCalledTimes(1);
   });
@@ -4716,9 +3915,7 @@ describe("local native Instantly campaign and lead tools", () => {
     f.state.activeRoleId = "role-1";
     const ensured = f.result(await f.run("ensure_role_campaign", {}));
     expect(ensured).toMatchObject({ created: true, campaignId: CAMPAIGN });
-    expect(
-      f.state.effects.has(`instantly-role-campaign:${SERVER.id}:role-1`),
-    ).toBe(true);
+    expect(f.state.effects.has(`instantly-role-campaign:${SERVER.id}:role-1`)).toBe(true);
     const added = f.result(
       await f.run("add_shortlist_leads", {
         candidates: [{ candidate_key: "a", email: "a@x.test" }],
@@ -4748,13 +3945,7 @@ describe("local native Instantly campaign and lead tools", () => {
     await f
       .run("ensure_role_campaign", {
         role_id: "role-1",
-        steps: [
-          {
-            subject: "Hi",
-            body: "Hi Ada,\n\nQ&A <30 min>\nThanks",
-            delay_days: 0,
-          },
-        ],
+        steps: [{ subject: "Hi", body: "Hi Ada,\n\nQ&A <30 min>\nThanks", delay_days: 0 }],
       })
       .catch(() => undefined);
     const patch = f.state.requests.findLast((r) => r.method === "PATCH");
@@ -4765,34 +3956,20 @@ describe("local native Instantly campaign and lead tools", () => {
 
   it("reports a body the provider saved blank and rewrites it on the next save", async () => {
     const f = fixture();
-    const blank = [
-      { steps: [{ variants: [{ subject: "Hi", body: "<br /><br />" }] }] },
-    ];
+    const blank = [{ steps: [{ variants: [{ subject: "Hi", body: "<br /><br />" }] }] }];
     f.state.campaign.sequences = blank;
     const steps = [{ subject: "Hi", body: "Q&A", delay_days: 0 }];
-    const first = await f.run("ensure_role_campaign", {
-      role_id: "role-1",
-      steps,
-    });
-    expect(first[0]).toMatchObject({
-      type: "error",
-      message: expect.stringMatching(/blank body/),
-    });
+    const first = await f.run("ensure_role_campaign", { role_id: "role-1", steps });
+    expect(first[0]).toMatchObject({ type: "error", message: expect.stringMatching(/blank body/) });
     const retry = f.result(
       await f.run("ensure_role_campaign", {
         role_id: "role-1",
         steps: [{ subject: "Hi", body: "Q and A", delay_days: 0 }],
       }),
     );
-    expect(retry).toMatchObject({
-      created: false,
-      stepsSaved: true,
-      hasEmail: true,
-    });
+    expect(retry).toMatchObject({ created: false, stepsSaved: true, hasEmail: true });
     expect(
-      f.state.requests.filter(
-        (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
-      ),
+      f.state.requests.filter((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
     ).toHaveLength(1);
   });
 
@@ -4800,49 +3977,27 @@ describe("local native Instantly campaign and lead tools", () => {
     const f = fixture();
     delete f.state.campaign.sequences;
     const first = f.result(
-      await f.run("ensure_role_campaign", {
-        role_id: "role-1",
-        timezone: "America/New_York",
-      }),
+      await f.run("ensure_role_campaign", { role_id: "role-1", timezone: "America/New_York" }),
     );
     expect(first).toMatchObject({ created: true });
     const created = f.state.requests.find(
       (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
     );
-    expect(JSON.stringify(created?.body)).toContain(
-      '"timezone":"America/Detroit"',
-    );
+    expect(JSON.stringify(created?.body)).toContain('"timezone":"America/Detroit"');
     const steps = [{ subject: "Hi", body: "Hello", delay_days: 0 }];
-    const second = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1", steps }),
-    );
-    expect(second).toMatchObject({
-      created: false,
-      stepsSaved: true,
-      hasEmail: true,
-    });
-    expect(
-      f.state.requests.findLast((r) => r.method === "PATCH"),
-    ).toMatchObject({
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
+    expect(second).toMatchObject({ created: false, stepsSaved: true, hasEmail: true });
+    expect(f.state.requests.findLast((r) => r.method === "PATCH")).toMatchObject({
       method: "PATCH",
       path: `/api/v2/campaigns/${CAMPAIGN}`,
       body: {
         sequences: [
-          {
-            steps: [
-              {
-                type: "email",
-                variants: [{ subject: "Hi", body: "<p>Hello</p>" }],
-              },
-            ],
-          },
+          { steps: [{ type: "email", variants: [{ subject: "Hi", body: "<p>Hello</p>" }] }] },
         ],
       },
     });
     // Saved copy is shown, never replaced.
-    f.state.campaign.sequences = [
-      { steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] },
-    ];
+    f.state.campaign.sequences = [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }];
     const writes = f.state.requests.length;
     const again = f.result(
       await f.run("ensure_role_campaign", {
@@ -4855,35 +4010,23 @@ describe("local native Instantly campaign and lead tools", () => {
       hasEmail: true,
       currentEmail: { subject: "Hi", body: "Hello" },
     });
-    expect(
-      f.state.requests.slice(writes).some((r) => r.method === "PATCH"),
-    ).toBe(false);
+    expect(f.state.requests.slice(writes).some((r) => r.method === "PATCH")).toBe(false);
   });
 
   it("never writes copy onto an adopted campaign", async () => {
     const f = fixture();
     delete f.state.campaign.sequences;
     f.state.campaigns = [
-      {
-        id: "adopted",
-        name: "Founding Engineer",
-        status: 0,
-        timestamp_created: "2026-01-01",
-      },
+      { id: "adopted", name: "Founding Engineer", status: 0, timestamp_created: "2026-01-01" },
     ];
-    const adopted = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const adopted = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(adopted).toMatchObject({ adopted: true, created: false });
     const steps = [{ subject: "Hi", body: "Hello", delay_days: 0 }];
-    const second = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1", steps }),
-    );
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-1", steps }));
     expect(second).toMatchObject({ stepsSaved: false });
     expect(
       f.state.requests.some(
-        (r) =>
-          r.method === "PATCH" && JSON.stringify(r.body).includes("sequences"),
+        (r) => r.method === "PATCH" && JSON.stringify(r.body).includes("sequences"),
       ),
     ).toBe(false);
   });
@@ -4896,18 +4039,13 @@ describe("local native Instantly campaign and lead tools", () => {
     const paths = f.state.requests.map((r) => `${r.method} ${r.path}`);
     expect(paths).toContain("POST /api/v2/campaigns");
     expect(paths.at(-2)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
-    expect(f.result(events)).toMatchObject({
-      activated: true,
-      campaignId: CAMPAIGN,
-    });
+    expect(f.result(events)).toMatchObject({ activated: true, campaignId: CAMPAIGN });
   });
 
   it("picks the default mailbox: last used on this connection, else the first connected", async () => {
     const f = fixture();
     f.state.accounts = ["first@example.test", "second@example.test"];
-    const first = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const first = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(first).toMatchObject({ eaccount: "first@example.test" });
     // A later role reuses the mailbox the space last bound, even when it is no longer first.
     f.state.accounts = ["other@example.test", "first@example.test"];
@@ -4915,18 +4053,14 @@ describe("local native Instantly campaign and lead tools", () => {
       id: "role-2",
       title: "Designer",
     }));
-    const second = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-2" }),
-    );
+    const second = f.result(await f.run("ensure_role_campaign", { role_id: "role-2" }));
     expect(second).toMatchObject({ eaccount: "first@example.test" });
     f.state.accounts = [];
     f.prisma.recruitingRole.findFirst.mockImplementationOnce(async () => ({
       id: "role-3",
       title: "PM",
     }));
-    expect(
-      (await f.run("ensure_role_campaign", { role_id: "role-3" }))[0],
-    ).toMatchObject({
+    expect((await f.run("ensure_role_campaign", { role_id: "role-3" }))[0]).toMatchObject({
       type: "error",
       message: expect.stringMatching(/No Instantly mailbox is connected/),
     });
@@ -4958,16 +4092,12 @@ describe("local native Instantly campaign and lead tools", () => {
         b: { leadId: "lead-existing", email: "B@x.test" },
       },
     });
-    expect(
-      f.state.requests.find((r) => r.path === "/api/v2/leads/add")?.body,
-    ).toEqual({
+    expect(f.state.requests.find((r) => r.path === "/api/v2/leads/add")?.body).toEqual({
       campaign_id: CAMPAIGN,
       skip_if_in_workspace: false,
       leads: [{ email: "a@x.test", first_name: "A" }],
     });
-    const again = f.result(
-      await f.run("ensure_role_campaign", { role_id: "role-1" }),
-    );
+    const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(again.leads).toMatchObject({ a: { leadId: "lead-a@x.test" } });
   });
 });
@@ -4976,29 +4106,18 @@ describe("MCP discovery tool-list cache", () => {
   function fixture() {
     const state = { failNext: false, initializations: 0, lists: 0 };
     const fetch = mcpFetch(state);
-    vi.stubGlobal(
-      "fetch",
-      async (input: string | URL | Request, init?: RequestInit) => {
-        const request =
-          input instanceof Request ? input : new Request(input, init);
-        if (
-          request.method === "POST" &&
-          (await request.clone().text()).includes('"tools/list"')
-        )
-          state.lists += 1;
-        return fetch(input, init);
-      },
-    );
+    vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.method === "POST" && (await request.clone().text()).includes('"tools/list"'))
+        state.lists += 1;
+      return fetch(input, init);
+    });
     let assignment = {
       ...ASSIGNMENT,
       server: { ...SERVER },
     } as Record<string, unknown> & { server: typeof SERVER };
-    const prisma = {
-      botMcpServer: { findMany: vi.fn(async () => [assignment]) },
-    };
-    const connector = new McpConnector(prisma as never, {} as never, {
-      network: TEST_NETWORK,
-    });
+    const prisma = { botMcpServer: { findMany: vi.fn(async () => [assignment]) } };
+    const connector = new McpConnector(prisma as never, {} as never, { network: TEST_NETWORK });
     const context = {
       spaceId: "w1",
       userId: "u1",
@@ -5067,10 +4186,7 @@ describe("MCP discovery tool-list cache", () => {
       expect(await f.connector.discoverTools(f.context)).toEqual([]);
       expect(f.state.lists).toBe(1);
       // Server or credential write bumps the revision (or secretId): a miss.
-      f.setAssignment({
-        allowAllTools: true,
-        server: { ...SERVER, revision: 2 },
-      });
+      f.setAssignment({ allowAllTools: true, server: { ...SERVER, revision: 2 } });
       const tools = await f.connector.discoverTools(f.context);
       expect(f.state.lists).toBe(2);
       expect(tools[0]!.route?.resourceRevision).toBe(2);
@@ -5101,9 +4217,7 @@ describe("MCP discovery tool-list cache", () => {
       expect(await f.connector.discoverTools(f.context)).toEqual([]);
       expect(f.state.initializations).toBe(attempted);
       expect(f.state.lists).toBe(0);
-      expect(
-        sink.events.filter((event) => event.message === "discovery.skipped"),
-      ).toHaveLength(1);
+      expect(sink.events.filter((event) => event.message === "discovery.skipped")).toHaveLength(1);
       // A server/credential write changes the version and retries at once.
       f.setAssignment({ server: { ...SERVER, revision: 2 } });
       expect(await f.connector.discoverTools(f.context)).toHaveLength(1);
