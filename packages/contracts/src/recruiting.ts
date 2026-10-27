@@ -1,3 +1,13 @@
+import {
+  RecruitingEmploymentDateSchema,
+  RecruitingEmploymentDaySchema,
+  type RecruitingEmploymentRule,
+  RecruitingEmploymentRuleSchema,
+} from "./recruiting-employment.js";
+
+export * from "./recruiting-candidate-text.js";
+export * from "./recruiting-employment.js";
+
 import { ListRecruitingCandidatesInput } from "./recruiting-candidate-filters.js";
 import { RecruitingId, VerdictSchema } from "./recruiting-identifiers.js";
 
@@ -87,48 +97,6 @@ const SourceRefs = z
     "Full source reference objects, never source ID strings. Copy native anchors and read metadata exactly.",
   );
 const Questions = z.array(Text).readonly();
-
-const EmploymentYear = z.number().int().min(1).max(9999);
-const EmploymentMonth = z.number().int().min(1).max(12);
-export const RecruitingEmploymentDaySchema = z
-  .strictObject({
-    precision: z.literal("day"),
-    year: EmploymentYear,
-    month: EmploymentMonth,
-    day: z.number().int().min(1).max(31),
-  })
-  .refine(
-    (date) => {
-      const calendar = new Date(0);
-      calendar.setUTCFullYear(date.year, date.month - 1, date.day);
-      return calendar.getUTCMonth() === date.month - 1;
-    },
-    { message: "Employment day must be a valid calendar date" },
-  )
-  .readonly();
-export const RecruitingEmploymentDateSchema = z.discriminatedUnion("precision", [
-  z.strictObject({ precision: z.literal("year"), year: EmploymentYear }).readonly(),
-  z
-    .strictObject({ precision: z.literal("month"), year: EmploymentYear, month: EmploymentMonth })
-    .readonly(),
-  RecruitingEmploymentDaySchema,
-]);
-export type RecruitingEmploymentDate = z.infer<typeof RecruitingEmploymentDateSchema>;
-export type RecruitingEmploymentDay = z.infer<typeof RecruitingEmploymentDaySchema>;
-
-export const RecruitingEmploymentRuleSchema = z
-  .strictObject({
-    minimumMonths: z.number().int().nonnegative(),
-    countingRule: z.literal("complete_calendar_months"),
-    qualificationDefinition: Text,
-    cutoff: z.discriminatedUnion("kind", [
-      z.strictObject({ kind: z.literal("fixed"), date: RecruitingEmploymentDaySchema }).readonly(),
-      // The server freezes the UTC calendar day at the start of assessment execution.
-      z.strictObject({ kind: z.literal("assessment_date") }).readonly(),
-    ]),
-  })
-  .readonly();
-export type RecruitingEmploymentRule = z.infer<typeof RecruitingEmploymentRuleSchema>;
 
 export type RecruitingCriterionExpression =
   | Readonly<{
@@ -1292,62 +1260,6 @@ export const ReadRecruitingViewInput = z.discriminatedUnion("kind", [
   }),
 ]);
 export type ReadRecruitingViewInput = z.infer<typeof ReadRecruitingViewInput>;
-
-// These are transport/provenance fields, not provider observations about the person.
-const reportMetadata = new Set([
-  "id",
-  "taskid",
-  "taskids",
-  "providertaskid",
-  "artifactid",
-  "artifactids",
-  "artifactref",
-  "actionid",
-  "effectid",
-  "runid",
-  "threadid",
-  "roleid",
-  "rolerevisionid",
-  "sourceid",
-  "shardid",
-  "shardids",
-  "outputid",
-  "receiptid",
-  "request",
-  "response",
-  "route",
-  "routing",
-  "cursor",
-  "nextcursor",
-  "requestcursor",
-  "providerresult",
-  "observation",
-  "metadata",
-  "traceid",
-  "storagekey",
-  "sha256",
-  "hash",
-  "toolname",
-  "connectorid",
-  "resourceid",
-  "resourcerevision",
-  "cataloggroup",
-  "clientnonce",
-]);
-
-/** The same business/provenance boundary governs report display and retained row equivalence. */
-export function isRecruitingCandidateReportField(key: string): boolean {
-  return !key.startsWith("_") && !reportMetadata.has(key.replace(/[_-]/g, "").toLowerCase());
-}
-
-/** Recruiter-visible source text excludes operational IDs; immutable artifacts remain lossless. */
-export function recruitingCandidateSourceText(value: unknown): string | undefined {
-  return JSON.stringify(
-    value,
-    (key, nested) => (!key || isRecruitingCandidateReportField(key) ? nested : undefined),
-    2,
-  );
-}
 
 /** Recruiter-readable projection of one exact retained provider row, never qualification. */
 export const RecruitingCandidateReportSchema = z.strictObject({

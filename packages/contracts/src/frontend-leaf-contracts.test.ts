@@ -4,6 +4,8 @@ import * as events from "./events.js";
 import * as publicApi from "./index.js";
 import * as recruiting from "./recruiting.js";
 import * as filters from "./recruiting-candidate-filters.js";
+import * as candidateText from "./recruiting-candidate-text.js";
+import * as employment from "./recruiting-employment.js";
 import * as identifiers from "./recruiting-identifiers.js";
 
 describe("frontend contract leaf exports", () => {
@@ -43,4 +45,14 @@ describe("frontend contract leaf exports", () => {
       expect(schema.safeParse(input).success).toBe(false);
     }
   });
+});
+
+it("retains canonical employment validation and candidate source text exports", () => {
+  expect(publicApi.RecruitingEmploymentDaySchema).toBe(employment.RecruitingEmploymentDaySchema);
+  expect(publicApi.RecruitingEmploymentDateSchema).toBe(employment.RecruitingEmploymentDateSchema);
+  expect(publicApi.RecruitingEmploymentRuleSchema).toBe(employment.RecruitingEmploymentRuleSchema);
+  expect(publicApi.recruitingCandidateSourceText).toBe(candidateText.recruitingCandidateSourceText);
+  expect(publicApi.isRecruitingCandidateReportField).toBe(
+    candidateText.isRecruitingCandidateReportField,
+  );
 });
