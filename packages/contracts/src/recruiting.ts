@@ -1744,7 +1744,7 @@ export const RecruitingOffsetCursorSchema = z
   .regex(/^(0|[1-9]\d{0,6})$/)
   .refine((value) => Number(value) <= 1_000_000);
 export const RecruitingCorrespondenceInputPage = {
-  /** Inbox emails per page (default 50); events and contacts keep their own bounds. */
+  /** Inbox emails (default 50) or contacts (default 200) per page. */
   limit: z.number().int().min(1).max(200).optional(),
   cursor: RecruitingOffsetCursorSchema.optional(),
 };
@@ -1954,7 +1954,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     }),
   ),
   partial: z.boolean(),
-  /** Next inbox email page; null on the last page and for interview/contacts views. */
+  /** Next inbox email or contact page; null on the last page and for interview views. */
   nextCursor: z.string().nullable(),
 });
 export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;

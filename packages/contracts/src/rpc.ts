@@ -178,6 +178,13 @@ import {
 import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
+const listPageFields = { offset: z.number().int().min(0).max(1000000).optional() };
+
+const sidebarPage = z.object({
+  offset: z.number().int().min(0).default(0),
+  archived: z.boolean().default(false),
+});
+
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
 const recruitingWorkspace = z.strictObject({
@@ -332,7 +339,9 @@ export const appContract = {
     update: oc.input(z.object({ avatarStyle: AvatarStyleSchema })).output(MeSchema),
   },
   spaces: {
-    list: oc.output(SpaceNavigationSchema),
+    list: oc
+      .input(z.object({ offset: z.number().int().min(0).max(1000000).optional() }).optional())
+      .output(SpaceNavigationSchema),
     /**
      * Sidebar live state for the caller's own bots in the current space. Opens with every bot's
      * current state (durable rows, not replayed events), then one frame per change; a frame
@@ -353,7 +362,11 @@ export const appContract = {
   bootstrap: oc
     .input(
       z
-        .object({ botId: Id.optional(), groupId: Id.optional() })
+        .object({
+          botId: Id.optional(),
+          groupId: Id.optional(),
+          offset: z.number().int().min(0).max(1000000).optional(),
+        })
         .refine((input) => !(input.botId && input.groupId), {
           message: "Provide at most one of botId or groupId",
           path: ["botId"],
@@ -393,9 +406,11 @@ export const appContract = {
     apply: oc.input(ServerUpdateRequestSchema).output(ServerUpdateRunSchema),
   },
   models: {
-    list: oc.output(z.array(ModelCatalogEntrySchema)),
-    credentials: oc.output(z.array(ModelCredentialSchema)),
-    backups: oc.output(z.array(ModelBackupChoiceSchema)),
+    list: oc.input(z.object(listPageFields).nullish()).output(z.array(ModelCatalogEntrySchema)),
+    credentials: oc
+      .input(z.object(listPageFields).nullish())
+      .output(z.array(ModelCredentialSchema)),
+    backups: oc.input(z.object(listPageFields).nullish()).output(z.array(ModelBackupChoiceSchema)),
     setBackups: oc.input(ModelBackupListSchema).output(z.object({ ok: z.literal(true) })),
     connect: oc.input(ModelConnectInputSchema).output(ModelCredentialSchema),
     probeOpenAiCompatible: oc
@@ -454,8 +469,13 @@ export const appContract = {
       .output(z.object({ ok: z.literal(true) })),
   },
   bots: {
-    list: oc.output(z.array(BotSchema)),
-    listArchived: oc.output(z.array(BotSchema)),
+    page: oc
+      .input(sidebarPage)
+      .output(
+        z.object({ items: z.array(BotSchema).max(200), nextOffset: z.number().int().nullable() }),
+      ),
+    list: oc.output(z.array(BotSchema).max(200)),
+    listArchived: oc.output(z.array(BotSchema).max(200)),
     get: oc.input(botId).output(BotSchema),
     create: oc.input(CreateBotInput).output(BotSchema),
     duplicate: oc.input(botId).output(BotSchema),
@@ -477,8 +497,13 @@ export const appContract = {
   },
   groups: {
     create: oc.input(CreateGroupInput).output(GroupSchema),
-    list: oc.output(z.array(GroupSchema)),
-    listArchived: oc.output(z.array(GroupSchema)),
+    page: oc
+      .input(sidebarPage)
+      .output(
+        z.object({ items: z.array(GroupSchema).max(200), nextOffset: z.number().int().nullable() }),
+      ),
+    list: oc.output(z.array(GroupSchema).max(200)),
+    listArchived: oc.output(z.array(GroupSchema).max(200)),
     get: oc.input(groupId).output(GroupDetailSchema),
     duplicate: oc.input(groupId).output(GroupSchema),
     update: oc.input(UpdateGroupInput).output(GroupSchema),
@@ -487,7 +512,7 @@ export const appContract = {
     remove: oc.input(groupId).output(z.object({ ok: z.literal(true) })),
   },
   botSections: {
-    list: oc.output(z.array(BotSectionSchema)),
+    list: oc.input(z.object(listPageFields).nullish()).output(z.array(BotSectionSchema)),
     create: oc
       .input(threadTarget.safeExtend({ name: z.string().trim().min(1).max(60) }))
       .output(BotSectionSchema),
@@ -592,7 +617,7 @@ export const appContract = {
     recover: oc.input(botId).output(ComputerUpdateSchema),
     reset: oc.input(botId).output(ComputerStatusSchema),
     update: oc.input(botId).output(ComputerUpdateSchema),
-    updates: oc.output(z.array(ComputerUpdateSchema)),
+    updates: oc.input(z.object(listPageFields).nullish()).output(z.array(ComputerUpdateSchema)),
     releaseInterrupted: oc
       .input(z.object({ id: Id, workersStopped: z.literal(true) }))
       .output(z.object({ ok: z.literal(true) })),
@@ -650,7 +675,7 @@ export const appContract = {
     crmData: oc
       .input(z.intersection(threadTarget, RecruitingCrmDataInputSchema))
       .output(RecruitingCrmDataOutputSchema),
-    schedulingPlans: oc.input(z.object({ threadId: Id })).output(
+    schedulingPlans: oc.input(z.object({ threadId: Id }).safeExtend(listPageFields)).output(
       z.object({
         plans: z.array(RecruitingSchedulingPlanSchema),
         slots: z.array(RecruitingSchedulingSlotSchema.safeExtend({ observedAt: IsoDate })),
@@ -716,7 +741,7 @@ export const appContract = {
       .input(SetRecruitingCandidateShortlistInput)
       .output(SetRecruitingCandidateShortlistOutput),
     listQuestions: oc
-      .input(z.strictObject({ threadId: Id, roleId: RecruitingId }))
+      .input(z.strictObject({ threadId: Id, roleId: RecruitingId }).safeExtend(listPageFields))
       .output(z.strictObject({ questions: z.array(RecruitingQuestionSchema) })),
     createRole: oc.input(CreateRecruitingRoleInput).output(recruitingWorkspace),
     bindRole: oc
@@ -759,7 +784,7 @@ export const appContract = {
     confirmBrief: oc.input(ConfirmRecruitingBriefInput).output(recruitingWorkspace),
     editCriteria: oc.input(EditRecruitingCriteriaInput).output(recruitingWorkspace),
     listAssessments: oc
-      .input(z.strictObject({ roleId: RecruitingId }))
+      .input(z.strictObject({ roleId: RecruitingId }).safeExtend(listPageFields))
       .output(z.array(RecruitingAssessmentSnapshotSchema)),
     getAssessment: oc
       .input(
@@ -770,17 +795,23 @@ export const appContract = {
         }),
       )
       .output(RecruitingAssessmentSnapshotSchema.nullable()),
-    listResearch: oc.input(z.strictObject({ roleId: RecruitingId })).output(
-      z.strictObject({
-        tasks: z.array(RecruitingResearchTaskSchema),
-        actions: z.array(RecruitingResearchActionSchema),
-        observations: z.array(RecruitingResearchSavedObservationSchema),
-      }),
-    ),
+    listResearch: oc
+      .input(z.strictObject({ roleId: RecruitingId }).safeExtend(listPageFields))
+      .output(
+        z.strictObject({
+          tasks: z.array(RecruitingResearchTaskSchema),
+          actions: z.array(RecruitingResearchActionSchema),
+          observations: z.array(RecruitingResearchSavedObservationSchema),
+        }),
+      ),
   },
   memory: {
     list: oc
-      .input(z.object({ botId: Id.optional(), scope: z.enum(["bot", "user"]).optional() }))
+      .input(
+        z
+          .object({ botId: Id.optional(), scope: z.enum(["bot", "user"]).optional() })
+          .safeExtend(listPageFields),
+      )
       .output(z.array(MemoryDocumentSchema)),
     update: oc
       .input(
@@ -791,7 +822,9 @@ export const appContract = {
         }),
       )
       .output(MemoryDocumentSchema),
-    history: oc.input(z.object({ documentId: Id })).output(z.array(MemoryRevisionSchema)),
+    history: oc
+      .input(z.object({ documentId: Id }).safeExtend(listPageFields))
+      .output(z.array(MemoryRevisionSchema)),
     exportMarkdown: oc.input(z.object({ botId: Id.optional() })).output(z.string()),
     providerConfig: oc.output(SpaceMemoryConfigSchema.nullable()),
     connectProvider: oc
@@ -810,7 +843,7 @@ export const appContract = {
     disconnectProvider: oc.output(z.object({ ok: z.literal(true) })),
   },
   routines: {
-    list: oc.input(botId).output(z.array(RoutineSchema)),
+    list: oc.input(botId.safeExtend(listPageFields)).output(z.array(RoutineSchema)),
     history: oc
       .input(z.object({ routineId: Id, before: RoutineRunCursorSchema.optional() }))
       .output(RoutineHistorySchema),
@@ -829,11 +862,13 @@ export const appContract = {
   scratchpad: {
     list: oc
       .input(
-        z.object({
-          botId: Id,
-          status: ScratchpadItemStatusSchema.optional(),
-          includeDone: z.boolean().optional(),
-        }),
+        z
+          .object({
+            botId: Id,
+            status: ScratchpadItemStatusSchema.optional(),
+            includeDone: z.boolean().optional(),
+          })
+          .safeExtend(listPageFields),
       )
       .output(z.array(ScratchpadItemSchema)),
     create: oc.input(CreateScratchpadItemInput).output(ScratchpadItemSchema),
@@ -850,22 +885,24 @@ export const appContract = {
     remove: oc.input(z.object({ itemId: Id })).output(z.object({ ok: z.literal(true) })),
   },
   boards: {
-    list: oc.output(z.array(BoardSchema)),
+    list: oc.input(z.object(listPageFields).nullish()).output(z.array(BoardSchema)),
     get: oc.output(BoardSchema),
     rename: oc.input(RenameBoardInput).output(BoardSchema),
     subscribe: oc.output(eventIterator(BoardEventSchema)),
   },
   tickets: {
-    list: oc.input(ListTicketsInput).output(ListTicketsOutput),
+    list: oc.input(ListTicketsInput.safeExtend(listPageFields)).output(ListTicketsOutput),
     get: oc.input(GetTicketInput).output(TicketSchema),
     create: oc.input(CreateTicketInput).output(TicketSchema),
     update: oc.input(UpdateTicketInput).output(TicketSchema),
     move: oc.input(MoveTicketInput).output(TicketSchema),
     comment: oc.input(CommentTicketInput).output(TicketCommentSchema),
-    comments: oc.input(z.object({ ticketId: Id })).output(z.array(TicketCommentSchema)),
+    comments: oc
+      .input(z.object({ ticketId: Id }).safeExtend(listPageFields))
+      .output(z.array(TicketCommentSchema)),
   },
   skills: {
-    list: oc.input(botId).output(z.array(TaughtSkillSchema)),
+    list: oc.input(botId.safeExtend(listPageFields)).output(z.array(TaughtSkillSchema)),
     get: oc.input(z.object({ skillId: Id })).output(TaughtSkillSchema),
     start: oc
       .input(z.object({ botId: Id, goal: z.string().min(1).max(4000) }))
@@ -894,7 +931,9 @@ export const appContract = {
   },
   /** Claude Agent Skills (SKILL.md recipes) shared across assistants (not taught/demo skills). Pi already understands this format; we persist and inject them. */
   agentSkills: {
-    list: oc.output(z.array(AgentSkillCatalogEntrySchema)),
+    list: oc
+      .input(z.object(listPageFields).nullish())
+      .output(z.array(AgentSkillCatalogEntrySchema)),
     get: oc
       .input(
         z
@@ -915,7 +954,7 @@ export const appContract = {
     remove: oc.input(z.object({ skillId: Id })).output(z.object({ ok: z.literal(true) })),
   },
   capabilities: {
-    list: oc.output(z.array(CapabilityInstallSchema)),
+    list: oc.input(z.object(listPageFields).nullish()).output(z.array(CapabilityInstallSchema)),
     catalogSearch: oc
       .input(
         z.object({
@@ -944,7 +983,7 @@ export const appContract = {
   },
   mcp: {
     servers: {
-      list: oc.output(z.array(McpServerSchema)),
+      list: oc.input(z.object(listPageFields).nullish()).output(z.array(McpServerSchema)),
       create: oc.input(McpServerConfigInput).output(McpServerSchema),
       update: oc
         .input(
@@ -957,8 +996,8 @@ export const appContract = {
       remove: oc.input(z.object({ id: Id })).output(z.object({ ok: z.literal(true) })),
     },
     assignments: {
-      list: oc.input(botId).output(z.array(BotMcpServerSchema)),
-      all: oc.output(z.array(BotMcpServerSchema)),
+      list: oc.input(botId.safeExtend(listPageFields)).output(z.array(BotMcpServerSchema)),
+      all: oc.input(z.object(listPageFields).nullish()).output(z.array(BotMcpServerSchema)),
       approve: oc
         .input(
           z.object({
@@ -1050,9 +1089,13 @@ export const appContract = {
   },
   connections: {
     catalog: oc
-      .input(z.object({ query: z.string().optional(), connectorId: z.string().optional() }))
+      .input(
+        z
+          .object({ query: z.string().optional(), connectorId: z.string().optional() })
+          .safeExtend(listPageFields),
+      )
       .output(z.array(ConnectionCatalogItemSchema)),
-    list: oc.output(z.array(ConnectionSchema)),
+    list: oc.input(z.object(listPageFields).nullish()).output(z.array(ConnectionSchema)),
     begin: oc
       .input(
         z.object({
@@ -1070,14 +1113,16 @@ export const appContract = {
       .output(ConnectionSchema),
     revoke: oc.input(z.object({ connectionId: Id })).output(z.object({ ok: z.literal(true) })),
     /** Tools the connected provider exposes. Read-only; no per-tool allowlist yet. */
-    tools: oc.input(z.object({ connectorId: z.string(), provider: z.string() })).output(
-      z.array(
-        z.object({
-          name: z.string(),
-          description: z.string(),
-        }),
+    tools: oc
+      .input(z.object({ connectorId: z.string(), provider: z.string() }).safeExtend(listPageFields))
+      .output(
+        z.array(
+          z.object({
+            name: z.string(),
+            description: z.string(),
+          }),
+        ),
       ),
-    ),
   },
   /** External messaging surface: link state, group channels, agent connections. */
   messaging: {
@@ -1095,7 +1140,9 @@ export const appContract = {
       unlink: oc.input(z.object({ identityId: Id })).output(z.object({ ok: z.literal(true) })),
     },
     channels: {
-      list: oc.output(z.array(MessagingChannelMembershipSchema)),
+      list: oc
+        .input(z.object(listPageFields).nullish())
+        .output(z.array(MessagingChannelMembershipSchema)),
       // Addressed by membership, not channel: one user can have two linked
       // chat apps in the same group, and each answers for its own agent.
       respond: oc
@@ -1104,7 +1151,9 @@ export const appContract = {
       leave: oc.input(z.object({ membershipId: Id })).output(z.object({ ok: z.literal(true) })),
     },
     connections: {
-      list: oc.output(z.array(MessagingAgentConnectionSchema)),
+      list: oc
+        .input(z.object(listPageFields).nullish())
+        .output(z.array(MessagingAgentConnectionSchema)),
       respond: oc
         .input(z.object({ connectionId: Id, accept: z.boolean() }))
         .output(MessagingAgentConnectionSchema),
@@ -1112,7 +1161,7 @@ export const appContract = {
     },
   },
   approvalRules: {
-    list: oc.output(z.array(ActionApprovalRuleSchema)),
+    list: oc.input(z.object(listPageFields).nullish()).output(z.array(ActionApprovalRuleSchema)),
     set: oc
       .input(
         z.object({
@@ -1130,7 +1179,9 @@ export const appContract = {
   },
   artifacts: {
     list: oc
-      .input(botId.extend({ includeDiagnostics: z.boolean().optional() }))
+      .input(
+        botId.extend({ includeDiagnostics: z.boolean().optional() }).safeExtend(listPageFields),
+      )
       .output(z.array(ArtifactSchema)),
     listSpace: oc
       .input(
@@ -1148,7 +1199,11 @@ export const appContract = {
         }),
       ),
     listVersions: oc
-      .input(z.object({ familyId: Id, includeDiagnostics: z.boolean().optional() }))
+      .input(
+        z
+          .object({ familyId: Id, includeDiagnostics: z.boolean().optional() })
+          .safeExtend(listPageFields),
+      )
       .output(z.array(ArtifactVersionSchema)),
     create: oc
       .input(
@@ -1211,12 +1266,16 @@ export const appContract = {
       .output(z.object({ icon: z.string().nullable(), retry: z.boolean().optional() })),
   },
   runs: {
-    list: oc.input(z.object({ filter: z.enum(["active", "recent"]) })).output(RunsListOutputSchema),
+    list: oc
+      .input(z.object({ filter: z.enum(["active", "recent"]) }).safeExtend(listPageFields))
+      .output(RunsListOutputSchema),
   },
   voice: {
-    catalog: oc.output(z.array(VoiceCatalogEntrySchema)),
+    catalog: oc.input(z.object(listPageFields).nullish()).output(z.array(VoiceCatalogEntrySchema)),
     status: oc.output(VoiceStatusSchema),
-    credentials: oc.output(z.array(VoiceCredentialSchema)),
+    credentials: oc
+      .input(z.object(listPageFields).nullish())
+      .output(z.array(VoiceCredentialSchema)),
     connect: oc
       .input(
         z.object({
@@ -1237,7 +1296,7 @@ export const appContract = {
       .input(z.object({ provider: z.string().min(1), speechModel: z.string().max(64) }))
       .output(VoiceCredentialSchema),
     voices: oc
-      .input(z.object({ provider: z.string().optional() }))
+      .input(z.object({ provider: z.string().optional() }).safeExtend(listPageFields))
       .output(z.array(VoiceInfoSchema)),
     prepare: oc
       .input(
@@ -1255,12 +1314,14 @@ export const appContract = {
       .output(ExternalConversationPolicySchema),
   },
   agentSecrets: {
-    list: oc.output(z.array(AgentSecretSchema)),
+    list: oc.input(z.object(listPageFields).nullish()).output(z.array(AgentSecretSchema)),
     put: oc.input(AgentSecretInputSchema).output(AgentSecretSchema),
     remove: oc.input(z.object({ id: Id })).output(z.object({ ok: z.literal(true) })),
   },
   botSecrets: {
-    list: oc.input(z.object({ botId: Id })).output(z.array(BotSecretMetadata)),
+    list: oc
+      .input(z.object({ botId: Id }).safeExtend(listPageFields))
+      .output(z.array(BotSecretMetadata)),
     put: oc.input(BotSecretPutInput).output(BotSecretMetadata),
     remove: oc
       .input(z.object({ botId: Id, name: StoredBotSecretName }))
