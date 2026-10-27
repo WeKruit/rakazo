@@ -21,7 +21,7 @@ import {
   resolveComposerSendPlan,
 } from "@rakazo/core";
 import type { Dispatch, RefObject, SetStateAction } from "react";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { NavigateFunction } from "react-router-dom";
 import { requestBrowserNotificationPermission } from "../../lib/browser-notifications";
 import { newClientId } from "../../lib/client-id";
@@ -154,6 +154,16 @@ export function useShellMessages({
   refreshBots: (includeArchived?: boolean, replaceBotOrder?: boolean) => Promise<void>;
 }) {
   const { t } = useLingui();
+  const mounted = useRef(false);
+  const echoTimers = useRef(new Set<number>());
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      for (const timer of echoTimers.current) window.clearTimeout(timer);
+      echoTimers.current.clear();
+    };
+  }, []);
   const openBot = useCallback((id: string) => navigate(`/app/${id}`), [navigate]);
   const loadOlder = useCallback(() => loadOlderMessagesRef.current(), []);
   const jumpToReplyMessage = useCallback((messageId: string) => {
@@ -488,7 +498,9 @@ export function useShellMessages({
         if (botTarget && activeBotId.current === botTarget) setAttachmentNotice(null);
         // The receipt and the event stream carry the rest. Read only if no event or echo
         // arrived in time (stream down), or the message carried no text to echo.
-        window.setTimeout(() => {
+        if (!mounted.current) return true;
+        const echoTimer = window.setTimeout(() => {
+          echoTimers.current.delete(echoTimer);
           const current = snapshotRef.current;
           const stillEchoed = current?.messages.some(
             (message) => message.id === pendingUserMessageId(clientNonce),
@@ -499,6 +511,7 @@ export function useShellMessages({
           else if (botTarget && activeBotId.current === botTarget)
             void refreshThreadRef.current(botTarget).catch(() => undefined);
         }, SEND_ECHO_GRACE_MS);
+        echoTimers.current.add(echoTimer);
         return true;
       } catch (error) {
         if (!accepted) withdrawEcho();

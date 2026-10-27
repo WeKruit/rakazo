@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
+import { createRecruitingReadCache } from "../../lib/recruiting-read-cache";
 
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -127,7 +128,7 @@ it("lists saved sequences without a role, in business wording, and hides them wh
         crmContext={{
           target: { groupId: "group-1" } as never,
           scope: "scope",
-          cache: { entries: new Map(), epoch: 0 },
+          cache: createRecruitingReadCache(),
         }}
         groups={[]}
         archivedGroups={[]}

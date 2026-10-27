@@ -1286,6 +1286,25 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   sort: z.enum(["name", "recent", "rank", "tier", "score"]).optional(),
 });
 export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
+/** One display read followed by a fresh thread binding check; not a serializable DB snapshot. */
+export const ReadRecruitingViewInput = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("candidates"),
+    threadId: RecruitingId,
+    roleId: RecruitingId,
+    roleRevisionId: RecruitingId,
+    query: ListRecruitingCandidatesInput.omit({ roleId: true }),
+  }),
+  z.strictObject({
+    kind: z.literal("research"),
+    offset: z.number().int().min(0).optional(),
+    threadId: RecruitingId,
+    roleId: RecruitingId,
+    roleRevisionId: RecruitingId,
+  }),
+]);
+export type ReadRecruitingViewInput = z.infer<typeof ReadRecruitingViewInput>;
+
 // These are transport/provenance fields, not provider observations about the person.
 const reportMetadata = new Set([
   "id",
