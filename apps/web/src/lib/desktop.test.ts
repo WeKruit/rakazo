@@ -54,7 +54,9 @@ describe("window chrome", () => {
 
   it("does not paint fake traffic lights into the browser shell or welcome page", () => {
     const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "../pages");
-    const shell = readFileSync(path.join(root, "Shell.tsx"), "utf8");
+    const shell = ["Shell.tsx", "shell/ShellConversation.tsx", "shell/ShellSidebar.tsx"]
+      .map((file) => readFileSync(path.join(root, file), "utf8"))
+      .join("\n");
     const welcome = readFileSync(path.join(root, "Welcome.tsx"), "utf8");
     expect(shell).not.toContain("FF5F57");
     expect(welcome).not.toContain("FF5F57");
@@ -62,7 +64,9 @@ describe("window chrome", () => {
 
   it("keeps conversation header controls clickable", () => {
     const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "../pages");
-    const shell = readFileSync(path.join(root, "Shell.tsx"), "utf8");
+    const shell = ["Shell.tsx", "shell/ShellConversation.tsx", "shell/ShellSidebar.tsx"]
+      .map((file) => readFileSync(path.join(root, file), "utf8"))
+      .join("\n");
     // The header is draggable in both its role-workspace and plain conversation forms.
     expect(shell).toContain('"app-drag hire-panel-heading justify-between"');
     expect(shell).toContain(
@@ -76,7 +80,9 @@ describe("window chrome", () => {
 
   it("moves window chrome into the conversation header when the bots sidebar is collapsed", () => {
     const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "../pages");
-    const shell = readFileSync(path.join(root, "Shell.tsx"), "utf8");
+    const shell = ["Shell.tsx", "shell/ShellConversation.tsx", "shell/ShellSidebar.tsx"]
+      .map((file) => readFileSync(path.join(root, file), "utf8"))
+      .join("\n");
     expect(shell).toContain("{botsSidebarCollapsed && desktopBridge() ? <WindowChrome /> : null}");
   });
 
