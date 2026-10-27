@@ -644,13 +644,24 @@ function measureFirstTen(events, round) {
     (e) =>
       e.type === "effect.recorded" && e.payload?.source?.kind === "people_search" && afterAnswer(e),
   ).length;
-  const modelSearches = events.filter(
+  // A search the server refused (for example the planned-rows guard) cost a model step but ran
+  // nothing, so it is counted apart from searches that ran.
+  const refusedCalls = new Set(
+    events
+      .filter((e) => e.type === "agent.tool.completed" && e.payload?.outcome === "error")
+      .map((e) => e.payload.executionId),
+  );
+  const modelSearchCalls = events.filter(
     (e) =>
       e.type === "agent.tool.called" &&
       SEARCH_TOOL.test(e.payload?.name ?? "") &&
       !NOT_A_PEOPLE_SEARCH.test(e.payload.name) &&
       afterAnswer(e),
+  );
+  const refusedSearches = modelSearchCalls.filter((e) =>
+    refusedCalls.has(e.payload.executionId),
   ).length;
+  const modelSearches = modelSearchCalls.length - refusedSearches;
   const people = round.candidates.map((c) => ({
     name: c.name,
     company: c.company ?? "",
@@ -672,6 +683,7 @@ function measureFirstTen(events, round) {
     plannedSearches: planned.at(-1)?.payload?.queries?.length ?? 0,
     searchesAfterAnswer: searchesRun,
     modelSearchesAfterAnswer: modelSearches,
+    refusedSearchesAfterAnswer: refusedSearches,
     tenRecordedBeforeCard: !cardAfter || roundAt <= at(cardAfter),
     people: people.length,
     inArea: AREA ? people.length - outsideArea.length : null,

@@ -138,7 +138,9 @@ for (const item of KNOWN) {
 
 const s = (value) => (value == null ? "—" : `${value} s`);
 const check = (f, report) => ({
-  searched: f.modelSearchesAfterAnswer ? `yes (${f.modelSearchesAfterAnswer})` : "no",
+  searched:
+    (f.modelSearchesAfterAnswer ? `yes (${f.modelSearchesAfterAnswer})` : "no") +
+    (f.refusedSearchesAfterAnswer ? `, ${f.refusedSearchesAfterAnswer} refused` : ""),
   beforeCard: f.tenRecordedBeforeCard ? "yes" : "no",
   area: `${f.inArea ?? "—"}/${f.people}`,
   staff: f.hiringCompanyStaff.length,
