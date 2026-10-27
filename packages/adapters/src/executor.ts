@@ -5361,15 +5361,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   state: "known",
                   consequential: true,
                 })),
-                // The playbook's default exclusion, shown so the recruiter can lift it.
+                // The playbook's default tenure preference, shown so the recruiter can lift it. An
+                // inferred filter may only prefer, so it is worded as the people it prefers.
                 searchFilters: [
                   {
                     id: "tenure",
-                    mode: "exclude",
+                    mode: "prefer",
                     origin: "inferred",
                     statement: chinese
-                      ? `现任岗位不满 ${MIN_CURRENT_ROLE_MONTHS} 个月的人`
-                      : `People in their current role under ${MIN_CURRENT_ROLE_MONTHS} months`,
+                      ? `现任岗位满 ${MIN_CURRENT_ROLE_MONTHS} 个月以上的人`
+                      : `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
                   },
                 ],
               },
