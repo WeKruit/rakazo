@@ -464,6 +464,7 @@ import {
   schedulingPlanHash,
   schedulingPlanReview,
 } from "./recruiting-scheduling.js";
+import { MIN_CURRENT_ROLE_MONTHS, shortCurrentTenure } from "./recruiting-tenure.js";
 import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
   admitRecruitingResearchCall,
@@ -559,6 +560,7 @@ import {
   guardRecruitingTurnEnd,
   intakeAnswers,
   recruitingRoundListText,
+  recruitingRoundPeople,
 } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
 import {
@@ -998,9 +1000,30 @@ export async function settlePlannedSearches<T>(
 const ROLE_LEAD_IN =
   /^(?:新岗位|岗位|职位|招聘|new role|job title|job|role|position|hiring)\s*[:：]/i;
 
+/** Display width, with CJK characters counted twice. */
+const titleWidth = (text: string) =>
+  text.length + (text.match(/[\u3000-\u9fff\uff00-\uffef]/g)?.length ?? 0);
+const TITLE_WIDTH = 60;
+/** The text before the first top-level comma, so a parenthesised 「（亚特兰大，现场办公）」 stays whole. */
+function firstClause(text: string) {
+  let depth = 0;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index] as string;
+    if ("([（【".includes(char)) depth++;
+    else if (")]）】".includes(char)) depth = Math.max(0, depth - 1);
+    else if (
+      depth === 0 &&
+      (char === "，" || char === "、" || (char === "," && text[index + 1] === " "))
+    )
+      return text.slice(0, index);
+  }
+  return text;
+}
+
 /**
- * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
- * 「新岗位：」. Short messages are instructions, not a JD, unless they open with a role lead-in.
+ * The title of a JD pasted as a message: its first line, or the line after a label such as
+ * 「新岗位：」 or "Job title:". A line that runs on into the JD keeps its first sentence, then its
+ * first clause. Short messages are instructions, not a JD, unless they open with a role lead-in.
  */
 export function pastedJobTitle(text: string): string | null {
   const trimmed = text.trim();
@@ -1011,10 +1034,15 @@ export function pastedJobTitle(text: string): string | null {
     .map((line) => line.trim())
     .filter(Boolean);
   const first = lines[0] ?? "";
-  const after = first.replace(/^[^:：]*[:：]\s*/, "");
-  const line = (/[:：]\s*$/.test(first) ? lines[1] : after || first) ?? "";
-  // A one-line JD runs on after the title: keep its first sentence.
-  const title = ledIn ? (line.split(/[。；;]|\.\s/)[0] ?? "") : line;
+  // Only a short label before the colon is a label; "…, Dallas TX. On-site: 3 days…" is the JD.
+  const label = first.match(/^([^:：]*)[:：]\s*/);
+  const labelled =
+    !!label &&
+    (ledIn || (titleWidth(label[1] as string) <= 24 && !/[.,;，。；]/.test(label[1] as string)));
+  const after = labelled ? first.slice((label as RegExpMatchArray)[0].length) : first;
+  let title = ((labelled && !after ? lines[1] : after) ?? "").replace(/^[#*\s]+|[*\s]+$/g, "");
+  if (ledIn || titleWidth(title) > TITLE_WIDTH) title = title.split(/[。；;]|\.\s/)[0] ?? "";
+  if (titleWidth(title) > TITLE_WIDTH) title = firstClause(title);
   return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
 }
 
@@ -5164,14 +5192,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // Set before the first model step when a job link is saved as the thread's role.
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
-        // After the ten are shown the server saves the brief from the recruiter's intake answers;
-        // the next-step card waits for that save, so the pause never cuts it off.
+        // After the ten are shown the server saves the recruiter's intake answers as the brief, so
+        // the role always has one; the model's own brief save then replaces it. The next-step card
+        // waits for that save, so the pause never cuts it off.
         let briefSaving: Promise<unknown> | undefined;
+        // That save moves the role on a revision the model has not seen; its own brief save, which
+        // replaces the answers-only brief, still names the revision it recorded the round on.
+        let briefBump: { from: number; to: number } | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
         // show_picks put the first people in chat; the turn owes the recorded ten.
         let firstPicksShown = false;
-        // People whose location the run already asked the model about once.
+        // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
         /**
          * Picked people whose saved location names only a country or a state, and those whose
@@ -5201,6 +5233,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             locationOutliers(located).map((key) => [key, labels.get(key) as string]),
           );
           return { regionOnly, outliers };
+        };
+        /** Picked people whose profile passage shows every current role started under six months ago. */
+        const newInCurrentRole = async (roleId: string, keys: readonly string[]) => {
+          const people = await recruitingRoundPeople(deps.prisma, {
+            threadId: run.threadId,
+            spaceId: run.spaceId,
+            roleId,
+            candidateKeys: keys,
+          });
+          const newcomers = new Map<string, string>();
+          for (const key of keys) {
+            const person = people.get(key);
+            const months = shortCurrentTenure(person?.snippet);
+            if (months !== null)
+              newcomers.set(key, `${person?.name ?? key} (${months} months in the current role)`);
+          }
+          return newcomers;
         };
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
@@ -5239,9 +5288,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !Array.isArray(call.args.candidateKeys)
           )
             return;
-          // The last key may still be cut mid-word.
+          // The last key may still be cut mid-word; the list leaves it out until it names one person.
           const named = call.args.candidateKeys
-            .slice(0, -1)
             .filter((key): key is string => typeof key === "string")
             .map(savedCandidateKeyForm);
           // A retry after a refused key keeps the people already shown until it lists more.
@@ -5263,6 +5311,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 roleId,
                 candidateKeys: named,
                 knownOnly: true,
+                lastMayBeCut: true,
               });
               if (text) await showRoundList(text);
             })
@@ -5292,6 +5341,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             select: { role: true, blocks: true },
           });
           const answers = intakeAnswers(messages);
+          const chinese = /\p{Script=Han}/u.test(quote);
           const saved = (await applyTool(
             "recruiting_role",
             {
@@ -5307,12 +5357,25 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   state: "known",
                   consequential: true,
                 })),
+                // The playbook's default exclusion, shown so the recruiter can lift it.
+                searchFilters: [
+                  {
+                    id: "tenure",
+                    mode: "exclude",
+                    origin: "inferred",
+                    statement: chinese
+                      ? `现任岗位不满 ${MIN_CURRENT_ROLE_MONTHS} 个月的人`
+                      : `People in their current role under ${MIN_CURRENT_ROLE_MONTHS} months`,
+                  },
+                ],
               },
             },
             `${runId}:brief-after-round`,
-          )) as { error?: unknown } | null;
+          )) as { error?: unknown; workspace?: { role?: { revision?: unknown } } | null } | null;
           if (saved?.error)
             getLogger().warn("brief not saved after the round", { error: saved.error });
+          const to = saved?.workspace?.role?.revision;
+          if (typeof to === "number" && to > role.revision) briefBump = { from: role.revision, to };
         };
         // After this run records a round, its only card is the next-step choice.
         const nextStepCardAfterRound = async () => {
@@ -5365,6 +5428,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : name === "recruiting_role"
                 ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
                 : rawArgs;
+          if (
+            name === "recruiting_role" &&
+            args.operation === "update" &&
+            executionId !== `${runId}:brief-after-round`
+          )
+            await briefSaving;
+          if (
+            name === "recruiting_role" &&
+            args.operation === "update" &&
+            briefBump &&
+            args.expectedRevision === briefBump.from
+          )
+            args = { ...args, expectedRevision: briefBump.to };
           if (name === "recruiting_role" && args.operation !== "read")
             args = await fillRecruitingRoleArgs(
               deps.prisma,
@@ -5536,8 +5612,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               [...people].filter(([key]) => !locationAsked.has(key)).map(([, label]) => label);
             const vague = unasked(regionOnly);
             const far = unasked(outliers);
-            if (vague.length || far.length) {
-              for (const key of [...regionOnly.keys(), ...outliers.keys()]) locationAsked.add(key);
+            const recent = await newInCurrentRole(
+              thread.activeRecruitingRoleId,
+              researchInput.data.candidateKeys.map(savedCandidateKeyForm),
+            );
+            const newcomers = unasked(recent);
+            if (vague.length || far.length || newcomers.length) {
+              for (const key of [...regionOnly.keys(), ...outliers.keys(), ...recent.keys()])
+                locationAsked.add(key);
               return {
                 error: [
                   "Not recorded.",
@@ -5545,7 +5627,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     `${vague.join(", ")} show only a country or a state, which never counts inside a city or metro location scope.`,
                   far.length &&
                     `${far.join(", ")} ${far.length > 1 ? "are" : "is"} more than ${COMMUTE_MILES} miles from where the other picks are; check against the role's location scope.`,
-                  "Replace anyone outside the scope with people from the rows whose location is inside it and record the ten again. If they are all inside the scope, record the same ten again.",
+                  newcomers.length &&
+                    `${newcomers.join(", ")} started the current role under ${MIN_CURRENT_ROLE_MONTHS} months ago, which the round leaves out unless the recruiter asked for them.`,
+                  "Replace anyone outside the scope or new in their role with people from the rows who fit, and record the ten again. If they all fit, record the same ten again.",
                 ]
                   .filter(Boolean)
                   .join(" "),

@@ -6072,6 +6072,20 @@ describe("native recruiting assessment effect delivery", () => {
       ),
     ).toBe("仓库运营经理（亚特兰大 Atlanta，现场办公）");
     expect(pastedJobTitle("岗位：仓库经理")).toBeNull();
+    // A one-line JD: a colon later in the text is not a label, and the title stops at its clause.
+    expect(
+      pastedJobTitle(
+        `[Test 4] US R&D Engineer (Automotive Aftermarket Parts), Dallas TX. $80K–100K. On-site: about 3 days in office, 2 days field work; no remote. ${body}`,
+      ),
+    ).toBe("[Test 4] US R&D Engineer (Automotive Aftermarket Parts)");
+    expect(
+      pastedJobTitle(
+        `仓库运营经理（亚特兰大，现场办公），5年以上仓储运营管理经验，英文即可，薪资面议。${body}`,
+      ),
+    ).toBe("仓库运营经理（亚特兰大，现场办公）");
+    expect(pastedJobTitle(`Senior Accountant\nAbout us: we build things.\n${body}`)).toBe(
+      "Senior Accountant",
+    );
     expect(
       pastedJobTitle("帮我把这个岗位的要求改一下：现场办公改成远程，不要求中文，其他不变。"),
     ).toBeNull();

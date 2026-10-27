@@ -665,6 +665,11 @@ function CandidateProfile({
   );
 }
 
+/** A brief field key written as a label (「工作年限」, "Years of experience"), not an id or a question. */
+function isBriefLabel(key: string) {
+  return key.length <= 24 && !/[_?？:：]/.test(key);
+}
+
 function recruitingMatchSummaryText(value: string): string {
   // ponytail: ambiguous codes may name companies/products; translate only explicit gate expressions.
   return value.replace(
@@ -4692,6 +4697,8 @@ function RecruitingWorkspace({
                   <div className="hire-criterion-row" key={field.key}>
                     {Object.hasOwn(briefFieldLabels, field.key) ? (
                       <span>{briefFieldLabels[field.key]}</span>
+                    ) : isBriefLabel(field.key) ? (
+                      <span>{field.key}</span>
                     ) : null}
                     <strong className="whitespace-pre-wrap">{field.value}</strong>
                     {field.state === "conflict" ? (

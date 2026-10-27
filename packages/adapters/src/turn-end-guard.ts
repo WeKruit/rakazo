@@ -115,22 +115,21 @@ export function answeredAsk(question: string, answers: readonly { key: string; v
     return short.length >= 8 && long.includes(short);
   });
 }
-/**
- * The ten of a recorded round as the chat lists them: name, title, company, location and the
- * profile passage the people search returned for each, read from this run's saved searches.
- */
-export async function recruitingRoundListText(
-  prisma: Pick<PrismaClient, "externalEffect"> & {
-    recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
-  },
-  input: {
-    threadId: string;
-    spaceId: string;
-    roleId: string;
-    candidateKeys: readonly string[];
-    /** Leave out keys that name no saved person (a list still being written). */
-    knownOnly?: boolean;
-  },
+type RoundPrisma = Pick<PrismaClient, "externalEffect"> & {
+  recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
+};
+type RoundPerson = {
+  name?: string | null;
+  title?: string | null;
+  company?: string | null;
+  location?: string | null;
+  snippet?: string | null;
+};
+
+/** The saved people behind round keys, each with the profile passage its search returned. */
+export async function recruitingRoundPeople(
+  prisma: RoundPrisma,
+  input: { threadId: string; spaceId: string; roleId: string; candidateKeys: readonly string[] },
 ) {
   // Any saved search in this conversation: the round is often recorded by a later run.
   const [searches, occurrences] = await Promise.all([
@@ -150,25 +149,44 @@ export async function recruitingRoundListText(
       orderBy: [{ page: { observedAt: "desc" } }, { rowIndex: "asc" }],
     }),
   ]);
-  type Person = {
-    name?: string | null;
-    title?: string | null;
-    company?: string | null;
-    location?: string | null;
-    snippet?: string | null;
-  };
-  const people = new Map<string, Person>();
+  const people = new Map<string, RoundPerson>();
   for (const row of occurrences)
     if (!people.has(row.candidateKey)) people.set(row.candidateKey, row);
   for (const search of searches) {
     const rows = (search.result as { candidateRows?: unknown } | null)?.candidateRows;
     if (!Array.isArray(rows)) continue;
-    for (const row of rows as Array<Person & { candidateKey?: unknown }>)
+    for (const row of rows as Array<RoundPerson & { candidateKey?: unknown }>)
       if (typeof row.candidateKey === "string" && row.snippet)
         people.set(row.candidateKey, { ...people.get(row.candidateKey), ...row });
   }
+  return people;
+}
+
+/**
+ * The ten of a recorded round as the chat lists them: name, title, company, location and the
+ * profile passage the people search returned for each, read from this run's saved searches.
+ */
+export async function recruitingRoundListText(
+  prisma: RoundPrisma,
+  input: {
+    threadId: string;
+    spaceId: string;
+    roleId: string;
+    candidateKeys: readonly string[];
+    /** Leave out keys that name no saved person (a list still being written). */
+    knownOnly?: boolean;
+    /** The last key may be cut mid-word: leave it out while it is the start of another person's. */
+    lastMayBeCut?: boolean;
+  },
+) {
+  const people = await recruitingRoundPeople(prisma, input);
+  const last = input.candidateKeys.length - 1;
+  const cut = (key: string, index: number) =>
+    !!input.lastMayBeCut &&
+    index === last &&
+    [...people.keys()].some((other) => other !== key && other.startsWith(key));
   const keys = input.knownOnly
-    ? input.candidateKeys.filter((key) => people.has(key))
+    ? input.candidateKeys.filter((key, index) => people.has(key) && !cut(key, index))
     : input.candidateKeys;
   if (input.knownOnly && !keys.length) return "";
   const lines = keys.map((key, index) => {
@@ -184,7 +202,7 @@ export async function recruitingRoundListText(
     const passage = person?.snippet?.trim();
     return `${index + 1}. ${head}${passage ? `\n   > ${passage.length > 220 ? `${passage.slice(0, 220)}…` : passage}` : ""}`;
   });
-  return `本轮 10 位人选：\n\n${lines.join("\n")}`;
+  return `本轮 ${lines.length} 位人选：\n\n${lines.join("\n")}`;
 }
 
 const PROMISE_LABEL = "完成上一条说要做的事";

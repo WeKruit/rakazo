@@ -292,6 +292,35 @@ describe("guardRecruitingTurnEnd", () => {
     ).toBe("");
   });
 
+  it("shows the last person of a list being written once the key is whole, counting who is shown", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "linkedin:/in/ana", name: "Ana" },
+          { candidateKey: "linkedin:/in/bo", name: "Bo" },
+          { candidateKey: "linkedin:/in/bo-lee", name: "Bo Lee" },
+        ]),
+      },
+    } as never;
+    const input = { threadId: "thread-1", spaceId: "space-1", roleId: "role-1", knownOnly: true };
+    const whole = await recruitingRoundListText(prisma, {
+      ...input,
+      candidateKeys: ["linkedin:/in/bo-lee", "linkedin:/in/ana"],
+      lastMayBeCut: true,
+    });
+    expect(whole).toContain("本轮 2 位人选");
+    expect(whole).toContain("2. **Ana**");
+    // "bo" may still become "bo-lee": not shown yet.
+    const cut = await recruitingRoundListText(prisma, {
+      ...input,
+      candidateKeys: ["linkedin:/in/ana", "linkedin:/in/bo"],
+      lastMayBeCut: true,
+    });
+    expect(cut).toContain("本轮 1 位人选");
+    expect(cut).not.toContain("Bo");
+  });
+
   it.each([
     [10, false, true, false, "ended"],
     [9, false, true, false, "continued"],
