@@ -22,6 +22,7 @@ model AiDataConsent {
 }
 
 model User {
+  modelOAuthSessions ModelOAuthSession[]
   recruitingCrmCampaigns RecruitingCrmCampaign[]
   recruitingCrmLeads RecruitingCrmLead[]
   aiDataConsents AiDataConsent[]
@@ -218,6 +219,7 @@ model Member {
 }
 
 model Space {
+  modelOAuthSessions ModelOAuthSession[]
   recruitingCrmCampaigns RecruitingCrmCampaign[]
   recruitingCrmLeads RecruitingCrmLead[]
   aiDataConsents AiDataConsent[]
@@ -2077,4 +2079,23 @@ model RecruitingCrmLead {
   @@index([userId, spaceId, crmCandidateId])
   @@index([userId, spaceId, crmCampaignId])
   @@map("recruiting_crm_leads")
+}
+
+model ModelOAuthSession {
+  id String @id
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  spaceId String
+  space Space @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  provider String
+  ownerId String
+  state String
+  acceptsCode Boolean @default(false)
+  codeCiphertext String?
+  result String?
+  expiresAt DateTime
+
+  @@index([userId, provider, state])
+  @@index([expiresAt])
+  @@map("model_oauth_sessions")
 }
