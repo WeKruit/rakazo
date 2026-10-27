@@ -859,7 +859,7 @@ export class McpConnector implements ConnectorProvider {
         call.route.toolName,
         call.args,
       );
-      await requireFullEnrichJobOwnership(
+      const ownedArgs = await requireFullEnrichJobOwnership(
         this.prisma,
         context,
         assignment.server,
@@ -886,7 +886,7 @@ export class McpConnector implements ConnectorProvider {
         ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
           ? await this.instantlyCampaignScope(context, assignment.server.id)
           : null;
-      let args = call.args;
+      let args = ownedArgs;
       if (emailScope && call.route.toolName === "list_emails") {
         const campaignId = scopedInstantlyCampaign(args, emailScope.campaignIds);
         const catalog = await session.listTools({ signal: context.signal });
