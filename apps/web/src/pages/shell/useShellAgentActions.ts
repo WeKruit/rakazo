@@ -17,8 +17,8 @@ import { rpc } from "../../lib/rpc";
 import { clearActiveThreadRuns } from "../../lib/thread-events";
 import { speaker } from "../../lib/tts";
 import { errorText } from "../../lib/user-error";
-import type { RoutineDraftState } from "../RoutineList";
-import { emptyRoutineDraft } from "../RoutineList";
+import type { RoutineDraftState } from "../routine-draft";
+import { emptyRoutineDraft } from "../routine-draft";
 
 export function useShellAgentActions({
   showToolActivity,
