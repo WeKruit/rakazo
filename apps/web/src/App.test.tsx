@@ -194,6 +194,9 @@ it("loads the board chunk only after bootstrap enables the route", async () => {
       root.render(render());
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(capability.boardLoaded).toHaveBeenCalledOnce();
     expect(container.textContent).toBe("Board page");
   } finally {

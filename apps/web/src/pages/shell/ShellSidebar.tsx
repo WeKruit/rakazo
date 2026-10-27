@@ -7,6 +7,7 @@ import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
 import { authClient } from "../../lib/auth";
 import { desktopBridge } from "../../lib/desktop";
+import { withFeatureMessages } from "../../lib/i18n";
 import { clearSpaceSelection } from "../../lib/rpc";
 
 import { RecruitingNavigation } from "../shell/RecruitingNavigation";
@@ -14,7 +15,7 @@ import type { useShellController } from "../shell/useShellController";
 import { WindowChrome } from "../WindowChrome";
 
 const DeveloperSidebar = lazyPanel(() =>
-  import("./DeveloperSidebar").then((m) => m.DeveloperSidebar),
+  withFeatureMessages(() => import("./DeveloperSidebar")).then((m) => m.DeveloperSidebar),
 );
 export function ShellSidebar({ model }: { model: ReturnType<typeof useShellController> }) {
   const { t } = useLingui();
