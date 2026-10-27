@@ -1,4 +1,4 @@
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -72,8 +72,8 @@ function voiceStatusRefreshTimeout(): Promise<never> {
 }
 
 export function ShellOverlays({ model }: { model: ReturnType<typeof useShellController> }) {
+  const { t } = useLingui();
   const {
-    t,
     navigate,
     session,
     userId,

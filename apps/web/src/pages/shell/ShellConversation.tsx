@@ -1,5 +1,5 @@
 import { i18n } from "@lingui/core";
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
 import { attachmentsForThread, isActive, threadTailPhase } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
@@ -62,8 +62,8 @@ export function ShellConversation({
   nativeCorrespondence: ReactNode;
   reviewSchedulingPlan: (handoff: SchedulingPlanHandoff) => void;
 }) {
+  const { t } = useLingui();
   const {
-    t,
     linkFavicons,
     groupId,
     navigate,

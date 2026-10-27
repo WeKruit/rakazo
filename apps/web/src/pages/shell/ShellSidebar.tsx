@@ -1,6 +1,6 @@
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { nestRosterByParent } from "@rakazo/core";
 import {
   BotAvatar,
@@ -51,8 +51,8 @@ const ActivityList = lazyPanel(() =>
 const _VOICE_STATUS_REFRESH_TIMEOUT_MS = 10_000;
 
 export function ShellSidebar({ model }: { model: ReturnType<typeof useShellController> }) {
+  const { t } = useLingui();
   const {
-    t,
     groupId,
     navigate,
     groups,
