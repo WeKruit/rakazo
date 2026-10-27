@@ -5215,6 +5215,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const plannedFresh = new Set<string>();
         // Rows of planned searches that returned after the pick started, not yet shown to the model.
         const lateSearchRows: string[] = [];
+        let plannedEarlyRefusalAt: number | undefined;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
         /**
@@ -5412,9 +5413,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          // Before the first picks, one step's extra searches are refused once: the model picks
+          // from the planned rows first, and may search again only if the answer changed the role.
+          const refusedEarly = () => {
+            const now = Date.now();
+            plannedEarlyRefusalAt ??= now;
+            return now - plannedEarlyRefusalAt < 3_000;
+          };
           if (
             (name.endsWith("web_search_advanced_exa") || name === "web_search") &&
-            firstPicksShown &&
             plannedNewPeople >= PLANNED_POOL_ENOUGH &&
             !executionId.startsWith(`${runId}:planned-search:`) &&
             !(await deps.prisma.externalEffect.findFirst({
@@ -5426,13 +5433,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 request: { path: ["operation"], equals: "calibration_round" },
               },
               select: { id: true },
-            }))
+            })) &&
+            (firstPicksShown || refusedEarly())
           ) {
+            const late = lateSearchRows.splice(0);
+            const lateText = late.length
+              ? `\n\nThe planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`
+              : "";
+            if (!firstPicksShown)
+              return {
+                error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people. First show the two to four clearest fits from those rows with show_picks, then record the ten with calibration_round. Search again only if the recruiter's answer changes who you are looking for.${lateText}`,
+              };
             // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
             peopleSearchesRun = Math.max(peopleSearchesRun, 8);
-            const late = lateSearchRows.splice(0);
             return {
-              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people, and the ten come from them. Record the ten now with calibration_round from those rows, starting with the people already shown; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say.${late.length ? `\n\nThe planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}` : ""}`,
+              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people, and the ten come from them. Record the ten now with calibration_round from those rows, starting with the people already shown; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say.${lateText}`,
             };
           }
           if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
@@ -5675,9 +5690,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             stream.posting = stream.posting.then(() => showRoundList(text));
             await stream.posting;
             firstPicksShown = true;
+            const late = lateSearchRows.splice(0);
             return {
               shown: keys.length,
               ...(left ? { notShown: left } : {}),
+              ...(late.length
+                ? {
+                    lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
+                  }
+                : {}),
               next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ask the recruiter how to go on, as the round instructions say.",
             };
           }
@@ -11112,6 +11133,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           const inArea = (rows: PlannedRow[], outside: Set<string>) =>
             rows.filter((row) => !outside.has(keyOf(row) ?? ""));
+          // Late rows join a tool result, so their passages are shortened.
+          const compactRow = ({ snippet, ...row }: PlannedRow & { snippet?: unknown }) => ({
+            ...row,
+            ...(typeof snippet === "string" ? { snippet: snippet.slice(0, 300) } : {}),
+          });
           const addFresh = (rows: PlannedRow[]) => {
             for (const row of rows) {
               const key = keyOf(row);
@@ -11134,14 +11160,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const kept = inArea(rows, outsideOf([...onTime, ...rows]));
               addFresh(kept);
               lateSearchRows.push(
-                `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(kept).slice(0, 24_000)}`,
+                `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(kept.map(compactRow)).slice(0, 8_000)}`,
               );
             });
           });
           const searches = planned.data.queries.map((query, index) => {
             const result = results[index];
             if (result === PLANNED_SEARCH_LATE)
-              return `Search ${index + 1} "${query}": still running; its people are saved to Results when it returns, so pick from the other searches.`;
+              return `Search ${index + 1} "${query}": still running; its rows come back with your show_picks result, so start from the other searches and never wait or end the turn for it.`;
             const rows = rowsOf(result);
             return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
           });
