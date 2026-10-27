@@ -1,3 +1,12 @@
+import { MessageRole, ReplyPreviewSchema } from "./thread-message-metadata.js";
+
+export type { ReplyPreview } from "./thread-message-metadata.js";
+export {
+  canReactToThreadMessage,
+  MessageRole,
+  ReplyPreviewSchema,
+} from "./thread-message-metadata.js";
+
 import * as z from "zod";
 import { botSecretDestinationSchema } from "./bot-secrets.js";
 import { Id, IsoDate } from "./ids.js";
@@ -106,7 +115,6 @@ export const RunCompletedPayloadSchema = RunTimingSchema.extend({
 });
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
-export const MessageRole = z.enum(["user", "bot", "system"]);
 export const BotMessageIntent = z.enum(["request", "result", "question", "status", "fyi"]);
 export type BotMessageIntent = z.infer<typeof BotMessageIntent>;
 
@@ -747,21 +755,6 @@ export const ProductEventSchema = z
   });
 export type ProductEvent = z.infer<typeof ProductEventSchema>;
 
-export const ReplyPreviewSchema = z.object({
-  role: MessageRole,
-  botId: Id.optional(),
-  text: z.string(),
-  attachment: z
-    .object({
-      kind: z.enum(["image", "file"]),
-      artifactId: Id,
-      mimeType: z.string(),
-      name: z.string(),
-    })
-    .optional(),
-});
-export type ReplyPreview = z.infer<typeof ReplyPreviewSchema>;
-
 export const ThreadMessageSchema = z.object({
   /** Server-generated continuation; retained for history but hidden in conversation views. */
   internal: z.boolean().optional(),
@@ -780,11 +773,3 @@ export const ThreadMessageSchema = z.object({
   createdAt: z.string(),
 });
 export type ThreadMessage = z.infer<typeof ThreadMessageSchema>;
-
-export function canReactToThreadMessage(message: Pick<ThreadMessage, "id" | "blocks">): boolean {
-  return (
-    !message.id.startsWith("progress:") &&
-    !message.id.startsWith("subagent:") &&
-    !message.blocks.some((block) => block.kind === "channel_message")
-  );
-}

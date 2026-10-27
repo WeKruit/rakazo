@@ -1609,6 +1609,9 @@ it("uses the native current coordinator and exact managed member keys for ordina
   });
   await view.render();
   await view.click("Integrations");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
     coordinatorBotId: "bot-1",
     recruitingBotIds: { outreach: "bot-2", scheduling: undefined },
@@ -1649,6 +1652,9 @@ it("connects personal apps from New Role using only this user's installed native
   await view.render();
   await view.click("New Role");
   await view.click("Integrations");
+  await act(async () => {
+    await vi.dynamicImportSettled();
+  });
   expect(shellApi.plugins.mock.calls.at(-1)?.[0]).toMatchObject({
     coordinatorBotId: "bot-1",
     recruitingBotIds: { outreach: "managed-outreach", scheduling: "managed-scheduling" },
@@ -3967,6 +3973,9 @@ it("switches the owner presentation while retaining the same native thread, pend
   for (const preference of ["on", "off"] as const) {
     await act(async () => {
       setToolActivityPreference(preference);
+    });
+    await act(async () => {
+      await vi.dynamicImportSettled();
     });
     expect(
       container?.querySelector('[data-testid="shell-root"]')?.getAttribute("data-product-view"),

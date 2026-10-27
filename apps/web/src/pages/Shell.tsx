@@ -1,6 +1,8 @@
 import { ATTACHMENT_ACCEPT } from "./shell/Composer";
 import { ShellConversation } from "./shell/ShellConversation";
-import { ShellOverlays } from "./shell/ShellOverlays";
+
+const ShellOverlays = lazyPanel(() => import("./shell/ShellOverlays").then((m) => m.ShellOverlays));
+
 import { ShellSidebar } from "./shell/ShellSidebar";
 import { firstThreadRoute, useShellController } from "./shell/useShellController";
 
@@ -19,14 +21,37 @@ import { cronFromPreset, isActive } from "@rakazo/core";
 import { AvatarStyleProvider, BotAvatar, Button } from "@rakazo/ui-web";
 import { Maximize2, Settings, X } from "lucide-react";
 import type { ComponentProps } from "react";
-import { ComputerMaintenanceActions } from "../components/ComputerMaintenanceActions";
+
+const ComputerMaintenanceActions = lazyPanel(() =>
+  import("../components/ComputerMaintenanceActions").then((m) => m.ComputerMaintenanceActions),
+);
+
 import { ComputersUnavailableHint } from "../components/ComputersUnavailableHint";
-import { ComputerUpdateProgress } from "../components/ComputerUpdateProgress";
-import { CallCard } from "../components/call/CallCard";
+
+const ComputerUpdateProgress = lazyPanel(() =>
+  import("../components/ComputerUpdateProgress").then(
+    (m) => (props: ComponentProps<typeof m.ComputerUpdateProgress>) => (
+      <m.ComputerUpdateProgress {...props} />
+    ),
+  ),
+);
+const CallCard = lazyPanel(() => import("../components/call/CallCard").then((m) => m.CallCard));
+
 import { lazyPanel } from "../components/ErrorBoundary";
-import { TeachCaptureOverlay } from "../components/teach/TeachCaptureOverlay";
-import { TeachComputerOverlayControl } from "../components/teach/TeachComputerOverlay";
-import { TeachRecordingChrome, TeachStopButton } from "../components/teach/TeachRecordingChrome";
+
+const TeachCaptureOverlay = lazyPanel(() =>
+  import("../components/teach/TeachCaptureOverlay").then((m) => m.TeachCaptureOverlay),
+);
+const TeachComputerOverlayControl = lazyPanel(() =>
+  import("../components/teach/TeachComputerOverlay").then((m) => m.TeachComputerOverlayControl),
+);
+const TeachRecordingChrome = lazyPanel(() =>
+  import("../components/teach/TeachRecordingChrome").then((m) => m.TeachRecordingChrome),
+);
+const TeachStopButton = lazyPanel(() =>
+  import("../components/teach/TeachRecordingChrome").then((m) => m.TeachStopButton),
+);
+
 import { BOTS_SIDEBAR_EDGE_DRAG_PX } from "../lib/bots-sidebar-pref";
 import { screenIframeSandbox } from "../lib/computer-screen";
 import { localTimezone } from "../lib/local-timezone";
@@ -34,7 +59,11 @@ import { parseModelOptionKey } from "../lib/model-catalog";
 import { rpc } from "../lib/rpc";
 import { computerPanelNeedsMaintenance, computerTakeoverBlocked } from "../lib/thread-events";
 import { errorText } from "../lib/user-error";
-import { HostComputerPrompt } from "./HostComputerPrompt";
+
+const HostComputerPrompt = lazyPanel(() =>
+  import("./HostComputerPrompt").then((m) => m.HostComputerPrompt),
+);
+
 import { ResizableSidePanel } from "./ResizableSidePanel";
 import {
   draftFromRoutine,
@@ -894,7 +923,27 @@ export function ShellPage() {
         ) : null}
       </ResizableSidePanel>
 
-      <ShellOverlays model={model} />
+      {model.spaceMenu ||
+      model.deleteTarget ||
+      model.deleteGroupTarget ||
+      model.renameSpaceTarget ||
+      model.deleteSpaceTarget ||
+      model.newSectionTarget ||
+      model.renameSectionTarget ||
+      model.sectionMenu ||
+      model.newSpaceOpen ||
+      model.pickerInfoTopic ||
+      model.clearTarget ||
+      model.deleteRoutineTarget ||
+      model.pluginsOpen ||
+      model.mcpOpen ||
+      model.messagingSettingsOpen ||
+      model.settingsOpen ||
+      (model.contextChat && model.botMenu) ||
+      (model.showToolActivity && model.commandPaletteOpen) ||
+      (model.peerConversation && model.active) ? (
+        <ShellOverlays model={model} />
+      ) : null}
 
       {booting ? (
         <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-[22px] bg-background/95">

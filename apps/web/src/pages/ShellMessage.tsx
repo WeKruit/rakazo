@@ -18,10 +18,19 @@ import {
 } from "@rakazo/ui-web";
 import { Copy, MoreHorizontal, Reply, Smile } from "lucide-react";
 import { memo, useMemo, useState } from "react";
-import { ArtifactFileCard } from "../components/ArtifactFileCard";
-import { AskCard } from "../components/AskCard";
+import { lazyPanel } from "../components/ErrorBoundary";
+
+const ArtifactFileCard = lazyPanel(() =>
+  import("../components/ArtifactFileCard").then((m) => m.ArtifactFileCard),
+);
+const AskCard = lazyPanel(() => import("../components/AskCard").then((m) => m.AskCard));
+
 import { CollaborationMarker } from "../components/ai/CollaborationMarker";
-import { CloudAgentCard } from "../components/CloudAgentCard";
+
+const CloudAgentCard = lazyPanel(() =>
+  import("../components/CloudAgentCard").then((m) => m.CloudAgentCard),
+);
+
 import { MessageHoverMetadata } from "../components/MessageHoverMetadata";
 import {
   LIVE_TOOL_STEP_WINDOW,
@@ -30,7 +39,11 @@ import {
   ToolOnlyNarration,
   ToolSteps,
 } from "../components/ToolActivityDisclosure";
-import { SkillDraftCard } from "../components/teach/SkillDraftCard";
+
+const SkillDraftCard = lazyPanel(() =>
+  import("../components/teach/SkillDraftCard").then((m) => m.SkillDraftCard),
+);
+
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { copyableMessageText, previewMessageText } from "../lib/message-text";
 import { messageProviderLabel } from "../lib/messaging";
