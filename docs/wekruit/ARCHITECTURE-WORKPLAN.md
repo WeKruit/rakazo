@@ -22,15 +22,16 @@
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，待发布） | Adam |
 | C5 | 多容器 | web/API 和 worker 拆成两个服务，开多个容器，做滚动发布 | 阻塞（共享存储配置、C4 与部署授权） | |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
-| D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中 | Adam |
+| D1 | 前端 | 首屏 JS 太大，要按需加载 | 进行中：第一步已在本分支（593 → 561 KB，见 D1） | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 进行中 | Adam |
-| D3 | 前端 | 长列表虚拟滚动 | 进行中 | Adam |
+| D3 | 前端 | 长列表虚拟滚动 | 部分实现（候选人目录已本地验收，[#276](https://github.com/WeKruit/rakazo/pull/276)；消息待做） | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 进行中 | Adam |
+| F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
 | E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
 | E2 | 可靠性 | 压测：20 和 50 个并发对话 | 阻塞（缺获准的部署测试环境和在线压测范围） | |
 | E3 | 可靠性 | 数据库备份恢复演练 | 阻塞（缺备份访问及隔离恢复目标授权） | |
 | E4 | 可靠性 | 模型服务只有一个提供方 | 阻塞（禁止生产连接配置/停用主连接） | |
-| F1 | Agent | 招聘逻辑写死在执行器代码里 | 进行中 | Adam |
+| F2 | Agent / 可靠性 | 回合守卫二期（#65 留下的 5 项） | 复查后 4 项已上线，1 项建议保持现状 | Claude（架构线程） |
 
 ---
 
@@ -99,6 +100,9 @@ SQL
   - 机器人列表和群组列表是一次全部读出。
 - **验收（代码检查）：** 任何列表 RPC 单次返回不超过 200 行。
 - **验收（线上实测）：** 有 1,000 个候选人的岗位，联系人视图的 RPC p95 小于 300 ms。
+- **Adam 实施记录（仍进行中）：** [PR #277](https://github.com/WeKruit/rakazo/pull/277) 覆盖机器人/群组、导航/bootstrap、联系人有界读取及 Web/Mobile 自动续页；为另外 31 个数组列表与 5 个结构化列表增加明确 offset，认证后的 RPC 响应每个列表最多 200 条，客户端完整续页。没有截断写操作的回执。后续已将其中 28 个读接口分页下推到数据库（稳定排序、take/skip 或 SQL LIMIT/OFFSET），其余 8 个为静态/外部 provider 目录或已有 10/100 条上限的集合，边界区别见验收记录。
+- **实测与限制：** 见 [A3 本地验收记录](./A3-PAGINATION-VALIDATION.md)。合成 PostgreSQL 数据 1,000 候选人，100 次采样：原全岗位查询 1,000 行、p95 0.88 ms；按已观察身份查询 20 行、p95 0.49 ms。机器人 1,000 条在 `200/200/200/200/200/0` 六页中无遗漏、无重复。真实本地 HTTP+PostgreSQL 的 1,000 人联系人 RPC：首轮 p95 32.44 ms，此前复测 p95 26.37 ms，F1 合入后发布门禁复测 p95 26.58 ms（各 100 samples/10 warmups）；固定合成 session actor，其余授权和 DB 查询真实。实际浏览器 contacts 1×1000→5×200 请求，JS gzip 625,224→626,840 bytes。后续整份 recruiting PostgreSQL 回归 285 passed、候选人单元 425 passed、DB 含 cross-package 类型检查通过。**线上联系人 RPC p95 还没测，不标完成**。没有部署、云配置变更或真实岗位/候选人测试。
+
 
 ### A4 schema 和迁移不一致 — 阻塞，尚未通过验收
 
@@ -263,7 +267,8 @@ CHECK
 ### D1 首屏 JS
 
 - **现状（本地 `vite build` 实测）：** 首屏要加载的 JS 合计 594 KB（gzip 后）。主包 1.18 MB（未压缩），gzip 后 338 KB。主包里占得最多的是：react-dom 171 KB、`Shell.tsx` 147 KB、`RecruitingPanel.tsx` 113 KB、`ModelSettingsOverlay` 29 KB、`RecruitingCorrespondence` 24 KB、`RoutineEditor`、`InterviewCalendar`、`SchedulingPlan`、`DetailPanel`、markdown 解析器。路由页面已经是按需加载的。
-- **做法：** 第一屏用不到的面板改成 `lazy()` 加载：设置浮层、例行任务编辑器、邮件序列编辑、面试日历、排期计划、候选人详情。markdown 解析器在第一条消息渲染时再加载。打开这些面板时要有加载占位，不能出现空白。
+- **本 PR 已做：** 本地设置页、集成设置页和 MCP 授权回调页改成按需加载，联系人、面试、邮件往来这几个视图也改成按需加载（`recruiting/LazyViews.tsx`）。另外把 `PersonAvatar` 移进 `ProfileImage.tsx`，断开了 DetailPanel 和 CandidateDirectory 之间的循环引用。首屏 JS（gzip -9）从 592,955 字节降到 561,040 字节。
+- **剩下的做法：** 第一屏用不到的面板改成 `lazy()` 加载：设置浮层、例行任务编辑器、邮件序列编辑、面试日历、排期计划、候选人详情。markdown 解析器在第一条消息渲染时再加载。打开这些面板时要有加载占位，不能出现空白。
 - **验收（代码检查）：** 用 `vite build` 计算首屏 JS，gzip 后不超过 350 KB（第一阶段），最终目标 250 KB。
 - **验收（线上实测）：** 在 Lighthouse 的移动端模拟环境（Fast 4G）下，LCP 小于 2.5 s。
 
@@ -277,6 +282,42 @@ CHECK
 
 - **现状：** 消息和候选人列表都会把每一项渲染成 DOM，没有用虚拟滚动。
 - **验收：** 有 1,000 个候选人的列表，渲染出来的行节点不超过 100 个，滚动时没有超过 50 ms 的长任务。
+
+- **实现范围：** `ContactsTab` 使用的主 `CandidateDirectory` 表格/卡片超过 80 人后使用固定版本 `@tanstack/react-virtual` 3.14.23，测量实际高度、保留焦点行和稳定 key，支持 Home/End/上下箭头、响应式卡片分组，以及切换表格/卡片时恢复测量缓存和滚动位置。原有加载、选中和 shortlist 状态仍由调用者维护，不丢弃已加载候选人。没有新增用户可见文案。
+- **认领/实现：** Adam 先推送认领 `09d5070b2`，实现提交 `0950da29b0a89243a08665d1a247174cb109f80e`，Draft [#276](https://github.com/WeKruit/rakazo/pull/276) 指向 #263 分支。
+- **实测（Node 24.19.0，本地 Chromium，1440×900，生产构建的真实组件加 1,000 个合成人员）：** 表格初始行节点 1,000 → 14；30 个滚动位置的最大行节点 1,000 → 19；新卡片模式 30 个滚动位置最多 36 人，390px 响应式卡片也不超过 100 人。两次表格测量及新卡片测量均未记录到 >50 ms long task。键盘首尾导航、点击选中、shortlist 滚出/滚回后保持、滚动时焦点行保留、布局切换后恢复滚动全部通过。
+- **前后成本：** 同一个冷启动 fixture 页面实际请求尝试数 5 → 5，其中 JS 请求 1 → 1（不是滚动采样次数；原有外部字体请求被测试拦截，计入尝试数）。fixture JS 原始字节 895,559 → 932,535，gzip 字节 286,325 → 297,386。完整应用静态入口及静态 imports 闭包为 14 个 JS，原始字节 1,987,089 → 2,024,057，gzip 字节 594,217 → 605,997（增加 11,780）。这是 D1 合入前的隔离对比，最终集成需重测，不作首屏减包声明。
+- **门禁：** `pnpm --filter @rakazo/web check` 通过；web 141 个测试文件、1,649 个测试全通过；生产 build、Biome、`git diff --check` 通过；浏览器验收 1/1 通过（包含上述多项断言）。
+- **尚未完成/未测：** 旧 `RecruitingPanel` 结果视图和带流式更新的聊天消息列表尚未虚拟化，因此整项 D3 未标完成。部署环境、真实页面/API 集成、其他浏览器、CPU 降速和辅助技术人工检查未测。仅本地合成数据，未调用真实岗位/候选人或外部服务；CI 保持关闭，故没有 CI 截图。
+
+```sh
+pnpm --filter @rakazo/web check
+pnpm --filter @rakazo/web test
+RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec vite build --manifest
+PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers D3_BASE_REF=5e99915aa pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+PLAYWRIGHT_BROWSERS_PATH=/tmp/rakazo-c6-browsers pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+pnpm exec biome check apps/web/src/pages/recruiting/CandidateDirectory.tsx apps/web/src/pages/recruiting/CandidateWindow.tsx apps/web/src/pages/recruiting/latency.test.tsx apps/web/e2e/candidate-virtualization.spec.ts apps/web/e2e/fixtures/candidates.tsx apps/web/playwright.candidates.config.ts apps/web/package.json
+git diff --check
+```
+
+
+### D3 #276 发布前刷新（候选列表独立范围）
+
+- 普通合并 #263 最新分支 `168fcaacc`，合并提交 `600d11f7b`；头像导入冲突保留新的 ProfileImage 模块与虚拟窗口 hooks。没有引入 D1/D4 的 Shell 拆分或聊天 Transcript 实现。
+- 相同生产 fixture 对当前 base 的前后重测：1,000 合成人选初始/最大表格 DOM **1,000/1,000 → 14/19**，卡片最大 **36**；两侧均没有 >50ms 的测量滚动长任务。实际冷页面请求 **5 → 5**、JS 请求 **1 → 1**。fixture 原始 JS **895,401 → 932,377 B**，gzip **286,363 → 297,393 B**（增加11,030 B）；不是完整应用首屏或线上性能。键盘、选中项、布局切换和滚动恢复断言通过。
+- 刷新门禁：web **141文件/1,649测试通过**（28.10s）；相关 latency **16/16**；web 类型检查、中文生产 build、5文件 Biome、diff检查通过。前后浏览器各 **1/1**（5.4s/8.3s）。
+- 范围边界：整项 D3 仍未标完成。旧 RecruitingPanel 和真实 Transcript 的后续本地实现依赖 D1/D4，保留在独立 followup 提交中，由主线程在这些依赖合入后串行集成；不能夹带进本候选列表 PR。线上、其他浏览器、CPU降速、人工辅助技术仍未测。
+
+```sh
+pnpm exec vitest run apps/web/src/pages/recruiting/latency.test.tsx --maxWorkers=2
+pnpm --filter @rakazo/web test
+pnpm --filter @rakazo/web check
+RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web exec vite build --manifest
+D3_BASE_REF=168fcaacc pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+pnpm --filter @rakazo/web exec playwright test -c playwright.candidates.config.ts
+pnpm exec biome check apps/web/src/pages/recruiting/CandidateDirectory.tsx apps/web/src/pages/recruiting/CandidateWindow.tsx apps/web/e2e/candidate-virtualization.spec.ts apps/web/e2e/fixtures/candidates.tsx apps/web/playwright.candidates.config.ts
+git diff --check
+```
 
 ### D4 拆分超大组件文件
 
@@ -317,6 +358,67 @@ CHECK
 
 - **现状：** `executor.ts` 有约 14,000 行，其中 482 处和招聘有关。按 AGENTS.md 的原则，招聘相关的行为应该写在机器人指令和技能里，不应该写在执行器代码里。
 - **验收：** 执行器里和招聘有关的引用每一轮都在减少，招聘验收流程不退步。
+
+- **F1 本轮（2026-10-27，[#269](https://github.com/WeKruit/rakazo/pull/269)）：** 移除 executor 对澄清问题强制携带四条搜索计划的业务门槛，以及与原生 intake skill 重复的逐轮筛选/下一步指令。已有 intake skill 负责已存搜索结果复用和后续选择；executor 只补充该部分的已存岗位/搜索事实。没有把同一决策代码挪进新的模块，保留授权、账号隔离、已答问题复用及提供方执行边界。
+- **量化：** 本轮前后 `wc -l packages/adapters/src/executor.ts` 为 14,351 → 14,327；`rg -i -c recruiting packages/adapters/src/executor.ts` 为 482 → 481。仍有大量招聘工具适配与业务逻辑，不能据此说 F1 整项已完成。
+- **认领和实现：** 先以 Adam 认领并推送 `e6b8446de`，实现提交 `888e5dfd05c07a4bd07f2d209076bc1e6b938cd7`，小 PR base 为 `claude/project-thread-f1cbzk`。
+- **本地实测：** Node 24.19.0、pnpm 9.15.0。core 1,232 通过 / 5 跳过；adapters 单独重跑 5,128 通过 / 44 跳过；聚焦回归 238 通过；招聘默认配置安装/升级测试 55 通过；core/adapters 类型检查、Biome 和 diff 检查通过。新用例证明无计划、空计划、单条计划都能提交实质澄清且不调用提供方/不产生效果。用原始 executor 跑同一新回归：2 失败 / 1 通过；修改后 3 通过。
+- **初次失败记录：** 首次全 adapters 测试为 5,127 通过、1 失败（computer-idle 的固定临时 marker 建 symlink 遇到 EEXIST）；恢复原始 F1 源码后单独运行该测试文件 59/59 通过，随后独立全量重跑 5,128/5,128 通过。未修改无关生产代码掩盖问题。
+- **未完成的验收：** 真实提供方支持的测试副本岗位 → 10 人校准 → 人工反馈 → 同任务继续的业务不退步尚未测；现有本地假服务测试不替代该证据。因此 F1 只记部分实现，不记完成。未在真实岗位/候选人上测试，无部署、云配置、Secret、资源、外发或 CI 改动。
+
+F1 复现命令（仓库根目录，Node 24.19.0）：
+
+```sh
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @rakazo/db generate
+pnpm --filter @rakazo/core --filter @rakazo/adapters check
+pnpm --filter @rakazo/core --filter @rakazo/adapters test
+pnpm --filter @rakazo/adapters test
+pnpm test packages/adapters/src/executor-effect-idempotency.test.ts packages/adapters/src/executor-planned-searches.test.ts packages/core/src/recruiting-defaults.test.ts
+pnpm test packages/db/src/recruiting-bootstrap.test.ts
+pnpm exec vitest run packages/adapters/src/computer-idle.test.ts
+pnpm exec vitest run packages/adapters/src/executor-effect-idempotency.test.ts --testNamePattern 'intake questions follow'
+pnpm exec biome check packages/adapters/src/executor.ts packages/adapters/src/executor-effect-idempotency.test.ts packages/core/src/recruiting-defaults.ts packages/core/src/recruiting-defaults.test.ts
+wc -l packages/adapters/src/executor.ts
+rg -i -c recruiting packages/adapters/src/executor.ts
+git diff --check
+```
+
+- **F1 PostgreSQL 跟进：** 在专用本地合成库 `rakazo_f1` 修复两处实际回归：原始输入与最新人类输入引用相同时优先最新有效来源；取消 run 的已完成读取由后续 run 记录后，按原 owner 和产物记录 run 查询凭据，仍完整验证作用域、绑定及回执。四处测试断言/夹具显式携带已有证据引用，不恢复隐式推断来源。认领前基线 12 失败；本次负责的 7 项全部通过，全文件 277 通过 / 5 失败（282 项），余下五项由集成负责人独立修正，不能称全套通过。DB/adapters 类型检查通过。
+
+```sh
+VERIFY_DATABASE=1 DATABASE_URL=postgresql://postgres@127.0.0.1:55434/rakazo_f1 pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts --testNamePattern 'atomically recovers native role|rejects native role identity|verifies native human authorship|uses the actual native|recovers an actually bound completed read'
+VERIFY_DATABASE=1 DATABASE_URL=postgresql://postgres@127.0.0.1:55434/rakazo_f1 pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts
+pnpm --filter @rakazo/db --filter @rakazo/adapters check
+```
+
+- **F1 第二轮审查：** executor 招聘匹配行 481 → 477（相对起点 482），总行数 14,327 → 14,231（起点 14,351）。移除基于美国地名/多数候选人位置的通勤距离筛选及州/国家级位置自动拒绝：地理匹配属于现有 agent/skill 的证据判断，不能由执行器在不知道岗位实际地域范围时替代判断。删除失去调用者的 location 模块、地名表及其旧算法测试。移除已显示部分候选人/已记录一轮之后禁止实质澄清的两处时序门槛；展示回执只报告 `shown` 和 `roundRecorded`，不强制四查询或下一工具步骤。
+- **保留边界逐类审查：** (1) 当前 role/thread/actor 绑定、revision CAS、候选人必须来自该岗位的已存来源：保留，属于身份与事实完整性；(2) 候选人评估 source、精确人类引用、已答卡复用、历史 run 回执和付费读取重放：保留，删除会伪造证据或重复外部效果；(3) outreach/email/calendar 精确批准请求、recipient/account 匹配、预算和提供方任务所有权：保留，属于授权；(4) 正式 calibration 提交的十人完整性、真实反馈与批准记录：保留，未把 display-only 的选中人数当作已完成校准；(5) 工具 DTO/持久化与 chat 展示：保留，不通过改名或搬文件减少计数；(6) planned-search 调度、brief 自动保存、next-step card、turn-end 自动续跑、approval-stage 拦截仍包含业务时序，尚未完成剥离。它们涉及原生等待卡、恢复和实际人类决策，不能只删除后宣称工作流无回退，须有相应业务验收再继续。
+- **本轮反例与实测：** 新增六个运行时反例：美国/州/英国/缺失位置的已存人选可展示且可提出实质澄清；未知候选人仍拒绝；完成轮次后的澄清仍进入带作用域的 assessment 验证，验证拒绝照常传播。无提供方执行或外发。相关三文件共 244 测试通过；这些实现证据不替代真实提供方测试副本的全流程验收。F1 仍为部分实现，不标完成。
+- 第二轮全 adapters 实测：5,118 通过 / 44 跳过（删除 16 个失去生产调用者的地域算法测试、增加 6 个运行时反例；第一轮 5,128）。`pnpm --filter @rakazo/adapters check` 通过。初次沙箱运行因本地 socket/网络夹具权限失败，随后允许本地服务的完整运行通过；未把权限失败当作产品失败或忽略未过测试。
+- **最终分支刷新验收：** 普通 merge 最新 #263 分支 `9b2705c66`，并加入集成负责人的五项旧夹具修正（`41f98a52d`，来源 `5ecdb59c9`）。专用合成 PostgreSQL 全文件 **282/282 通过**（31.11 秒），原先五项失败已解决；全 adapters **5,118 通过 / 47 跳过**（230 文件通过 / 6 跳过，25.78 秒）；core/adapters/db 类型检查全部通过。当前 executor 14,231 行、招聘匹配行 477；这些计数只是审计指标，不表示全部业务逻辑已移除。47 项跳过及真实提供方全流程均不宣称已验证。此项仍为部分实现。
+
+最终复现命令（Node 24.19.0，`DATABASE_URL` 指向专用本地合成库）：
+
+```sh
+pnpm --filter @rakazo/core --filter @rakazo/adapters --filter @rakazo/db check
+pnpm --filter @rakazo/adapters test
+VERIFY_DATABASE=1 pnpm exec vitest run packages/db/src/recruiting.postgres.test.ts
+wc -l packages/adapters/src/executor.ts
+rg -i -c recruiting packages/adapters/src/executor.ts
+```
+
+### F2 回合守卫二期（#65 留下的项目）
+
+#65 合并了回合守卫的一期：回合结束时没有交付物，就自动继续下一步。下面是它列为二期、当时没有做的部分，每项都对着 main 检查过。
+
+| 项目 | main 上的现状 | 状态 | 验收 |
+|---|---|---|---|
+| 隐藏自动继续的消息 | `sendUserMessage` 收到以 `autocontinue:` 开头的 nonce 时，会把消息标成 `internal`（`packages/db/src/events.ts`）；消息列表、群组列表和招聘读取都会过滤掉它 | 已上线 | 在 e2e 里，自动继续之后聊天中没有出现「继续下一步：…」 |
+| 10 分钟后提醒还没回答的问题 | 已有：`recruiting-question-nudge.ts` 会在问题卡片等了 10 分钟后，把原来那张卡片重新标成未读并推到前面，每张卡片只做一次，不新发消息，也不会代替用户回答。`stuck-work.ts` 另外会发手机推送提醒 | 已上线（复查时发现之前写成待做是错的） | 一张问题卡片 10 分钟没人回答，线程变成未读，同一张卡片不会提醒第二次；回答以后不再提醒 |
+| 崩溃后自动接着做 | `job-reconciler.ts` 会把租约过期的 `leased`/`running` 运行重新排队，由原来的运行接着做 | 已上线 | 在一个回合中途杀掉 worker：重启后 2 分钟内同一个运行继续，不重复发消息 |
+| 唤醒时无事可做就保持沉默 | 已有，名字叫 `NO_RESPONSE`（`silent-reply.ts`）。定时任务的唤醒会被告知「没有新内容就只回 `NO_RESPONSE`」，最终回复只有这个词时，聊天里不出现消息。工单类唤醒的回复本来就是空的 | 已上线 | 一次定时唤醒没有新内容时，聊天里没有新消息，运行正常结束 |
+| 预算用完时给出总结 | `runBudgetStopText` 会发一段固定文字，带上已保存的人数和下一步 | 保持现状（建议关掉这一项）：预算用完时如果再调用一次模型来写小结，就会超出预算；现在的文字已经说明了已保存多少人和下一步 | 预算用完的那个回合里，最后一条消息写明已保存的人数和下一步 |
 
 ## 整体验收边界与阻塞台账（2026-10-27）
 

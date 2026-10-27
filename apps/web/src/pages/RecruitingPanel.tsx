@@ -91,13 +91,12 @@ import {
   writeRecruitingPanelState,
 } from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
-import { CorrespondenceEmails } from "./RecruitingCorrespondence";
 import type { RecruitingInboxEmail, RecruitingTabProps } from "./recruiting";
 import { InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
-import { ContactsTab } from "./recruiting/ContactsTab";
 import type { ShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
+import { ContactsTab, CorrespondenceEmails } from "./recruiting/LazyViews";
 import { quickOutput } from "./recruiting/quickOutput";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
