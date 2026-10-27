@@ -1796,6 +1796,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
       view: viewName,
       tab: "evidence",
     });
+    await act(async () => vi.dynamicImportSettled());
     if (viewName !== "results")
       expect(view.container.querySelector("h1")?.textContent).toBe(
         viewName === "shortlist" ? "Shortlist" : "Contacts",

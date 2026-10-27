@@ -146,6 +146,7 @@ describe("lingui catalogs", () => {
       "../pages/recruiting/VerdictLabel.tsx",
       "../pages/recruiting/RecruitingRoleTab.tsx",
       "../pages/recruiting/RecruitingEvidenceTab.tsx",
+      "../pages/recruiting/RecruitingLegacyResults.tsx",
       "../pages/recruiting/useRecruitingWorkspace.ts",
       "../pages/shell/useShellComputer.ts",
       "../pages/shell/useShellRoster.ts",
