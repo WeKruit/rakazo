@@ -82,6 +82,7 @@ import type { Actor, AuthCapabilities } from "@rakazo/contracts";
 import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
 import {
+  closePoolSessions,
   createBoardEvents,
   createDb,
   createPool,
@@ -91,6 +92,7 @@ import {
   provisionMessagingIdentity,
   pushSessionExpiresAt,
   requireMembership,
+  SESSION_RELEASE_MS,
 } from "@rakazo/db";
 import type { Logger } from "@rakazo/logging";
 import {
@@ -1049,6 +1051,13 @@ export async function createApp(
       // on waitForComputerReady for the full boot-wait window during shared Postgres journeys.
       auth.disposeOidcDiscovery();
       shutdown.abort();
+      // The drain below can outlast the kill deadline; say goodbye to the pooler first.
+      const pool = created.pool;
+      if (pool)
+        setTimeout(() => {
+          void realtime.close();
+          void closePoolSessions(pool);
+        }, SESSION_RELEASE_MS).unref();
       oauthLogins.abortAll();
       messagingStopped = true;
       clearMessagingRetryDelay?.();

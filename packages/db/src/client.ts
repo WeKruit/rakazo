@@ -1,6 +1,6 @@
 import { PrismaPg } from "@prisma/adapter-pg";
 import { getLogContext, getLogger } from "@rakazo/logging";
-import type { PoolClient } from "pg";
+import type { Client, PoolClient } from "pg";
 import { Pool } from "pg";
 import { PrismaClient } from "./generated/prisma/client.js";
 
@@ -21,6 +21,10 @@ const POOL_WAIT_REPORT_MS = 60_000;
 const POOL_CALLER_SAMPLE = 10;
 const POOL_CALLERS_LOGGED = 8;
 
+const poolSessions = new WeakMap<Pool, Set<Client>>();
+/** The container is killed 8 s after SIGTERM; sessions still open when this passes are ended. */
+export const SESSION_RELEASE_MS = 4_000;
+
 export function createPool(connectionString: string, options: DbClientOptions = {}): Pool {
   const pool = new Pool({
     connectionString,
@@ -38,11 +42,27 @@ export function createPool(connectionString: string, options: DbClientOptions = 
   // pool: an idle-client disconnect is otherwise an unhandled error that kills
   // the process and orphans the TCP sessions until Postgres times them out.
   pool.on("error", () => undefined);
+  const sessions = new Set<Client>();
+  poolSessions.set(pool, sessions);
   pool.on("connect", (client) => {
     client.on("error", () => undefined);
+    sessions.add(client);
+    client.once("end", () => sessions.delete(client));
   });
   installConnectRetry(pool);
   return pool;
+}
+
+/**
+ * Ends every session the pool holds, checked out or not. pool.end() waits for checked-out
+ * clients, and graphile's LISTEN, the reconciler's lock and running jobs keep theirs until
+ * shutdown finishes, which can outlast the container's kill deadline. A session that dies
+ * with the container instead of saying goodbye stays counted against the pooler's 15.
+ */
+export async function closePoolSessions(pool: Pool): Promise<void> {
+  await Promise.all(
+    [...(poolSessions.get(pool) ?? [])].map((client) => client.end().catch(() => undefined)),
+  );
 }
 
 export function createDb(
