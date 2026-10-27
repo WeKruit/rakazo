@@ -53,7 +53,8 @@ export function assertSchedulingCall(
       route.toolName !== "create_booking" ||
       args.eventTypeId !== plan.calendar.eventTypeId ||
       args.start !== plan.calendar.start ||
-      args.lengthInMinutes !== plan.calendar.lengthInMinutes ||
+      (args.lengthInMinutes !== undefined &&
+        args.lengthInMinutes !== plan.calendar.lengthInMinutes) ||
       !attendee ||
       !sameEmail(attendee.email, plan.candidate.email) ||
       attendee.name !== plan.candidate.name ||
