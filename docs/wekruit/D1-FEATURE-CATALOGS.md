@@ -191,3 +191,6 @@ match the preceding committed results. No deployed LCP or real-user data was use
 Production browser gate: all 16 cases passed in 44.0 seconds, covering real
 responsive recruiting routes, contacts keyboard/focus, EN/ZH labels, optional
 catalog loading/language switching, and auth/session/selected-space behavior.
+
+Follow-up review: https://github.com/WeKruit/rakazo/pull/307 (Draft, targeting the
+#263 branch; this document does not assert it has merged).
