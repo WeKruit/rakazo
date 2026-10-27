@@ -577,7 +577,7 @@ export async function saveNativeRecruitingCandidateResults(
       },
     );
     succeeded = true;
-    return result;
+    return await withCandidatePageSummary(deps.prisma, result);
   } finally {
     const finished = performance.now();
     if (phase !== "validation") wallMs[phase] = finished - phaseStarted;
@@ -591,6 +591,64 @@ export async function saveNativeRecruitingCandidateResults(
       rowCount,
       bytes,
     });
+  }
+}
+
+const SUMMARY_PEOPLE = 20;
+
+/**
+ * Adds who was saved to a save_results receipt, so the agent relays the page from this summary
+ * instead of paging through the complete output artifact. A summary failure keeps the receipt.
+ */
+export async function withCandidatePageSummary(prisma: PrismaClient, result: unknown) {
+  if (result === null || typeof result !== "object" || Array.isArray(result)) return result;
+  const { roleId, sourceEffectId } = result as { roleId?: unknown; sourceEffectId?: unknown };
+  if (typeof roleId !== "string" || typeof sourceEffectId !== "string") return result;
+  try {
+    const rows = await prisma.recruitingCandidateOccurrence.findMany({
+      where: { pageId: sourceEffectId, roleId },
+      orderBy: { rowIndex: "asc" },
+      select: {
+        candidateKey: true,
+        name: true,
+        title: true,
+        company: true,
+        location: true,
+        linkedinUrl: true,
+        matchFields: true,
+      },
+    });
+    const earlier = await prisma.recruitingCandidateOccurrence.findMany({
+      where: {
+        roleId,
+        pageId: { not: sourceEffectId },
+        candidateKey: { in: rows.map((row) => row.candidateKey) },
+      },
+      distinct: ["candidateKey"],
+      select: { candidateKey: true },
+    });
+    const seen = new Set(earlier.map((row) => row.candidateKey));
+    const fresh = rows.filter((row) => !seen.has(row.candidateKey));
+    return {
+      ...result,
+      summary: {
+        saved: rows.length,
+        newToRole: new Set(fresh.map((row) => row.candidateKey)).size,
+        people: fresh
+          .slice(0, SUMMARY_PEOPLE)
+          .map(({ candidateKey: _key, matchFields, ...person }) =>
+            matchFields && typeof matchFields === "object" && Object.keys(matchFields).length
+              ? { ...person, match: matchFields }
+              : person,
+          ),
+        note: "Relay results from this summary and the role's Results; the people are saved. Read outputArtifact only for one named person's evidence, with a small limit.",
+      },
+    };
+  } catch (error) {
+    getLogger().warn("recruiting.candidates.summary.failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return result;
   }
 }
 
