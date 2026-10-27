@@ -80,6 +80,62 @@ describe("Supabase artifact storage", () => {
     expect(fetch).toHaveBeenCalledTimes(6);
   });
 
+  it("reads files saved on the volume before object storage was configured, then copies them", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-artifacts-"));
+    dirs.push(root);
+    const legacy = await new LocalArtifactStore(root).put(
+      { name: "old.pdf", mimeType: "application/pdf", bytes: new Uint8Array([7, 8, 9]) },
+      remoteContext,
+    );
+    const objects = new Map<string, Uint8Array>();
+    const fetch = vi.fn(async (url: string, init: RequestInit) => {
+      const key = new URL(url).pathname.replace("/authenticated/", "/");
+      if (init.method === "POST") {
+        expect(init.headers).toMatchObject({ "x-upsert": "true" });
+        objects.set(key, new Uint8Array(init.body as Uint8Array));
+        return Response.json({ Key: key });
+      }
+      const bytes = objects.get(key);
+      return bytes ? new Response(new Uint8Array(bytes)) : new Response("", { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetch);
+    const options = artifactStores.artifactStorageOptionsFromEnv(remoteEnv);
+    if (!options) throw new Error("expected remote options");
+    const store = artifactStores.createArtifactStore(root, options);
+    expect(await store.get(legacy.id, remoteContext)).toEqual(new Uint8Array([7, 8, 9]));
+    expect(fetch).not.toHaveBeenCalled();
+
+    const remote = new artifactStores.SupabaseArtifactStore(options);
+    const signal = new AbortController().signal;
+    expect(await artifactStores.copyLocalArtifacts(root, remote, signal)).toEqual({
+      copied: 1,
+      bytes: 3,
+    });
+    expect([...objects.keys()]).toEqual([`/storage/v1/object/artifacts/space-1/${legacy.id}`]);
+    expect(await remote.get(legacy.id, remoteContext)).toEqual(new Uint8Array([7, 8, 9]));
+    expect(await artifactStores.copyLocalArtifacts(root, remote, signal)).toEqual({
+      copied: 1,
+      bytes: 3,
+    });
+  });
+
+  it("copies nothing when the volume has no saved files", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "rakazo-artifacts-"));
+    dirs.push(root);
+    const options = artifactStores.artifactStorageOptionsFromEnv(remoteEnv);
+    if (!options) throw new Error("expected remote options");
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    expect(
+      await artifactStores.copyLocalArtifacts(
+        root,
+        new artifactStores.SupabaseArtifactStore(options),
+        new AbortController().signal,
+      ),
+    ).toEqual({ copied: 0, bytes: 0 });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("keeps the native local provider only when remote configuration is wholly absent", () => {
     expect(artifactStores.artifactStorageOptionsFromEnv({})).toBeUndefined();
     expect(artifactStores.createArtifactStore("unused-local-path")).toBeInstanceOf(
