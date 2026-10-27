@@ -1,5 +1,5 @@
 import { useLingui } from "@lingui/react/macro";
-import { MarkdownLinkPromptProvider } from "@rakazo/chat-ui/web";
+import { MarkdownLinkPromptProvider } from "@rakazo/chat-ui/web-contexts";
 import type { ReactNode } from "react";
 
 export function MarkdownLinkPrompt({ children }: { children: ReactNode }) {

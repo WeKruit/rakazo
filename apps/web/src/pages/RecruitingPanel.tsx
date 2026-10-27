@@ -79,6 +79,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { ArtifactFileCard, SourceText } from "../components/ArtifactFileCard";
 import { AskCard } from "../components/AskCard";
 import { Shimmer } from "../components/ai/primitives";
+import { lazyPanel } from "../components/ErrorBoundary";
 import { decodeArtifactBase64 } from "../lib/artifact-open";
 import { authClient } from "../lib/auth";
 import { retryTransientRead } from "../lib/read-retry";
@@ -92,16 +93,29 @@ import {
 } from "../lib/right-panel-state";
 import { rpc } from "../lib/rpc";
 import type { RecruitingInboxEmail, RecruitingTabProps } from "./recruiting";
-import { InboxWithReply, InterviewTab, SequenceTab } from "./recruiting";
+
 import type { ShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import type { RecruitingDetailPerson } from "./recruiting/detail";
 import { useRecruitingDetail } from "./recruiting/detail";
-import { ContactsTab, CorrespondenceEmails } from "./recruiting/LazyViews";
+import { ContactsTab } from "./recruiting/LazyViews";
 import { quickOutput } from "./recruiting/quickOutput";
 import { RetryNotice } from "./recruiting/RetryNotice";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
 import { TabLoading, tabCacheSlot, useArrivals, useKeyedRead } from "./recruiting/shared";
 import type { RecruitingWorkspaceView } from "./shell/RecruitingNavigation";
+
+const CorrespondenceEmails = lazyPanel(() =>
+  import("./RecruitingCorrespondence").then((module) => module.CorrespondenceEmails),
+);
+const InboxWithReply = lazyPanel(() =>
+  import("./recruiting/InboxTab").then((module) => module.InboxWithReply),
+);
+const InterviewTab = lazyPanel(() =>
+  import("./recruiting/InterviewTab").then((module) => module.InterviewTab),
+);
+const SequenceTab = lazyPanel(() =>
+  import("./recruiting/SequenceTab").then((module) => module.SequenceTab),
+);
 
 export type CrmBrowseSelection = Pick<
   Extract<RecruitingCrmDataInput, { operation: "candidates" }>,

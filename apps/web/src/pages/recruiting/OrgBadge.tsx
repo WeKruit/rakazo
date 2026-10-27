@@ -1,4 +1,4 @@
-import { useLinkFavicon } from "@rakazo/chat-ui/web";
+import { useLinkFavicon } from "@rakazo/chat-ui/web-contexts";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@rakazo/ui-web";
 import { ProfileImage } from "./ProfileImage";
 import { profileImageUrl } from "./profileAssets";

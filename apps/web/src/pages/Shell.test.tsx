@@ -619,11 +619,16 @@ async function renderFeedbackShell(
     );
   await render();
   const click = async (name: string) => {
-    const button = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
-      (item) => item.textContent === name || item.getAttribute("aria-label") === name,
-    )!;
-    expect(button, name).toBeDefined();
-    await act(async () => button.click());
+    let button: HTMLButtonElement | undefined;
+    await vi.waitFor(async () => {
+      await act(async () => {
+        button = [...document.body.querySelectorAll<HTMLButtonElement>("button")].find(
+          (item) => item.textContent === name || item.getAttribute("aria-label") === name,
+        );
+      });
+      expect(button, name).toBeDefined();
+    });
+    await act(async () => button!.click());
   };
   // The role chat opens by default; only a collapsed chat needs its trigger.
   const openRoleChat = async () => {
@@ -4020,6 +4025,9 @@ it.each([
       });
     const palette = () => document.body.querySelector('[data-testid="command-palette"]');
     await shortcut("k", "metaKey");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(Boolean(palette())).toBe(visible);
     if (!visible) {
       await shortcut("k", "ctrlKey");
@@ -4082,6 +4090,9 @@ it.each(["@once", "0 18 * * *"])(
     const view = await renderFeedbackShell("bot", undefined, { routines: [routine] });
     await view.click("Close");
     await view.navigate("/app/bot-1?routine=routine-1");
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     expect(container?.textContent).toContain(
       cron === "@once" ? "America/Chicago" : "America/Los_Angeles",
     );
