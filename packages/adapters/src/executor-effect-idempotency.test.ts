@@ -2092,6 +2092,50 @@ describe("native recruiting role effect delivery", () => {
     vi.mocked(loadRecruitingRunContext).mockReset();
   });
 
+  // 2026-10-27 LA role: a save refused over its citations is repeated once by the server with
+  // them as plain locators, so the role is saved without another model turn.
+  it("repeats a role save refused over its citations once, without the quotes", async () => {
+    const f = fixture("role-source-repeat");
+    vi.mocked(executeRecruitingRoleTool)
+      .mockRejectedValueOnce(new RecruitingSourceValidationError("jd", "text"))
+      .mockImplementationOnce(async (prisma, trusted, input) => {
+        expect(JSON.stringify((input as { criteria: unknown }).criteria)).not.toContain('"quote"');
+        return roleReceipt(f, receipt)(prisma, trusted);
+      });
+    vi.mocked(loadRecruitingRunContext).mockResolvedValue(adopted);
+    f.setCalls([{ name: "recruiting_role", args, executionId: "source-repeat" }]);
+    await f.run();
+    expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
+    expect(f.results).toEqual([delivered]);
+    expect(f.effects.map((effect) => effect.status)).toEqual(["completed", "completed"]);
+  });
+
+  // 2026-10-27: "找 50 个" sent while the round's turn still ran; the brief update quoted the
+  // earlier answer and was refused. The update quotes the recruiter's latest message instead.
+  it("quotes the recruiter's latest message on a role update", async () => {
+    const f = fixture("role-update-latest");
+    vi.mocked(f.prisma.message.findFirst).mockResolvedValue({
+      blocks: [{ kind: "text", text: "这 10 个方向可以，找 50 个类似的人" }],
+    } as never);
+    vi.mocked(executeRecruitingRoleTool).mockRejectedValue(new IsolationError());
+    f.setCalls([
+      {
+        name: "recruiting_role",
+        args: {
+          operation: "update",
+          roleId: "role-1",
+          expectedRevision: 1,
+          intent: { basis: "direct", quote: "优先洛杉矶都会区" },
+        },
+        executionId: "update-latest",
+      },
+    ]);
+    await f.run();
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      intent: { basis: "direct", quote: "这 10 个方向可以，找 50 个类似的人" },
+    });
+  });
+
   it.each(["quote", "scope"])(
     "settles native role source %s errors without repeating the mutation",
     async (kind) => {
@@ -2113,9 +2157,11 @@ describe("native recruiting role effect delivery", () => {
       expect(f.effects[0]).toMatchObject({ status: "completed", result });
       expect(JSON.parse(JSON.stringify(f.effects[0]?.result))).toEqual(result);
       expect(JSON.stringify(result)).not.toContain("Private source details");
+      // The server's one repeat without quotes is refused too; replays repeat neither.
+      expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
       await f.run();
-      expect(executeRecruitingRoleTool).toHaveBeenCalledOnce();
-      expect(f.effects).toHaveLength(1);
+      expect(executeRecruitingRoleTool).toHaveBeenCalledTimes(2);
+      expect(f.effects).toHaveLength(2);
       expect(f.results).toEqual([result, result]);
       expect(loadRecruitingRunContext).not.toHaveBeenCalled();
     },

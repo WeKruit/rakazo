@@ -474,6 +474,7 @@ import {
   RecruitingCandidateOutputError,
   RecruitingCsvImportError,
   RecruitingPeopleSearchError,
+  repairedRoleSave,
   resolveRecruitingResearchTool,
   saveNativeRecruitingCandidateResults,
   saveRecruitingPeopleSearch,
@@ -5360,15 +5361,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   state: "known",
                   consequential: true,
                 })),
-                // The playbook's default exclusion, shown so the recruiter can lift it.
+                // The playbook's default tenure preference, shown so the recruiter can lift it. An
+                // inferred filter may only prefer, so it is worded as the people it prefers.
                 searchFilters: [
                   {
                     id: "tenure",
-                    mode: "exclude",
+                    mode: "prefer",
                     origin: "inferred",
                     statement: chinese
-                      ? `现任岗位不满 ${MIN_CURRENT_ROLE_MONTHS} 个月的人`
-                      : `People in their current role under ${MIN_CURRENT_ROLE_MONTHS} months`,
+                      ? `现任岗位满 ${MIN_CURRENT_ROLE_MONTHS} 个月以上的人`
+                      : `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
                   },
                 ],
               },
@@ -5404,7 +5406,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             /\p{Script=Han}/u.test(JSON.stringify(human?.blocks ?? "")),
           );
         };
-        const applyTool = async (
+        const applyToolNow = async (
           name: string,
           rawArgs: Record<string, unknown>,
           executionId: string,
@@ -5469,10 +5471,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             args = { ...args, expectedRevision: briefBump.to };
           // A brief save whose intent is missing or not copied from the recruiter's current
           // message acts on that message, so the save never fails on the quote.
-          const turnTexts =
-            currentTurnMessage?.blocks.flatMap((block) =>
+          // A message the recruiter sent while this turn ran is the current one, so it is read now.
+          const latestHuman =
+            name === "recruiting_role" && args.operation === "update"
+              ? await deps.prisma.message.findFirst({
+                  where: { threadId: thread.id, role: "user" },
+                  orderBy: { seq: "desc" },
+                  select: { blocks: true },
+                })
+              : null;
+          const textsOf = (blocks: unknown) =>
+            (Array.isArray(blocks) ? (blocks as MessageBlock[]) : []).flatMap((block) =>
               block.kind === "text" && block.text.trim() ? [block.text] : [],
-            ) ?? [];
+            );
+          const latestTexts = textsOf(latestHuman?.blocks);
+          const turnTexts = latestTexts.length ? latestTexts : textsOf(currentTurnMessage?.blocks);
           const givenQuote = (args.intent as { quote?: unknown } | undefined)?.quote;
           if (
             name === "recruiting_role" &&
@@ -5519,6 +5532,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args = { ...args, expectedRoleRevision: typed };
             else if (role) args = { ...args, expectedRoleRevision: role.revision };
           }
+          // An unverified note written as a list is one note, so the round records on the first call.
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            args.unverified &&
+            typeof args.unverified === "object" &&
+            !Array.isArray(args.unverified)
+          )
+            args = {
+              ...args,
+              unverified: Object.fromEntries(
+                Object.entries(args.unverified as Record<string, unknown>).map(([key, value]) => [
+                  key,
+                  Array.isArray(value) ? value.map(String).join("、") : value,
+                ]),
+              ),
+            };
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -8391,6 +8421,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !deps.artifacts ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
+              // Only the people search fills Results; a plain web search finds pages, not people.
+              route.toolName !== "web_search_advanced_exa" ||
               (returned !== null && typeof returned === "object" && "error" in returned)
             )
               return null;
@@ -9459,7 +9491,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               result = await executeRole();
             } catch (error) {
-              return finish(roleError(error));
+              const refused = await finish(roleError(error));
+              // A save refused over its citations is repeated once by the server with them as
+              // plain locators and the recruiter's own words as the intent, so it never stops
+              // the work. Ownership checks still apply to the repeat.
+              const repeat = repairedRoleSave(args, error);
+              if (!repeat || executionId.endsWith(":repaired")) return refused;
+              getLogger().warn("recruiting.role.save_repaired", {
+                runId,
+                operation: args.operation,
+                error: error instanceof Error ? error.name : String(error),
+              });
+              const repeated: unknown = await applyTool(name, repeat, `${executionId}:repaired`);
+              return repeated && typeof repeated === "object" && "error" in repeated
+                ? refused
+                : repeated;
             }
             // Native writes complete their immutable domain receipt in the same transaction.
             if (args.operation === "read" && !(await persistEffectResult(result)))
@@ -10832,6 +10878,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           return finish({ error: `unknown tool ${name}` });
         };
+        // A role save still running when a question card pauses the turn would lose its lease and be
+        // refused; the card waits for it instead.
+        const savesInFlight = new Set<Promise<unknown>>();
+        const applyTool = (...call: Parameters<typeof applyToolNow>) => {
+          const [name, rawArgs] = call;
+          const applied = applyToolNow(...call);
+          if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
+          const settled = applied.catch(() => undefined);
+          savesInFlight.add(settled);
+          void settled.then(() => savesInFlight.delete(settled));
+          return applied;
+        };
 
         const pluginLine =
           connectedPlugins.length > 0
@@ -11821,6 +11879,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
               });
             } else if (event.type === "ask") {
+              await Promise.all(savesInFlight);
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
                 const card = await nextStepCardAfterRound();

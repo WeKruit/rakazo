@@ -3219,6 +3219,14 @@ describe.each([
       vi.setSystemTime(Date.now() + DISCOVERY_FAILURE_TTL_MS);
       await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
         expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
+        // The contact lookup rides on the enrichment connection.
+        ...(official.endpoint === "https://mcp.fullenrich.com/mcp"
+          ? [
+              expect.objectContaining({
+                route: expect.objectContaining({ toolName: "native_find_emails" }),
+              }),
+            ]
+          : []),
       ]);
       expect(
         state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),

@@ -7,6 +7,11 @@ import {
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
 } from "./mcp-connector.js";
 
+vi.mock("./recruiting-research.js", async (actual) => ({
+  ...(await actual<typeof import("./recruiting-research.js")>()),
+  requireFullEnrichJobOwnership: async () => undefined,
+}));
+
 const success = { content: [{ type: "text", text: '{"results":[]}' }] };
 const context = {
   operationId: "search-test",
@@ -90,7 +95,10 @@ function fixture(
           resourceRevision: 1,
           toolName,
         },
-        args: { query: "test role", category: "people", numResults: 25 },
+        args:
+          toolName === "get_enrichment_results"
+            ? { enrichment_id: "lookup-1" }
+            : { query: "test role", category: "people", numResults: 25 },
       },
       { ...context, signal: controller.signal },
     ))
@@ -102,6 +110,7 @@ function fixture(
 
 beforeEach(() => {
   vi.stubEnv("EXA_API_KEY", "fake-search-key");
+  vi.stubEnv("FULLENRICH_API_KEY", "fake-enrich-key");
   vi.useFakeTimers();
   vi.setSystemTime(0);
 });
@@ -316,6 +325,42 @@ describe("people search rate limits", () => {
     try {
       expect(await f.read()).toEqual([{ type: "result", data: result }]);
       expect(f.calls).toHaveLength(1);
+    } finally {
+      await f.connector.close();
+    }
+  });
+});
+
+describe("contact lookup results", () => {
+  const ENRICH = "https://mcp.fullenrich.com/mcp";
+  const pending = { content: [{ type: "text", text: '{"status":"in_progress"}' }] };
+  const finished = { content: [{ type: "text", text: '{"status":"FINISHED","results":[]}' }] };
+
+  it("waits for a lookup in progress and returns the finished result", async () => {
+    const f = fixture([pending, pending, finished], {
+      endpoint: ENRICH,
+      toolName: "get_enrichment_results",
+    });
+    try {
+      const result = f.read();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await result).toEqual([{ type: "result", data: finished }]);
+      expect(f.calls.map(({ at }) => at)).toEqual([0, 5_000, 10_000]);
+    } finally {
+      await f.connector.close();
+    }
+  });
+
+  it("returns the in-progress status once the wait runs out", async () => {
+    const f = fixture(Array(60).fill(pending), {
+      endpoint: ENRICH,
+      toolName: "get_enrichment_results",
+    });
+    try {
+      const result = f.read();
+      await vi.advanceTimersByTimeAsync(240_000);
+      expect(await result).toEqual([{ type: "result", data: pending }]);
+      expect(f.calls.length).toBeLessThanOrEqual(48);
     } finally {
       await f.connector.close();
     }

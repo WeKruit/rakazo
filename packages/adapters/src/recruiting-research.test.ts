@@ -66,7 +66,7 @@ describe("FullEnrich job ownership", () => {
               route,
             ];
       const db = fixture(saved);
-      await expect(authorize(db)).resolves.toBeUndefined();
+      await expect(authorize(db)).resolves.toBeTruthy();
       expect(db.externalEffect.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
@@ -78,6 +78,30 @@ describe("FullEnrich job ownership", () => {
       );
     },
   );
+  it("reads the person's newest lookup for latest", async () => {
+    await expect(
+      authorize(fixture(), "get_enrichment_results", { enrichment_id: "latest" }),
+    ).resolves.toEqual({ enrichment_id: "owned-job" });
+    await expect(
+      authorize({ externalEffect: { findMany: vi.fn(async () => []) } }, "get_enrichment_results", {
+        enrichment_id: "latest",
+      }),
+    ).rejects.toThrow();
+  });
+  it("names the person's own lookups when the id is mistyped", async () => {
+    await expect(
+      authorize(fixture(), "get_enrichment_results", { enrichment_id: "owned-jbo" }),
+    ).rejects.toThrow("Your latest lookups, newest first: owned-job.");
+  });
+  it("accepts a creation the agent called by the tool's display name", async () => {
+    const saved = [
+      "__rakazoCatalogTool",
+      "connectors_execute_tool",
+      { id: "mcp__fullenrich__enrich_bulk", arguments: { data: [{ linkedin_url: "x" }] } },
+      route,
+    ];
+    await expect(authorize(fixture(saved))).resolves.toBeTruthy();
+  });
   it.each(["user", "space", "job", "connection", "revision", "read", "error", "malformed"])(
     "does not grant ownership from %s mismatch",
     async (change) => {
@@ -109,8 +133,8 @@ describe("FullEnrich job ownership", () => {
   );
   it("allows creation and credits but denies unscoped account tools and malformed job reads", async () => {
     const db = fixture();
-    await expect(authorize(db, "enrich_bulk", creation)).resolves.toBeUndefined();
-    await expect(authorize(db, "get_credits", {})).resolves.toBeUndefined();
+    await expect(authorize(db, "enrich_bulk", creation)).resolves.toBeTruthy();
+    await expect(authorize(db, "get_credits", {})).resolves.toBeTruthy();
     expect(db.externalEffect.findMany).not.toHaveBeenCalled();
     for (const [tool, args] of [
       ["export_enrichment_results", { enrichment_id: "owned-job" }],
@@ -128,7 +152,7 @@ describe("FullEnrich job ownership", () => {
         ...server,
         endpoint: "https://custom.example.test/mcp",
       }),
-    ).resolves.toBeUndefined();
+    ).resolves.toBeTruthy();
     expect(db.externalEffect.findMany).not.toHaveBeenCalled();
   });
 });

@@ -1510,3 +1510,59 @@ describe("native research preparation", () => {
 });
 
 import { createHash } from "node:crypto";
+
+describe("withCandidatePageSummary", () => {
+  const receipt = { status: "saved", roleId: "role", sourceEffectId: "page-2", candidateRows: [] };
+  const person = (key: string, match?: unknown) => ({
+    candidateKey: key,
+    name: key,
+    title: "Live Ops",
+    company: "Acme",
+    location: "Los Angeles",
+    linkedinUrl: `https://www.linkedin.com/in/${key}`,
+    matchFields: match ?? {},
+  });
+
+  it("names the new people saved on the page and counts the ones already in the pool", async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([person("a", { tier: "A" }), person("b"), person("c")])
+      .mockResolvedValueOnce([{ candidateKey: "b" }]);
+    const result = (await tools.withCandidatePageSummary(
+      { recruitingCandidateOccurrence: { findMany } } as unknown as PrismaClient,
+      receipt,
+      [{ grade: { value: "A" } }, { grade: "B" }, { grade: "B" }],
+    )) as { summary: { saved: number; newToRole: number; people: { name: string }[] } };
+    expect(result).toMatchObject({
+      ...receipt,
+      summary: { saved: 3, newToRole: 2, grades: { A: 1, B: 2 } },
+    });
+    expect(result.summary.people).toEqual([
+      {
+        name: "a",
+        title: "Live Ops",
+        company: "Acme",
+        location: "Los Angeles",
+        linkedinUrl: "https://www.linkedin.com/in/a",
+        match: { tier: "A" },
+      },
+      {
+        name: "c",
+        title: "Live Ops",
+        company: "Acme",
+        location: "Los Angeles",
+        linkedinUrl: "https://www.linkedin.com/in/c",
+      },
+    ]);
+  });
+
+  it("keeps the saved receipt when the summary cannot be read", async () => {
+    const findMany = vi.fn().mockRejectedValue(new Error("pool timeout"));
+    expect(
+      await tools.withCandidatePageSummary(
+        { recruitingCandidateOccurrence: { findMany } } as unknown as PrismaClient,
+        receipt,
+      ),
+    ).toBe(receipt);
+  });
+});

@@ -8,6 +8,7 @@
 //   RAKAZO_URL=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… node infra/acceptance/recruiting-latency.mjs
 //   Options: --jd <file> | --jd-text <text>   role description (default: a built-in test role)
 //            --jd-url <url>                   start the role from a job link, as a recruiter pastes one
+//            --jd-file <file>                 start the role from an attached JD file (PDF, DOCX, text)
 //            --group <id>                     measure an existing role chat instead of starting one
 //            --scale-now                      with --group: send the scale-out request right away
 //            --skip-scale                     stop after the first ten
@@ -58,6 +59,12 @@ const JD = option("--jd-url")
   : option("--jd")
     ? fs.readFileSync(option("--jd"), "utf8").trim()
     : option("--jd-text", DEFAULT_JD);
+const ATTACHMENT_TYPES = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  md: "text/markdown",
+  txt: "text/plain",
+};
 const OUT = option("--out", `latency-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
 const AREA = option("--area") ? new RegExp(option("--area"), "i") : null;
 const HIRING_COMPANY = option("--hiring-company")?.toLowerCase() ?? null;
@@ -731,8 +738,26 @@ async function main() {
     groupId = group.id;
     report.groupId = groupId;
     save();
-    // Same call the web app's new-role form makes.
-    await rpc("threads/followUp", { groupId, text: JD, mentions: [workspace.botId] });
+    // Same calls the web app's composer makes: upload the file, then send it with a short line.
+    const file = option("--jd-file");
+    const artifactIds = file
+      ? [
+          (
+            await rpc("artifacts/create", {
+              groupId,
+              name: file.split("/").pop(),
+              mimeType: ATTACHMENT_TYPES[file.split(".").pop()?.toLowerCase()] ?? "text/plain",
+              contentBase64: fs.readFileSync(file).toString("base64"),
+            })
+          ).id,
+        ]
+      : undefined;
+    await rpc("threads/followUp", {
+      groupId,
+      text: file ? "使用附件来定义这个岗位并开始搜索。" : JD,
+      mentions: [workspace.botId],
+      ...(artifactIds ? { artifactIds } : {}),
+    });
     mark("jd_sent");
   } else {
     report.groupId = groupId;

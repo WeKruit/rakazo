@@ -23,12 +23,12 @@ export function validateRecruitingBrief(
       sources.set(source.id, source);
     }
   const requireSources = (ids: readonly string[], location: string) => {
-    const invalid = ids.find(
-      (id) => sources.get(id)?.readState !== "read" || !sources.get(id)?.quote,
-    );
+    // A read source without a quote still locates the fact (the server drops a quote it cannot
+    // match rather than refusing the save), so it counts as a citation.
+    const invalid = ids.find((id) => sources.get(id)?.readState !== "read");
     if (!ids.length || invalid !== undefined)
       throw new RecruitingPlaybookValidationError(
-        `${location}: ${!ids.length ? "add at least one source ID" : `source ID ${JSON.stringify(invalid)} is missing, unread or has no quote`}. Cite a full read source reference with an exact quote; user_instruction must cite the actual human-message reference.`,
+        `${location}: ${!ids.length ? "add at least one source ID" : `source ID ${JSON.stringify(invalid)} is missing or unread`}. Cite a read source reference; user_instruction must cite the actual human-message reference.`,
       );
   };
   if (
@@ -374,7 +374,7 @@ export function nextPlaybookStep(
         stage,
         label: "规模化搜寻",
         prompt:
-          "本轮已获接受，开始扩大搜索：先自己用人才搜索分批扩大，每批同一步并行跑 4 个换说法的 web_search_advanced_exa 人才搜索、下一步 save_search，批与批之间不逐人阅读或排序，直到达到目标人数（默认 100）或一批新增不到 5 人；然后用 message_user 两三句话说明结果里已有多少人、是否还有深度搜索在继续、邮件草稿在准备；最后只转交一次（转交会结束你这一轮，之后的工具调用都会被拒）：人才搜索补不满目标、或需要领英以外的证据时，把剩下的人数交给搜寻同事做深度搜索，带上确认后的 brief、每轮反馈，并排除已返回的人，由搜寻同事开始后再让外联同事起草邮件；否则直接让外联同事按已保存的 brief 起草这个岗位的邮件序列（只是草稿，不导入、不启动、不发送）。",
+          "本轮已获接受，开始扩大搜索：先自己用人才搜索分批扩大，每批同一步并行跑 4 个换说法的 web_search_advanced_exa 人才搜索、下一步 save_search，批与批之间不逐人阅读或排序，直到达到目标人数（默认 100）或一批新增不到 5 人；然后用 message_user 两三句话说明结果里已有多少人、是否还有深度搜索在继续。只有人才搜索补不满目标时，最后转交一次（转交会结束你这一轮，之后的工具调用都会被拒）：把还差的人数交给搜寻同事做深度搜索，带上确认后的 brief、每轮反馈，并排除已返回的人。已达到目标就不要转交、不要做深度搜索。招聘者没要求时不要起草邮件，也不要把邮件交给外联同事。",
       };
     case "enrichment":
       return {
@@ -414,6 +414,9 @@ const LIST_ROW_RE = /^\s*(?:[-*•]|\d+[.)、])\s+\S/gm;
 // Work promised for later in this chat: "我会…", "接下来…", "预计 3 点前…", "恢复后…", "I'll…".
 const PROMISE_RE =
   /我(?:会|将|马上|这就|随后|稍后|再)|接下来|稍后|稍等|请稍候|预计.{0,40}?(?:前|内|完成|给出|展示|汇报)|\bETA\b[^。.]{0,24}\d|恢复后|\bI(?:'|’)ll\b|\bI will\b|\bI(?:'|’)m going to\b|\blet me\b|\bnext,? I\b/i;
+// Work said to be under way: "已开始扩展搜索", "正在查找", "I've started the search".
+const STARTED_RE =
+  /已(?:经)?(?:开始|启动|发起)|正在(?:搜索|查找|寻找|扩展|扩大|检索)|\b(?:I(?:'|’)ve|I have) (?:started|kicked off|launched)\b|\bnow (?:searching|running)\b/i;
 // The recruiter's own move ends the turn: "你确认后我会发送" waits on them, not on the agent.
 const WAITS_ON_RECRUITER_RE =
   /(?:你|您)(?:确认|回复|同意|决定|选择|提供|补充|批准|点击)|请(?:你|您)?确认|确认后|取决于|once you|after you|when you|if you|depends on|after confirmation/i;
@@ -436,6 +439,33 @@ export function turnEndPromise(text: string): string | undefined {
   if (!PROMISE_RE.test(last) || WAITS_ON_RECRUITER_RE.test(last) || TREATMENT_RE.test(last))
     return undefined;
   return last;
+}
+
+/**
+ * The sentence claiming work is under way ("已开始扩展搜索") in a turn that ends without a
+ * question, else undefined. The caller checks whether anything really runs.
+ */
+export function turnEndStarted(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || QUESTION_RE.test(trimmed)) return undefined;
+  return trimmed
+    .split(/(?<=[。！!；;\n]|[.](?=\s|$))/)
+    .map((sentence) => sentence.trim())
+    .find((sentence) => STARTED_RE.test(sentence) && !WAITS_ON_RECRUITER_RE.test(sentence));
+}
+
+// A report that the work failed or is stuck: "抱歉，流程卡在…", "无法保存", "I couldn't…".
+const STUCK_RE =
+  /抱歉|卡在|卡住|失败|未成功|没成功|未能|没能|无法|不能继续|不可用|出错|故障|暂时不能|\bsorry\b|\bunable\b|\bfailed\b|\bcould(?:n['’]t| not)\b|\bcan(?:not|['’]t)\b|\bunavailable\b|\bstuck\b|\berror\b/i;
+
+/**
+ * The text when the turn ends by reporting a failure or blocker instead of a question or a
+ * result, else undefined. Such an ending has not done the work.
+ */
+export function turnEndStuck(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || QUESTION_RE.test(trimmed) || !STUCK_RE.test(trimmed)) return undefined;
+  return trimmed;
 }
 
 /** The final turn's prose, joined. */

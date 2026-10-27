@@ -15,7 +15,8 @@ import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingResearch, listRunToolResults } from "@rakazo/db";
 import { readActorArtifact } from "./artifact-read.js";
-import { isPeopleSearchEndpoint } from "./recruiting-profiles.js";
+import type { FoundEmail } from "./contact-lookup.js";
+import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
@@ -41,6 +42,7 @@ async function nativeMcpCreationReceipts(
         ],
       })),
     },
+    orderBy: { createdAt: "desc" },
     select: { request: true, result: true },
   });
   const receipts: Array<{ args: Record<string, unknown>; result: unknown }> = [];
@@ -55,10 +57,11 @@ async function nativeMcpCreationReceipts(
       route.resourceRevision !== server.revision ||
       route.toolName !== toolName ||
       !requestArgs ||
+      // The executor appends the resolved route only after the catalog id or display name
+      // resolved to this exact tool, so the route, not the model-chosen id, is authoritative.
       (!direct &&
-        (!catalog ||
-          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName) ||
-          catalog.args.id !== `${server.id}:${toolName}`))
+        (!catalog?.route ||
+          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)))
     )
       continue;
     receipts.push({
@@ -153,37 +156,65 @@ export async function requireQuickSearchBeforeResearch(
   );
 }
 
-/** Shared contact-enrichment funding does not share another person's job history. */
+/**
+ * Shared contact-enrichment funding does not share another person's job history. Returns the
+ * arguments to send: enrichment_id "latest" reads this person's newest lookup, so a later turn
+ * need not recover the id from history.
+ */
 export async function requireFullEnrichJobOwnership(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId">,
   server: Pick<McpServer, "id" | "revision" | "transport" | "endpoint">,
   toolName: string,
   args: Record<string, unknown>,
-): Promise<void> {
+): Promise<Record<string, unknown>> {
   if (
     server.transport !== "streamable_http" ||
     server.endpoint !== "https://mcp.fullenrich.com/mcp"
   )
-    return;
-  if (toolName === "get_credits" && Object.keys(args).length === 0) return;
-  if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return;
-  if (toolName === "get_enrichment_results" && nonblank(args.enrichment_id)) {
+    return args;
+  if (toolName === "get_credits" && Object.keys(args).length === 0) return args;
+  if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return args;
+  if (toolName === "get_enrichment_results") {
+    const owned: string[] = [];
     for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "enrich_bulk")) {
-      if (
-        !Array.isArray(receipt.args.contacts) ||
-        !receipt.args.contacts.length ||
-        receipt.args.enrichment_id !== undefined ||
-        record(receipt.result)?.isError === true
-      )
+      if (receipt.args.enrichment_id !== undefined || record(receipt.result)?.isError === true)
         continue;
       const body = mcpObject(receipt.result);
-      if (body?.enrichment_id === args.enrichment_id && body.error === undefined) return;
+      if (body?.error !== undefined || !nonblank(body?.enrichment_id)) continue;
+      if (body.enrichment_id === args.enrichment_id) return args;
+      owned.push(String(body.enrichment_id));
     }
+    if (args.enrichment_id === "latest" && owned[0]) return { ...args, enrichment_id: owned[0] };
+    // A mistyped id must not lead to a second paid lookup: name the ones this person started.
+    if (owned.length)
+      throw new IsolationError(
+        `No lookup with that id. Your latest lookups, newest first: ${owned.slice(0, 3).join(", ")}. Read one of these, copying the id unchanged, or pass "latest"; do not start a new lookup.`,
+      );
   }
   throw new IsolationError(
     "This contact lookup is not available in your workspace. Start a new lookup in this conversation.",
   );
+}
+
+/** Emails this account's earlier contact lookups on this connection found, by LinkedIn key. */
+export async function savedContactEmails(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+  server: Pick<McpServer, "id" | "revision">,
+  toolName: string,
+): Promise<Map<string, FoundEmail[]>> {
+  const saved = new Map<string, FoundEmail[]>();
+  for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, toolName)) {
+    const people = mcpObject(receipt.result)?.people;
+    for (const person of Array.isArray(people) ? people : []) {
+      const entry = record(person);
+      const key = linkedinPersonKey(entry?.linkedin_url);
+      const emails = Array.isArray(entry?.emails) ? (entry.emails as FoundEmail[]) : [];
+      if (key && emails.length && !saved.has(key)) saved.set(key, emails);
+    }
+  }
+  return saved;
 }
 
 export type { RecruitingResearchObservation } from "@rakazo/contracts";
