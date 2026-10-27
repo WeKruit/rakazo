@@ -11,7 +11,7 @@
 | # | 方向 | 项目 | 状态 | 负责 |
 |---|---|---|---|---|
 | A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已上线（#259） | — |
-| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 进行中 | Adam |
+| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 未完成：本地审计已做；实现待做，线上角色/配置和 p95 验收受限 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 进行中 | Adam |
 | A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
 | B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本 PR | — |
@@ -47,6 +47,50 @@
 - **做法：** 先给存用户数据的表加 RLS 策略，按 `current_setting('app.user_id')` 过滤，从招聘相关表、消息表和附件表开始。连接身份用一个不带 `BYPASSRLS` 的角色，每个事务里用 `SET LOCAL` 设置当前用户（事务模式连接池支持这种写法）。后台任务和迁移用单独的角色。分批上线，每批先跑隔离测试。
 - **验收（代码检查）：** 现有隔离测试全过。新增一个测试：故意漏掉 `userId` 条件查询别人的数据，结果必须是 0 行。
 - **验收（线上实测）：** 开启 RLS 前后，RPC 的 p95 延迟变化小于 10%。
+
+- **本地审计（2026-10-27，认领 `7fbaf515e`）：** 在全新、仅含合成数据的本地 PostgreSQL 16 数据库重放现有迁移，得到 92 张应用表、0 张启用 RLS、0 张 FORCE RLS、0 条 policy。以本地 fixture 的 superuser/BYPASSRLS 连接执行事务内 `set_config('app.user_id', synthetic_user_id, true)` 后，直接查询另一个合成账号的附件和招聘岗位仍分别返回 5 行和 1 行，**不满足漏过滤条件必须 0 行的验收**。这不是线上角色权限检查，也不证明生产账号可绕过应用层。
+- **现有隔离基线：** 运行原 `infra/acceptance/account-isolation.mjs`，由原 testkit harness 启动本地 API、scripted runtime、fake sandbox 和 emulated email；只把 Docker 数据库启动替换为独立本地 PostgreSQL。报告为 `isolated`，143 项 `ok`、0 leak、0 warning；另有 99 项因测试副本缺少对应数据未触达。不能把这个结果写成历史 268 项全过，也不能当作新增 RLS 验收通过。`pnpm --filter @rakazo/db check` 通过（包含 cross-package tests 类型检查）。
+- **真实数据库回归未全过：** 在未修改产品代码的 `e6b8446de` 上，`VERIFY_DATABASE=1` 的 recruiting 与 space-membership PostgreSQL 测试为 271 通过、12 失败；只把本地数据库默认时区设为 UTC 并重连后仍是 271/12。失败涉及 native source/role recovery、排序、calibration 和候选页可见性；不能把这些已有失败归因于尚未实现的 RLS，也不能忽略为已通过。数据库回归门禁仍未满足。
+- **尚未实现，非权限阻塞：** `createDb` 返回共享 Prisma client；`createApp` 把它传给 auth、RPC 和后台回调，RPC context 有 actor 但没有绑定数据库事务身份。`recruiting.ts` 当前有 70 处 `$transaction` 调用，不能通过给整个 RPC 包一层长事务安全替代。还需明确并实现按调用传递的用户数据库 client、嵌套事务复用、流式订阅与后台操作的生命周期边界，以及消息通过 thread 归属访问的策略；然后加入非 superuser/非 BYPASSRLS 测试、漏条件 0 行测试、提交/回滚后身份不残留测试和全量隔离回归。没有加入未接线 helper、没有启用会阻断现有身份的 RLS 迁移。
+- **确切权限阻塞：** 生产 API/worker/迁移角色分离、非 BYPASSRLS 运行身份和对应连接凭据的配置，需要数据库角色/授权及云配置变更；当前禁止这些操作，也禁止部署，所以没有尝试这些写入，状态为**待授权、未执行**，不是工具拒绝或结果不明。线上开启策略前后 RPC p95 <10% 的测量同样待部署授权。不能仅以本地 fixture 的角色配置替代生产身份验证。
+- **连接预算：** 此审计未改应用、池或角色；生产约束仍是 `DATABASE_URL` 6543 transaction pooler、`REALTIME_DATABASE_URL` 5432，每容器 session 连接不超过 6。后续身份实现须使用事务内 `SET LOCAL`/`set_config(..., true)`，不能新增每用户常驻连接或把 SSE 生命周期变成长数据库事务。当前没有声称该后续实现已验证。
+
+A2 本地审计复现（全新合成数据库，不能替换为生产 URL）：
+
+```sh
+# 已有只监听 loopback 的本地 PostgreSQL 16，创建独立空数据库。
+createdb -h 127.0.0.1 -p 55434 -U postgres rakazo_a2
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm --filter @rakazo/db generate
+# 临时 runner 保留原 testkit fixture/验收逻辑，仅替换数据库启动；完成后删除。
+python3 - <<'PYRUNNER'
+from pathlib import Path
+source = Path('packages/testkit/src/cli/account-isolation.ts').read_text()
+source = source.replace('import { PostgreSqlContainer } from "@testcontainers/postgresql";\n', '')
+source = source.replace('const container = await new PostgreSqlContainer("postgres:16-alpine").start();', 'const container = { getConnectionUri: () => "postgres://postgres@127.0.0.1:55434/rakazo_a2", stop: async () => {} };')
+Path('packages/testkit/src/cli/.a2-local-isolation.ts').write_text(source)
+PYRUNNER
+API_PORT=3194 pnpm exec tsx packages/testkit/src/cli/.a2-local-isolation.ts --out /tmp/rakazo-a2-isolation.json
+rm packages/testkit/src/cli/.a2-local-isolation.ts
+pnpm --filter @rakazo/db check
+# 以下回归基线未全过：271 passed / 12 failed。
+DATABASE_URL=postgres://postgres@127.0.0.1:55434/rakazo_a2 VERIFY_DATABASE=1 pnpm test packages/db/src/recruiting.postgres.test.ts packages/db/src/space-membership.postgres.test.ts
+psql postgres://postgres@127.0.0.1:55434/rakazo_a2 -X -v ON_ERROR_STOP=1 <<'SQL'
+SELECT count(*) FILTER (WHERE c.relname <> '_prisma_migrations') AS application_tables,
+       count(*) FILTER (WHERE c.relrowsecurity) AS rls_enabled,
+       count(*) FILTER (WHERE c.relforcerowsecurity) AS rls_forced
+FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+WHERE n.nspname='public' AND c.relkind='r';
+SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname=current_user;
+SELECT count(*) AS policies FROM pg_policies WHERE schemaname='public';
+BEGIN;
+SELECT set_config('app.user_id', (SELECT id FROM "user" WHERE email='b@isolation.test'), true) IS NOT NULL AS synthetic_actor_context_set;
+SELECT count(*) AS foreign_artifacts_visible_without_filter FROM artifacts WHERE "userId" <> current_setting('app.user_id');
+SELECT count(*) AS foreign_roles_visible_without_filter FROM recruiting_roles WHERE "userId" <> current_setting('app.user_id');
+ROLLBACK;
+SQL
+```
+
 
 ### A3 列表分页
 
