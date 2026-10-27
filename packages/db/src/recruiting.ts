@@ -175,12 +175,16 @@ const CALIBRATION_FEEDBACK_THRESHOLD = 10;
 
 /** After candidates are saved: ten or more saved people move the role into the feedback loop. */
 /** Saved people reach the feedback stage only once a calibration round has shown ten of them. */
+// Runs inside the save's locked transaction, where each statement is a round trip: before the
+// first round there is nothing to advance, so the count is skipped.
 async function advanceStageAfterSave(tx: Tx, roleId: string) {
-  const [saved, round] = await Promise.all([
-    tx.recruitingCandidate.count({ where: { roleId } }),
-    tx.recruitingCalibrationRound.findFirst({ where: { roleId }, select: { id: true } }),
-  ]);
-  if (round && saved >= CALIBRATION_FEEDBACK_THRESHOLD)
+  const round = await tx.recruitingCalibrationRound.findFirst({
+    where: { roleId },
+    select: { id: true },
+  });
+  if (!round) return;
+  const saved = await tx.recruitingCandidate.count({ where: { roleId } });
+  if (saved >= CALIBRATION_FEEDBACK_THRESHOLD)
     await advanceRecruitingPlaybookStage(tx, roleId, "feedback");
 }
 
@@ -7297,19 +7301,20 @@ async function saveUnassessedCandidatePage(
     },
   });
   const keys = [...new Set(rows.map((row) => row.candidateKey))];
-  const existing = new Set(
-    (
-      await tx.recruitingCandidate.findMany({
-        where: { roleId: role.id, candidateKey: { in: keys } },
-        select: { candidateKey: true },
-      })
-    ).map((candidate) => candidate.candidateKey),
+  // One statement both adds new people and tells them apart: a key it did not insert was
+  // already in the role's pool.
+  const added = new Set(
+    rows.length
+      ? (
+          await tx.recruitingCandidate.createManyAndReturn({
+            data: keys.map((candidateKey) => ({ roleId: role.id, candidateKey })),
+            skipDuplicates: true,
+            select: { candidateKey: true },
+          })
+        ).map((candidate) => candidate.candidateKey)
+      : [],
   );
   if (rows.length) {
-    await tx.recruitingCandidate.createMany({
-      data: keys.map((candidateKey) => ({ roleId: role.id, candidateKey })),
-      skipDuplicates: true,
-    });
     await tx.recruitingCandidateOccurrence.createMany({ data: rows });
     await fillCandidateMatchFields(tx, Prisma.sql`o."pageId" = ${saving.id}`);
     await advanceStageAfterSave(tx, role.id);
@@ -7325,7 +7330,7 @@ async function saveUnassessedCandidatePage(
       candidateRows: rows.map(({ rowIndex, candidateKey }) => ({
         rowIndex,
         candidateKey,
-        alreadyInPool: existing.has(candidateKey),
+        alreadyInPool: !added.has(candidateKey),
       })),
     }),
   };

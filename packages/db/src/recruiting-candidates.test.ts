@@ -6824,8 +6824,9 @@ describe("recruiter CSV candidate import", () => {
     );
     const existing: Array<{ candidateKey: string }> = [];
     Object.assign(f.tx.recruitingCandidate, {
-      findMany: vi.fn(async () => existing),
-      createMany: vi.fn(async () => ({ count: 1 })),
+      createManyAndReturn: vi.fn(async ({ data }: { data: Array<{ candidateKey: string }> }) =>
+        data.filter((row) => !existing.some((known) => known.candidateKey === row.candidateKey)),
+      ),
     });
     const captured: Parameters<typeof recruiting.recruitingCsvImportReceipt>[1] = {
       artifactSha256: csvHash,
@@ -6924,12 +6925,13 @@ describe("recruiter CSV candidate import", () => {
       alreadyInPool: true,
     });
     // discoveryCount is the occurrence count per key: one new occurrence, no new candidate row.
-    expect(f.tx.recruitingCandidate.createMany).toHaveBeenCalledWith({
+    expect(f.tx.recruitingCandidate.createManyAndReturn).toHaveBeenCalledWith({
       data: [
         { roleId: "role", candidateKey: "linkedin:/in/example" },
         { roleId: "role", candidateKey: "source-row:save:1" },
       ],
       skipDuplicates: true,
+      select: { candidateKey: true },
     });
   });
 
@@ -6965,8 +6967,9 @@ describe("people search candidate save", () => {
     const trusted = { ...f.trusted, effectRequest: input };
     const existing: Array<{ candidateKey: string }> = [];
     Object.assign(f.tx.recruitingCandidate, {
-      findMany: vi.fn(async () => existing),
-      createMany: vi.fn(async () => ({ count: 1 })),
+      createManyAndReturn: vi.fn(async ({ data }: { data: Array<{ candidateKey: string }> }) =>
+        data.filter((row) => !existing.some((known) => known.candidateKey === row.candidateKey)),
+      ),
     });
     const completedSources = { count: 1 };
     Object.assign(f.tx.externalEffect, { count: vi.fn(async () => completedSources.count) });
