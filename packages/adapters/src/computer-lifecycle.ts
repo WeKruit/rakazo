@@ -32,6 +32,7 @@ import {
 } from "./computer-workspace.js";
 import { isSandboxGoneError } from "./e2b-sandbox.js";
 import { resolveAgentHomePath } from "./home.js";
+import { authoritativeRevision } from "./home-authority.js";
 
 type ComputerUpdateProgress = (
   stage: Exclude<ComputerUpdate["stage"], "preparing">,
@@ -871,13 +872,25 @@ export async function replaceComputer(
           deps.sandbox,
           existing.homeKey,
           oldRef,
-          context,
+          {
+            ...context,
+            homeLifecycleClaim: {
+              computerId,
+              providerRef: existing.providerRef,
+              updatedAt: claimStamp,
+            },
+          },
         );
-        const recorded = await deps.prisma.computer.updateMany({
-          where: { id: computerId, state: "suspending", updatedAt: claimStamp },
-          data: { homeRevision: revision, updatedAt: claimStamp },
-        });
-        if (recorded.count !== 1) throw new ComputerBusyError();
+        const where = { id: computerId, state: "suspending", updatedAt: claimStamp };
+        const count = authoritativeRevision(revision)
+          ? await deps.prisma.computer.count({ where: { ...where, homeRevision: revision } })
+          : (
+              await deps.prisma.computer.updateMany({
+                where,
+                data: { homeRevision: revision, updatedAt: claimStamp },
+              })
+            ).count;
+        if (count !== 1) throw new ComputerBusyError();
       } catch (error) {
         // A gone sandbox has nothing left to checkpoint; the replacement restores
         // the last recorded revision instead of failing the whole replacement.

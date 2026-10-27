@@ -21,7 +21,7 @@ suite("system-only home authority with an ordinary actor", () => {
     if (
       target.hostname !== "127.0.0.1" ||
       target.port !== "55434" ||
-      target.pathname !== "/rakazo_c5"
+      !["/rakazo_c5", "/rakazo_c5_final"].includes(target.pathname)
     )
       throw new Error("Requires dedicated synthetic local rakazo_c5 database");
     sql = new Pool({ connectionString: url, max: 1 });
