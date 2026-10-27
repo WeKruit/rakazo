@@ -105,6 +105,26 @@ export default defineConfig(({ mode }) => {
           attachNovncProxy(server, screenProxySecret(), api, screenLog),
       },
     ],
+    // Keep the three existing entry boundaries while compressing their static dependencies
+    // together. Dynamic feature imports and locale catalogs remain separate. Shared UI
+    // utility definitions may move earlier; no closed feature is mounted by this grouping.
+    build: {
+      rolldownOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: "initial-shared", tags: ["$initial"], priority: 30 },
+              { name: "shell-shared", test: /[\\/]pages[\\/]Shell\.tsx$/, priority: 20 },
+              {
+                name: "recruiting-shared",
+                test: /[\\/]pages[\\/]RecruitingPanel\.tsx$/,
+                priority: 10,
+              },
+            ],
+          },
+        },
+      },
+    },
     server: {
       host: process.env.RAKAZO_DEV_HOST ?? rootEnv.RAKAZO_DEV_HOST ?? "127.0.0.1",
       port: webPort,
