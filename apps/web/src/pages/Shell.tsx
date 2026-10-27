@@ -1055,6 +1055,7 @@ export function ShellPage() {
   const manuallyUnread = useRef(new Set<string>());
   const readVisibleGroups = useRef(new Set<string>());
   const notifiedBrowserEvents = useRef(new Set<string>());
+  const browserNotificationShownAt = useRef(new Map<string, number>());
   const pendingBrowserNotifications = useRef(new Map<string, PendingBrowserNotification>());
   const computerVisible = useRef(false);
   computerVisible.current = panel === "computer" || computerOpen;
@@ -1230,6 +1231,7 @@ export function ShellPage() {
         permission: Notification.permission,
         notifiedEventIds: notifiedBrowserEvents.current,
         show: (title, body, tag) => new Notification(title, { body, tag }),
+        shownAt: browserNotificationShownAt.current,
       },
     );
     return result !== "pending";

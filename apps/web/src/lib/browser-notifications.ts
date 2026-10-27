@@ -101,6 +101,23 @@ export function browserNotificationMessage(
   };
 }
 
+/** One ordinary notification per thread per window; a question or a failure always gets through. */
+export const NOTIFICATION_QUIET_MS = 15 * 60_000;
+
+function needsUser(event: Pick<ProductEvent, "type" | "payload">) {
+  if (event.type === "run.failed") return true;
+  if (event.type !== "thread.message.created") return false;
+  const blocks = Array.isArray(event.payload.blocks) ? event.payload.blocks : [];
+  return blocks.some(
+    (block) =>
+      block &&
+      typeof block === "object" &&
+      "kind" in block &&
+      block.kind === "ask" &&
+      !("status" in block && block.status === "answered"),
+  );
+}
+
 export function deliverBrowserNotification(
   event: Pick<ProductEvent, "id" | "type" | "threadId" | "payload">,
   botName: string,
@@ -111,13 +128,19 @@ export function deliverBrowserNotification(
     permission: BrowserNotificationPermission;
     notifiedEventIds: Set<string>;
     show: (title: string, body: string, tag: string) => void;
+    /** Last notification time per thread; when given, ordinary messages are throttled. */
+    shownAt?: Map<string, number>;
+    now?: number;
   },
 ): "delivered" | "pending" | "discarded" {
+  const now = context.now ?? Date.now();
+  const lastShown = context.shownAt?.get(event.threadId);
   if (
     !context.enabled ||
     (context.pageVisible && context.windowFocused) ||
     context.notifiedEventIds.has(event.id) ||
-    context.permission === "denied"
+    context.permission === "denied" ||
+    (lastShown !== undefined && now - lastShown < NOTIFICATION_QUIET_MS && !needsUser(event))
   ) {
     return "discarded";
   }
@@ -126,6 +149,7 @@ export function deliverBrowserNotification(
   try {
     context.show(message.title, message.body, event.threadId);
     context.notifiedEventIds.add(event.id);
+    context.shownAt?.set(event.threadId, now);
     return "delivered";
   } catch {
     return "pending";
