@@ -19,6 +19,7 @@ import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
 import { startCall } from "../../lib/call-session";
 import { desktopBridge } from "../../lib/desktop";
+import { withFeatureMessages } from "../../lib/i18n";
 import { clampWidth } from "../../lib/pane-width";
 import { selectedSpaceId } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
@@ -52,10 +53,14 @@ const RecruitingPanel = lazyPanel(() =>
   ),
 );
 const InterviewTab = lazyPanel(() =>
-  import("../recruiting/InterviewTab").then((module) => module.InterviewTab),
+  withFeatureMessages(() => import("../recruiting/InterviewTab")).then(
+    (module) => module.InterviewTab,
+  ),
 );
 const SequenceTab = lazyPanel(() =>
-  import("../recruiting/SequenceTab").then((module) => module.SequenceTab),
+  withFeatureMessages(() => import("../recruiting/SequenceTab")).then(
+    (module) => module.SequenceTab,
+  ),
 );
 
 import type { ReactNode } from "react";

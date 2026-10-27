@@ -96,3 +96,26 @@ two baselines. The final table uses the merged build and published dependency ba
 Deployed Fast4G LCP and other browsers remain untested. See
 [D1-250KB-OPTIONS.md](D1-250KB-OPTIONS.md) for further design choices; these results do not
 establish that a different rendering stack is necessary or sufficient.
+
+## Second bounded slice: deferred recruiting views
+
+On published integration `f0752e539`, actual chunk/module attribution found 17 recruiting
+view/helper sources absent from both the contacts entry graph and its immediately rendered
+content. These include CRM history, candidate detail/presentation, scheduling/calendar,
+role/summary/legacy views and feedback. Their existing dynamic boundaries now wait for
+optional messages; static children are covered by those parent boundaries. The source audit
+also checked the recruiting barrel's current type-only consumer. No new feature registry or
+UI hiding is involved.
+
+Startup now has 984 extracted entries; the optional catalog has 1,225 (shared IDs appear
+in both). Compared with the preceding published catalog build, Chinese cold contacts is
+**339,147 → 332,440 gzip B**, chat **301,872 → 295,153**, sign-in
+**194,711 → 187,986**. Contacts retains 7 JS / 35 total requests, 17 RPC / zero duplicates;
+chat and sign-in retain their preceding counts. This additional 6,707-byte contact saving
+is measured, not the earlier maximal catalog estimate. Contacts remains 82,440 bytes above
+250,000.
+
+Web **1,694/1,694** (149 files, 31.73 s), web check, production build, all locale catalog
+checks, and the same **15/15** production browser cases (40.5 s) pass. Commands are the
+same as above. First-stage and second-slice measurements are kept separate. No schema,
+authentication plugin, or server behavior was changed in this slice.

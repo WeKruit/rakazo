@@ -10,7 +10,9 @@ import type { InterviewTab as InterviewTabComponent } from "./InterviewTab";
 
 // Views that are not on the first screen load when they are first opened.
 const LoadedInterviewTab = lazy(() =>
-  import("./InterviewTab").then((module) => ({ default: module.InterviewTab })),
+  withFeatureMessages(() => import("./InterviewTab")).then((module) => ({
+    default: module.InterviewTab,
+  })),
 );
 const LoadedContactsTab = lazy(() =>
   import("./ContactsTab").then((module) => ({ default: module.ContactsTab })),
