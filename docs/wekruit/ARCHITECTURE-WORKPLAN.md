@@ -11,7 +11,7 @@
 | # | 方向 | 项目 | 状态 | 负责 |
 |---|---|---|---|---|
 | A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已有上线记录（#259）；50 并发验收未测 | — |
-| A2 | 数据库 | 账号隔离：在应用层过滤之外再加数据库行级安全（RLS） | 招聘首批隔离通过；本地性能未稳定达标，线上门禁未测，整体未完成 | Adam |
+| A2 | 数据库 | 数据库行级安全与 actor 隔离 | 部分完成：99模型已审计[#336](https://github.com/WeKruit/rakazo/pull/336)，33表opt-in策略[#337](https://github.com/WeKruit/rakazo/pull/337)；PG22/22，API144 OK+98未覆盖，线上延迟未测 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 已合入 [#277](https://github.com/WeKruit/rakazo/pull/277)，本地门禁通过；线上 p95 未测 | Adam |
 | A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
 | A5 | 数据库 | 对话开头到第一次搜索的查询次数（现 150–220 条，约 3–5 秒）：合并重复读取，缩短对话行锁 | 进行中 | Claude（工具出错率线程） |
@@ -23,11 +23,11 @@
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，线上未测） | Adam |
 | C5 | 多容器 | web/API 和 worker 拆分、独立 slot 与滚动发布 | 代码与本地验收已合入 [#334](https://github.com/WeKruit/rakazo/pull/334)：7,762通过/510跳过、真实PG与子进程23/23、Python17/17；实际云端滚动与连续对话未测，不标整体验收完成 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
-| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#295](https://github.com/WeKruit/rakazo/pull/295)、[#302](https://github.com/WeKruit/rakazo/pull/302) 已合入，后续[#307](https://github.com/WeKruit/rakazo/pull/307)、[#308](https://github.com/WeKruit/rakazo/pull/308)、[#330](https://github.com/WeKruit/rakazo/pull/330)已合入，联系人322,286B gzip/7JS/35请求/17RPC/零重复读取；最终250KB未达，线上LCP未测 | Adam |
+| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#338](https://github.com/WeKruit/rakazo/pull/338)后联系人321,748B gzip，7JS/35请求/17RPC/0重复；最终250KB仍差71,748B，线上LCP未测 | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 完成（本项代码验收）：重复RPC为0，[#301](https://github.com/WeKruit/rakazo/pull/301) 已合入 | Adam |
 | D3 | 前端 | 长列表虚拟滚动 | 完成（本地验收）：最多19行/36卡，无观测>50ms长任务；[#276](https://github.com/WeKruit/rakazo/pull/276)、[#300](https://github.com/WeKruit/rakazo/pull/300) 已合入 | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 完成：生产源文件最多1,499行，零超限；[#298](https://github.com/WeKruit/rakazo/pull/298) 已合入 | Adam |
-| F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现（[#269](https://github.com/WeKruit/rakazo/pull/269)；业务验收未测） | Adam |
+| F1 | Agent | 招聘逻辑写死在执行器代码里 | 部分实现：[#269](https://github.com/WeKruit/rakazo/pull/269)、[#339](https://github.com/WeKruit/rakazo/pull/339)已合；窄改246/246通过，保留权限/审批/幂等，真实业务验收未测 | Adam |
 | E1 | 可靠性 | 告警 | 阻塞（禁止云日志平台配置与触发） | |
 | E2 | 可靠性 | 压测：20 和 50 个并发对话 | 阻塞（缺获准的部署测试环境和在线压测范围） | |
 | E3 | 可靠性 | 数据库备份恢复演练 | 阻塞（缺备份访问及隔离恢复目标授权） | |
