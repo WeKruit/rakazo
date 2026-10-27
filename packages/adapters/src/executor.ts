@@ -5462,6 +5462,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               { threadId: thread.id },
               args,
             );
+          // A role revision on an operation that takes none is dropped instead of refusing the call.
+          if (
+            name === "recruiting_research" &&
+            Object.hasOwn(args, "expectedRoleRevision") &&
+            !REVISIONED_RESEARCH_OPERATIONS.has(String(args.operation))
+          ) {
+            const { expectedRoleRevision: _dropped, ...rest } = args;
+            args = rest;
+          }
           // A left-out role revision is the conversation's current one, so the call is not refused
           // for a field the server knows.
           if (
@@ -5570,13 +5579,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const roleId = thread.activeRecruitingRoleId;
             if (!roleId) return { error: "This conversation has no active role." };
             const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
-            // Someone whose profile shows only a country or a state is left out of the first
-            // picks rather than costing a step; the round itself asks about them.
-            const { regionOnly } = await locationSlips(roleId, picked);
-            const keys = picked.filter((key) => !regionOnly.has(key));
+            // Someone whose profile shows only a country or a state, or under six months in the
+            // current role, is left out of the first picks rather than costing a step.
+            const [{ regionOnly }, recent] = await Promise.all([
+              locationSlips(roleId, picked),
+              newInCurrentRole(roleId, picked),
+            ]);
+            const left = [
+              regionOnly.size &&
+                `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
+              recent.size &&
+                `${[...recent.values()].join(", ")}: under ${MIN_CURRENT_ROLE_MONTHS} months in the current role.`,
+            ]
+              .filter(Boolean)
+              .join(" ");
+            const keys = picked.filter((key) => !regionOnly.has(key) && !recent.has(key));
             if (!keys.length)
               return {
-                error: `Not shown: ${[...regionOnly.values()].join(", ")} show only a country or a state. Pick people whose location is inside the role's location scope.`,
+                error: `Not shown: ${left} Pick people who fit every requirement.`,
               };
             const text = await recruitingRoundListText(deps.prisma, {
               threadId: run.threadId,
@@ -5598,11 +5618,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             firstPicksShown = true;
             return {
               shown: keys.length,
-              ...(regionOnly.size
-                ? {
-                    notShown: `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
-                  }
-                : {}),
+              ...(left ? { notShown: left } : {}),
               next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have; search again only if fewer than ten of all those rows meet every hard requirement, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ask the recruiter how to go on, as the round instructions say.",
             };
           }
@@ -11126,7 +11142,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : result;
             return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
           });
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits only when their row shows no hard requirement of the JD or the answers failed: every must-have past title, industry, company type such as a startup, years and location is checked against the row, and someone whose row shows that experience missing, whose matching role ended years ago, or who is retired or semi-retired does not fit. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it or search deeper at more cost) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
+          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits only when their row shows no hard requirement of the JD or the answers failed: every must-have past title, industry, company type such as a startup, years and location is checked against the row, and someone whose row shows that experience missing, whose matching role ended years ago, or who is retired or semi-retired does not fit. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round; show_picks names only the people who fit. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
