@@ -962,13 +962,6 @@ export function shortQuestion(question: string, max = 240): string {
 const HANDOFF_OPENING_NOTE =
   "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in the language they write in, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history.";
 
-/** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
-const PLANNED_SEARCHES_NOTE =
-  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
-
-const PLANNED_SEARCHES_MISSING =
-  "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches, or with plannedSearches: [] when the recruiter said not to look for people outside their own list.";
-
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
@@ -10899,13 +10892,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in the recruiter's language, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
+          const revisionNote = "The new role has revision 1 once saved and no brief yet.";
           try {
             if (pasted) {
               const title = pastedJobTitle(pasted.text)!;
               return {
                 saving: create(title, []),
-                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask}`,
+                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${revisionNote}`,
               };
             }
             const url = jobLinkIn(block.text)!;
@@ -10938,7 +10931,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   quote: read.text.trim().slice(0, 300).trim(),
                 },
               ]),
-              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask}`,
+              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${revisionNote}`,
             };
           } catch (error) {
             getLogger().warn("job link not read before the first step", { error: String(error) });
@@ -11021,14 +11014,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const searches = planned.data.queries.map((query, index) => {
             const result = results[index];
             if (result === PLANNED_SEARCH_LATE)
-              return `Search ${index + 1} "${query}": still running; its people are saved to Results when it returns, so pick from the other searches.`;
+              return `Search ${index + 1} "${query}": still running; its people are saved to Results when it returns.`;
             const people =
               result && typeof result === "object" && "people" in result
                 ? (result as { people: unknown }).people
                 : result;
             return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
           });
-          return `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts), meeting every hard requirement its row can show and not currently at the hiring company. They appear in chat at once. Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. Keep the people already shown unless one clearly fails a hard requirement.\n\n${searches.join("\n\n")}`;
+          return `The last question has been answered. These are the retained results of its planned people searches; returned rows are saved to Results and include candidateKey.\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
@@ -11064,18 +11057,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ]),
         );
         linkRole = jobRole;
-        // Once the planned searches ran, the pick note alone says what to do next.
-        const intakeNote =
-          intake &&
-          [
-            plannedNote
-              ? PLANNED_SEARCHES_NOTE
-              : `Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step. ${PLANNED_SEARCHES_NOTE}`,
-            intake.page &&
-              `The role's job page, already read and saved (never fetch it again):\n\n${intake.page}`,
-          ]
-            .filter(Boolean)
-            .join(" ");
+        // The native intake skill owns next-step policy; this note carries retained data only.
+        const intakeNote = intake?.page
+          ? `The role's job page, already read and saved:\n\n${intake.page}`
+          : undefined;
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
@@ -11535,7 +11520,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       runSecrets.push(...values),
                     ),
               onToolCallDelta: streamRoundPicks,
-              beforeAsk: async (question, plannedSearches) => {
+              beforeAsk: async (question) => {
                 await briefSaving;
                 // A run that recorded a round asks the next-step choice, which is asked anew each round.
                 if (await nextStepCardAfterRound()) return undefined;
@@ -11555,15 +11540,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                 );
                 if (known) return `"${known.key}" → "${known.value}"`;
-                // Any intake answer may be the last one, and the first people come from the searches
-                // planned with it; without four of them the answer turn waits on its own searches.
-                // An explicit [] is the recruiter's own-list-only instruction.
-                if (
-                  (firstRoundPending || linkRole) &&
-                  (plannedSearches === undefined ||
-                    (plannedSearches.length > 0 && plannedSearches.length < 4))
-                )
-                  return { instead: PLANNED_SEARCHES_MISSING };
                 return undefined;
               },
               onToolCompleted: async (completion) => {

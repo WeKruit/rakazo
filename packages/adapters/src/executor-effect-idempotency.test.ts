@@ -1260,6 +1260,50 @@ describe("explicit artifact workspace writes", () => {
   });
 });
 
+describe("intake questions follow agent instructions", () => {
+  it.each([
+    { plannedSearches: undefined },
+    { plannedSearches: [] },
+    { plannedSearches: ["one focused query"] },
+  ])(
+    "accepts a material question without a fixed four-search plan: %j",
+    async ({ plannedSearches }) => {
+      const f = fixture("intake-question-policy");
+      f.thread.activeRecruitingRoleId = "role-1";
+      const rounds = vi.fn(async () => null);
+      Object.assign(f.prisma.externalEffect, { findFirst: vi.fn(async () => null) });
+      Object.assign(f.prisma, { recruitingCalibrationRound: { findFirst: rounds } });
+      Object.assign(f.prisma.event, { findFirst: vi.fn(async () => null) });
+      f.connector.discoverTools.mockResolvedValue([
+        {
+          name: "fixture_web_search_advanced_exa",
+          description: "Test people search",
+          readOnly: true,
+          inputSchema: { type: "object" },
+          route: {
+            connectorId: "mcp",
+            resourceId: "fixture-server",
+            resourceRevision: 1,
+            toolName: "web_search_advanced_exa",
+          },
+        },
+      ]);
+      const decisions: unknown[] = [];
+      f.runtimeRun.mockImplementation(async function* (request) {
+        decisions.push(
+          await request.beforeAsk?.("Which city should this role cover?", plannedSearches),
+        );
+        yield { type: "done" as const, text: "Clarification prepared." };
+      });
+      await f.run();
+      expect(rounds).toHaveBeenCalled();
+      expect(decisions).toEqual([undefined]);
+      expect(f.connector.execute).not.toHaveBeenCalled();
+      expect(f.effects).toEqual([]);
+    },
+  );
+});
+
 describe("tool audit ordering", () => {
   it("appends agent.tool.called before agent.tool.completed for a tool that finishes while narration is pending", async () => {
     const f = fixture("tool-audit-order");
