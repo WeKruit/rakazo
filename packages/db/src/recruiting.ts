@@ -1978,12 +1978,18 @@ async function requireCurrentHumanSource(
         });
   if (allowOriginalIntent && original && answers.some((answer) => answer.seq <= original.seq))
     throw new IsolationError();
+  const latestHasQuote = (latest.blocks as { kind: string; text?: string }[]).some(
+    (block) =>
+      block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
+  );
   const source =
+    !latestHasQuote &&
     allowOriginalIntent &&
     original?.threadId === run.threadId &&
     isNativeHumanMessage(original) &&
     (original.blocks as { kind: string; text?: string }[]).some(
-      (block) => block.kind === "text" && block.text?.includes(quote),
+      (block) =>
+        block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
     )
       ? original
       : latest;
@@ -6989,12 +6995,26 @@ async function researchReadBinding(
   pageOnly = false,
 ) {
   const owner = await memo(`run:${effect.runId}`, () => requireRun(tx, actor, effect.runId));
+  // A cancelled run's completed read may be materialized by a later owned run.
+  // Use the artifact's recorded run for an indexed lookup; its ownership and full
+  // receipt identity are still verified by recordedResearchReadArtifact below.
+  const clientNonce = `recruiting-observation:${effect.id}`;
+  const materializedArtifact = await memo(`artifact:${clientNonce}`, () =>
+    tx.artifact.findUnique({
+      where: {
+        spaceId_userId_clientNonce: { spaceId: actor.spaceId, userId: actor.userId, clientNonce },
+      },
+    }),
+  );
+  const eventRunIds = [
+    ...new Set([owner.id, ...(materializedArtifact?.runId ? [materializedArtifact.runId] : [])]),
+  ];
   const events = await memo(`read-events:${owner.id}:${effect.id}`, () =>
     tx.event.findMany({
       where: {
         spaceId: actor.spaceId,
-        // The binding must belong to the owner run (checked below); index-scoped, not space-wide.
-        runId: owner.id,
+        // The binding must still belong to the original effect owner (checked below).
+        runId: { in: eventRunIds },
         type: "recruiting.read",
         payload: { path: ["effectId"], equals: effect.id },
       },

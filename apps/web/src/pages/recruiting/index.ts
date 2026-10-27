@@ -1,4 +1,3 @@
-export { ContactsTab } from "./ContactsTab";
 export { RecruitingDetailPanel } from "./DetailPanel";
 export type { RecruitingDetailController, RecruitingDetailTarget } from "./detail";
 export {
@@ -9,6 +8,6 @@ export {
 } from "./detail";
 export type { RecruitingInboxEmail } from "./InboxTab";
 export { InboxTab, InboxWithReply } from "./InboxTab";
-export { InterviewTab } from "./InterviewTab";
+export { ContactsTab, InterviewTab } from "./LazyViews";
 export { SequenceTab } from "./SequenceTab";
 export type { RecruitingTabProps } from "./shared";
