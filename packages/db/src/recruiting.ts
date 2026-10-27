@@ -125,6 +125,7 @@ import {
 } from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import { extractPdfText } from "@rakazo/core/node/pdf-text";
+import { getLogger } from "@rakazo/logging";
 import type { PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
 import type { AnswerRunInput, PauseRunForInput } from "./events.js";
@@ -250,12 +251,15 @@ export type { RecruitingAssessmentSnapshot } from "@rakazo/contracts";
 
 /** The intent quote is not in the recruiter's current message; says which words to copy. */
 export class RecruitingIntentQuoteError extends IsolationError {
-  constructor(text: string) {
+  /** A quote the current message does contain, so a save can be repeated without the model. */
+  readonly quote: string;
+  constructor(text: string, quote = text) {
     const excerpt = text.length > 300 ? `${text.slice(0, 300)}…` : text;
     super(
       `intent.quote must be exact words copied from the recruiter's current message, not from a system or agent message. Their current message reads: ${JSON.stringify(excerpt)}`,
     );
     this.name = "RecruitingIntentQuoteError";
+    this.quote = quote;
   }
 }
 
@@ -2008,12 +2012,12 @@ async function requireCurrentHumanSource(
     (block) =>
       block.kind === "text" && typeof block.text === "string" && block.text.includes(quote),
   );
-  if (quoteIndex < 0)
-    throw new RecruitingIntentQuoteError(
-      sourceBlocks
-        .flatMap((block) => (block.kind === "text" && block.text ? [block.text] : []))
-        .join("\n"),
+  if (quoteIndex < 0) {
+    const texts = sourceBlocks.flatMap((block) =>
+      block.kind === "text" && block.text ? [block.text] : [],
     );
+    throw new RecruitingIntentQuoteError(texts.join("\n"), texts[0]);
+  }
   const humanSource: RecruitingSourceRef = {
     id: `human-message:${source.id}`,
     kind: "original_material",
@@ -4399,7 +4403,55 @@ export async function fillRecruitingRoleArgs(
     const receipt = receipts.get(id);
     return receipt && record.kind === "original_material" ? { ...filled, ...receipt } : filled;
   };
-  const filled = fill(args) as LooseRecord;
+  let filled = fill(args) as LooseRecord;
+  // A citation of a message outside this conversation (a made-up or mistyped id) cites the
+  // recruiter's latest message instead, as a plain locator, so the save does not fail on it.
+  const messageIds = new Set<string>();
+  const messageOf = (value: unknown) => {
+    const anchor = looseRecord(value) ? value.anchor : undefined;
+    return looseRecord(anchor) && anchor.kind === "message" && typeof anchor.messageId === "string"
+      ? anchor.messageId
+      : null;
+  };
+  const collectMessages = (value: unknown): void => {
+    if (Array.isArray(value)) value.forEach(collectMessages);
+    else if (looseRecord(value)) {
+      const id = messageOf(value);
+      if (id) messageIds.add(id);
+      Object.values(value).forEach(collectMessages);
+    }
+  };
+  collectMessages(filled);
+  if (messageIds.size && thread) {
+    const [present, latest] = await Promise.all([
+      prisma.message.findMany({
+        where: { id: { in: [...messageIds] }, threadId: context.threadId },
+        select: { id: true },
+      }),
+      prisma.message.findFirst({
+        where: { threadId: context.threadId, role: "user" },
+        orderBy: { seq: "desc" },
+        select: { id: true },
+      }),
+    ]);
+    const known = new Set(present.map((message) => message.id));
+    const repoint = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(repoint);
+      if (!looseRecord(value)) return value;
+      const record = Object.fromEntries(
+        Object.entries(value).map(([key, item]) => [key, repoint(item)]),
+      );
+      const id = messageOf(value);
+      if (!id || known.has(id) || !latest) return record;
+      getLogger().warn("recruiting.source.repaired", { reason: "message_not_in_thread" });
+      const { quote: _quote, ...rest } = record;
+      return {
+        ...rest,
+        anchor: { kind: "message", messageId: latest.id, locator: "blocks[0].text" },
+      };
+    };
+    filled = repoint(filled) as LooseRecord;
+  }
   if (
     (filled.operation === "update" || filled.operation === "revise") &&
     thread?.activeRecruitingRoleId

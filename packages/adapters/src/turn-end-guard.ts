@@ -1,6 +1,13 @@
 import { runContinueJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { classifyTurnEnd, type TurnEndClass, turnEndPromise, turnEndText } from "@rakazo/core";
+import {
+  classifyTurnEnd,
+  type TurnEndClass,
+  turnEndPromise,
+  turnEndStarted,
+  turnEndStuck,
+  turnEndText,
+} from "@rakazo/core";
 import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
@@ -193,12 +200,11 @@ export async function recruitingRoundListText(
   if (input.knownOnly && !keys.length) return "";
   const lines = keys.map((key, index) => {
     const person = people.get(key);
-    const head = [
-      person?.name ? `**${person.name}**` : null,
-      person?.title,
-      person?.company,
-      person?.location,
-    ]
+    // The saved key is the profile link, so the name opens the person's LinkedIn profile.
+    const slug = /^linkedin:(\/in\/[^\s/?#]+)\/?$/i.exec(key)?.[1];
+    const name =
+      person?.name && slug ? `[${person.name}](https://www.linkedin.com${slug})` : person?.name;
+    const head = [name ? `**${name}**` : null, person?.title, person?.company, person?.location]
       .filter(Boolean)
       .join(" · ");
     const passage = person?.snippet?.trim();
@@ -389,7 +395,9 @@ export async function guardRecruitingTurnEnd(
     },
   );
   if (classification !== "none") return { action: "ended", classification };
-  const promise = turnEndPromise(turnEndText(input.blocks));
+  const endText = turnEndText(input.blocks);
+  // "已开始扩展搜索" with nothing running is a promise too; a running search is checked below.
+  const promise = turnEndPromise(endText) ?? turnEndStarted(endText);
   // A teammate handed this bot one task (an email draft, a deeper search). Finishing that task
   // ends its turn; the role's next step stays with the coordinator, so only a promise is pushed.
   const handedIn = await handedInStage(deps, run);
@@ -473,7 +481,7 @@ export async function guardRecruitingTurnEnd(
  */
 export async function guardRecruitingRoleCreate(
   deps: Pick<TurnEndGuardDeps, "events" | "jobs"> & {
-    prisma: Pick<PrismaClient, "message" | "externalEffect">;
+    prisma: Pick<PrismaClient, "message" | "externalEffect" | "event">;
   },
   input: Pick<TurnEndGuardInput, "blocks" | "handedOff" | "pendingApproval"> & {
     run: TurnEndGuardInput["run"];
@@ -499,9 +507,31 @@ export async function guardRecruitingRoleCreate(
     orderBy: { createdAt: "desc" },
     select: { result: true },
   });
-  const error = (refused?.result as { error?: unknown } | null)?.error;
-  const promise = classification === "none" ? turnEndPromise(turnEndText(input.blocks)) : undefined;
-  if (typeof error !== "string" && !promise) return { action: "ended", classification };
+  // A save refused before it reached the server (its arguments failed the tool's format check)
+  // leaves only the tool event.
+  const failedCall = refused
+    ? undefined
+    : (
+        await deps.prisma.event.findMany({
+          where: {
+            runId: run.id,
+            spaceId: run.spaceId,
+            type: "agent.tool.completed",
+            payload: { path: ["name"], equals: "recruiting_role" },
+          },
+          orderBy: { createdAt: "desc" },
+          take: 5,
+          select: { payload: true },
+        })
+      )
+        .map((event) => (event.payload as { error?: unknown } | null)?.error)
+        .find((value) => typeof value === "string");
+  const error = (refused?.result as { error?: unknown } | null)?.error ?? failedCall;
+  const text = turnEndText(input.blocks);
+  const promise = classification === "none" ? turnEndPromise(text) : undefined;
+  // Ending on "sorry, it is stuck" without a question or a result has not done the work either.
+  const stuck = classification === "none" ? turnEndStuck(text) : undefined;
+  if (typeof error !== "string" && !promise && !stuck) return { action: "ended", classification };
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: run.threadId,
@@ -519,19 +549,21 @@ export async function guardRecruitingRoleCreate(
   getLogger().info("run.autocontinue", {
     runId: run.id,
     stage: "intake",
-    reason: typeof error === "string" ? "role_refused" : "promise",
+    reason: typeof error === "string" ? "role_refused" : promise ? "promise" : "stuck",
   });
-  const text =
+  const prompt =
     typeof error === "string"
-      ? `继续：刚才保存岗位被拒，原因：${error.slice(0, 600)} 这不是故障。按原因改正后立即用 recruiting_role create 重新保存，然后继续下一步。${AUTO_NOTE}`
-      : continuationText({ promise, last: true });
+      ? `继续：刚才保存岗位被拒，原因：${error.slice(0, 600)} 这不是故障。按原因改正后立即用 recruiting_role create 重新保存（引用写不准就只写来源位置、不写引文），然后继续找人，直到展示十位人选。${AUTO_NOTE}`
+      : promise
+        ? continuationText({ promise, last: true })
+        : `继续：上一条以报错或卡住结束，但工作没有做完。岗位还没保存：现在用 recruiting_role create 保存岗位（引用写不准就只写来源位置、不写引文），然后继续找人，直到展示十位人选。不要再向招聘方道歉或说保存不可用。${AUTO_NOTE}`;
   const sent = await deps.events.sendUserMessage({
     spaceId: run.spaceId,
     threadId: run.threadId,
     botId: run.botId,
     userId: run.userId,
-    blocks: [{ kind: "text", text }],
-    prompt: text,
+    blocks: [{ kind: "text", text: prompt }],
+    prompt,
     trigger: "follow_up",
     internal: true,
     clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:1`,
@@ -544,7 +576,7 @@ export async function guardRecruitingRoleCreate(
     action: "continued",
     runId: sent.runId ?? null,
     stage: "intake",
-    label: typeof error === "string" ? "保存岗位" : PROMISE_LABEL,
+    label: typeof error !== "string" && promise ? PROMISE_LABEL : "保存岗位",
     count: 1,
   };
 }
