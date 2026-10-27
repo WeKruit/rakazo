@@ -1,6 +1,6 @@
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { nestRosterByParent } from "@rakazo/core";
 import {
   BotAvatar,
@@ -41,8 +41,8 @@ const ActivityList = lazyPanel(() =>
 );
 
 export function DeveloperSidebar({ model }: { model: ReturnType<typeof useShellController> }) {
+  const { t } = useLingui();
   const {
-    t,
     navigate,
     bots,
     botSections,

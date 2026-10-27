@@ -1,4 +1,4 @@
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Button, NativeSelect, NativeSelectOption, TabsContent, Textarea } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import { rpc } from "../../lib/rpc";
@@ -14,10 +14,10 @@ import {
 import { Sources } from "../recruiting/SourceDocuments";
 import type { useRecruitingWorkspace } from "../recruiting/useRecruitingWorkspace";
 export function RecruitingRoleTab({ model }: { model: ReturnType<typeof useRecruitingWorkspace> }) {
+  const { t } = useLingui();
   const {
     threadId,
     showDiagnostics,
-    t,
     setRefresh,
     loading,
     failed,

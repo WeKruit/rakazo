@@ -1,4 +1,4 @@
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import { Button } from "@rakazo/ui-web";
 import { FolderOpen, Gauge, LayoutGrid, LogOut, Settings, SquareKanban } from "lucide-react";
 import type { CSSProperties } from "react";
@@ -17,8 +17,8 @@ const DeveloperSidebar = lazyPanel(() =>
   import("./DeveloperSidebar").then((m) => m.DeveloperSidebar),
 );
 export function ShellSidebar({ model }: { model: ReturnType<typeof useShellController> }) {
+  const { t } = useLingui();
   const {
-    t,
     groupId,
     navigate,
     groups,

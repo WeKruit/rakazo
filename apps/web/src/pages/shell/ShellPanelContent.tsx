@@ -1,4 +1,4 @@
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import type { Routine, ThinkingLevel } from "@rakazo/contracts";
 import { cronFromPreset, isActive } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
@@ -62,9 +62,9 @@ export function ShellPanelContent({
   model: ReturnType<typeof useShellController>;
   roleCreationForm: ReactNode;
 }) {
+  const { t } = useLingui();
   const {
     currentWorkspaceRead,
-    t,
     navigate,
     userId,
     groups,

@@ -15,7 +15,7 @@ import { useShellController } from "./shell/useShellController";
 export type { ComposerHandle } from "./shell/Composer";
 export { Composer, candidateReferenceText } from "./shell/Composer";
 
-import { Trans } from "@lingui/react/macro";
+import { Trans, useLingui } from "@lingui/react/macro";
 import type { ComputerReleaseReason } from "@rakazo/contracts";
 import { AvatarStyleProvider, BotAvatar, Button } from "@rakazo/ui-web";
 import { X } from "lucide-react";
@@ -89,8 +89,8 @@ const MOBILE_SIDEBAR_SWIPE_DISTANCE_PX = 56;
 
 export function ShellPage() {
   const model = useShellController();
+  const { t } = useLingui();
   const {
-    t,
     navigate,
     session,
     userId,
