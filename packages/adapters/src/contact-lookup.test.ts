@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findEmails } from "./contact-lookup.js";
+import { FindEmailsInput, findEmails } from "./contact-lookup.js";
 
 const people = [
   { name: "Ada Example", linkedin_url: "https://www.linkedin.com/in/ada-example", company: "Acme" },
@@ -128,5 +128,19 @@ describe("findEmails", () => {
       outcome: "pending",
       detail: "IN_PROGRESS",
     });
+  });
+  it("looks up the first 50 of a longer list and names who is left", async () => {
+    const many = Array.from({ length: 81 }, (_, index) => ({
+      name: `Person ${index}`,
+      linkedin_url: `https://www.linkedin.com/in/person-${index}`,
+    }));
+    expect(FindEmailsInput.safeParse({ people: many }).success).toBe(true);
+    const result = await findEmails(
+      { people: many },
+      { ...options, fetch: async () => ok({}), keys: {} },
+    );
+    expect(result.people).toHaveLength(50);
+    expect(result.summary.not_looked_up).toBe(31);
+    expect(result.summary.next_step).toContain("Person 50");
   });
 });

@@ -12,8 +12,10 @@ export const FindEmailsInput = z.strictObject({
       }),
     )
     .min(1)
-    .max(50),
+    .max(500),
 });
+/** People one call looks up; the rest are named in the result for the next call. */
+export const LOOKUP_BATCH = 50;
 export type FindEmailsInput = z.infer<typeof FindEmailsInput>;
 
 export type ContactProvider = "fullenrich" | "contactout" | "leadmagic";
@@ -38,7 +40,14 @@ export type PersonContacts = {
 };
 export type FindEmailsResult = {
   people: PersonContacts[];
-  summary: { looked_up: number; found: number; verified: number };
+  summary: {
+    looked_up: number;
+    found: number;
+    verified: number;
+    /** People past the first {@link LOOKUP_BATCH}, left for the next call. */
+    not_looked_up?: number;
+    next_step?: string;
+  };
 };
 
 export type ContactLookupKeys = Partial<Record<ContactProvider, string>>;
@@ -109,16 +118,17 @@ export async function findEmails(
   options: ContactLookupOptions,
 ): Promise<FindEmailsResult> {
   const sleep = options.sleep ?? defaultSleep;
-  const people: Array<PersonContacts & { key: string | null; company?: string }> = input.people.map(
-    (person) => ({
+  const later = input.people.slice(LOOKUP_BATCH);
+  const people: Array<PersonContacts & { key: string | null; company?: string }> = input.people
+    .slice(0, LOOKUP_BATCH)
+    .map((person) => ({
       name: person.name,
       linkedin_url: person.linkedin_url,
       company: person.company,
       key: linkedinPersonKey(person.linkedin_url),
       emails: [],
       lookups: [],
-    }),
-  );
+    }));
   const add = (person: PersonContacts, email: FoundEmail) => {
     const address = email.address.trim().toLowerCase();
     if (!EMAIL.safeParse(address).success) return;
@@ -161,6 +171,12 @@ export async function findEmails(
       verified: output.filter((person) =>
         person.emails.some((email) => email.status === "DELIVERABLE"),
       ).length,
+      ...(later.length
+        ? {
+            not_looked_up: later.length,
+            next_step: `Looked up the first ${LOOKUP_BATCH}. Call again with the other ${later.length} people, starting with ${later[0]!.name}.`,
+          }
+        : {}),
     },
   };
 }
