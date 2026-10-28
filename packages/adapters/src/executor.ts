@@ -4438,6 +4438,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ).map((row) => [row.id, row.name])
             : [],
         );
+        // In a group, mark where this member's unread part starts, so it catches up on what
+        // others said since its own last reply instead of rereading the whole thread.
+        const firstUnseen = thread.groupId ? firstUnseenMessageId(messages, run.botId) : undefined;
         const threadContext = threadContextForRun(
           run.trigger,
           {
@@ -4450,7 +4453,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : m.role === "bot" && m.botId === run.botId
                   ? "assistant"
                   : "user") as "user" | "assistant" | "system",
-              content: `${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(m)}`,
+              content: `${m.id === firstUnseen ? "[new since your last reply] " : ""}${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(m)}`,
             })),
             summary: thread.historyCompactionSummary,
             historyCompactedUpToSeq: thread.historyCompactedUpToSeq,
@@ -4800,7 +4803,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await notifyRun(deps, run, {
               kind: "failure",
               title: `${bot.name} failed`,
-              body: message,
+              body: failureNotificationBody(message),
               botId: bot.id,
               threadId: thread.id,
             });
@@ -12931,7 +12934,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await notifyRun(deps, run, {
               kind: "failure",
               title: `${bot.name} failed`,
-              body: message.slice(0, 180),
+              body: failureNotificationBody(message),
               botId: bot.id,
               threadId: thread.id,
             });
@@ -13839,6 +13842,19 @@ export function runIdentityInstruction(
     `Description: ${bot.description.trim() || "(none)"}`,
     instructions ? `Instructions:\n${instructions}` : "Instructions: (none)",
   ].join("\n");
+}
+
+/** What stopped, in the recruiter's terms, and the one thing to do next; never raw error text. */
+export function failureNotificationBody(error: string): string {
+  const reason =
+    /rate.?limit|too many requests|overload|capacity|unavailable|timed? out|timeout/i.test(error)
+      ? "The model service was busy."
+      : /budget|spend|\$\d/i.test(error)
+        ? "It reached this task's spending limit."
+        : /\bminutes?\b|time limit/i.test(error)
+          ? "It reached this task's time limit."
+          : "It stopped on an error.";
+  return `${reason} Send a message in the chat to pick up where it stopped.`;
 }
 
 export function runSendsFinishNotification(trigger: string, continuationPending = false): boolean {
@@ -14879,6 +14895,24 @@ export async function withRecentTurnImages(
 }
 
 /** Names a teammate in shared history; falls back to the id when the bot is gone. */
+/** The earliest message by someone else after this bot's own latest message in the thread. */
+export function firstUnseenMessageId(
+  messages: readonly { id: string; seq: number; role: string; botId: string | null }[],
+  botId: string,
+): string | undefined {
+  let lastOwn = -1;
+  for (const m of messages)
+    if (m.role === "bot" && m.botId === botId) lastOwn = Math.max(lastOwn, m.seq);
+  if (lastOwn < 0) return undefined;
+  let first: { id: string; seq: number } | undefined;
+  for (const m of messages) {
+    if (m.seq <= lastOwn || (m.role === "bot" && m.botId === botId) || m.role === "system")
+      continue;
+    if (!first || m.seq < first.seq) first = m;
+  }
+  return first?.id;
+}
+
 export function teammateLabel(
   botId: string | null | undefined,
   names: ReadonlyMap<string, string>,
