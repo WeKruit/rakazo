@@ -4038,8 +4038,10 @@ it.each([
       await act(async () => {});
       expect(document.body.querySelector('[data-message-id="pending-main"]')).not.toBeNull();
     });
-    // Hover/focus prefetches pass no request options; count only conversation opens.
-    const opens = () => shellApi.get.mock.calls.filter((call) => call.length > 1).length;
+    // Hover/focus prefetches pass no request options, and a background refresh of the open group
+    // (a resync under a loaded test run) is not a switch; count only opens of another conversation.
+    const opens = () =>
+      shellApi.get.mock.calls.filter((call) => call.length > 1 && !call[0]?.groupId).length;
     const reads = opens();
     const extraReads: string[] = [];
     const getImpl = shellApi.get.getMockImplementation()!;
