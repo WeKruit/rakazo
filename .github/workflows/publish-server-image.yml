@@ -30,7 +30,8 @@ env:
 
 concurrency:
   group: publish-server-image-${{ github.ref }}
-  cancel-in-progress: false
+  # Superseded PR builds waste runner time; main and tag publishes still run to completion.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   installer-smoke:
