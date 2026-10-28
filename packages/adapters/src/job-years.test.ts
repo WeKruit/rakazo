@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { jobStatesYears } from "./executor";
+import { jobStatesYears } from "./executor.js";
 
 describe("jobStatesYears", () => {
   it("finds a stated years requirement", () => {
