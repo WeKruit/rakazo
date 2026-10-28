@@ -3650,7 +3650,7 @@ describe("local native Instantly campaign and lead tools", () => {
                   type: "email",
                   delay: 0,
                   delay_unit: "days",
-                  variants: [{ subject: "Hi", body: "Hello<br/>there" }],
+                  variants: [{ subject: "Hi", body: "<p>Hello<br />there</p>" }],
                 },
               ],
             },
@@ -4001,6 +4001,29 @@ describe("local native Instantly campaign and lead tools", () => {
     const patch = f.state.requests.findLast((r) => r.method === "PATCH");
     expect(JSON.stringify(patch?.body)).toContain(
       "<p>Hi Ada,</p><p>Q＆A ＜30 min＞<br />Thanks</p>",
+    );
+  });
+
+  it("sends an HTML body as paragraphs so no text sits outside one", async () => {
+    const f = fixture();
+    delete f.state.campaign.sequences;
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.campaign.sequences = undefined;
+    await f
+      .run("ensure_role_campaign", {
+        role_id: "role-1",
+        steps: [
+          {
+            subject: "Hi",
+            body: "Hi {{firstName}},<br/><br/>The work:<ul><li>Run streams</li><li>Q&amp;A</li></ul>Best",
+            delay_days: 0,
+          },
+        ],
+      })
+      .catch(() => undefined);
+    const patch = f.state.requests.findLast((r) => r.method === "PATCH");
+    expect(JSON.stringify(patch?.body)).toContain(
+      "<p>Hi {{firstName}},</p><p>The work:</p><p>• Run streams<br />• Q＆A</p><p>Best</p>",
     );
   });
 

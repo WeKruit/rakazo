@@ -139,12 +139,16 @@ async function grant(
     },
   });
   const allowed = assignment?.allowedTools;
+  // Local Instantly tools ride the official server's get_email + list_emails grant, as the
+  // executor authorizes them.
+  const required = (tools ?? [native.route.toolName]).flatMap((tool) =>
+    tool.startsWith("native_instantly_") ? ["get_email", "list_emails"] : [tool],
+  );
   if (
     !server ||
     !assignment ||
     (!assignment.allowAllTools &&
-      (!Array.isArray(allowed) ||
-        !(tools ?? [native.route.toolName]).every((tool) => allowed.includes(tool))))
+      (!Array.isArray(allowed) || !required.every((tool) => allowed.includes(tool))))
   )
     throw new IsolationError();
   return native;

@@ -310,6 +310,50 @@ database("scheduling plan persistence (local PostgreSQL)", () => {
       }),
     ).rejects.toThrow(/get_email/);
   });
+  it("accepts a local Instantly mail read under the official server's narrow grant", async () => {
+    await prisma.botMcpServer.updateMany({
+      where: { botId: identity.botId, serverId: mailId },
+      data: { allowAllTools: false, allowedTools: ["get_email", "list_emails"] },
+    });
+    await prisma.botMcpServer.updateMany({
+      where: { botId: identity.botId, serverId: calendarId },
+      data: {
+        allowAllTools: false,
+        allowedTools: ["get_availability", "create_booking", "get_booking"],
+      },
+    });
+    try {
+      await effect(
+        mailId,
+        "native_instantly_get_email",
+        { id: "native-email" },
+        {
+          id: "native-email",
+          thread_id: "original-thread",
+          eaccount: "recruiter@example.test",
+          from_address_email: "candidate@example.test",
+        },
+      );
+      const plan = await prepareRecruitingSchedulingPlan(prisma, actor, {
+        threadId: input.threadId,
+        emailId: "native-email",
+        candidate: {
+          candidateKey: "candidate@example.test",
+          name: "Candidate",
+          timeZone: "America/New_York",
+        },
+        interviewer: input.interviewer,
+        start: "2026-11-01T06:30:00Z",
+        lengthInMinutes: 30,
+      });
+      expect(plan.originalEmail.providerMessageId).toBe("native-email");
+    } finally {
+      await prisma.botMcpServer.updateMany({
+        where: { botId: identity.botId },
+        data: { allowAllTools: true },
+      });
+    }
+  });
   it("claims one booking across different runs and preserves the same binding on retry", async () => {
     const plan = await createRecruitingSchedulingPlan(prisma, actor, input);
     const args = {
