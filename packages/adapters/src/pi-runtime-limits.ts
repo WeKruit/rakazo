@@ -198,3 +198,23 @@ export function compactionReserveTokens(window: number, output: number): number 
     Math.max(0, window - output),
   );
 }
+
+/**
+ * A schema that forbids extra arguments rejects the whole call over one invented name. Drop the
+ * names it does not declare, so the declared ones still run; required ones are still checked.
+ */
+export function withoutUndeclaredArguments(
+  raw: Record<string, unknown>,
+  schema: unknown,
+): Record<string, unknown> {
+  const declared = schema as { additionalProperties?: unknown; properties?: unknown } | undefined;
+  if (
+    declared?.additionalProperties !== false ||
+    !declared.properties ||
+    typeof declared.properties !== "object"
+  )
+    return raw;
+  const names = new Set(Object.keys(declared.properties));
+  if (Object.keys(raw).every((key) => names.has(key))) return raw;
+  return Object.fromEntries(Object.entries(raw).filter(([key]) => names.has(key)));
+}
