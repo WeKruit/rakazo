@@ -55,4 +55,22 @@ describe("company site", () => {
     });
     expect(fetch.mock.calls.length).toBe(calls);
   });
+
+  it("queues a table's worth of names instead of turning them away", async () => {
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const name = url.hostname.replace(/\.com$/, "");
+      return url.hostname.endsWith(".com")
+        ? new Response(`<title>${name}</title>`, { headers: { "content-type": "text/html" } })
+        : new Response("not found", { status: 404 });
+    });
+    const resolver = createCompanySiteResolver({
+      fetch: fetch as unknown as typeof globalThis.fetch,
+      resolveHostname: async () => [{ address: "203.0.113.10", family: 4 as const }],
+    });
+    const names = Array.from({ length: 30 }, (_, index) => `company${index}`);
+    const answers = await Promise.all(names.map((name) => resolver.companySite(name)));
+    expect(answers).toEqual(names.map((name) => ({ host: `${name}.com` })));
+  });
 });

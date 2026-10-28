@@ -402,7 +402,7 @@ export function RecruitingNavigation({
                   )}
                   dir="auto"
                 >
-                  {group.name}
+                  <span className="block truncate">{group.name}</span>
                   {(titleCounts.get(group.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? (
                     <time
                       dateTime={group.createdAt}
@@ -414,16 +414,18 @@ export function RecruitingNavigation({
                       })}
                     </time>
                   ) : null}
+                  {/* Below the name, so a long status never squeezes the role out of view. */}
+                  {waitsOnUser(group) ? (
+                    <Badge variant="secondary" className="mt-1 block w-fit font-normal">
+                      {group.attention === "approval" ? (
+                        <Trans>Needs confirmation</Trans>
+                      ) : (
+                        <Trans>Needs input</Trans>
+                      )}
+                    </Badge>
+                  ) : null}
                 </span>
-                {waitsOnUser(group) ? (
-                  <Badge variant="secondary" className="shrink-0">
-                    {group.attention === "approval" ? (
-                      <Trans>Needs confirmation</Trans>
-                    ) : (
-                      <Trans>Needs input</Trans>
-                    )}
-                  </Badge>
-                ) : group.unread ? (
+                {waitsOnUser(group) ? null : group.unread ? (
                   <span
                     className="size-1.5 shrink-0 rounded-full bg-link"
                     role="img"

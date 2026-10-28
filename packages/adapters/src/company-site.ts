@@ -1,11 +1,15 @@
 import { JSDOM } from "jsdom";
+import { BUSY, concurrencyLimit } from "./favicon.js";
 import type { ResolveHostname } from "./network-address.js";
 import { fetchSafeWebBytes } from "./web-ssrf.js";
 
 const PAGE_MAX_BYTES = 128 * 1024;
 const FETCH_TIMEOUT_MS = 4_000;
 const LOOKUP_DEADLINE_MS = 10_000;
-const MAX_CONCURRENT = 4;
+const MAX_CONCURRENT = 6;
+// A results table asks for a few dozen names at once; they wait their turn instead of failing.
+const MAX_WAITING = 64;
+const MAX_WAIT_MS = 15_000;
 const MAX_CACHED_NAMES = 5_000;
 const FOUND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const MISSING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
@@ -94,7 +98,7 @@ export function createCompanySiteResolver(
   const now = options.now ?? Date.now;
   const cache = new Map<string, { host: string | null; expiresAt: number }>();
   const inFlight = new Map<string, Promise<CompanySiteAnswer>>();
-  let active = 0;
+  const limit = concurrencyLimit(MAX_CONCURRENT, MAX_WAITING, MAX_WAIT_MS);
   const remember = (key: string, host: string | null) => {
     cache.delete(key);
     cache.set(key, { host, expiresAt: now() + (host ? FOUND_TTL_MS : MISSING_TTL_MS) });
@@ -109,18 +113,16 @@ export function createCompanySiteResolver(
       if (cached && cached.expiresAt > now()) return { host: cached.host };
       const pending = inFlight.get(key);
       if (pending) return pending;
-      if (active >= MAX_CONCURRENT) return { host: null, retry: true };
-      active += 1;
-      const lookup = findCompanySite(tokens, options, AbortSignal.timeout(LOOKUP_DEADLINE_MS))
-        .catch(() => null)
+      const lookup = limit(() =>
+        findCompanySite(tokens, options, AbortSignal.timeout(LOOKUP_DEADLINE_MS)).catch(() => null),
+      )
         .then((host): CompanySiteAnswer => {
+          // Turned away by a full queue is not a miss: not remembered, and the client asks again.
+          if (host === BUSY) return { host: null, retry: true };
           remember(key, host);
           return { host };
         })
-        .finally(() => {
-          active -= 1;
-          inFlight.delete(key);
-        });
+        .finally(() => inFlight.delete(key));
       inFlight.set(key, lookup);
       return lookup;
     },
