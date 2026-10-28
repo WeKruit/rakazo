@@ -2555,7 +2555,7 @@ describe("sendThreadMessage", () => {
           threadId: "thread-1",
           seq: 1,
           role: "user",
-          blocks: [{ kind: "text", text: "status?" }],
+          blocks: [{ kind: "text", text: "and the Dallas ones?" }],
           botId: null,
           replyToMessageId: null,
           runId: null,
@@ -2620,7 +2620,7 @@ describe("sendThreadMessage", () => {
       },
       actor,
       target,
-      { text: "status?", clientNonce: "nonce-group-webhook" },
+      { text: "and the Dallas ones?", clientNonce: "nonce-group-webhook" },
     );
 
     expect(result).toMatchObject({ runId: "run-webhook", taskId: "task-webhook" });
@@ -2628,6 +2628,94 @@ describe("sendThreadMessage", () => {
       data: { messageId: "msg-1", botId: "bot-a", userId: "user-1", runId: null },
     });
     expect(tx.run.create).not.toHaveBeenCalled();
+  });
+  it("answers a progress question from a working teammate without interrupting it", async () => {
+    let messageSeq = 0;
+    const created: Array<{ role: string; blocks: unknown }> = [];
+    const tx = {
+      thread: {
+        update: vi.fn(async ({ data }: { data: { nextMessageSeq?: unknown } }) =>
+          data.nextMessageSeq ? { nextMessageSeq: ++messageSeq } : { nextEventSeq: messageSeq },
+        ),
+      },
+      message: {
+        create: vi.fn(async ({ data }: { data: { role: string; blocks: unknown } }) => {
+          created.push(data);
+          return {
+            id: `msg-${created.length}`,
+            threadId: "thread-1",
+            seq: created.length,
+            ...data,
+          };
+        }),
+        update: vi.fn(),
+      },
+      run: {
+        findMany: vi.fn(async ({ where }: { where: { status?: unknown } }) =>
+          where.status === "running"
+            ? [
+                {
+                  id: "run-b",
+                  taskId: "task-b",
+                  botId: "bot-b",
+                  status: "running",
+                  trigger: "user",
+                },
+              ]
+            : [],
+        ),
+        findUnique: vi.fn().mockResolvedValue({ startedAt: new Date(Date.now() - 90_000) }),
+        create: vi.fn(),
+      },
+      task: { create: vi.fn() },
+      event: {
+        create: vi.fn().mockResolvedValue({ id: "event-1", seq: 1, createdAt: new Date() }),
+        findFirst: vi.fn().mockResolvedValue({ payload: { name: "recruiting_research" } }),
+      },
+      steeringMessage: { create: vi.fn() },
+      chatGroup: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "group-1",
+          members: [
+            { bot: { id: "bot-a", name: "Alpha", color: null } },
+            { bot: { id: "bot-b", name: "Beta", color: null } },
+          ],
+        }),
+        update: vi.fn().mockResolvedValue({ id: "group-1" }),
+      },
+      $queryRaw: vi.fn().mockResolvedValue([{ id: "group-1" }]),
+    };
+    const prisma = {
+      message: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+
+    await sendThreadMessage(
+      {
+        prisma,
+        events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
+        jobs: { enqueue } as never,
+      },
+      { spaceId: "workspace-1", userId: "user-1" } as Actor,
+      {
+        kind: "group",
+        groupId: "group-1",
+        groupName: "Group",
+        threadId: "thread-1",
+        members: [],
+        memberBotIds: ["bot-a", "bot-b"],
+      } satisfies ThreadTarget,
+      { text: "进度怎么样了", clientNonce: "nonce-status" },
+    );
+
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.run.create).not.toHaveBeenCalled();
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(created.at(-1)).toMatchObject({ role: "bot" });
+    expect(JSON.stringify(created.at(-1)?.blocks)).toContain(
+      "Still working: searching candidates, 1m 30s",
+    );
   });
   it("answers a routine run waiting for input from the composer", async () => {
     const waitingAsk = {
