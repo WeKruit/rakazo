@@ -51,8 +51,8 @@ export function lazyCatalogTools(
   const indexText = formatNameIndexText(groupedNames(entries));
   const embedIndex = indexText.length > 0 && fitsNameIndexBudget(groupedNames(entries));
   const searchDescription = embedIndex
-    ? `Search connected ${label} tools. Empty query lists names by source. Pass group to expand one source.\n${indexText}`
-    : `Search connected ${label} tools. Empty query lists sources. Pass group to list names in one source, or query to search.`;
+    ? `Search connected ${label} tools. Empty query lists names by source. Pass group to expand one source. Search here before saying you lack a tool or access; say so only when search finds none.\n${indexText}`
+    : `Search connected ${label} tools. Empty query lists sources. Pass group to list names in one source, or query to search. Search here before saying you lack a tool or access; say so only when search finds none.`;
   return [
     {
       name: `${prefix}_search_tools`,

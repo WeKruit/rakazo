@@ -130,6 +130,13 @@ describe("lazy tool catalog", () => {
     expect(search?.description).not.toContain("Send mail");
   });
 
+  it("tells the agent to search before claiming it lacks a tool", () => {
+    for (const entries of [catalogEntries(multiGroupTools()), []]) {
+      const [search] = lazyCatalogTools("connectors", "mcp", "MCP", entries);
+      expect(search?.description).toContain("say so only when search finds none");
+    }
+  });
+
   it("matches a query that lists several words or tool names", () => {
     const entries = catalogEntries(multiGroupTools());
     const result = searchCatalog(entries, { group: "gmail", query: "send mail, read draft" });
