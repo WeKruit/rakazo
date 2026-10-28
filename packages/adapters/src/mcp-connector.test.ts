@@ -4072,6 +4072,19 @@ describe("local native Instantly campaign and lead tools", () => {
     ).toHaveLength(1);
   });
 
+  it("schedules Pacific weekday hours in Mountain time one hour later", async () => {
+    const f = fixture();
+    delete f.state.campaign.sequences;
+    await f.run("ensure_role_campaign", { role_id: "role-1", timezone: "America/Los_Angeles" });
+    const created = f.state.requests.find(
+      (r) => r.method === "POST" && r.path === "/api/v2/campaigns",
+    );
+    expect(JSON.stringify(created?.body)).toContain(
+      '"timing":{"from":"10:00","to":"18:00"},"days":',
+    );
+    expect(JSON.stringify(created?.body)).toContain('"timezone":"America/Boise"');
+  });
+
   it("saves new steps onto the role's existing draft and maps the zone the provider lists", async () => {
     const f = fixture();
     delete f.state.campaign.sequences;

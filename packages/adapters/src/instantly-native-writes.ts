@@ -252,13 +252,17 @@ const PROVIDER_ZONE: Record<string, string> = {
   "US/Mountain": "America/Boise",
   "America/Phoenix": "America/Creston",
   "US/Central": "America/Chicago",
-  // The provider lists no Pacific zone that observes daylight saving; its Pacific entry is this one.
-  "America/Los_Angeles": "America/Dawson",
-  "America/Vancouver": "America/Dawson",
-  "America/Tijuana": "America/Dawson",
-  "US/Pacific": "America/Dawson",
 };
 export const providerTimezone = (zone: string) => PROVIDER_ZONE[zone] ?? zone;
+// The provider lists no Pacific zone that keeps daylight saving (its America/Dawson is fixed
+// UTC-7), so Pacific hours are scheduled in Mountain time, always exactly one hour ahead.
+const PACIFIC_WEEKDAYS = "Weekdays (Pacific)";
+const PACIFIC = new Set([
+  "America/Los_Angeles",
+  "America/Vancouver",
+  "America/Tijuana",
+  "US/Pacific",
+]);
 
 export function instantlyRest(
   fetch: (url: URL, init: RequestInit) => Promise<Response>,
@@ -364,14 +368,19 @@ function firstEmail(campaign: Record<string, unknown> | undefined) {
 
 function campaignSchedule(hours: "weekdays_9_to_5" | "any_time", zone: string) {
   const anyTime = hours === "any_time";
+  const pacific = PACIFIC.has(zone);
   return {
     schedules: [
       {
-        name: anyTime ? "Any time" : "Weekdays",
-        timing: anyTime ? { from: "00:00", to: "23:59" } : { from: "09:00", to: "17:00" },
+        name: anyTime ? "Any time" : pacific ? PACIFIC_WEEKDAYS : "Weekdays",
+        timing: anyTime
+          ? { from: "00:00", to: "23:59" }
+          : pacific
+            ? { from: "10:00", to: "18:00" }
+            : { from: "09:00", to: "17:00" },
         // ponytail: "1".."5" assumed Mon-Fri (docs do not define the day index); adjust in UI if off.
         days: { "0": anyTime, "1": true, "2": true, "3": true, "4": true, "5": true, "6": anyTime },
-        timezone: providerTimezone(zone),
+        timezone: pacific ? "America/Boise" : providerTimezone(zone),
       },
     ],
   };
@@ -509,6 +518,7 @@ function describeSchedule(campaign: Record<string, unknown> | undefined) {
   const schedules = (campaign?.campaign_schedule as { schedules?: unknown } | undefined)?.schedules;
   const first = Array.isArray(schedules) ? (schedules[0] as Record<string, unknown>) : undefined;
   if (!first) return null;
+  if (first.name === PACIFIC_WEEKDAYS) return "Weekdays 09:00-17:00 Pacific time";
   const timing = first.timing as { from?: unknown; to?: unknown } | undefined;
   return (
     [
