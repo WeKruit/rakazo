@@ -1,4 +1,4 @@
-import { buildSkillMd, RECRUITING_DEFAULT_SKILLS } from "@rakazo/core";
+import { buildSkillMd, MEMORY_TIDY_SKILL, RECRUITING_DEFAULT_SKILLS } from "@rakazo/core";
 
 /**
  * Built-in Agent Skills (SKILL.md recipes) available to every user.
@@ -7,6 +7,7 @@ import { buildSkillMd, RECRUITING_DEFAULT_SKILLS } from "@rakazo/core";
  */
 const SKILLS: Array<{ name: string; description: string; body: string }> = [
   ...RECRUITING_DEFAULT_SKILLS,
+  MEMORY_TIDY_SKILL,
   {
     name: "Interrogate",
     description: "Adversarial review of a diff/PR/plan. Review only; never applies fixes.",

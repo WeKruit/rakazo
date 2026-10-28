@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Actor } from "@rakazo/contracts";
+import { memoryTidyRoutineCron } from "@rakazo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import * as recruiting from "./recruiting-bootstrap.js";
@@ -55,6 +56,19 @@ type PresetRow = {
   userId: string;
   config: unknown;
 };
+type RoutineRow = {
+  id: string;
+  spaceId: string;
+  userId: string;
+  botId: string;
+  name: string;
+  prompt: string;
+  crons: string[];
+  timezone: string;
+  notify: boolean;
+  active: boolean;
+  nextRunAt: Date;
+};
 type ManagedState = {
   schemaVersion: number;
   groupId: string;
@@ -75,6 +89,7 @@ function fixture() {
   const servers: ServiceRow[] = [];
   const assignments: AssignmentRow[] = [];
   const presets: PresetRow[] = [];
+  const routines: RoutineRow[] = [];
   let busy = false;
   let botSequence = 0;
   let assignmentSequence = 0;
@@ -122,6 +137,23 @@ function fixture() {
       createMany: vi.fn(async ({ data }) => {
         group!.members.push(...data.map((row: { botId: string }) => ({ botId: row.botId })));
         return { count: data.length };
+      }),
+    },
+    routine: {
+      findFirst: vi.fn(
+        async ({ where }) =>
+          routines.find(
+            (row) =>
+              row.spaceId === where.spaceId &&
+              row.userId === where.userId &&
+              row.botId === where.botId &&
+              row.name === where.name,
+          ) ?? null,
+      ),
+      create: vi.fn(async ({ data }) => {
+        const row = { id: `routine-${routines.length}`, ...data };
+        routines.push(row);
+        return row;
       }),
     },
     deploymentSettings: { findUnique: vi.fn(async () => ({ computerHost: "docker" })) },
@@ -226,6 +258,7 @@ function fixture() {
     servers,
     assignments,
     presets,
+    routines,
     busy: () => {
       busy = true;
     },
@@ -1162,5 +1195,95 @@ describe("crews set up before the recruiting preset", () => {
       "already has conversations",
     );
     expect(f.bots.find((bot) => bot.id === "old-main")!.instructions).toBe("Old Main instructions");
+  });
+
+  it("gives the adopted crew one nightly memory tidy per bot, once", async () => {
+    const f = legacy();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.routines.map((row) => row.botId)).toEqual([
+      "old-main",
+      "old-sourcer",
+      "old-outreach",
+      "old-scheduling",
+    ]);
+    f.routines.splice(1, 1);
+    f.presets[0]!.digest = "older catalog";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.routines).toHaveLength(3);
+    expect(f.presets[0]!.config).toMatchObject({
+      legacy: true,
+      routines: { sourcer: "routine-1" },
+    });
+  });
+});
+
+describe("nightly memory tidy defaults", () => {
+  const options = { sandboxKind: "fake" };
+  it("gives each new bot one active nightly tidy in its own scope; only Main tidies shared memory", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.routines).toHaveLength(4);
+    expect(f.routines.map((row) => row.botId)).toEqual(f.bots.map((bot) => bot.id));
+    for (const row of f.routines) {
+      expect(row).toMatchObject({
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        name: "Nightly memory tidy",
+        timezone: "UTC",
+        notify: false,
+        active: true,
+      });
+      expect(row.crons).toEqual([expect.stringMatching(/^\d{1,2} 8 \* \* \*$/)]);
+      expect(row.nextRunAt.getTime()).toBeGreaterThan(Date.now());
+      expect(row.nextRunAt.getTime() - Date.now()).toBeLessThanOrEqual(24 * 60 * 60 * 1000);
+      expect(row.prompt).toMatch(/^\/Tidy memory\n/);
+      expect(row).not.toHaveProperty("threadId");
+    }
+    expect(f.routines[0]!.prompt).toMatch(/shared memory\.\nprecondition: memory$/);
+    expect(
+      f.routines.slice(1).every((row) => row.prompt.endsWith("precondition: bot_memory")),
+    ).toBe(true);
+    expect((f.presets[0]!.config as { routines: unknown }).routines).toEqual({
+      main: "routine-0",
+      sourcer: "routine-1",
+      outreach: "routine-2",
+      scheduling: "routine-3",
+    });
+  });
+
+  it("adds tidies to an earlier managed crew once and never recreates a deleted one", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    f.routines.splice(0);
+    delete (f.presets[0]!.config as { routines?: unknown }).routines;
+    f.presets[0]!.digest = "earlier-release";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.routines).toHaveLength(4);
+    f.routines.splice(2, 1);
+    for (let login = 0; login < 3; login++) {
+      await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+      f.presets[0]!.digest = "earlier-release";
+      await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    }
+    expect(f.routines).toHaveLength(3);
+    expect(f.tx.routine.create).toHaveBeenCalledTimes(8);
+  });
+
+  it("adopts a same-named routine instead of adding a second one", async () => {
+    const f = fixture();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    delete (f.presets[0]!.config as { routines?: unknown }).routines;
+    f.presets[0]!.digest = "earlier-release";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(f.routines).toHaveLength(4);
+    expect(f.tx.routine.create).toHaveBeenCalledTimes(4);
+  });
+
+  it("spreads accounts over the hour without depending on anything but the account", () => {
+    expect(memoryTidyRoutineCron("person-a")).toBe(memoryTidyRoutineCron("person-a"));
+    const minutes = new Set(
+      ["a", "b", "c", "d", "e", "f"].map((id) => memoryTidyRoutineCron(`person-${id}`)),
+    );
+    expect(minutes.size).toBeGreaterThan(1);
   });
 });

@@ -10,10 +10,13 @@ import { getLogger } from "@rakazo/logging";
  * `precondition: new_activity`. The line costs nothing to the model and needs no new column.
  * `new_activity`: a person wrote in the routine's thread, an inbound external message arrived
  * for the bot, or a recruiting role changed since the routine last actually ran.
+ * `bot_memory`: the bot has saved memory that changed since the last run, or was last reviewed a
+ * week or more ago. `memory`: the same, counting the user's shared memory too.
  */
-export type RoutinePrecondition = "new_activity";
+export type RoutinePrecondition = "new_activity" | "memory" | "bot_memory";
 
-const DIRECTIVE = /^[ \t]*precondition:[ \t]*(new_activity)[ \t]*$/im;
+const DIRECTIVE = /^[ \t]*precondition:[ \t]*(new_activity|memory|bot_memory)[ \t]*$/im;
+const MEMORY_REVIEW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function parseRoutinePrecondition(prompt: string): RoutinePrecondition | undefined {
   return DIRECTIVE.exec(prompt)?.[1]?.toLowerCase() as RoutinePrecondition | undefined;
@@ -28,10 +31,23 @@ export async function routinePreconditionMet(
   precondition: RoutinePrecondition,
   threadId: string | undefined,
 ): Promise<boolean> {
-  if (precondition !== "new_activity") return true;
   const since = routine.lastRunAt;
-  if (!since) return true;
   const { spaceId, userId, botId } = routine;
+  if (precondition !== "new_activity") {
+    const latest = await prisma.memoryDocument.findFirst({
+      where: {
+        spaceId,
+        userId,
+        content: { not: "" },
+        OR: [{ scope: "bot", botId }, ...(precondition === "memory" ? [{ scope: "user" }] : [])],
+      },
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    });
+    if (!latest) return false;
+    return !since || latest.updatedAt > since || Date.now() - since.getTime() >= MEMORY_REVIEW_MS;
+  }
+  if (!since) return true;
   const [messages, inbound, recruiting] = await Promise.all([
     threadId
       ? prisma.message.count({ where: { threadId, role: "user", createdAt: { gt: since } } })

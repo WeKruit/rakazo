@@ -123,6 +123,63 @@ describe("routinePreconditionMet", () => {
   });
 });
 
+describe("memory tidy preconditions", () => {
+  const day = 24 * 60 * 60 * 1000;
+  const routine = {
+    spaceId: "space-1",
+    userId: "user-1",
+    botId: "bot-1",
+    threadId: null,
+    lastRunAt: new Date(Date.now() - day),
+  };
+  const withLatest = (updatedAt: Date | null) => {
+    const findFirst = vi.fn(async () => (updatedAt ? { updatedAt } : null));
+    return { prisma: { memoryDocument: { findFirst } } as unknown as PrismaClient, findFirst };
+  };
+
+  it("reads the memory directives", () => {
+    expect(parseRoutinePrecondition("/Tidy memory\nprecondition: memory")).toBe("memory");
+    expect(parseRoutinePrecondition("/Tidy memory\nprecondition: bot_memory")).toBe("bot_memory");
+  });
+
+  it("runs only when saved memory changed since the last tidy or a week has passed", async () => {
+    const changed = withLatest(new Date());
+    expect(await routinePreconditionMet(changed.prisma, routine, "memory", undefined)).toBe(true);
+    const unchanged = withLatest(new Date(Date.now() - 2 * day));
+    expect(await routinePreconditionMet(unchanged.prisma, routine, "memory", undefined)).toBe(
+      false,
+    );
+    const weekOld = { ...routine, lastRunAt: new Date(Date.now() - 7 * day) };
+    expect(await routinePreconditionMet(unchanged.prisma, weekOld, "memory", undefined)).toBe(true);
+    const first = { ...routine, lastRunAt: null };
+    expect(await routinePreconditionMet(unchanged.prisma, first, "bot_memory", undefined)).toBe(
+      true,
+    );
+    const empty = withLatest(null);
+    expect(await routinePreconditionMet(empty.prisma, first, "memory", undefined)).toBe(false);
+  });
+
+  it("counts shared memory only for the routine that tidies it, within the owner's scope", async () => {
+    const { prisma, findFirst } = withLatest(null);
+    await routinePreconditionMet(prisma, routine, "bot_memory", undefined);
+    await routinePreconditionMet(prisma, routine, "memory", undefined);
+    const where = (call: number) =>
+      (findFirst.mock.calls[call] as unknown as [{ where: unknown }])[0].where;
+    expect(where(0)).toEqual({
+      spaceId: "space-1",
+      userId: "user-1",
+      content: { not: "" },
+      OR: [{ scope: "bot", botId: "bot-1" }],
+    });
+    expect(where(1)).toEqual({
+      spaceId: "space-1",
+      userId: "user-1",
+      content: { not: "" },
+      OR: [{ scope: "bot", botId: "bot-1" }, { scope: "user" }],
+    });
+  });
+});
+
 describe("routine.wakeup precondition", () => {
   const payload = { routineId: "routine-1", scheduledFor: scheduledAt.toISOString() };
 
