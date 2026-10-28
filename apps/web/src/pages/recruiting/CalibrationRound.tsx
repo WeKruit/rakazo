@@ -211,10 +211,18 @@ type Scope = Pick<RecruitingTabProps, "readCache" | "readCacheScope"> & {
   refreshSignal?: number;
   /** Sends the recruiter's text to the role conversation, like typing it in chat. */
   onSend: (text: string) => Promise<boolean>;
+  /** Once accepted, the round's people are in the candidate list below; no second list. */
+  hideWhenAccepted?: boolean;
 };
 
 /** The role's latest calibration round from `recruiting.calibrationRound`; nothing before one exists. */
-export function CalibrationRoundCard({ conversation, refreshSignal, onSend, ...cache }: Scope) {
+export function CalibrationRoundCard({
+  conversation,
+  refreshSignal,
+  onSend,
+  hideWhenAccepted = false,
+  ...cache
+}: Scope) {
   const target =
     "groupId" in conversation ? { groupId: conversation.groupId } : { botId: conversation.botId };
   const [approvals, setApprovals] = useState(0);
@@ -224,7 +232,7 @@ export function CalibrationRoundCard({ conversation, refreshSignal, onSend, ...c
     tabCacheSlot(cache, ["calibrationRound", target]),
   );
   const round = read.data?.round;
-  if (!round) return null;
+  if (!round || (hideWhenAccepted && round.approvedAt !== null)) return null;
   return (
     <CalibrationRoundView
       round={round}

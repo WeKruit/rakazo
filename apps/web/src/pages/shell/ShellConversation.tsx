@@ -436,6 +436,7 @@ export function ShellConversation({
                 readCache={recruitingReadCache.current}
                 readCacheScope={recruitingCacheScope}
                 onSend={sendRoleText}
+                hideWhenAccepted
               />
             ) : null}
             <RecruitingPanel
