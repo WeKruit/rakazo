@@ -501,8 +501,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     hop: z.number().int().positive().optional(),
     /** The sender asked to check this stage's result: it is handed back when the stage ends. */
     reportBack: z.boolean().optional(),
-    /** This handoff returns a finished or failed stage to the member that asked for it. */
-    report: z.enum(["completed", "failed"]).optional(),
+    /** Returns a finished or failed stage, or its one mid-stage check-in, to the member that asked. */
+    report: z.enum(["completed", "failed", "progress"]).optional(),
   }),
   z.object({
     /** A group-chat message delivered into a member bot's own thread. */

@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   pollRecruitingResearch,
   RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS,
+  recruitingResearchInFlight,
   recruitingResearchWakeNonce,
   trackDirectRecruitingResearch,
 } from "./recruiting-research-poll.js";
@@ -153,6 +154,42 @@ describe("pollRecruitingResearch", () => {
       attempt: RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS - 1,
     });
     expect(exhausted.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("tells the owner once when it stops following a task the provider never finished", async () => {
+    const onStalled = vi.fn(async () => undefined);
+    const working1 = fixture({ provider: working });
+    await pollRecruitingResearch({ ...working1.deps, onStalled }, { taskId: "task", attempt: 3 });
+    expect(onStalled).not.toHaveBeenCalled();
+    const exhausted = fixture({ provider: working });
+    await pollRecruitingResearch(
+      { ...exhausted.deps, onStalled },
+      { taskId: "task", attempt: RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS - 1 },
+    );
+    expect(onStalled).toHaveBeenCalledExactlyOnceWith(task.createdByRun);
+  });
+
+  it("narrows research in flight to what one bot started in one conversation", async () => {
+    const findMany = vi.fn(async () => []);
+    const prisma = {
+      recruitingResearchTask: { findMany },
+      externalEffect: { findFirst: vi.fn() },
+      run: { findFirst: vi.fn() },
+    };
+    await expect(
+      recruitingResearchInFlight(prisma as never, "role", Date.now(), {
+        botId: "bot",
+        threadId: "thread",
+      }),
+    ).resolves.toBe(false);
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          roleId: "role",
+          createdByRun: { botId: "bot", threadId: "thread" },
+        }),
+      }),
+    );
   });
 
   it("opens exactly one wake run carrying local ids only when the provider finishes", async () => {

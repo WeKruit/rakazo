@@ -1,6 +1,17 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { handoffToGroupBot, reportGroupHandoffOutcome } from "./group-handoff.js";
+import {
+  handoffToGroupBot,
+  isStageCheckIn,
+  reportGroupHandoffOutcome,
+  reportGroupStageOutcome,
+  reportStalledGroupStage,
+} from "./group-handoff.js";
+import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+
+vi.mock("./recruiting-research-poll.js", () => ({
+  recruitingResearchInFlight: vi.fn(async () => false),
+}));
 
 const run = {
   id: "run-a",
@@ -266,5 +277,177 @@ describe("group handoff report back", () => {
         message: "Two of the ten are outside the area; replace them.",
       }),
     ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
+  });
+});
+
+describe("long stage check-in", () => {
+  const asked = {
+    kind: "handoff",
+    fromBotId: "bot-a",
+    toBotId: "bot-b",
+    text: "Scale the search to 100 people for this role.",
+    hop: 1,
+    reportBack: true,
+  };
+  const stage = { ...run, id: "run-b", botId: "bot-b", sourceMessageId: "message-0" };
+  const handedIn = { ...stage, trigger: "follow_up" };
+  const wake = (clientNonce: string) => ({
+    ...stage,
+    id: "wake-1",
+    sourceMessageId: null,
+    trigger: "recruiting_research",
+    clientNonce,
+  });
+  const inFlight = vi.mocked(recruitingResearchInFlight);
+
+  function stageHarness(existing?: { sourceRuns: [] }) {
+    const h = harness([asked], existing);
+    const stageLookup = vi.fn(async () => stage);
+    Object.assign(h.deps.prisma, {
+      thread: {
+        findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })),
+        findFirst: vi.fn(async () => ({ groupId: "group-1" })),
+      },
+      run: { findFirst: stageLookup },
+    });
+    return { ...h, stageLookup };
+  }
+
+  function reported(messageCreate: ReturnType<typeof vi.fn>) {
+    return messageCreate.mock.calls.map(
+      ([args]) => (args as { data: { clientNonce: string } }).data.clientNonce,
+    );
+  }
+
+  it("holds the report while the worker's own search is still running", async () => {
+    inFlight.mockResolvedValueOnce(true);
+    const { deps, messageCreate } = stageHarness();
+    await expect(
+      reportGroupStageOutcome(deps as never, handedIn, "group-1", { status: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(inFlight).toHaveBeenLastCalledWith(deps.prisma, "role-1", expect.any(Number), {
+      botId: "bot-b",
+      threadId: "thread-1",
+    });
+    expect(messageCreate).not.toHaveBeenCalled();
+  });
+
+  it("checks in once when the search's first partial results are saved", async () => {
+    inFlight.mockResolvedValueOnce(true);
+    const { deps, messageCreate, runCreate, stageLookup } = stageHarness();
+    await expect(
+      reportGroupStageOutcome(deps as never, wake("research-wake:task:rows:20"), "group-1", {
+        status: "completed",
+      }),
+    ).resolves.toEqual({ runId: "run-b" });
+    expect(stageLookup).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          botId: "bot-b",
+          threadId: "thread-1",
+          trigger: "follow_up",
+          status: "completed",
+        }),
+      }),
+    );
+    expect(reported(messageCreate)).toEqual(["group-checkin:run-b"]);
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blocks: [
+            expect.objectContaining({
+              toBotId: "bot-a",
+              report: "progress",
+              text: expect.stringContaining("reply exactly NO_RESPONSE"),
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(runCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ botId: "bot-a", trigger: "follow_up" }),
+      }),
+    );
+  });
+
+  it("never checks in twice, after the stage ended, or for a failed partial save", async () => {
+    inFlight.mockResolvedValueOnce(true);
+    const again = stageHarness({ sourceRuns: [] });
+    await expect(
+      reportGroupStageOutcome(again.deps as never, wake("n:rows:40"), "group-1", {
+        status: "completed",
+      }),
+    ).resolves.toBeUndefined();
+    expect(again.messageCreate).not.toHaveBeenCalled();
+
+    const finished = stageHarness();
+    await expect(
+      reportGroupStageOutcome(finished.deps as never, wake("n:rows:40"), "group-1", {
+        status: "completed",
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      reportGroupStageOutcome(finished.deps as never, wake("n:rows:40"), "group-1", {
+        status: "failed",
+        error: "save failed",
+      }),
+    ).resolves.toBeUndefined();
+    expect(finished.messageCreate).not.toHaveBeenCalled();
+  });
+
+  it("reports the stage when the search's final wake ends with nothing left running", async () => {
+    const { deps, messageCreate } = stageHarness();
+    await expect(
+      reportGroupStageOutcome(deps as never, wake("research-wake:task:provider"), "group-1", {
+        status: "completed",
+      }),
+    ).resolves.toEqual({ runId: "run-b" });
+    expect(reported(messageCreate)).toEqual(["group-report:run-b"]);
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blocks: [expect.objectContaining({ report: "completed", toBotId: "bot-a" })],
+        }),
+      }),
+    );
+  });
+
+  it("ignores turns that are neither a handed-in stage nor its search", async () => {
+    const { deps, messageCreate } = stageHarness();
+    await expect(
+      reportGroupStageOutcome(deps as never, { ...handedIn, trigger: "user" }, "group-1", {
+        status: "completed",
+      }),
+    ).resolves.toBeUndefined();
+    expect(messageCreate).not.toHaveBeenCalled();
+  });
+
+  it("tells the delegator when the search stopped being followed unfinished", async () => {
+    const { deps, messageCreate } = stageHarness();
+    await reportStalledGroupStage(deps as never, stage);
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientNonce: "group-report:run-b",
+          blocks: [
+            expect.objectContaining({
+              report: "failed",
+              text: expect.stringContaining("still not finished"),
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("lets only the check-in answer end silently", () => {
+    const checkIn = [{ ...asked, fromBotId: "bot-b", toBotId: "bot-a", report: "progress" }];
+    expect(isStageCheckIn("follow_up", checkIn as never, "bot-a")).toBe(true);
+    expect(isStageCheckIn("follow_up", checkIn as never, "bot-b")).toBe(false);
+    expect(
+      isStageCheckIn("follow_up", [{ ...checkIn[0], report: "completed" }] as never, "bot-a"),
+    ).toBe(false);
+    expect(isStageCheckIn("user", checkIn as never, "bot-a")).toBe(false);
   });
 });

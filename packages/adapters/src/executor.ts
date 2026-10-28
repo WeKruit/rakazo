@@ -356,7 +356,12 @@ import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
-import { handoffToGroupBot, loadGroupContext, reportGroupHandoffOutcome } from "./group-handoff.js";
+import {
+  handoffToGroupBot,
+  isStageCheckIn,
+  loadGroupContext,
+  reportGroupStageOutcome,
+} from "./group-handoff.js";
 import {
   COMPACTION_BATCH_SIZE,
   formatCompactedSummary,
@@ -4513,8 +4518,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           peerMessage?.intent,
           peerMessage?.repliesToRequest,
         );
-        const allowSilentEmptyRun =
-          allowSilentPeerMessage || messagingChannelRun || runAllowsSilentEmpty(run.trigger);
+        // Answering a teammate's mid-stage check-in stays quiet unless the user needs to know.
+        const quietRun =
+          runAllowsSilentEmpty(run.trigger) || isStageCheckIn(run.trigger, turnBlocks, bot.id);
+        const allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun || quietRun;
         const emptyResponseText = peerMessage
           ? peerMessage.intent === "result" ||
             peerMessage.intent === "status" ||
@@ -4800,8 +4807,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               .enqueue(runContinueJob(failed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
           }
-          if (thread.groupId && run.trigger === "follow_up" && !failed.continuationRunId) {
-            await reportGroupHandoffOutcome(deps, run, thread.groupId, {
+          if (thread.groupId && !failed.continuationRunId) {
+            await reportGroupStageOutcome(deps, run, thread.groupId, {
               status: "failed",
               error: message,
             }).catch((error) => getLogger().error("group handoff report", error));
@@ -5242,7 +5249,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           assembled = "";
           hasStreamedText = false;
           pendingProgress = "";
-          if (!runPromotesMidTurnNarration(run.trigger)) {
+          if (!runPromotesMidTurnNarration(run.trigger) || quietRun) {
             discardedMidTurnNarration = true;
             return;
           }
@@ -12382,7 +12389,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               await publishMidTurnNarration();
               if (assembled.trim()) {
                 const narration = visible(redactSecrets(assembled, runSecrets)).trim();
-                if (narration && runPromotesMidTurnNarration(run.trigger)) {
+                if (narration && runPromotesMidTurnNarration(run.trigger) && !quietRun) {
                   await publishMessage(
                     deps,
                     run,
@@ -12661,9 +12668,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
 
           flushPendingTools();
-          // Only routine runs are instructed to emit NO_RESPONSE. Other
+          // Only routine runs and check-in answers are instructed to emit NO_RESPONSE. Other
           // allowSilentEmpty wakes (FYI, messaging) may finish truly empty.
-          const silentReply = runAllowsSilentEmpty(run.trigger)
+          const silentReply = quietRun
             ? stripNoResponseReply(assembled, messageSegments)
             : { assembled, blocks: messageSegments };
           let completionBlocks = silentReply.blocks;
@@ -12684,7 +12691,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? []
             : finalBlocksAfterMidTurnProgress(
                 redactBlocks(completionBlocks, runSecrets, hideVendors),
-                publishedMidTurnUserMessage || runAllowsSilentEmpty(run.trigger),
+                publishedMidTurnUserMessage || quietRun,
               );
           const text = handedOff
             ? ""
@@ -12795,8 +12802,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ).catch((error) => getLogger().error("run.autocontinue guard", error));
             recruitingContinued = guard?.action === "continued";
           }
-          if (thread.groupId && run.trigger === "follow_up" && !handedOff) {
-            await reportGroupHandoffOutcome(deps, run, thread.groupId, {
+          if (thread.groupId && !handedOff) {
+            await reportGroupStageOutcome(deps, run, thread.groupId, {
               status: "completed",
             }).catch((error) => getLogger().error("group handoff report", error));
           }
