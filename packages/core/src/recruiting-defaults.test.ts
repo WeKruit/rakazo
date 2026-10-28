@@ -200,6 +200,13 @@ describe("maintained recruiting defaults", () => {
     expect(sourcer.instructions).toContain("Missing resume is unknown, never a rejection");
   });
 
+  it("Outreach copies email addresses exactly", () => {
+    const outreach = RECRUITING_DEFAULT_BOTS.find((bot) => bot.name === "Outreach");
+    expect(outreach?.instructions).toContain(
+      "Copy each email exactly from the lookup; never guess or think aloud about one.",
+    );
+  });
+
   it("Scheduling books or offers a new time instead of declining", () => {
     const scheduling = RECRUITING_DEFAULT_BOTS.find((bot) => bot.name === "Scheduling");
     expect(scheduling?.instructions).toContain(
