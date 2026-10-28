@@ -311,8 +311,11 @@ export async function loadMessageRoutineDelivery(
   };
 }
 
+/** Event-triggered runs one routine may start per minute; a retry storm past this is skipped. */
+export const ROUTINE_RUNS_PER_MINUTE = 20;
+
 export async function deliverWebhookEvent(
-  deps: Pick<WebhookDeps, "events" | "jobs">,
+  deps: Pick<WebhookDeps, "events" | "jobs"> & { prisma?: Pick<PrismaClient, "run"> },
   target: InboundTarget,
   input: {
     prompt: string;
@@ -332,7 +335,23 @@ export async function deliverWebhookEvent(
   },
 ) {
   const deliveries = [];
+  const skipped: Array<{ routineId: string; reason: "rate_limited" }> = [];
   for (const routine of input.routines) {
+    // The limit protects spend; a failed count never blocks a delivery.
+    const recent = deps.prisma
+      ? await Promise.resolve()
+          .then(() =>
+            deps.prisma!.run.count({
+              where: { routineId: routine.id, createdAt: { gte: new Date(Date.now() - 60_000) } },
+            }),
+          )
+          .catch(() => 0)
+      : 0;
+    if (recent >= ROUTINE_RUNS_PER_MINUTE) {
+      getLogger().warn(`${input.source} routine rate limited`, { routineId: routine.id, recent });
+      skipped.push({ routineId: routine.id, reason: "rate_limited" });
+      continue;
+    }
     const promptText = [
       `Run routine "${routine.name}":\n${routine.prompt.trim()}`,
       "",
@@ -392,6 +411,6 @@ export async function deliverWebhookEvent(
     });
   }
   return deliveries.length
-    ? { ok: true as const, deliveries }
-    : { ok: true as const, ignored: true as const };
+    ? { ok: true as const, deliveries, ...(skipped.length ? { skipped } : {}) }
+    : { ok: true as const, ignored: true as const, ...(skipped.length ? { skipped } : {}) };
 }

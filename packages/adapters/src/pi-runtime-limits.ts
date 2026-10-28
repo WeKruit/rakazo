@@ -1,3 +1,4 @@
+import { DEFAULT_COMPACTION_SETTINGS } from "@earendil-works/pi-agent-core";
 import { DEFAULT_MODEL_MAX_TOKENS } from "@rakazo/contracts";
 
 /** Hung completions must fail before the typical 5-minute run lease. */
@@ -188,4 +189,12 @@ export async function clipContentWithFullOutput<T>(
   const stored = await store(texts.join("\n")).catch(() => undefined);
   if (!stored) return clipped;
   return [...clipped, { type: "text", text: fullToolOutputPointer(stored) } as T];
+}
+
+/** Compact once the context passes about 80% of the window, so a long run never hits the provider's limit. */
+export function compactionReserveTokens(window: number, output: number): number {
+  return Math.min(
+    Math.max(DEFAULT_COMPACTION_SETTINGS.reserveTokens, Math.floor(window * 0.2)),
+    Math.max(0, window - output),
+  );
 }

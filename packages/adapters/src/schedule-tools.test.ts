@@ -275,28 +275,28 @@ describe("native routine updates", () => {
 });
 
 describe("resolveScheduleTiming", () => {
-  it("rejects repeating intervals under one minute", () => {
-    expect(resolveScheduleTiming({ every: 2, unit: "seconds" })).toEqual({
-      ok: false,
-      error: "minimum interval is 1 minute",
-    });
+  it("rejects repeating schedules that fire less than five minutes apart", () => {
+    for (const input of [
+      { every: 2, unit: "seconds" },
+      { every: 1, unit: "minutes" },
+      { every: 4, unit: "minutes" },
+      { cron: "* * * * *" },
+      { cron: "*/2 * * * *" },
+      { cron: "0,1,2 * * * *" },
+    ]) {
+      expect(resolveScheduleTiming(input)).toMatchObject({ ok: false });
+    }
   });
 
-  it("accepts every 1 minute", () => {
-    const result = resolveScheduleTiming({ every: 1, unit: "minutes" });
+  it("accepts every 5 minutes and ordinary daily schedules", () => {
+    const result = resolveScheduleTiming({ every: 5, unit: "minutes" });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.cron).toBe("*/1 * * * *");
+    expect(result.cron).toBe("*/5 * * * *");
     expect(result.oneShot).toBe(false);
     expect(result.nextRunAt.getTime()).toBeGreaterThan(Date.now());
-  });
-
-  it("accepts cron every minute", () => {
-    const result = resolveScheduleTiming({ cron: "*/1 * * * *" });
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.cron).toBe("*/1 * * * *");
-    expect(result.oneShot).toBe(false);
+    expect(resolveScheduleTiming({ cron: "0 9 * * 1-5" })).toMatchObject({ ok: true });
+    expect(resolveScheduleTiming({ cron: "0,30 9 * * *" })).toMatchObject({ ok: true });
   });
 
   it("creates one-shot schedules with @once cron", () => {
@@ -484,17 +484,17 @@ describe("schedule tool persistence", () => {
       threadId: "thread-1",
       name: "Morning joke",
       prompt: "Tell a joke",
-      schedule: { every: 1, unit: "minutes" },
+      schedule: { every: 5, unit: "minutes" },
     });
 
-    expect(result).toMatchObject({ ok: true, routineId: "routine-1", cron: "*/1 * * * *" });
+    expect(result).toMatchObject({ ok: true, routineId: "routine-1", cron: "*/5 * * * *" });
     expect(create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           spaceId: "ws-1",
           userId: "user-1",
           threadId: "thread-1",
-          crons: ["*/1 * * * *"],
+          crons: ["*/5 * * * *"],
           active: true,
         }),
       }),
@@ -514,7 +514,7 @@ describe("schedule tool persistence", () => {
           create: vi.fn(async () => ({
             id: "routine-1",
             name: "Morning joke",
-            crons: ["*/1 * * * *"],
+            crons: ["*/5 * * * *"],
             nextRunAt: new Date(),
           })),
           delete: remove,
@@ -535,7 +535,7 @@ describe("schedule tool persistence", () => {
       threadId: "thread-1",
       name: "Morning joke",
       prompt: "Tell a joke",
-      schedule: { every: 1, unit: "minutes" },
+      schedule: { every: 5, unit: "minutes" },
     });
 
     expect(result).toMatchObject({ ok: true, routineId: "routine-1" });
@@ -551,7 +551,7 @@ describe("schedule tool persistence", () => {
           create: vi.fn(async () => ({
             id: "routine-1",
             name: "Morning joke",
-            crons: ["*/1 * * * *"],
+            crons: ["*/5 * * * *"],
             nextRunAt: new Date(),
           })),
           delete: remove,
@@ -573,7 +573,7 @@ describe("schedule tool persistence", () => {
       threadId: "thread-1",
       name: "Morning joke",
       prompt: "Tell a joke",
-      schedule: { every: 1, unit: "minutes" },
+      schedule: { every: 5, unit: "minutes" },
     });
 
     expect(result).toEqual({ error: "Could not schedule the reminder. Try again." });
@@ -588,7 +588,7 @@ describe("schedule tool persistence", () => {
           create: vi.fn(async () => ({
             id: "routine-1",
             name: "Morning joke",
-            crons: ["*/1 * * * *"],
+            crons: ["*/5 * * * *"],
             nextRunAt: new Date(),
           })),
           delete: vi.fn(async () => {
@@ -613,7 +613,7 @@ describe("schedule tool persistence", () => {
       threadId: "thread-1",
       name: "Morning joke",
       prompt: "Tell a joke",
-      schedule: { every: 1, unit: "minutes" },
+      schedule: { every: 5, unit: "minutes" },
     });
 
     expect(result).toEqual({ error: "Could not schedule the reminder. Try again." });
@@ -630,7 +630,7 @@ describe("schedule tool persistence", () => {
           create: vi.fn(async () => ({
             id: "routine-1",
             name: "Morning joke",
-            crons: ["*/1 * * * *"],
+            crons: ["*/5 * * * *"],
             nextRunAt: new Date(),
           })),
           delete: vi.fn(async () => {
@@ -658,7 +658,7 @@ describe("schedule tool persistence", () => {
         threadId: "thread-1",
         name: "Morning joke",
         prompt: "Tell a joke",
-        schedule: { every: 1, unit: "minutes" },
+        schedule: { every: 5, unit: "minutes" },
       }),
     ).rejects.toThrow("deactivate failed");
   });

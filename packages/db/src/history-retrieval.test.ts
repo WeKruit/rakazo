@@ -687,6 +687,32 @@ describe("local history retrieval", () => {
       expect.arrayContaining([new Date("2026-01-01T00:00:00.000Z"), "older"]),
     );
   });
+  it("ranks messages sharing some words when no message has every word", async () => {
+    const { mock, prisma } = db();
+    mock.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([
+      {
+        ...row(4, "Berlin backend role: keep Go, drop Kotlin"),
+        id: "close",
+        threadId: "other-thread",
+        botName: "Sourcer",
+        groupName: null,
+      },
+    ]);
+    const result = await searchHistory(prisma, scope, {
+      query: "decided Berlin backend",
+      scope: "mine",
+    });
+    expect(sql(mock, 1).sql).toContain("ts_rank_cd");
+    expect(sql(mock, 1).sql).toContain("'&', '|'");
+    expect(result).toMatchObject({ match: "some_words_ranked", nextSearch: null });
+    expect(result.coverage.status).toBe("partial");
+    expect(result.messages.map((message) => message.messageId)).toEqual(["close"]);
+    mock.$queryRaw.mockClear();
+    mock.$queryRaw.mockResolvedValueOnce([]);
+    const single = await searchHistory(prisma, scope, { query: "ORBIT-990", scope: "mine" });
+    expect(mock.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(single).not.toHaveProperty("match");
+  });
   it("reads another conversation of the same user as messages only", async () => {
     const { mock, prisma } = db();
     mock.$queryRaw

@@ -15,6 +15,7 @@ import {
   ONCE_ROUTINE_CRON,
   presetFromCron,
   resolveRoutineNextRunAt,
+  routineIntervalError,
 } from "./cron.js";
 
 function preset(partial: Partial<CronPreset> & Pick<CronPreset, "freq">): CronPreset {
@@ -322,6 +323,7 @@ describe("cronIntervalAmounts", () => {
     for (const n of cronIntervalAmounts(unit)) {
       const cron = cronFromPreset({ freq: "Interval", n, unit });
       expect(() => nextCronDate(cron, new Date("2026-01-01T00:00:00Z"))).not.toThrow();
+      expect(routineIntervalError([cron])).toBeNull();
     }
   });
 
@@ -348,5 +350,15 @@ describe("cronIntervalAmounts", () => {
       expect(cronIntervalAmounts(unit, n)).toContain(n);
       expect(cronIntervalAmounts(unit, n + 1)).not.toContain(n + 1);
     }
+  });
+});
+
+describe("routineIntervalError", () => {
+  it("rejects schedules whose fire times come closer than five minutes, across all crons", () => {
+    expect(routineIntervalError(["*/1 * * * *"])).toMatch(/5 minutes/);
+    expect(routineIntervalError(["0 9 * * *", "2 9 * * *"])).toMatch(/5 minutes/);
+    expect(routineIntervalError(["*/5 * * * *"])).toBeNull();
+    expect(routineIntervalError(["0 9 * * 1-5", "0 17 * * 1-5"])).toBeNull();
+    expect(routineIntervalError([ONCE_ROUTINE_CRON])).toBeNull();
   });
 });
