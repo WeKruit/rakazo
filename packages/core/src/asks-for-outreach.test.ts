@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asksForOutreach } from "./recruiting-defaults.js";
+import { asksForOutreach, recruitingBotKey } from "./recruiting-defaults.js";
 
 describe("asksForOutreach", () => {
   it("matches contact, draft and send requests", () => {
@@ -17,5 +17,14 @@ describe("asksForOutreach", () => {
   it("leaves search and feedback alone", () => {
     for (const text of ["lets find 50", "开发经验太少", "发现这几个人不合适", "Run another round"])
       expect(asksForOutreach(text)).toBe(false);
+  });
+});
+
+describe("recruitingBotKey", () => {
+  it("knows a teammate by spawn key, or by name when an older crew has none", () => {
+    expect(recruitingBotKey({ name: "Main", spawnKey: "recruiting:u1:main" })).toBe("main");
+    expect(recruitingBotKey({ name: "Outreach", spawnKey: null })).toBe("outreach");
+    expect(recruitingBotKey({ name: "Outreach", spawnKey: "onboarding:first" })).toBeUndefined();
+    expect(recruitingBotKey({ name: "Writer", spawnKey: null })).toBeUndefined();
   });
 });

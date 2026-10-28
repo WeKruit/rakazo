@@ -124,6 +124,7 @@ import {
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
+  REPLY_IN_ENGLISH_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
   recipientsShownToRecruiter,
@@ -131,6 +132,7 @@ import {
   recruiterConnectBlock,
   recruiterInstructedSend,
   recruiterQuestionNotInEnglish,
+  recruitingBotKey,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
   redactSecrets,
@@ -4212,7 +4214,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A recruiter never sees a provider's name; connect cards (not text) still name it.
         // A bot with the people search is recruiting too; that is known once its tools are listed.
         let hideVendors = Boolean(
-          isRecruitingSpawnKey(bot.spawnKey) || thread.activeRecruitingRoleId,
+          isRecruitingSpawnKey(bot.spawnKey) ||
+            thread.activeRecruitingRoleId ||
+            (!bot.spawnKey && recruitingBotKey(bot) && recruitingBotKey(bot) !== "main"),
         );
         const visible = (text: string) => (hideVendors ? hideVendorNames(text) : text);
         const historySearchBeforeSeq =
@@ -11291,8 +11295,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const outreachAsk =
           thread.groupId &&
           run.trigger === "user" &&
-          isRecruitingSpawnKey(bot.spawnKey) &&
-          !bot.spawnKey?.endsWith(":outreach") &&
+          hideVendors &&
+          recruitingBotKey(bot) !== "outreach" &&
           currentTurnMessage?.role === "user" &&
           asksForOutreach(
             currentTurnMessage.blocks
@@ -11303,7 +11307,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .findFirst({
                   where: {
                     groupId: thread.groupId,
-                    bot: { spawnKey: { endsWith: ":outreach" }, archivedAt: null },
+                    bot: {
+                      archivedAt: null,
+                      OR: [
+                        { spawnKey: { endsWith: ":outreach" } },
+                        { spawnKey: null, name: "Outreach" },
+                      ],
+                    },
                   },
                   select: { botId: true },
                 })
@@ -11312,6 +11322,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const dispatchNote = outreachAsk
           ? `The recruiter asked for contacts, an email draft or a send: that is Outreach's work. Hand it to Outreach now with handoff_to_bot (bot_id ${outreachAsk.botId}) as your only step, quoting the recruiter's exact words; never decline it, never ask which people and never call the saved results unready. Tell Outreach to show what is already done for these people first (contacts already found, a saved draft) and do only what is missing.`
           : undefined;
+        // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
+        // sits next to their message, where it holds.
+        const lastRecruiterBlocks = messages.findLast((message) => message.role === "user")?.blocks;
+        const lastRecruiterText = Array.isArray(lastRecruiterBlocks)
+          ? lastRecruiterBlocks
+              .map((block) =>
+                block &&
+                typeof block === "object" &&
+                "text" in block &&
+                typeof block.text === "string"
+                  ? block.text
+                  : "",
+              )
+              .join(" ")
+          : "";
+        const languageNote =
+          hideVendors &&
+          lastRecruiterText &&
+          recruiterQuestionNotInEnglish(lastRecruiterText, messages)
+            ? REPLY_IN_ENGLISH_NOTE
+            : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&
@@ -11338,6 +11369,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
           intakeSkillNote,
           linkRole?.note,
           dispatchNote,
+          languageNote,
           !linkRole &&
           !thread.activeRecruitingRoleId &&
           currentTurnMessage?.role === "user" &&
