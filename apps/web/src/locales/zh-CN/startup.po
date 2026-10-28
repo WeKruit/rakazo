@@ -1018,7 +1018,7 @@ msgstr "标准名称不可用"
 
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Current"
-msgstr "目前"
+msgstr "当前"
 
 #: src/components/AccountAccess.tsx
 msgid "Current password"
