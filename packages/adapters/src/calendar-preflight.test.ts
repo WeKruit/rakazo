@@ -35,7 +35,7 @@ function fixture() {
   };
   const connector = {
     discoverTools: vi.fn(async () => [tool]),
-    execute: vi.fn(async function* () {
+    execute: vi.fn(async function* (_call?: { args: object }) {
       yield { type: "result" as const, data: { structuredContent: data } };
     }),
   };
