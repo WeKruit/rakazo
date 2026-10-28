@@ -130,7 +130,7 @@ function tenChecks(messages, failures, { card = true } = {}) {
 }
 
 /** Sends one recruiter message and waits until the crew settles. Never answers a card. */
-async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000 } = {}) {
+async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
   const before = new Set((await messagesOf(groupId)).map((message) => message.id));
   const busy = await working(groupId);
   const sentAt = Date.now();
@@ -154,7 +154,8 @@ async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000 } = 
       changed = Date.now();
       firstReply ??= Math.round((changed - sentAt) / 1000);
     }
-    if (Date.now() - changed > quietMs && !(await working(groupId))) break;
+    if (until?.(replies)) break;
+    if (!until && Date.now() - changed > quietMs && !(await working(groupId))) break;
   }
   return { replies, firstReply, seconds: Math.round((Date.now() - sentAt) / 1000) };
 }
@@ -347,12 +348,14 @@ if (wanted.has("t1"))
       failures.push(
         `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
       );
-    const send = await say(groupId, "发20个人的先");
-    if (
-      !send.replies.some((message) =>
-        (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId),
-      )
-    )
+    // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
+    const sendCard = (message) =>
+      (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId);
+    const send = await say(groupId, "发20个人的先", {
+      until: (replies) => replies.some(sendCard),
+      limitMs: 8 * 60_000,
+    });
+    if (!send.replies.some(sendCard))
       failures.push("「发20个人的先」 did not end on a send confirmation card");
     commonChecks(await messagesOf(groupId), failures);
   });
