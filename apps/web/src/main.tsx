@@ -1,3 +1,5 @@
+// Must run before any module that builds a zod schema.
+import "./lib/zod-jitless";
 import { StrictMode, useEffect, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";

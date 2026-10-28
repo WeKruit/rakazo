@@ -1,11 +1,14 @@
-import { realpath, stat } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
 import { isIP } from "node:net";
 import path from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { HTML_PREVIEW_PATH, WEB_CSP_NONCE_PLACEHOLDER } from "@rakazo/core";
 import { attachNovncProxy } from "@rakazo/core/node/novnc-proxy";
 import type { Logger } from "@rakazo/logging";
+import type { Context } from "hono";
 import { Hono } from "hono";
 import { compress } from "hono/compress";
 
@@ -22,6 +25,18 @@ export async function createPublicWebServer(options: {
   const index = await realpath(path.join(root, "index.html"));
   if (!index.startsWith(`${root}${path.sep}`))
     throw new Error("Web index must be inside the static root");
+  const page = await readFile(index, "utf8");
+  // A build without nonces would not run under the policy: report instead of blanking the app.
+  const enforced = page.includes(WEB_CSP_NONCE_PLACEHOLDER);
+  if (!enforced) options.logger.warn("public web index has no CSP nonce; policy is report-only");
+  const sendPage = (c: Context) => {
+    const nonce = randomBytes(16).toString("base64");
+    c.header(
+      enforced ? "content-security-policy" : "content-security-policy-report-only",
+      webContentSecurityPolicy(nonce),
+    );
+    return c.html(page.replaceAll(WEB_CSP_NONCE_PLACEHOLDER, nonce));
+  };
   const rejected = new Set<string>();
   const accepts = (hostname: string) => {
     if (hostAccepted(hostname, options.allowedHosts)) return true;
@@ -65,15 +80,19 @@ export async function createPublicWebServer(options: {
     if (resolved && resolved !== root && !resolved.startsWith(`${root}${path.sep}`))
       return c.notFound();
     c.header("cache-control", "no-cache");
+    if (pathname === HTML_PREVIEW_PATH)
+      c.header("content-security-policy", "frame-ancestors 'self'; sandbox allow-scripts");
     await next();
   });
   app.use("*", compress());
+  app.get("/", sendPage);
+  app.get("/index.html", sendPage);
   app.use("*", serveStatic({ root }));
-  app.get("*", async (c, next) => {
+  app.get("*", (c) => {
     // Only browser navigations get SPA fallback; missing modules must remain 404.
     if (!c.req.header("accept")?.includes("text/html") || path.extname(c.req.path))
       return c.notFound();
-    return serveStatic({ path: path.join(root, "index.html") })(c, next);
+    return sendPage(c);
   });
   const listener = getRequestListener(app.fetch);
   const server = createServer();
@@ -110,6 +129,29 @@ export async function createPublicWebServer(options: {
     server.on("upgrade", (_req, socket) => socket.destroy());
   }
   return server;
+}
+
+/**
+ * Strict CSP for the app document: only scripts carrying this response's nonce run, and
+ * the bundle they load is trusted through 'strict-dynamic'. Everything else is same-origin
+ * except images (candidate photos and company logos live on arbitrary https hosts) and
+ * frames (PDF previews are blob URLs; a computer screen can come from its sandbox host).
+ * Styles allow inline: the loading screen and UI primitives use style attributes and elements.
+ */
+export function webContentSecurityPolicy(nonce: string) {
+  return [
+    "default-src 'self'",
+    `script-src 'nonce-${nonce}' 'strict-dynamic'`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob: https:",
+    // A computer's terminal socket can live on its sandbox host.
+    "connect-src 'self' wss:",
+    "media-src 'self' blob:",
+    "frame-src 'self' blob: https:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+  ].join("; ");
 }
 
 /**

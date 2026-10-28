@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { expect, it, vi } from "vitest";
 import { SandboxedHtmlViewer } from "./SandboxedHtmlViewer";
+
+const shell = readFileSync(
+  path.join(import.meta.dirname, "../../public/html-preview.html"),
+  "utf8",
+);
 
 async function render(html: string) {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -14,9 +21,14 @@ async function render(html: string) {
     root.render(<SandboxedHtmlViewer title="Notes" html={html} />);
   });
   const iframe = container.querySelector("iframe");
+  const post = vi.fn();
+  if (iframe?.contentWindow) iframe.contentWindow.postMessage = post;
+  await act(async () => {
+    iframe?.dispatchEvent(new Event("load"));
+  });
   return {
     iframe,
-    srcDoc: iframe?.getAttribute("srcdoc") ?? "",
+    posted: String(post.mock.calls[0]?.[0] ?? ""),
     async cleanup() {
       await act(async () => root.unmount());
       container.remove();
@@ -25,53 +37,42 @@ async function render(html: string) {
   };
 }
 
-it("keeps the preview iframe opaque and blocks remote images and fonts", async () => {
-  const view = await render(
-    '<img src="https://example.invalid/pixel.png"><style>@font-face { src: url(https://example.invalid/font.woff); }</style>',
-  );
+it("keeps the shell opaque and sends it the preview only once it has loaded", async () => {
+  const view = await render('<img src="https://example.invalid/pixel.png">');
 
+  expect(view.iframe?.getAttribute("src")).toBe("/html-preview.html");
   expect(view.iframe?.getAttribute("sandbox")).toBe("allow-scripts");
   expect(view.iframe?.getAttribute("referrerpolicy")).toBe("no-referrer");
-  expect(view.srcDoc).toContain("frame-src about:");
-  expect(view.srcDoc).toContain("child-src 'none'");
-  expect(view.srcDoc).toContain("img-src data:");
-  expect(view.srcDoc).toContain("font-src data:");
-  expect(view.srcDoc).not.toContain("allow-same-origin");
-  expect(view.srcDoc).not.toMatch(/img-src[^;]*https:/);
-  expect(view.srcDoc).not.toMatch(/font-src[^;]*https:/);
-  expect(view.srcDoc).toContain("https://example.invalid/pixel.png");
+  expect(view.iframe?.hasAttribute("srcdoc")).toBe(false);
+  expect(view.posted).toContain("img-src data:");
+  expect(view.posted).not.toMatch(/img-src[^;]*https:/);
+  expect(view.posted).toContain("https://example.invalid/pixel.png");
 
   await view.cleanup();
 });
 
-it("embeds attacker markup so it cannot take over the navigation shell", async () => {
-  const view = await render(
-    '</script><script>location.href="https://example.invalid/nav"</script><iframe sandbox="allow-scripts allow-same-origin" src="https://example.invalid/frame"></iframe>',
-  );
-
-  const shell = view.srcDoc.split("srcdoc=")[0] ?? "";
-  expect(shell).toContain('sandbox="allow-scripts"');
+it("nests the preview in an opaque frame that cannot load remote images or fonts", () => {
+  const inner = shell.match(/<iframe [^>]*>/)?.[0] ?? "";
+  expect(inner).toContain('sandbox="allow-scripts"');
   expect(shell).not.toContain("allow-same-origin");
-  expect(view.srcDoc).not.toContain("</script><script>");
-  expect(view.srcDoc).toContain("\\u003c/script>");
-  expect(shellContentSecurityPolicy(view.srcDoc)).toContain("frame-src about:");
-
-  await view.cleanup();
+  expect(inner).toContain("img-src data:");
+  expect(inner).toContain("font-src data:");
+  expect(inner).not.toMatch(/(?:img|font)-src[^;]*https:/);
+  // Only the embedding app may replace the preview.
+  expect(shell).toContain("event.source === parent");
 });
 
-it("lets the shell load the nested srcdoc preview and rejects http(s) navigations", async () => {
-  const view = await render("<p>Hello</p>");
-  const sources = operativeFrameSources(shellContentSecurityPolicy(view.srcDoc));
+it("lets the shell load the nested srcdoc preview and rejects http(s) navigations", () => {
+  const sources = operativeFrameSources(shellContentSecurityPolicy(shell));
 
+  expect(shellContentSecurityPolicy(shell)).toContain("child-src 'none'");
   expect(frameSourceAllows(sources, "about:srcdoc")).toBe(true);
   expect(frameSourceAllows(sources, "https://example.invalid/nav")).toBe(false);
   expect(frameSourceAllows(sources, "http://example.invalid/nav")).toBe(false);
-
-  await view.cleanup();
 });
 
-function shellContentSecurityPolicy(srcDoc: string): string {
-  const match = srcDoc.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
+function shellContentSecurityPolicy(document: string): string {
+  const match = document.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/);
   if (!match?.[1]) throw new Error("shell CSP missing");
   return match[1];
 }

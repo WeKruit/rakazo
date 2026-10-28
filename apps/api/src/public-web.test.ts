@@ -16,7 +16,11 @@ beforeEach(async () => {
   directory = await mkdtemp(path.join(tmpdir(), "rakazo-public-web-"));
   const root = path.join(directory, "dist");
   await mkdir(path.join(root, "assets"), { recursive: true });
-  await writeFile(path.join(root, "index.html"), "<!doctype html><title>Test app</title>");
+  await writeFile(
+    path.join(root, "index.html"),
+    '<!doctype html><title>Test app</title><script nonce="__RAKAZO_CSP_NONCE__">1</script>',
+  );
+  await writeFile(path.join(root, "html-preview.html"), "<!doctype html><title>Preview</title>");
   await writeFile(path.join(root, "assets/app.js"), 'console.log("test");'.repeat(200));
   await writeFile(path.join(directory, "private.txt"), "never public");
   await writeFile(path.join(root, ".env"), "never public");
@@ -69,6 +73,45 @@ describe("production public listener", () => {
     expect(asset.headers.get("content-encoding")).toBe("gzip");
     expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
     expect(await asset.text()).toContain('console.log("test")');
+  });
+  it("sends a fresh nonce in the page and an enforced strict policy", async () => {
+    const nonces = [];
+    for (const route of ["/", "/index.html", "/roles/test"]) {
+      const res = await fetch(`${origin}${route}`, { headers: { accept: "text/html" } });
+      const policy = res.headers.get("content-security-policy") ?? "";
+      const nonce = policy.match(/script-src 'nonce-([A-Za-z0-9+/=]+)' 'strict-dynamic'/)?.[1];
+      expect(nonce).toHaveLength(24);
+      const html = await res.text();
+      expect(html).toContain(`<script nonce="${nonce}">`);
+      expect(html).not.toContain("__RAKAZO_CSP_NONCE__");
+      expect(policy).toContain("object-src 'none'");
+      expect(policy).toContain("base-uri 'none'");
+      expect(policy).not.toContain("unsafe-eval");
+      expect(policy).not.toMatch(/script-src[^;]*unsafe-inline/);
+      nonces.push(nonce);
+    }
+    expect(new Set(nonces).size).toBe(3);
+    const asset = await fetch(`${origin}/assets/app.js`);
+    expect(asset.headers.get("content-security-policy")).toBeNull();
+    const preview = await fetch(`${origin}/html-preview.html`);
+    expect(preview.headers.get("content-security-policy")).toBe(
+      "frame-ancestors 'self'; sandbox allow-scripts",
+    );
+    expect(await preview.text()).toContain("Preview");
+  });
+  it("only reports the policy for a build without nonces", async () => {
+    const root = path.join(directory, "plain");
+    await mkdir(root);
+    await writeFile(path.join(root, "index.html"), "<!doctype html><script>1</script>");
+    const plain = await createPublicWebServer({ app: new Hono(), root, allowedHosts: [], logger });
+    await new Promise<void>((resolve) => plain.listen(0, "127.0.0.1", resolve));
+    try {
+      const res = await fetch(`http://127.0.0.1:${(plain.address() as AddressInfo).port}/`);
+      expect(res.headers.get("content-security-policy")).toBeNull();
+      expect(res.headers.get("content-security-policy-report-only")).toContain("'strict-dynamic'");
+    } finally {
+      await new Promise<void>((resolve) => plain.close(() => resolve()));
+    }
   });
   it("preserves API cookies, request bodies and readiness without exposing internals", async () => {
     const session = await fetch(`${origin}/api/session`, { headers: { cookie: "session=fake" } });
