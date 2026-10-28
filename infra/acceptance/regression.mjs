@@ -529,12 +529,22 @@ const summary = [
 ].join("\n");
 fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
 log(summary);
-// Archive test copies idle for a day; keep the booking fixture the t5 case reuses.
+// The copies this run made leave the sidebar now that their checks are done.
+for (const name of ["progress", "t3", "t1"]) {
+  if (!fs.existsSync(path.join(OUT, `${name}.json`))) continue;
+  const { groupId } = reportOf(name);
+  if (groupId) await rpc("groups/archive", { groupId }).catch((error) => log(error.message));
+}
+// Sweep copies other harness runs left idle; keep the booking fixture the t5 case reuses.
 if (TOKEN) {
   const t5 = CASES && path.join(CASES, "t5.json");
   const keep =
     option("--t5-group") ??
     (t5 && fs.existsSync(t5) ? JSON.parse(fs.readFileSync(t5, "utf8")).groupId : "");
-  await run("archive-copies", "archive-test-copies.mjs", keep ? ["--keep", keep] : []);
+  await run("archive-copies", "archive-test-copies.mjs", [
+    "--idle-hours",
+    "2",
+    ...(keep ? ["--keep", keep] : []),
+  ]);
 }
 process.exit(passed ? 0 : 1);

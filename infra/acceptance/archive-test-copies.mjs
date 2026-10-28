@@ -4,7 +4,7 @@
 // Real roles never match the copy prefix. A copy with a run still working is skipped.
 //
 //   RAKAZO_URL=… RAKAZO_ORIGIN=… RAKAZO_TOKEN=… node infra/acceptance/archive-test-copies.mjs \
-//     [--idle-hours 24] [--keep <groupId>,<groupId>] [--dry-run]
+//     [--idle-hours 2] [--keep <groupId>,<groupId>] [--dry-run]
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
   const index = args.indexOf(name);
@@ -17,7 +17,7 @@ if (!BASE || !TOKEN) {
   console.error("RAKAZO_URL and RAKAZO_TOKEN are required");
   process.exit(2);
 }
-const IDLE_MS = Number(option("--idle-hours", "24")) * 3_600_000;
+const IDLE_MS = Number(option("--idle-hours", "2")) * 3_600_000;
 const KEEP = new Set((option("--keep", "") ?? "").split(",").filter(Boolean));
 const DRY = args.includes("--dry-run");
 const COPY = /^测试副本 · /;
