@@ -981,6 +981,18 @@ const MODEL_OUTAGE =
   /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|socket hang up/i;
 const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn once";
 
+/** A JD that states no years leaves the range to ask; round 1 of the playtest skipped it. */
+export function jobStatesYears(text: string): boolean {
+  return /\d+\s*\+?\s*(?:(?:-|–|to)\s*\d+\s*\+?\s*)?(?:years?|yrs?)\b|\d+\s*年/i.test(text);
+}
+
+const YEARS_OPEN_NOTE =
+  "The JD states no years of experience: one of your clarifying questions before the search is the years range, offering two or three ranges that fit the pay.";
+
+/** A JD sent as a file is read in the model's first step; nothing is written before that read. */
+const FILE_JOB_NOTE =
+  "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
+
 const ASK_IN_ENGLISH =
   "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
 
@@ -5620,7 +5632,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               unverified: Object.fromEntries(
                 Object.entries(args.unverified as Record<string, unknown>).map(([key, value]) => [
                   key,
-                  Array.isArray(value) ? value.map(String).join("、") : value,
+                  Array.isArray(value) ? value.map(String).join("; ") : value,
                 ]),
               ),
             };
@@ -11054,7 +11066,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const title = pastedJobTitle(pasted.text)!;
               return {
                 saving: create(title, []),
-                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask}`,
+                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask}${jobStatesYears(pasted.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
               };
             }
             const url = jobLinkIn(block.text)!;
@@ -11087,7 +11099,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   quote: read.text.trim().slice(0, 300).trim(),
                 },
               ]),
-              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask}`,
+              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask}${jobStatesYears(read.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
             };
           } catch (error) {
             getLogger().warn("job link not read before the first step", { error: String(error) });
@@ -11298,6 +11310,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : basePrompt,
           intakeSkillNote,
           linkRole?.note,
+          !linkRole &&
+          !thread.activeRecruitingRoleId &&
+          currentTurnMessage?.role === "user" &&
+          currentTurnMessage.blocks.some((block) => block.kind === "file") &&
+          tools.some((tool) => tool.name === "recruiting_role")
+            ? FILE_JOB_NOTE
+            : undefined,
           intakeNote,
           plannedNote,
           handedIn ? HANDOFF_OPENING_NOTE : undefined,
