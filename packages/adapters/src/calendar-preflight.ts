@@ -52,6 +52,11 @@ export async function preflightCalBooking(input: {
     }
   }
   const { start, lengthInMinutes } = input.args;
+  // A reschedule keeps the original booking's length unless the request names another.
+  const length =
+    lengthInMinutes ??
+    (original &&
+      (Date.parse(original.snapshot.end) - Date.parse(original.snapshot.start)) / 60_000);
   const eventTypeId = original?.snapshot.eventTypeId ?? input.args.eventTypeId;
   if (
     !Number.isSafeInteger(eventTypeId) ||
@@ -59,12 +64,9 @@ export async function preflightCalBooking(input: {
     typeof start !== "string" ||
     !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(start) ||
     !Number.isFinite(Date.parse(start)) ||
-    ((lengthInMinutes !== undefined || input.route.toolName !== "create_booking") &&
-      (!Number.isSafeInteger(lengthInMinutes) || Number(lengthInMinutes) <= 0))
+    (length !== undefined && (!Number.isSafeInteger(length) || Number(length) <= 0))
   )
-    return unavailable(
-      "the approved booking needs an explicit eventTypeId, UTC start and (to reschedule) lengthInMinutes",
-    );
+    return unavailable("the approved booking needs an explicit eventTypeId and UTC start");
   // Non-standard routing/conflict overrides cannot be verified by a regular event-type slot read.
   if (
     ["instant", "routing", "allowConflicts", "allowBookingOutOfBounds", "skipBookingLimits"].some(
@@ -73,8 +75,7 @@ export async function preflightCalBooking(input: {
   )
     return unavailable("this booking uses options outside the verified availability contract");
   // Without a duration, read the next hour of slots and take the one starting at the approved time.
-  const endMs =
-    Date.parse(start) + (lengthInMinutes === undefined ? 60 : Number(lengthInMinutes)) * 60_000;
+  const endMs = Date.parse(start) + (length === undefined ? 60 : Number(length)) * 60_000;
   if (!Number.isFinite(endMs) || Math.abs(endMs) > 8.64e15)
     return unavailable("booking interval is invalid");
   const readArgs = {
@@ -185,7 +186,7 @@ export async function preflightCalBooking(input: {
       const value = slot as { start: string; end: string };
       return (
         Date.parse(value.start) === Date.parse(start) &&
-        (lengthInMinutes === undefined
+        (length === undefined
           ? Date.parse(value.end) > Date.parse(start)
           : Date.parse(value.end) === endMs)
       );

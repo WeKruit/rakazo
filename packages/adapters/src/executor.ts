@@ -8038,13 +8038,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               try {
                 if (!deps.connector || !connectorCall.route || typeof args.bookingUid !== "string")
                   throw new Error("The exact original booking UID is required");
-                if (
-                  connectorCall.route.toolName === "reschedule_booking" &&
-                  (!Number.isSafeInteger(args.lengthInMinutes) || Number(args.lengthInMinutes) <= 0)
-                )
-                  throw new Error(
-                    "Clarify the explicit reschedule duration before requesting approval",
-                  );
                 if (args.cancelSubsequentBookings === true)
                   throw new Error(
                     "Recurring cancellation requires separate verified booking scope",
