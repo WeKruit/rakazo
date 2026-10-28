@@ -1815,16 +1815,13 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
             };
           }
           if (host.request.executeTool) {
-            const result = await host.request.executeTool(
-              tool.name,
-              args,
-              executionId,
-              tool.route,
-              {
+            const result = await untilStopped(
+              host.request.executeTool(tool.name, args, executionId, tool.route, {
                 onShellStillRunning: (completion) => {
                   host.pendingShells.push(completion);
                 },
-              },
+              }),
+              host.signal,
             );
             if (isAgentToolExecutionResult(result)) {
               if (isToolPauseResult(result)) host.pausePending = true;
@@ -3889,4 +3886,17 @@ export function reliableStreamOptions(
   }
 
   return next;
+}
+
+/**
+ * A stopped run (user stop, lease loss or the silence watch) must end even when a tool call
+ * never settles; the abandoned call is left to finish or fail on its own.
+ */
+export function untilStopped<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
 }
