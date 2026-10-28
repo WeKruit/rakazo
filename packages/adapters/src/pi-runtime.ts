@@ -102,6 +102,14 @@ import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
+import type { SubagentSession } from "./subagent-delivery.js";
+import {
+  collectSubagentResults,
+  deliverFinishedSubagents,
+  startBackgroundTurn,
+  takeSubagentResult,
+  waitForSubagents,
+} from "./subagent-delivery.js";
 import { sanitizeThought } from "./thought.js";
 import { textContentArg } from "./tool-text.js";
 
@@ -322,6 +330,8 @@ export class PiAgentRuntime implements AgentRuntime {
           depth: 0,
           pausePending: false,
           pendingShells: [],
+          subagents: new Map(),
+          subagentCount: { value: 0 },
         };
         resumeHost = host;
         const tools = toAgentTools(toolDefs, host);
@@ -495,6 +505,19 @@ export class PiAgentRuntime implements AgentRuntime {
               host.pendingShells,
               turn,
               turnSignal,
+            );
+            await deliverFinishedSubagents(
+              (text) => {
+                // The result starts a new step: keep it apart from the reply already streamed.
+                if (streamed.trim() && !streamed.endsWith("\n")) {
+                  queue.push({ type: "text", text: "\n\n" });
+                  streamed += "\n\n";
+                }
+                agent.steer({ role: "user", content: text, timestamp: Date.now() });
+              },
+              host.subagents.values(),
+              turn,
+              { paused: host.pausePending, signal: turnSignal },
             );
           },
           prepareNextTurnWithContext: async () => {
@@ -1653,6 +1676,10 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           instructions: raw.instructions ? String(raw.instructions) : "",
           model_provider: raw.model_provider ? String(raw.model_provider) : "",
           model_id: raw.model_id ? String(raw.model_id) : "",
+          ...(raw.background === true ? { background: true } : {}),
+          ...(raw.handle ? { handle: String(raw.handle) } : {}),
+          ...(Array.isArray(raw.wait) ? { wait: raw.wait.map(String) } : {}),
+          ...(raw.timeout_seconds !== undefined ? { timeout_seconds: raw.timeout_seconds } : {}),
         };
       }
       if (tool.name === "spawn_bot") {
@@ -1710,6 +1737,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       try {
         result = await (async () => {
           if (tool.name === "request_takeover") {
+            const helped = await subagentResultsBeforePause(host);
+            if (helped) return helped;
             host.pausePending = true;
             host.queue.push({
               type: "takeover",
@@ -1747,6 +1776,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               throw new Error(
                 "Ask one question at a time: ask only the single most decision-affecting question first, with options.",
               );
+            const helped = await subagentResultsBeforePause(host);
+            if (helped) return helped;
             // A message the user sent while this question was being written may already answer
             // it; read it before pausing, so the user is never left waiting behind the card.
             const arrived = (host.steeredUnseen ?? 0) + ((await host.claimNewSteering?.()) ?? 0);
@@ -1889,15 +1920,89 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
   };
 }
 
-async function executeSubagent(host: ToolHost, executionId: string, args: Record<string, unknown>) {
+/** run_subagent: start a helper, continue one by handle, or wait for background results. */
+async function executeSubagent(
+  host: ToolHost,
+  executionId: string,
+  args: Record<string, unknown>,
+): Promise<string> {
   if (host.depth > 0) return "Subagents cannot nest further.";
-  await host.subagentGate.acquire();
+  if (Array.isArray(args.wait))
+    return waitForSubagents(
+      host.subagents,
+      args.wait.map(String),
+      args.timeout_seconds,
+      host.signal,
+    );
+  const handle = String(args.handle ?? "").trim();
+  const task = String(args.task ?? "").trim();
+  let helper: SubagentHelper;
+  let previous: string | undefined;
+  if (handle) {
+    const existing = host.subagents.get(handle);
+    if (!existing) return `No helper with handle ${handle} in this turn.`;
+    if (existing.busy)
+      return `Helper ${handle} is still working. Wait for its result before sending more.`;
+    if (!task) return "Give the follow-up task for this helper.";
+    helper = existing;
+    // A result not read yet is handed over here instead of being replaced by the next one.
+    previous = takeSubagentResult(existing);
+  } else {
+    const created = await createSubagent(host, executionId, args);
+    if (typeof created === "string") return created;
+    helper = created;
+    host.subagents.set(helper.handle, helper);
+  }
+  const withPrevious = (text: string) => (previous ? `${previous}\n\n${text}` : text);
+  if (args.background !== true) {
+    const result = await helper.turn(task);
+    return withPrevious(`${result}\n\n(helper handle: ${helper.handle})`);
+  }
+  startBackgroundTurn(helper, helper.turn(task));
+  return withPrevious(
+    `Started ${helper.name} in the background (handle ${helper.handle}). Its result arrives in this conversation once, when it finishes. Reply to the user or keep working meanwhile; use run_subagent with wait to block on it, or with handle to send it more after it finishes.`,
+  );
+}
+
+/**
+ * A question or takeover ends the run, and helpers cannot outlive it: first wait for background
+ * helpers and give their results to the model, which then asks again if it still needs to.
+ */
+async function subagentResultsBeforePause(
+  host: ToolHost,
+): Promise<AgentToolResult<unknown> | undefined> {
+  if (host.depth > 0) return undefined;
+  const results = await collectSubagentResults(host.subagents.values(), host.signal);
+  if (!results) return undefined;
+  return {
+    content: [
+      {
+        type: "text",
+        text: `${results}\n\nYour helpers finished before this was shown. Read their results; ask again only if you still need to.`,
+      },
+    ],
+    details: { subagentResults: true },
+  };
+}
+
+interface SubagentHelper extends SubagentSession {
+  /** One prompt to this helper; resolves with its result text and never rejects. */
+  turn(task: string): Promise<string>;
+}
+
+async function createSubagent(
+  host: ToolHost,
+  executionId: string,
+  args: Record<string, unknown>,
+): Promise<SubagentHelper | string> {
   const agentId = executionId;
+  // Taken before any await so parallel calls never share a handle.
+  const handle = `subagent-${++host.subagentCount.value}`;
   const name =
     String(args.name ?? "helper")
       .trim()
       .slice(0, 80) || "helper";
-  const task = String(args.task ?? "").trim();
+  let task = String(args.task ?? "").trim();
   const extra = args.instructions ? String(args.instructions).trim() : "";
   host.queue.push({
     type: "subagent",
@@ -1932,7 +2037,6 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       status: "failed",
       result: message,
     });
-    host.subagentGate.release();
     return `Subagent failed: ${message}`;
   }
 
@@ -1954,7 +2058,6 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       status: "failed",
       result: message,
     });
-    host.subagentGate.release();
     return `Subagent failed: ${message}`;
   }
   const subagentModel = modelForCompletion(selectedModel.model, requestModel.maxTokens);
@@ -2088,7 +2191,6 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       messages: [],
     },
   });
-  host.nestedAgents.add(nested);
 
   let streamed = "";
   let lastPush = 0;
@@ -2130,38 +2232,95 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
     }
   });
 
-  try {
-    if (host.signal.aborted) {
+  let started = false;
+  const turn = async (prompt: string): Promise<string> => {
+    session.busy = true;
+    await host.subagentGate.acquire();
+    if (started) {
+      // A follow-up by handle: the same helper row shows the new task.
+      task = prompt;
       host.queue.push({
         type: "subagent",
         agentId,
         name,
         task,
-        status: "failed",
-        result: "stopped",
+        status: "running",
+        progress: "starting…",
       });
-      return "stopped";
     }
-    const onAbort = () => nested.abort();
-    host.signal.addEventListener("abort", onAbort);
+    started = true;
+    streamed = "";
+    host.nestedAgents.add(nested);
     try {
-      await nested.prompt(task || "Complete the delegated task.");
+      return await subagentTurn(prompt);
     } finally {
-      try {
-        await nested.waitForIdle();
-      } finally {
-        host.signal.removeEventListener("abort", onAbort);
-        // nestedHost is a shallow copy; ask_user / request_takeover set pause
-        // only on the child. Copy it up before the parent releases the budget.
-        if (nestedHost.pausePending) host.pausePending = true;
-      }
+      host.nestedAgents.delete(nested);
+      host.subagentGate.release();
+      session.busy = false;
     }
-    // Shared-budget abort leaves errorMessage on the nested agent; surface it as a
-    // completed stop rather than a failed subagent chip.
-    const budgetExceeded = host.toolCallBudget.exceeded;
-    const error = nested.state.errorMessage || providerFailureText(nested.state.messages.at(-1));
-    if (error && !budgetExceeded) {
-      const message = sanitizeProviderError(subagentModel.provider, error);
+  };
+  const subagentTurn = async (prompt: string): Promise<string> => {
+    try {
+      if (host.signal.aborted) {
+        host.queue.push({
+          type: "subagent",
+          agentId,
+          name,
+          task,
+          status: "failed",
+          result: "stopped",
+        });
+        return "stopped";
+      }
+      const onAbort = () => nested.abort();
+      host.signal.addEventListener("abort", onAbort);
+      try {
+        await nested.prompt(prompt || "Complete the delegated task.");
+      } finally {
+        try {
+          await nested.waitForIdle();
+        } finally {
+          host.signal.removeEventListener("abort", onAbort);
+          // nestedHost is a shallow copy; ask_user / request_takeover set pause
+          // only on the child. Copy it up before the parent releases the budget.
+          if (nestedHost.pausePending) host.pausePending = true;
+        }
+      }
+      // Shared-budget abort leaves errorMessage on the nested agent; surface it as a
+      // completed stop rather than a failed subagent chip.
+      const budgetExceeded = host.toolCallBudget.exceeded;
+      const error = nested.state.errorMessage || providerFailureText(nested.state.messages.at(-1));
+      if (error && !budgetExceeded) {
+        const message = sanitizeProviderError(subagentModel.provider, error);
+        host.queue.push({
+          type: "subagent",
+          agentId,
+          name,
+          task,
+          status: "failed",
+          result: message,
+        });
+        return `Subagent failed: ${message}`;
+      }
+      const budgetMessage = budgetExceeded
+        ? toolCallBudgetExceededMessage(host.toolCallBudget.limit)
+        : undefined;
+      const result =
+        budgetMessage && streamed.trim()
+          ? `${streamed.trim()}\n\n${budgetMessage}`
+          : budgetMessage || streamed || assistantText(nested.state.messages.at(-1)) || "done.";
+      const clipped = clipToolResultText(result, 12_000);
+      host.queue.push({
+        type: "subagent",
+        agentId,
+        name,
+        task,
+        status: "completed",
+        result: clipped,
+      });
+      return clipped;
+    } catch (error) {
+      const message = sanitizeError(error instanceof Error ? error.message : String(error));
       host.queue.push({
         type: "subagent",
         agentId,
@@ -2172,38 +2331,14 @@ async function executeSubagent(host: ToolHost, executionId: string, args: Record
       });
       return `Subagent failed: ${message}`;
     }
-    const budgetMessage = budgetExceeded
-      ? toolCallBudgetExceededMessage(host.toolCallBudget.limit)
-      : undefined;
-    const result =
-      budgetMessage && streamed.trim()
-        ? `${streamed.trim()}\n\n${budgetMessage}`
-        : budgetMessage || streamed || assistantText(nested.state.messages.at(-1)) || "done.";
-    const clipped = clipToolResultText(result, 12_000);
-    host.queue.push({
-      type: "subagent",
-      agentId,
-      name,
-      task,
-      status: "completed",
-      result: clipped,
-    });
-    return clipped;
-  } catch (error) {
-    const message = sanitizeError(error instanceof Error ? error.message : String(error));
-    host.queue.push({
-      type: "subagent",
-      agentId,
-      name,
-      task,
-      status: "failed",
-      result: message,
-    });
-    return `Subagent failed: ${message}`;
-  } finally {
-    host.nestedAgents.delete(nested);
-    host.subagentGate.release();
-  }
+  };
+  const session: SubagentHelper = {
+    handle,
+    name,
+    busy: false,
+    turn,
+  };
+  return session;
 }
 
 /** Build AgentTool.parameters for a connector tool, including OpenAI wire fidelity. */
@@ -2282,11 +2417,15 @@ function builtinParameters(tool: ConnectorTool) {
   }
   if (tool.name === "run_subagent") {
     return Type.Object({
-      name: Type.String(),
-      task: Type.String(),
+      name: Type.Optional(Type.String()),
+      task: Type.Optional(Type.String()),
       instructions: Type.Optional(Type.String()),
       model_provider: Type.Optional(Type.String()),
       model_id: Type.Optional(Type.String()),
+      background: Type.Optional(Type.Boolean()),
+      handle: Type.Optional(Type.String()),
+      wait: Type.Optional(Type.Array(Type.String())),
+      timeout_seconds: Type.Optional(Type.Number()),
     });
   }
   if (tool.name === "spawn_bot") {
@@ -2877,6 +3016,9 @@ interface ToolHost {
   forceCompaction?: string;
   /** Shell commands that returned output and are still running. */
   pendingShells: Array<Promise<FinishedShellCommand>>;
+  /** Helpers this run started, by handle (shared with nested hosts, used at depth 0 only). */
+  subagents: Map<string, SubagentHelper>;
+  subagentCount: { value: number };
   /** Messages steered in while the current model step streamed; the model has not read them yet. */
   steeredUnseen?: number;
   /** Claims messages that arrived since the last read, steers them in and returns how many. */
