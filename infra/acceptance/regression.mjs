@@ -143,6 +143,7 @@ async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000 } = 
   let count = 0;
   let changed = Date.now();
   let replies = [];
+  let firstReply = null;
   while (Date.now() - sentAt < limitMs) {
     await sleep(3_000);
     replies = (await messagesOf(groupId)).filter(
@@ -151,10 +152,11 @@ async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000 } = 
     if (replies.length !== count) {
       count = replies.length;
       changed = Date.now();
+      firstReply ??= Math.round((changed - sentAt) / 1000);
     }
     if (Date.now() - changed > quietMs && !(await working(groupId))) break;
   }
-  return { replies, seconds: Math.round((Date.now() - sentAt) / 1000) };
+  return { replies, firstReply, seconds: Math.round((Date.now() - sentAt) / 1000) };
 }
 
 /** Waits until the crew is idle and has posted nothing new for a while; the next-step card follows the ten. */
@@ -340,9 +342,10 @@ if (wanted.has("t1"))
     const contacts = await say(groupId, "找contact");
     if (!contacts.replies.length) failures.push("「找contact」 got no reply");
     const again = await say(groupId, "找contact");
-    if (again.seconds > contacts.seconds)
+    // A repeat shows the contacts already found first, then continues to the next people.
+    if (again.firstReply === null || again.firstReply > 60)
       failures.push(
-        `repeat 「找contact」 slower than the first (${again.seconds} s vs ${contacts.seconds} s)`,
+        `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
       );
     const send = await say(groupId, "发20个人的先");
     if (
@@ -366,6 +369,7 @@ if (wanted.has("t5"))
         "pass --t5-group and --t5-say, or <cases>/t5.json, for the booking card case",
       );
     const { replies } = await say(groupId, text);
+    fs.writeFileSync(path.join(OUT, "t5-replies.txt"), `${replies.map(botText).join("\n")}\n`);
     const card = cards(replies).find((block) => block.approvalEffectId);
     if (!card) failures.push("no booking confirmation card");
     else if (!/confirm interview booking/i.test(card.text ?? ""))
