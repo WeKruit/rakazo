@@ -12,6 +12,8 @@ const WEEKDAY_NAMES = [
 ] as const;
 
 export const ONCE_ROUTINE_CRON = "@once";
+/** Repeating routines wake a paid model run, so their fire times stay at least this far apart. */
+export const MIN_ROUTINE_INTERVAL_MINUTES = 5;
 
 export function isOneShotRoutineCron(cron: string): boolean {
   return cron.trim() === ONCE_ROUTINE_CRON;
@@ -62,7 +64,13 @@ export type CronPresetInput = {
 };
 
 export function defaultCronPreset(): CronPreset {
-  return { freq: "Every day", n: 3, unit: "minutes", time: "9:00 AM", cron: "" };
+  return {
+    freq: "Every day",
+    n: MIN_ROUTINE_INTERVAL_MINUTES,
+    unit: "minutes",
+    time: "9:00 AM",
+    cron: "",
+  };
 }
 
 const INTERVAL_AMOUNTS = [1, 2, 3, 5, 10, 15, 30, 45];
@@ -70,7 +78,10 @@ export const CRON_INTERVAL_MAX: Record<CronUnit, number> = { minutes: 59, hours:
 
 // Cron steps cannot exceed the field's range, so offer only amounts that fit.
 export function cronIntervalAmounts(unit: CronUnit, current?: number): number[] {
-  const amounts = INTERVAL_AMOUNTS.filter((n) => n <= CRON_INTERVAL_MAX[unit]);
+  const amounts = INTERVAL_AMOUNTS.filter(
+    (n) =>
+      n <= CRON_INTERVAL_MAX[unit] && (unit !== "minutes" || n >= MIN_ROUTINE_INTERVAL_MINUTES),
+  );
   if (current === undefined || current > CRON_INTERVAL_MAX[unit] || amounts.includes(current)) {
     return amounts;
   }
@@ -260,6 +271,26 @@ export function nextCronDateAcrossStrict(
     if (!earliest || next < earliest) earliest = next;
   }
   return earliest;
+}
+
+/** Error text when any two consecutive fire times across a routine's schedules are too close. */
+export function routineIntervalError(crons: readonly string[], timezone = "UTC"): string | null {
+  const recurring = crons.filter((cron) => !isOneShotRoutineCron(cron));
+  if (!recurring.length) return null;
+  const minimum = MIN_ROUTINE_INTERVAL_MINUTES * 60_000;
+  // A fixed Monday start keeps the check deterministic; 48 fires cover any dense pattern.
+  let from = new Date(Date.UTC(2026, 0, 5));
+  let previous: Date | null = null;
+  for (let index = 0; index < 48; index += 1) {
+    const next = nextCronDateAcross(recurring, from, timezone);
+    if (!next) return null;
+    if (previous && next.getTime() - previous.getTime() < minimum) {
+      return `Schedules must be at least ${MIN_ROUTINE_INTERVAL_MINUTES} minutes apart.`;
+    }
+    previous = next;
+    from = new Date(next.getTime() + 1_000);
+  }
+  return null;
 }
 
 function validTimezoneOrUtc(timezone: string): string {

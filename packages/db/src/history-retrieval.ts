@@ -215,15 +215,37 @@ async function searchMine(
       AND to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${query})
     ORDER BY m."createdAt" DESC, m.id DESC LIMIT ${limit + 1}
   `);
+  // Every word missed: a paraphrase usually still shares some words, so rank messages by
+  // how many of them they contain (first page only; ranked results have no cursor).
+  const anyWord = !rows.length && !before && /\s/.test(query);
+  if (anyWord) {
+    rows.push(
+      ...(await prisma.$queryRaw<
+        Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
+      >(Prisma.sql`
+        SELECT ${columns}, m."threadId" AS "threadId",
+          (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
+          (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName"
+        FROM messages m JOIN threads t ON t.id = m."threadId"
+        WHERE ${visible(scope, { mine: null })}
+          ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
+          AND to_tsvector('simple', ${searchableText}) @@ replace(plainto_tsquery('simple', ${query})::text, '&', '|')::tsquery
+        ORDER BY ts_rank_cd(to_tsvector('simple', ${searchableText}), replace(plainto_tsquery('simple', ${query})::text, '&', '|')::tsquery) DESC,
+          m."createdAt" DESC, m.id DESC
+        LIMIT ${limit}
+      `)),
+    );
+  }
   const page = rows.slice(0, limit);
-  const last = rows.length > limit ? page.at(-1)! : undefined;
+  const last = !anyWord && rows.length > limit ? page.at(-1)! : undefined;
   return {
     untrusted: true as const,
     query,
     scope: "mine" as const,
+    ...(anyWord ? { match: "some_words_ranked" as const } : {}),
     coverage: {
       scope: "requested_query_and_range" as const,
-      status: last ? ("partial" as const) : ("exhausted" as const),
+      status: last || anyWord ? ("partial" as const) : ("exhausted" as const),
     },
     messages: page.map((row) => ({
       threadId: row.threadId,

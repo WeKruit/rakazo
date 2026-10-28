@@ -277,13 +277,17 @@ export async function wakeMessageRoutines(
     if (!reserved) return false;
     delivery = reserved;
   }
-  await deliverWebhookEvent({ events: deps.events, jobs: deps.jobs }, nativeTarget, {
-    prompt: delivery.prompt,
-    routines: routines.filter((routine) => delivery.routineIds.includes(routine.id)),
-    source: "messaging",
-    provider: delivery.provider,
-    idempotencyKey,
-  });
+  await deliverWebhookEvent(
+    { events: deps.events, jobs: deps.jobs, prisma: deps.prisma },
+    nativeTarget,
+    {
+      prompt: delivery.prompt,
+      routines: routines.filter((routine) => delivery.routineIds.includes(routine.id)),
+      source: "messaging",
+      provider: delivery.provider,
+      idempotencyKey,
+    },
+  );
   return true;
 }
 

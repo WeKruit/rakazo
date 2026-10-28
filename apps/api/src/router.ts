@@ -176,6 +176,7 @@ import {
   isOneShotRoutineCrons,
   promptTextForAttachments,
   resolveGroupTargetBotIds,
+  routineIntervalError,
 } from "@rakazo/core";
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
@@ -4127,6 +4128,8 @@ export function createRouter(deps: RouterDeps) {
             message: "One-shot schedules must be created from chat.",
           });
         }
+        const intervalError = routineIntervalError(input.crons, input.timezone);
+        if (intervalError) throw new ORPCError("BAD_REQUEST", { message: intervalError });
         const bot = await repos.getBot(context.actor, input.botId);
         await assertRoutineModel(context.actor, input);
         // Validate every recurring cron even when inactive; @once and webhook-only have no next date.

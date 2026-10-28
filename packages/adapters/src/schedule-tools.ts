@@ -7,9 +7,11 @@ import {
   hasMixedOneShotSchedule,
   isOneShotRoutineCron,
   isOneShotRoutineCrons,
+  MIN_ROUTINE_INTERVAL_MINUTES,
   nextCronDate,
   nextCronDateAcrossStrict,
   ONCE_ROUTINE_CRON,
+  routineIntervalError,
 } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { IsolationError, Prisma, scoped } from "@rakazo/db";
@@ -154,7 +156,7 @@ export function resolveScheduleTiming(
         error: "Use runAt, delayMinutes, or delaySeconds for one-shot schedules.",
       };
     }
-    const intervalError = validateRepeatingCron(cron);
+    const intervalError = validateRepeatingCron(cron, timezone);
     if (intervalError) return { ok: false, error: intervalError };
     try {
       const nextRunAt = nextCronDate(cron, new Date(), timezone);
@@ -170,16 +172,16 @@ export function resolveScheduleTiming(
     return { ok: false, error: "every must be a positive whole number." };
   }
   if (unit === "seconds") {
-    return { ok: false, error: "minimum interval is 1 minute" };
+    return { ok: false, error: `minimum interval is ${MIN_ROUTINE_INTERVAL_MINUTES} minutes` };
   }
   if (!["minutes", "hours", "days"].includes(unit)) {
     return { ok: false, error: 'unit must be "minutes", "hours", or "days".' };
   }
-  if (unit === "minutes" && every < 1) {
-    return { ok: false, error: "minimum interval is 1 minute" };
+  if (unit === "minutes" && every < MIN_ROUTINE_INTERVAL_MINUTES) {
+    return { ok: false, error: `minimum interval is ${MIN_ROUTINE_INTERVAL_MINUTES} minutes` };
   }
   const cron = cronFromPreset({ freq: "Interval", n: every, unit });
-  const intervalError = validateRepeatingCron(cron);
+  const intervalError = validateRepeatingCron(cron, timezone);
   if (intervalError) return { ok: false, error: intervalError };
   try {
     const nextRunAt = nextCronDate(cron, new Date(), timezone);
@@ -189,18 +191,14 @@ export function resolveScheduleTiming(
   }
 }
 
-function validateRepeatingCron(cron: string): string | null {
+function validateRepeatingCron(cron: string, timezone?: string): string | null {
   const parts = cron.trim().split(/\s+/);
   if (parts.length !== 5) return "cron must be a 5-field cron expression.";
-  const minuteExpr = parts[0] ?? "*";
-  const step = /^\*\/(\d+)$/.exec(minuteExpr);
-  if (step) {
-    const n = Number(step[1]);
-    if (!Number.isFinite(n) || n < 1 || !Number.isInteger(n)) {
-      return "minimum interval is 1 minute";
-    }
+  try {
+    return routineIntervalError([cron], timezone);
+  } catch {
+    return "cron must be a valid 5-field cron expression.";
   }
-  return null;
 }
 
 export interface ScheduleToolDeps {
@@ -497,6 +495,11 @@ export async function updateRoutine(
         message: "Add a schedule, webhook, GitHub, or message trigger",
       });
     }
+    const intervalError =
+      input.crons !== undefined
+        ? routineIntervalError(crons, input.timezone ?? existing.timezone)
+        : null;
+    if (intervalError) throw new RoutineUpdateError("BAD_REQUEST", { message: intervalError });
     if (hasMixedOneShotSchedule(crons)) {
       throw new RoutineUpdateError("BAD_REQUEST", {
         message: "A one-time schedule can't be combined with other schedules.",
