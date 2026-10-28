@@ -93,6 +93,19 @@ export function asksForOutreach(text: string): boolean {
 export const REPLY_IN_ENGLISH_NOTE =
   "The recruiter wrote in Chinese but has not asked for Chinese replies: write every reply, summary, question and card of this turn in English.";
 
+/**
+ * A draft request about "these people": the recruiter expects one named email per person, and a
+ * general draft with [candidate name] placeholders is what they had to correct.
+ */
+export function asksAboutThesePeople(text: string): boolean {
+  return /这些人|这几个人|这些候选|这几位|这批人|these (?:people|candidates|profiles|ten)/i.test(
+    text,
+  );
+}
+
+export const NAMED_EMAILS_NOTE =
+  "They mean the role's people: tell Outreach to write one first email per person for the people they named, else the role's first ten results, each with that person's name and current title or company from their saved profile, never a placeholder such as [candidate name] or {{first_name}}, whether or not their emails are found yet.";
+
 /** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
 /**
  * A question to the recruiter written mostly in Chinese when no recruiter message asked for
