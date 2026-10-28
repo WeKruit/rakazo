@@ -353,10 +353,15 @@ if (wanted.has("t1"))
 
 if (wanted.has("t5"))
   await stage("t5", async (failures) => {
-    const groupId = option("--t5-group");
-    const text = option("--t5-say");
+    // <cases>/t5.json ({"groupId","say"}) names a private test chat that already has a candidate reply.
+    const file = CASES && path.join(CASES, "t5.json");
+    const saved = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+    const groupId = option("--t5-group") ?? saved.groupId;
+    const text = option("--t5-say") ?? saved.say;
     if (!groupId || !text)
-      return failures.push("pass --t5-group and --t5-say for the booking card case");
+      return failures.push(
+        "pass --t5-group and --t5-say, or <cases>/t5.json, for the booking card case",
+      );
     const { replies } = await say(groupId, text);
     const card = cards(replies).find((block) => block.approvalEffectId);
     if (!card) failures.push("no booking confirmation card");
