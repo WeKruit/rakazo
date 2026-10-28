@@ -5620,7 +5620,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               unverified: Object.fromEntries(
                 Object.entries(args.unverified as Record<string, unknown>).map(([key, value]) => [
                   key,
-                  Array.isArray(value) ? value.map(String).join("、") : value,
+                  Array.isArray(value) ? value.map(String).join("; ") : value,
                 ]),
               ),
             };
