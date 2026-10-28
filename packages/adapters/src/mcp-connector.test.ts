@@ -4069,20 +4069,28 @@ describe("local native Instantly campaign and lead tools", () => {
         ],
       },
     });
-    // Saved copy is shown, never replaced.
+    // Saved copy on a draft this product created is replaced when steps are saved again.
     f.state.campaign.sequences = [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }];
-    const writes = f.state.requests.length;
     const again = f.result(
       await f.run("ensure_role_campaign", {
         role_id: "role-1",
         steps: [{ subject: "New", body: "Other", delay_days: 0 }],
       }),
     );
-    expect(again).toMatchObject({
-      stepsSaved: false,
-      hasEmail: true,
-      currentEmail: { subject: "Hi", body: "Hello" },
-    });
+    expect(again).toMatchObject({ stepsSaved: true, hasEmail: true });
+    expect(JSON.stringify(f.state.requests.findLast((r) => r.method === "PATCH")?.body)).toContain(
+      "<p>Other</p>",
+    );
+    // A paused campaign may already have sent, so its copy stays.
+    f.state.campaign.status = 2;
+    const writes = f.state.requests.length;
+    const paused = f.result(
+      await f.run("ensure_role_campaign", {
+        role_id: "role-1",
+        steps: [{ subject: "Third", body: "Third", delay_days: 0 }],
+      }),
+    );
+    expect(paused).toMatchObject({ stepsSaved: false, hasEmail: true });
     expect(f.state.requests.slice(writes).some((r) => r.method === "PATCH")).toBe(false);
   });
 

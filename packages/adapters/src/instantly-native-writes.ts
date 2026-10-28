@@ -200,7 +200,7 @@ export const nativeInstantlyWrites = [
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
     false,
-    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence onto a campaign it created that has no email yet; existing copy is never replaced and comes back as currentEmail to show the recruiter. hasEmail says whether the campaign has an email to send. Pass send_hours any_time when the recruiter wants it sent now or outside weekday 9-5. Also returns candidate_key -> lead id mappings.",
+    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Pass send_hours any_time when the recruiter wants it sent now or outside weekday 9-5. Also returns candidate_key -> lead id mappings.",
   ),
   tool(
     "add_shortlist_leads",
@@ -283,6 +283,7 @@ export function instantlyRest(
 // campaign starts sending, so leads only go into draft/paused ones; activation is the card.
 const ENROLLABLE = new Set([0, 2]);
 const ACTIVE = 1;
+const DRAFT = 0;
 async function requireEnrollable(rest: InstantlyRest, campaignId: string) {
   const campaign = await rest("GET", `/campaigns/${campaignId}`);
   if (!ENROLLABLE.has(campaign.status as number))
@@ -688,13 +689,14 @@ async function ensureRoleCampaign(
     if (campaign && !better) {
       const patched = campaign.stop_on_reply !== true;
       const current = firstEmail(campaign);
-      // Copy is saved only onto an empty draft or paused campaign this product created: an active
-      // one keeps what is sending, and copy someone already wrote is shown, never replaced.
+      // Copy goes only onto a campaign this product created: a draft (nothing sent yet) takes
+      // replacement copy, a paused one only its first; an active one keeps what is sending, and an
+      // adopted one keeps the copy someone else wrote.
       const writeSteps =
         Boolean(input.steps) &&
-        ENROLLABLE.has(campaign.status as number) &&
         existing.binding.created === true &&
-        current === null;
+        (campaign.status === DRAFT ||
+          (ENROLLABLE.has(campaign.status as number) && current === null));
       // The provider edits only draft or paused campaigns, so a live one is paused for new hours.
       const pausedForHours = Boolean(input.send_hours) && campaign.status === ACTIVE;
       if (pausedForHours) await rest("POST", `/campaigns/${mappedId}/pause`);
@@ -720,9 +722,8 @@ async function ensureRoleCampaign(
         ...(input.steps && !writeSteps
           ? {
               currentEmail: current,
-              stepsNotSaved: current
-                ? "The campaign already has this email; show it to the recruiter instead of replacing it"
-                : "This campaign was not created here or is sending; its email is not changed",
+              stepsNotSaved:
+                "This campaign was not created here or is sending; its email is not changed",
             }
           : {}),
       };
