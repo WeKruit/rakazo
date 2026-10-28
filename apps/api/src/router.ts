@@ -172,6 +172,7 @@ import {
   CALL_CLIENT_NONCE_PREFIX,
   callClientNonce,
   clampCatalogThinkingLevel,
+  closedAskClientNonce,
   containsSecret,
   expandSkillReferencesInPrompt,
   hasMixedOneShotSchedule,
@@ -204,6 +205,7 @@ import {
   ensureBoard,
   ensurePlatformServices,
   ensureRecruitingWorkspace,
+  findClosedAskAnswer,
   findDefaultModelCredential,
   findDefaultVoiceCredential,
   findModelCredential,
@@ -225,6 +227,7 @@ import {
   Prisma,
   parseComputerMode,
   RECRUITING_PRESET_SOURCE,
+  recordClosedAskAnswer,
   recruitingCrmConversationId,
   recruitingPresetId,
   releaseSpaceDeletionClaim,
@@ -1041,6 +1044,54 @@ export function createRouter(deps: RouterDeps) {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+  /** One admission path for a composer message and for an answer that starts work again. */
+  async function sendAsActor(
+    actor: Actor,
+    input: Parameters<typeof sendThreadMessage>[3] & Parameters<typeof resolveThreadTarget>[2],
+  ) {
+    const startedAt = performance.now();
+    // The three admission reads are independent and all complete before any write.
+    // Outcomes are reported in the original order (model gate, ownership, teaching) so an
+    // unowned bot still answers with the isolation error rather than its teaching state.
+    const settled = <T>(promise: Promise<T>) =>
+      promise.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+    const [needsModel, resolvedTarget, teaching] = await Promise.all([
+      sendNeedsModel(deps, actor),
+      settled(resolveThreadTarget(deps.prisma, actor, input)),
+      input.botId
+        ? settled(assertTeachingSendAllowed(deps.prisma, actor.spaceId, input.botId))
+        : { value: undefined },
+    ]);
+    if (needsModel) {
+      throw new ORPCError("BAD_REQUEST", { message: "Connect a model to start a run." });
+    }
+    if ("error" in resolvedTarget) throw resolvedTarget.error;
+    if ("error" in teaching) throw teaching.error;
+    const target = resolvedTarget.value;
+    if (target.kind === "group") await attachMissingCrmRole({ actor }, target);
+    const authorizedAt = performance.now();
+    const result = await sendThreadMessage(
+      deps,
+      actor,
+      target,
+      input,
+      target.kind === "bot"
+        ? (runId) => releaseComputerControl(deps, actor, target.botId, "done", runId)
+        : undefined,
+    );
+    const finishedAt = performance.now();
+    getLogger().info("thread.send.timing", {
+      threadId: target.threadId,
+      kind: target.kind,
+      authorizeMs: Math.round(authorizedAt - startedAt),
+      sendMs: Math.round(finishedAt - authorizedAt),
+      totalMs: Math.round(finishedAt - startedAt),
+    });
+    return result;
   }
   const taughtSkills = createTaughtSkillsService({
     prisma: deps.prisma,
@@ -2659,50 +2710,9 @@ export function createRouter(deps: RouterDeps) {
           void follow.return(undefined).catch(() => {});
         }
       }),
-      send: authed.threads.send.handler(async ({ context, input }) => {
-        const startedAt = performance.now();
-        // The three admission reads are independent and all complete before any write.
-        // Outcomes are reported in the original order (model gate, ownership, teaching) so an
-        // unowned bot still answers with the isolation error rather than its teaching state.
-        const settled = <T>(promise: Promise<T>) =>
-          promise.then(
-            (value) => ({ value }),
-            (error: unknown) => ({ error }),
-          );
-        const [needsModel, resolvedTarget, teaching] = await Promise.all([
-          sendNeedsModel(deps, context.actor),
-          settled(resolveThreadTarget(deps.prisma, context.actor, input)),
-          input.botId
-            ? settled(assertTeachingSendAllowed(deps.prisma, context.actor.spaceId, input.botId))
-            : { value: undefined },
-        ]);
-        if (needsModel) {
-          throw new ORPCError("BAD_REQUEST", { message: "Connect a model to start a run." });
-        }
-        if ("error" in resolvedTarget) throw resolvedTarget.error;
-        if ("error" in teaching) throw teaching.error;
-        const target = resolvedTarget.value;
-        if (target.kind === "group") await attachMissingCrmRole(context, target);
-        const authorizedAt = performance.now();
-        const result = await sendThreadMessage(
-          deps,
-          context.actor,
-          target,
-          input,
-          target.kind === "bot"
-            ? (runId) => releaseComputerControl(deps, context.actor, target.botId, "done", runId)
-            : undefined,
-        );
-        const finishedAt = performance.now();
-        getLogger().info("thread.send.timing", {
-          threadId: target.threadId,
-          kind: target.kind,
-          authorizeMs: Math.round(authorizedAt - startedAt),
-          sendMs: Math.round(finishedAt - authorizedAt),
-          totalMs: Math.round(finishedAt - startedAt),
-        });
-        return result;
-      }),
+      send: authed.threads.send.handler(async ({ context, input }) =>
+        sendAsActor(context.actor, input),
+      ),
       updateQueued: authed.threads.updateQueued.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
         await updateQueuedThreadMessage(deps, context.actor, target, input);
@@ -3087,9 +3097,45 @@ export function createRouter(deps: RouterDeps) {
           username: input.username,
         });
         if (!answered) {
-          throw new ORPCError("CONFLICT", {
-            message: "This prompt is no longer awaiting an answer",
+          // The wait already ended (it expired or was stopped). The answer starts the work the
+          // way a message does, replying to the card so the run still sees the question.
+          const closed = await findClosedAskAnswer(deps.prisma, {
+            spaceId: context.actor.spaceId,
+            threadId: target.threadId,
+            runId: input.runId,
+            messageId: input.messageId,
+            answer: input.answer,
           });
+          if (!closed) {
+            throw new ORPCError("CONFLICT", {
+              message: "This prompt is no longer awaiting an answer",
+            });
+          }
+          await sendAsActor(context.actor, {
+            ...(target.kind === "group"
+              ? {
+                  groupId: target.groupId,
+                  addressing: "mentions" as const,
+                  mentions: [{ kind: "bot" as const, id: closed.botId }],
+                }
+              : { botId: target.botId }),
+            text: closed.text,
+            replyToMessageId: input.messageId,
+            clientNonce: closedAskClientNonce(input.messageId),
+          });
+          const seq = await recordClosedAskAnswer(deps.prisma, {
+            spaceId: context.actor.spaceId,
+            threadId: target.threadId,
+            runId: input.runId,
+            messageId: input.messageId,
+            answer: closed,
+          });
+          if (seq !== null) {
+            await deps.events.notify(target.threadId, seq).catch((error) => {
+              getLogger().error("closed ask realtime notification", error);
+            });
+          }
+          return { ok: true as const };
         }
         await deps.jobs.enqueue(runContinueJob(input.runId)).catch((error) => {
           // The answer and queued run are durable; the reconciler repairs a missed immediate wake.

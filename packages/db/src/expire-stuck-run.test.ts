@@ -11,6 +11,7 @@ function tx(options?: {
   sibling?: boolean;
   steering?: boolean;
   status?: "queued" | "waiting_input" | "waiting_takeover";
+  cards?: Array<{ id: string; blocks: unknown[] }>;
 }) {
   let reads = 0;
   const messages: Array<Record<string, unknown>> = [];
@@ -45,6 +46,11 @@ function tx(options?: {
     thread: { update: vi.fn(async () => ({ nextMessageSeq: 2, nextEventSeq: 9 })) },
     message: {
       findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () => options?.cards ?? []),
+      update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => ({
+        id: args.where.id,
+        ...args.data,
+      })),
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
         const row = { id: "message-expired", ...args.data };
         messages.push(row);
@@ -174,5 +180,43 @@ describe("expireStuckRun", () => {
         blocks: [{ kind: "meta", text: stuckWorkStatusMessage("waiting_input") }],
       }),
     });
+  });
+
+  it("closes the waiting card instead of adding a status line", async () => {
+    const card = { kind: "ask", text: "Which city?", status: "pending" };
+    const client = tx({
+      status: "waiting_input",
+      cards: [{ id: "ask-1", blocks: [{ kind: "text", text: "One question." }, card] }],
+    });
+    await expireStuckRun(client as unknown as Prisma.TransactionClient, {
+      runId: "run-1",
+      threadId: "thread-1",
+      status: "waiting_input",
+      updatedAt,
+      now,
+    });
+    const closed = [
+      { kind: "text", text: "One question." },
+      { ...card, status: "expired" },
+    ];
+    expect(client.message.update).toHaveBeenCalledWith({
+      where: { id: "ask-1" },
+      data: { blocks: closed },
+    });
+    expect(client.message.create).not.toHaveBeenCalled();
+    expect(client.snapshot().events).toEqual([
+      expect.objectContaining({
+        type: "thread.message.updated",
+        runId: "run-1",
+        payload: { messageId: "ask-1", role: "bot", blocks: closed },
+      }),
+      expect.objectContaining({ type: "run.cancelled", runId: "run-1" }),
+    ]);
+    // The run still records why it stopped, for the activity list and delegated outcomes.
+    expect(client.run.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ error: stuckWorkStatusMessage("waiting_input") }),
+      }),
+    );
   });
 });

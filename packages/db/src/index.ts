@@ -7,6 +7,7 @@ export * from "./board-live.js";
 export * from "./bootstrap-user.js";
 export * from "./cancel-runs.js";
 export * from "./client.js";
+export * from "./closed-asks.js";
 export * from "./computers.js";
 export * from "./connect-asks.js";
 export * from "./credential-secrets.js";

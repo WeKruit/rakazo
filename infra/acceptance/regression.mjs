@@ -12,7 +12,8 @@
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
 //                  coordinator in the t1 chat, or --dispatch-group <id>), and the booking card
-//                  (--t5-group <id> --t5-say <text>)
+//                  (--t5-group <id> --t5-say <text>), and answering a question card whose wait
+//                  expired (--expired-group <id>, a test chat with a question left unanswered for a day)
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
 //   RAKAZO_EXPECT_SHA  passed to smoke.mjs so /ready must serve the released revision
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every case passes.
@@ -217,7 +218,7 @@ const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.js
 const wanted = new Set(
   option("--only")?.split(",") ??
     (SUITE === "full"
-      ? ["smoke", "first10", "progress", "t3", "first10-long", "t1", "dispatch", "t5"]
+      ? ["smoke", "first10", "progress", "t3", "first10-long", "t1", "dispatch", "t5", "expired"]
       : ["smoke", "first10", "progress", "t3"]),
 );
 
@@ -523,6 +524,64 @@ if (wanted.has("t5"))
     else if (!/confirm interview booking/i.test(card.text ?? ""))
       failures.push(`card text: "${card.text}"`);
     commonChecks(replies, failures);
+  });
+
+if (wanted.has("expired"))
+  await stage("expired", async (failures) => {
+    // <cases>/expired.json ({"groupId"}) names a private test chat whose question card expired.
+    // Answering it must start the work like any message: the card shows the answer, the answer
+    // replies to the card, a reply follows, and the question is not asked again.
+    const file = CASES && path.join(CASES, "expired.json");
+    const saved = file && fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, "utf8")) : {};
+    const groupId = option("--expired-group") ?? saved.groupId;
+    if (!groupId)
+      return failures.push(
+        "pass --expired-group, or <cases>/expired.json, for the expired card case",
+      );
+    const before = await messagesOf(groupId);
+    // Approval, secret and connection cards are never answered here.
+    const card = before.findLast((message) =>
+      (message.blocks ?? []).some(
+        (block) =>
+          block.kind === "ask" &&
+          block.status === "expired" &&
+          !block.approvalEffectId &&
+          block.input !== "secret" &&
+          !block.connection &&
+          !block.requestedSchema &&
+          block.actions?.length,
+      ),
+    );
+    if (!card) return failures.push("no expired question card with choices in the test chat");
+    const ask = card.blocks.find((block) => block.kind === "ask" && block.status === "expired");
+    const choice = ask.actions[0];
+    const seen = new Set(before.map((message) => message.id));
+    await rpc("threads/answer", {
+      groupId,
+      runId: card.runId,
+      messageId: card.id,
+      answer: choice.id,
+    });
+    const messages = await settled(groupId, { quietMs: 30_000, limitMs: 10 * 60_000 });
+    const added = messages.filter((message) => !seen.has(message.id));
+    const answered = messages
+      .find((message) => message.id === card.id)
+      ?.blocks?.find((block) => block.kind === "ask");
+    if (answered?.status !== "answered" || answered.answer !== choice.id)
+      failures.push(`card not shown answered (${answered?.status ?? "missing"})`);
+    const sent = added.filter((message) => message.role === "user");
+    if (sent.length !== 1 || botText(sent[0]) !== choice.label)
+      failures.push(`answer not sent once as "${choice.label}" (${sent.length} messages)`);
+    else if (sent[0].replyToMessageId !== card.id)
+      failures.push("answer does not reply to the card");
+    const replies = recruiterSees(added);
+    if (!replies.some((message) => botText(message).trim()))
+      failures.push("no reply after the answer");
+    if (cards(added).some((block) => block.text === ask.text))
+      failures.push(`asked again: "${ask.text.slice(0, 80)}"`);
+    const notice = added.find((message) => message.role === "system" && !message.internal);
+    if (notice) failures.push(`status line after the answer: "${botText(notice).slice(0, 80)}"`);
+    commonChecks(added, failures);
   });
 
 const passed = results.every((result) => result.pass);
