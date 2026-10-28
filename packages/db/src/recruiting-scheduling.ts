@@ -864,10 +864,25 @@ export async function bindRecruitingSchedulingOperation(
       throw new IsolationError("Scheduling operation history is incomplete");
     for (const sibling of siblings) {
       const other = projection(sibling);
-      if (other.id !== plan.id && fingerprint(other) === fingerprint(plan) && other[key])
-        throw new IsolationError(
-          "This original email and interval already have an operation; reconcile its existing outcome",
-        );
+      const otherId = other[key];
+      if (other.id === plan.id || fingerprint(other) !== fingerprint(plan) || !otherId) continue;
+      const earlier = await tx.externalEffect.findFirst({
+        where: { id: otherId, spaceId: actor.spaceId },
+        select: { status: true },
+      });
+      // A card nobody answered (or a declined one) never reached the calendar: the new card
+      // replaces it, and the old card can no longer be approved.
+      if (earlier?.status === "denied") continue;
+      if (earlier?.status === "intended") {
+        const replaced = await tx.externalEffect.updateMany({
+          where: { id: otherId, spaceId: actor.spaceId, status: "intended" },
+          data: { status: "denied", reviewReason: "Replaced by a newer approval card" },
+        });
+        if (replaced.count === 1) continue;
+      }
+      throw new IsolationError(
+        "This original email and interval already have an operation; reconcile its existing outcome",
+      );
     }
     const inverse = await tx.externalEffect.findFirst({
       where: {
