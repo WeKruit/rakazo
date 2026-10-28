@@ -11,6 +11,7 @@ import {
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
   TOOL_RESULT_TEXT_LIMIT,
+  withoutUndeclaredArguments,
 } from "./pi-runtime-limits.js";
 
 describe("modelStreamMaxRetries", () => {
@@ -210,5 +211,27 @@ describe("compactionReserveTokens", () => {
     expect(compactionReserveTokens(200_000, 32_000)).toBe(40_000);
     expect(compactionReserveTokens(40_000, 8_000)).toBe(16_384);
     expect(compactionReserveTokens(20_000, 16_000)).toBe(4_000);
+  });
+});
+
+describe("tool argument repair", () => {
+  const schema = {
+    type: "object",
+    properties: { query: { type: "string" }, numResults: { type: "number" } },
+    required: ["query"],
+    additionalProperties: false,
+  };
+
+  it("drops an invented argument a strict schema would reject, keeping the declared ones", () => {
+    expect(
+      withoutUndeclaredArguments({ query: "warehouse managers", objective: "find" }, schema),
+    ).toEqual({ query: "warehouse managers" });
+  });
+
+  it("leaves arguments alone when the schema allows extras or all names are declared", () => {
+    const raw = { query: "x", objective: "y" };
+    expect(withoutUndeclaredArguments(raw, { ...schema, additionalProperties: true })).toBe(raw);
+    const declared = { query: "x", numResults: 5 };
+    expect(withoutUndeclaredArguments(declared, schema)).toBe(declared);
   });
 });

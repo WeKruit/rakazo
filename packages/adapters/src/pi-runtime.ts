@@ -46,7 +46,12 @@ import type {
   ModelCallObserver,
 } from "@rakazo/adapter-kit";
 import { AskUserInputSchema, usableModelId } from "@rakazo/contracts";
-import { abortableDelay, type WorkActivity, workActivityForTool } from "@rakazo/core";
+import {
+  abortableDelay,
+  shortQuestion,
+  type WorkActivity,
+  workActivityForTool,
+} from "@rakazo/core";
 import { getLogger } from "@rakazo/logging";
 import { isToolPauseResult } from "./approval-effect.js";
 import { connectionIdArgument, credentialArgument } from "./bot-secrets.js";
@@ -86,6 +91,7 @@ import {
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
   type ToolOutputStore,
+  withoutUndeclaredArguments,
 } from "./pi-runtime-limits.js";
 import type { PiSessionHandle, PiSessionRecorder } from "./pi-session.js";
 import { PiJsonlSessionRecorder } from "./pi-session.js";
@@ -1582,7 +1588,8 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
       if (tool.name === "ask_user") {
         const options = Array.isArray(raw.options) ? raw.options.map(String) : raw.options;
         return {
-          question: String(raw.question ?? "What should I use?"),
+          // An over-long question loses its leading sentences instead of failing the card.
+          question: shortQuestion(String(raw.question ?? "What should I use?")),
           // Keep a missing/invalid options value as-is so schema minItems can reject it;
           // do not coerce to [] (that used to look like a valid empty list upstream).
           ...(options === undefined ? {} : { options }),
@@ -1665,7 +1672,7 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
           bot_id: raw.bot_id ? String(raw.bot_id) : raw.botId ? String(raw.botId) : "",
         };
       }
-      return raw as never;
+      return withoutUndeclaredArguments(raw, tool.inputSchema) as never;
     },
     execute: async (toolCallId, params): Promise<AgentToolResult<unknown>> => {
       host.signal.throwIfAborted();

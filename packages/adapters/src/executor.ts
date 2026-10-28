@@ -147,6 +147,7 @@ import {
   sendBodyText,
   sendRecipients,
   sendToNote,
+  shortQuestion,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   truncatedPlainText,
@@ -964,14 +965,50 @@ export function nearCandidateKey(
 }
 
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
-export function shortQuestion(question: string, max = 240): string {
-  let text = question.trim();
-  while (text.length > max) {
-    const cut = text.search(/[。！？.!?；;]\s*(?=\S)/);
-    if (cut < 0 || cut + 1 >= text.length) return `${text.slice(0, max - 1)}…`;
-    text = text.slice(cut + 1).trim();
-  }
-  return text;
+export { shortQuestion };
+
+/** "find 50", "找100个", "scale to 200": the number of people the recruiter asked to reach. */
+export function requestedPeopleTarget(text: string): number | undefined {
+  if (/e-?mail|contact|outreach|send|draft|邮件|联系|发/i.test(text)) return undefined;
+  const match =
+    /(?:find|get|source|search(?:\s+for)?|scale(?:\s+(?:up|out))?(?:\s+to)?|widen\s+to|找|搜|扩大到)\D{0,15}?(\d{2,4})/i.exec(
+      text,
+    ) ?? /(\d{2,4})\s*(?:more\s+)?(?:people|candidates|profiles|个人|人|位)/i.exec(text);
+  const target = match ? Number(match[1]) : Number.NaN;
+  return Number.isFinite(target) && target >= 10 ? target : undefined;
+}
+
+/**
+ * The playbook stops a scale-out at the recruiter's target: once the role holds that many people,
+ * handing a search on for a paid deep search only spends money nobody asked for.
+ */
+async function searchTargetAlreadyMet(
+  prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
+  threadId: string,
+  handoffMessage: string,
+): Promise<string | undefined> {
+  if (!/search|research|sourc|find|more (?:people|candidates)|深度|搜索|找/i.test(handoffMessage))
+    return undefined;
+  const thread = await prisma.thread.findUnique({
+    where: { id: threadId },
+    select: { activeRecruitingRoleId: true },
+  });
+  if (!thread?.activeRecruitingRoleId) return undefined;
+  const latest = await prisma.message.findFirst({
+    where: { threadId, role: "user" },
+    orderBy: { seq: "desc" },
+    select: { blocks: true },
+  });
+  const said = ((latest?.blocks ?? []) as MessageBlock[])
+    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .join("\n");
+  const target = requestedPeopleTarget(said);
+  if (!target) return undefined;
+  const total = await prisma.recruitingCandidate.count({
+    where: { roleId: thread.activeRecruitingRoleId },
+  });
+  if (total < target) return undefined;
+  return `Not handed off: Results already holds ${total} people, meeting the recruiter's target of ${target}. Do not run a deep search; tell the recruiter the total and offer the next step.`;
 }
 
 /**
@@ -5748,8 +5785,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           // The server's own repeat of a refused role save is not a new model call: it still runs.
           if (handedOff && !executionId.includes(":repaired")) {
+            // Not a failure: the next member owns this work now, so nothing is retried.
             return {
-              error: "This stage was handed off. End the turn without more tool calls.",
+              skipped: "Not run: this stage was handed off. End the turn without more tool calls.",
             };
           }
           if (disabledBuiltinTools.has(name)) {
@@ -10888,6 +10926,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
+            const met = await searchTargetAlreadyMet(
+              deps.prisma,
+              thread.id,
+              String(args.message ?? ""),
+            );
+            if (met) return finish({ skipped: met });
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
               confirm_name: args.confirm_name ? String(args.confirm_name) : undefined,
