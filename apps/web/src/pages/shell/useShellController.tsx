@@ -160,19 +160,9 @@ export function useShellController() {
   const [recruitingRefresh, setRecruitingRefresh] = useState(0);
   // The role chat starts open: answers and confirmation cards must be visible without a click.
   const [roleChatOpen, setRoleChatOpen] = useState(true);
-  // A message sent during a reply interjects; it is queued until the reply takes it in.
-  const [steer, setSteer] = useState<{ threadId: string; state: "queued" | "applied" } | null>(
-    null,
-  );
   const [requeuedRunIds, setRequeuedRunIds] = useState<string[]>([]);
   const observeRunSignal = useCallback(
     (event: { type: string; runId?: string | null; threadId?: string | null }) => {
-      if (event.type === "run.steering.claimed")
-        setSteer((current) =>
-          current && current.threadId === event.threadId && current.state === "queued"
-            ? { ...current, state: "applied" }
-            : current,
-        );
       if (event.type === "run.requeued" && event.runId) {
         const runId = event.runId;
         setRequeuedRunIds((current) =>
@@ -816,11 +806,6 @@ export function useShellController() {
     setPreloadRecoveryActiveWork(composerRunning);
     return () => setPreloadRecoveryActiveWork(false);
   }, [composerRunning]);
-  // Only a reply that is still working takes an interjection; one waiting on a card does not.
-  const composerRunningRef = useRef(transcriptRunning);
-  composerRunningRef.current = transcriptRunning;
-  const runningThreadId = transcriptRunning ? activeSnapshot?.threadId : undefined;
-  const shownSteer = steer && steer.threadId === runningThreadId ? steer.state : null;
   // A reply whose worker stopped is queued again and resumes on its own; say so until it does.
   const resuming = currentRuns.some(
     (run) => requeuedRunIds.includes(run.id) && ["queued", "waiting_takeover"].includes(run.status),
@@ -1051,10 +1036,8 @@ export function useShellController() {
     cancelFocusPrompt,
     clearReply,
     bootstrapMe,
-    composerRunningRef,
     showToolActivity,
     terminalRunReceipts,
-    setSteer,
     refreshBots,
   });
   const { attachmentUploads, sendMessage } = shellMessages;
@@ -1465,7 +1448,6 @@ export function useShellController() {
     transcriptRunning,
     peopleAdded,
     composerRunning,
-    shownSteer,
     resuming,
     runError,
     displayedRunError,

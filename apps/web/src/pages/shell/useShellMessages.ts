@@ -15,7 +15,6 @@ import {
   answerableAskMessageIds,
   attachmentsForThread,
   inferAttachmentMimeType,
-  isStatusQuestion,
   isXlsxFileName,
   pendingUserMessageId,
   removePendingUserMessage,
@@ -87,10 +86,8 @@ export function useShellMessages({
   cancelFocusPrompt,
   clearReply,
   bootstrapMe,
-  composerRunningRef,
   showToolActivity,
   terminalRunReceipts,
-  setSteer,
   refreshBots,
 }: {
   navigate: NavigateFunction;
@@ -149,10 +146,8 @@ export function useShellMessages({
   cancelFocusPrompt: () => void;
   clearReply: () => void;
   bootstrapMe: Me | null | undefined;
-  composerRunningRef: RefObject<boolean>;
   showToolActivity: boolean;
   terminalRunReceipts: RefObject<Set<string>>;
-  setSteer: Dispatch<SetStateAction<{ threadId: string; state: "queued" | "applied" } | null>>;
   refreshBots: (includeArchived?: boolean, replaceBotOrder?: boolean) => Promise<void>;
 }) {
   const { t } = useLingui();
@@ -232,6 +227,37 @@ export function useShellMessages({
           : activeBotId.current === botId;
         if (!stillHere) return;
         setSendError(errorText(error, t`Could not update reaction`));
+      }
+    },
+    [t],
+  );
+  // A message sent while a reply works waits as steering; this edits, removes or sends it now.
+  const changeQueuedMessage = useCallback(
+    async (
+      messageId: string,
+      change: { action: "edit"; text: string } | { action: "remove" } | { action: "send_now" },
+    ) => {
+      const botId = activeBotId.current;
+      const groupId = activeGroupId.current;
+      if (!botId && !groupId) return;
+      const stillHere = () =>
+        groupId ? activeGroupId.current === groupId : activeBotId.current === botId;
+      try {
+        await rpc.threads.updateQueued({
+          ...(groupId ? { groupId } : { botId: botId! }),
+          messageId,
+          change,
+        });
+      } catch (error) {
+        if (!stillHere()) return;
+        // The reply already took it in: re-read so it shows where it went.
+        if (isConflict(error)) {
+          if (groupId) await refreshGroupThreadRef.current(groupId).catch(() => undefined);
+          else await refreshThreadRef.current(botId!).catch(() => undefined);
+          return;
+        }
+        setSendError(errorText(error, t`Could not update message`));
+        throw error;
       }
     },
     [t],
@@ -433,10 +459,6 @@ export function useShellMessages({
           withdrawEcho();
           return false;
         }
-        const interjectThreadId = composerRunningRef.current
-          ? snapshotRef.current?.threadId
-          : undefined;
-        const interject = Boolean(interjectThreadId && !reroutedToGroup);
         if (groupTarget) {
           // A network failure retries the same send (same nonce) before the draft comes back.
           const sent = await retrySend(
@@ -452,7 +474,6 @@ export function useShellMessages({
                 artifactIds: artifactIds.length ? artifactIds : undefined,
                 replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
                 replyQuote: reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
-                ...(interject ? { interrupt: true } : {}),
               }),
             { keepTrying: stillSubmitted },
           );
@@ -471,7 +492,6 @@ export function useShellMessages({
                 artifactIds: artifactIds.length ? artifactIds : undefined,
                 replyToMessageId: activeReplyTarget?.id,
                 replyQuote: activeReplyQuote ?? undefined,
-                ...(interject ? { interrupt: true } : {}),
               }),
             { keepTrying: stillSubmitted },
           );
@@ -491,9 +511,6 @@ export function useShellMessages({
             );
           }
         }
-        // A progress question is answered at once without reaching the work: nothing is queued.
-        if (interject && interjectThreadId && !isStatusQuestion(trimmed))
-          setSteer({ threadId: interjectThreadId, state: "queued" });
         dropDelayedSetup();
         clearReply();
         revokePendingAttachmentPreviews(attachments);
@@ -566,9 +583,16 @@ export function useShellMessages({
     jumpToReplyMessage,
     answerMessage,
     reactToMessage,
+    changeQueuedMessage,
     attachmentUploads,
     onAttachmentPick,
     removeAttachment,
     sendMessage,
   };
+}
+
+function isConflict(error: unknown): boolean {
+  return (
+    error !== null && typeof error === "object" && "code" in error && error.code === "CONFLICT"
+  );
 }

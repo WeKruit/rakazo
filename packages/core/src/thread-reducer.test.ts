@@ -213,3 +213,48 @@ describe("tool step closure by execution", () => {
     expect(active(done)).toBe(false);
   });
 });
+
+describe("queued input", () => {
+  const queued = event(11, "thread.message.created", {
+    messageId: "user-2",
+    role: "user",
+    blocks: [{ kind: "text", text: "Only senior people" }],
+    queued: true,
+  });
+
+  it("holds a queued message until the run reads it", () => {
+    const held = reduceThreadEvent(base, queued);
+    expect(held.queuedMessageIds).toEqual(["user-2"]);
+    const edited = reduceThreadEvent(
+      held,
+      event(12, "thread.message.updated", {
+        messageId: "user-2",
+        role: "user",
+        blocks: [{ kind: "text", text: "Only staff engineers" }],
+        queued: true,
+      }),
+    );
+    expect(edited.queuedMessageIds).toEqual(["user-2"]);
+    expect(edited.messages.at(-1)?.blocks).toEqual([
+      { kind: "text", text: "Only staff engineers" },
+    ]);
+    const applied = reduceThreadEvent(
+      edited,
+      event(13, "run.steering.claimed", { steeringIds: ["s-1"], messageIds: ["user-2"] }),
+    );
+    expect(applied.queuedMessageIds).toEqual([]);
+    expect(applied.messages.map((message) => message.id)).toEqual(["user-2"]);
+    expect(eventNeedsSnapshotRead({ type: "run.steering.claimed" })).toBe(false);
+  });
+
+  it("drops a removed message and never requeues a replay older than the snapshot", () => {
+    const removed = reduceThreadEvent(
+      reduceThreadEvent(base, queued),
+      event(12, "thread.message.deleted", { messageId: "user-2" }),
+    );
+    expect(removed.messages).toEqual([]);
+    expect(removed.queuedMessageIds).toEqual([]);
+    const replayed = reduceThreadEvent({ ...base, cursor: 20 }, queued);
+    expect(replayed.queuedMessageIds).toBeUndefined();
+  });
+});

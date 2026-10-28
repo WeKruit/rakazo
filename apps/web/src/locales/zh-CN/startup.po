@@ -352,6 +352,7 @@ msgstr "已附加 {path}"
 
 #: src/lib/message-text.ts
 #: src/pages/shell/chat-context.tsx
+#: src/pages/shell/queued-messages.tsx
 msgid "Attachment"
 msgstr "附件"
 
@@ -466,6 +467,10 @@ msgstr "无法连接服务器。"
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Cancel"
 msgstr "取消"
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Cancel edit"
+msgstr "取消编辑"
 
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
@@ -965,6 +970,10 @@ msgid "Could not update computer"
 msgstr "无法更新电脑"
 
 #: src/pages/shell/useShellMessages.ts
+msgid "Could not update message"
+msgstr "无法更新消息"
+
+#: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "无法更新反应"
 
@@ -1183,6 +1192,10 @@ msgstr "截止时间"
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
 msgstr "编辑"
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Edit queued message"
+msgstr "编辑排队消息"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Education"
@@ -1471,14 +1484,6 @@ msgstr "集成"
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Interested"
 msgstr "感兴趣"
-
-#: src/pages/shell/ShellConversation.tsx
-msgid "Interjection applied"
-msgstr "插话已生效"
-
-#: src/pages/shell/ShellConversation.tsx
-msgid "Interjection queued"
-msgstr "插话已排队"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Internal assessment"
@@ -2170,6 +2175,10 @@ msgstr "拉取请求"
 msgid "Qualifying work"
 msgstr "符合条件的工作"
 
+#: src/pages/shell/queued-messages.tsx
+msgid "Queued messages"
+msgstr "排队消息"
+
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
 msgstr "引用"
@@ -2342,6 +2351,10 @@ msgstr "将{name}移出候选名单"
 #: src/pages/shell/Composer.tsx
 msgid "Remove mention {0}"
 msgstr "移除提及 {0}"
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Remove queued message"
+msgstr "移除排队消息"
 
 #. placeholder {0}: selectedSkill.name
 #: src/pages/shell/Composer.tsx
@@ -2547,6 +2560,7 @@ msgstr "薪资范围"
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/queued-messages.tsx
 msgid "Save"
 msgstr "保存"
 
@@ -2653,6 +2667,10 @@ msgstr "发送删除验证码"
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Send feedback"
 msgstr "发送反馈"
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Send now"
+msgstr "立即发送"
 
 #: src/pages/recruiting/CrmWorkbench.tsx
 msgid "Send outcome unknown"

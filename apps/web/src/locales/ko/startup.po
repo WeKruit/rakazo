@@ -352,6 +352,7 @@ msgstr ""
 
 #: src/lib/message-text.ts
 #: src/pages/shell/chat-context.tsx
+#: src/pages/shell/queued-messages.tsx
 msgid "Attachment"
 msgstr "첨부 파일"
 
@@ -466,6 +467,10 @@ msgstr "서버에 연결할 수 없습니다."
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Cancel"
 msgstr "취소"
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Cancel edit"
+msgstr ""
 
 #: src/pages/shell/chat-context.tsx
 msgid "Cancel reply"
@@ -965,6 +970,10 @@ msgid "Could not update computer"
 msgstr "컴퓨터를 업데이트할 수 없습니다"
 
 #: src/pages/shell/useShellMessages.ts
+msgid "Could not update message"
+msgstr ""
+
+#: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
 msgstr "반응을 업데이트할 수 없습니다"
 
@@ -1182,6 +1191,10 @@ msgstr ""
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
+msgstr ""
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Edit queued message"
 msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1470,14 +1483,6 @@ msgstr "앱·도구 연동"
 
 #: src/pages/recruiting/SequenceOverview.tsx
 msgid "Interested"
-msgstr ""
-
-#: src/pages/shell/ShellConversation.tsx
-msgid "Interjection applied"
-msgstr ""
-
-#: src/pages/shell/ShellConversation.tsx
-msgid "Interjection queued"
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -2170,6 +2175,10 @@ msgstr "풀 리퀘스트"
 msgid "Qualifying work"
 msgstr ""
 
+#: src/pages/shell/queued-messages.tsx
+msgid "Queued messages"
+msgstr ""
+
 #: src/pages/shell/Transcript.tsx
 msgid "Quote"
 msgstr ""
@@ -2342,6 +2351,10 @@ msgstr ""
 #: src/pages/shell/Composer.tsx
 msgid "Remove mention {0}"
 msgstr "{0} 멘션 삭제"
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Remove queued message"
+msgstr ""
 
 #. placeholder {0}: selectedSkill.name
 #: src/pages/shell/Composer.tsx
@@ -2547,6 +2560,7 @@ msgstr ""
 #: src/components/teach/SkillDraftCard.tsx
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/queued-messages.tsx
 msgid "Save"
 msgstr "저장"
 
@@ -2652,6 +2666,10 @@ msgstr "삭제 코드 보내기"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Send feedback"
+msgstr ""
+
+#: src/pages/shell/queued-messages.tsx
+msgid "Send now"
 msgstr ""
 
 #: src/pages/recruiting/CrmWorkbench.tsx

@@ -1046,6 +1046,8 @@ export const ThreadSnapshotSchema = z.object({
   threadId: Id,
   cursor: z.number().int().min(-1),
   messages: z.array(ThreadMessageSchema),
+  /** User messages a working reply has not read yet, oldest first; editable until it does. */
+  queuedMessageIds: z.array(Id).optional(),
   olderCursor: z.number().int().nonnegative().nullable(),
   /** Oldest seq of the latest-message window (excludes merged waiting cards); null when empty. */
   messagesCursor: z.number().int().nonnegative().nullable().optional(),

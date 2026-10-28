@@ -795,12 +795,28 @@ export function useShellRecruiting({
         connectionMemberIds.includes(bot.id) && bot.spawnKey === `recruiting:${userId}:${key}`,
     )?.id;
 
+  // Messages a working reply has not read yet wait above the composer instead of the transcript.
+  const queuedMessageIds = activeSnapshot?.queuedMessageIds;
   const transcriptMessages = useMemo(
     () =>
-      userVisibleMessages(activeSnapshot?.messages ?? [], {
-        includePeerReceipts: showToolActivity,
-      }),
-    [activeSnapshot?.messages, showToolActivity],
+      userVisibleMessages(
+        queuedMessageIds?.length
+          ? (activeSnapshot?.messages ?? []).filter(
+              (message) => !queuedMessageIds.includes(message.id),
+            )
+          : (activeSnapshot?.messages ?? []),
+        { includePeerReceipts: showToolActivity },
+      ),
+    [activeSnapshot?.messages, queuedMessageIds, showToolActivity],
+  );
+  const queuedMessages = useMemo(
+    () =>
+      queuedMessageIds?.length
+        ? (activeSnapshot?.messages ?? []).filter((message) =>
+            queuedMessageIds.includes(message.id),
+          )
+        : [],
+    [activeSnapshot?.messages, queuedMessageIds],
   );
   const transcriptArtifactTarget = useMemo<ArtifactTarget>(
     () => (inGroup ? { groupId: groupId ?? "" } : { botId: active?.id ?? "" }),
@@ -1145,6 +1161,7 @@ export function useShellRecruiting({
     connectionMemberIds,
     recruitingConnectionBot,
     transcriptMessages,
+    queuedMessages,
     transcriptArtifactTarget,
     saveSequenceDraft,
     openingCrmRole,

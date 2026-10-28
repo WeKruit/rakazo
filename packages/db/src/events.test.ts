@@ -4372,7 +4372,11 @@ describe("claimSteering", () => {
     expect(tx.event.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         type: "run.steering.claimed",
-        payload: { steeringIds: ["steer-1", "steer-2"], nextMessageSeq: 7 },
+        payload: {
+          steeringIds: ["steer-1", "steer-2"],
+          messageIds: ["message-1", "message-2"],
+          nextMessageSeq: 7,
+        },
       }),
     });
     expect(tx.steeringMessage.updateMany).toHaveBeenCalledWith({

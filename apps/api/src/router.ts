@@ -374,6 +374,7 @@ import {
   stopThreadRuns,
   threadHead,
   threadSnapshot,
+  updateQueuedThreadMessage,
 } from "./thread-target.js";
 import {
   disconnectVoiceCredential,
@@ -2702,6 +2703,11 @@ export function createRouter(deps: RouterDeps) {
         });
         return result;
       }),
+      updateQueued: authed.threads.updateQueued.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        await updateQueuedThreadMessage(deps, context.actor, target, input);
+        return { ok: true as const };
+      }),
       reportTiming: authed.threads.reportTiming.handler(({ context, input }) => {
         getLogger().info("client.turn.timing", { spaceId: context.actor.spaceId, ...input });
         return { ok: true as const };
@@ -2958,6 +2964,8 @@ export function createRouter(deps: RouterDeps) {
               role: "user",
               blocks,
               runIds,
+              // Every addressed bot is busy and holds it as unread steering.
+              ...(runIds.length && !createdRunIds.length ? { queued: true } : {}),
             },
           });
           await touchGroupUpdatedAt(tx, target.groupId);
