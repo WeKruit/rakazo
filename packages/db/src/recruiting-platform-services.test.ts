@@ -20,6 +20,7 @@ function fixture(
     missing?: Record<string, string[]>;
     lead?: boolean;
     linked?: number;
+    grants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
   } = {},
 ) {
   const servers = { ...options.servers };
@@ -57,6 +58,8 @@ function fixture(
     },
     botMcpServer: {
       count: vi.fn(async () => options.linked ?? 0),
+      findMany: vi.fn(async () => options.grants ?? []),
+      updateMany: vi.fn(async () => ({ count: 1 })),
       createMany: vi.fn(async () => {
         missing[current] = [];
         return { count: 1 };
@@ -147,5 +150,37 @@ describe("ensurePlatformServices", () => {
     await ensurePlatformServices(none.prisma, actor);
     expect(none.tx.mcpServer.create).not.toHaveBeenCalled();
     expect(none.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+  });
+
+  it("lets Scheduling move and cancel bookings where it can already book", async () => {
+    const reads = ["get_bookings", "get_availability"];
+    const f = fixture({
+      grants: [
+        { id: "books", allowAllTools: false, allowedTools: [...reads, "create_booking"] },
+        { id: "reads", allowAllTools: false, allowedTools: reads },
+        {
+          id: "done",
+          allowAllTools: false,
+          allowedTools: ["create_booking", "reschedule_booking", "cancel_booking"],
+        },
+      ],
+    });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.botMcpServer.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        allowAllTools: false,
+        server: expect.objectContaining({ endpoint: "https://mcp.cal.com/mcp", enabled: true }),
+      }),
+    });
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        id: "books",
+        allowedTools: { equals: [...reads, "create_booking"] },
+      }),
+      data: {
+        allowedTools: [...reads, "create_booking", "reschedule_booking", "cancel_booking"],
+      },
+    });
   });
 });
