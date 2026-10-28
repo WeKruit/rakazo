@@ -37,9 +37,8 @@ import {
 } from "./lib/session-gate";
 import { completeSsoCallback, SSO_CALLBACK_PATH } from "./lib/sso-flow";
 
-const ShellPage = lazy(() =>
-  import("./pages/Shell").then((module) => ({ default: module.ShellPage })),
-);
+const loadShell = () => import("./pages/Shell");
+const ShellPage = lazy(() => loadShell().then((module) => ({ default: module.ShellPage })));
 
 const loadAuth = () => import("./pages/Auth");
 const AuthPage = lazy(() => loadAuth().then((module) => ({ default: module.AuthPage })));
@@ -54,8 +53,13 @@ export function usesSession(pathname: string) {
   return pathname !== SSO_CALLBACK_PATH && pathname !== LOCAL_SETTINGS_PAGE;
 }
 
-/** On a cold sign-in page, fetch its module and sign-in options alongside the session. */
+/** On a cold chat or sign-in page, fetch what it renders first alongside the session. */
 export function preloadFirstPage(pathname: string) {
+  const [, root, child] = pathname.split("/");
+  if (root === "app" && child !== "artifacts" && child !== "board") {
+    void loadShell().catch(() => undefined);
+    return true;
+  }
   if (!AUTH_PATHS.has(pathname)) return false;
   void loadAuth().catch(() => undefined);
   void fetchAuthCapabilities().catch(() => undefined);
