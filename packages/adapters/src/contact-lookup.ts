@@ -67,6 +67,8 @@ export type ContactLookupOptions = {
   searched?: ReadonlyMap<string, ReadonlySet<ContactProvider>>;
   waitMs?: number;
   pollMs?: number;
+  /** Longest wait for one provider request; a source that stops answering never holds the run. */
+  requestMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
 };
 
@@ -96,6 +98,20 @@ const defaultSleep = (ms: number, signal: AbortSignal) =>
   });
 
 class ProviderError extends Error {}
+
+const REQUEST_MS = 30_000;
+const NO_ANSWER = "no answer in time";
+const request = (options: ContactLookupOptions, url: string, init: RequestInit = {}) =>
+  options.fetch(url, {
+    ...init,
+    signal: AbortSignal.any([options.signal, AbortSignal.timeout(options.requestMs ?? REQUEST_MS)]),
+  });
+const failure = (error: unknown) =>
+  error instanceof ProviderError
+    ? error.message
+    : error instanceof Error && error.name === "TimeoutError"
+      ? NO_ANSWER
+      : "request failed";
 
 async function json(response: Response, provider: string) {
   if (response.status === 402) throw new ProviderError(`${provider} has no credits left`);
@@ -167,8 +183,18 @@ export async function findEmails(
     });
 
   await fullEnrich(open("fullenrich"), options, sleep, add);
-  for (const person of open("contactout")) await contactOut(person, options, add);
-  for (const person of open("leadmagic")) await leadMagic(person, options, add);
+  // A source that stopped answering is skipped for everyone after it.
+  for (const provider of ["contactout", "leadmagic"] as const) {
+    let down = false;
+    for (const person of open(provider)) {
+      if (down) {
+        person.lookups.push({ provider, outcome: "skipped", detail: "source not answering" });
+        continue;
+      }
+      await (provider === "contactout" ? contactOut : leadMagic)(person, options, add);
+      down = person.lookups.at(-1)?.detail === NO_ANSWER;
+    }
+  }
 
   const output = people.map(({ key: _key, company: _company, ...person }) => ({
     ...person,
@@ -235,10 +261,9 @@ async function fullEnrich(
   const headers = { authorization: `Bearer ${key}`, "content-type": "application/json" };
   try {
     const started = await json(
-      await options.fetch(FULLENRICH, {
+      await request(options, FULLENRICH, {
         method: "POST",
         headers,
-        signal: options.signal,
         body: JSON.stringify({
           name: "contact lookup",
           datas: people.map((person, index) => ({
@@ -258,13 +283,17 @@ async function fullEnrich(
     let body: Record<string, unknown> | undefined;
     for (;;) {
       await sleep(options.pollMs ?? 5_000, options.signal);
-      body = await json(
-        await options.fetch(`${FULLENRICH}/${encodeURIComponent(id)}`, {
-          headers,
-          signal: options.signal,
-        }),
-        "fullenrich",
-      );
+      try {
+        body = await json(
+          await request(options, `${FULLENRICH}/${encodeURIComponent(id)}`, { headers }),
+          "fullenrich",
+        );
+      } catch (error) {
+        // One slow status check is retried on the next poll; the lookup is already paid for.
+        if (options.signal.aborted || error instanceof ProviderError) throw error;
+        if (Date.now() >= deadline) break;
+        continue;
+      }
       if (text(body?.status) === "FINISHED" || Date.now() >= deadline) break;
       if (/CANCELED|CREDITS_INSUFFICIENT|RATE_LIMIT|UNKNOWN/i.test(text(body?.status))) break;
     }
@@ -301,7 +330,7 @@ async function fullEnrich(
       });
   } catch (error) {
     if (options.signal.aborted) throw error;
-    mark("failed", error instanceof ProviderError ? error.message : "request failed");
+    mark("failed", failure(error));
   }
 }
 
@@ -316,10 +345,7 @@ async function contactOut(person: Person, options: ContactLookupOptions, add: Ad
     url.searchParams.set("profile", person.linkedin_url);
     url.searchParams.set("include_phone", "false");
     const body = await json(
-      await options.fetch(url.href, {
-        headers: { token: key, authorization: "basic" },
-        signal: options.signal,
-      }),
+      await request(options, url.href, { headers: { token: key, authorization: "basic" } }),
       "contactout",
     );
     const profile = record(body?.profile);
@@ -347,7 +373,7 @@ async function contactOut(person: Person, options: ContactLookupOptions, add: Ad
     person.lookups.push({
       provider: "contactout",
       outcome: "failed",
-      detail: error instanceof ProviderError ? error.message : "request failed",
+      detail: failure(error),
     });
   }
 }
@@ -360,10 +386,9 @@ async function leadMagic(person: Person, options: ContactLookupOptions, add: Add
   }
   try {
     const body = await json(
-      await options.fetch(LEADMAGIC, {
+      await request(options, LEADMAGIC, {
         method: "POST",
         headers: { "x-api-key": key, "content-type": "application/json" },
-        signal: options.signal,
         body: JSON.stringify({ profile_url: person.linkedin_url }),
       }),
       "leadmagic",
@@ -384,7 +409,7 @@ async function leadMagic(person: Person, options: ContactLookupOptions, add: Add
     person.lookups.push({
       provider: "leadmagic",
       outcome: "failed",
-      detail: error instanceof ProviderError ? error.message : "request failed",
+      detail: failure(error),
     });
   }
 }
