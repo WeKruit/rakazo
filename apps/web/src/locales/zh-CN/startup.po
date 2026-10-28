@@ -124,6 +124,10 @@ msgstr "{name} 已停止"
 msgid "{people} people"
 msgstr "{people} 人"
 
+#: src/pages/shell/ShellConversation.tsx
+msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
+msgstr "{peopleAdded, plural, other {已新增 # 人}}"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "剩余 {remaining} · Bot 只看不操作"

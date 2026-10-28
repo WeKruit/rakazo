@@ -124,6 +124,10 @@ msgstr "{name} durduruldu"
 msgid "{people} people"
 msgstr ""
 
+#: src/pages/shell/ShellConversation.tsx
+msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
+msgstr "{peopleAdded, plural, one {# kişi eklendi} other {# kişi eklendi}}"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} kaldı · bot yalnızca izliyor"

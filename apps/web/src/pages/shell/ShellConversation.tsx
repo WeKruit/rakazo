@@ -1,5 +1,5 @@
 import { i18n } from "@lingui/core";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
 import { attachmentsForThread, isActive, threadTailPhase } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
@@ -176,6 +176,7 @@ export function ShellConversation({
     answerableAskIds,
     workingRuns,
     transcriptRunning,
+    peopleAdded,
     composerRunning,
     shownSteer,
     resuming,
@@ -796,6 +797,11 @@ export function ShellConversation({
                   speakingMessageId={speakingMessageId}
                   onSpeak={speakMessage}
                   onOpenComputer={onOpenComputer}
+                  liveDetail={
+                    peopleAdded ? (
+                      <Plural value={peopleAdded} one="# person added" other="# people added" />
+                    ) : undefined
+                  }
                 />
               )}
               {showToolActivity && inGroup && composerRunning ? (

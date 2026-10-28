@@ -124,6 +124,10 @@ msgstr "{name} रोक दिया गया"
 msgid "{people} people"
 msgstr ""
 
+#: src/pages/shell/ShellConversation.tsx
+msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
+msgstr "{peopleAdded, plural, one {# व्यक्ति जोड़ा गया} other {# लोग जोड़े गए}}"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} शेष · बॉट देख रहा है, कार्रवाई नहीं कर रहा"

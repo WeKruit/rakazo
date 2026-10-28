@@ -15,7 +15,7 @@ import {
 import type { GroupAvatarMember } from "@rakazo/ui-web";
 import { cn } from "@rakazo/ui-web";
 import { ArrowDown, TextQuote } from "lucide-react";
-import type { RefObject } from "react";
+import type { ReactNode, RefObject } from "react";
 import {
   Fragment,
   memo,
@@ -94,6 +94,7 @@ export const Transcript = memo(function Transcript({
   speakingMessageId,
   onSpeak,
   onOpenComputer,
+  liveDetail,
 }: {
   narrow: boolean;
   visible: boolean;
@@ -133,6 +134,8 @@ export const Transcript = memo(function Transcript({
   speakingMessageId: string | null;
   onSpeak: (message: ThreadMessage) => void;
   onOpenComputer: (botId?: string) => void;
+  /** Business progress for the live work line, e.g. people added to Results. */
+  liveDetail?: ReactNode;
 }) {
   const { t } = useLingui();
   const [atEnd, setAtEnd] = useState(true);
@@ -637,6 +640,7 @@ export const Transcript = memo(function Transcript({
               }
               live
               label={workingLabel}
+              detail={liveDetail}
               showSteps={!showToolActivity}
             />
           ) : (

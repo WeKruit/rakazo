@@ -98,6 +98,7 @@ import type { PendingAttachment } from "../shell/Composer";
 import { isCommandPaletteHotkey } from "../shell/command-palette-hotkey";
 import { FALLBACK_BOT_COLOR } from "../shell/constants";
 import { memberName } from "../shell/group-members";
+import { useNewPeopleDuringRun } from "../../lib/run-people-progress";
 import { useShellComputer } from "./useShellComputer";
 
 export function useShellController() {
@@ -800,6 +801,12 @@ export function useShellController() {
     ["running", "queued", "leased"].includes(run.status),
   );
   const transcriptRunning = workingRuns.length > 0;
+  const peopleAdded = useNewPeopleDuringRun({
+    groupId: inGroup && !showToolActivity ? (groupId ?? undefined) : undefined,
+    threadId: knownThreadId ?? undefined,
+    running: transcriptRunning,
+    refreshSignal: recruitingRefresh,
+  });
   const composerRunning = currentRuns.some((run) => isActive(run.status));
   useEffect(() => {
     setPreloadRecoveryActiveWork(composerRunning);
@@ -1448,6 +1455,7 @@ export function useShellController() {
     answerableAskIds,
     workingRuns,
     transcriptRunning,
+    peopleAdded,
     composerRunning,
     shownSteer,
     resuming,
