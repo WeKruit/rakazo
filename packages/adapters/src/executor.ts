@@ -1037,7 +1037,7 @@ const PLANNED_SEARCHES_NOTE =
   "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
 
 const nextStepAlreadyGiven = (reply: string) =>
-  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round).`;
+  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines with message_user and end the turn without a question.`;
 
 /** Model failures that a fresh attempt can clear: a silent or dropped stream, a timeout or an outage. */
 const MODEL_OUTAGE =
@@ -5622,26 +5622,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const to = saved?.workspace?.role?.revision;
           if (typeof to === "number" && to > role.revision) briefBump = { from: role.revision, to };
         };
-        // After this run records a round, its only card is the next-step choice.
-        const nextStepCardAfterRound = async () => {
-          if (!thread.activeRecruitingRoleId) return undefined;
-          const [round] = await deps.prisma.externalEffect.findMany({
-            where: {
-              runId,
-              spaceId: run.spaceId,
-              kind: "recruiting_research",
-              status: "completed",
-              request: { path: ["operation"], equals: "calibration_round" },
-            },
-            select: { id: true },
-            take: 1,
-          });
-          if (!round) return undefined;
-          return recruitingNextStepCard();
-        };
-        /** What the recruiter wrote after this run recorded its round, newest message. */
-        const recruiterReplyAfterRound = async () => {
-          const round = await deps.prisma.externalEffect.findFirst({
+        /** The newest round this run recorded; a refused attempt (its result is an error) is none. */
+        const roundRecordedThisRun = async () => {
+          const rounds = await deps.prisma.externalEffect.findMany({
             where: {
               runId,
               spaceId: run.spaceId,
@@ -5650,8 +5633,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
               request: { path: ["operation"], equals: "calibration_round" },
             },
             orderBy: { createdAt: "desc" },
-            select: { createdAt: true },
+            select: { createdAt: true, result: true },
+            take: 20,
           });
+          return rounds.find(
+            ({ result }) => !(result && typeof result === "object" && "error" in result),
+          );
+        };
+        // After this run records a round, its only card is the next-step choice.
+        const nextStepCardAfterRound = async () => {
+          if (!thread.activeRecruitingRoleId) return undefined;
+          if (!(await roundRecordedThisRun())) return undefined;
+          return recruitingNextStepCard();
+        };
+        /** What the recruiter wrote after this run recorded its round, newest message. */
+        const recruiterReplyAfterRound = async () => {
+          const round = await roundRecordedThisRun();
           if (!round) return undefined;
           const reply = await deps.prisma.message.findFirst({
             where: {
