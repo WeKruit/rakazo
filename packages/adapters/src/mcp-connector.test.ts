@@ -3481,13 +3481,17 @@ describe("local native Instantly campaign and lead tools", () => {
       activeRoleId: null as string | null,
       deleted: false,
       rejectPatch: "",
+      lookups: [] as Record<string, unknown>[],
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
     const prisma = {
       botMcpServer: { findFirst: vi.fn(async () => assignment) },
       secret: { findFirst: vi.fn(async () => ({ id: "key-1", ciphertext: "encrypted" })) },
-      mcpServer: { findFirst: vi.fn(async () => server) },
+      mcpServer: {
+        findFirst: vi.fn(async () => server),
+        findMany: vi.fn(async () => [{ id: "enrich", revision: 1 }]),
+      },
       run: {
         findFirst: vi.fn(async ({ where }) =>
           where.id === "run-1" ? { thread: { activeRecruitingRoleId: state.activeRoleId } } : null,
@@ -3513,11 +3517,14 @@ describe("local native Instantly campaign and lead tools", () => {
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
         findMany: vi.fn(async ({ where }) =>
-          [...state.effects.values()].filter(
-            (e) =>
-              e.kind === where.kind &&
-              (e.request as { roleId?: string } | undefined)?.roleId !== where.NOT?.request?.equals,
-          ),
+          where.OR
+            ? state.lookups
+            : [...state.effects.values()].filter(
+                (e) =>
+                  e.kind === where.kind &&
+                  (e.request as { roleId?: string } | undefined)?.roleId !==
+                    where.NOT?.request?.equals,
+              ),
         ),
         findFirst: vi.fn(async () => {
           const bound = [...state.effects.values()].filter(
@@ -4163,6 +4170,58 @@ describe("local native Instantly campaign and lead tools", () => {
     expect((await f.run("ensure_role_campaign", { role_id: "role-3" }))[0]).toMatchObject({
       type: "error",
       message: expect.stringMatching(/No Instantly mailbox is connected/),
+    });
+  });
+
+  it("add_shortlist_leads fills in the email an earlier contact lookup saved", async () => {
+    const f = fixture();
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.lookups = [
+      {
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "enrich",
+              resourceRevision: 1,
+              toolName: "native_find_emails",
+            },
+            args: { people: [] },
+          },
+        ],
+        result: {
+          structuredContent: {
+            people: [
+              {
+                linkedin_url: "https://www.linkedin.com/in/ada-l",
+                emails: [
+                  { address: "ada@home.test", type: "personal", status: null, provider: "a" },
+                  { address: "ada@work.test", type: "work", status: "DELIVERABLE", provider: "b" },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ];
+    f.state.requests.length = 0;
+    const out = f.result(
+      await f.run("add_shortlist_leads", {
+        role_id: "role-1",
+        candidates: [
+          { candidate_key: "https://www.linkedin.com/in/ada-l/", first_name: "Ada" },
+          { candidate_key: "c" },
+        ],
+      }),
+    );
+    expect(out).toMatchObject({
+      added: ["https://www.linkedin.com/in/ada-l/"],
+      skippedMissingEmail: ["c"],
+    });
+    expect(f.state.requests.find((r) => r.path === "/api/v2/leads/add")?.body).toMatchObject({
+      leads: [{ email: "ada@work.test", first_name: "Ada" }],
     });
   });
 
