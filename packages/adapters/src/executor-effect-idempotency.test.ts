@@ -771,11 +771,11 @@ describe("simulated scheduling approval chain", () => {
 describe("model outage on a recruiting turn", () => {
   it("runs the turn once more before reporting the failure", async () => {
     const f = fixture("run-outage");
-    const bot = await f.prisma.bot.findUniqueOrThrow({ where: { id: "bot-1" } });
+    const bot = await f.prisma.bot.findUniqueOrThrow();
     f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
       ...bot,
       spawnKey: "recruiting:user-1:main",
-    });
+    } as typeof bot);
     let retried = 0;
     Object.assign(f.prisma.attempt, { count: vi.fn(async () => retried) });
     f.runtimeRun.mockImplementation(async function* () {

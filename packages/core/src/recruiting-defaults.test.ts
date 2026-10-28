@@ -26,6 +26,15 @@ describe("calibration fast path", () => {
 });
 
 describe("maintained recruiting defaults", () => {
+  // Same budget Workloop uses: a longer prompt dilutes every rule in it. Shorten before adding.
+  it.each(RECRUITING_DEFAULT_BOTS)("$name instructions stay within 12,000 characters", (bot) => {
+    expect(bot.instructions.length).toBeLessThanOrEqual(12_000);
+  });
+
+  it.each(RECRUITING_DEFAULT_SKILLS)("$name skill stays within 8,000 characters", (skill) => {
+    expect(skill.body.length).toBeLessThanOrEqual(8_000);
+  });
+
   it.each(RECRUITING_DEFAULT_BOTS)(
     "$name asks only consequential questions and keeps preferences retractable",
     (bot) => {

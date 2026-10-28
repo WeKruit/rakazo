@@ -527,6 +527,7 @@ import {
   observeShellCommand,
   SHELL_STILL_RUNNING_NOTICE,
 } from "./shell-command-stream.js";
+import { createSilenceWatch, SILENT_RUN_STOP_TEXT } from "./silence-watch.js";
 import { isExactNoResponse, NO_RESPONSE, stripNoResponseReply } from "./silent-reply.js";
 import {
   listAgentSkillRecords,
@@ -4086,6 +4087,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
       }, 60_000);
       heartbeat.unref?.();
+      // Stuck detection: a runtime that sends nothing for 20 minutes is stopped, so the run fails
+      // with a visible notice (and a role thread's idle sweep picks it up) instead of hanging.
+      const silenceWatch = createSilenceWatch({
+        onSilent: (silentMs) => {
+          getLogger().warn("run.silent", { runId, silentMs });
+          runAbortController?.abort(new Error(SILENT_RUN_STOP_TEXT));
+        },
+      });
 
       const runSecrets = [...deps.secrets];
       try {
@@ -11930,9 +11939,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             runAbortController?.abort();
           };
           let lastTakeoverExecutionId: string | undefined;
+          silenceWatch.touch();
           for await (const event of withRuntimeCleanup(runtimeEvents, runAbortController, () => {
             for (const entry of toolCalledAudits.values()) entry.release();
           })) {
+            silenceWatch.touch();
             if (approvalPausePending) return;
             if (!leaseValid) return;
             const now = Date.now();
@@ -12619,14 +12630,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
             return;
           }
-          const message = redactSecrets(
-            error instanceof Error ? error.message : String(error),
-            runSecrets,
-          );
+          const message = silenceWatch.fired
+            ? SILENT_RUN_STOP_TEXT
+            : redactSecrets(error instanceof Error ? error.message : String(error), runSecrets);
           // A recruiter's request must not vanish because the model went silent or was briefly
           // unavailable after its own retries: run the turn once more before reporting failure.
           if (
             hideVendors &&
+            !silenceWatch.fired &&
             MODEL_OUTAGE.test(message) &&
             !(await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } }))
           ) {
@@ -12740,6 +12751,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
       } finally {
         detachShutdown?.();
         clearInterval(heartbeat);
+        silenceWatch.stop();
         if (!retainComputerLease) {
           if (screenRelease) {
             await deps.sandbox
