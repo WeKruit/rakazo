@@ -414,7 +414,7 @@ if (wanted.has("dispatch"))
         ]),
       );
       const text = recruiterSees(replies).map(botText).join("\n");
-      log.push(
+      notes.push(
         `## ${item.capability}: ${item.ask}\nhandled by: ${[...handlers].filter(Boolean).join(", ")}\n${text}`,
       );
       if (!replies.length) failures.push(`${item.capability}: no reply`);

@@ -355,7 +355,7 @@ import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
-import { handoffToGroupBot, loadGroupContext } from "./group-handoff.js";
+import { handoffToGroupBot, loadGroupContext, reportGroupHandoffOutcome } from "./group-handoff.js";
 import {
   COMPACTION_BATCH_SIZE,
   formatCompactedSummary,
@@ -4742,6 +4742,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(failed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
+          }
+          if (thread.groupId && run.trigger === "follow_up" && !failed.continuationRunId) {
+            await reportGroupHandoffOutcome(deps, run, thread.groupId, {
+              status: "failed",
+              error: message,
+            }).catch((error) => getLogger().error("group handoff report", error));
           }
           if (run.trigger === "bot_message") {
             await returnBotMessageOutcome(
@@ -10886,6 +10892,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
               confirm_name: args.confirm_name ? String(args.confirm_name) : undefined,
               message: String(args.message ?? ""),
+              report_back: args.report_back === true,
             });
             if ("ok" in result && result.ok) handedOff = true;
             return finish(result);
@@ -12723,6 +12730,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
             ).catch((error) => getLogger().error("run.autocontinue guard", error));
             recruitingContinued = guard?.action === "continued";
+          }
+          if (thread.groupId && run.trigger === "follow_up" && !handedOff) {
+            await reportGroupHandoffOutcome(deps, run, thread.groupId, {
+              status: "completed",
+            }).catch((error) => getLogger().error("group handoff report", error));
           }
           if (botMessageOutcome) {
             // Prefer the final reply. If the turn only posted mid-turn progress, return that

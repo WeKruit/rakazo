@@ -499,6 +499,10 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     text: z.string(),
     /** Links ownership transfers in one user-started group turn. */
     hop: z.number().int().positive().optional(),
+    /** The sender asked to check this stage's result: it is handed back when the stage ends. */
+    reportBack: z.boolean().optional(),
+    /** This handoff returns a finished or failed stage to the member that asked for it. */
+    report: z.enum(["completed", "failed"]).optional(),
   }),
   z.object({
     /** A group-chat message delivered into a member bot's own thread. */

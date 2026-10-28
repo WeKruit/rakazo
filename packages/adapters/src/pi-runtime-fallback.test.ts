@@ -69,9 +69,11 @@ import { estimateModelContextTokens } from "./model-context.js";
 import { IMAGE_RETURNING_COMPUTER_TOOLS } from "./model-vision.js";
 import {
   CODEX_STREAM_IDLE_TIMEOUT_MESSAGE,
+  isProviderRateLimited,
   isRetryableProviderUnavailable,
   keepInterruptedAssistantMessage,
   PiAgentRuntime,
+  providerRetryAfterMs,
   thinkingSummary,
 } from "./pi-runtime.js";
 import {
@@ -1570,6 +1572,28 @@ describe("Pi runtime transient model retries", () => {
     expect(providerState.delay.mock.calls.map(([delay]) => delay)).toEqual([2_000, 8_000, 20_000]);
   });
 
+  it("keeps a separate rate-limit budget and honours the provider's retry-after", async () => {
+    providerState.stream
+      .mockImplementationOnce(() => stream(primary, message(primary, [], "error", "terminated")))
+      .mockImplementationOnce(() =>
+        stream(primary, message(primary, [], "error", "429 Too Many Requests; retry after 42s")),
+      )
+      .mockImplementationOnce(() =>
+        stream(primary, message(primary, [], "error", "HTTP 503 unavailable")),
+      )
+      .mockImplementationOnce(() =>
+        stream(primary, message(primary, [], "error", "429 rate limit")),
+      )
+      .mockImplementation(() =>
+        stream(primary, message(primary, [{ type: "text", text: "Recovered." }], "stop")),
+      );
+    const events = await run(request());
+    expect(events.at(-1)).toEqual({ type: "done", text: "Recovered." });
+    expect(providerState.delay.mock.calls.map(([delay]) => delay)).toEqual([
+      2_000, 42_000, 8_000, 15_000,
+    ]);
+  });
+
   it("does not back off after a provider timeout, which already spent its request budget", async () => {
     providerState.stream.mockImplementation(() =>
       stream(primary, message(primary, [], "error", "Request timed out.")),
@@ -1666,7 +1690,7 @@ describe("Pi runtime transient model retries", () => {
     const outcome = run(request()).catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(0);
     expect(providerState.stream).toHaveBeenCalledTimes(1);
-    for (const [index, delay] of [2_000, 8_000, 20_000].entries()) {
+    for (const [index, delay] of [5_000, 15_000, 30_000, 60_000].entries()) {
       await vi.advanceTimersByTimeAsync(delay - 1);
       expect(providerState.stream).toHaveBeenCalledTimes(index + 1);
       await vi.advanceTimersByTimeAsync(1);
@@ -2945,7 +2969,7 @@ describe("Pi runtime ordered model fallback", () => {
       providerState.stream.mock.calls.map(
         ([target]) => (target as Model<"openai-completions">).provider,
       ),
-    ).toEqual([primary.provider, primary.provider, primary.provider, primary.provider]);
+    ).toEqual(Array(5).fill(primary.provider));
   });
 
   it("skips an OpenAI-compatible backup with acceptsImages false and uses one with true", async () => {
@@ -3447,4 +3471,18 @@ it("passes tool-call arguments parsed so far to the run while the model writes t
   const deltas: unknown[] = [];
   await run({ ...request(), onToolCallDelta: (call) => deltas.push(call) });
   expect(deltas).toEqual([{ id: "call-1", name: "picks", args: { keys: ["a"] } }]);
+});
+
+describe("provider rate-limit facts", () => {
+  it.each([
+    ["429 rate limit", true, undefined],
+    ["Rate limit reached. Please try again in 1.5s.", true, 1_500],
+    ["Too Many Requests; retry-after: 12", true, 12_000],
+    ["rate_limit_error retry_after_ms=750", true, 750],
+    ["429; retry after 900 seconds", true, 60_000],
+    ["HTTP 503 unavailable", false, undefined],
+  ])("%s", (error, limited, wait) => {
+    expect(isProviderRateLimited(new Error(error))).toBe(limited);
+    expect(providerRetryAfterMs(new Error(error))).toBe(wait);
+  });
 });

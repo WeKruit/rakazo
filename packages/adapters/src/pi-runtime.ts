@@ -120,6 +120,9 @@ function catalogModels(): Models {
 }
 const MAX_PARALLEL_SUBAGENTS = 4;
 const MODEL_PROVIDER_RETRY_DELAYS_MS = [2_000, 8_000, 20_000] as const;
+// Rate limits clear on the provider's clock, so they get their own longer budget.
+const MODEL_RATE_LIMIT_RETRY_DELAYS_MS = [5_000, 15_000, 30_000, 60_000] as const;
+const MODEL_RETRY_AFTER_MAX_MS = 60_000;
 // Some OpenAI-compatible models return EOS immediately after a tool result
 // instead of taking another assistant turn. A bounded internal follow-up keeps
 // that provider quirk from making a long task look complete after one step.
@@ -2989,6 +2992,26 @@ function errorFacts(value: unknown) {
   return { text: text.join(" ").toLowerCase(), statuses };
 }
 
+export function isProviderRateLimited(error: unknown): boolean {
+  const { text, statuses } = errorFacts(error);
+  return statuses.has(429) || /rate.?limit|too many requests/.test(text);
+}
+
+/** The wait the provider asked for, when its error says one; capped so a run never stalls. */
+export function providerRetryAfterMs(error: unknown): number | undefined {
+  const { text } = errorFacts(error);
+  const match =
+    /retry[-_ ]after(?:[-_ ]ms)?["']?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec(?:onds?)?)?/.exec(
+      text,
+    ) ?? /(?:try again|retry) in\s*(\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|sec(?:onds?)?)/.exec(text);
+  if (!match) return undefined;
+  const value = Number(match[1]);
+  const millis =
+    /^m/.test(match[2] ?? "") || /retry[-_ ]after[-_ ]ms/.test(match[0]) ? value : value * 1000;
+  if (!Number.isFinite(millis) || millis <= 0) return undefined;
+  return Math.min(Math.ceil(millis), MODEL_RETRY_AFTER_MAX_MS);
+}
+
 function isProviderTimeout(error: unknown): boolean {
   return /timed? out|timeout/.test(errorFacts(error).text);
 }
@@ -3225,6 +3248,7 @@ function fallbackAwareModelStream(
   const run = async () => {
     let buffered: AssistantMessageEvent[] = [];
     let retries = 0;
+    let rateLimitRetries = 0;
     let retriedSilentStream = false;
     // After a stalled stream, the next attempt (same model or backup) waits longer for its first item.
     let stalled = false;
@@ -3294,11 +3318,19 @@ function fallbackAwareModelStream(
                 restart = true;
                 break;
               }
-              const delay = isProviderTimeout(event.error)
+              const rateLimited = isProviderRateLimited(event.error);
+              const scheduled = isProviderTimeout(event.error)
                 ? undefined
-                : MODEL_PROVIDER_RETRY_DELAYS_MS[retries];
+                : rateLimited
+                  ? MODEL_RATE_LIMIT_RETRY_DELAYS_MS[rateLimitRetries]
+                  : MODEL_PROVIDER_RETRY_DELAYS_MS[retries];
+              const delay =
+                scheduled === undefined
+                  ? undefined
+                  : Math.max(scheduled, providerRetryAfterMs(event.error) ?? 0);
               if (delay !== undefined) {
-                retries += 1;
+                if (rateLimited) rateLimitRetries += 1;
+                else retries += 1;
                 await abortableDelay(delay, signal);
                 if (failIfAborted(target)) return;
                 buffered = [];

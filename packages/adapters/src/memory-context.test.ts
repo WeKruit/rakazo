@@ -59,6 +59,22 @@ describe("agent memory context", () => {
     expect(result.text).toContain(result.documents[0]!.includedContent);
   });
 
+  it("names memory cut for space instead of dropping it silently", async () => {
+    const read = vi.fn(async ({ scope }: { scope: "bot" | "user" }) =>
+      snapshot(
+        scope === "bot"
+          ? [document("new", "notes.md", "n".repeat(400), 1, "2026-08-15T12:00:00.000Z")]
+          : [document("old", "PROFILE.md", "p".repeat(400), 1, "2026-08-14T12:00:00.000Z")],
+      ),
+    );
+    const result = await loadAgentMemoryContext(storeWith(read), "bot-1", context, 700);
+    expect(Buffer.byteLength(result.text ?? "", "utf8")).toBeLessThanOrEqual(700);
+    expect(result.text).toContain(
+      "Cut for space; read with read_memory when relevant: bot: notes.md, user: PROFILE.md.",
+    );
+    expect(result.text?.endsWith("</durable_memory>")).toBe(true);
+  });
+
   it("omits the memory block when neither scope has documents", async () => {
     const read = vi.fn(async () => snapshot([]));
 
