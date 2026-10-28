@@ -214,6 +214,10 @@ msgstr "{name} arrêté"
 msgid "{people} people"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
+msgstr "{peopleAdded, plural, one {# personne ajoutée} other {# personnes ajoutées}}"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "{remaining} restant · le bot observe, il n'agit pas"
