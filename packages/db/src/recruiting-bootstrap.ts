@@ -855,6 +855,48 @@ export async function ensureRecruitingWorkspace(
 export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor): Promise<void> {
   for (const slug of ["people-search", "fullenrich"])
     await ensurePlatformService(prisma, actor, slug);
+  await ensureBookingChanges(prisma, actor);
+}
+
+const BOOKING_CHANGES = ["reschedule_booking", "cancel_booking"];
+
+/**
+ * Scheduling can book on a connected Cal.com calendar, so it can also move or cancel those
+ * bookings; each change still waits for the recruiter on its own card. Older connections were
+ * granted booking alone. Additive: only a restricted grant that already books gains the two tools.
+ */
+async function ensureBookingChanges(prisma: PrismaClient, actor: Actor): Promise<void> {
+  const scope = { spaceId: actor.spaceId, userId: actor.userId };
+  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "scheduling");
+  if (!role) return;
+  const grants = await prisma.botMcpServer.findMany({
+    where: {
+      ...scope,
+      allowAllTools: false,
+      server: { ...scope, endpoint: "https://mcp.cal.com/mcp", enabled: true },
+      bot: {
+        ...scope,
+        archivedAt: null,
+        OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
+      },
+    },
+  });
+  for (const grant of grants) {
+    const tools = Array.isArray(grant.allowedTools)
+      ? grant.allowedTools.filter((tool): tool is string => typeof tool === "string")
+      : [];
+    const missing = BOOKING_CHANGES.filter((tool) => !tools.includes(tool));
+    if (!tools.includes("create_booking") || !missing.length) continue;
+    await prisma.botMcpServer.updateMany({
+      where: {
+        id: grant.id,
+        ...scope,
+        allowAllTools: false,
+        allowedTools: { equals: grant.allowedTools as Prisma.InputJsonValue },
+      },
+      data: { allowedTools: [...tools, ...missing] },
+    });
+  }
 }
 
 function toolsFor(
