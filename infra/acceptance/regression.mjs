@@ -463,4 +463,12 @@ const summary = [
 ].join("\n");
 fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
 log(summary);
+// Archive test copies idle for a day; keep the booking fixture the t5 case reuses.
+if (TOKEN) {
+  const t5 = CASES && path.join(CASES, "t5.json");
+  const keep =
+    option("--t5-group") ??
+    (t5 && fs.existsSync(t5) ? JSON.parse(fs.readFileSync(t5, "utf8")).groupId : "");
+  await run("archive-copies", "archive-test-copies.mjs", keep ? ["--keep", keep] : []);
+}
 process.exit(passed ? 0 : 1);
