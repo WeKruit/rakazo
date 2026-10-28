@@ -3486,3 +3486,43 @@ describe("provider rate-limit facts", () => {
     expect(providerRetryAfterMs(new Error(error))).toBe(wait);
   });
 });
+
+it("compacts and retries once when the provider rejects the request as too long", async () => {
+  const { target, input } = compactionRequest(true);
+  // Our estimate fits; the provider counts more and refuses.
+  target.contextWindow = 400_000;
+  let answers = 0;
+  let summaries = 0;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) => {
+      if (context.systemPrompt?.includes("summarization assistant")) {
+        summaries++;
+        return stream(
+          target,
+          message(target, [{ type: "text", text: "Earlier completed work." }], "stop"),
+        );
+      }
+      return ++answers === 1
+        ? stream(target, message(target, [], "error", "prompt is too long: 412000 tokens > 400000"))
+        : stream(target, message(target, [{ type: "text", text: "Recovered." }], "stop"));
+    },
+  );
+  expect((await run(input)).at(-1)).toEqual({ type: "done", text: "Recovered." });
+  expect(answers).toBe(2);
+  expect(summaries).toBeGreaterThan(0);
+  expect(
+    providerState.agent!.state.messages.some((entry) => entry.role === "compactionSummary"),
+  ).toBe(true);
+});
+
+it("fails normally when the retried request is still too long", async () => {
+  const { target, input } = compactionRequest(true);
+  target.contextWindow = 400_000;
+  providerState.stream.mockImplementation(
+    (_model: Model<"openai-completions">, context: Context) =>
+      context.systemPrompt?.includes("summarization assistant")
+        ? stream(target, message(target, [{ type: "text", text: "Summary." }], "stop"))
+        : stream(target, message(target, [], "error", "context_length_exceeded")),
+  );
+  await expect(run(input)).rejects.toThrow("context_length_exceeded");
+});
