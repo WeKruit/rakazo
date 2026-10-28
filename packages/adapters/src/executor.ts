@@ -8591,8 +8591,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
                       }))
                     : rows;
+                  // The role's total, so a scale-out stops at its target without counting rows.
+                  const peopleInResults = await deps.prisma.recruitingCandidate.count({
+                    where: { roleId },
+                  });
                   return {
                     savedToResults: true,
+                    peopleInResults,
                     people,
                     expectedRoleRevision: role.revision,
                     next: RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
