@@ -3,7 +3,8 @@ import { Badge, Button } from "@rakazo/ui-web";
 import type { VirtualItem } from "@tanstack/react-virtual";
 import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { preloadCandidateDetail } from "../shell/preload-detail";
 import { CandidateWindow } from "./CandidateWindow";
 import { CompanyLogo } from "./CompanyLogo";
 import { PersonAvatar } from "./ProfileImage";
@@ -273,6 +274,7 @@ export function CandidateDirectory({
 }: CandidateDirectoryProps) {
   const { t } = useLingui();
   const [view, setView] = useState<"table" | "cards">("table");
+  useEffect(preloadCandidateDetail, []);
   const profiles = useMemo(
     () => rows.map((row) => directoryProfile(row, criterionRevision)),
     [rows, criterionRevision],
