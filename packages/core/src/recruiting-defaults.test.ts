@@ -265,7 +265,7 @@ describe("maintained recruiting defaults", () => {
       "even when it also says to find more of a kind",
       "Acceptance carries no correction.",
       "waves of four differently worded web_search_advanced_exa people searches",
-      "until the role holds the target or a wave adds fewer than five new people",
+      "until the role holds the target (each search returns peopleInResults, the role's total, already counting the people saved before this request)",
       "when the people search stopped short of the target",
       "everyone already returned excluded",
       // 2026-10-27: "find 50" with 124 people saved still started paid research and an email draft.
