@@ -15,7 +15,12 @@ import {
   RecruitingResearchToolInputSchema,
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
-import { boundDirectApprovalDetails, catalogApprovalDetails, parseCsv } from "@rakazo/core";
+import {
+  ACTIVE_RUN_STATUSES,
+  boundDirectApprovalDetails,
+  catalogApprovalDetails,
+  parseCsv,
+} from "@rakazo/core";
 import { stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type {
   Prisma,
@@ -1008,12 +1013,15 @@ export async function completeRecruitingResearchCall(
     ...(observation.nextCursor === undefined ? {} : { cursor: observation.nextCursor }),
   });
   // The provider is still working after the foreground wait: hand off to the poll job, which
-  // wakes this thread once, and tell the model not to spin on status.
+  // wakes this thread once, and tell the model not to spin on status. A stopped run never arms it.
   const background =
     taskState === "active" &&
     admitted.operation !== "rows" &&
     deps.jobs &&
-    !receiptIdentity?.historicalBackfill;
+    !receiptIdentity?.historicalBackfill &&
+    (await deps.prisma.run.count({
+      where: { id: trusted.runId, status: { in: [...ACTIVE_RUN_STATUSES] } },
+    })) > 0;
   if (background)
     await deps.jobs!.enqueue(
       recruitingResearchPollJob({ taskId: task.id }, recruitingResearchPollDelay(0)),

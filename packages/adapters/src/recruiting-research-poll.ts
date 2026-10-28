@@ -6,6 +6,7 @@ import type {
 } from "@rakazo/adapter-kit";
 import { recruitingResearchPollJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
+import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { classifyRecruitingResearchResult, mcpObject } from "./recruiting-research.js";
@@ -167,8 +168,9 @@ export async function trackDirectRecruitingResearch(
       where: { id: route.resourceId, ...scope },
       select: { id: true, revision: true, endpoint: true, transport: true },
     }),
+    // A stopped run never arms a background follow-up, even if its call returns afterwards.
     deps.prisma.run.findFirst({
-      where: { id: context.runId, ...scope },
+      where: { id: context.runId, ...scope, status: { in: [...ACTIVE_RUN_STATUSES] } },
       select: { id: true, thread: { select: { activeRecruitingRoleId: true } } },
     }),
   ]);
@@ -319,7 +321,7 @@ export async function pollRecruitingResearch(
       data: { nextEventSeq: { increment: 0 } },
     });
     if (!locked.count) return null;
-    const [bot, existing] = await Promise.all([
+    const [bot, existing, live] = await Promise.all([
       tx.bot.findFirst({
         where: { id: run.botId, spaceId: run.spaceId, userId: run.userId, archivedAt: null },
         select: { id: true },
@@ -328,8 +330,10 @@ export async function pollRecruitingResearch(
         where: { spaceId: run.spaceId, clientNonce: nonce },
         select: { id: true },
       }),
+      // Read under the thread lock: a Stop that closed the task while this probe ran wins.
+      tx.recruitingResearchTask.count({ where: { id: task.id, state: "active" } }),
     ]);
-    if (!bot || existing) return null;
+    if (!bot || existing || !live) return null;
     // Provider text is untrusted. Wake with local identity and status only.
     const direct = !(await tx.recruitingResearchAction.count({ where: { taskId: task.id } }));
     const summary = direct
@@ -447,7 +451,7 @@ async function wakeForPartialRows(
       data: { nextEventSeq: { increment: 0 } },
     });
     if (!locked.count) return null;
-    const [bot, existing, busy] = await Promise.all([
+    const [bot, existing, busy, live] = await Promise.all([
       tx.bot.findFirst({
         where: { id: run.botId, spaceId: run.spaceId, userId: run.userId, archivedAt: null },
         select: { id: true },
@@ -461,8 +465,9 @@ async function wakeForPartialRows(
         where: { threadId: run.threadId, status: { in: ["queued", "running"] } },
         select: { id: true },
       }),
+      tx.recruitingResearchTask.count({ where: { id: task.id, state: "active" } }),
     ]);
-    if (!bot || existing || busy) return null;
+    if (!bot || existing || busy || !live) return null;
     const summary = `Research for recruiting role ${task.roleId} is still working and has returned ${rows} people so far. Read the people not saved yet with the research provider's get_rows on the same research (task ${task.providerTaskId}), following each returned cursor, and save every page with recruiting_research save_results so they show in Results now. Do not reply to, restart or wait for the research; the rest arrives on its own. Then say in one short line how many new people were added, and end the turn.`;
     const wakeTask = await tx.task.create({
       data: {

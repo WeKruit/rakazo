@@ -719,7 +719,11 @@ describe("native research preparation", () => {
       }),
     };
     const prisma = {
-      run: { findFirst: vi.fn().mockResolvedValue({ thread: saved.thread }) },
+      run: {
+        findFirst: vi.fn().mockResolvedValue({ thread: saved.thread }),
+        // Live runs only; a stopped run counts 0.
+        count: vi.fn().mockResolvedValue(1),
+      },
       thread: { findUnique: vi.fn().mockResolvedValue(saved.thread) },
       mcpServer: {
         findFirst: vi.fn().mockResolvedValue({ endpoint: "https://api.autumn.ai/mcp" }),
@@ -1338,6 +1342,35 @@ describe("native research preparation", () => {
       receipt,
     );
     expect(plain).not.toHaveProperty("background");
+  });
+
+  it("never hands a research to the background poll from a run that was stopped", async () => {
+    const f = researchFixture("continue");
+    const read = pendingRead(f);
+    const enqueue = vi.fn(async () => undefined);
+    vi.mocked(f.prisma.run.count).mockResolvedValue(0);
+    const result = await tools.completeRecruitingResearchCall(
+      { ...f.deps, jobs: { enqueue } },
+      f.trusted,
+      {
+        kind: "read",
+        operation: "status",
+        saved: f.saved,
+        call: {
+          ...f.call,
+          route: { ...read.route, toolName: "get_task" },
+          args: { task_id: "provider-original", wait_seconds: 10 },
+        },
+      } as never,
+      { structuredContent: { task_id: "provider-original", state: "working", done: false } },
+      context,
+      { effectId: read.effect.id, request: read.effect.request },
+    );
+    expect(f.prisma.run.count).toHaveBeenCalledWith({
+      where: { id: "run", status: { in: expect.not.arrayContaining(["cancelled"]) } },
+    });
+    expect(result).not.toHaveProperty("background");
+    expect(enqueue).not.toHaveBeenCalled();
   });
 
   it("does not poll a task the provider already finished", async () => {

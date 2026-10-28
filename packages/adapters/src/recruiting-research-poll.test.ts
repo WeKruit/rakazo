@@ -28,6 +28,7 @@ function fixture(options: {
   providerError?: boolean;
   wokenAlready?: boolean;
   wokenInTx?: boolean;
+  stoppedInTx?: boolean;
   latestReply?: string | null;
   partialWakes?: Array<{ clientNonce: string; status: string }>;
 }) {
@@ -45,6 +46,7 @@ function fixture(options: {
     },
     task: { create: vi.fn(async () => ({ id: "wake-task" })) },
     recruitingResearchAction: { count: vi.fn(async () => 1) },
+    recruitingResearchTask: { count: vi.fn(async () => (options.stoppedInTx ? 0 : 1)) },
   };
   const prisma = {
     recruitingResearchTask: {
@@ -217,6 +219,28 @@ describe("pollRecruitingResearch", () => {
     );
   });
 
+  it("ignores a research that finishes after the conversation was stopped", async () => {
+    // Stopped before the probe: the closed task is never read at the provider again.
+    const closed = fixture({ provider: completed, task: { state: "closed" } });
+    await pollRecruitingResearch(closed.deps, { taskId: "task" });
+    expect(closed.calls).toHaveLength(0);
+    expect(closed.runs).toHaveLength(0);
+    expect(closed.enqueue).not.toHaveBeenCalled();
+    // Stopped while the probe was in flight: the check under the thread lock wins.
+    for (const provider of [
+      completed,
+      { structuredContent: { ...working.structuredContent, progress: { rows: 40 } } },
+    ]) {
+      const racing = fixture({ provider, stoppedInTx: true });
+      await pollRecruitingResearch(racing.deps, { taskId: "task" });
+      expect(racing.runs).toHaveLength(0);
+      expect(racing.tx.task.create).not.toHaveBeenCalled();
+      expect(racing.enqueue).not.toHaveBeenCalledWith(
+        expect.objectContaining({ name: "run.continue" }),
+      );
+    }
+  });
+
   it("never opens a second wake run or re-probes once the wake exists", async () => {
     const outside = fixture({ provider: completed, wokenAlready: true });
     await pollRecruitingResearch(outside.deps, { taskId: "task" });
@@ -341,7 +365,14 @@ describe("streaming a long research into Results", () => {
 describe("trackDirectRecruitingResearch", () => {
   const route = { connectorId: "mcp", resourceId: "autumn", toolName: "research" };
   const accepted = { structuredContent: { task_id: "provider-1", status: "accepted" } };
-  function deps(options: { endpoint?: string; roleId?: string | null; taskRole?: string } = {}) {
+  function deps(
+    options: {
+      endpoint?: string;
+      roleId?: string | null;
+      taskRole?: string;
+      stopped?: boolean;
+    } = {},
+  ) {
     const upsert = vi.fn(async ({ create }: { create: { roleId: string } }) => ({
       id: "local-task",
       roleId: options.taskRole ?? create.roleId,
@@ -358,12 +389,17 @@ describe("trackDirectRecruitingResearch", () => {
         })),
       },
       run: {
-        findFirst: vi.fn(async () => ({
-          id: "run-1",
-          thread: {
-            activeRecruitingRoleId: options.roleId === undefined ? "role" : options.roleId,
-          },
-        })),
+        // The lookup only matches a live run; a stopped run is not found.
+        findFirst: vi.fn(async () =>
+          options.stopped
+            ? null
+            : {
+                id: "run-1",
+                thread: {
+                  activeRecruitingRoleId: options.roleId === undefined ? "role" : options.roleId,
+                },
+              },
+        ),
       },
       recruitingRole: { findFirst: vi.fn(async () => ({ id: "role" })) },
       recruitingResearchTask: { upsert, update: vi.fn() },
@@ -425,5 +461,24 @@ describe("trackDirectRecruitingResearch", () => {
       ),
     ).resolves.toBeNull();
     expect(read.upsert).not.toHaveBeenCalled();
+  });
+
+  it("never arms a background follow-up from a run that was stopped", async () => {
+    const f = deps({ stopped: true });
+    await expect(
+      trackDirectRecruitingResearch(f.deps, context, route, { prompt: "find" }, accepted),
+    ).resolves.toBeNull();
+    const findRun = vi.mocked(
+      (f.deps.prisma as unknown as { run: { findFirst: () => unknown } }).run.findFirst,
+    );
+    expect(findRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: expect.not.arrayContaining(["cancelled"]) },
+        }),
+      }),
+    );
+    expect(f.upsert).not.toHaveBeenCalled();
+    expect(f.enqueue).not.toHaveBeenCalled();
   });
 });

@@ -20,6 +20,7 @@ import {
   pendingUserMessageId,
   removePendingUserMessage,
   resolveComposerSendPlan,
+  retrySend,
 } from "@rakazo/core";
 import type { Dispatch, RefObject, SetStateAction } from "react";
 import { useCallback, useEffect, useRef } from "react";
@@ -422,13 +423,13 @@ export function useShellMessages({
           attachments.map((pending) => ({ id: attachmentUploadKey(pending), file: pending.file })),
           groupTarget ? { groupId: groupTarget } : { botId: botTarget! },
         );
-        if (
-          !discussionScope.current.active ||
-          (selectedSpaceId() ?? bootstrapMe?.spaceId) !== bootstrapMe?.spaceId ||
-          botsRefreshUser.current !== submittedUser ||
-          discussionScope.current.composerRef !== submittedComposer ||
-          (correspondenceReference && currentCorrespondenceScope.current !== selectedEmail?.scope)
-        ) {
+        const stillSubmitted = () =>
+          discussionScope.current.active &&
+          (selectedSpaceId() ?? bootstrapMe?.spaceId) === bootstrapMe?.spaceId &&
+          botsRefreshUser.current === submittedUser &&
+          discussionScope.current.composerRef === submittedComposer &&
+          (!correspondenceReference || currentCorrespondenceScope.current === selectedEmail?.scope);
+        if (!stillSubmitted()) {
           withdrawEcho();
           return false;
         }
@@ -437,34 +438,43 @@ export function useShellMessages({
           : undefined;
         const interject = Boolean(interjectThreadId && !reroutedToGroup);
         if (groupTarget) {
-          const sent = await rpc.threads.send({
-            groupId: groupTarget,
-            addressing: showToolActivity ? undefined : "coordinator",
-            clientNonce,
-            text: trimmed || undefined,
-            ...(correspondenceReference ? { correspondenceReference } : {}),
-            ...(recruitingContext ? { recruitingContext } : {}),
-            mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
-            artifactIds: artifactIds.length ? artifactIds : undefined,
-            replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
-            replyQuote: reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
-            ...(interject ? { interrupt: true } : {}),
-          });
+          // A network failure retries the same send (same nonce) before the draft comes back.
+          const sent = await retrySend(
+            () =>
+              rpc.threads.send({
+                groupId: groupTarget,
+                addressing: showToolActivity ? undefined : "coordinator",
+                clientNonce,
+                text: trimmed || undefined,
+                ...(correspondenceReference ? { correspondenceReference } : {}),
+                ...(recruitingContext ? { recruitingContext } : {}),
+                mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
+                artifactIds: artifactIds.length ? artifactIds : undefined,
+                replyToMessageId: reroutedToGroup ? undefined : activeReplyTarget?.id,
+                replyQuote: reroutedToGroup ? undefined : (activeReplyQuote ?? undefined),
+                ...(interject ? { interrupt: true } : {}),
+              }),
+            { keepTrying: stillSubmitted },
+          );
           accepted = true;
           if (echoed) turnTimer.accepted(clientNonce, sent.runId);
         } else if (botTarget) {
-          const sent = await rpc.threads.send({
-            botId: botTarget,
-            clientNonce,
-            text: trimmed || undefined,
-            ...(correspondenceReference ? { correspondenceReference } : {}),
-            ...(recruitingContext ? { recruitingContext } : {}),
-            mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
-            artifactIds: artifactIds.length ? artifactIds : undefined,
-            replyToMessageId: activeReplyTarget?.id,
-            replyQuote: activeReplyQuote ?? undefined,
-            ...(interject ? { interrupt: true } : {}),
-          });
+          const sent = await retrySend(
+            () =>
+              rpc.threads.send({
+                botId: botTarget,
+                clientNonce,
+                text: trimmed || undefined,
+                ...(correspondenceReference ? { correspondenceReference } : {}),
+                ...(recruitingContext ? { recruitingContext } : {}),
+                mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
+                artifactIds: artifactIds.length ? artifactIds : undefined,
+                replyToMessageId: activeReplyTarget?.id,
+                replyQuote: activeReplyQuote ?? undefined,
+                ...(interject ? { interrupt: true } : {}),
+              }),
+            { keepTrying: stillSubmitted },
+          );
           accepted = true;
           if (echoed) turnTimer.accepted(clientNonce, sent.runId);
           if (activeBotId.current === botTarget) {

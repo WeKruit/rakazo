@@ -2781,6 +2781,28 @@ it("does not report a missing CRM binding as a failure", async () => {
   expect(container?.textContent).not.toContain("Could not load this role’s candidate records.");
 });
 
+it("resends the same message after a network failure instead of handing the draft back", async () => {
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+    initialPath: "/app/g/group-1?view=results",
+  });
+  await view.openRoleChat();
+  const composer = container!.querySelector<HTMLTextAreaElement>('textarea[name="chat-message"]')!;
+  shellApi.send
+    .mockRejectedValueOnce(new TypeError("Failed to fetch"))
+    .mockResolvedValue({ runId: "retried-run" });
+  type(composer, "Find two more robotics engineers");
+  await view.click("Send");
+  // The first retry waits one second; the real timer keeps the send path unchanged.
+  await vi.waitFor(() => expect(shellApi.send).toHaveBeenCalledTimes(2), { timeout: 3_000 });
+  const [first, second] = shellApi.send.mock.calls.map(([input]) => input);
+  expect(second).toEqual(first);
+  expect(second.clientNonce).toEqual(expect.any(String));
+  await vi.waitFor(() => expect(composer.value).toBe(""));
+  expect(container?.textContent).not.toContain("Failed to send message");
+});
+
 it("never drops a message typed while the role chat is closed", async () => {
   const view = await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,
