@@ -678,6 +678,10 @@ async function readBinding(prisma: PrismaClient, context: AdapterContext, key: s
   return { effect, binding: effect.result as RoleBinding };
 }
 
+/** The recruiter reviews the emails in chat, never only as a saved sequence. */
+const SHOW_SAVED_STEPS =
+  "In your reply, show the recruiter every saved email as Subject: and its full body, written out for the first person (their name and company in place of the variables); the saved sequence keeps its variables.";
+
 async function ensureRoleCampaign(
   prisma: PrismaClient,
   rest: InstantlyRest,
@@ -737,6 +741,7 @@ async function ensureRoleCampaign(
           ? { paused: "Paused to change the hours; call activate_campaign to resume sending" }
           : {}),
         hasEmail: writeSteps || current !== null,
+        ...(writeSteps ? { next: SHOW_SAVED_STEPS } : {}),
         ...(input.steps && !writeSteps
           ? {
               currentEmail: current,
@@ -782,7 +787,12 @@ async function ensureRoleCampaign(
   else await recordBinding(prisma, context, key, role.id, serverId, binding);
   // Checked after binding, so a retry writes onto this campaign instead of adopting it.
   if (!adopt && input.steps) await requireSavedEmail(rest, campaign.id);
-  return { created: !adopt, adopted: Boolean(adopt), ...binding };
+  return {
+    created: !adopt,
+    adopted: Boolean(adopt),
+    ...binding,
+    ...(!adopt && input.steps ? { next: SHOW_SAVED_STEPS } : {}),
+  };
 }
 
 // ponytail: no cross-request lock; two concurrent first calls can both create (the unique key

@@ -1008,6 +1008,8 @@ const FILE_JOB_NOTE =
 const ASK_IN_ENGLISH =
   "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
 
+const PLANNED_SEARCHES_EMPTY =
+  "Not asked yet: plannedSearches: [] means the recruiter said not to look for people outside their own list. If they did not, ask the same question again with four plannedSearches; when the question is about the location, use the JD's location, since the answer only narrows or widens it. If they did say so, ask again with [] unchanged.";
 const PLANNED_SEARCHES_MISSING =
   "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches, or with plannedSearches: [] when the recruiter said not to look for people outside their own list.";
 
@@ -5267,6 +5269,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let peopleSearchesRun = 0;
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
+        let emptySearchesBounced = false;
         // New people the searches planned with the last answer returned. Once the first picks come
         // from them and there are this many, the ten come from them instead of another search.
         let plannedNewPeople = 0;
@@ -11902,6 +11905,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     (plannedSearches.length > 0 && plannedSearches.length < 4))
                 )
                   return { instead: PLANNED_SEARCHES_MISSING };
+                // An empty plan once skipped the planned searches for a role with no own-list rule.
+                if (
+                  (firstRoundPending || linkRole) &&
+                  plannedSearches?.length === 0 &&
+                  !emptySearchesBounced
+                ) {
+                  emptySearchesBounced = true;
+                  return { instead: PLANNED_SEARCHES_EMPTY };
+                }
                 return undefined;
               },
               onToolCompleted: async (completion) => {
