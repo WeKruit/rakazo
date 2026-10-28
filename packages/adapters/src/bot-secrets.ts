@@ -166,8 +166,8 @@ export async function loadBotCommandEnvironment(
 }
 
 /**
- * The environment for one shell command: the space variables, with this bot's command variables
- * loaded fresh over them (the bot's own value wins a name clash). The bot's values are handed to
+ * The environment for one shell command: the space variables the command names, with this bot's
+ * command variables loaded fresh over them (the bot's own value wins a name clash). The bot's values are handed to
  * `registerRedactions` before this returns, so the command's output is redacted.
  */
 export async function shellCommandEnvironment(input: {
@@ -190,7 +190,13 @@ export async function shellCommandEnvironment(input: {
   // Encoded forms too, as secret_request does, so an accidental `base64` or URL-encoding of a
   // value is still redacted from command output.
   input.registerRedactions(commandCredentialRedactions(botEnvironment));
-  const environment = { ...input.spaceEnvironment, ...botEnvironment };
+  // Space variables follow the same rule: only the ones the command names reach the sandbox.
+  const referenced =
+    input.command === undefined ? undefined : commandVariableReferences(input.command);
+  const spaceEnvironment = Object.fromEntries(
+    Object.entries(input.spaceEnvironment).filter(([name]) => !referenced || referenced.has(name)),
+  );
+  const environment = { ...spaceEnvironment, ...botEnvironment };
   // A failed bot credential still shadows the space credential with the same name.
   for (const variable of unsetVariables) delete environment[variable];
   return { env: environment, unsetEnv: [...unsetVariables] };
