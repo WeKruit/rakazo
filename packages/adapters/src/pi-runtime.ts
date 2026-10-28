@@ -764,6 +764,14 @@ export class PiAgentRuntime implements AgentRuntime {
             host.steeredUnseen = 0;
             await agent.continue();
           }
+          // The provider counts tokens its own way: when it rejects the request as too long,
+          // compact what our estimate let through and try once more instead of failing the run.
+          const overflowError =
+            signal.aborted || host.pausePending ? undefined : dropContextOverflowFailure(agent);
+          if (overflowError) {
+            host.forceCompaction = overflowError;
+            await agent.continue();
+          }
         } finally {
           if (interjectTimer) clearInterval(interjectTimer);
           try {
@@ -1204,10 +1212,12 @@ function activeCompaction(
     if (wire.length !== context.messages.length) return;
     // Match provider selection: tool details and runtime metadata are not prompt content.
     const before = estimateModelContextTokens({ messages: wire }, estimatePiImageTokens);
-    const overflow = before > window - output;
+    const forced = host.forceCompaction;
+    host.forceCompaction = undefined;
+    const overflow = forced || before > window - output;
     if (!overflow && !shouldCompact(before, window, settings)) return;
     const fingerprint = createHash("sha256").update(JSON.stringify(context.messages)).digest("hex");
-    if (fingerprint === lastAttempt) return;
+    if (fingerprint === lastAttempt && !forced) return;
     const protectedIndexes = new Set(getPolicy().protectedIndexes(wire));
     let groups: ReturnType<typeof messageGroups>;
     try {
@@ -1305,6 +1315,8 @@ function activeCompaction(
       !preparation ||
       (!preparation.messagesToSummarize.length && !preparation.turnPrefixMessages.length)
     ) {
+      // Nothing earlier to compact: the provider's own refusal is the honest error.
+      if (forced) throw new Error(forced);
       if (overflow)
         throw new Error("Required context leaves no completed history that Pi can compact.");
       return;
@@ -2855,6 +2867,8 @@ interface ToolHost {
   depth: number;
   agentNamespace?: string;
   pausePending: boolean;
+  /** The provider said the request exceeds its context: compact before the next request. */
+  forceCompaction?: string;
   /** Shell commands that returned output and are still running. */
   pendingShells: Array<Promise<FinishedShellCommand>>;
   /** Messages steered in while the current model step streamed; the model has not read them yet. */
@@ -3069,6 +3083,29 @@ export function isRetryableProviderUnavailable(error: unknown): boolean {
   return /rate.?limit|too many requests|quota|overload|capacity|temporarily unavailable|service unavailable|retry[- ](?:after|delay)|server error|upstream error|gateway timeout|timed? out|timeout|connection reset|connection refused|network error|max retries exceeded|\bterminated\b/.test(
     text,
   );
+}
+
+export function isContextOverflowError(text: string | undefined): boolean {
+  return /context[ _-]?(?:length|window)|too many tokens|maximum context|prompt is too long|input is too long|request too large|exceeds? (?:the )?(?:model'?s? )?(?:maximum )?context/i.test(
+    text ?? "",
+  );
+}
+
+/** Removes a terminal "request too long" failure with no output, so the turn can be retried. */
+export function dropContextOverflowFailure(agent: Pick<Agent, "state">): string | undefined {
+  const last = agent.state.messages.at(-1);
+  const error =
+    last?.role === "assistant" ? (last.errorMessage ?? agent.state.errorMessage) : undefined;
+  if (
+    last?.role !== "assistant" ||
+    last.stopReason !== "error" ||
+    assistantHasPartialOutput(last) ||
+    !error ||
+    !isContextOverflowError(error)
+  )
+    return undefined;
+  agent.state.messages = agent.state.messages.slice(0, -1);
+  return error;
 }
 
 function assistantHasPartialOutput(message: AssistantMessage): boolean {
