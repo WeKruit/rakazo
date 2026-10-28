@@ -166,11 +166,11 @@ it("tells the agent to drop the length when a fixed-length event is open at that
   const f = fixture();
   f.tool.inputSchema.required = ["eventTypeId", "start", "end", "timeZone", "format"];
   const open = { "2026-11-01": [{ start: f.args.start, end: "2026-11-01T06:00:00Z" }] };
-  f.connector.execute.mockImplementation(async function* (call: { args: object }) {
+  f.connector.execute.mockImplementation(async function* (call?: { args: object }) {
     yield {
       type: "result" as const,
       data: {
-        structuredContent: { status: "success", data: "duration" in call.args ? {} : open },
+        structuredContent: { status: "success", data: call && "duration" in call.args ? {} : open },
       },
     };
   });
