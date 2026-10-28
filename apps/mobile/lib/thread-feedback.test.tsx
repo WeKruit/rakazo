@@ -309,6 +309,27 @@ describe("scoped mobile outbox", () => {
     expect(request.mock.calls.filter(([proc]) => proc === "threads/send")).toHaveLength(1);
     expect(notDelivered).not.toHaveBeenCalled();
   });
+  it("resends the same message after a transient failure before marking it unsent", async () => {
+    const attempt = feedback.sendAttempt(payload("Once"));
+    let failed = false;
+    request.mockImplementation(async (proc) => {
+      if (proc === "artifacts/create") return { id: "artifact-a" };
+      if (!failed) {
+        failed = true;
+        throw new TypeError("Network request failed");
+      }
+      return { seq: 42 };
+    });
+    // The first retry waits one second on the real timer.
+    await act(async () => {
+      await feedback.send(attempt);
+    });
+    const sends = request.mock.calls.filter(([proc]) => proc === "threads/send");
+    expect(sends).toHaveLength(2);
+    expect(sends[1]).toEqual(sends[0]);
+    expect(attempt.acceptedSeq).toBe(42);
+    expect(notDelivered).not.toHaveBeenCalled();
+  });
   it("allows Retry after a consent conflict before dispatch", async () => {
     const attempt = feedback.sendAttempt(payload());
     request.mockRejectedValueOnce(

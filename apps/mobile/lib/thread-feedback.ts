@@ -1,6 +1,6 @@
 import type { AgentSkillCatalogEntry } from "@rakazo/contracts";
 import type { ComposerMention, resolveComposerSendPlan } from "@rakazo/core";
-import { isServerUnreachable } from "@rakazo/core";
+import { isServerUnreachable, retrySend } from "@rakazo/core";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { rpc } from "./api";
 import { t } from "./i18n";
@@ -89,15 +89,18 @@ export async function deliverSend(
     }
     artifactIds.push(id);
   }
-  const sent = await request<{ seq: number }>("threads/send", {
-    ...(groupTarget ? { groupId: groupTarget } : { botId: botTarget! }),
-    clientNonce: attempt.clientNonce,
-    text: plan.trimmed || undefined,
-    mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
-    artifactIds: artifactIds.length ? artifactIds : undefined,
-    replyToMessageId: reroutedToGroup ? undefined : payload.replyTargetId,
-    replyQuote: reroutedToGroup ? undefined : (payload.replyQuote ?? undefined),
-  });
+  // A network failure retries the same send (same nonce) before the outbox marks it unsent.
+  const sent = await retrySend(() =>
+    request<{ seq: number }>("threads/send", {
+      ...(groupTarget ? { groupId: groupTarget } : { botId: botTarget! }),
+      clientNonce: attempt.clientNonce,
+      text: plan.trimmed || undefined,
+      mentions: plan.mentionPayload.length ? plan.mentionPayload : undefined,
+      artifactIds: artifactIds.length ? artifactIds : undefined,
+      replyToMessageId: reroutedToGroup ? undefined : payload.replyTargetId,
+      replyQuote: reroutedToGroup ? undefined : (payload.replyQuote ?? undefined),
+    }),
+  );
   return sent.seq;
 }
 
