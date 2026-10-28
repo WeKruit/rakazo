@@ -19,7 +19,7 @@ import { useEffect, useState } from "react";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruiting-read-cache";
+import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 import type { ContextMenuPosition } from "../BotContextMenu";
 import type { CrmBrowseSelection } from "../RecruitingPanel";
@@ -158,7 +158,7 @@ export function RecruitingNavigation({
       return true;
     };
     const cacheKey = `${scope}:crm:roles`;
-    const cached = savedRecruitingRead(cache, cacheKey) as CrmRole[] | undefined;
+    const cached = cache.entries.get(cacheKey) as CrmRole[] | undefined;
     setCrm((previous) => {
       const keepPrevious =
         !cached && previous && !previous.failed && sameAccount(previous.key, crmKey);

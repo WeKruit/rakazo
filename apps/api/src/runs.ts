@@ -57,7 +57,6 @@ export async function listSpaceRuns(
   prisma: PrismaClient,
   actor: Actor,
   filter: "active" | "recent",
-  offset?: number,
 ): Promise<RunActivityRow[]> {
   const rows = await prisma.run.findMany({
     where: {
@@ -85,13 +84,7 @@ export async function listSpaceRuns(
       filter === "active"
         ? [{ updatedAt: "desc" }, { id: "desc" }]
         : [{ completedAt: "desc" }, { updatedAt: "desc" }, { id: "desc" }],
-    take:
-      filter === "recent"
-        ? Math.max(0, RECENT_LIMIT - (offset ?? 0))
-        : offset === undefined
-          ? undefined
-          : 200,
-    ...(offset === undefined ? {} : { skip: offset }),
+    take: filter === "recent" ? RECENT_LIMIT : undefined,
   });
 
   return rows.map((row) => ({

@@ -26,13 +26,8 @@ export async function ensureBoard(prisma: PrismaClient, spaceId: string): Promis
   return prisma.board.findUniqueOrThrow({ where: { spaceId } });
 }
 
-export async function listBoards(
-  prisma: PrismaClient,
-  spaceId: string,
-  offset?: number,
-): Promise<BoardRow[]> {
+export async function listBoards(prisma: PrismaClient, spaceId: string): Promise<BoardRow[]> {
   return prisma.board.findMany({
-    ...(offset === undefined ? {} : { take: 200, skip: offset }),
     where: { spaceId },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],
   });
@@ -120,10 +115,8 @@ export async function listTicketComments(
   prisma: Pick<PrismaClient, "ticketComment">,
   spaceId: string,
   ticketId: string,
-  offset?: number,
 ) {
   return prisma.ticketComment.findMany({
-    ...(offset === undefined ? {} : { take: 200, skip: offset }),
     where: { ticketId, spaceId },
     include: { authorBot: { select: { name: true } }, authorUser: { select: { name: true } } },
     orderBy: [{ createdAt: "asc" }, { id: "asc" }],

@@ -21,7 +21,6 @@ import type {
 import {
   AutumnFileConnector,
   applyMessagingOutboundStatus,
-  assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   ComposioConnector,
@@ -37,10 +36,8 @@ import {
   createRunSandbox,
   createRunSecretWriter,
   createSecretStore,
-  createSessionAdmissionRuntime,
   createTicketChangeNotifier,
   createWebProvider,
-  DurablePiOAuthLogins,
   deletePushToken,
   destroyBot,
   EmailEmulator,
@@ -58,6 +55,7 @@ import {
   McpOAuthBroker,
   messagingPlatformsFromEnv,
   PiAgentRuntime,
+  PiOAuthLogins,
   PipedreamConnector,
   PostgresRealtimeFanout,
   pipedreamConfigFromEnv,
@@ -85,11 +83,9 @@ import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
 import {
   closePoolSessions,
-  createActorDb,
   createBoardEvents,
   createDb,
   createPool,
-  createSpaceForMember,
   createThreadEvents,
   IsolationError,
   parsePositiveInteger,
@@ -207,25 +203,14 @@ export async function createApp(
         applicationName: "rakazo-api",
       });
   let { prisma } = created;
-  if (process.env.RAKAZO_SESSION_SLOT && (prismaOverride || realtimeOverride))
-    throw new Error("Split admission cannot use overridden session owners");
-  const sessionAdmission = await createSessionAdmissionRuntime(prisma, "api", process.env);
   const realtime =
     realtimeOverride ??
     (created.pool
       ? new PostgresRealtimeFanout({
           connectionString: env.realtimeDatabaseUrl,
           publisher: created.pool,
-          applicationName: sessionAdmission?.admission.sessionApplicationName,
-          verifyConnection: sessionAdmission?.verifyConnection,
-          assertConnectionAdmission: sessionAdmission?.assertConnectionAdmission,
         })
       : new InMemoryRealtimeFanout());
-  if (sessionAdmission) {
-    if (!(realtime instanceof PostgresRealtimeFanout))
-      throw new Error("Unexpected split session owner");
-    sessionAdmission.bindOwners(realtime);
-  }
   const secrets = createSecretStore(env.encryptionKey, process.env, realtime);
   await secrets.start();
   if (secrets.describe().capabilities.degraded)
@@ -324,9 +309,8 @@ export async function createApp(
     env.mcpAllowPrivateEndpoint,
   );
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
-  const oauthLogins = new DurablePiOAuthLogins(prisma, secrets, realtime);
-  await assertHomeStorageConfiguration(prisma, env.artifactStorage);
-  const home = createAgentHomeStore(env.dataDir, env.artifactStorage, prisma);
+  const oauthLogins = new PiOAuthLogins();
+  const home = createAgentHomeStore(env.dataDir, env.artifactStorage);
   const artifacts = createArtifactStore(env.dataDir, env.artifactStorage);
   const memory = new MarkdownMemoryStore(prisma);
   const firstPartyOidc = env.oidc;
@@ -565,36 +549,18 @@ export async function createApp(
     : undefined;
   reconciler?.start();
 
-  // Auth, webhook and worker composition retain their explicit privileged client.
-  // The protected RPC client has no privileged fallback when actor context is missing.
-  const actorDb = env.actorDatabaseUrl
-    ? createActorDb(env.actorDatabaseUrl, {
-        poolMax: parsePositiveInteger(process.env.DB_POOL_MAX, 4),
-        applicationName: "rakazo-api-actor",
-      })
-    : undefined;
-  const actorPrisma = actorDb ? withSecretPersistence(actorDb.prisma, secrets) : prisma;
-  if (actorDb) await actorDb.prisma.$connect();
-  const actorEvents = actorDb
-    ? createThreadEvents(actorPrisma, realtime, {
-        runSecretWriter: createRunSecretWriter(secrets),
-      })
-    : events;
   const router = createRouter({
     cloudAgent,
     codexCatalog,
-    prisma: actorPrisma,
-    createSpaceForMember: (input) => createSpaceForMember(prisma, input),
-    events: actorEvents,
+    prisma,
+    events,
     ticketChanges,
     boardEvents,
     auth,
     jobs,
     sandbox,
-    memory: actorDb ? new MarkdownMemoryStore(actorPrisma) : memory,
-    memoryProviders: actorDb
-      ? new SpaceMemoryProviderResolver(actorPrisma, secrets)
-      : memoryProviders,
+    memory,
+    memoryProviders,
     home,
     secrets,
     oauthLogins,
@@ -1086,13 +1052,13 @@ export async function createApp(
       auth.disposeOidcDiscovery();
       shutdown.abort();
       // The drain below can outlast the kill deadline; say goodbye to the pooler first.
-      const pools = [created.pool, actorDb?.pool].filter((pool) => pool !== undefined);
-      if (pools.length)
+      const pool = created.pool;
+      if (pool)
         setTimeout(() => {
           void realtime.close();
-          for (const pool of pools) void closePoolSessions(pool);
+          void closePoolSessions(pool);
         }, SESSION_RELEASE_MS).unref();
-      await oauthLogins.abortAll();
+      oauthLogins.abortAll();
       messagingStopped = true;
       clearMessagingRetryDelay?.();
       clearTeamChatRetryDelay?.();
@@ -1114,13 +1080,6 @@ export async function createApp(
       await realtime.close();
       await connector.stop();
       await mcp.close();
-      await actorDb?.prisma.$disconnect().catch(() => undefined);
-      await actorDb?.pool.end().catch(() => undefined);
-      if (sessionAdmission) {
-        if (!(realtime instanceof PostgresRealtimeFanout))
-          throw new Error("Unexpected split session owner");
-        await sessionAdmission.closeAndRelease();
-      }
       await prisma.$disconnect().catch(() => undefined);
       await created.pool?.end().catch(() => undefined);
       await ownedJobPool?.end().catch(() => undefined);

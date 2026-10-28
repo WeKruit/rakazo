@@ -191,19 +191,16 @@ async function assertArtifactVisible(
 export async function listOwnedArtifacts(
   deps: { prisma: Pick<PrismaClient, "$queryRaw"> },
   actor: Actor,
-  input: { botId: string; includeDiagnostics?: boolean; offset?: number },
+  input: { botId: string; includeDiagnostics?: boolean },
 ) {
   const visibility = artifactDiagnostics(actor, input)
     ? Prisma.empty
     : Prisma.sql`AND NOT ${internalRecruitingFamily()}`;
-  const page =
-    input.offset === undefined ? Prisma.empty : Prisma.sql`LIMIT 200 OFFSET ${input.offset}`;
   const rows = await deps.prisma.$queryRaw<Prisma.ArtifactGetPayload<Record<string, never>>[]>(
     Prisma.sql`
       SELECT a.* FROM "artifacts" a
       WHERE a."botId" = ${input.botId} AND a."groupId" IS NULL
         AND a."spaceId" = ${actor.spaceId} AND a."userId" = ${actor.userId} ${visibility}
-      ORDER BY a."id" ASC ${page}
     `,
   );
   return rows.map(createdArtifact);
@@ -469,7 +466,7 @@ export async function listSpaceArtifacts(
 export async function listArtifactVersions(
   deps: { prisma: Pick<PrismaClient, "artifact" | "$queryRaw"> },
   actor: Actor,
-  input: { familyId: string; includeDiagnostics?: boolean; offset?: number },
+  input: { familyId: string; includeDiagnostics?: boolean },
 ) {
   const anchor = await deps.prisma.artifact.findFirst({
     where: { id: input.familyId, spaceId: actor.spaceId, userId: actor.userId },
@@ -484,8 +481,7 @@ export async function listArtifactVersions(
       userId: actor.userId,
       OR: [{ id: rootId }, { rootArtifactId: rootId }],
     },
-    orderBy: [{ version: "desc" }, { id: "asc" }],
-    ...(input.offset === undefined ? {} : { take: 200, skip: input.offset }),
+    orderBy: { version: "desc" },
   });
   return rows.map((row) => ({
     id: row.id,

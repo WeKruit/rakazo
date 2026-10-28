@@ -5,21 +5,12 @@ type MarkdownLinkCopy = {
   title: string;
   cancel: string;
   open: string;
-  loading?: string;
-  loadError?: string;
-  retry?: string;
-  refreshWarning?: string;
 };
 
 const defaultMarkdownLinkCopy: MarkdownLinkCopy = {
   title: "Open external link?",
   cancel: "Cancel",
   open: "Open",
-  loading: "Loading…",
-  loadError: "Something went wrong. Try again.",
-  retry: "Refresh",
-  refreshWarning:
-    "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?",
 };
 
 const CopyContext = createContext<MarkdownLinkCopy>(defaultMarkdownLinkCopy);
@@ -42,7 +33,7 @@ export function MarkdownLinkPromptProvider({
 }
 
 export function useMarkdownLinkCopy() {
-  return { ...defaultMarkdownLinkCopy, ...useContext(CopyContext) };
+  return useContext(CopyContext);
 }
 
 export function useMarkdownLinkAppOrigin() {

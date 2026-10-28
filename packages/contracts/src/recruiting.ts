@@ -1,23 +1,9 @@
-import {
-  RecruitingEmploymentDateSchema,
-  RecruitingEmploymentDaySchema,
-  type RecruitingEmploymentRule,
-  RecruitingEmploymentRuleSchema,
-} from "./recruiting-employment.js";
-
-export * from "./recruiting-candidate-text.js";
-export * from "./recruiting-employment.js";
-
-import { ListRecruitingCandidatesInput } from "./recruiting-candidate-filters.js";
-import { RecruitingId, VerdictSchema } from "./recruiting-identifiers.js";
-
-export * from "./recruiting-candidate-filters.js";
-export * from "./recruiting-identifiers.js";
-
 import * as z from "zod";
 import { ArtifactJsonStringPathSchema } from "./builtin-tools.js";
 import { Id, IsoDate } from "./ids.js";
 import { RecruitingCrmCandidateSyncSchema, RecruitingCrmTargetSchema } from "./recruiting-crm.js";
+
+export const RecruitingId = Id.refine((value) => value.trim().length > 0, "ID must not be blank");
 
 export const ReadRecruitingSourceInput = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -38,6 +24,9 @@ export type ReadRecruitingSourceInput = z.infer<typeof ReadRecruitingSourceInput
 
 const Text = z.string().trim().min(1);
 const Revision = z.number().int().positive();
+
+export const VerdictSchema = z.enum(["met", "unmet", "unknown"]);
+export type Verdict = z.infer<typeof VerdictSchema>;
 
 /** artifactId is the native Artifact row for one exact version, never a family/name lookup. */
 export const RecruitingArtifactRefSchema = z
@@ -97,6 +86,48 @@ const SourceRefs = z
     "Full source reference objects, never source ID strings. Copy native anchors and read metadata exactly.",
   );
 const Questions = z.array(Text).readonly();
+
+const EmploymentYear = z.number().int().min(1).max(9999);
+const EmploymentMonth = z.number().int().min(1).max(12);
+export const RecruitingEmploymentDaySchema = z
+  .strictObject({
+    precision: z.literal("day"),
+    year: EmploymentYear,
+    month: EmploymentMonth,
+    day: z.number().int().min(1).max(31),
+  })
+  .refine(
+    (date) => {
+      const calendar = new Date(0);
+      calendar.setUTCFullYear(date.year, date.month - 1, date.day);
+      return calendar.getUTCMonth() === date.month - 1;
+    },
+    { message: "Employment day must be a valid calendar date" },
+  )
+  .readonly();
+export const RecruitingEmploymentDateSchema = z.discriminatedUnion("precision", [
+  z.strictObject({ precision: z.literal("year"), year: EmploymentYear }).readonly(),
+  z
+    .strictObject({ precision: z.literal("month"), year: EmploymentYear, month: EmploymentMonth })
+    .readonly(),
+  RecruitingEmploymentDaySchema,
+]);
+export type RecruitingEmploymentDate = z.infer<typeof RecruitingEmploymentDateSchema>;
+export type RecruitingEmploymentDay = z.infer<typeof RecruitingEmploymentDaySchema>;
+
+export const RecruitingEmploymentRuleSchema = z
+  .strictObject({
+    minimumMonths: z.number().int().nonnegative(),
+    countingRule: z.literal("complete_calendar_months"),
+    qualificationDefinition: Text,
+    cutoff: z.discriminatedUnion("kind", [
+      z.strictObject({ kind: z.literal("fixed"), date: RecruitingEmploymentDaySchema }).readonly(),
+      // The server freezes the UTC calendar day at the start of assessment execution.
+      z.strictObject({ kind: z.literal("assessment_date") }).readonly(),
+    ]),
+  })
+  .readonly();
+export type RecruitingEmploymentRule = z.infer<typeof RecruitingEmploymentRuleSchema>;
 
 export type RecruitingCriterionExpression =
   | Readonly<{
@@ -1207,24 +1238,74 @@ export const RecruitingAssessmentToolInputSchema = z.discriminatedUnion("operati
 ]);
 export type RecruitingAssessmentToolInput = z.infer<typeof RecruitingAssessmentToolInputSchema>;
 
-/** One display read followed by a fresh thread binding check; not a serializable DB snapshot. */
-export const ReadRecruitingViewInput = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal("candidates"),
-    threadId: RecruitingId,
-    roleId: RecruitingId,
-    roleRevisionId: RecruitingId,
-    query: ListRecruitingCandidatesInput.omit({ roleId: true }),
-  }),
-  z.strictObject({
-    kind: z.literal("research"),
-    offset: z.number().int().min(0).optional(),
-    threadId: RecruitingId,
-    roleId: RecruitingId,
-    roleRevisionId: RecruitingId,
-  }),
+export const ListRecruitingCandidatesInput = z.strictObject({
+  roleId: RecruitingId,
+  cursor: Text.optional(),
+  limit: z.number().int().min(1).max(200).optional(),
+  query: z.string().max(240).optional(),
+  assessmentState: z.enum(["unassessed", "current", "outdated"]).optional(),
+  verdict: VerdictSchema.optional(),
+  shortlisted: z.boolean().optional(),
+  actionId: RecruitingId.optional(),
+  sourceEffectId: RecruitingId.optional(),
+  sort: z.enum(["name", "recent", "rank", "tier", "score"]).optional(),
+});
+export type ListRecruitingCandidatesInput = z.infer<typeof ListRecruitingCandidatesInput>;
+// These are transport/provenance fields, not provider observations about the person.
+const reportMetadata = new Set([
+  "id",
+  "taskid",
+  "taskids",
+  "providertaskid",
+  "artifactid",
+  "artifactids",
+  "artifactref",
+  "actionid",
+  "effectid",
+  "runid",
+  "threadid",
+  "roleid",
+  "rolerevisionid",
+  "sourceid",
+  "shardid",
+  "shardids",
+  "outputid",
+  "receiptid",
+  "request",
+  "response",
+  "route",
+  "routing",
+  "cursor",
+  "nextcursor",
+  "requestcursor",
+  "providerresult",
+  "observation",
+  "metadata",
+  "traceid",
+  "storagekey",
+  "sha256",
+  "hash",
+  "toolname",
+  "connectorid",
+  "resourceid",
+  "resourcerevision",
+  "cataloggroup",
+  "clientnonce",
 ]);
-export type ReadRecruitingViewInput = z.infer<typeof ReadRecruitingViewInput>;
+
+/** The same business/provenance boundary governs report display and retained row equivalence. */
+export function isRecruitingCandidateReportField(key: string): boolean {
+  return !key.startsWith("_") && !reportMetadata.has(key.replace(/[_-]/g, "").toLowerCase());
+}
+
+/** Recruiter-visible source text excludes operational IDs; immutable artifacts remain lossless. */
+export function recruitingCandidateSourceText(value: unknown): string | undefined {
+  return JSON.stringify(
+    value,
+    (key, nested) => (!key || isRecruitingCandidateReportField(key) ? nested : undefined),
+    2,
+  );
+}
 
 /** Recruiter-readable projection of one exact retained provider row, never qualification. */
 export const RecruitingCandidateReportSchema = z.strictObject({
@@ -1628,7 +1709,7 @@ export const RecruitingOffsetCursorSchema = z
   .regex(/^(0|[1-9]\d{0,6})$/)
   .refine((value) => Number(value) <= 1_000_000);
 export const RecruitingCorrespondenceInputPage = {
-  /** Inbox emails (default 50) or contacts (default 200) per page. */
+  /** Inbox emails per page (default 50); events and contacts keep their own bounds. */
   limit: z.number().int().min(1).max(200).optional(),
   cursor: RecruitingOffsetCursorSchema.optional(),
 };
@@ -1838,7 +1919,7 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
     }),
   ),
   partial: z.boolean(),
-  /** Next inbox email or contact page; null on the last page and for interview views. */
+  /** Next inbox email page; null on the last page and for interview/contacts views. */
   nextCursor: z.string().nullable(),
 });
 export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;

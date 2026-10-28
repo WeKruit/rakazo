@@ -211,10 +211,7 @@ export async function createSpaceForMember(
           },
           select: { organizationId: true },
         });
-        if (!currentMembership || !(await tx.member.findFirst({
-          where: { userId: input.userId, organizationId: currentMembership.organizationId },
-          select: { id: true },
-        }))) throw new IsolationError();
+        if (!currentMembership) throw new IsolationError();
         const count = await tx.spaceMember.count({
           where: {
             userId: input.userId,

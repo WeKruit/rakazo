@@ -13,7 +13,7 @@ import {
   getSnapshot as readCallSnapshot,
   startCall as startOwnedCall,
   toggleMute,
-} from "./call-session-engine";
+} from "./call-session";
 import { dictation } from "./dictation.js";
 import { rpc } from "./rpc.js";
 import { reduceThreadSnapshot } from "./thread-events.js";
@@ -89,15 +89,6 @@ describe("call session", () => {
   afterEach(() => {
     endCall();
     vi.useRealTimers();
-  });
-
-  it("keeps a pending-loader mute in effect before ever opening the microphone", () => {
-    startOwnedCall(
-      { userId: "owner", spaceId: "space", botId: "call-bot", botName: "Ada" },
-      { muted: true, transcriptOpen: true, startedAt: 123 },
-    );
-    expect(getSnapshot()).toMatchObject({ muted: true, transcriptOpen: true, startedAt: 123 });
-    expect(dictation.listen).not.toHaveBeenCalled();
   });
 
   it("starts listening for the bot on the call", async () => {

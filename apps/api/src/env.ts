@@ -24,8 +24,6 @@ export interface AppEnv {
   nodeEnv: string;
   desktopStackToken?: string;
   databaseUrl: string;
-  /** Optional first-batch RLS role, separate from auth/background ownership. */
-  actorDatabaseUrl?: string;
   realtimeDatabaseUrl: string;
   authSecret: string;
   authUrl: string;
@@ -131,23 +129,12 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): AppEnv {
   const deploymentModel = resolveDeploymentModel(source);
   const updaterUrl = optional(source.RAKAZO_UPDATER_URL);
   const updaterToken = optional(source.RAKAZO_UPDATER_TOKEN);
-  const actorDatabaseUrl = optional(source.ACTOR_DATABASE_URL);
-  if (
-    actorDatabaseUrl &&
-    source.NODE_ENV === "production" &&
-    new URL(actorDatabaseUrl).port !== "6543"
-  ) {
-    throw new Error(
-      "ACTOR_DATABASE_URL must use the transaction pooler on port 6543 in production",
-    );
-  }
   return {
     passwordAuth,
     oidc,
     firstPartyMcpUrl: trustedMcpEndpoint,
     nodeEnv: source.NODE_ENV ?? "",
     databaseUrl: required(source, "DATABASE_URL"),
-    actorDatabaseUrl,
     realtimeDatabaseUrl: source.REALTIME_DATABASE_URL ?? required(source, "DATABASE_URL"),
     desktopStackToken: optional(source.RAKAZO_DESKTOP_STACK_TOKEN),
     authSecret,

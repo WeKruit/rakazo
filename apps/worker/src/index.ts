@@ -2,8 +2,6 @@ import type { JobPublisher, JobWorkerHost } from "@rakazo/adapter-kit";
 import { ComposioConnector, IntegrationProviderSettings } from "@rakazo/adapters";
 import { hostedStagingConfig } from "@rakazo/core";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
-import { createWorkerDrain } from "./drain.js";
-import { startWorkerHealth } from "./health.js";
 import { startStagingWorker } from "./release-staging.js";
 import { createWorkerSecretStore } from "./secret-store.js";
 
@@ -12,7 +10,6 @@ if (process.env.RAKAZO_RELEASE_PROFILE !== "staging") loadRootEnv();
 import {
   AutumnFileConnector,
   artifactStorageOptionsFromEnv,
-  assertHomeStorageConfiguration,
   ChatSdkMessagingSurface,
   CodexCatalogCache,
   createAgentHomeStore,
@@ -26,7 +23,6 @@ import {
   createRunExecutor,
   createRunSandbox,
   createRunSecretWriter,
-  createSessionAdmissionRuntime,
   createTicketChangeNotifier,
   createWebProvider,
   DISCOVERY_PREWARM_REFRESH_MS,
@@ -57,7 +53,6 @@ import {
   ScriptedAgentRuntime,
   SpaceMemoryProviderResolver,
   sandboxProviderOptionsFromEnv,
-  startJobQueueReporter,
   withSecretPersistence,
 } from "@rakazo/adapters";
 import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
@@ -110,26 +105,16 @@ async function main() {
   });
   const { pool } = created;
   let { prisma } = created;
-  const sessionAdmission = await createSessionAdmissionRuntime(prisma, "worker", process.env);
   const sessionUrl = process.env.REALTIME_DATABASE_URL ?? databaseUrl;
   // LISTEN, the lock, and two for fetching and completing jobs.
   const sessionPool =
     sessionUrl === databaseUrl
       ? pool
-      : createPool(sessionUrl, {
-          poolMax: 4,
-          applicationName:
-            sessionAdmission?.admission.sessionApplicationName ?? "rakazo-worker-session",
-          verifyConnection: sessionAdmission?.verifyConnection,
-        });
+      : createPool(sessionUrl, { poolMax: 4, applicationName: "rakazo-worker-session" });
   const realtime = new PostgresRealtimeFanout({
     connectionString: sessionUrl,
     publisher: pool,
-    applicationName: sessionAdmission?.admission.sessionApplicationName,
-    verifyConnection: sessionAdmission?.verifyConnection,
-    assertConnectionAdmission: sessionAdmission?.assertConnectionAdmission,
   });
-  sessionAdmission?.bindOwners(realtime, sessionPool);
   const secrets = await createWorkerSecretStore(process.env, realtime);
   if (secrets.describe().capabilities.degraded)
     logger.warn("Secret storage degraded; encrypted credentials remain available");
@@ -244,12 +229,9 @@ async function main() {
   prewarm();
   setInterval(prewarm, DISCOVERY_PREWARM_REFRESH_MS).unref();
   const memoryProviders = new SpaceMemoryProviderResolver(prisma, secrets);
-  await assertHomeStorageConfiguration(prisma, artifactStorage);
-  const home = createAgentHomeStore(dataDir, artifactStorage, prisma);
-  const workerConcurrency = parsePositiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 4);
+  const home = createAgentHomeStore(dataDir, artifactStorage);
   const inMemoryJobs = process.env.WAKEUP_DRIVER === "memory" ? new InMemoryJobQueue() : undefined;
   const jobs: JobPublisher = inMemoryJobs ?? new GraphileJobPublisher(pool);
-  if (!inMemoryJobs) startJobQueueReporter(pool, workerConcurrency, shutdown.signal);
   const ticketChanges = createTicketChangeNotifier({
     boardEvents,
     jobs,
@@ -259,7 +241,7 @@ async function main() {
   const jobHost: JobWorkerHost =
     inMemoryJobs ??
     new GraphileJobWorkerHost(sessionPool, {
-      concurrency: workerConcurrency,
+      concurrency: parsePositiveInteger(process.env.GRAPHILE_WORKER_CONCURRENCY, 4),
       noHandleSignals: true,
     });
   // One provider instance so emulator launches and polls share the same Map.
@@ -330,8 +312,6 @@ async function main() {
     cloudAgent,
     connector: stack.connector,
     shutdownSignal: shutdown.signal,
-    // Keep at least two in five slots for conversations.
-    scheduledRunSlots: Math.max(1, Math.floor((workerConcurrency * 3) / 5)),
   });
   // graphile-worker run() connects through the shared pool. createPool already
   // retries connect() on 53300 a finite number of times. Keep retrying start
@@ -363,36 +343,10 @@ async function main() {
   });
   reconciler.start();
 
-  const drain = createWorkerDrain({
-    stopJobs: () => jobHost.stop(),
-    stopReconciler: () => reconciler.stop(),
-    afterDrain: sessionAdmission ? () => sessionAdmission.beginShutdown() : undefined,
-  });
-  // Active runs retain leases/heartbeats until job drain completes; only then close slot sessions.
-  const requestDrain = () => {
-    void drain.begin().catch((error) => logger.error("worker drain failed", error));
-  };
-  process.on("SIGUSR2", requestDrain);
-  const health = process.env.WORKER_HEALTH_PORT
-    ? await startWorkerHealth(
-        drain.state,
-        parsePositiveInteger(process.env.WORKER_HEALTH_PORT, 8001),
-        "0.0.0.0",
-        sessionAdmission
-          ? {
-              instanceId: sessionAdmission.admission.instanceId,
-              generation: sessionAdmission.admission.generation,
-              service: sessionAdmission.admission.service,
-            }
-          : undefined,
-      )
-    : undefined;
-
   let stopping = false;
   const stop = async () => {
     if (stopping) return;
     stopping = true;
-    process.off("SIGUSR2", requestDrain);
     shutdown.abort();
     // Draining running jobs can outlast the kill deadline; say goodbye to the pooler first.
     setTimeout(() => {
@@ -401,22 +355,17 @@ async function main() {
       void closePoolSessions(sessionPool);
     }, SESSION_RELEASE_MS).unref();
     try {
-      await health?.close();
-      await drain.begin();
+      await reconciler.stop();
+      await jobHost.stop();
       await jobs.close();
       await secrets.close();
       await realtime.close();
       await connector.stop();
       await mcp.close();
       firstPartyAuth?.disposeOidcDiscovery();
-      if (sessionAdmission) {
-        // A failed release keeps its reservation; no TTL or silent reclaim.
-        await sessionAdmission
-          .closeAndRelease()
-          .catch((error) => logger.error("session admission retained after shutdown", error));
-      } else if (sessionPool !== pool) await sessionPool.end().catch(() => undefined);
       await prisma.$disconnect().catch(() => undefined);
       await pool.end().catch(() => undefined);
+      if (sessionPool !== pool) await sessionPool.end().catch(() => undefined);
     } finally {
       await logger.flush({ timeoutMs: 2_000 });
     }

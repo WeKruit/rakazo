@@ -29,9 +29,6 @@ export interface PostgresRealtimeOptions {
     query(sql: string, values: unknown[]): Promise<unknown>;
   };
   clientFactory?: () => RealtimeListenerClient;
-  applicationName?: string;
-  assertConnectionAdmission?: () => void;
-  verifyConnection?: (client: RealtimeListenerClient) => Promise<void>;
   reconnectBaseMs?: number;
   reconnectMaxMs?: number;
   random?: () => number;
@@ -49,9 +46,6 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined;
   private reconnectAttempt = 0;
   private closed = false;
-  private closing: Promise<void> | undefined;
-  private disposing: Promise<void> | undefined;
-  private disposeFailure: unknown;
 
   constructor(private readonly options: PostgresRealtimeOptions) {
     this.clientFactory =
@@ -59,7 +53,7 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
       (() =>
         new Client({
           connectionString: options.connectionString,
-          application_name: options.applicationName ?? "rakazo-realtime",
+          application_name: "rakazo-realtime",
           connectionTimeoutMillis: 5_000,
         }) as RealtimeListenerClient);
     this.reconnectBaseMs = options.reconnectBaseMs ?? 250;
@@ -100,24 +94,18 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
     };
   }
 
-  close(): Promise<void> {
-    if (this.closing) return this.closing;
+  async close(): Promise<void> {
+    if (this.closed) return;
     this.closed = true;
-    this.closing = (async () => {
-      this.subscribers.clear();
-      if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = undefined;
-      const connectingClient = this.connectingClient;
-      this.connectingClient = undefined;
-      if (connectingClient) await this.disposeClient(connectingClient);
-      const client = this.client;
-      this.client = undefined;
-      if (client) await this.disposeClient(client);
-      if (this.options.verifyConnection) await this.connecting?.catch(() => undefined);
-      await this.disposing;
-      if (this.disposeFailure !== undefined) throw this.disposeFailure;
-    })();
-    return this.closing;
+    this.subscribers.clear();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = undefined;
+    const connectingClient = this.connectingClient;
+    this.connectingClient = undefined;
+    if (connectingClient) await this.disposeClient(connectingClient);
+    const client = this.client;
+    this.client = undefined;
+    if (client) await this.disposeClient(client);
   }
 
   private async ensureConnected(): Promise<void> {
@@ -132,9 +120,6 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
   }
 
   private async connectClient(): Promise<void> {
-    if (this.disposing) await this.disposing;
-    if (this.closed) return;
-    this.options.assertConnectionAdmission?.();
     const candidate = this.clientFactory();
     this.connectingClient = candidate;
     const disconnected = () => this.handleDisconnect(candidate);
@@ -143,11 +128,6 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
     candidate.on("end", disconnected);
     try {
       await candidate.connect();
-      if (this.closed || this.connectingClient !== candidate) {
-        await this.disposeClient(candidate);
-        return;
-      }
-      await this.options.verifyConnection?.(candidate);
       await candidate.query(`LISTEN ${POSTGRES_CHANNEL}`);
       if (this.closed || this.subscribers.size === 0 || this.connectingClient !== candidate) {
         await this.disposeClient(candidate);
@@ -197,17 +177,7 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
     if (candidate === this.connectingClient) this.connectingClient = undefined;
     else if (candidate === this.client) this.client = undefined;
     else return;
-    // A failed end() must not block every later reconnect. Keep it for close() to report.
-    const disposing = Promise.all([this.disposing, this.disposeClient(candidate)]).then(
-      () => undefined,
-      (error: unknown) => {
-        this.disposeFailure ??= error;
-      },
-    );
-    this.disposing = disposing;
-    void disposing.then(() => {
-      if (this.disposing === disposing) this.disposing = undefined;
-    });
+    void this.disposeClient(candidate);
     this.scheduleReconnect();
   }
 
@@ -228,9 +198,7 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
 
   private async disposeClient(client: RealtimeListenerClient): Promise<void> {
     client.removeAllListeners();
-    await client.end().catch((error) => {
-      if (this.options.verifyConnection) throw error;
-    });
+    await client.end().catch(() => undefined);
   }
 }
 

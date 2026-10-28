@@ -14,7 +14,7 @@ import { Check, ChevronRight, PanelLeftOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruiting-read-cache";
+import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 import type { DashboardRoleView, FunnelStageKey, RoleSummary } from "./dashboard";
 import {
@@ -161,9 +161,7 @@ function useOverview(
   const current = read?.key === key ? read : undefined;
   const data =
     current?.data ??
-    (!current?.failed && slot
-      ? (savedRecruitingRead(cache, slot) as Overview | undefined)
-      : undefined);
+    (!current?.failed && slot ? (cache?.entries.get(slot) as Overview | undefined) : undefined);
   return {
     data,
     loading: !data && !current?.failed,

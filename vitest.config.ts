@@ -1,9 +1,7 @@
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
-import { catalogTestPlugin } from "./apps/web/catalog-test-plugin.ts";
 
 export default defineConfig({
-  plugins: [catalogTestPlugin],
   resolve: {
     alias: [
       {

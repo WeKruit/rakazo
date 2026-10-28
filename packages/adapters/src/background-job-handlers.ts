@@ -8,7 +8,7 @@ import type {
   SandboxProvider,
   SecretStore,
 } from "@rakazo/adapter-kit";
-import { messagingDeliverJob, runContinueJob } from "@rakazo/adapter-kit";
+import { messagingDeliverJob } from "@rakazo/adapter-kit";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { CloudAgentConnection } from "./cloud-agent-factory.js";
@@ -26,14 +26,6 @@ import {
   skipRoutineWithoutNewActivity,
 } from "./routine-precondition.js";
 import { expireTaughtSkillTeaching } from "./teaching-session.js";
-
-/**
- * Run triggers with no conversation behind them. A handoff (bot_message) or research result is
- * part of a conversation someone is following, so it is not limited here.
- */
-const SCHEDULED_TRIGGERS = ["routine", "webhook", "tickets", "cloud_agent"];
-/** How long a scheduled run waits before trying for a slot again. */
-const SCHEDULED_RUN_RETRY_MS = 5_000;
 
 export function createBackgroundJobHandlers(deps: {
   executor: ReturnType<typeof createRunExecutor>;
@@ -53,17 +45,7 @@ export function createBackgroundJobHandlers(deps: {
   cloudAgent?: CloudAgentConnection | null;
   /** The native MCP connector; without it research tasks are not polled in the background. */
   connector?: ConnectorProvider;
-  /**
-   * Most worker slots scheduled runs may hold at once in this process, so a burst of routines
-   * cannot take every slot from people chatting. Unset means no limit.
-   */
-  scheduledRunSlots?: number;
 }): BackgroundJobHandlers {
-  let scheduledRunsActive = 0;
-  const isScheduledRun = async (runId: string) =>
-    (await deps.prisma.run.count({
-      where: { id: runId, trigger: { in: SCHEDULED_TRIGGERS } },
-    })) > 0;
   const deliverMessaging = async (runId?: string) => {
     if (!deps.messaging) return;
     await deliverMessagingOutbound(
@@ -81,24 +63,7 @@ export function createBackgroundJobHandlers(deps: {
 
   return {
     "run.continue": async (payload) => {
-      const limited = deps.scheduledRunSlots !== undefined && (await isScheduledRun(payload.runId));
-      if (limited && scheduledRunsActive >= deps.scheduledRunSlots!) {
-        getLogger().info("run.scheduled.deferred", {
-          runId: payload.runId,
-          active: scheduledRunsActive,
-        });
-        await deps.jobs.enqueue({
-          ...runContinueJob(payload.runId),
-          availableAt: new Date(Date.now() + SCHEDULED_RUN_RETRY_MS),
-        });
-        return;
-      }
-      if (limited) scheduledRunsActive++;
-      try {
-        await deps.executor.continueRun(payload.runId, deps.workerId);
-      } finally {
-        if (limited) scheduledRunsActive--;
-      }
+      await deps.executor.continueRun(payload.runId, deps.workerId);
       // A routine whose last five runs all failed stops firing; never let this fail the run.
       await pauseRoutineAfterRepeatedFailures(deps, payload.runId).catch((error) => {
         getLogger().error("routine failure pause error", error);

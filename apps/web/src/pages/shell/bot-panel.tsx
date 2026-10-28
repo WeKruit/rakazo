@@ -34,7 +34,6 @@ import {
 import { X } from "lucide-react";
 import { lazy, Suspense, useEffect, useId, useRef, useState } from "react";
 import { ErrorBoundary, SectionLoadFailed } from "../../components/ErrorBoundary";
-import { withFeatureMessages } from "../../lib/i18n";
 import { thinkingLevelLabel } from "../../lib/model-catalog";
 import { rpc } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
@@ -42,15 +41,11 @@ import { AvatarStudioPopover } from "./avatar-studio-popover";
 import { BotCredentialsSection } from "./bot-credentials";
 
 const ScratchpadSection = lazy(() =>
-  withFeatureMessages(() => import("../ScratchpadSection")).then((module) => ({
-    default: module.ScratchpadSection,
-  })),
+  import("../ScratchpadSection").then((module) => ({ default: module.ScratchpadSection })),
 );
 
 const KnowledgeSection = lazy(() =>
-  withFeatureMessages(() => import("../KnowledgeSection")).then((module) => ({
-    default: module.KnowledgeSection,
-  })),
+  import("../KnowledgeSection").then((module) => ({ default: module.KnowledgeSection })),
 );
 
 const fieldLabelClass = "mt-4 block text-[14px] text-muted-foreground";

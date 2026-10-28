@@ -328,7 +328,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       operation,
       title: "Atomic native role",
       sourceRefs: [ref],
-      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [ref] }],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
       preferences: [],
       definitionQuestions: [],
       intent: { basis: "direct" as const, quote: "Create and revise this supplied role" },
@@ -3537,7 +3537,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       operation: "create" as const,
       title: "Native role",
       sourceRefs: [],
-      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [source(first.id)] }],
+      criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
       preferences: [],
       definitionQuestions: [],
       intent: { basis: "direct" as const, quote: "Create this role with seven years" },
@@ -3550,7 +3550,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(created.changed).toBe(true);
     expect(created.status).toBe("saved");
     expect(created.workspace?.revision.sourceRefs).toEqual([created.source]);
-    expect(created.workspace?.revision.criteria[0]?.sourceRefs).toEqual([source(first.id)]);
+    expect(created.workspace?.revision.criteria[0]?.sourceRefs).toEqual([created.source]);
     expect(created.source?.anchor).toEqual({
       kind: "message",
       messageId: first.id,
@@ -3794,7 +3794,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         operation: "create",
         title: "Answered role",
         sourceRefs: [],
-        criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [source(answerMessage.id)] }],
+        criteria: [{ ...roleInput().criteria[0]!, sourceRefs: [] }],
         preferences: [],
         definitionQuestions: [],
         intent: { basis: "direct", quote },
@@ -4406,7 +4406,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           expectedRevision: draft.role.revision,
         })
       : draft;
-    const approveDocuments = async (approvedRole: typeof role) => {
+    let approvalEffectId = `missing-documents-${f.run.id}`;
+    if (confirmed) {
       // A separate completed gate run keeps research dispatch assertions scoped to the research run.
       const approvalRun = await prisma.run.create({
         data: {
@@ -4448,8 +4449,8 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       }
       const request: RecruitingApprovalToolInput = {
         stage: "documents",
-        roleId: approvedRole.role.id,
-        expectedRoleRevision: approvedRole.role.revision,
+        roleId: role.role.id,
+        expectedRoleRevision: role.role.revision,
         documents: { jdText: docs[0]!, namedPdf: docs[1]!, anonymousPdf: null, deck: null },
       };
       const effect = await prisma.externalEffect.create({
@@ -4515,12 +4516,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         request,
         material,
       );
+      approvalEffectId = saved.approvalEffectId;
       await prisma.run.update({ where: { id: approvalRun.id }, data: { status: "completed" } });
-      return saved.approvalEffectId;
-    };
-    const approvalEffectId = confirmed
-      ? await approveDocuments(role)
-      : `missing-documents-${f.run.id}`;
+    }
     const server = await prisma.mcpServer.create({
       data: {
         spaceId,
@@ -4589,7 +4587,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       effectKind: "mcp_research",
     };
     const lease = { runId: f.run.id, leaseOwner: "research-worker", leaseFence: 1 };
-    return { ...f, role, draft, definition, server, metadata, input, lease, approveDocuments };
+    return { ...f, role, draft, definition, server, metadata, input, lease };
   }
 
   it("confirms a brief with one durable human receipt and preserves the immutable draft", async () => {
@@ -6769,7 +6767,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           limit: 10,
         })
       ).items.map((item) => item.candidateKey),
-    ).toEqual(["c", "e", "b", "d", "g", "a", "f", "h", "i", "j"].map(key));
+    ).toEqual(["c", "b", "d", "a", "e", "f", "g", "h", "i", "j"].map(key));
     await recordCandidatePage(
       f,
       prepared,
@@ -6787,7 +6785,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
           limit: 10,
         })
       ).items.map((item) => item.candidateKey),
-    ).toEqual(["c", "e", "b", "d", "g", "a", "f", "h", "i", "j"].map(key));
+    ).toEqual(["c", "d", "a", "b", "e", "f", "g", "h", "i", "j"].map(key));
     await prisma.artifact.update({
       where: { id: original.saved.outputArtifact.id },
       data: { hash: "f".repeat(64) },
@@ -6912,7 +6910,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     ).toEqual([]);
   });
 
-  it("requires an explicit ten-person round before feedback and waits for the recruiter", async () => {
+  it("requires a feedback card after the tenth saved candidate advances the real stage", async () => {
     const { f, prepared } = await mappedResearchFixture();
     await prisma.recruitingRole.update({
       where: { id: f.role.role.id },
@@ -6930,31 +6928,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         .playbookStage,
     ).toBe("calibration_10");
     await recordCandidatePage(f, prepared, "calibration-tenth", rows.slice(9));
-    expect(
-      (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
-        .playbookStage,
-    ).toBe("calibration_10");
-    const roundRequest = {
-      operation: "calibration_round" as const,
-      expectedRoleRevision: f.role.role.revision,
-      candidateKeys: Array.from({ length: 10 }, (_, index) => `linkedin:/in/calibration-${index}`),
-    };
-    const roundEffect = await prisma.externalEffect.create({
-      data: {
-        spaceId,
-        runId: f.run.id,
-        kind: "recruiting_research",
-        status: "executing",
-        idempotencyKey: `round:${f.run.id}`,
-        request: roundRequest,
-      },
-    });
-    await recruiting.saveRecruitingCalibrationRound(
-      prisma,
-      actor,
-      { ...f.lease, effectId: roundEffect.id, effectRequest: roundRequest },
-      roundRequest,
-    );
     expect(
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: f.role.role.id } }))
         .playbookStage,
@@ -6982,9 +6955,11 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         ...input,
         blocks: [{ kind: "text", text: "Saved the ten profiles." }],
       }),
-    ).toMatchObject({ action: "ended" });
-    // A complete unapproved round waits for human input; do not manufacture a continuation.
-    expect(sendUserMessage).not.toHaveBeenCalled();
+    ).toMatchObject({ action: "continued", stage: "feedback" });
+    expect(sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ internal: true, prompt: expect.stringContaining("原生问题卡") }),
+    );
+    sendUserMessage.mockClear();
     expect(
       await guardRecruitingTurnEnd(deps, {
         ...input,
@@ -7385,7 +7360,7 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ).length,
     ).toBeLessThanOrEqual(2);
   });
-  it("filters proven research pages with overlapping identities without narrowing role counts", async () => {
+  it("filters saved native pages with overlapping identities without narrowing role counts", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const pages = [];
     for (const [label, name, hour] of [
@@ -7408,8 +7383,9 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
         { observedAt: new Date(`2026-10-16T${hour}:00:00Z`) },
       );
       pages.push(
-        await prisma.recruitingCandidatePage.findUniqueOrThrow({
+        await prisma.recruitingCandidatePage.update({
           where: { effectId: page.input.effectId },
+          data: { taskId: null, actionId: null },
         }),
       );
     }
@@ -7501,13 +7477,13 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       ...input,
       actionId: prepared.action.id,
     });
-    expect(action.total).toBe(3);
-    expect(action.items.find((item) => item.candidateKey === "linkedin:/in/shared")).toMatchObject({
+    expect(action.total).toBe(1);
+    expect(action.items[0]).toMatchObject({
       company: "Latest company",
       latestSource: { effectId: latest.input.effectId },
     });
-    expect(intersection.items.map((item) => item.candidateKey)).toEqual(["linkedin:/in/alpha"]);
-    expect(intersection.total).toBe(2);
+    expect(intersection.items).toEqual([]);
+    expect(intersection.total).toBe(0);
     expect(intersection.counts).toEqual(first.counts);
     const other = await mappedResearchFixture();
     await recordCandidatePage(other.f, other.prepared, "other-role-page", [
@@ -7520,14 +7496,6 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(foreign.total).toBe(0);
     expect(foreign.items).toEqual([]);
     expect(foreign.counts).toMatchObject({ sourceRows: 1, candidates: 1 });
-    // Detaching a proven action page cannot manufacture a native-save receipt.
-    await prisma.recruitingCandidatePage.update({
-      where: { effectId: pages[0]!.effectId },
-      data: { taskId: null, actionId: null },
-    });
-    await expect(recruiting.listRecruitingCandidates(prisma, actor, input)).rejects.toBeInstanceOf(
-      IsolationError,
-    );
   });
 
   it("keeps cross-action occurrences for one profile while role identities stay isolated", async () => {
@@ -7661,190 +7629,5 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
       discoveryCount: 1,
       latestAssessment: { version: 1, isCurrent: true },
     });
-  });
-  it("pages latest distinct assessments before the 200-row bound", async () => {
-    const f = await assessmentFixture();
-    await recruiting.saveRecruitingAssessment(prisma, actor, f.context, f.input, f.artifacts);
-    const original = await prisma.recruitingAssessment.findFirstOrThrow({
-      where: { roleId: f.role.role.id },
-    });
-    await prisma.recruitingAssessment.deleteMany({ where: { roleId: f.role.role.id } });
-    await prisma.recruitingAssessment.createMany({
-      data: Array.from({ length: 205 }, (_, index) =>
-        [1, 2].map((version) => ({
-          ...original,
-          candidateKey: `candidate-${String(index).padStart(3, "0")}`,
-          version,
-          basedOnVersion: version === 1 ? null : 1,
-          facts: original.facts as Prisma.InputJsonValue,
-          judgments: original.judgments as Prisma.InputJsonValue,
-          questions: original.questions as Prisma.InputJsonValue,
-          sourceRefs: original.sourceRefs as Prisma.InputJsonValue,
-        })),
-      ).flat(),
-    });
-    const first = await recruiting.listRecruitingAssessments(prisma, actor, {
-      roleId: f.role.role.id,
-      offset: 0,
-    });
-    const second = await recruiting.listRecruitingAssessments(prisma, actor, {
-      roleId: f.role.role.id,
-      offset: 200,
-    });
-    expect(first).toHaveLength(200);
-    expect(second).toHaveLength(5);
-    expect(
-      [...first, ...second].map((row) => [row.assessment.candidateKey, row.assessment.version]),
-    ).toEqual(
-      Array.from({ length: 205 }, (_, index) => [`candidate-${String(index).padStart(3, "0")}`, 2]),
-    );
-    expect(
-      await recruiting.listRecruitingAssessments(prisma, actor, {
-        roleId: f.role.role.id,
-        offset: 400,
-      }),
-    ).toEqual([]);
-    await expect(
-      recruiting.listRecruitingAssessments(
-        prisma,
-        { ...actor, userId: otherUserId },
-        { roleId: f.role.role.id, offset: 0 },
-      ),
-    ).rejects.toThrow(IsolationError);
-  });
-
-  it("pages research tasks and actions independently including over 200 actions on one task", async () => {
-    const f = await assessmentFixture();
-    const server = await prisma.mcpServer.create({
-      data: {
-        spaceId,
-        userId,
-        name: "Pagination fixture",
-        slug: `pagination-${f.role.role.id}`,
-        transport: "http",
-      },
-    });
-    const prefix = `paged-${f.role.role.id}`;
-    const taskIds = Array.from(
-      { length: 205 },
-      (_, index) => `${prefix}-${String(index).padStart(3, "0")}`,
-    );
-    await prisma.recruitingResearchTask.createMany({
-      data: taskIds.map((id) => ({
-        id,
-        roleId: f.role.role.id,
-        mcpServerId: server.id,
-        serverRevision: 1,
-        state: "unknown",
-        createdByRunId: f.run.id,
-      })),
-    });
-    const actionIds = Array.from(
-      { length: 206 },
-      (_, index) => `${prefix}-action-${String(index).padStart(3, "0")}`,
-    );
-    await prisma.recruitingResearchAction.createMany({
-      data: actionIds.map((id, index) => ({
-        id,
-        taskId: index < 205 ? taskIds[0]! : taskIds[204]!,
-        roleRevisionId: f.role.revision.id,
-        runId: f.run.id,
-        sourceMessageId: f.message.id,
-        clientNonce: id,
-        kind: "create",
-        requestArtifactId: artifactId,
-        requestArtifactHash: hash,
-        contextArtifactId: artifactId,
-        contextArtifactHash: hash,
-        outputArtifacts: [],
-      })),
-    });
-    await prisma.recruitingResearchTask.update({
-      where: { id: taskIds[0] },
-      data: { pendingActionId: actionIds[204] },
-    });
-    const first = await recruiting.listRecruitingResearch(prisma, actor, {
-      roleId: f.role.role.id,
-      offset: 0,
-    });
-    const second = await recruiting.listRecruitingResearch(prisma, actor, {
-      roleId: f.role.role.id,
-      offset: 200,
-    });
-    expect(first.tasks.map((row) => row.id)).toEqual(taskIds.slice(0, 200));
-    expect(second.tasks.map((row) => row.id)).toEqual(taskIds.slice(200));
-    expect(first.actions.map((row) => row.id)).toEqual(actionIds.slice(0, 200));
-    expect(second.actions.map((row) => row.id)).toEqual(actionIds.slice(200));
-    expect(first.tasks[0]?.pendingActionId).toBe(actionIds[204]);
-    expect(
-      await recruiting.listRecruitingResearch(prisma, actor, {
-        roleId: f.role.role.id,
-        offset: 400,
-      }),
-    ).toEqual({ tasks: [], actions: [], observations: [] });
-    await prisma.recruitingResearchAction.update({
-      where: { id: actionIds[204] },
-      data: { requestArtifactHash: "b".repeat(64) },
-    });
-    await expect(
-      recruiting.listRecruitingResearch(prisma, actor, { roleId: f.role.role.id, offset: 200 }),
-    ).rejects.toThrow(IsolationError);
-  });
-
-  it("filters candidate questions before applying the 200-row offset", async () => {
-    const f = await questionFixture(true);
-    await recruiting.pauseRunForInput(prisma, f.pause);
-    const original = await prisma.event.findFirstOrThrow({
-      where: { runId: f.run.id, type: "recruiting.question.asked" },
-    });
-    const { id: _id, seq: _seq, ...event } = original;
-    const payload = original.payload as Record<string, Prisma.InputJsonValue>;
-    let seq = (
-      await prisma.event.aggregate({ where: { threadId: f.thread.id }, _max: { seq: true } })
-    )._max.seq!;
-    // Interleaved unrelated candidate receipts must not consume this candidate's page.
-    for (let index = 0; index < 204; index++) {
-      await prisma.event.create({
-        data: {
-          ...event,
-          seq: ++seq,
-          payload: {
-            ...payload,
-            target: {
-              kind: "candidate",
-              candidateKey: "different",
-              assessmentVersion: 1,
-              criterionIds: [],
-            },
-          },
-        },
-      });
-      await prisma.event.create({
-        data: { ...event, seq: ++seq, payload: payload as Prisma.InputJsonValue },
-      });
-    }
-    const input = {
-      threadId: f.thread.id,
-      roleId: f.role.role.id,
-      candidateKey: f.input.candidateKey,
-    };
-    const first = await recruiting.listRecruitingQuestions(prisma, actor, { ...input, offset: 0 });
-    const second = await recruiting.listRecruitingQuestions(prisma, actor, {
-      ...input,
-      offset: 200,
-    });
-    expect(first).toHaveLength(200);
-    expect(second).toHaveLength(5);
-    expect([...first, ...second].every((question) => question.effectId === f.effect.id)).toBe(true);
-    expect(
-      await recruiting.listRecruitingQuestions(prisma, actor, { ...input, offset: 400 }),
-    ).toEqual([]);
-    await expect(
-      recruiting.listRecruitingQuestions(
-        prisma,
-        { ...actor, userId: otherUserId },
-        { ...input, offset: 0 },
-      ),
-    ).rejects.toThrow(IsolationError);
   });
 });

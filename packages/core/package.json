@@ -48,11 +48,6 @@
       "types": "./src/node/screen-capability.ts",
       "development": "./src/node/screen-capability.ts",
       "default": "./src/node/screen-capability.ts"
-    },
-    "./node/novnc-proxy": {
-      "types": "./src/node/novnc-proxy.ts",
-      "development": "./src/node/novnc-proxy.ts",
-      "default": "./src/node/novnc-proxy.ts"
     }
   },
   "scripts": {
@@ -76,6 +71,5 @@
     "fast-check": "4.10.0",
     "typescript": "7.0.2",
     "vitest": "4.1.11"
-  },
-  "sideEffects": false
+  }
 }

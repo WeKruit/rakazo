@@ -68,27 +68,6 @@ describePostgres("push tokens (PostgreSQL)", () => {
     await expect(loadPushToken(prisma, userC)).resolves.toBeUndefined();
   });
 
-  it.each(["UTC", "America/Chicago", "Asia/Tokyo"])(
-    "compares session expiry as UTC under %s",
-    async (timezone) => {
-      const url = new URL(databaseUrl!);
-      url.searchParams.set("options", `-c TimeZone=${timezone}`);
-      const local = createDb(url.href, { poolMax: 1 });
-      const token = `ExponentPushToken[timezone-${timezone}-${suffix}]`;
-      try {
-        await expect(
-          savePushToken(local.prisma, userC, token, await session(userC, -60_000)),
-        ).rejects.toBeInstanceOf(PushSessionEndedError);
-        await expect(
-          savePushToken(local.prisma, userC, token, await session(userC, 60_000)),
-        ).resolves.toBeUndefined();
-      } finally {
-        await local.prisma.$disconnect();
-        await local.pool.end();
-      }
-    },
-  );
-
   it("ends or retargets only the token of the session that registered it", async () => {
     const token = `ExponentPushToken[retarget-${suffix}]`;
     const first = await session(userC);

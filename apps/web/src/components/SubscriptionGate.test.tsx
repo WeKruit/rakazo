@@ -67,9 +67,6 @@ it("shows the paywall without access and opens once a recheck finds access", asy
   api.me.mockResolvedValue({ billingEnabled: true });
   api.status.mockResolvedValue({ access: false });
   const { container, root } = await renderGate(true);
-  await act(async () => {
-    await vi.dynamicImportSettled();
-  });
   expect(container.textContent).toBe("paywall");
 
   api.status.mockResolvedValue({ access: true });
