@@ -425,7 +425,8 @@ describe("shared Linux desktop lifecycle", () => {
         waitForReady(joinedReady);
         const result = spawnSync("bash", ["-eu", "-c", command], {
           encoding: "utf8",
-          timeout: 20_000,
+          // Two profiles can each wait up to 20 s for a graceful close on a loaded machine.
+          timeout: 60_000,
           env: {
             ...process.env,
             PATH: `${bin}${path.delimiter}${process.env.PATH ?? ""}`,
@@ -460,10 +461,11 @@ describe("shared Linux desktop lifecycle", () => {
         }
       }
     },
+    90_000,
   );
 
   it.skipIf(process.platform !== "linux")(
-    "reads the debugging port from a space-joined Chromium command line",
+    "reads the debugging port from a space-joined Chromium command line
     () => {
       const root = mkdtempSync(path.join(tmpdir(), "desktop-port-"));
       roots.push(root);
