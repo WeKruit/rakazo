@@ -976,6 +976,8 @@ export function shortQuestion(question: string, max = 240): string {
  * A handed-in stage used to stay silent for 20-200 s while the specialist read context and ran
  * slow tools. Its first step runs at low thinking and opens with one line the recruiter sees.
  */
+const SCHEDULING_PREPARE_NEXT_STEP =
+  "Build the plan with operation prepare: read the candidate's email with get_email and the calendar with get_availability in this conversation, then call recruiting_scheduling with operation prepare, emailId, candidate {candidateKey,name,timeZone}, interviewer {name,email,timeZone}, start and lengthInMinutes of one returned slot. Then book with operation book and the returned planId; its card is the approval.";
 const HANDOFF_OPENING_NOTE =
   "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in English, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history.";
 
@@ -6035,10 +6037,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               connectorCall = resolved.call;
               resolvedTool = resolved.tool;
             } catch (error) {
+              const operation = (args as { operation?: unknown }).operation;
               return {
                 error: sanitizeConnectorError(error, runSecrets),
                 code: "SCHEDULING_PLAN_UNAVAILABLE",
                 dispatched: false,
+                // A failed draft or plan read left agents stuck on "not found"; prepare is the path.
+                ...(operation === "book" || operation === "confirm"
+                  ? {}
+                  : { next: SCHEDULING_PREPARE_NEXT_STEP }),
               };
             }
           }
