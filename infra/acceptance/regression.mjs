@@ -156,6 +156,24 @@ async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000 } = 
   return { replies, seconds: Math.round((Date.now() - sentAt) / 1000) };
 }
 
+/** Waits until the crew is idle and has posted nothing new for a while; the next-step card follows the ten. */
+async function settled(groupId, { quietMs = 20_000, limitMs = 3 * 60_000 } = {}) {
+  const startedAt = Date.now();
+  let count = -1;
+  let changed = Date.now();
+  let messages = [];
+  while (Date.now() - startedAt < limitMs) {
+    messages = await messagesOf(groupId);
+    if (messages.length !== count) {
+      count = messages.length;
+      changed = Date.now();
+    }
+    if (Date.now() - changed > quietMs && !(await working(groupId))) break;
+    await sleep(3_000);
+  }
+  return messages;
+}
+
 const results = [];
 async function stage(name, body) {
   const failures = [];
@@ -272,7 +290,7 @@ if (wanted.has("t3"))
       path.join(OUT, "t3.json"),
     ]);
     if (code !== 0) failures.push("first ten did not pass; see t3.log");
-    const messages = await messagesOf(reportOf("t3").groupId);
+    const messages = await settled(reportOf("t3").groupId);
     commonChecks(messages, failures);
     tenChecks(messages, failures);
     const text = fs.readFileSync(jd, "utf8");
@@ -310,7 +328,7 @@ if (wanted.has("t1"))
     ]);
     if (code !== 0) failures.push("start or find-50 did not pass; see t1.log");
     const groupId = reportOf("t1").groupId;
-    tenChecks(await messagesOf(groupId), failures);
+    tenChecks(await settled(groupId), failures);
     const draft = await say(groupId, "来个campign draft看看");
     const drafted = draft.replies.map(botText).join("\n");
     if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
