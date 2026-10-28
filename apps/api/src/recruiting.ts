@@ -1204,7 +1204,8 @@ export async function getRecruitingCorrespondence(
       }
       // Read the same authorized CRM role used by the workspace, without inventing a saved tool receipt.
       const start = Number(page.cursor ?? 0);
-      const end = start + (page.limit ?? 50);
+      const end =
+        start + Math.min(200, Math.max(1, page.limit ?? (view === "contacts" ? 200 : 50)));
       if (workspace && view === "inbox" && crmReads) {
         const attached = await recruiting.getRecruitingWorkspaceCrmTarget(prisma, actor, {
           threadId: target.threadId,
@@ -1317,10 +1318,11 @@ export async function getRecruitingCorrespondence(
         output.partial ||= outcomes.partial;
       }
       // Offset over the merged inbox order; refresh from page one after new mail.
-      output.nextCursor = output.emails.length > end ? String(end) : null;
-      // Unpaged callers keep the old "more than one screen of mail" signal.
+      const rows = view === "contacts" ? output.contacts : output.emails;
+      output.nextCursor = rows.length > end ? String(end) : null;
       output.partial ||= output.nextCursor !== null;
-      output.emails = output.emails.slice(start, end);
+      if (view === "contacts") output.contacts = output.contacts.slice(start, end);
+      else output.emails = output.emails.slice(start, end);
       return output;
     };
     if (!workspace) return finish();
@@ -1692,20 +1694,25 @@ export async function getRecruitingCorrespondence(
           if (current?.role.id !== workspace.role.id) throw new IsolationError();
         };
     }
-    const candidateKeys = new Set(
-      view === "contacts"
-        ? (
-            await prisma.recruitingCandidate.findMany({
-              where: {
-                roleId: workspace.role.id,
-                role: { spaceId: actor.spaceId, userId: actor.userId },
-              },
-              select: { candidateKey: true },
-            })
-          ).map((candidate) => candidate.candidateKey)
-        : [],
-    );
     const contactKeys = new Set<string>();
+    // Only check identities present in a retained provider result, 200 keys per query. Reading
+    // every key in the role makes the contact view grow with the whole candidate pool.
+    const roleCandidateKeys = async (observedKeys: string[]) => {
+      const keys = new Set<string>();
+      for (let offset = 0; offset < observedKeys.length; offset += 200) {
+        const candidates = await prisma.recruitingCandidate.findMany({
+          where: {
+            roleId: workspace.role.id,
+            role: { spaceId: actor.spaceId, userId: actor.userId },
+            candidateKey: { in: observedKeys.slice(offset, offset + 200) },
+          },
+          select: { candidateKey: true },
+          take: 200,
+        });
+        for (const candidate of candidates) keys.add(candidate.candidateKey);
+      }
+      return keys;
+    };
     let parsed = false;
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
     const instantlyObservedAt = new Map<string, Date>();
@@ -1983,6 +1990,15 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         parsed = true;
+        const candidateKeys = await roleCandidateKeys([
+          ...new Set(
+            body.people.flatMap((row: unknown) => {
+              const url = correspondenceRecord(row)?.linkedin_url;
+              const identity = typeof url === "string" ? recruitingCalibrationIdentity(url) : null;
+              return identity ? [`linkedin:${identity}`] : [];
+            }),
+          ),
+        ]);
         for (const row of body.people) {
           const entry = correspondenceRecord(row);
           const linkedinUrl = entry?.linkedin_url;
@@ -2025,6 +2041,17 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         parsed = true;
+        const observedKeys = [
+          ...new Set(
+            body.results.flatMap((row: unknown) => {
+              const input = correspondenceRecord(correspondenceRecord(row)?.input);
+              const url = input?.professional_network_url;
+              const identity = typeof url === "string" ? recruitingCalibrationIdentity(url) : null;
+              return identity ? [`linkedin:${identity}`] : [];
+            }),
+          ),
+        ];
+        const candidateKeys = await roleCandidateKeys(observedKeys);
         for (const row of body.results) {
           const entry = correspondenceRecord(row);
           const input = correspondenceRecord(entry?.input);

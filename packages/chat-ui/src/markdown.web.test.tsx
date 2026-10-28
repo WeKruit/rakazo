@@ -558,6 +558,9 @@ describe("web external link confirmation", () => {
     await act(async () => {
       link?.click();
     });
+    await act(async () => {
+      await vi.dynamicImportSettled();
+    });
     const dialog = document.querySelector("[role='alertdialog']");
     expect(dialog?.textContent).toContain("Open external link?");
     expect(dialog?.textContent).toContain("https://example.test/docs?x=1");
@@ -596,6 +599,9 @@ describe("web external link confirmation", () => {
     );
     await act(async () => {
       view.container.querySelector("a")?.click();
+    });
+    await act(async () => {
+      await vi.dynamicImportSettled();
     });
     const dialog = document.querySelector("[role='alertdialog']");
     expect(dialog?.querySelector("strong")?.textContent).toBe("images.example.test");

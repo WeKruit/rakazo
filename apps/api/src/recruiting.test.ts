@@ -2981,10 +2981,40 @@ describe("saved recruiting correspondence", () => {
     });
     expect(JSON.stringify(result)).not.toMatch(/saved-job|private profile|Never join|VERIFIED/);
     expect(client.recruitingCandidate.findMany).toHaveBeenCalledWith({
-      where: { roleId: "role", role: { spaceId: "space", userId: "owner" } },
+      where: {
+        roleId: "role",
+        role: { spaceId: "space", userId: "owner" },
+        candidateKey: { in: ["linkedin:/in/saved-person"] },
+      },
       select: { candidateKey: true },
+      take: 200,
     });
   });
+  it("pages 1000 observed contacts and bounds each candidate membership query to 200 keys", async () => {
+    const rows = Array.from({ length: 1000 }, (_, index) => ({
+      ...contactRow,
+      input: { professional_network_url: `https://linkedin.com/in/synthetic-${index}` },
+      profile: {
+        social_profiles: {
+          professional_network: { url: `https://linkedin.com/in/synthetic-${index}` },
+        },
+      },
+    }));
+    const { client, prisma } = contactFixture({ status: "FINISHED", results: rows });
+    client.recruitingCandidate.findMany.mockImplementation(async (query) =>
+      query.where.candidateKey.in.map((candidateKey: string) => ({ candidateKey })),
+    );
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "contacts");
+    expect(result.contacts).toHaveLength(200);
+    expect(result.nextCursor).toBe("200");
+    expect(client.recruitingCandidate.findMany).toHaveBeenCalledTimes(5);
+    for (const [query] of client.recruitingCandidate.findMany.mock.calls) {
+      expect(query.take).toBe(200);
+      expect(query.where.candidateKey.in).toHaveLength(200);
+      expect(query.where.role).toEqual({ spaceId: "space", userId: "owner" });
+    }
+  });
+
   it("shows emails from the multi-source contact lookup for this role's people only", async () => {
     const { client, prisma } = contactFixture({
       source: "local_contact_lookup",

@@ -2,11 +2,13 @@ import { readdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 import type { AdapterContext, PortableFile } from "@rakazo/adapter-kit";
+import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ArtifactStorageOptions } from "./artifacts.js";
 import { SupabaseArtifactStore } from "./artifacts.js";
 import { writePortableFile } from "./computer-workspace.js";
 import { LocalAgentHomeStore } from "./home.js";
+import { MigratingAgentHomeStore } from "./home-authoritative-store.js";
 
 /** The object storage calls a replicated home needs; SupabaseArtifactStore provides them. */
 export interface HomeSnapshotStore {
@@ -17,14 +19,29 @@ export interface HomeSnapshotStore {
 
 const PUBLISH_TIMEOUT_MS = 120_000;
 
+/** Configuration loss must not turn an authoritative home back into a local directory. */
+export async function assertHomeStorageConfiguration(
+  prisma: PrismaClient,
+  storage?: ArtifactStorageOptions,
+) {
+  if (
+    !storage &&
+    ((await prisma.homeAuthorityCutover.count()) ||
+      (await prisma.computer.count({ where: { homeRevision: { startsWith: "v2:" } } })))
+  )
+    throw new Error("Authoritative homes require object storage; local fallback is forbidden");
+}
+
 /** Homes on the volume, replicated to object storage when it is configured. */
 export function createAgentHomeStore(
   root: string,
   storage?: ArtifactStorageOptions,
+  prisma?: PrismaClient,
 ): LocalAgentHomeStore {
-  return storage
-    ? new ReplicatedAgentHomeStore(root, new SupabaseArtifactStore(storage))
-    : new LocalAgentHomeStore(root);
+  if (!storage) return new LocalAgentHomeStore(root);
+  const remote = new SupabaseArtifactStore(storage);
+  const legacy = new ReplicatedAgentHomeStore(root, remote);
+  return prisma ? new MigratingAgentHomeStore(root, legacy, remote, prisma) : legacy;
 }
 
 /**

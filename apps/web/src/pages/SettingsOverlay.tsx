@@ -15,6 +15,8 @@ import {
 import type { ComponentType } from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { computersAreUnavailable } from "../components/ComputersUnavailableHint";
+import { lazyPanel } from "../components/ErrorBoundary";
+import { withFeatureMessages } from "../lib/i18n";
 import {
   ComputerSettingsPanel,
   GeneralSettingsPanels,
@@ -23,8 +25,13 @@ import {
 } from "./AccountSettingsOverlay";
 import { BillingSettingsPanel } from "./BillingSettingsPanel";
 import { MemorySettingsOverlay } from "./MemorySettingsOverlay";
-import { ModelSettingsOverlay } from "./ModelSettingsOverlay";
 import { VoiceSettingsOverlay } from "./VoiceSettingsOverlay";
+
+const ModelSettingsOverlay = lazyPanel(() =>
+  withFeatureMessages(() => import("./ModelSettingsOverlay")).then(
+    (module) => module.ModelSettingsOverlay,
+  ),
+);
 
 export type SettingsSection =
   | "general"

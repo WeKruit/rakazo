@@ -109,14 +109,17 @@ describe("account preferences", () => {
           input.where?.mcpServers ? Promise.resolve(null) : target(input),
         ),
         findMany: vi.fn(async (input) =>
-          input.select || input.where.archivedAt !== null ? [] : [bot],
+          input.select || input!.where!.archivedAt !== null ? [] : [bot],
         ),
         // A crew without Main and Sourcer is not a recruiting workspace to upgrade.
         count: vi.fn().mockResolvedValue(0),
       },
-      chatGroup: { findMany: vi.fn().mockResolvedValue([]) },
-      botSection: { findMany: vi.fn().mockResolvedValue([]) },
-      externalConversation: { findMany: vi.fn().mockResolvedValue([]) },
+      chatGroup: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      botSection: { findMany: vi.fn().mockResolvedValue([]), count: vi.fn().mockResolvedValue(0) },
+      externalConversation: {
+        findMany: vi.fn().mockResolvedValue([]),
+        count: vi.fn().mockResolvedValue(0),
+      },
       routine: { findMany: routines },
       capabilityInstall: { findFirst: vi.fn().mockResolvedValue(null) },
       message: { findMany: vi.fn().mockResolvedValue([]) },
@@ -149,6 +152,36 @@ describe("account preferences", () => {
     expect(f.snapshot).not.toHaveBeenCalled();
     expect(f.routines).not.toHaveBeenCalled();
   }, 500);
+
+  it("pages 1000 bots through list, navigation and bootstrap without losing the selected thread", async () => {
+    const f = bootstrapDeps();
+    const base = await f.target();
+    const rows = Array.from({ length: 1000 }, (_, index) => ({ ...base, id: `bot-${index}` }));
+    vi.mocked(f.deps.prisma.bot.findMany).mockImplementation(async (input) =>
+      input!.select || input!.where!.archivedAt !== null
+        ? []
+        : rows.slice(input!.skip ?? 0, (input!.skip ?? 0) + (input!.take ?? rows.length)),
+    );
+    vi.mocked(f.deps.prisma.bot.count).mockImplementation(async (input) =>
+      input?.where?.name ? 0 : 1000,
+    );
+    const ids: string[] = [];
+    for (let offset = 0; offset < 1000; offset += 200) {
+      const page = await f.client.bots.page({ offset, archived: false });
+      expect(page.items).toHaveLength(200);
+      ids.push(...page.items.map((bot) => bot.id));
+      const navigation = await f.client.spaces.list({ offset });
+      expect(navigation.current.bots).toHaveLength(200);
+      expect(navigation.nextOffset).toBe(offset < 800 ? offset + 200 : null);
+    }
+    expect(new Set(ids).size).toBe(1000);
+    expect(await f.client.bots.list()).toHaveLength(200);
+    f.target.mockResolvedValue(rows[999]);
+    const bootstrap = await f.client.bootstrap({ botId: "bot-999" });
+    expect(bootstrap.bots).toHaveLength(200);
+    expect(bootstrap.nextOffset).toBe(200);
+    expect(bootstrap.thread?.botId).toBe("bot-999");
+  });
 
   it("returns bootstrap without waiting for the computer pre-warm", async () => {
     const f = bootstrapDeps();
@@ -191,6 +224,9 @@ describe("account preferences", () => {
     const client = createRouterClient(createRouter(deps), { context: { actor } });
     await expect(client.capabilities.list()).resolves.toEqual([]);
     expect(findMany).toHaveBeenCalledWith({
+      take: 200,
+      skip: 0,
+      orderBy: { id: "asc" },
       where: {
         spaceId: actor.spaceId,
         userId: actor.userId,
@@ -255,6 +291,9 @@ describe("account preferences", () => {
     );
     expect(f.snapshot).toHaveBeenCalledOnce();
     expect(f.routines).toHaveBeenCalledWith({
+      take: 200,
+      skip: 0,
+      orderBy: { id: "asc" },
       where: { botId: "bot-1", spaceId: f.actor.spaceId },
     });
   });
@@ -277,6 +316,7 @@ describe("account preferences", () => {
     const groupTarget = vi.fn().mockResolvedValue(group);
     Object.assign(f.deps.prisma, {
       chatGroup: {
+        count: vi.fn().mockResolvedValue(1),
         findFirst: groupTarget,
         findMany: vi.fn(async (input) => (input.where.archivedAt === null ? [group] : [])),
       },
@@ -1195,7 +1235,9 @@ describe("MCP loopback endpoints", () => {
       expect(JSON.stringify(body)).not.toContain("test-platform-credential-not-for-clients");
       expect(list).toHaveBeenCalledWith({
         where: { spaceId: "workspace-1", userId: "member-1" },
-        orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+        orderBy: [{ name: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        take: 200,
+        skip: 0,
       });
     } finally {
       vi.unstubAllEnvs();
@@ -3148,6 +3190,17 @@ describe("codex catalog auth", () => {
   const apiKey = "sk-test-api-key-12345678";
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
@@ -3249,6 +3302,17 @@ describe("codex live catalog", () => {
   }
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
@@ -3757,6 +3821,17 @@ describe("model set default auth", () => {
   const apiKey = "sk-test-api-key-12345678";
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",
@@ -4078,6 +4153,17 @@ describe("bot model auth on save", () => {
   const apiKey = "sk-test-api-key-12345678";
 
   async function call(handler: RPCHandler<never>, path: string, body: unknown) {
+    if (path === "models/list" && body === null) {
+      const json: unknown[] = [];
+      for (let offset = 0; ; offset += 200) {
+        const response = await call(handler, path, { offset });
+        if (!response?.ok) return response;
+        const page = (await response.json()).json as unknown[];
+        expect(page.length).toBeLessThanOrEqual(200);
+        json.push(...page);
+        if (page.length < 200) return Response.json({ json });
+      }
+    }
     const { response } = await handler.handle(
       new Request(`http://127.0.0.1/rpc/${path}`, {
         method: "POST",

@@ -10,6 +10,7 @@ const crmData = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
 const roleCampaign = vi.hoisted(() => vi.fn());
 const recordView = vi.hoisted(() => vi.fn());
+vi.mock("./LazyViews", () => import("./lazy-views-eager"));
 vi.mock("../../lib/rpc", () => ({
   rpc: {
     recruiting: {

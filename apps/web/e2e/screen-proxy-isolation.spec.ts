@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer as createHttpServer, type Server } from "node:http";
 import type { AddressInfo, Server as NetServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -7,6 +7,7 @@ import path from "node:path";
 import { expect, test } from "@playwright/test";
 import { openScreenCapability } from "@rakazo/core/node/screen-capability";
 import { createServer, type Plugin, preview, type ViteDevServer } from "vite";
+import { createPublicWebServer } from "../../api/src/public-web";
 import { addScreenProxyCapability } from "../../api/src/screen-proxy";
 
 const scope = {
@@ -26,7 +27,7 @@ const screenHtml = `<!doctype html><title>Fake screen</title>
     cookie: attempt(() => document.cookie),
     storage: attempt(() => localStorage.getItem('app-data')),
     parent: attempt(() => parent.document.title),
-    api: await fetch('/session', { credentials: 'include' }).then(r => r.text()).catch(() => 'blocked'),
+    api: await fetch('/api/session', { credentials: 'include' }).then(r => r.text()).catch(() => 'blocked'),
   };
   const socketUrl = new URL('./websockify', location.href);
   socketUrl.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -50,7 +51,7 @@ async function close(server: Server) {
   );
 }
 
-for (const mode of ["development", "preview"] as const) {
+for (const mode of ["development", "preview", "production"] as const) {
   test.describe(`screen response isolation in ${mode}`, () => {
     let origin: string;
     let screenUrl: string;
@@ -106,7 +107,7 @@ for (const mode of ["development", "preview"] as const) {
             res.end(
               '<!doctype html><title>Fake app</title><body><script>localStorage.setItem("app-data", "private-app-data"); document.cookie = "app-session=fake-session; Path=/";</script></body>',
             );
-          } else if (req.url === "/session") {
+          } else if (req.url === "/api/session") {
             res.setHeader("Content-Type", "application/json");
             res.end(JSON.stringify({ cookie: req.headers.cookie ?? null }));
           } else next();
@@ -139,7 +140,30 @@ for (const mode of ["development", "preview"] as const) {
           server: { host: "127.0.0.1", port: 0, hmr: false as const },
           preview: { host: "127.0.0.1", port: 0 },
         };
-        const server = mode === "development" ? await createServer(config) : await preview(config);
+        const server =
+          mode === "production"
+            ? await (async () => {
+                await writeFile(
+                  path.join(root, "dist/index.html"),
+                  '<!doctype html><title>Fake app</title><body><script>localStorage.setItem("app-data", "private-app-data"); document.cookie = "app-session=fake-session; Path=/";</script></body>',
+                );
+                const app = {
+                  fetch: (request: Request) =>
+                    Response.json({ cookie: request.headers.get("cookie") }),
+                };
+                const httpServer = await createPublicWebServer({
+                  app,
+                  root: path.join(root, "dist"),
+                  allowedHosts: ["127.0.0.1"],
+                  screen: { secret, api: process.env.API_PROXY_TARGET! },
+                  logger: { warn() {}, info() {} },
+                });
+                await listen(httpServer);
+                return { httpServer, close: () => close(httpServer) };
+              })()
+            : mode === "development"
+              ? await createServer(config)
+              : await preview(config);
         // listen() replaces zero with Vite's default port; bind the HTTP server directly instead.
         if ("listen" in server) await listen(server.httpServer!);
         origin = `http://127.0.0.1:${(server.httpServer!.address() as AddressInfo).port}`;

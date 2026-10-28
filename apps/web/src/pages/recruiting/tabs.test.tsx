@@ -1,3 +1,4 @@
+import "../../lib/query.test-support";
 // @vitest-environment jsdom
 import { ORPCError } from "@orpc/client";
 import type { ReactNode } from "react";
@@ -32,10 +33,12 @@ vi.mock("@lingui/react/macro", () => ({
 }));
 
 import { RecruitingChatContextProvider } from "../shell/recruiting-chat-context";
+import { ContactsTab } from "./ContactsTab";
 import type { RecruitingDetailController } from "./detail";
 import { RecruitingDetailProvider } from "./detail";
 import { InboxWithReply, replyStatus } from "./InboxTab";
-import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./index";
+import { InterviewTab } from "./InterviewTab";
+import { InboxTab, SequenceTab } from "./index";
 import { RoleCampaignCard } from "./SequenceTab";
 
 const ORG = "00000000-0000-4000-8000-000000000001";

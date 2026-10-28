@@ -985,6 +985,7 @@ export class PiOAuthLogins {
     thinkingLevel?: string | null;
     label?: string;
     signal?: AbortSignal;
+    persist?: (login: PiOAuthConnected) => Promise<unknown>;
   }): Promise<PiOAuthBegin> {
     if (!SUBSCRIPTION_SIGN_IN_PROVIDERS[input.provider]) {
       throw new Error(

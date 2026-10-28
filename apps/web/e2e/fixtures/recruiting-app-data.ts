@@ -368,6 +368,7 @@ const bootstrap: AppBootstrap = {
 export async function mockRecruitingApp(
   page: Page,
   options: {
+    locale?: string;
     scheduling?: boolean;
     nativeScheduling?: boolean;
     emptyCalendar?: boolean;
@@ -381,11 +382,11 @@ export async function mockRecruitingApp(
   const unknown: string[] = [];
   const calls: { method: string; input: Record<string, unknown> }[] = [];
   const views: Record<string, unknown>[] = [];
-  await page.addInitScript(() => {
+  await page.addInitScript((locale) => {
     localStorage.setItem("rakazo.uiAppearance", "light");
-    localStorage.setItem("rakazo.uiLocale", "en");
+    localStorage.setItem("rakazo.uiLocale", locale);
     localStorage.setItem("rakazo:space-id", "fixture-space");
-  });
+  }, options.locale ?? "en");
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (
@@ -436,12 +437,18 @@ export async function mockRecruitingApp(
         },
       });
     if (!url.pathname.startsWith("/rpc/")) return route.continue();
-    const method = url.pathname.slice(5);
-    const input = (route.request().postDataJSON()?.json ?? {}) as Record<string, unknown>;
+    let method = url.pathname.slice(5);
+    let input = (route.request().postDataJSON()?.json ?? {}) as Record<string, unknown>;
     calls.push({ method, input });
     if (method === "threads/subscribe") {
       await new Promise<void>((resolve) => page.once("close", () => resolve()));
       return;
+    }
+    const viewInput = method === "recruiting/readView" ? input : undefined;
+    if (viewInput) {
+      method =
+        viewInput.kind === "candidates" ? "recruiting/listCandidates" : "recruiting/listResearch";
+      input = { ...((viewInput.query as Record<string, unknown>) ?? {}), roleId: viewInput.roleId };
     }
     let value: unknown;
     if (method === "bootstrap") value = bootstrap;
@@ -845,6 +852,19 @@ export async function mockRecruitingApp(
       unknown.push(method);
       return route.fulfill({ status: 400, json: { message: "Unmocked fixture method" } });
     }
+    if (viewInput)
+      value = {
+        kind: viewInput.kind,
+        workspace: {
+          role,
+          revision,
+          crmTarget: options.nativeScheduling
+            ? null
+            : { bindingEffectId: "fixture-binding", target: crmTarget },
+        },
+        data:
+          viewInput.roleId === role.id && viewInput.roleRevisionId === revision.id ? value : null,
+      };
     return route.fulfill({ json: { json: value } });
   });
   return { unknown, calls, views };

@@ -1,8 +1,10 @@
+import "../../lib/query.test-support";
 // @vitest-environment jsdom
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { clearRecruitingReads, createRecruitingReadCache } from "../../lib/recruiting-read-cache";
 
 const listCandidates = vi.hoisted(() => vi.fn());
 const crmData = vi.hoisted(() => vi.fn());
@@ -20,7 +22,9 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
-import { ContactsTab, InboxTab, InterviewTab, SequenceTab } from "./index";
+import { ContactsTab } from "./ContactsTab";
+import { InterviewTab } from "./InterviewTab";
+import { InboxTab, SequenceTab } from "./index";
 
 const LATENCY = 300;
 const ORG = "00000000-0000-4000-8000-000000000001";
@@ -181,7 +185,7 @@ for (const [name, Tab] of Object.entries(tabs)) {
   });
 
   it(`${name}: a revisited tab renders cached rows at once and refreshes in the background`, async () => {
-    const readCache = { entries: new Map<string, unknown>(), epoch: 0 };
+    const readCache = createRecruitingReadCache();
     const cached = { ...props, crmTarget: target, readCache, readCacheScope: "user:space:thread" };
     await timeToFirstRows(<Tab {...cached} />);
     await cleanup?.();
@@ -196,20 +200,18 @@ for (const [name, Tab] of Object.entries(tabs)) {
 }
 
 it("discards a response issued before the read cache was cleared", async () => {
-  const readCache = { entries: new Map<string, unknown>(), epoch: 0 };
+  const readCache = createRecruitingReadCache();
   const cached = { ...props, crmTarget: target, readCache, readCacheScope: "user:space:thread" };
   const container = document.createElement("div");
   document.body.append(container);
   const root = createRoot(container);
   await act(async () => root.render(<ContactsTab {...cached} />));
-  readCache.epoch++;
-  readCache.entries.clear();
+  clearRecruitingReads(readCache);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(LATENCY);
   });
   expect(container.textContent).not.toContain("Person 0");
-  expect(container.querySelector('[role="alert"]')).not.toBeNull();
-  expect(readCache.entries.size).toBe(0);
+  expect(readCache.client.getQueryCache().getAll().length).toBe(0);
   cleanup = async () => {
     await act(async () => root.unmount());
     container.remove();
@@ -265,7 +267,7 @@ it("prefers the API's cursor over the offset when one is returned", async () => 
   expect(crmData.mock.calls[1]![0]).not.toHaveProperty("offset");
 });
 
-it("loads more rows with the CRM offset until every row is shown", async () => {
+it("loads every CRM page while keeping the rendered window bounded", async () => {
   const { container } = await timeToFirstRows(<ContactsTab {...props} crmTarget={target} />);
   expect(container.querySelectorAll("tbody tr")).toHaveLength(25);
   const more = () =>
@@ -275,9 +277,15 @@ it("loads more rows with the CRM offset until every row is shown", async () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(LATENCY);
     });
-    expect(container.querySelectorAll("tbody tr")).toHaveLength(Math.min(shown, TOTAL));
+    // Crossing the existing 80-row threshold loads the virtualizer module.
+    await act(async () => vi.dynamicImportSettled());
+    const loaded = Math.min(shown, TOTAL);
+    expect(container.querySelector("table")?.getAttribute("aria-rowcount")).toBe(
+      String(loaded + 1),
+    );
+    expect(container.querySelectorAll("tbody tr:has(th)").length).toBeLessThanOrEqual(80);
   }
-  expect(container.querySelectorAll("tbody tr")).toHaveLength(TOTAL);
+  expect(container.querySelector("table")?.getAttribute("aria-rowcount")).toBe(String(TOTAL + 1));
   expect(more()).toBeUndefined();
   expect(crmData.mock.calls.map(([input]) => (input as Input).offset ?? 0)).toEqual([
     0, 25, 50, 75, 100,
