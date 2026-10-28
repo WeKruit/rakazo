@@ -362,6 +362,8 @@ function localInstantlyTools(
 }
 
 const FULLENRICH_MCP = "https://mcp.fullenrich.com/mcp";
+/** Longest wait for one Instantly read, so a provider that stops answering never holds a run. */
+const INSTANTLY_READ_MS = 60_000;
 const FIND_EMAILS = "native_find_emails";
 
 /**
@@ -1652,7 +1654,7 @@ export class McpConnector implements ConnectorProvider {
           {
             method: "GET",
             headers: { authorization: `Bearer ${credential.key}` },
-            signal: context.signal,
+            signal: AbortSignal.any([context.signal, AbortSignal.timeout(INSTANTLY_READ_MS)]),
           },
         );
         const { text } = await readBoundedText(accounts, 100_000);
@@ -1699,7 +1701,7 @@ export class McpConnector implements ConnectorProvider {
       const response = await safeFetch(url, {
         method: "GET",
         headers: { authorization: `Bearer ${credential.key}` },
-        signal: context.signal,
+        signal: AbortSignal.any([context.signal, AbortSignal.timeout(INSTANTLY_READ_MS)]),
       });
       const { text, truncated } = await readBoundedText(response, EMAIL_PAGE_BOUND);
       if (!response.ok) {
@@ -1757,7 +1759,7 @@ export class McpConnector implements ConnectorProvider {
           {
             method: "GET",
             headers: { authorization: `Bearer ${credential.key}` },
-            signal: context.signal,
+            signal: AbortSignal.any([context.signal, AbortSignal.timeout(INSTANTLY_READ_MS)]),
           },
         );
         await account.body?.cancel();
@@ -1801,7 +1803,7 @@ export class McpConnector implements ConnectorProvider {
             {
               method: "GET",
               headers: { authorization: `Bearer ${credential.key}` },
-              signal: context.signal,
+              signal: AbortSignal.any([context.signal, AbortSignal.timeout(INSTANTLY_READ_MS)]),
             },
           );
           const { text, truncated } = await readBoundedText(response, 1_000_000);

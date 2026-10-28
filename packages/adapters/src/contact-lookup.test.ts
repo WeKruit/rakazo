@@ -186,4 +186,62 @@ describe("findEmails", () => {
     expect(result.summary.not_looked_up).toBe(31);
     expect(result.summary.next_step).toContain("Person 50");
   });
+
+  it("gives up on a source that stops answering instead of holding the run", async () => {
+    const calls: string[] = [];
+    // Answers only when its request is aborted, like a provider that never responds.
+    const silent = (raw: string, init?: RequestInit) => {
+      calls.push(new URL(raw).hostname);
+      return new Promise<Response>((_resolve, reject) =>
+        init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), { once: true }),
+      );
+    };
+    const result = await findEmails(
+      { people },
+      {
+        ...options,
+        fetch: silent,
+        requestMs: 10,
+        keys: { fullenrich: "k1", contactout: "k2", leadmagic: "k3" },
+      },
+    );
+    expect(result.people[0]!.lookups).toEqual([
+      { provider: "fullenrich", outcome: "failed", detail: "no answer in time" },
+      { provider: "contactout", outcome: "failed", detail: "no answer in time" },
+      { provider: "leadmagic", outcome: "failed", detail: "no answer in time" },
+    ]);
+    expect(result.people[2]!.lookups.at(-1)).toEqual({
+      provider: "leadmagic",
+      outcome: "skipped",
+      detail: "source not answering",
+    });
+    // One bulk request, then one try per per-person source before it is skipped.
+    expect(calls).toEqual(["app.fullenrich.com", "api.contactout.com", "api.leadmagic.io"]);
+  });
+
+  it("keeps polling when one status check is slow", async () => {
+    let polls = 0;
+    const fetch = (_raw: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.resolve(ok({ enrichment_id: "e1" }));
+      polls += 1;
+      if (polls === 1)
+        return new Promise<Response>((_resolve, reject) =>
+          init?.signal?.addEventListener("abort", () => reject(init.signal!.reason), {
+            once: true,
+          }),
+        );
+      return Promise.resolve(
+        ok({
+          status: "FINISHED",
+          datas: [{ custom: { person: "0" }, contact: { emails: [{ email: "ada@acme.com" }] } }],
+        }),
+      );
+    };
+    const result = await findEmails(
+      { people: people.slice(0, 1) },
+      { ...options, fetch, requestMs: 10, keys: { fullenrich: "k1" } },
+    );
+    expect(polls).toBe(2);
+    expect(result.people[0]!.emails[0]!.address).toBe("ada@acme.com");
+  });
 });
