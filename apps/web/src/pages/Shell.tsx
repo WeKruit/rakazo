@@ -56,6 +56,7 @@ import {
   isPeerReceiptBlocks,
   isPendingUserMessage,
   isRunTerminalEvent,
+  isStatusQuestion,
   isToolActivityBlock,
   isXlsxFileName,
   mentionChipKey,
@@ -3648,7 +3649,8 @@ export function ShellPage() {
             );
           }
         }
-        if (interject && interjectThreadId)
+        // A progress question is answered at once without reaching the work: nothing is queued.
+        if (interject && interjectThreadId && !isStatusQuestion(trimmed))
           setSteer({ threadId: interjectThreadId, state: "queued" });
         dropDelayedSetup();
         clearReply();
