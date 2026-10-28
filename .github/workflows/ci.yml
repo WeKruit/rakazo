@@ -3,6 +3,11 @@ on:
   push:
     branches: [main]
   pull_request:
+    # Planning notes and root *.md are never read by builds or tests. docs/** and app markdown are (skill docs, smoke tests, blog), so they stay covered.
+    paths-ignore:
+      - ".planning/**"
+      - "*.md"
+  workflow_dispatch:
 
 permissions:
   contents: read
