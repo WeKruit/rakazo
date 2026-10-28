@@ -1191,7 +1191,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "run_subagent",
     description:
-      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
+      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. By default the call waits for the result; set background to keep working while it runs. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1212,8 +1212,27 @@ export const builtinAgentTools: ConnectorTool[] = [
           type: "string",
           description: "Optional connected model ID. Set together with model_provider.",
         },
+        background: {
+          type: "boolean",
+          description:
+            "Return a handle at once instead of waiting. The result arrives in this conversation once, when the helper finishes, so you can reply to the user meanwhile.",
+        },
+        handle: {
+          type: "string",
+          description:
+            "Send task as a follow-up to the helper with this handle, which keeps what it already did.",
+        },
+        wait: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "Block until the helpers with these handles finish (empty: all working helpers) and return their results. Set only wait and timeout_seconds.",
+        },
+        timeout_seconds: {
+          type: "number",
+          description: "With wait: stop waiting after this many seconds (default 60, at most 600).",
+        },
       },
-      required: ["name", "task"],
     },
   },
   {
