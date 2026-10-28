@@ -5706,7 +5706,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args = { ...args, question: shortQuestion(args.question) };
           }
           // The server's own repeat of a refused role save is not a new model call: it still runs.
-          if (handedOff && !executionId.endsWith(":repaired")) {
+          if (handedOff && !executionId.includes(":repaired")) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",
             };
@@ -9612,15 +9612,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const refused = await finish(roleError(error));
               // A save refused over its citations is repeated once by the server with them as
               // plain locators and the recruiter's own words as the intent, so it never stops
-              // the work. Ownership checks still apply to the repeat.
+              // the work. Ownership checks still apply to the repeat. A recruiter message that
+              // arrives during the repeat makes it the current one, so a refused quote gets one
+              // more repeat with that message's words.
               const repeat = repairedRoleSave(args, error);
-              if (!repeat || executionId.endsWith(":repaired")) return refused;
+              const again = executionId.endsWith(":repaired");
+              if (
+                !repeat ||
+                executionId.endsWith(":again") ||
+                (again && !(error instanceof RecruitingIntentQuoteError))
+              )
+                return refused;
               getLogger().warn("recruiting.role.save_repaired", {
                 runId,
                 operation: args.operation,
                 error: error instanceof Error ? error.name : String(error),
               });
-              const repeated: unknown = await applyTool(name, repeat, `${executionId}:repaired`);
+              const repeated: unknown = await applyTool(
+                name,
+                repeat,
+                again ? `${executionId}:again` : `${executionId}:repaired`,
+              );
               return repeated && typeof repeated === "object" && "error" in repeated
                 ? refused
                 : repeated;
