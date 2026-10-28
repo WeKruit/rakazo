@@ -98,6 +98,17 @@ const AddShortlistLeadsInput = z.strictObject({
         first_name: z.string().max(200).optional(),
         last_name: z.string().max(200).optional(),
         company_name: z.string().max(200).optional(),
+        email_type: z
+          .enum(["work", "personal"])
+          .optional()
+          .describe("Which kind of address the lookup found; the send card shows it."),
+        personalization: z
+          .string()
+          .max(1000)
+          .optional()
+          .describe(
+            "This person's own opening line, sent where the sequence has {{personalization}}.",
+          ),
       }),
     )
     .min(1)
@@ -191,7 +202,7 @@ export const nativeInstantlyWrites = [
     "add_shortlist_leads",
     AddShortlistLeadsInput,
     false,
-    "Adds shortlisted candidates of a role to its campaign as leads (ensuring the campaign first). Skips candidates without an email and ones already in the campaign; records candidate_key -> lead id.",
+    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence). Skips people without an email, on hold or passed for the role, or already in the campaign; records candidate_key -> lead id.",
   ),
 ];
 const TOOL_NAMES = new Set(nativeInstantlyWrites.map((entry) => entry.toolName));
@@ -390,7 +401,7 @@ type RoleBinding = {
   campaignId: string;
   campaignName: string;
   eaccount: string;
-  leads: Record<string, { leadId: string; email: string }>;
+  leads: Record<string, { leadId: string; email: string; emailType?: "work" | "personal" }>;
   /** True only when this product created the campaign; adopted or older bindings never get copy. */
   created?: boolean;
 };
@@ -466,7 +477,12 @@ export type InstantlyActivationDisplay = {
   campaignName: string | null;
   status: string | null;
   mailbox: string | null;
-  recipients: { name: string | null; email: string }[];
+  recipients: {
+    name: string | null;
+    email: string;
+    emailType?: "work" | "personal";
+    personalization?: string;
+  }[];
   /** null when the leads could not be read; the list itself is capped at 100. */
   recipientCount: number | null;
   stopOnReply: boolean | null;
@@ -526,7 +542,13 @@ export async function describeCampaignActivation(
   ) => Promise<Record<string, unknown> | undefined>,
   campaignId: string,
   fallbackMailbox: string | null = null,
+  bindingLeads: RoleBinding["leads"] = {},
 ): Promise<InstantlyActivationDisplay> {
+  const types = new Map(
+    Object.values(bindingLeads).flatMap((lead) =>
+      lead.emailType ? [[lead.email.toLowerCase(), lead.emailType] as const] : [],
+    ),
+  );
   const [campaign, leads] = await Promise.all([
     read("native_instantly_get_campaign", { campaign_id: campaignId }).catch(() => undefined),
     read("native_instantly_list_leads", { campaign_id: campaignId, limit: 100 }).catch(
@@ -540,7 +562,19 @@ export async function describeCampaignActivation(
     const name = [lead.first_name, lead.last_name]
       .filter((part): part is string => typeof part === "string" && part.trim() !== "")
       .join(" ");
-    return [{ name: name || null, email: lead.email }];
+    const emailType = types.get(lead.email.toLowerCase());
+    const personalization =
+      typeof lead.personalization === "string" && lead.personalization.trim()
+        ? lead.personalization.trim()
+        : undefined;
+    return [
+      {
+        name: name || null,
+        email: lead.email,
+        ...(emailType ? { emailType } : {}),
+        ...(personalization ? { personalization } : {}),
+      },
+    ];
   });
   return {
     campaignName: typeof campaign?.name === "string" ? campaign.name : null,
@@ -849,20 +883,29 @@ async function addShortlistLeads(
   const existing = await readBinding(prisma, context, bindingKey(serverId, role.id));
   if (!existing) throw new IsolationError("Role campaign binding missing after ensure");
   const { binding } = existing;
-  const shortlisted = new Set(
-    (
-      await prisma.recruitingCandidate.findMany({
-        where: {
-          roleId: role.id,
-          shortlisted: true,
-          candidateKey: { in: input.candidates.map((candidate) => candidate.candidate_key) },
-        },
-        select: { candidateKey: true },
+  // The send card is where the recruiter approves the recipients; the role's own people who are
+  // not on hold or passed can be added without a shortlist bookmark first.
+  const saved = await prisma.recruitingCandidate.findMany({
+    where: {
+      roleId: role.id,
+      candidateKey: { in: input.candidates.map((candidate) => candidate.candidate_key) },
+    },
+    select: { candidateKey: true, consideration: true },
+  });
+  const stopped = new Set(
+    saved
+      .filter((candidate) => {
+        const operation = (candidate.consideration as { operation?: unknown } | null)?.operation;
+        return operation === "hold" || operation === "pass";
       })
-    ).map((candidate) => candidate.candidateKey),
+      .map((candidate) => candidate.candidateKey),
   );
-  const notShortlisted = input.candidates.filter((c) => !shortlisted.has(c.candidate_key));
-  const eligible = input.candidates.filter((c) => shortlisted.has(c.candidate_key));
+  const inRole = new Set(saved.map((candidate) => candidate.candidateKey));
+  const notInRole = input.candidates.filter((c) => !inRole.has(c.candidate_key));
+  const onHoldOrPassed = input.candidates.filter((c) => stopped.has(c.candidate_key));
+  const eligible = input.candidates.filter(
+    (c) => inRole.has(c.candidate_key) && !stopped.has(c.candidate_key),
+  );
   const missingEmail = eligible.filter((c) => !c.email);
   const withEmail = eligible.filter((c): c is typeof c & { email: string } => Boolean(c.email));
   const leads = { ...binding.leads };
@@ -882,7 +925,11 @@ async function addShortlistLeads(
       // Instantly stores lead emails case-insensitively; dedup the same way.
       const hit = items.find((lead) => lead.email?.toLowerCase() === candidate.email.toLowerCase());
       if (!hit) return true;
-      leads[candidate.candidate_key] = { leadId: hit.id, email: candidate.email };
+      leads[candidate.candidate_key] = {
+        leadId: hit.id,
+        email: candidate.email,
+        ...(candidate.email_type ? { emailType: candidate.email_type } : {}),
+      };
       already.push(candidate.candidate_key);
       return false;
     });
@@ -894,17 +941,22 @@ async function addShortlistLeads(
     report = await rest("POST", "/leads/add", {
       campaign_id: binding.campaignId,
       skip_if_in_workspace: false,
-      leads: pending.map(({ email, first_name, last_name, company_name }) => ({
+      leads: pending.map(({ email, first_name, last_name, company_name, personalization }) => ({
         email,
         ...(first_name ? { first_name } : {}),
         ...(last_name ? { last_name } : {}),
         ...(company_name ? { company_name } : {}),
+        ...(personalization ? { personalization } : {}),
       })),
     });
     for (const created of (report.created_leads ?? []) as { index: number; id: string }[]) {
       const candidate = pending[created.index];
       if (!candidate || typeof created.id !== "string") continue;
-      leads[candidate.candidate_key] = { leadId: created.id, email: candidate.email };
+      leads[candidate.candidate_key] = {
+        leadId: created.id,
+        email: candidate.email,
+        ...(candidate.email_type ? { emailType: candidate.email_type } : {}),
+      };
       added.push(candidate.candidate_key);
     }
   }
@@ -917,7 +969,8 @@ async function addShortlistLeads(
     added,
     alreadyInCampaign: already,
     skippedMissingEmail: missingEmail.map((c) => c.candidate_key),
-    notShortlisted: notShortlisted.map((c) => c.candidate_key),
+    notInRole: notInRole.map((c) => c.candidate_key),
+    onHoldOrPassed: onHoldOrPassed.map((c) => c.candidate_key),
     notCreatedByProvider: pending
       .filter((c) => !added.includes(c.candidate_key))
       .map((c) => c.candidate_key),
