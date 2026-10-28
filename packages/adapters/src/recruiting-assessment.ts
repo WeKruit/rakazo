@@ -34,9 +34,14 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
-import { createRecruitingCandidateReportReader } from "./recruiting-research.js";
+import {
+  bestLookedUpEmail,
+  createRecruitingCandidateReportReader,
+  lookedUpContactEmails,
+} from "./recruiting-research.js";
 import {
   listRecruitingRoleReplies,
+  rememberResolvedContactEmails,
   resolveRecruitingContact,
   resolveRecruitingContactAcrossRoles,
 } from "./recruiting-tools.js";
@@ -152,8 +157,42 @@ export async function executeRecruitingCandidatesTool(
       });
       queryMs = Math.round(performance.now() - queryStarted);
       itemCount = result.items.length;
+      // Every agent sees the emails earlier contact lookups saved, in any later turn.
+      const found = result.items.length
+        ? await lookedUpContactEmails(deps.prisma, trusted.actor)
+        : new Map();
+      const enriched = found.size
+        ? result.items.flatMap((item) => {
+            const email = bestLookedUpEmail(found, item.linkedinUrl, item.candidateKey);
+            return email ? [{ item, email }] : [];
+          })
+        : [];
+      if (context.runId && enriched.length)
+        rememberResolvedContactEmails(
+          context.runId,
+          enriched.map(({ item, email }) => ({
+            name: item.name ?? null,
+            email: email.address,
+            linkedinUrl: item.linkedinUrl ?? null,
+            sources: ["saved_pool" as const],
+            crmCandidateId: null,
+            candidateKey: item.candidateKey,
+            stage: null,
+            outreachStatus: null,
+          })),
+        );
       succeeded = true;
-      return result;
+      if (!enriched.length) return result;
+      const emails = new Map(enriched.map(({ item, email }) => [item, email]));
+      return {
+        ...result,
+        items: result.items.map((item) => {
+          const email = emails.get(item);
+          return email
+            ? { ...item, email: { address: email.address, type: email.type, status: email.status } }
+            : item;
+        }),
+      };
     }
     const { operation: _operation, ...query } = input;
     if (!deps.artifacts) throw new IsolationError();

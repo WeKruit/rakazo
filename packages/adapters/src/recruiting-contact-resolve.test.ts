@@ -96,7 +96,10 @@ function fixture(
     },
   };
   const leadBindings: { result: unknown }[] = [];
-  const prisma = { externalEffect: { findMany: vi.fn(async () => leadBindings) } } as never;
+  const prisma = {
+    externalEffect: { findMany: vi.fn(async () => leadBindings) },
+    mcpServer: { findMany: vi.fn(async () => []) },
+  } as never;
   const context = { runId: "run-resolve", operationId: "op", signal: new AbortController().signal };
   const resolve = (nameOrEmail: string) =>
     resolveRecruitingContact(

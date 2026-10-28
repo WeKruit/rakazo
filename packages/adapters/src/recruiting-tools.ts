@@ -52,7 +52,11 @@ import { getLogger } from "@rakazo/logging";
 import { completeExternalEffect } from "./approval-effect.js";
 import { readActorArtifact } from "./artifact-read.js";
 import { isPeopleSearchEndpoint, peopleFromSearch } from "./recruiting-profiles.js";
-import { classifyRecruitingResearchResult } from "./recruiting-research.js";
+import {
+  bestLookedUpEmail,
+  classifyRecruitingResearchResult,
+  lookedUpContactEmails,
+} from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_BACKGROUND_NOTICE,
   RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS,
@@ -1176,9 +1180,16 @@ export async function resolveRecruitingContact(
   const result = matchRecruitingContacts(input.nameOrEmail, crmRows, pool);
   // A saved person enrolled in this role's outreach campaign has that lead address stored.
   const leadEmails = await roleCampaignLeadEmails(deps.prisma, actor, input.roleId);
+  // Otherwise the email an earlier contact lookup saved for the same LinkedIn profile.
+  const found = result.matches.some((match) => !match.email)
+    ? await lookedUpContactEmails(deps.prisma, actor)
+    : new Map();
   for (const match of result.matches)
-    if (!match.email && match.candidateKey)
-      match.email = leadEmails.get(match.candidateKey) ?? null;
+    if (!match.email)
+      match.email =
+        (match.candidateKey ? leadEmails.get(match.candidateKey) : undefined) ??
+        bestLookedUpEmail(found, match.linkedinUrl, match.candidateKey)?.address ??
+        null;
   if (context.runId) rememberResolvedContactEmails(context.runId, result.matches);
   const contacts = result.matches.filter((match) => match.crmCandidateId);
   if (!target || crm !== "read" || !contacts.length) return { ...result, crm };
