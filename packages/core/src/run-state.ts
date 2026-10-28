@@ -35,6 +35,24 @@ export function isBackgroundRunTrigger(trigger: string | null | undefined): bool
   return BACKGROUND_RUN_TRIGGER_SET.has(trigger ?? "");
 }
 
+/**
+ * Run triggers that no person is waiting on. Each thread runs them one at a time, oldest first,
+ * after the thread's earlier runs; workers also schedule them behind a person's turn.
+ */
+export const AUTOMATION_RUN_TRIGGERS = [
+  "bot_message",
+  "routine",
+  "webhook",
+  "tickets",
+  "recruiting_research",
+  "cloud_agent",
+] as const;
+const AUTOMATION_RUN_TRIGGER_SET = new Set<string>(AUTOMATION_RUN_TRIGGERS);
+
+export function isAutomationRunTrigger(trigger: string | null | undefined): boolean {
+  return AUTOMATION_RUN_TRIGGER_SET.has(trigger ?? "");
+}
+
 const allowed: Record<RunStatus, RunStatus[]> = {
   queued: ["leased", "cancelled"],
   leased: ["running", "queued", "cancelled"],

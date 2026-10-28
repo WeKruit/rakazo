@@ -278,9 +278,12 @@ function fixture({
     ),
   };
   const prisma = {
+    $queryRaw: vi.fn(async () => []),
+    $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
+      count: vi.fn(async () => 0),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(run, data);
         return { count: 1 };

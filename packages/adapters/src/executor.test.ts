@@ -2836,6 +2836,7 @@ description: Prepare standup notes
       run: {
         findUnique: vi.fn(async () => run),
         findUniqueOrThrow: vi.fn(async () => ({ status: "leased", startedAt: null })),
+        count: vi.fn(async () => 0),
         updateMany: vi.fn(async () => ({ count: 1 })),
       },
       bot: {

@@ -5,24 +5,14 @@ import {
   type JobPublisher,
   type JobWorkerHost,
 } from "@rakazo/adapter-kit";
+import { AUTOMATION_RUN_TRIGGERS } from "@rakazo/core";
 import { isTooManyDatabaseConnections } from "@rakazo/db";
 import { getLogger, runCorrelatedJob, unwrapJobPayload, wrapJobPayload } from "@rakazo/logging";
 import { makeWorkerUtils, type Runner, run, type WorkerUtils } from "graphile-worker";
 import type { Pool } from "pg";
 import { recordHistoryCompactAttemptsExhausted } from "./history-compaction.js";
 
-/**
- * Run triggers that no person is waiting on. Their runs queue behind a recruiter's turn when every
- * worker slot is busy; graphile runs lower priority numbers first.
- */
-const BACKGROUND_TRIGGERS = [
-  "bot_message",
-  "routine",
-  "webhook",
-  "tickets",
-  "recruiting_research",
-  "cloud_agent",
-];
+/** Automation runs queue behind a recruiter's turn when every worker slot is busy; graphile runs lower priority numbers first. */
 const BACKGROUND_PRIORITY = 10;
 
 // Share the caller's pg.Pool instead of opening a separate connectionString-based
@@ -55,7 +45,7 @@ export class GraphileJobPublisher implements JobPublisher {
     const background = await utils.withPgClient(async (client) => {
       const found = await client.query(
         'select 1 from runs where id = $1 and "trigger" = any($2::text[])',
-        [job.payload.runId, BACKGROUND_TRIGGERS],
+        [job.payload.runId, [...AUTOMATION_RUN_TRIGGERS]],
       );
       return (found.rowCount ?? 0) > 0;
     });

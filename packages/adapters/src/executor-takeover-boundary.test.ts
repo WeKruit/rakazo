@@ -99,6 +99,7 @@ function fixture(
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
+      count: vi.fn(async () => 0),
       findFirst: vi.fn(async () => ({
         bot: { notifyOnFinish: false },
         thread: { groupId: null },

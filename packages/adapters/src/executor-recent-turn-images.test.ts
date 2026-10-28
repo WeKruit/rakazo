@@ -130,6 +130,7 @@ async function runWithModel(
   const prisma = {
     // Early final replies on file-touching turns persist through one transaction on these rows.
     $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
+    $queryRaw: vi.fn(async () => []),
     event: {
       create: vi.fn(async ({ data }: { data: object }) => ({ ...data, seq: 1 })),
       findFirst: vi.fn(async () => {
@@ -140,6 +141,7 @@ async function runWithModel(
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
+      count: vi.fn(async () => 0),
       findFirst: vi.fn(async () => null),
       findMany: vi.fn(async () =>
         options.priorRoutineRun
