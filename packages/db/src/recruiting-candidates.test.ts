@@ -6823,11 +6823,10 @@ describe("recruiter CSV candidate import", () => {
       args.where.id === "csv" ? (csvArtifact as never) : contextFind(args),
     );
     const existing: Array<{ candidateKey: string }> = [];
-    Object.assign(f.tx.recruitingCandidate, {
-      createManyAndReturn: vi.fn(async ({ data }: { data: Array<{ candidateKey: string }> }) =>
-        data.filter((row) => !existing.some((known) => known.candidateKey === row.candidateKey)),
-      ),
-    });
+    const createManyAndReturn = vi.fn(async ({ data }: { data: Array<{ candidateKey: string }> }) =>
+      data.filter((row) => !existing.some((known) => known.candidateKey === row.candidateKey)),
+    );
+    Object.assign(f.tx.recruitingCandidate, { createManyAndReturn });
     const captured: Parameters<typeof recruiting.recruitingCsvImportReceipt>[1] = {
       artifactSha256: csvHash,
       header: ["Name", "LinkedIn", "Company"],
@@ -6862,7 +6861,17 @@ describe("recruiter CSV candidate import", () => {
         ...captured,
         outputArtifact,
       });
-    return { ...f, input, trusted, captured, outputArtifact, existing, csvArtifact, save };
+    return {
+      ...f,
+      input,
+      trusted,
+      captured,
+      outputArtifact,
+      existing,
+      csvArtifact,
+      createManyAndReturn,
+      save,
+    };
   }
 
   it("saves one unassessed page with CSV provenance and reports skipped rows", async () => {
@@ -6925,7 +6934,7 @@ describe("recruiter CSV candidate import", () => {
       alreadyInPool: true,
     });
     // discoveryCount is the occurrence count per key: one new occurrence, no new candidate row.
-    expect(f.tx.recruitingCandidate.createManyAndReturn).toHaveBeenCalledWith({
+    expect(f.createManyAndReturn).toHaveBeenCalledWith({
       data: [
         { roleId: "role", candidateKey: "linkedin:/in/example" },
         { roleId: "role", candidateKey: "source-row:save:1" },
