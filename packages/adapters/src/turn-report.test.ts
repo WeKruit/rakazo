@@ -131,6 +131,17 @@ describe("declineRetry", () => {
     expect(retry?.note).toContain("confirmation card");
   });
 
+  it("points a contact decline at the saved-email lookup, which reuses earlier results", () => {
+    const retry = declineRetry({
+      reply:
+        "I can't verify whether other contact details are saved from the records available here.",
+      request: "前5个人的contact",
+      tools: [{ name: "mcp__wekruit__find_emails" }],
+      teammates: [],
+    });
+    expect(retry?.note).toContain("mcp__wekruit__find_emails");
+  });
+
   it("hands off to a teammate who can", () => {
     const retry = declineRetry({
       reply: notReady,

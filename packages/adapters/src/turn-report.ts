@@ -277,7 +277,7 @@ const REQUEST_KINDS: Record<Capability, RegExp> = {
 // Tool operations (the last "__" segment) that do each kind of request.
 const TOOL_KINDS: Record<Capability, RegExp> = {
   send: /send|reply_to|activate_campaign|forward/,
-  contacts: /contact|enrich|lookup/,
+  contacts: /contact|enrich|lookup|find_emails/,
   schedule: /booking|calendar|availability|schedul/,
   draft: /draft|recruiting_reply|role_campaign/,
   search: /web_search_advanced_exa|recruiting_research/,
