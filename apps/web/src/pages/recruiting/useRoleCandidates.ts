@@ -1,5 +1,5 @@
 import type { RecruitingCandidate, RecruitingCrmDataOutput } from "@rakazo/contracts";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { RoleCandidateRow } from "./roleCandidates";
 import { isRecordId, mergeRoleCandidates, roleCandidateFit } from "./roleCandidates";
 import type { RecruitingTabProps } from "./shared";
@@ -48,31 +48,42 @@ export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnC
       : null,
     { ...props, reload },
   );
-  const crmItems = crmPages.data?.items ?? [];
-  const rows = mergeRoleCandidates({
-    autumn: (autumn?.items ?? []).map((candidate) => ({
-      key: `autumn:${candidate.candidateKey}`,
-      name: candidate.name,
-      title: candidate.title,
-      location: candidate.location,
-      email: autumn?.email?.(candidate) ?? null,
-      linkedinUrl: candidate.linkedinUrl,
-      value: candidate,
-    })),
-    crm: crmItems.map((person) => ({
-      key: `crm:${person.candidateId}`,
-      name: person.name,
-      title: person.title,
-      location: person.location,
-      email: person.email,
-      linkedinUrl: person.linkedinUrl,
-      // Some imported records hold an internal company id where the name belongs.
-      value: isRecordId(person.company) ? { ...person, company: null } : person,
-    })),
-    fit: (candidate) => roleCandidateFit(candidate.latestSource?.report?.fields),
-    sortByScore: autumn?.sortByScore ?? true,
-  });
-  const crmTotal = crmPages.data?.total ?? null;
+  const crmData = crmPages.data;
+  const autumnItems = autumn?.items;
+  const sortByScore = autumn?.sortByScore ?? true;
+  // The email lookup is a new function on every parent render; its answers are what matter.
+  const emails = (autumnItems ?? []).map((candidate) => autumn?.email?.(candidate) ?? null);
+  const emailKey = emails.join("\n");
+  // Merged rows keep their identity across renders, so the table and its per-row profile
+  // parsing do not redo work when only the open person or a tab changes.
+  const rows = useMemo(
+    () =>
+      mergeRoleCandidates({
+        autumn: (autumnItems ?? []).map((candidate, index) => ({
+          key: `autumn:${candidate.candidateKey}`,
+          name: candidate.name,
+          title: candidate.title,
+          location: candidate.location,
+          email: emails[index] ?? null,
+          linkedinUrl: candidate.linkedinUrl,
+          value: candidate,
+        })),
+        crm: (crmData?.items ?? []).map((person) => ({
+          key: `crm:${person.candidateId}`,
+          name: person.name,
+          title: person.title,
+          location: person.location,
+          email: person.email,
+          linkedinUrl: person.linkedinUrl,
+          // Some imported records hold an internal company id where the name belongs.
+          value: isRecordId(person.company) ? { ...person, company: null } : person,
+        })),
+        fit: (candidate) => roleCandidateFit(candidate.latestSource?.report?.fields),
+        sortByScore,
+      }),
+    [autumnItems, crmData, sortByScore, emailKey],
+  );
+  const crmTotal = crmData?.total ?? null;
   const crmRead = {
     loading: crm.status === "loading" || crmPages.loading,
     failed: crm.status === "failed" || crmPages.failed,

@@ -8,7 +8,7 @@ import type {
 import { Button } from "@rakazo/ui-web";
 import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Shimmer } from "../../components/ai/primitives";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
@@ -40,6 +40,12 @@ export type RecruitingTabProps = {
 };
 
 type CacheSlot = { cache?: RecruitingReadCache; key?: string };
+
+/**
+ * The Shell's display cache for reads every panel repeats, such as the role's CRM binding, so a
+ * person or tab opened next renders at once instead of reading the same binding again.
+ */
+export const RecruitingReadCacheContext = createContext<RecruitingReadCache | undefined>(undefined);
 
 /** Display-cache slot for one tab read; empty without a Shell scope. */
 export function tabCacheSlot(
@@ -96,8 +102,12 @@ export type RoleCrm =
 export function useRoleCrm(props: RecruitingTabProps): RoleCrm {
   const { roleId, spaceId, conversation, refreshSignal = 0, crmTarget } = props;
   const known = crmTarget !== undefined;
-  const read = useKeyedRead(known ? null : JSON.stringify([spaceId, roleId, refreshSignal]), () =>
-    rpc.recruiting.listCandidates({ roleId, limit: 1 }),
+  const shared = useContext(RecruitingReadCacheContext);
+  const key = known ? null : JSON.stringify([spaceId, roleId, refreshSignal]);
+  const read = useKeyedRead(
+    key,
+    () => rpc.recruiting.listCandidates({ roleId, limit: 1 }),
+    shared && key ? { cache: shared, key: `role-crm:${key}` } : {},
   );
   if (!known && read.loading) return { status: "loading" };
   if (!known && read.failed) return { status: "failed" };
@@ -157,10 +167,15 @@ export function useCrmData<O extends CrmOperation>(
   scope: CrmScope,
 ) {
   const request = crmRequest(crm, operation, input);
+  const shared = useContext(RecruitingReadCacheContext);
+  const slot = request ? tabCacheSlot(scope, ["crm", scope.spaceId, request]) : {};
   return useKeyedRead(
     request ? JSON.stringify([scope.spaceId, request, scope.refreshSignal, scope.reload]) : null,
     () => readCrm(request!),
-    request ? tabCacheSlot(scope, ["crm", scope.spaceId, request]) : {},
+    // A panel without its own scope (a person's detail) still shows the last answer at once.
+    !slot.cache && request && shared
+      ? { cache: shared, key: `crm:${JSON.stringify([scope.spaceId, request])}` }
+      : slot,
   );
 }
 

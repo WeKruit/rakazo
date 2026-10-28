@@ -1,6 +1,7 @@
 import { i18n } from "@lingui/core";
 import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { LinkFaviconsContext } from "@rakazo/chat-ui/web-lazy";
+import type { ThreadMessage } from "@rakazo/contracts";
 import { attachmentsForThread, isActive, threadTailPhase } from "@rakazo/core";
 import { BotAvatar, Button, cn, GroupAvatar } from "@rakazo/ui-web";
 import {
@@ -14,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import type { ComponentProps, CSSProperties } from "react";
+import { useCallback, useMemo } from "react";
 import { MessageSkeleton } from "../../components/ai/primitives";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
@@ -65,6 +67,9 @@ const SequenceTab = lazyPanel(() =>
 
 import type { ReactNode } from "react";
 
+/** One empty list, so an empty chat passes the same value on every render. */
+const NO_ITEMS: never[] = [];
+
 /** What the Try again button sends after a failed run; the bot picks up from the history. */
 const RETRY_TEXT = "Try again";
 
@@ -80,6 +85,29 @@ export function ShellConversation({
   reviewSchedulingPlan: (handoff: SchedulingPlanHandoff) => void;
 }) {
   const { t } = useLingui();
+  const { setReplyTarget, setReplyQuote, peopleAdded } = model;
+  // Stable handlers keep the memoized transcript from re-rendering when a panel changes.
+  const replyTo = useCallback(
+    (message: ThreadMessage) => {
+      setReplyTarget(message);
+      setReplyQuote(null);
+    },
+    [setReplyTarget, setReplyQuote],
+  );
+  const quoteFrom = useCallback(
+    (message: ThreadMessage, quote: string) => {
+      setReplyTarget(message);
+      setReplyQuote(quote);
+    },
+    [setReplyTarget, setReplyQuote],
+  );
+  const liveDetail = useMemo(
+    () =>
+      peopleAdded ? (
+        <Plural value={peopleAdded} one="# person added" other="# people added" />
+      ) : undefined,
+    [peopleAdded],
+  );
   const {
     currentWorkspaceRead,
     linkFavicons,
@@ -90,8 +118,6 @@ export function ShellConversation({
     userId,
     enterToSend,
     pendingAttachments,
-    setReplyTarget,
-    setReplyQuote,
     sending,
     sendError,
     setSendError,
@@ -176,7 +202,6 @@ export function ShellConversation({
     answerableAskIds,
     workingRuns,
     transcriptRunning,
-    peopleAdded,
     composerRunning,
     shownSteer,
     resuming,
@@ -770,33 +795,25 @@ export function ShellConversation({
                   scrollRequest={scrollRequest}
                   onScrollRequestHandled={clearScrollRequest}
                   artifactTarget={transcriptArtifactTarget}
-                  messages={emptyCrmChat ? [] : transcriptMessages}
+                  messages={emptyCrmChat ? NO_ITEMS : transcriptMessages}
                   showToolActivity={showToolActivity}
                   olderCursor={emptyCrmChat ? null : (activeSnapshot?.olderCursor ?? null)}
                   loadingOlder={loadingOlder}
-                  answerableAskMessageIds={emptyCrmChat ? [] : answerableAskIds}
+                  answerableAskMessageIds={emptyCrmChat ? NO_ITEMS : answerableAskIds}
                   running={!emptyCrmChat && transcriptRunning}
                   tailPhase={
                     emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })
                   }
-                  workingBots={emptyCrmChat ? [] : workingBots}
-                  workRuns={emptyCrmChat ? [] : workingRuns}
+                  workingBots={emptyCrmChat ? NO_ITEMS : workingBots}
+                  workRuns={emptyCrmChat ? NO_ITEMS : workingRuns}
                   onLoadOlder={loadOlder}
                   onOpenBot={openBot}
                   onAnswer={answerMessage}
-                  onReply={(message) => {
-                    setReplyTarget(message);
-                    setReplyQuote(null);
-                  }}
-                  onQuote={(message, quote) => {
-                    setReplyTarget(message);
-                    setReplyQuote(quote);
-                  }}
+                  onReply={replyTo}
+                  onQuote={quoteFrom}
                   onReact={reactToMessage}
                   onJumpToMessage={jumpToReplyMessage}
-                  onOpenPeerMessages={(peer) => {
-                    setPeerConversation(peer);
-                  }}
+                  onOpenPeerMessages={setPeerConversation}
                   memberName={resolveTranscriptMemberName}
                   peerBot={resolveTranscriptBot}
                   onRefresh={refreshActiveThread}
@@ -806,11 +823,7 @@ export function ShellConversation({
                   speakingMessageId={speakingMessageId}
                   onSpeak={speakMessage}
                   onOpenComputer={onOpenComputer}
-                  liveDetail={
-                    peopleAdded ? (
-                      <Plural value={peopleAdded} one="# person added" other="# people added" />
-                    ) : undefined
-                  }
+                  liveDetail={liveDetail}
                 />
               )}
               {showToolActivity && inGroup && composerRunning ? (

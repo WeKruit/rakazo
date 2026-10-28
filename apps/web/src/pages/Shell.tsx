@@ -62,6 +62,7 @@ import { ResizableSidePanel } from "./ResizableSidePanel";
 import { writeShortlistWeekFilter } from "./recruiting/dashboard-drilldown";
 import { RecruitingDetailProvider } from "./recruiting/detail";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
+import { RecruitingReadCacheContext } from "./recruiting/shared";
 import { RecruitingChatContextProvider } from "./shell/recruiting-chat-context";
 
 const CreateGroupForm = lazyPanel(() =>
@@ -623,7 +624,11 @@ export function ShellPage() {
   return (
     <AvatarStyleProvider value={bootstrapMe?.avatarStyle ?? "organic"}>
       <RecruitingChatContextProvider value={chatContextApi}>
-        <RecruitingDetailProvider value={recruitingDetail}>{shell}</RecruitingDetailProvider>
+        <RecruitingDetailProvider value={recruitingDetail}>
+          <RecruitingReadCacheContext.Provider value={recruitingReadCache.current}>
+            {shell}
+          </RecruitingReadCacheContext.Provider>
+        </RecruitingDetailProvider>
       </RecruitingChatContextProvider>
     </AvatarStyleProvider>
   );

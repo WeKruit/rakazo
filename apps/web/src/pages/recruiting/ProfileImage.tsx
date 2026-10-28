@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { memo, useState } from "react";
 import { initials } from "./profile";
 import { profileImageUrl } from "./profileAssets";
 
@@ -43,7 +43,8 @@ export function ProfileImage({
   );
 }
 
-export function PersonAvatar({
+/** Memoized: a table row's avatar does not re-render when another person is opened. */
+export const PersonAvatar = memo(function PersonAvatar({
   name,
   src,
   size = "md",
@@ -62,4 +63,4 @@ export function PersonAvatar({
       }`}
     />
   );
-}
+});
