@@ -111,7 +111,7 @@ const VENDORS =
   /\b(autumn|exa|coresignal|fullenrich|contactout|instantly|composio|cal\.com|apollo|openai|codex)\b/i;
 // "Which people…?" asks the recruiter to pick instead of doing it; "I'll check which people…" is fine.
 const REFUSAL =
-  /\b(?:unassessed|not (?:send-)?ready|which (?:\d+|people|candidates)\b[^.!?\n]*\?|can(?:no|['’])t (?:send|look up|choose))/i;
+  /\b(?:unassessed|not (?:send-)?ready|which (?:\d+(?![-:])|people|candidates)\b[^.!?\n]*\?|can(?:no|['’])t (?:send|look up|choose))/i;
 // The model thinking aloud in a reply, seen while it spelled unusual email addresses.
 const SELF_TALK = /\?\s*Wait\.|\bNeed correctly\b/;
 /** Checks every recruiter-visible message must pass, whatever the case. */
@@ -155,10 +155,12 @@ function scaleReportChecks(messages, failures, scale) {
   if (!scale?.at) return failures.push("no scale request was sent");
   const sentAt = Date.parse(scale.at);
   const later = messages.filter((message) => Date.parse(message.createdAt) > sentAt);
-  // The window ends at the recruiter's next message; a progress question does not end it.
+  // The window ends at the recruiter's next message; a progress question does not end it. The
+  // scale request itself can be stamped just after the harness clock read, so it is skipped.
   const next = later.find(
     (message) =>
       message.role === "user" &&
+      Date.parse(message.createdAt) > sentAt + 15_000 &&
       !message.internal &&
       !/进度|how(?:['’]s| is) it going|status/i.test(botText(message)),
   );
