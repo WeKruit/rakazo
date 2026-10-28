@@ -138,11 +138,15 @@ it("rejects a changed slot without changing the original approved request", asyn
   expect(await f.check()).toMatchObject({ code: "CALENDAR_SLOT_CONFLICT" });
   expect(f.args).toEqual(before);
 });
-it("does not infer reschedule duration", async () => {
+it("keeps the original length when a reschedule names none", async () => {
   const f = fixture();
   expect(
     await f.check({ args: { bookingUid: "old", start: "2026-11-01T06:30:00Z" } }),
-  ).toMatchObject({ dispatched: false });
+  ).toBeUndefined();
+  f.conflict();
+  expect(
+    await f.check({ args: { bookingUid: "old", start: "2026-11-01T06:30:00Z" } }),
+  ).toMatchObject({ code: "CALENDAR_SLOT_CONFLICT" });
 });
 it("rejects an unreadable original without creating a new approval", async () => {
   const f = fixture();
