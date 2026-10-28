@@ -110,6 +110,8 @@ const VENDORS =
 // "Which people…?" asks the recruiter to pick instead of doing it; "I'll check which people…" is fine.
 const REFUSAL =
   /\b(?:unassessed|not (?:send-)?ready|which (?:\d+|people|candidates)\b[^.!?\n]*\?|can(?:no|['’])t (?:send|look up|choose))/i;
+// The model thinking aloud in a reply, seen while it spelled unusual email addresses.
+const SELF_TALK = /\?\s*Wait\.|\bNeed correctly\b/;
 /** Checks every recruiter-visible message must pass, whatever the case. */
 function commonChecks(messages, failures) {
   for (const message of recruiterSees(messages)) {
@@ -119,6 +121,11 @@ function commonChecks(messages, failures) {
     if (han > latin) failures.push(`not English: "${text.slice(0, 80)}"`);
     if (text.includes("、")) failures.push(`Chinese list separator: "${text.slice(0, 80)}"`);
     if (VENDORS.test(text)) failures.push(`vendor name: "${text.match(VENDORS)[0]}"`);
+    const selfTalk = text.match(SELF_TALK);
+    if (selfTalk)
+      failures.push(
+        `self-talk in reply: "…${text.slice(Math.max(0, selfTalk.index - 60), selfTalk.index + 40)}…"`,
+      );
     const refusal = text.match(REFUSAL);
     if (refusal)
       failures.push(
