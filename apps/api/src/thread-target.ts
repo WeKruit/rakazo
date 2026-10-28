@@ -26,6 +26,7 @@ import {
   resolveGroupTargetBotIds,
   runFailureError,
   statusAnswer,
+  typicalDurationMs,
   workActivityForTool,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
@@ -105,13 +106,29 @@ async function answerStatusQuestion(
   text: string | undefined,
 ): Promise<boolean> {
   if (run.status !== "running" || !steersUserMessage(run) || !isStatusQuestion(text)) return false;
-  const [called, timing] = await Promise.all([
+  const [called, timing, past] = await Promise.all([
     tx.event.findFirst({
       where: { runId: run.id, type: "agent.tool.called" },
       orderBy: { seq: "desc" },
       select: { payload: true },
     }),
     tx.run.findUnique({ where: { id: run.id }, select: { startedAt: true, createdAt: true } }),
+    // The same person's recent finished runs of this agent and kind give the estimate.
+    tx.run.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId,
+        trigger: run.trigger ?? undefined,
+        status: "completed",
+        startedAt: { not: null },
+        completedAt: { not: null },
+        id: { not: run.id },
+      },
+      orderBy: { completedAt: "desc" },
+      take: 20,
+      select: { startedAt: true, completedAt: true },
+    }),
   ]);
   const tool = (called?.payload as { name?: unknown } | null)?.name;
   const since = timing?.startedAt ?? timing?.createdAt;
@@ -121,6 +138,13 @@ async function answerStatusQuestion(
       text: statusAnswer({
         activity: typeof tool === "string" ? workActivityForTool(tool) : "working",
         elapsedMs: since ? Date.now() - since.getTime() : 0,
+        typicalMs: typicalDurationMs(
+          past.flatMap((done) =>
+            done.startedAt && done.completedAt
+              ? [done.completedAt.getTime() - done.startedAt.getTime()]
+              : [],
+          ),
+        ),
       }),
     },
   ];
