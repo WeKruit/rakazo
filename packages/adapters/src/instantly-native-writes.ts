@@ -4,7 +4,10 @@ import { IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
+import type { FoundEmail } from "./contact-lookup.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { linkedinPersonKey } from "./recruiting-profiles.js";
+import { savedContactEmails } from "./recruiting-research.js";
 
 /**
  * Local REST-backed Instantly campaign/lead tools (official v2 API, https://developer.instantly.ai).
@@ -206,7 +209,7 @@ export const nativeInstantlyWrites = [
     "add_shortlist_leads",
     AddShortlistLeadsInput,
     false,
-    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence). Skips people without an email, on hold or passed for the role, or already in the campaign; records candidate_key -> lead id.",
+    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence); a person passed without an email gets the one an earlier contact lookup saved. Skips people with no email, on hold or passed for the role, or already in the campaign; records candidate_key -> lead id.",
   ),
 ];
 const TOOL_NAMES = new Set(nativeInstantlyWrites.map((entry) => entry.toolName));
@@ -863,6 +866,29 @@ async function bindCreatedCampaign(
   });
 }
 
+/** Emails this account's contact lookups saved, by LinkedIn key, across its lookup connections. */
+async function lookedUpEmails(prisma: PrismaClient, context: AdapterContext) {
+  const servers = await prisma.mcpServer.findMany({
+    where: {
+      spaceId: context.spaceId,
+      userId: context.userId,
+      enabled: true,
+      endpoint: "https://mcp.fullenrich.com/mcp",
+    },
+    select: { id: true, revision: true },
+  });
+  const found = new Map<string, FoundEmail[]>();
+  for (const server of servers)
+    for (const [key, emails] of await savedContactEmails(
+      prisma,
+      context,
+      server,
+      "native_find_emails",
+    ))
+      if (!found.has(key)) found.set(key, emails);
+  return found;
+}
+
 async function addShortlistLeads(
   prisma: PrismaClient,
   rest: InstantlyRest,
@@ -887,7 +913,27 @@ async function addShortlistLeads(
       roleId: role.id,
       candidateKey: { in: input.candidates.map((candidate) => candidate.candidate_key) },
     },
-    select: { candidateKey: true, consideration: true },
+    select: {
+      candidateKey: true,
+      consideration: true,
+      occurrences: { select: { linkedinUrl: true } },
+    },
+  });
+  // A person passed without an email gets the one this account's contact lookup already saved.
+  const found = input.candidates.some((c) => !c.email)
+    ? await lookedUpEmails(prisma, context)
+    : new Map<string, FoundEmail[]>();
+  const candidates = input.candidates.map((candidate) => {
+    if (candidate.email) return candidate;
+    const row = saved.find((entry) => entry.candidateKey === candidate.candidate_key);
+    const keys = [candidate.candidate_key, ...(row?.occurrences ?? []).map((o) => o.linkedinUrl)]
+      .map((value) => linkedinPersonKey(value))
+      .filter((key): key is string => Boolean(key));
+    const emails = keys.flatMap((key) => found.get(key) ?? []);
+    const best = emails.find((email) => email.status === "DELIVERABLE") ?? emails[0];
+    return best
+      ? { ...candidate, email: best.address, email_type: candidate.email_type ?? best.type }
+      : candidate;
   });
   const stopped = new Set(
     saved
@@ -898,9 +944,9 @@ async function addShortlistLeads(
       .map((candidate) => candidate.candidateKey),
   );
   const inRole = new Set(saved.map((candidate) => candidate.candidateKey));
-  const notInRole = input.candidates.filter((c) => !inRole.has(c.candidate_key));
-  const onHoldOrPassed = input.candidates.filter((c) => stopped.has(c.candidate_key));
-  const eligible = input.candidates.filter(
+  const notInRole = candidates.filter((c) => !inRole.has(c.candidate_key));
+  const onHoldOrPassed = candidates.filter((c) => stopped.has(c.candidate_key));
+  const eligible = candidates.filter(
     (c) => inRole.has(c.candidate_key) && !stopped.has(c.candidate_key),
   );
   const missingEmail = eligible.filter((c) => !c.email);
