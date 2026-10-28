@@ -127,6 +127,8 @@ function fixture(
           return { count: 1 };
         },
       ),
+      // The thread lane: no other run in this thread is ahead of this one.
+      count: vi.fn(async () => 0),
     },
     routine: { findUnique: vi.fn(async () => ({ notify: false, nextRunAt: null })) },
     event: {
