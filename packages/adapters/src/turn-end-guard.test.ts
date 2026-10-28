@@ -8,6 +8,7 @@ import {
   guardRecruitingTurnEnd,
   intakeAnswers,
   recruitingRoundListText,
+  roundPassage,
 } from "./turn-end-guard.js";
 
 const run = {
@@ -358,6 +359,27 @@ describe("guardRecruitingTurnEnd", () => {
       unverified: { "person-1": "初创公司经历" },
     });
     expect(text).toContain("1. **Person 1**\n   Not verified: 初创公司经历");
+  });
+
+  it("says must-haves no one's row shows once, not under every person", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "person-1", name: "Person 1" },
+          { candidateKey: "person-2", name: "Person 2" },
+        ]),
+      },
+    } as never;
+    const text = await recruitingRoundListText(prisma, {
+      threadId: "thread-1",
+      spaceId: "space-1",
+      roleId: "role-1",
+      candidateKeys: ["person-1", "person-2"],
+      unverified: { "person-1": "US work authorization", "person-2": "US work authorization" },
+    });
+    expect(text).toContain("this round:\nNot verified for anyone yet: US work authorization");
+    expect(text).not.toContain("   Not verified:");
   });
 
   it.each([
@@ -958,5 +980,24 @@ describe("answeredAsk", () => {
       expect(met.sendUserMessage).not.toHaveBeenCalled();
       expect(met.postAssistant).not.toHaveBeenCalled();
     }
+  });
+});
+
+describe("roundPassage", () => {
+  it("drops search scaffolding and cuts at a word", () => {
+    expect(
+      roundPassage(
+        "Design Engineer at Peterbilt Motors Company Dallas-Fort Worth Metroplex (US) ... Mar 2024 - Present Level: Mid",
+      ),
+    ).toBe(
+      "Design Engineer at Peterbilt Motors Company Dallas-Fort Worth Metroplex Mar 2024 - Present",
+    );
+    expect(
+      roundPassage("Department: Engineering and Technical • Level: Specialist"),
+    ).toBeUndefined();
+    const long = `${"word ".repeat(60)}responsibilities continue`;
+    const cut = roundPassage(long)!;
+    expect(cut.endsWith("word…")).toBe(true);
+    expect(cut.length).toBeLessThanOrEqual(221);
   });
 });
