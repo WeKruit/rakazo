@@ -9,7 +9,8 @@
       "development": "./src/index.ts",
       "default": "./src/index.ts"
     },
-    "./local-settings": "./src/local-settings.js"
+    "./local-settings": "./src/local-settings.js",
+    "./auth": "./src/auth.ts"
   },
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.json",

@@ -1,7 +1,7 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400..750&display=swap");
 @import "tailwindcss";
 @import "@rakazo/ui-web/styles.css";
 @import "@fontsource-variable/geist/wght.css";
+@import "@fontsource-variable/inter/wght.css";
 
 @source "../../packages/ui-web/src/**/*.{ts,tsx}";
 @source "./src/**/*.{ts,tsx}";
@@ -54,7 +54,8 @@ body,
 }
 
 [data-product-view="recruiting"] {
-  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    "Inter Variable", ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-size: 14px;
   letter-spacing: normal;
 }

@@ -119,6 +119,12 @@ export default defineConfig(({ mode }) => {
                 test: /(?:packages[\\/]ui-web[\\/]src[\\/]components[\\/]ui[\\/]input\.tsx|lucide-react[\\/]dist[\\/]esm[\\/]createLucideIcon\.mjs)$/,
                 priority: 25,
               },
+              // Sign-in validates capabilities after first paint; keep the validator out of Shell.
+              {
+                name: "validation",
+                test: /(?:[\\/]node_modules[\\/]zod[\\/]|contracts[\\/]src[\\/]auth\.ts$)/,
+                priority: 22,
+              },
               { name: "shell-shared", test: /[\\/]pages[\\/]Shell\.tsx$/, priority: 20 },
               {
                 name: "recruiting-shared",

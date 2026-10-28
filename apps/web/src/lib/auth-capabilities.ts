@@ -1,5 +1,4 @@
 import type { AuthCapabilities } from "@rakazo/contracts";
-import { authCapabilitiesSchema, legacyAuthCapabilitiesSchema } from "@rakazo/contracts";
 import { ResponseBodyTooLargeError, readBoundedJsonResponse } from "@rakazo/core";
 
 export type { AuthCapabilities } from "@rakazo/contracts";
@@ -28,6 +27,9 @@ export function fetchAuthCapabilities(): Promise<AuthCapabilities> {
 
 /** Public deployment capabilities, bounded in time and size so a stalled API cannot hang the UI. */
 async function loadAuthCapabilities(): Promise<AuthCapabilities> {
+  // The validator loads with the request instead of in the first screen's code.
+  const validator = import("@rakazo/contracts/auth");
+  void validator.catch(() => undefined);
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -56,6 +58,7 @@ async function loadAuthCapabilities(): Promise<AuthCapabilities> {
         controller.signal,
       );
     }
+    const { authCapabilitiesSchema, legacyAuthCapabilitiesSchema } = await validator;
     return authCapabilitiesSchema.or(legacyAuthCapabilitiesSchema).parse(body);
   } finally {
     clearTimeout(timer);
