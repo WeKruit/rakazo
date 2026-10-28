@@ -27,6 +27,7 @@ import {
   Prisma,
   prepareNativeRecruitingCandidateDecision,
   RecruitingConflictError,
+  RecruitingIntentQuoteError,
   RecruitingSourceValidationError,
   recruitingResearchSnapshot,
 } from "@rakazo/db";
@@ -2169,6 +2170,36 @@ describe("native recruiting role effect delivery", () => {
     await f.run();
     expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
       intent: { basis: "direct", quote: "这 10 个方向可以，找 50 个类似的人" },
+    });
+  });
+
+  // 2026-10-28: feedback whose quote was not the recruiter's exact words was lost.
+  it("repeats a feedback save once with the words the quote check named", async () => {
+    const f = fixture("feedback-quote-repair");
+    vi.mocked(executeRecruitingFeedback)
+      .mockReset()
+      .mockRejectedValueOnce(new RecruitingIntentQuoteError("Greater Los Angeles first"))
+      .mockResolvedValue({ status: "rejected", reason: "noop" } as never);
+    f.setCalls([
+      {
+        name: "recruiting_feedback",
+        args: {
+          target: "role",
+          operation: "revise",
+          roleId: "role-1",
+          expectedRoleRevision: 1,
+          summary: "Prefer Los Angeles",
+          intent: { basis: "direct", quote: "prefer LA" },
+          sourceRefs: [],
+        },
+        executionId: "feedback-quote",
+      },
+    ]);
+    await f.run();
+    const calls = vi.mocked(executeRecruitingFeedback).mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[1]?.[2]).toMatchObject({
+      intent: { basis: "direct", quote: "Greater Los Angeles first" },
     });
   });
 

@@ -5603,9 +5603,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const ownTexts = textsOf(currentTurnMessage?.blocks);
           const turnTexts = [...ownTexts, ...latestTexts];
           const givenQuote = (args.intent as { quote?: unknown } | undefined)?.quote;
+          // A server repeat already carries the quote the save check named, so it is kept.
           if (
             name === "recruiting_role" &&
             args.operation === "update" &&
+            !executionId.includes(":repaired") &&
             turnTexts[0] &&
             !(
               typeof givenQuote === "string" &&
@@ -9255,6 +9257,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               const delivered = await deliverRecruitingFeedbackResult(result);
               return candidateDecision ? delivered : finish(delivered);
             } catch (error) {
+              // A quote not copied exactly is repeated once with the words the check named, so
+              // the recruiter's feedback is never lost over the citation.
+              if (
+                error instanceof RecruitingIntentQuoteError &&
+                error.quote &&
+                !executionId.includes(":repaired") &&
+                args.intent &&
+                typeof args.intent === "object"
+              ) {
+                const repeated: unknown = await applyTool(
+                  name,
+                  { ...args, intent: { ...(args.intent as object), quote: error.quote } },
+                  `${executionId}:repaired`,
+                );
+                if (!(repeated && typeof repeated === "object" && "error" in repeated))
+                  return candidateDecision ? repeated : finish(repeated);
+              }
               if (error instanceof IsolationError)
                 return finish({
                   error: `${FEEDBACK_NOT_SAVED} The quote must be the recruiter's exact words from their message, roleId the conversation's current role, and candidateKeys saved people on it.`,
