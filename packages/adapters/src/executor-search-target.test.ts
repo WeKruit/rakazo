@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { requestedPeopleTarget } from "./executor.js";
+import { peopleTargetFrom, requestedPeopleTarget } from "./executor.js";
 
 describe("requested people target", () => {
   it.each([
@@ -18,4 +18,15 @@ describe("requested people target", () => {
       expect(requestedPeopleTarget(text)).toBeUndefined();
     },
   );
+
+  it.each([
+    ["lets find 50", 69, 119],
+    ["lets find 50", 20, 50],
+    ["find 50 total", 69, 50],
+    ["一共找100个", 120, 100],
+    ["再找20个人", 10, 30],
+    ["find 30 more candidates", 40, 70],
+  ])("%s with %s saved → %s", (text, before, target) => {
+    expect(peopleTargetFrom(text, before)).toBe(target);
+  });
 });

@@ -420,6 +420,7 @@ async function sendAsComposer(groupId, text) {
   });
   return running;
 }
+let goal = TARGET;
 async function sendScale(groupId, threadId) {
   const before = threadId ? await readTotal(threadId) : null;
   report.candidateTotals.push({ s: elapsed(), total: before });
@@ -427,7 +428,14 @@ async function sendScale(groupId, threadId) {
   // Let the previous turn settle so the request is its own user message.
   await sleep(3_000);
   await sendAsComposer(groupId, SCALE_TEXT);
-  mark("scale_sent", { before });
+  // "find 50" with 50 or more already saved means 50 more; only "total" or a smaller pool means 50 in all.
+  goal =
+    before !== null &&
+    !/\btotal\b|in all|一共|总共/i.test(SCALE_TEXT) &&
+    (before >= TARGET || /\bmore\b|再/i.test(SCALE_TEXT))
+      ? before + TARGET
+      : TARGET;
+  mark("scale_sent", { before, goal });
   return "scale";
 }
 function placeQuality(people) {
@@ -773,7 +781,7 @@ async function checkScale(groupId, events) {
       ).length
     : 0;
   report.scale = {
-    target: TARGET,
+    target: goal,
     finalTotal: report.pool?.total ?? lastPoolTotal(),
     outreachToolCalls: outreachCalls.map((e) => e.payload.name),
     outreachRuns: outreachRuns.length,
@@ -936,8 +944,8 @@ async function main() {
         report.candidateTotals.push({ s: elapsed(), total });
         log(`role has ${total} people`);
         for (const step of [25, 50, 75])
-          if (total >= (TARGET * step) / 100) mark(`reached_${step}pct`, { total });
-        if (total >= TARGET) mark("target_reached", { total });
+          if (total >= (goal * step) / 100) mark(`reached_${step}pct`, { total });
+        if (total >= goal) mark("target_reached", { total });
       }
       // People saved before the request can already exceed the target, so the run also waits for
       // the reply to the request and for the role's work to finish before it reads the pool.
@@ -960,14 +968,14 @@ async function main() {
         .catch(() => true);
       // Below the target, background research can still bring people after the turn ends, so the
       // run waits for 10 quiet minutes before it calls the role settled short of the target.
-      const quietFor = lastTotal >= TARGET ? 45_000 : 10 * 60_000;
+      const quietFor = lastTotal >= goal ? 45_000 : 10 * 60_000;
       if (!busy && replied) {
         settledSince ??= Date.now();
         if (Date.now() - Math.max(settledSince, idleSince) > quietFor) {
           mark("scale_settled", { total: lastTotal });
           // Work that stops on a question before the target is a stall a recruiter has to notice.
           const open = pendingAsks();
-          if (lastTotal < TARGET && open.length)
+          if (lastTotal < goal && open.length)
             violation("scale_waits_on_card", open.at(-1).block.text.slice(0, 120));
           break;
         }

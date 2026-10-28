@@ -536,6 +536,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "Scale went straight to paid research.",
   },
   {
+    rule: "find N with N already saved means N more",
+    in: "RECRUITING_SCALE_START",
+    phrase:
+      "means that many more, so the target is the current total plus it, unless they say total",
+    why: '"lets find 50" with 69 saved was answered "the search has reached 50" instead of finding 50 more.',
+  },
+  {
     rule: "the scale stops at the target",
     in: "RECRUITING_SCALE_START",
     phrase:
