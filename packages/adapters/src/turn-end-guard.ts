@@ -50,6 +50,7 @@ export type TurnEndGuardDeps = {
     recruitingCandidate: PrismaClient["recruitingCandidate"];
     recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
     recruitingResearchTask: PrismaClient["recruitingResearchTask"];
+    recruitingSavedProfile: Pick<PrismaClient["recruitingSavedProfile"], "count">;
     run: Pick<PrismaClient["run"], "findFirst">;
   };
   events: Pick<ExecutorDeps["events"], "sendUserMessage">;
@@ -282,6 +283,42 @@ async function handedInStage(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run
 }
 
 /**
+ * The recruiter asked to update people already saved (their work history, photo) and that was
+ * done; the role's next step waits for the recruiter instead of starting on its own.
+ */
+async function updatedProfilesOnly(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
+  const asked = await deps.prisma.message.findFirst({
+    where: { threadId: run.threadId, role: "user" },
+    orderBy: { seq: "desc" },
+    select: { createdAt: true },
+  });
+  if (!asked) return false;
+  const effects = await deps.prisma.externalEffect.findMany({
+    where: {
+      spaceId: run.spaceId,
+      run: { threadId: run.threadId },
+      createdAt: { gt: asked.createdAt },
+    },
+    select: { id: true },
+  });
+  if (!effects.length) return false;
+  const ids = effects.map((effect) => effect.id);
+  // New people saved means the turn searched; this is only about updating saved ones.
+  const pages = await deps.prisma.recruitingCandidatePage.count({
+    where: { effectId: { in: ids } },
+  });
+  if (pages) return false;
+  const saved = await deps.prisma.recruitingSavedProfile.count({
+    where: {
+      spaceId: run.spaceId,
+      sourceEffectId: { in: ids },
+      updatedAt: { gt: asked.createdAt },
+    },
+  });
+  return saved > 0;
+}
+
+/**
  * A turn whose last recruiting_feedback call was rejected left the recruiter's feedback unsaved,
  * whatever its reply said. Push one retry with the reason, once per recruiter message.
  */
@@ -432,7 +469,10 @@ export async function guardRecruitingTurnEnd(
   // A teammate handed this bot one task (an email draft, a deeper search). Finishing that task
   // ends its turn; the role's next step stays with the coordinator, so only a promise is pushed.
   const handedIn = await handedInStage(deps, run);
-  const nextStep = handedIn ? undefined : (playbook?.step ?? undefined);
+  const nextStep =
+    handedIn || (playbook?.step && (await updatedProfilesOnly(deps, run)))
+      ? undefined
+      : (playbook?.step ?? undefined);
   if (!nextStep && !promise) return { action: "ended", classification };
   // Waiting on a running search is not a stall: its wake brings the results.
   if (await recruitingResearchInFlight(deps.prisma, input.roleId)) {

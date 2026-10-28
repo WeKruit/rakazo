@@ -43,6 +43,8 @@ function fixture(
     feedbackError?: string;
     /** People were saved after the round was accepted. */
     scaledPage?: boolean;
+    /** Since the recruiter's message, saved people's profiles were updated and nobody new saved. */
+    profileUpdate?: boolean;
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -65,10 +67,14 @@ function fixture(
         findFirst: vi.fn(async () =>
           options.roundAnswered
             ? { id: "feedback", clientNonce: options.latestNonce ?? null }
-            : null,
+            : options.profileUpdate
+              ? { createdAt: new Date("2026-10-28T22:00:00Z") }
+              : null,
         ),
       },
+      recruitingSavedProfile: { count: vi.fn(async () => (options.profileUpdate ? 3 : 0)) },
       recruitingCandidatePage: {
+        count: vi.fn(async () => 0),
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
         findFirst: vi.fn(async () => (options.scaledPage ? { effectId: "page-9" } : null)),
       },
@@ -89,6 +95,7 @@ function fixture(
               ? { result: { error: options.feedbackError } }
               : null,
         ),
+        findMany: vi.fn(async () => (options.profileUpdate ? [{ id: "lookup-1" }] : [])),
       },
       recruitingResearchTask: {
         findMany: vi.fn(async () =>
@@ -192,6 +199,20 @@ describe("guardRecruitingTurnEnd", () => {
       expect(result.action).toBe(action);
     },
   );
+
+  it("leaves the next step to the recruiter after updating saved people's profiles", async () => {
+    const f = fixture({ stage: "calibration_10", savedCandidates: 16, profileUpdate: true });
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run,
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    });
+    expect(result.action).toBe("ended");
+    expect(f.sendUserMessage).not.toHaveBeenCalled();
+  });
 
   it("does not treat feedback-stage saves or a prose question as a delivered review", async () => {
     const f = fixture({
