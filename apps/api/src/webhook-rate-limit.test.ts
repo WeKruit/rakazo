@@ -1,5 +1,6 @@
+import { AUTOMATION_RUNS_PER_MINUTE } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { deliverWebhookEvent, ROUTINE_RUNS_PER_MINUTE } from "./webhook-inbound.js";
+import { deliverWebhookEvent } from "./webhook-inbound.js";
 
 const target = {
   bot: { id: "bot", spaceId: "space", userId: "user", webhookSecretId: "secret" },
@@ -20,7 +21,7 @@ describe("routine rate limit", () => {
   it("skips a routine that already started its per-minute limit of runs", async () => {
     const sendUserMessage = vi.fn(async () => ({ messageId: "m", runId: "r", seq: 1 }));
     const count = vi.fn(async ({ where }: { where: { routineId: string } }) =>
-      where.routineId === "busy" ? ROUTINE_RUNS_PER_MINUTE : 0,
+      where.routineId === "busy" ? AUTOMATION_RUNS_PER_MINUTE : 0,
     );
     const result = await deliverWebhookEvent(
       {

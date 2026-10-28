@@ -2829,6 +2829,7 @@ description: Prepare standup notes
       sourceMessageId: null,
       checkpoint: null,
       leaseFence: 0,
+      createdAt: new Date(),
     };
     const prisma = {
       $queryRaw: vi.fn().mockResolvedValue([]),

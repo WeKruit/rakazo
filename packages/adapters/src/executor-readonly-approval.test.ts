@@ -237,6 +237,7 @@ function fixture({
     status: "queued",
     trigger,
     leaseFence: 0,
+    createdAt: new Date(),
   };
   const externalEffect = {
     findMany: vi.fn(

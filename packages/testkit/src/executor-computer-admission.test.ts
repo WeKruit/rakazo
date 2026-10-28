@@ -74,6 +74,7 @@ function fixture(
     routineId: "routine-1",
     retryOfRunId: null,
     leaseFence: 0,
+    createdAt: new Date(),
   };
   const toolResults: unknown[] = [];
   const runtimeRun = vi.fn(async function* (
