@@ -81,8 +81,10 @@ function run(name, script, scriptArgs) {
   return new Promise((resolve) => child.on("exit", (code) => resolve(code ?? 1)));
 }
 
+// Handoff text between agents shows only in the developer view.
 const botText = (message) =>
   (message.blocks ?? [])
+    .filter((block) => block.kind !== "handoff")
     .map((block) => block.text ?? block.question ?? "")
     .filter(Boolean)
     .join("\n");
@@ -337,7 +339,14 @@ if (wanted.has("t1"))
     const groupId = reportOf("t1").groupId;
     // The scale message goes in right after the ten, so no next-step card is expected here.
     tenChecks(await settled(groupId), failures, { card: false });
-    const draft = await say(groupId, "来个campign draft看看");
+    const draft = await say(groupId, "来个campign draft看看", {
+      until: (replies) =>
+        (replies
+          .map(botText)
+          .join("\n")
+          .match(/subject:/gi)?.length ?? 0) >= 3,
+      limitMs: 8 * 60_000,
+    });
     const drafted = draft.replies.map(botText).join("\n");
     fs.writeFileSync(path.join(OUT, "t1-draft.txt"), `${drafted}\n`);
     if (/\{\{\s*\w+\s*\}\}/.test(drafted))
