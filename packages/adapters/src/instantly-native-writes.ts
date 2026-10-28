@@ -252,6 +252,11 @@ const PROVIDER_ZONE: Record<string, string> = {
   "US/Mountain": "America/Boise",
   "America/Phoenix": "America/Creston",
   "US/Central": "America/Chicago",
+  // The provider lists no Pacific zone that observes daylight saving; its Pacific entry is this one.
+  "America/Los_Angeles": "America/Dawson",
+  "America/Vancouver": "America/Dawson",
+  "America/Tijuana": "America/Dawson",
+  "US/Pacific": "America/Dawson",
 };
 export const providerTimezone = (zone: string) => PROVIDER_ZONE[zone] ?? zone;
 
