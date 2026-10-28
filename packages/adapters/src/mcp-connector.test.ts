@@ -3477,6 +3477,8 @@ describe("local native Instantly campaign and lead tools", () => {
         sequences: [{ steps: [{ variants: [{ subject: "Hi", body: "Hello" }] }] }],
       } as Record<string, unknown>,
       existingLeads: [] as { id: string; email: string }[],
+      /** The role campaign's own leads, as /leads/list returns them for it. */
+      campaignLeads: [] as Record<string, unknown>[],
       campaigns: [] as Record<string, unknown>[],
       activeRoleId: null as string | null,
       deleted: false,
@@ -3577,8 +3579,21 @@ describe("local native Instantly campaign and lead tools", () => {
           return Response.json(state.campaign);
         const listed = state.campaigns.find((c) => url.pathname === `/api/v2/campaigns/${c.id}`);
         if (listed) return Response.json(listed);
+        const lead = url.pathname.match(/^\/api\/v2\/leads\/([^/]+)$/);
+        if (lead && request.method === "DELETE") {
+          const index = state.campaignLeads.findIndex((entry) => entry.id === lead[1]);
+          if (index < 0) return new Response("{}", { status: 404 });
+          return Response.json(state.campaignLeads.splice(index, 1)[0]);
+        }
         if (url.pathname === "/api/v2/leads/list" && body.campaign && !body.contacts)
-          return Response.json({ items: body.campaign === "with-leads" ? [{ id: "l" }] : [] });
+          return Response.json({
+            items:
+              body.campaign === "with-leads"
+                ? [{ id: "l" }]
+                : body.campaign === CAMPAIGN
+                  ? state.campaignLeads
+                  : [],
+          });
         if (url.pathname === "/api/v2/leads/list")
           return Response.json({
             items: state.existingLeads.filter((lead) =>
@@ -3740,12 +3755,12 @@ describe("local native Instantly campaign and lead tools", () => {
       },
       { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` },
       { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
-      { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
       {
         method: "POST",
         path: "/api/v2/leads/list",
         body: { campaign: CAMPAIGN, limit: 100 },
       },
+      { method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/activate` },
     ]);
   });
 
@@ -4158,7 +4173,7 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(events[0]).toMatchObject({ type: "result" });
     const paths = f.state.requests.map((r) => `${r.method} ${r.path}`);
     expect(paths).toContain("POST /api/v2/campaigns");
-    expect(paths.at(-2)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
+    expect(paths.at(-1)).toBe(`POST /api/v2/campaigns/${CAMPAIGN}/activate`);
     expect(f.result(events)).toMatchObject({ activated: true, campaignId: CAMPAIGN });
   });
 
@@ -4285,6 +4300,147 @@ describe("local native Instantly campaign and lead tools", () => {
     });
     const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(again.leads).toMatchObject({ a: { leadId: "lead-a@x.test" } });
+  });
+
+  describe("a send to the people the recruiter named", () => {
+    const ABE = { id: "lead-abe", email: "abe@x.test", first_name: "Abe", last_name: "Stone" };
+    const OTHERS = Array.from({ length: 15 }, (_, i) => ({
+      id: `lead-${i}`,
+      email: `p${i}@x.test`,
+      first_name: `P${i}`,
+    }));
+    /** The role campaign of the acceptance run: Abe plus 15 people added but never sent to. */
+    async function roleWithSixteen() {
+      const f = fixture();
+      f.state.activeRoleId = "role-1";
+      await f.run("ensure_role_campaign", {});
+      f.state.campaignLeads = [{ ...ABE }, ...OTHERS.map((lead) => ({ ...lead }))];
+      const binding = f.state.effects.get(`instantly-role-campaign:${SERVER.id}:role-1`)!;
+      binding.result = {
+        ...(binding.result as object),
+        leads: Object.fromEntries(
+          [ABE, ...OTHERS].map((lead) => [
+            `key-${lead.email}`,
+            { leadId: lead.id, email: lead.email },
+          ]),
+        ),
+      };
+      f.state.requests.length = 0;
+      return { f, binding };
+    }
+    const sends = (f: ReturnType<typeof fixture>) =>
+      f.state.requests.filter(
+        (r) => r.path.endsWith("/activate") || r.path === "/api/v2/leads/add",
+      );
+
+    it("takes the unnamed never-sent people out of a draft before activating it", async () => {
+      const { f, binding } = await roleWithSixteen();
+      const out = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+      expect(out).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+      const paths = f.state.requests.map((r) => `${r.method} ${r.path}`);
+      const deletes = paths.filter((path) => path.startsWith("DELETE"));
+      expect(deletes).toEqual(OTHERS.map((lead) => `DELETE /api/v2/leads/${lead.id}`));
+      // Every removal and a re-read showing only Abe come before the one activation.
+      expect(paths.indexOf(`POST /api/v2/campaigns/${CAMPAIGN}/activate`)).toBe(paths.length - 1);
+      expect(paths.at(-2)).toBe("POST /api/v2/leads/list");
+      expect(f.state.campaignLeads.map((lead) => lead.email)).toEqual(["abe@x.test"]);
+      // The role's lead map drops them too, so a later send adds them again from saved emails.
+      expect(Object.keys((binding.result as { leads: object }).leads)).toEqual(["key-abe@x.test"]);
+    });
+
+    it("never activates when someone unnamed is still in the campaign after the removals", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaignLeads.push({ id: "lead-late", email: "late@x.test" });
+      const fetch = globalThis.fetch;
+      vi.stubGlobal("fetch", async (input: string | URL | Request, init?: RequestInit) => {
+        const response = await fetch(input, init);
+        // A person added while the send was being prepared.
+        if (init?.method === "DELETE" && String(input).endsWith("lead-14"))
+          f.state.campaignLeads.push({ id: "lead-new", email: "new@x.test" });
+        return response;
+      });
+      const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
+      expect((events[0] as { message: string }).message).toMatch(/people changed/);
+      expect(sends(f)).toEqual([]);
+    });
+
+    it("refuses a name that matches nobody or more than one person, before changing anything", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaignLeads.push({ id: "lead-abe-2", email: "abe2@x.test", first_name: "Abe" });
+      const events = await f.run("activate_campaign", { recipients: ["Abe", "Nobody"] });
+      expect((events[0] as { message: string }).message).toMatch(/Abe, Nobody/);
+      expect(
+        f.state.requests.filter((r) => r.method !== "GET" && r.path !== "/api/v2/leads/list"),
+      ).toEqual([]);
+    });
+
+    it("keeps everyone in a campaign that has already run and sends nothing", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 2;
+      const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
+      expect((events[0] as { message: string }).message).toMatch(/would also email/);
+      expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
+      expect(sends(f)).toEqual([]);
+    });
+
+    it("adds only the named people to a campaign that is already sending", async () => {
+      const { f, binding } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      const ready = f.result(
+        await f.run("add_shortlist_leads", {
+          candidates: [
+            {
+              candidate_key: "abe-new",
+              email: "abe.new@x.test",
+              first_name: "Abe",
+              company_name: "Acme",
+              personalization: "Your search work at Acme stood out.",
+              email_type: "work",
+            },
+            { candidate_key: "zoe", email: "zoe@x.test", first_name: "Zoe" },
+          ],
+        }),
+      );
+      // Adding them to a sending campaign would email them at once, so nothing is added yet.
+      expect(ready).toMatchObject({ added: [], readyToSend: ["abe-new", "zoe"] });
+      expect(sends(f)).toEqual([]);
+      const out = f.result(await f.run("activate_campaign", { recipients: ["abe.new@x.test"] }));
+      expect(sends(f)).toEqual([
+        {
+          method: "POST",
+          path: "/api/v2/leads/add",
+          body: {
+            campaign_id: CAMPAIGN,
+            skip_if_in_workspace: false,
+            leads: [
+              {
+                email: "abe.new@x.test",
+                first_name: "Abe",
+                company_name: "Acme",
+                personalization: "Your search work at Acme stood out.",
+              },
+            ],
+          },
+        },
+      ]);
+      expect(out).toMatchObject({ sent: true, recipients: ["abe.new@x.test"] });
+      expect(f.state.requests.some((r) => r.method === "DELETE")).toBe(false);
+      const saved = binding.result as { leads: object; staged: object };
+      expect(saved.leads).toHaveProperty("abe-new", {
+        leadId: "lead-abe.new@x.test",
+        email: "abe.new@x.test",
+        emailType: "work",
+      });
+      expect(Object.keys(saved.staged)).toEqual(["zoe"]);
+    });
+
+    it("refuses a named person who is already in the sending campaign", async () => {
+      const { f } = await roleWithSixteen();
+      f.state.campaign.status = 1;
+      const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
+      expect((events[0] as { message: string }).message).toMatch(/Already in this campaign/);
+      expect(sends(f)).toEqual([]);
+    });
   });
 });
 
