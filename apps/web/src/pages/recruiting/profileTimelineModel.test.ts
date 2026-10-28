@@ -41,6 +41,18 @@ describe("parseTimeline", () => {
     expect(earlier).toMatchObject({ primary: "Engineer", secondary: "Beta", months: 24 });
     expect(earlier?.website).toBeUndefined();
 
+    const [commas] = parseTimeline(
+      "Northeast Area Manager – Morristown, NJ | Top Knobs USA, Inc. |  | Jul 2011 – Present | Hillsborough, New Jersey, United States",
+      "experience",
+      NOW,
+    );
+    expect(commas).toMatchObject({
+      primary: "Northeast Area Manager – Morristown, NJ",
+      secondary: "Top Knobs USA, Inc.",
+      current: true,
+      detail: "Hillsborough, New Jersey, United States",
+    });
+
     const [degree] = parseTimeline(
       "Stanford University | M.S., Computer Science | https://stanford.example.edu | 2016 – 2018",
       "education",

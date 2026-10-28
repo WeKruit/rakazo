@@ -166,7 +166,14 @@ function parseSegment(text: string, kind: TimelineKind, now: Date): TimelineEntr
     dates.dateLabel = single[0];
   }
 
-  const parts = splitParts(tidy(rest));
+  // The documented "Title | Company | … " form keeps commas inside names such as "Acme, Inc.".
+  const parts =
+    delimited && kind === "experience"
+      ? tidy(rest)
+          .split(/\s*\|\s*/)
+          .map((part) => part.trim())
+          .filter(Boolean)
+      : splitParts(tidy(rest));
   if (!parts.length) return plain;
   const hasDate = dates.dateLabel !== undefined;
   if (parts.length < 2 && !hasDate) return plain;

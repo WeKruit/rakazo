@@ -260,7 +260,18 @@ describe("peopleFromSearch", () => {
       "",
       "## Experience",
       "### Shift Lead - [Beta Freight](https://beta.example)",
-      "### Sort Center Manager - [Acme Parcel](https://acme.example) (Current)",
+      "",
+      "Apr 2015 - Oct 2019 (4 years and 6 months)",
+      "",
+      "Ran the night shift.",
+      "### Sort Center Manager - Acme Parcel, Inc. (Current)",
+      "",
+      "Jul 2019 - Present (7 years) in Edison, New Jersey, United States",
+      "",
+      "## Education",
+      "### B.S. Logistics - [Rutgers University](https://rutgers.example)",
+      "",
+      "2011 - 2015",
       "---",
       "Title: Ben Sample",
       "URL: https://linkedin.com/in/ben-sample/",
@@ -275,6 +286,10 @@ describe("peopleFromSearch", () => {
       "### [Gamma Fulfillment](https://gamma.example)",
       "",
       "#### Area Manager (Current)",
+      "",
+      "Mar 2023 - Present (3 years)",
+      "#### Shift Lead",
+      "Jan 2021 - Mar 2023 (2 years) in Newark, NJ",
       "---",
       "Title: Acme Parcel",
       "URL: https://www.linkedin.com/company/acme",
@@ -285,9 +300,14 @@ describe("peopleFromSearch", () => {
         name: "Ada Example",
         linkedin_url: "https://www.linkedin.com/in/ada-example",
         current_title: "Sort Center Manager",
-        current_company: "Acme Parcel",
+        current_company: "Acme Parcel, Inc.",
         location: "Edison, New Jersey, United States",
-        snippet: "Sort Center Manager at Acme Parcel Edison, New Jersey, United States (US)",
+        snippet: expect.stringMatching(/^Sort Center Manager at Acme Parcel Edison/),
+        experience: [
+          "Shift Lead | Beta Freight |  | Apr 2015 – Oct 2019",
+          "Sort Center Manager | Acme Parcel, Inc. |  | Jul 2019 – Present | Edison, New Jersey, United States",
+        ].join("\n"),
+        education: "Rutgers University | B.S. Logistics | 2011 – 2015",
       },
       {
         name: "Ben Sample",
@@ -295,7 +315,11 @@ describe("peopleFromSearch", () => {
         current_title: "Area Manager",
         current_company: "Gamma Fulfillment",
         location: "Newark, NJ",
-        snippet: "Operations leader Newark, NJ (US)",
+        snippet: expect.stringMatching(/^Operations leader Newark, NJ \(US\)/),
+        experience: [
+          "Area Manager | Gamma Fulfillment |  | Mar 2023 – Present",
+          "Shift Lead | Gamma Fulfillment |  | Jan 2021 – Mar 2023 | Newark, NJ",
+        ].join("\n"),
       },
     ]);
   });
@@ -317,9 +341,16 @@ describe("peopleFromSearch", () => {
                   {
                     title: "Warehouse Manager",
                     company: { name: "Delta Freight" },
-                    dates: { to: null },
+                    dates: { from: "2020-02-01", to: null },
                   },
                   { title: "Supervisor", company: { name: "Old Co" }, dates: { to: "2020-01-01" } },
+                ],
+                educationHistory: [
+                  {
+                    degree: "MBA",
+                    institution: { name: "Emory University" },
+                    dates: { to: "2019" },
+                  },
                 ],
               },
             },
@@ -336,6 +367,9 @@ describe("peopleFromSearch", () => {
         current_company: "Delta Freight",
         location: "Atlanta Metropolitan Area",
         snippet: "Ran a 120-person distribution center",
+        experience:
+          "Warehouse Manager | Delta Freight |  | Feb 2020 – Present\nSupervisor | Old Co",
+        education: "Emory University | MBA | 2019",
       },
     ]);
   });

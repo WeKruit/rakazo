@@ -244,7 +244,44 @@ export type PeopleSearchRow = {
   location?: string;
   /** A short passage of the profile the search matched, so the pick can quote the work. */
   snippet?: string;
+  /** Positions newest first, one per line: "Title | Company | | Start – End | Location". */
+  experience?: string;
+  /** Schools, one per line: "School | Degree | Start – End". */
+  education?: string;
 };
+
+type SearchJob = {
+  title: string;
+  company: string;
+  current: boolean;
+  start?: string;
+  end?: string;
+  location?: string;
+};
+
+const HISTORY_LIMIT = 30;
+
+function historyLine(parts: Array<string | undefined>): string {
+  return parts
+    .map((part) => (part ?? "").replace(/[|\n]+/g, " ").trim())
+    .join(" | ")
+    .replace(/(?: \| )+$/, "");
+}
+
+function experienceText(jobs: readonly SearchJob[]): string | undefined {
+  const lines = jobs
+    .slice(0, HISTORY_LIMIT)
+    .map((job) =>
+      historyLine([
+        job.title,
+        job.company,
+        "",
+        job.start ? `${job.start} – ${job.end ?? (job.current ? "Present" : "")}`.trim() : "",
+        job.location,
+      ]),
+    );
+  return lines.length ? lines.join("\n") : undefined;
+}
 
 const SNIPPET_LENGTH = 300;
 
@@ -305,6 +342,9 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     if (company) row.current_company = company.slice(0, 200);
     if (location) row.location = location.slice(0, 200);
     if (typeof record.snippet === "string") row.snippet = record.snippet;
+    if (typeof record.experience === "string" && record.experience)
+      row.experience = record.experience;
+    if (typeof record.education === "string" && record.education) row.education = record.education;
     people.set(key, row);
   }
   return [...people.values()];
@@ -327,6 +367,18 @@ export function isPeopleSearchEndpoint(endpoint: string): boolean {
 }
 
 const LOCATION_LINE = /\([A-Z]{2}\)$/;
+const MONTH_YEAR = String.raw`(?:[A-Z][a-z]{2,8}\.? )?\d{4}`;
+/** "Jul 2011 - Present (15 years) in Hillsborough, NJ" */
+const DATE_LINE = new RegExp(
+  String.raw`^(${MONTH_YEAR})\s*[-–—]\s*(Present|${MONTH_YEAR})(?:\s*\([^)]*\))?(?:\s+in\s+(.+))?$`,
+  "i",
+);
+const JOB_SECTIONS = new Set(["", "about", "experience"]);
+const SCHOOL_NAME = /universit|college|school|institut|academ|polytechn|大学|学院/i;
+
+function unlink(text: string): string {
+  return text.replace(/\[([^\]]+)\]\([^)]*\)/g, "$1").trim();
+}
 
 /**
  * People in a web-search listing ("Title: <name>\nURL: <linkedin>\n…Highlights" entries),
@@ -345,21 +397,72 @@ function peopleFromListing(text: string): Record_[] {
     const [first, second] = lines;
     const headline = first && !first.startsWith("#") && !LOCATION_LINE.test(first) ? first : null;
     const location = [first, second].find((line) => line && LOCATION_LINE.test(line));
-    // Jobs read "### Title - [Company](…) (Current)" or, for several roles at one company,
-    // "### [Company](…)" followed by "#### Title (Current)".
-    const jobs: Array<{ title: string; company: string; current: boolean }> = [];
+    // Jobs read "### Title - [Company](…) (Current)" (the company is not always a link) or, for
+    // several roles at one company, "### [Company](…)" followed by "#### Title (Current)". A
+    // job's first line after its heading may give "Jul 2011 - Present (…) in <location>".
+    const jobs: SearchJob[] = [];
+    const schools: string[] = [];
+    let section = "";
     let company: string | null = null;
-    for (const line of entry.split("\n")) {
-      const single = line.match(/^### (.+?) - \[([^\]]+)\]\([^)]*\)( \(Current\))?/);
-      const group = line.match(/^### \[([^\]]+)\]\([^)]*\)/);
+    let last: SearchJob | null = null;
+    let school: { name: string; degree?: string } | null = null;
+    const flushSchool = (dates?: string) => {
+      if (school) schools.push(historyLine([school.name, school.degree, dates]));
+      school = null;
+    };
+    for (const raw of entry.split("\n")) {
+      const line = raw.trim();
+      if (!line) continue;
+      if (line.startsWith("## ")) {
+        flushSchool();
+        section = line.slice(3).trim().toLowerCase();
+        company = null;
+        last = null;
+        continue;
+      }
+      if (section === "education") {
+        const heading = line.match(/^###+ (.+)$/);
+        if (heading) {
+          flushSchool();
+          const [first, second] = unlink(heading[1]!).split(/\s+-\s+/, 2);
+          school = second ? { name: second, degree: first } : { name: first! };
+          if (second && !SCHOOL_NAME.test(second) && SCHOOL_NAME.test(first!))
+            school = { name: first!, degree: second };
+        } else if (school) {
+          const dates = line.match(DATE_LINE);
+          flushSchool(dates ? `${dates[1]} – ${dates[2]}` : undefined);
+        }
+        continue;
+      }
+      // Jobs sit under Experience, or under About when the listing cut the heading out.
+      if (!JOB_SECTIONS.has(section)) continue;
+      const single = line.match(/^### (.+?) - (?:\[([^\]]+)\]\([^)]*\)|(.+?))( \(Current\))?$/);
+      const group = line.match(/^### (?:\[([^\]]+)\]\([^)]*\)|([^[\]]+?))$/);
       const role = line.match(/^#### (.+?)( \(Current\))?$/);
+      const dates = last && !last.start ? line.match(DATE_LINE) : null;
       if (single) {
         company = null;
-        jobs.push({ title: single[1]!, company: single[2]!, current: Boolean(single[3]) });
-      } else if (group) company = group[1]!;
-      else if (role && company) jobs.push({ title: role[1]!, company, current: Boolean(role[2]) });
-      else if (line.startsWith("## ")) company = null;
+        last = {
+          title: single[1]!,
+          company: (single[2] ?? single[3])!.trim(),
+          current: Boolean(single[4]),
+        };
+        jobs.push(last);
+      } else if (group) {
+        company = (group[1] ?? group[2])!.trim();
+        last = null;
+      } else if (role && company) {
+        last = { title: role[1]!, company, current: Boolean(role[2]) };
+        jobs.push(last);
+      } else if (dates && last) {
+        last.start = dates[1]!;
+        last.end = dates[2]!;
+        if (/^present$/i.test(dates[2]!)) last.current = true;
+        if (dates[3]) last.location = dates[3].trim();
+        last = null;
+      } else last = null;
     }
+    flushSchool();
     const job = jobs.find((item) => item.current) ?? jobs[0];
     found.push({
       full_name: name,
@@ -368,16 +471,18 @@ function peopleFromListing(text: string): Record_[] {
       company_name: job?.company ?? null,
       location: location?.replace(/\s*\([A-Z]{2}\)$/, "") ?? null,
       snippet: snippetOf(entry.split(/^# .+$/m)[1] ?? ""),
+      experience: experienceText(jobs),
+      education: schools.length ? schools.slice(0, HISTORY_LIMIT).join("\n") : undefined,
     });
   }
   return found;
 }
 
 /** People in a JSON search response ({results:[{url, entities:[{properties}]}]}). */
-function peopleFromResults(text: string): Record_[] {
+function peopleFromResults(body: string): Record_[] {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(body);
   } catch {
     return [];
   }
@@ -391,7 +496,13 @@ function peopleFromResults(text: string): Record_[] {
       workHistory?: Array<{
         title?: unknown;
         company?: { name?: unknown };
-        dates?: { to?: unknown };
+        location?: unknown;
+        dates?: { from?: unknown; to?: unknown };
+      }>;
+      educationHistory?: Array<{
+        degree?: unknown;
+        institution?: { name?: unknown };
+        dates?: { from?: unknown; to?: unknown };
       }>;
     };
     const jobs = Array.isArray(person.workHistory) ? person.workHistory : [];
@@ -411,9 +522,50 @@ function peopleFromResults(text: string): Record_[] {
         company_name: typeof job?.company?.name === "string" ? job.company.name : null,
         location: typeof person.location === "string" ? person.location : null,
         snippet: snippetOf(highlights),
+        experience: experienceText(
+          jobs.flatMap((entry): SearchJob[] =>
+            typeof entry?.title === "string" || typeof entry?.company?.name === "string"
+              ? [
+                  {
+                    title: text(entry.title) ?? "",
+                    company: text(entry.company?.name) ?? "",
+                    current: !entry.dates?.to,
+                    start: monthText(entry.dates?.from),
+                    end: monthText(entry.dates?.to),
+                    location: text(entry.location) ?? undefined,
+                  },
+                ]
+              : [],
+          ),
+        ),
+        education:
+          (Array.isArray(person.educationHistory) ? person.educationHistory : [])
+            .filter((entry) => typeof entry?.institution?.name === "string")
+            .slice(0, HISTORY_LIMIT)
+            .map((entry) => {
+              const from = monthText(entry.dates?.from);
+              const to = monthText(entry.dates?.to);
+              return historyLine([
+                text(entry.institution?.name) ?? "",
+                text(entry.degree) ?? "",
+                from || to ? [from, to].filter(Boolean).join(" – ") : "",
+              ]);
+            })
+            .join("\n") || undefined,
       },
     ];
   });
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** "2020-01-01" reads "Jan 2020"; other text stays as given. */
+function monthText(value: unknown): string | undefined {
+  const date = text(value);
+  if (!date) return undefined;
+  const iso = date.match(/^(\d{4})-(\d{2})/);
+  const month = iso ? MONTHS[Number(iso[2]) - 1] : undefined;
+  return iso ? (month ? `${month} ${iso[1]}` : iso[1]) : date;
 }
 
 function summary(profile: RecruitingSavedProfile) {
