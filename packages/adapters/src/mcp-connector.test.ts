@@ -3502,8 +3502,11 @@ describe("local native Instantly campaign and lead tools", () => {
       recruitingCandidate: {
         findMany: vi.fn(async ({ where }) =>
           (where.candidateKey.in as string[])
-            .filter((key) => key !== "not-shortlisted")
-            .map((candidateKey) => ({ candidateKey })),
+            .filter((key) => key !== "not-in-role")
+            .map((candidateKey) => ({
+              candidateKey,
+              consideration: candidateKey === "held" ? { operation: "hold" } : null,
+            })),
         ),
       },
       externalEffect: {
@@ -4113,7 +4116,7 @@ describe("local native Instantly campaign and lead tools", () => {
     });
   });
 
-  it("add_shortlist_leads dedups, skips missing emails and records candidate -> lead ids", async () => {
+  it("add_shortlist_leads adds the role's people without a shortlist, dedups and records lead ids", async () => {
     const f = fixture();
     await f.run("ensure_role_campaign", { role_id: "role-1" });
     f.state.existingLeads = [{ id: "lead-existing", email: "b@x.test" }];
@@ -4122,10 +4125,17 @@ describe("local native Instantly campaign and lead tools", () => {
       await f.run("add_shortlist_leads", {
         role_id: "role-1",
         candidates: [
-          { candidate_key: "a", email: "a@x.test", first_name: "A" },
+          {
+            candidate_key: "a",
+            email: "a@x.test",
+            first_name: "A",
+            email_type: "work",
+            personalization: "Your live shopping work at Acme stood out.",
+          },
           { candidate_key: "b", email: "B@x.test" },
           { candidate_key: "c", email: null },
-          { candidate_key: "not-shortlisted", email: "n@x.test" },
+          { candidate_key: "not-in-role", email: "n@x.test" },
+          { candidate_key: "held", email: "h@x.test" },
         ],
       }),
     );
@@ -4133,16 +4143,23 @@ describe("local native Instantly campaign and lead tools", () => {
       added: ["a"],
       alreadyInCampaign: ["b"],
       skippedMissingEmail: ["c"],
-      notShortlisted: ["not-shortlisted"],
+      notInRole: ["not-in-role"],
+      onHoldOrPassed: ["held"],
       leads: {
-        a: { leadId: "lead-a@x.test", email: "a@x.test" },
+        a: { leadId: "lead-a@x.test", email: "a@x.test", emailType: "work" },
         b: { leadId: "lead-existing", email: "B@x.test" },
       },
     });
     expect(f.state.requests.find((r) => r.path === "/api/v2/leads/add")?.body).toEqual({
       campaign_id: CAMPAIGN,
       skip_if_in_workspace: false,
-      leads: [{ email: "a@x.test", first_name: "A" }],
+      leads: [
+        {
+          email: "a@x.test",
+          first_name: "A",
+          personalization: "Your live shopping work at Acme stood out.",
+        },
+      ],
     });
     const again = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
     expect(again.leads).toMatchObject({ a: { leadId: "lead-a@x.test" } });

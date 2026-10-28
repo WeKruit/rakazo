@@ -442,9 +442,12 @@ describe("first campaign email", () => {
     const { nativeInstantlyWrites } = await import("./instantly-native-writes.js");
     const activate = nativeInstantlyWrites.find((t) => t.name === "activate_campaign")!;
     expect(activate.description).toContain("confirmation card");
-    for (const bot of RECRUITING_DEFAULT_BOTS.filter((b) => ["main", "outreach"].includes(b.key)))
-      expect(bot.instructions).toContain(
-        "call ensure_role_campaign, optionally get_campaign to show its name, id and lead count, then activate_campaign; its confirmation card is the one-time approval",
-      );
+    const role = (key: string) => RECRUITING_DEFAULT_BOTS.find((b) => b.key === key)!;
+    expect(role("main").instructions).toContain(
+      "call ensure_role_campaign, optionally get_campaign to show its name, id and lead count, then activate_campaign; its confirmation card is the one-time approval",
+    );
+    expect(role("outreach").instructions).toContain(
+      "then call activate_campaign, whose card lists every recipient and is the one confirmation",
+    );
   });
 });

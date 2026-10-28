@@ -238,7 +238,10 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     `Role: ${display.campaignName ?? "this role"}`,
     `From: ${unknown(display.mailbox)}`,
     `To (${count}):`,
-    ...shown.map((r) => `- ${r.name ? `${r.name} <${r.email}>` : r.email}`),
+    ...shown.flatMap((r) => [
+      `- ${r.name ? `${r.name} <${r.email}>` : r.email}${r.emailType ? ` (${r.emailType} email)` : ""}`,
+      ...(r.personalization ? [`  Opening: ${r.personalization}`] : []),
+    ]),
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]
       : []),

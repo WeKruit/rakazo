@@ -476,7 +476,12 @@ describe("buildApprovalAskBlock", () => {
           status: "Draft",
           mailbox: "team@example.test",
           recipients: [
-            { name: "Ada Lovelace", email: "ada@example.test" },
+            {
+              name: "Ada Lovelace",
+              email: "ada@example.test",
+              emailType: "work",
+              personalization: "Your engine notes stood out.",
+            },
             { name: null, email: "bob@example.test" },
           ],
           recipientCount: 2,
@@ -491,7 +496,8 @@ describe("buildApprovalAskBlock", () => {
         "Role: Founding Engineer",
         "From: team@example.test",
         "To (2):",
-        "- Ada Lovelace <ada@example.test>",
+        "- Ada Lovelace <ada@example.test> (work email)",
+        "  Opening: Your engine notes stood out.",
         "- bob@example.test",
         "Send time: Weekdays 09:00-17:00 America/Chicago",
         "",

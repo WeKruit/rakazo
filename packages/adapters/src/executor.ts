@@ -8149,6 +8149,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               let campaignId =
                 typeof args.campaign_id === "string" ? (args.campaign_id as string) : null;
               let eaccount: string | null = null;
+              let bindingLeads: Awaited<ReturnType<typeof readRoleCampaignBinding>> = null;
               if (!campaignId && approvalRoute.toolName === "native_instantly_activate_campaign") {
                 const current = await deps.prisma.thread.findUnique({
                   where: { id: thread.id },
@@ -8164,6 +8165,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : null;
                 campaignId = binding?.campaignId ?? null;
                 eaccount = binding?.eaccount ?? null;
+                bindingLeads = binding;
               }
               const connector = deps.connector;
               const read = async (tool: string, readArgs: Record<string, unknown>) => {
@@ -8191,14 +8193,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 instantlyReply = await describeReplyToEmail(read, args);
               else
                 instantlyActivation = campaignId
-                  ? await describeCampaignActivation(read, campaignId, eaccount)
+                  ? await describeCampaignActivation(
+                      read,
+                      campaignId,
+                      eaccount,
+                      bindingLeads?.leads,
+                    )
                   : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
               // A send card is only for something that would send: an email and its recipients.
               const unsendable =
                 instantlyActivation?.firstEmail === null
                   ? "This campaign has no email yet; save it with ensure_role_campaign steps, then activate again."
                   : instantlyActivation?.recipientCount === 0
-                    ? "This campaign has no recipients yet. Shortlist the people the recruiter named (recruiting_candidates), add them with add_shortlist_leads, then activate again."
+                    ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."
                     : null;
               if (unsendable) {
                 const result = { error: unsendable };
