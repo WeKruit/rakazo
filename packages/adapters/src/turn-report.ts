@@ -144,11 +144,11 @@ const ASK_CARRIES: readonly TurnWork[] = ["role", "feedback"];
 
 /** Model-facing: the one extra step before a question card when the work is unreported. */
 export const REPORT_BEFORE_ASK =
-  "Not asked yet: you have not told the user what you just did. Report it in two or three lines with message_user (counts and names, no internal ids), then ask again.";
+  "Not asked yet: you have not told the user what you just did. Report it briefly with message_user (counts and names, no internal ids), then ask again.";
 
 /** Model-facing: the last silent-turn continuation when the work is unreported. */
 export const REPORT_BEFORE_END =
-  "Report what you did in two or three lines (counts and names, no internal ids), then end the turn.";
+  "Finish the original task from the latest tool result, then give the user the final answer: report what you did (counts and names, no internal ids) and show in full anything they asked to see, such as a draft.";
 
 type Entry =
   | { kind: "tool"; id: string; name: string; args: Record<string, unknown> }
