@@ -521,6 +521,7 @@ if (wanted.has("dispatch"))
     const { members } = await rpc("groups/get", { groupId });
     const nameOf = new Map(members.map((member) => [member.botId, member.name ?? ""]));
     const notes = [];
+    const steps = [];
     for (const item of DISPATCH) {
       const askedAt = new Date().toISOString();
       const { replies } = await say(groupId, item.ask, {
@@ -565,8 +566,17 @@ if (wanted.has("dispatch"))
           `${item.capability}: declined "…${text.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
         );
       commonChecks(replies, failures);
+      // Each step's tool calls, kept before the end-of-run archive makes the group unreadable.
+      steps.push({
+        capability: item.capability,
+        ask: item.ask,
+        events: (await readEvents(groupId).catch(() => [])).filter(
+          (event) => event.createdAt > askedAt && event.type.startsWith("agent.tool."),
+        ),
+      });
     }
     fs.writeFileSync(path.join(OUT, "dispatch.txt"), `${notes.join("\n\n")}\n`);
+    fs.writeFileSync(path.join(OUT, "dispatch.events.json"), JSON.stringify(steps, null, 1));
   });
 
 if (wanted.has("t5"))
