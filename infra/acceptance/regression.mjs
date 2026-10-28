@@ -107,8 +107,9 @@ const working = async (groupId) =>
 
 const VENDORS =
   /\b(autumn|exa|coresignal|fullenrich|contactout|instantly|composio|cal\.com|apollo|openai|codex)\b/i;
+// "Which people…?" asks the recruiter to pick instead of doing it; "I'll check which people…" is fine.
 const REFUSAL =
-  /\b(?:unassessed|not (?:send-)?ready|which (?:\d+|people|candidates)|can(?:no|')t (?:send|look up|choose))\b/i;
+  /\b(?:unassessed|not (?:send-)?ready|which (?:\d+|people|candidates)\b[^.!?\n]*\?|can(?:no|['’])t (?:send|look up|choose))/i;
 /** Checks every recruiter-visible message must pass, whatever the case. */
 function commonChecks(messages, failures) {
   for (const message of recruiterSees(messages)) {
@@ -392,7 +393,7 @@ const DISPATCH = [
   { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
 ];
 const DECLINED =
-  /\b(?:I (?:can(?:no|')t|am unable to|'m unable to|'m not able to|don't have (?:access|a tool|the ability))|(?:that's|this is|it's) (?:outside|beyond) (?:my|what I)|not something I can)\b/i;
+  /\b(?:I (?:can(?:no|['’])t|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b/i;
 
 if (wanted.has("dispatch"))
   await stage("dispatch", async (failures) => {
