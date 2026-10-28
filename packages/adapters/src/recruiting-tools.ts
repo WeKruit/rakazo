@@ -56,6 +56,7 @@ import { getLogger } from "@rakazo/logging";
 
 import { completeExternalEffect } from "./approval-effect.js";
 import { readActorArtifact } from "./artifact-read.js";
+import { inlineProfilePhotos } from "./profile-photo.js";
 import { isPeopleSearchEndpoint, peopleFromSearch } from "./recruiting-profiles.js";
 import {
   bestLookedUpEmail,
@@ -906,6 +907,7 @@ export async function saveRecruitingPeopleSearch(
     throw new RecruitingPeopleSearchError(
       "No people with a name and LinkedIn profile came back from a profile-data search in this run. Run the people search with the connected profile-data connector first, then save.",
     );
+  await inlineProfilePhotos(rows.map((entry) => entry.row));
   const captured = { sources, rows, truncated };
   const bytes = Buffer.from(
     stableJsonValue(recruitingPeopleSearchReceipt(input, captured)),

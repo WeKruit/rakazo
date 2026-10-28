@@ -12,6 +12,7 @@ import {
   listRunToolResults,
   saveRecruitingSavedProfile,
 } from "@rakazo/db";
+import { linkedinPhotoUrl } from "./profile-photo.js";
 
 type Facts = Omit<RecruitingSavedProfile, "personKey" | "provider" | "fetchedAt">;
 type Record_ = Record<string, unknown>;
@@ -248,6 +249,8 @@ export type PeopleSearchRow = {
   experience?: string;
   /** Schools, one per line: "School | Degree | Start – End". */
   education?: string;
+  /** The source photo link; the save replaces it with our own copy or drops it. */
+  profile_image_url?: string;
 };
 
 type SearchJob = {
@@ -345,6 +348,8 @@ export function peopleFromSearch(result: unknown, endpoint: string): PeopleSearc
     if (typeof record.experience === "string" && record.experience)
       row.experience = record.experience;
     if (typeof record.education === "string" && record.education) row.education = record.education;
+    const photo = linkedinPhotoUrl(record.profile_image_url ?? record.image);
+    if (photo) row.profile_image_url = photo;
     people.set(key, row);
   }
   return [...people.values()];
@@ -518,6 +523,7 @@ function peopleFromResults(body: string): Record_[] {
       {
         full_name: name,
         linkedin_url: item.url,
+        image: item.image,
         job_title: typeof job?.title === "string" ? job.title : null,
         company_name: typeof job?.company?.name === "string" ? job.company.name : null,
         location: typeof person.location === "string" ? person.location : null,

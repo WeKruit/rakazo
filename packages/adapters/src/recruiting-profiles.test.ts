@@ -330,6 +330,8 @@ describe("peopleFromSearch", () => {
         {
           url: "https://www.linkedin.com/in/cara-example",
           title: "Cara Example",
+          image:
+            "https://media.licdn.com/dms/image/v2/X/profile-displayphoto-shrink_200_200/0/1?e=1",
           highlights: ["Ran a 120-person distribution center"],
           entities: [
             {
@@ -370,6 +372,8 @@ describe("peopleFromSearch", () => {
         experience:
           "Warehouse Manager | Delta Freight |  | Feb 2020 – Present\nSupervisor | Old Co",
         education: "Emory University | MBA | 2019",
+        profile_image_url:
+          "https://media.licdn.com/dms/image/v2/X/profile-displayphoto-shrink_200_200/0/1?e=1",
       },
     ]);
   });

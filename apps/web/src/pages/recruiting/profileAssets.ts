@@ -17,6 +17,9 @@ const SCHOOL_LOGO = /^(?:school|university) logo url$/i;
 const COMPANY_LINK = /^company (?:url|website(?: url)?)$/i;
 const SCHOOL_LINK = /^(?:school|university) (?:url|website(?: url)?)$/i;
 
+/** Our own re-encoded copy of a person's photo, saved inline with the row. */
+const SAVED_PHOTO = /^data:image\/(?:webp|png|jpeg);base64,[A-Za-z0-9+/]+={0,2}$/;
+
 /** Only an explicitly supplied asset URL; never derive a logo/photo from a name or source host. */
 export function profileImageUrl(value: string | null | undefined): string | null {
   if (!value || /\s/.test(value.trim())) return null;
@@ -85,7 +88,7 @@ export function profileAssets(fields: readonly Field[], company?: string | null)
     return urls.length === 1 ? { name, url: urls[0]! } : null;
   };
   return {
-    photo: profileImageUrl(value(PHOTO)),
+    photo: SAVED_PHOTO.test(value(PHOTO) ?? "") ? value(PHOTO) : profileImageUrl(value(PHOTO)),
     company: asset(COMPANY_LOGO, companyName) ?? retainedAsset(work, companyName, "logoUrl"),
     school: asset(SCHOOL_LOGO, schoolName) ?? retainedAsset(education, schoolName, "logoUrl"),
     companyLink:
