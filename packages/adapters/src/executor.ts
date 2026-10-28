@@ -991,6 +991,17 @@ export function requestedPeopleTarget(text: string): number | undefined {
 }
 
 /**
+ * "find 50" when Results already hold 50 or more means 50 more; it is a total only when the
+ * recruiter says so ("50 total", "一共50") or the role holds fewer than that.
+ */
+export function peopleTargetFrom(text: string, totalBefore: number): number | undefined {
+  const asked = requestedPeopleTarget(text);
+  if (!asked) return undefined;
+  if (/\b(?:total|in all|altogether|overall)\b|总共|一共|总数|合计/i.test(text)) return asked;
+  return /\bmore\b|再/i.test(text) || totalBefore >= asked ? totalBefore + asked : asked;
+}
+
+/**
  * The playbook stops a scale-out at the recruiter's target: once the role holds that many people,
  * handing a search on for a paid deep search only spends money nobody asked for.
  */
@@ -1009,16 +1020,23 @@ async function searchTargetAlreadyMet(
   const latest = await prisma.message.findFirst({
     where: { threadId, role: "user" },
     orderBy: { seq: "desc" },
-    select: { blocks: true },
+    select: { blocks: true, createdAt: true },
   });
   const said = ((latest?.blocks ?? []) as MessageBlock[])
     .flatMap((block) => (block.kind === "text" ? [block.text] : []))
     .join("\n");
-  const target = requestedPeopleTarget(said);
+  if (!latest || !requestedPeopleTarget(said)) return undefined;
+  const [before, total] = await Promise.all([
+    prisma.recruitingCandidate.count({
+      where: {
+        roleId: thread.activeRecruitingRoleId,
+        occurrences: { some: { page: { observedAt: { lt: latest.createdAt } } } },
+      },
+    }),
+    prisma.recruitingCandidate.count({ where: { roleId: thread.activeRecruitingRoleId } }),
+  ]);
+  const target = peopleTargetFrom(said, before);
   if (!target) return undefined;
-  const total = await prisma.recruitingCandidate.count({
-    where: { roleId: thread.activeRecruitingRoleId },
-  });
   if (total < target) return undefined;
   return `Not handed off: Results already holds ${total} people, meeting the recruiter's target of ${target}. Do not run a deep search; tell the recruiter the total and offer the next step.`;
 }
