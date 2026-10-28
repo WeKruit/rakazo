@@ -119,3 +119,18 @@ it("shows the phase without a clock before any run executes", () => {
   render(null, false);
   expect(container.textContent).toBe("");
 });
+
+it("shows business progress beside the step in flight", () => {
+  const session = observeWorkSession(
+    null,
+    { runs: [{ id: "r1", status: "running", startedAt: at(0) }], messages: [liveRow] },
+    at(42),
+  );
+  act(() =>
+    root.render(<LiveWork session={session} live label="Working…" detail="12 people added" />),
+  );
+  expect(container.querySelector('[data-testid="live-work-detail"]')?.textContent).toBe(
+    "12 people added",
+  );
+  expect(container.textContent).toContain("Searching candidates…");
+});

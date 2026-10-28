@@ -7,6 +7,7 @@ import {
   workSessionSteps,
 } from "@rakazo/core";
 import { ChevronRight } from "lucide-react";
+import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { LoadingState, Shimmer } from "./ai/primitives";
 import { LIVE_TOOL_STEP_WINDOW, ToolSteps } from "./ToolActivityDisclosure";
@@ -57,6 +58,7 @@ export function LiveWork({
   session,
   live,
   label,
+  detail,
   showSteps = true,
 }: {
   session: WorkSession | null;
@@ -65,6 +67,8 @@ export function LiveWork({
   label: string;
   /** Off where tool cards already list the steps. */
   showSteps?: boolean;
+  /** Business progress beside the headline, e.g. people added so far. */
+  detail?: ReactNode;
 }) {
   const labels = useWorkActivityLabels();
   const steps = (showSteps ? workSessionSteps(session) : []).map((step) => ({
@@ -82,6 +86,11 @@ export function LiveWork({
           indicator={
             <span aria-hidden className="flex items-center gap-2">
               <Shimmer>{headline}</Shimmer>
+              {detail ? (
+                <span data-testid="live-work-detail" className="text-[12px] text-muted-foreground">
+                  {detail}
+                </span>
+              ) : null}
               {session ? <WorkClock session={session} /> : null}
             </span>
           }

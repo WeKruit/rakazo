@@ -214,6 +214,10 @@ msgstr "{name} 중지됨"
 msgid "{people} people"
 msgstr ""
 
+#: src/pages/Shell.tsx
+msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
+msgstr "{peopleAdded, plural, other {#명 추가됨}}"
+
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "{remaining} left · bot is watching, not acting"
 msgstr "남은 시간 {remaining} · Bot은 화면만 보고 직접 조작하지 않습니다"

@@ -1,6 +1,6 @@
 import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
-import { Trans, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import { ORPCError } from "@orpc/client";
 import { ChatMarkdown, LinkFaviconsContext, LinkifiedText } from "@rakazo/chat-ui/web";
 import type {
@@ -142,6 +142,7 @@ import type {
   CSSProperties,
   DragEvent,
   MutableRefObject,
+  ReactNode,
   Ref,
   RefObject,
 } from "react";
@@ -271,6 +272,7 @@ import {
 } from "../lib/roster-status";
 import { clearSpaceSelection, rpc, selectedSpaceId, selectSpace } from "../lib/rpc";
 import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../lib/run-error-storage";
+import { useNewPeopleDuringRun } from "../lib/run-people-progress";
 import { sharedInflight } from "../lib/shared-inflight";
 import {
   activeThreadRuns,
@@ -3062,6 +3064,12 @@ export function ShellPage() {
     ["running", "queued", "leased"].includes(run.status),
   );
   const transcriptRunning = workingRuns.length > 0;
+  const peopleAdded = useNewPeopleDuringRun({
+    groupId: inGroup && !showToolActivity ? (groupId ?? undefined) : undefined,
+    threadId: knownThreadId ?? undefined,
+    running: transcriptRunning,
+    refreshSignal: recruitingRefresh,
+  });
   const composerRunning = currentRuns.some((run) => isActive(run.status));
   useEffect(() => {
     setPreloadRecoveryActiveWork(composerRunning);
@@ -6136,6 +6144,11 @@ export function ShellPage() {
                     speakingMessageId={speakingMessageId}
                     onSpeak={speakMessage}
                     onOpenComputer={onOpenComputer}
+                    liveDetail={
+                      peopleAdded ? (
+                        <Plural value={peopleAdded} one="# person added" other="# people added" />
+                      ) : undefined
+                    }
                   />
                 )}
                 {showToolActivity && inGroup && composerRunning ? (
@@ -7478,6 +7491,7 @@ const Transcript = memo(function Transcript({
   speakingMessageId,
   onSpeak,
   onOpenComputer,
+  liveDetail,
 }: {
   narrow: boolean;
   visible: boolean;
@@ -7517,6 +7531,8 @@ const Transcript = memo(function Transcript({
   speakingMessageId: string | null;
   onSpeak: (message: ThreadMessage) => void;
   onOpenComputer: (botId?: string) => void;
+  /** Business progress for the live work line, e.g. people added to Results. */
+  liveDetail?: ReactNode;
 }) {
   const { t } = useLingui();
   const [atEnd, setAtEnd] = useState(true);
@@ -7998,6 +8014,7 @@ const Transcript = memo(function Transcript({
               }
               live
               label={workingLabel}
+              detail={liveDetail}
               showSteps={!showToolActivity}
             />
           ) : (
