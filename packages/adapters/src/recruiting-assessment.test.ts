@@ -20,6 +20,11 @@ const db = vi.hoisted(() => ({
   candidates: vi.fn(),
   sources: vi.fn(),
 }));
+const lookups = vi.hoisted(() => ({ saved: vi.fn(async () => new Map()) }));
+vi.mock("./recruiting-research.js", async (original) => ({
+  ...(await original<object>()),
+  lookedUpContactEmails: lookups.saved,
+}));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<object>()),
   getRecruitingWorkspace: db.workspace,
@@ -114,6 +119,7 @@ function fixture() {
   const prisma = {
     run: { findFirst: findRun },
     artifact: { findMany: findArtifacts },
+    mcpServer: { findMany: vi.fn(async () => []) },
   } as unknown as PrismaClient;
   return {
     deps: { prisma, artifacts: { get, put } as unknown as ArtifactStore },
@@ -721,6 +727,54 @@ describe("native saved candidate reads", () => {
       expect(db.material).not.toHaveBeenCalled();
     },
   );
+
+  it("shows each listed person's email saved by an earlier contact lookup", async () => {
+    const f = fixture();
+    const linkedinUrl = "https://www.linkedin.com/in/example-person";
+    db.candidates.mockResolvedValue({
+      roleId: "role",
+      items: [
+        { candidateKey: "candidate-one", name: "Example Person", linkedinUrl },
+        { candidateKey: "candidate-two", name: "Other Person" },
+      ],
+      total: 2,
+      nextCursor: null,
+    });
+    lookups.saved.mockResolvedValueOnce(
+      new Map([
+        [
+          "linkedin:/in/example-person",
+          [
+            {
+              address: "maybe@example.test",
+              type: "personal",
+              status: null,
+              provider: "fullenrich",
+            },
+            {
+              address: "person@example.test",
+              type: "work",
+              status: "DELIVERABLE",
+              provider: "fullenrich",
+            },
+          ],
+        ],
+      ]),
+    );
+    const result = await executeRecruitingCandidatesTool(
+      f.deps,
+      trusted,
+      { operation: "list" },
+      context,
+    );
+    expect(result).toMatchObject({
+      items: [
+        { candidateKey: "candidate-one", email: { address: "person@example.test", type: "work" } },
+        { candidateKey: "candidate-two" },
+      ],
+    });
+    expect((result as { items: object[] }).items[1]).not.toHaveProperty("email");
+  });
 
   it("returns verified selected source reports with unchanged references and pagination", async () => {
     const f = sourceFixture();

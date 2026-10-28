@@ -217,6 +217,44 @@ export async function savedContactEmails(
   return saved;
 }
 
+/** Emails this account's contact lookups saved, by LinkedIn key, across its lookup connections. */
+export async function lookedUpContactEmails(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+) {
+  const servers = await prisma.mcpServer.findMany({
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      enabled: true,
+      endpoint: "https://mcp.fullenrich.com/mcp",
+    },
+    select: { id: true, revision: true },
+  });
+  const found = new Map<string, FoundEmail[]>();
+  for (const server of servers)
+    for (const [key, emails] of await savedContactEmails(
+      prisma,
+      actor,
+      server,
+      "native_find_emails",
+    ))
+      if (!found.has(key)) found.set(key, emails);
+  return found;
+}
+
+/** The best saved email for a person: a deliverable one first. */
+export function bestLookedUpEmail(
+  found: Map<string, FoundEmail[]>,
+  ...profiles: (string | null | undefined)[]
+) {
+  const emails = profiles
+    .map((value) => linkedinPersonKey(value))
+    .filter((key): key is string => Boolean(key))
+    .flatMap((key) => found.get(key) ?? []);
+  return emails.find((email) => email.status === "DELIVERABLE") ?? emails[0];
+}
+
 export type { RecruitingResearchObservation } from "@rakazo/contracts";
 
 const lifecycle = new Map([

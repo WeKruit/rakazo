@@ -6,8 +6,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
-import { linkedinPersonKey } from "./recruiting-profiles.js";
-import { savedContactEmails } from "./recruiting-research.js";
+import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
 
 /**
  * Local REST-backed Instantly campaign/lead tools (official v2 API, https://developer.instantly.ai).
@@ -891,29 +890,6 @@ async function bindCreatedCampaign(
   });
 }
 
-/** Emails this account's contact lookups saved, by LinkedIn key, across its lookup connections. */
-async function lookedUpEmails(prisma: PrismaClient, context: AdapterContext) {
-  const servers = await prisma.mcpServer.findMany({
-    where: {
-      spaceId: context.spaceId,
-      userId: context.userId,
-      enabled: true,
-      endpoint: "https://mcp.fullenrich.com/mcp",
-    },
-    select: { id: true, revision: true },
-  });
-  const found = new Map<string, FoundEmail[]>();
-  for (const server of servers)
-    for (const [key, emails] of await savedContactEmails(
-      prisma,
-      context,
-      server,
-      "native_find_emails",
-    ))
-      if (!found.has(key)) found.set(key, emails);
-  return found;
-}
-
 async function addShortlistLeads(
   prisma: PrismaClient,
   rest: InstantlyRest,
@@ -946,16 +922,16 @@ async function addShortlistLeads(
   });
   // A person passed without an email gets the one this account's contact lookup already saved.
   const found = input.candidates.some((c) => !c.email)
-    ? await lookedUpEmails(prisma, context)
+    ? await lookedUpContactEmails(prisma, context)
     : new Map<string, FoundEmail[]>();
   const candidates = input.candidates.map((candidate) => {
     if (candidate.email) return candidate;
     const row = saved.find((entry) => entry.candidateKey === candidate.candidate_key);
-    const keys = [candidate.candidate_key, ...(row?.occurrences ?? []).map((o) => o.linkedinUrl)]
-      .map((value) => linkedinPersonKey(value))
-      .filter((key): key is string => Boolean(key));
-    const emails = keys.flatMap((key) => found.get(key) ?? []);
-    const best = emails.find((email) => email.status === "DELIVERABLE") ?? emails[0];
+    const best = bestLookedUpEmail(
+      found,
+      candidate.candidate_key,
+      ...(row?.occurrences ?? []).map((o) => o.linkedinUrl),
+    );
     return best
       ? { ...candidate, email: best.address, email_type: candidate.email_type ?? best.type }
       : candidate;
