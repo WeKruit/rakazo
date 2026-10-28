@@ -315,7 +315,7 @@ describe("shell command environment", () => {
     expect(`${output.stdout}${output.stderr}`).not.toContain("fake-space-only");
   });
 
-  it("exports only the bot variables the command text names, and still redacts them", async () => {
+  it("exports only the variables the command text names, and still redacts them", async () => {
     const db = fakeDatabase();
     await save(db, "cli-token", "fake-cli-token");
     await save(db, "deploy-key", "fake-deploy-key");
@@ -328,12 +328,13 @@ describe("shell command environment", () => {
       prisma: db.prisma,
       secretStore: { load },
       scope,
-      spaceEnvironment: { SPACE_ONLY: "fake-space-only" },
+      spaceEnvironment: { SPACE_ONLY: "fake-space-only", SPACE_NAMED: "fake-space-named" },
       registerRedactions,
-      command: 'curl -H "Authorization: $CLI_TOKEN" "${DEPLOY_KEY:-none}" && echo $PATH',
+      command:
+        'curl -H "Authorization: $CLI_TOKEN" "${DEPLOY_KEY:-none}" "$SPACE_NAMED" && echo $PATH',
     });
     expect(env).toEqual({
-      SPACE_ONLY: "fake-space-only",
+      SPACE_NAMED: "fake-space-named",
       CLI_TOKEN: "fake-cli-token",
       DEPLOY_KEY: "fake-deploy-key",
     });
@@ -345,7 +346,7 @@ describe("shell command environment", () => {
     );
   });
 
-  it("exports no bot variable when the command names none", async () => {
+  it("exports no variable when the command names none", async () => {
     const db = fakeDatabase();
     await save(db, "cli-token", "fake-cli-token");
     const { env } = await shellCommandEnvironment({
@@ -356,7 +357,7 @@ describe("shell command environment", () => {
       registerRedactions: vi.fn(),
       command: "ls -la",
     });
-    expect(env).toEqual({ SPACE_ONLY: "fake-space-only" });
+    expect(env).toEqual({});
   });
 
   it("does not let one unencodable stored value abort the shell environment", async () => {

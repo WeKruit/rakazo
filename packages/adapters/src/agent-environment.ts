@@ -26,7 +26,7 @@ export function formatAgentEnvironmentInstruction(
 ): string | undefined {
   const names = Object.keys(environment).sort();
   if (names.length === 0) return undefined;
-  return `Managed credentials are available to shell commands as these environment variables: ${names.join(", ")}. Use them without printing, logging, or embedding their values in files or messages.`;
+  return `Managed credentials are available to shell commands as these environment variables: ${names.join(", ")}. A command receives only the ones it names as $NAME; for a tool that reads one on its own, pass it inline (NAME="$NAME" tool ...). Use them without printing, logging, or embedding their values in files or messages.`;
 }
 
 export function redactShellStreams(
