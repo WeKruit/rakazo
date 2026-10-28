@@ -505,6 +505,7 @@ import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
 import { requestConnection } from "./request-connection.js";
 import { lazyRunComputer } from "./run-computer.js";
+import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
   commitConsumedRunSecret,
   normalizeSecretAskPurpose,
@@ -4556,6 +4557,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 redactSecrets(text, runSecrets),
               ),
         );
+        // What the frozen prompt was built from, read beside the setup loads; later turn
+        // boundaries compare against it and name changes in one notice.
+        const contextWatch = messagingChannelRun
+          ? undefined
+          : createRunContextWatch(
+              () => readRunContextSnapshot(deps.prisma, run),
+              readRunContextSnapshot(deps.prisma, run).catch(() => undefined),
+              (text) => redactSecrets(text, runSecrets),
+            );
         // The run-start recruiting context needs only memory, so it overlaps tool discovery
         // and the other setup reads instead of starting after them. Joined after the model key.
         const recruitingContextStartedAt = performance.now();
@@ -9343,6 +9353,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       }
                     : undefined,
               );
+              if (result.status === "saved")
+                contextWatch?.acknowledge(
+                  "memory",
+                  `${result.document.scope}: ${result.document.path}`,
+                );
               const delivered = await deliverRecruitingFeedbackResult(result);
               return candidateDecision ? delivered : finish(delivered);
             } catch (error) {
@@ -9825,6 +9840,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
                 context,
               );
+              contextWatch?.acknowledge("memory", `${scope}: ${saved.path}`);
               return finish({ ok: true, path: saved.path, revision: saved.revision });
             } catch (error) {
               const message = error instanceof Error ? error.message : "Could not save memory";
@@ -10119,6 +10135,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "skill_create") {
+            contextWatch?.acknowledge("skills");
             return finish(
               await skillCreateFromTool(
                 deps.prisma,
@@ -10136,6 +10153,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "skill_update") {
+            contextWatch?.acknowledge("skills");
             return finish(
               await skillUpdateFromTool(
                 deps.prisma,
@@ -10156,6 +10174,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           }
           if (name === "skill_delete") {
+            contextWatch?.acknowledge("skills");
             return finish(
               await skillDeleteFromTool(
                 deps.prisma,
@@ -12059,6 +12078,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 );
               },
+              claimContextNotice: scripted ? undefined : contextWatch?.claimNotice,
               claimSteering: scripted
                 ? undefined
                 : async (seenIds) => {

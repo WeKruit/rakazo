@@ -552,6 +552,11 @@ export interface AgentRunRequest {
   }) => Promise<{ artifactId: string; length: number } | undefined>;
   /** Atomically claim durable user steering at the runtime's next safe turn boundary. */
   claimSteering?: (seenIds: string[]) => Promise<AgentSteeringMessage[]>;
+  /**
+   * One short notice of memory, skills or tools changed since the run started, claimed at the
+   * next turn boundary. The run's instructions stay as they were, keeping the cached prefix.
+   */
+  claimContextNotice?: () => Promise<string | undefined>;
 }
 
 export interface ScriptedTurn {

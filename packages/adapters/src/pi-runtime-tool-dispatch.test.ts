@@ -552,6 +552,34 @@ describe("Pi connector tool dispatch", () => {
     ]);
   });
 
+  it("delivers a context change notice at the next turn boundary without steering", async () => {
+    fakeAgentState.mode = "empty";
+    const claimContextNotice = vi.fn(async () => "New tools available: Calendar.");
+    const runtime = new PiAgentRuntime();
+
+    for await (const _event of runtime.run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "prepare the report",
+        instructions: "Follow the user's instructions.",
+        history: [],
+        tools: [],
+        model: { provider: "test", id: "dispatch-test-model" },
+        claimContextNotice,
+      },
+      { signal: new AbortController().signal },
+    )) {
+      // Exhaust the runtime event stream.
+    }
+
+    expect(claimContextNotice).toHaveBeenCalledTimes(1);
+    expect(fakeAgentState.preparedMessages).toEqual([
+      expect.objectContaining({ role: "user", content: "New tools available: Calendar." }),
+    ]);
+  });
+
   it("defers steering arriving during a continuation to the following boundary", async () => {
     fakeAgentState.mode = "two-boundaries";
     let claimCount = 0;
