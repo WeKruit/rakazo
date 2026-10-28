@@ -2,6 +2,7 @@ import { RecruitingSchedulingPlanSchema, SchedulingTimeZoneSchema } from "@rakaz
 import { describe, expect, it } from "vitest";
 import {
   assertSchedulingCall,
+  schedulingBookingArguments,
   schedulingPlanHash,
   schedulingPlanReview,
 } from "./recruiting-scheduling.js";
@@ -92,6 +93,13 @@ describe("explicit scheduling plan dispatch", () => {
   ])("rejects changed booking scope %j", (patch) => {
     const f = fixture();
     expect(() => assertSchedulingCall(f.plan, "book", f.route, { ...f.args, ...patch })).toThrow();
+  });
+  // 2026-10-28: an agent's hand-built booking arguments were rejected twice and it gave up.
+  it("books the reviewed plan's own arguments when the agent passes none", () => {
+    const f = fixture();
+    expect(() =>
+      assertSchedulingCall(f.plan, "book", f.route, schedulingBookingArguments(f.plan)),
+    ).not.toThrow();
   });
   it("uses explicit native mail source while preserving CRM origin", () => {
     const { plan } = fixture();

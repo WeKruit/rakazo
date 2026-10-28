@@ -470,6 +470,7 @@ import {
 import {
   assertSchedulingCall,
   SchedulingApprovalEvidenceSchema,
+  schedulingBookingArguments,
   schedulingPlanHash,
   schedulingPlanReview,
 } from "./recruiting-scheduling.js";
@@ -5992,7 +5993,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     };
               const providerArgs =
                 input.operation === "book"
-                  ? input.arguments
+                  ? (input.arguments ?? schedulingBookingArguments(plan))
                   : {
                       eaccount: plan.originalEmail.eaccount,
                       reply_to_uuid: plan.originalEmail.providerMessageId,
