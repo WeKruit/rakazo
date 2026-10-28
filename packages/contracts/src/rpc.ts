@@ -774,6 +774,15 @@ export const appContract = {
     crmSync: oc
       .input(threadTarget.safeExtend(RecruitingCrmSyncInputFields))
       .output(RecruitingCrmSyncOutputSchema),
+    /** Fill people's saved work history and photo from the role's earlier people searches. */
+    fillRoleProfiles: oc.input(z.strictObject({ roleId: RecruitingId })).output(
+      z.strictObject({
+        people: z.number().int().nonnegative(),
+        filled: z.number().int().nonnegative(),
+        photos: z.number().int().nonnegative(),
+        missing: z.number().int().nonnegative(),
+      }),
+    ),
     listCandidateSources: oc
       .input(ListRecruitingCandidateSourcesInput)
       .output(ListRecruitingCandidateSourcesOutput),

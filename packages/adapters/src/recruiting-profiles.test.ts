@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
+  listRecruitingRolePoolRuns: vi.fn(),
   listRecruitingSavedProfiles: vi.fn(),
   listRunToolResults: vi.fn(),
   saveRecruitingSavedProfile: vi.fn(),
@@ -9,6 +10,7 @@ vi.mock("@rakazo/db", () => db);
 
 import {
   executeRecruitingProfilesTool,
+  fillRecruitingRoleProfiles,
   linkedinPersonKey,
   peopleFromSearch,
   profileFromLookup,
@@ -385,5 +387,92 @@ describe("peopleFromSearch", () => {
         "https://mcp.other.example/mcp",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("fillRecruitingRoleProfiles", () => {
+  const actor = {
+    spaceId: "s1",
+    userId: "u1",
+    email: "owner@example.com",
+    isDeploymentOwner: false,
+  };
+  beforeEach(() => vi.resetAllMocks());
+
+  it("saves history and photo from the role's earlier searches for people missing it", async () => {
+    const createdAt = new Date("2026-10-27T10:00:00Z");
+    const photo = "https://media.licdn.com/dms/image/v2/A/profile-displayphoto-shrink_200_200/0/1";
+    const person = (slug: string, extra: Record<string, unknown> = {}) => ({
+      url: `https://www.linkedin.com/in/${slug}`,
+      title: slug,
+      ...extra,
+      entities: [
+        {
+          properties: {
+            name: slug,
+            workHistory: [
+              { title: "Manager", company: { name: "Delta" }, dates: { from: "2020-02-01" } },
+              { title: "Lead", company: { name: "Old" }, dates: { from: "2018", to: "2020-01" } },
+            ],
+            educationHistory: [{ degree: "BS", institution: { name: "State U" } }],
+          },
+        },
+      ],
+    });
+    const text = JSON.stringify({
+      results: [person("cara", { image: photo }), person("dan"), person("eve")],
+    });
+    db.listRecruitingRolePoolRuns.mockResolvedValue({
+      personKeys: ["linkedin:/in/cara", "linkedin:/in/dan", "linkedin:/in/zed"],
+      runIds: ["run1"],
+    });
+    db.listRecruitingSavedProfiles.mockResolvedValue(
+      new Map([["linkedin:/in/dan", { experience: [{ title: "x" }] }]]),
+    );
+    db.listRunToolResults.mockResolvedValue([
+      {
+        effectId: "e1",
+        toolName: "web_search_advanced_exa",
+        endpoint: PLATFORM_SEARCH,
+        result: { content: [{ type: "text", text }] },
+        createdAt,
+      },
+    ]);
+    const result = await fillRecruitingRoleProfiles({} as never, actor, "role1", async () => {
+      const { default: sharp } = await import("sharp");
+      return sharp({ create: { width: 8, height: 8, channels: 3, background: "#777777" } })
+        .png()
+        .toBuffer();
+    });
+    expect(result).toEqual({ people: 3, filled: 1, photos: 1, missing: 1 });
+    expect(db.saveRecruitingSavedProfile).toHaveBeenCalledTimes(1);
+    const [, , runId, input] = db.saveRecruitingSavedProfile.mock.calls[0]!;
+    expect(runId).toBe("run1");
+    expect(input).toMatchObject({
+      personKey: "linkedin:/in/cara",
+      sourceEffectId: "e1",
+      fetchedAt: createdAt,
+      profile: {
+        headline: null,
+        profileImageUrl: expect.stringMatching(/^data:image\/webp;base64,/),
+        experience: [
+          {
+            title: "Manager",
+            company_name: "Delta",
+            start_date: "Feb 2020",
+            end_date: null,
+            is_current: true,
+          },
+          {
+            title: "Lead",
+            company_name: "Old",
+            start_date: "2018",
+            end_date: "Jan 2020",
+            is_current: false,
+          },
+        ],
+        education: [{ school_name: "State U", degree: "BS", start_date: null, end_date: null }],
+      },
+    });
   });
 });

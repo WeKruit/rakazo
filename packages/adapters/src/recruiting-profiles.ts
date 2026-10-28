@@ -8,11 +8,12 @@ import type {
 import { recruitingCalibrationIdentity } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
+  listRecruitingRolePoolRuns,
   listRecruitingSavedProfiles,
   listRunToolResults,
   saveRecruitingSavedProfile,
 } from "@rakazo/db";
-import { linkedinPhotoUrl } from "./profile-photo.js";
+import { inlineProfilePhotos, linkedinPhotoUrl } from "./profile-photo.js";
 
 type Facts = Omit<RecruitingSavedProfile, "personKey" | "provider" | "fetchedAt">;
 type Record_ = Record<string, unknown>;
@@ -619,4 +620,108 @@ export async function executeRecruitingProfilesTool(
   throw new RecruitingProfileError(
     "No profile lookup for this person in this run. Fetch the person's full record by their LinkedIn URL with the connected profile-data connector first, then save.",
   );
+}
+
+/** "Start – End" of a saved history line; "Present" is an open end. */
+function span(dates: string | undefined) {
+  const [start, end] = (dates ?? "").split(" – ").map((part) => part.trim() || null);
+  const current = end === "Present";
+  return { start: start ?? null, end: current ? null : (end ?? null), current };
+}
+
+/** A people-search row's history lines as saved-profile facts, or null when it has none. */
+export function factsFromSearchRow(row: PeopleSearchRow): Facts | null {
+  const parts = (line: string) => line.split(" | ").map((part) => part.trim() || null);
+  const experience = (row.experience ?? "").split("\n").flatMap((line) => {
+    const [title = null, company = null, url = null, dates, location = null] = parts(line);
+    if (!title && !company) return [];
+    const { start, end, current } = span(dates ?? undefined);
+    return [
+      {
+        title,
+        company_name: company,
+        company_url: url,
+        company_linkedin_url: null,
+        company_logo_url: null,
+        company_industry: null,
+        company_size: null,
+        location,
+        start_date: start,
+        end_date: end,
+        is_current: current ? true : end ? false : null,
+        description: null,
+      },
+    ];
+  });
+  const education = (row.education ?? "").split("\n").flatMap((line) => {
+    const [school = null, degree = null, dates] = parts(line);
+    if (!school) return [];
+    const { start, end } = span(dates ?? undefined);
+    return [
+      {
+        school_name: school,
+        degree,
+        field_of_study: null,
+        school_url: null,
+        school_logo_url: null,
+        start_date: start,
+        end_date: end,
+      },
+    ];
+  });
+  const photo = row.profile_image_url?.startsWith("data:image/") ? row.profile_image_url : null;
+  if (!experience.length && !education.length && !photo) return null;
+  return { headline: null, profileImageUrl: photo, experience, education };
+}
+
+/**
+ * Fill the saved profiles of a role's people from the people searches already saved for it, at
+ * no lookup cost: their history and photo were in those results but older saves dropped them.
+ * People who already have a saved work history keep it.
+ */
+export async function fillRecruitingRoleProfiles(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+  fetchPhoto?: Parameters<typeof inlineProfilePhotos>[1],
+) {
+  const { personKeys, runIds } = await listRecruitingRolePoolRuns(prisma, actor, roleId);
+  const saved = await listRecruitingSavedProfiles(prisma, actor, personKeys);
+  const missing = new Set(personKeys.filter((key) => !saved.get(key)?.experience.length));
+  const before = missing.size;
+  let photos = 0;
+  for (const runId of runIds) {
+    if (!missing.size) break;
+    // Oldest call first, so each person keeps the history the role first found them with.
+    for (const call of (await listRunToolResults(prisma, actor, runId, 400)).reverse()) {
+      const found = peopleFromSearch(call.result, call.endpoint).filter((row) => {
+        const key = linkedinPersonKey(row.linkedin_url);
+        return (
+          key && missing.has(key) && (row.experience || row.education || row.profile_image_url)
+        );
+      });
+      if (!found.length) continue;
+      await inlineProfilePhotos(found, fetchPhoto);
+      for (const row of found) {
+        const key = linkedinPersonKey(row.linkedin_url)!;
+        const facts = factsFromSearchRow(row);
+        if (!facts || !missing.has(key)) continue;
+        await saveRecruitingSavedProfile(prisma, actor, runId, {
+          personKey: key,
+          provider: "people_search",
+          sourceEffectId: call.effectId,
+          fetchedAt: call.createdAt,
+          profile: facts,
+        });
+        if (facts.profileImageUrl) photos += 1;
+        missing.delete(key);
+      }
+    }
+  }
+  return {
+    people: personKeys.length,
+    filled: before - missing.size,
+    photos,
+    missing: missing.size,
+  };
 }

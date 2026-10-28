@@ -167,3 +167,31 @@ export async function saveRecruitingSavedProfile(
   });
   return profile;
 }
+
+/** The people in this actor's role pool and the runs that saved them, oldest run first. */
+export async function listRecruitingRolePoolRuns(
+  prisma: PrismaClient,
+  actor: Actor,
+  roleId: string,
+): Promise<{ personKeys: string[]; runIds: string[] }> {
+  const role = await prisma.recruitingRole.findFirst({
+    where: { id: roleId, spaceId: actor.spaceId, userId: actor.userId },
+    select: { id: true },
+  });
+  if (!role) throw new IsolationError();
+  const [candidates, pages] = await Promise.all([
+    prisma.recruitingCandidate.findMany({
+      where: { roleId: role.id, candidateKey: { startsWith: "linkedin:" } },
+      select: { candidateKey: true },
+    }),
+    prisma.recruitingCandidatePage.findMany({
+      where: { roleId: role.id, effect: { spaceId: actor.spaceId, run: { userId: actor.userId } } },
+      orderBy: { observedAt: "asc" },
+      select: { effect: { select: { runId: true } } },
+    }),
+  ]);
+  return {
+    personKeys: candidates.map((candidate) => candidate.candidateKey),
+    runIds: [...new Set(pages.map((page) => page.effect.runId))],
+  };
+}
