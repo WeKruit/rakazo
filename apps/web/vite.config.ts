@@ -9,6 +9,7 @@ import type { PreviewServer, ViteDevServer } from "vite";
 import { defineConfig, loadEnv } from "vite";
 import { attachNovncProxy } from "../../packages/core/src/node/novnc-proxy.ts";
 import { resolveScreenProxySecret } from "../../packages/core/src/secrets-guard.ts";
+import { WEB_CSP_NONCE_PLACEHOLDER } from "../../packages/core/src/web-csp.ts";
 import { createServiceLogger } from "../../packages/logging/src/env.ts";
 
 const webPort = Number(process.env.WEB_PORT ?? 5173);
@@ -105,6 +106,8 @@ export default defineConfig(({ mode }) => {
           attachNovncProxy(server, screenProxySecret(), api, screenLog),
       },
     ],
+    // The production listener swaps this for a per-response nonce (apps/api/src/public-web.ts).
+    html: { cspNonce: WEB_CSP_NONCE_PLACEHOLDER },
     // Preserve feature entries while compressing their static dependencies together.
     // Auth and Shell both use Input and Lucide's factory: keep those small controls
     // independent so opening sign-in never downloads the authenticated Shell group.
