@@ -1,6 +1,11 @@
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
-import { inlineProfilePhotos, linkedinPhotoUrl } from "./profile-photo.js";
+import {
+  encodeProfilePhoto,
+  inlineProfilePhotos,
+  linkedinPhotoUrl,
+  PROFILE_PHOTO_MAX_LENGTH,
+} from "./profile-photo.js";
 
 const PHOTO = "https://media.licdn.com/dms/image/v2/A/profile-displayphoto-shrink_200_200/0/1?e=1";
 
@@ -15,6 +20,15 @@ describe("profile photos", () => {
       linkedinPhotoUrl("http://media.licdn.com/dms/image/v2/A/profile-displayphoto/0/1"),
     ).toBeUndefined();
     expect(linkedinPhotoUrl(42)).toBeUndefined();
+  });
+
+  it("shrinks a busy photo until it fits a saved profile", async () => {
+    const noise = Buffer.from(Array.from({ length: 200 * 200 * 3 }, (_, i) => (i * 7919) % 251));
+    const png = await sharp(noise, { raw: { width: 200, height: 200, channels: 3 } })
+      .png()
+      .toBuffer();
+    const url = await encodeProfilePhoto(png);
+    expect(url.length).toBeLessThanOrEqual(PROFILE_PHOTO_MAX_LENGTH);
   });
 
   it("keeps our own small copy and drops photos it cannot use", async () => {
