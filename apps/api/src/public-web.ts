@@ -1,5 +1,6 @@
 import { realpath, stat } from "node:fs/promises";
 import { createServer } from "node:http";
+import { isIP } from "node:net";
 import path from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
@@ -21,9 +22,19 @@ export async function createPublicWebServer(options: {
   const index = await realpath(path.join(root, "index.html"));
   if (!index.startsWith(`${root}${path.sep}`))
     throw new Error("Web index must be inside the static root");
+  const rejected = new Set<string>();
+  const accepts = (hostname: string) => {
+    if (hostAccepted(hostname, options.allowedHosts)) return true;
+    // Name the refused host once so a hosting proxy's Host header is visible in the logs.
+    if (rejected.size < 20 && !rejected.has(hostname)) {
+      rejected.add(hostname);
+      options.logger.warn("public web refused host", { "http.host": hostname });
+    }
+    return false;
+  };
   const app = new Hono();
   app.use("*", async (c, next) => {
-    if (!options.allowedHosts.includes(new URL(c.req.url).hostname)) return c.body(null, 403);
+    if (!accepts(new URL(c.req.url).hostname)) return c.body(null, 403);
     c.header("x-content-type-options", "nosniff");
     await next();
   });
@@ -74,7 +85,7 @@ export async function createPublicWebServer(options: {
           use(handler) {
             server.on("request", (req, res) => {
               // Check Host before proxying too: the proxy is outside Hono's middleware.
-              if (!allowedHost(req.headers.host, options.allowedHosts)) {
+              if (!allowedHost(req.headers.host, accepts)) {
                 res.writeHead(403).end();
                 return;
               }
@@ -91,7 +102,7 @@ export async function createPublicWebServer(options: {
     );
     // Prepend so invalid hosts cannot reach the screen upgrade handler.
     server.prependListener("upgrade", (req, socket) => {
-      if (!allowedHost(req.headers.host, options.allowedHosts) || !req.url?.startsWith("/novnc/"))
+      if (!allowedHost(req.headers.host, accepts) || !req.url?.startsWith("/novnc/"))
         socket.destroy();
     });
   } else {
@@ -101,9 +112,21 @@ export async function createPublicWebServer(options: {
   return server;
 }
 
-function allowedHost(host: string | undefined, allowed: string[]) {
+/**
+ * The configured names, plus localhost and IP addresses as Vite preview allowed: a hosting
+ * proxy can reach the container by address. Other names stay refused (DNS rebinding).
+ */
+export function hostAccepted(hostname: string, allowed: readonly string[]) {
+  return (
+    allowed.includes(hostname) ||
+    hostname === "localhost" ||
+    isIP(hostname.replace(/^\[(.*)\]$/, "$1")) !== 0
+  );
+}
+
+function allowedHost(host: string | undefined, accepts: (hostname: string) => boolean) {
   try {
-    return Boolean(host && allowed.includes(new URL(`http://${host}`).hostname));
+    return Boolean(host && accepts(new URL(`http://${host}`).hostname));
   } catch {
     return false;
   }

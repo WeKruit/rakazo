@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createPublicWebServer } from "./public-web.js";
+import { createPublicWebServer, hostAccepted } from "./public-web.js";
 
 let directory: string;
 let server: Server;
@@ -101,6 +101,9 @@ describe("production public listener", () => {
   });
   it("rejects unknown hosts, malformed encoding and static writes", async () => {
     expect((await rawRequest("/", { host: "attacker.example" })).status).toBe(403);
+    expect(logger.warn).toHaveBeenCalledWith("public web refused host", {
+      "http.host": "attacker.example",
+    });
     expect((await rawRequest("/%zz")).status).toBe(400);
     expect((await fetch(origin, { method: "POST" })).status).toBe(405);
   });
@@ -108,5 +111,33 @@ describe("production public listener", () => {
     await expect(
       createPublicWebServer({ app: new Hono(), root: directory, allowedHosts: [], logger }),
     ).rejects.toThrow();
+  });
+});
+
+describe("production host headers", () => {
+  // The hosts the hosting proxy and the custom domain send, as the release configures them.
+  const allowed = ["headhunter.example.com", "org--rakazo-recruiting.modal.run"];
+  it.each([
+    "headhunter.example.com",
+    "org--rakazo-recruiting.modal.run",
+    "10.4.2.7",
+    "127.0.0.1",
+    "[::1]",
+    "[fd00::2]",
+    "localhost",
+  ])("serves %s", (host) => {
+    expect(hostAccepted(new URL(`http://${host}:8000`).hostname, allowed)).toBe(true);
+  });
+  it.each(["attacker.example", "headhunter.example.com.attacker.example", "modal.run"])(
+    "refuses %s",
+    (host) => {
+      expect(hostAccepted(new URL(`http://${host}`).hostname, allowed)).toBe(false);
+    },
+  );
+  it("serves pages, readiness and RPC for an address Host header", async () => {
+    for (const host of ["10.4.2.7:8000", "[fd00::2]:8000"]) {
+      expect((await rawRequest("/", { host, accept: "text/html" })).status).toBe(200);
+      expect((await rawRequest("/ready", { host })).status).toBe(200);
+    }
   });
 });
