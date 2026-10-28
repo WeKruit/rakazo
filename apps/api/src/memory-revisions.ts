@@ -30,10 +30,21 @@ export async function requireMemoryBot(prisma: PrismaClient, actor: Actor, botId
   if (!bot) throw new ORPCError("NOT_FOUND");
 }
 
-export async function memoryHistory(prisma: PrismaClient, actor: Actor, documentId: string) {
+export async function memoryHistory(
+  prisma: PrismaClient,
+  actor: Actor,
+  documentId: string,
+  offset?: number,
+) {
   const document = await prisma.memoryDocument.findFirst({
     where: { id: documentId, ...memoryDocumentWhere(actor) },
-    include: { revisions: { orderBy: { revision: "desc" } } },
+    include: {
+      revisions: {
+        orderBy:
+          offset === undefined ? { revision: "desc" } : [{ revision: "desc" }, { id: "asc" }],
+        ...(offset === undefined ? {} : { take: 200, skip: offset }),
+      },
+    },
   });
   if (!document) throw new ORPCError("NOT_FOUND");
   return document.revisions.map((revision) => ({

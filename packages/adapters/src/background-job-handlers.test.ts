@@ -64,6 +64,60 @@ describe("createBackgroundJobHandlers", () => {
     installLogger(createLogger({ service: "rakazo-worker", level: "off", sinks: [] }));
   });
 
+  it("defers scheduled runs past their slot limit and never limits conversation runs", async () => {
+    const triggers: Record<string, string> = {
+      "routine-1": "routine",
+      "routine-2": "routine",
+      "chat-1": "user_message",
+    };
+    const prisma = {
+      run: {
+        count: vi.fn(async ({ where }: { where: { id: string; trigger: { in: string[] } } }) =>
+          Number(where.trigger.in.includes(triggers[where.id]!)),
+        ),
+      },
+    } as unknown as PrismaClient;
+    let finishFirst: () => void = () => undefined;
+    const continueRun = vi.fn(async (runId: string) => {
+      if (runId === "routine-1") await new Promise<void>((resolve) => (finishFirst = resolve));
+    });
+    const enqueue = vi.fn(async () => undefined);
+    const handlers = createBackgroundJobHandlers({
+      executor: { continueRun } as unknown as ReturnType<typeof createRunExecutor>,
+      prisma,
+      sandbox: {} as unknown as SandboxProvider,
+      home: {} as unknown as AgentHomeStore,
+      jobs: { enqueue } as unknown as JobPublisher,
+      events: {} as unknown as ThreadEvents,
+      workerId: "worker-1",
+      runtime: {} as unknown as AgentRuntime,
+      secretStore: {} as unknown as EncryptedSecretStore,
+      memoryProviders: { resolve: vi.fn(async () => null) },
+      shutdownSignal: new AbortController().signal,
+      scheduledRunSlots: 1,
+    });
+
+    const first = handlers["run.continue"]({ runId: "routine-1" });
+    await vi.waitFor(() => expect(continueRun).toHaveBeenCalledWith("routine-1", "worker-1"));
+    await handlers["run.continue"]({ runId: "routine-2" });
+    await handlers["run.continue"]({ runId: "chat-1" });
+
+    expect(continueRun).not.toHaveBeenCalledWith("routine-2", "worker-1");
+    expect(continueRun).toHaveBeenCalledWith("chat-1", "worker-1");
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "run.continue",
+        payload: { runId: "routine-2" },
+        availableAt: expect.any(Date),
+      }),
+    );
+
+    finishFirst();
+    await first;
+    await handlers["run.continue"]({ runId: "routine-2" });
+    expect(continueRun).toHaveBeenCalledWith("routine-2", "worker-1");
+  });
+
   it("compacts the requested thread with the runtime, job publisher, and model key it was given", async () => {
     const prisma = {} as unknown as PrismaClient;
     const runtime = {} as unknown as AgentRuntime;

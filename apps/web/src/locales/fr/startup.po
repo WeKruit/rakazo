@@ -1,0 +1,3334 @@
+msgid ""
+msgstr ""
+"POT-Creation-Date: 2026-08-26 00:00+0000\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=utf-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Generator: @lingui/cli\n"
+"Language: fr\n"
+"Project-Id-Version: rakazo-web\n"
+"Report-Msgid-Bugs-To: \n"
+"PO-Revision-Date: \n"
+"Last-Translator: \n"
+"Language-Team: \n"
+"Plural-Forms: \n"
+
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid " (unread)"
+msgstr " (non lu)"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "— Not reported"
+msgstr ""
+
+#. placeholder {0}: candidatePage.counts.candidates
+#: src/pages/RecruitingPanel.tsx
+msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
+msgstr ""
+
+#. placeholder {0}: file.name
+#: src/pages/shell/useShellMessages.ts
+msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
+msgstr "{0} (max {ATTACHMENT_MAX_COUNT} pièces jointes)"
+
+#. placeholder {0}: file.name
+#: src/pages/shell/useShellMessages.ts
+msgid "{0} (over 10 MiB)"
+msgstr "{0} (plus de 10 MiB)"
+
+#. placeholder {0}: file.name
+#: src/pages/shell/useShellMessages.ts
+msgid "{0} (XLSX is not supported yet. Save as CSV and upload again.)"
+msgstr ""
+
+#. placeholder {0}: archivedRouteGroup.name
+#: src/pages/shell/ShellConversation.tsx
+msgid "{0} is archived."
+msgstr ""
+
+#. placeholder {0}: format(size / 1024)
+#: src/components/ArtifactFileCard.tsx
+msgid "{0} KB"
+msgstr "{0} Ko"
+
+#. placeholder {0}: format(size / (1024 * 1024))
+#: src/components/ArtifactFileCard.tsx
+msgid "{0} MB"
+msgstr "{0} Mo"
+
+#. placeholder {0}: active.name
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "{0}'s screen"
+msgstr "Écran de {0}"
+
+#: src/lib/billing.ts
+msgid "{amount} / {period}"
+msgstr ""
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "{botName}’s computer"
+msgstr "Ordinateur de {botName}"
+
+#: src/lib/billing.ts
+msgid "{count} days"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "{count} months"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "{count} weeks"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "{count} years"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "{days}d ago"
+msgstr "il y a {days} j"
+
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{hidden, plural, one {+# earlier step} other {+# earlier steps}}"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "{hours}h ago"
+msgstr "il y a {hours} h"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "{loadedCount} loaded"
+msgstr "{loadedCount} loaded"
+
+#: src/lib/relative-time.ts
+msgid "{minutes}m ago"
+msgstr "il y a {minutes} min"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "{name} failed"
+msgstr "{name} échoué"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "{name} finished"
+msgstr "{name} terminé"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "{name} stopped"
+msgstr "{name} arrêté"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "{people} people"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "{peopleAdded, plural, one {# person added} other {# people added}}"
+msgstr "{peopleAdded, plural, one {# personne ajoutée} other {# personnes ajoutées}}"
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "{remaining} left · bot is watching, not acting"
+msgstr "{remaining} restant · le bot observe, il n'agit pas"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mo"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{rest} mos"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+msgid "{size} B"
+msgstr "{size} o"
+
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{stepCount, plural, one {Done · # tool} other {Done · # tools}}"
+msgstr ""
+
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{stepCount, plural, one {Working… · # tool} other {Working… · # tools}}"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "{total, plural, =1 {# candidate} other {# candidates}}"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yr"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "{years} yrs"
+msgstr ""
+
+#. placeholder {0}: mention.name
+#: src/pages/shell/Composer.tsx
+msgid "@{0}"
+msgstr "@{0}"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "≥ Observed in loaded records"
+msgstr ""
+
+#: src/pages/shell/bot-picker.tsx
+msgid "About groups"
+msgstr "À propos des groupes"
+
+#: src/pages/shell/bot-picker.tsx
+msgid "About spaces"
+msgstr "À propos des espaces"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Accepted. Finding more people."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Access token"
+msgstr "Jeton d'accès"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Actions"
+msgstr ""
+
+#. placeholder {0}: group.name
+#. placeholder {0}: group.spaceName
+#. placeholder {0}: sectionMenu.section.name
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Actions for {0}"
+msgstr "Actions pour {0}"
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Actions for space"
+msgstr "Actions pour l'espace"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Active"
+msgstr "Actif"
+
+#: src/components/computer/TerminalApp.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Activity"
+msgstr "Activité"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Add {name} to shortlist"
+msgstr ""
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Add a run time for this one-shot."
+msgstr "Ajoutez un horaire d'exécution pour cet exécution unique."
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Add a schedule, webhook, GitHub, or message trigger"
+msgstr "Ajoutez une planification, un webhook, GitHub ou un déclencheur de message"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Add MCP server"
+msgstr "Ajouter un serveur MCP"
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Add note"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Add server URL"
+msgstr "Ajouter une URL de serveur"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Add to routine"
+msgstr "Ajouter à la routine"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Added"
+msgstr "Ajouté"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Agent"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Agent computer"
+msgstr "Ordinateur de l'agent"
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All internal assessments"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All internal verdicts"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "All of"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "All roles"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "All rounds"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "All statuses"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Allow writing"
+msgstr "Autoriser l'écriture"
+
+#: src/pages/Auth.tsx
+msgid "Already have an account?"
+msgstr "Vous avez déjà un compte ?"
+
+#: src/lib/model-connection-preflight.ts
+msgid "An API key is stored for this provider, not a subscription sign-in."
+msgstr "Une clé API est enregistrée pour ce fournisseur, et non une connexion par abonnement."
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "AND"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Any of"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "API is back, but the update did not finish. Check the host logs."
+msgstr "L'API est de retour, mais la mise à jour n'est pas terminée. Vérifiez les journaux de l'hôte."
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/lib/localized-provider-hint.ts
+msgid "API key"
+msgstr "Clé API"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Approval boundaries"
+msgstr "Limites d'approbation"
+
+#: src/pages/ShellMessage.tsx
+msgid "archived"
+msgstr "archivé"
+
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Archived"
+msgstr "Archivé"
+
+#: src/pages/ShellMessage.tsx
+msgid "Archived. Chat, memory, and files kept."
+msgstr "Archivé. Conversation, mémoire et fichiers conservés."
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Artifacts"
+msgstr "Artefacts"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Ask the server owner to configure this provider."
+msgstr "Demandez au propriétaire du serveur de configurer ce fournisseur."
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Assessment date"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Assistant"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Attach file"
+msgstr "Joindre un fichier"
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Attached {path}"
+msgstr ""
+
+#: src/lib/message-text.ts
+#: src/pages/shell/chat-context.tsx
+msgid "Attachment"
+msgstr "Pièce jointe"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Authentication failed."
+msgstr "Échec de l'authentification."
+
+#: src/pages/recruiting/AvailabilityRanges.tsx
+msgid "Available time"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Avatar Studio"
+msgstr "Studio d'avatars"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Avg tenure"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Awaiting feedback"
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+msgid "Back"
+msgstr "Retour"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Back to inbox"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Back to results"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Back to sign in"
+msgstr "Retour à la connexion"
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Base URL"
+msgstr "URL de base"
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Bearer token"
+msgstr "Jeton porteur"
+
+#: src/lib/ticket-status.ts
+msgid "Blocked"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Board"
+msgstr ""
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Booting live desktop…"
+msgstr "Démarrage du bureau en direct…"
+
+#. placeholder {0}: computerBot?.name ?? active?.name
+#: src/pages/Shell.tsx
+msgid "Booting up {0}’s computer"
+msgstr "Démarrage de l'ordinateur de {0}"
+
+#: src/pages/ShellMessage.tsx
+msgid "bot"
+msgstr "bot"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+#: src/pages/shell/useShellController.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Bot"
+msgstr "Bot"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Bot"
+msgstr "Bot"
+
+#: src/pages/Shell.tsx
+msgid "Bot screen"
+msgstr "Écran du bot"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Bot screen preview"
+msgstr "Aperçu de l'écran du bot"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Bounced"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Brain label"
+msgstr "Libellé du cerveau"
+
+#: src/components/computer/ComputerWorkspace.tsx
+msgid "Browser"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Calibration round"
+msgstr ""
+
+#: src/App.tsx
+msgid "Can't reach the server."
+msgstr "Impossible d'atteindre le serveur."
+
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/components/markdown-link-prompt.tsx
+#: src/components/teach/TeachComputerOverlay.tsx
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Cancel"
+msgstr "Annuler"
+
+#: src/pages/shell/chat-context.tsx
+msgid "Cancel reply"
+msgstr "Annuler la réponse"
+
+#: src/components/CloudAgentCard.tsx
+msgid "cancelled"
+msgstr "annulé"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate cards"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate conversations"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidate details unavailable"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Candidate feedback"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Candidate reference"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Candidate sort"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Candidate table"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Candidates"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Cards"
+msgstr "Cartes"
+
+#: src/pages/shell/Composer.tsx
+msgid "Chat Settings"
+msgstr "Paramètres de discussion"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Chat with WeKruit"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Check again"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Check failed"
+msgstr "Échec de la vérification"
+
+#: src/components/DesktopUpdates.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Check for updates"
+msgstr "Rechercher des mises à jour"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Check in."
+msgstr "Faites un point."
+
+#: src/lib/model-connection-preflight.ts
+msgid "Check the API key or sign-in, then test again."
+msgstr "Vérifiez la clé API ou la connexion, puis testez à nouveau."
+
+#: src/lib/model-connection-preflight.ts
+msgid "Check the server URL and network, then test again."
+msgstr "Vérifiez l'URL du serveur et le réseau, puis testez à nouveau."
+
+#: src/pages/Auth.tsx
+msgid "Check your email"
+msgstr "Vérifiez votre e-mail"
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Checking computer setup…"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+#: src/components/DesktopUpdates.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Checking…"
+msgstr "Vérification en cours…"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Checkout has local changes. Clean it before updating."
+msgstr "La copie de travail a des modifications locales. Nettoyez-la avant de mettre à jour."
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Choose a bot shape, color, or upload an image"
+msgstr "Choisissez une forme, une couleur de bot, ou téléchargez une image"
+
+#: src/pages/Auth.tsx
+msgid "Choose a new password"
+msgstr "Choisissez un nouveau mot de passe"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Choose file"
+msgstr "Choisir un fichier"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Choose the role again."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Clear date filter"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Clicked"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Client feedback"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Client ID"
+msgstr "ID client"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Client secret"
+msgstr "Secret client"
+
+#: src/components/LazyOverlay.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+#: src/pages/WindowChrome.tsx
+msgid "Close"
+msgstr "Fermer"
+
+#: src/components/computer/ComputerWorkspace.tsx
+msgid "Close {title}"
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Close computer"
+msgstr "Fermer l'ordinateur"
+
+#: src/pages/Shell.tsx
+msgid "Close navigation"
+msgstr "Fermer la navigation"
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Close panel"
+msgstr "Fermer le panneau"
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Close preview"
+msgstr "Fermer l'aperçu"
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Cloud"
+msgstr "Cloud"
+
+#. placeholder {0}: group.title
+#. placeholder {0}: item.chat.name
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Collapse {0}"
+msgstr "Réduire {0}"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Collapse navigation"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Collapse role chat"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Color"
+msgstr "Couleur"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Color {color}"
+msgstr "Couleur {color}"
+
+#: src/lib/roster-status.ts
+msgid "Compacting…"
+msgstr "Compactage…"
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Company deck"
+msgstr ""
+
+#. placeholder {0}: candidate.company
+#: src/pages/shell/Composer.tsx
+msgid "Company: {0}"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Computer"
+msgstr "Ordinateur"
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Computer failed to boot"
+msgstr "Échec du démarrage de l'ordinateur"
+
+#: src/pages/Shell.tsx
+msgid "Computer is asleep"
+msgstr "L'ordinateur est en veille"
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Computer is asleep. Open it to wake."
+msgstr "L'ordinateur est en veille. Ouvrez-le pour le réveiller."
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Computer is stopped"
+msgstr "L'ordinateur est arrêté"
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Computers are available. Reload or open a bot to continue."
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Computers are off. Set SANDBOX_PROVIDER=docker with SANDBOX_SUPERVISOR_TOKEN, or set SANDBOX_PROVIDER to e2b, daytona, or box with its API key. Recreate the stack after changing .env."
+msgstr "Les ordinateurs sont désactivés. Définissez SANDBOX_PROVIDER=docker avec SANDBOX_SUPERVISOR_TOKEN, ou définissez SANDBOX_PROVIDER sur e2b, daytona ou box avec sa clé API. Recréez la pile après avoir modifié .env."
+
+#: src/pages/Auth.tsx
+msgid "Confirm password"
+msgstr "Confirmer le mot de passe"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Confirm the URL is reachable from this browser session, then test again."
+msgstr "Confirmez que l'URL est accessible depuis cette session du navigateur, puis testez à nouveau."
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Connect"
+msgstr "Connecter"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Connect an app"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Connected"
+msgstr "Connecté"
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Connecting…"
+msgstr "Connexion en cours…"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Connection test failed."
+msgstr "Le test de connexion a échoué."
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Contact details have not been checked yet."
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Contact layout"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Contacted"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Contacts"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Continue"
+msgstr "Continuer"
+
+#. placeholder {0}: reset.sso.name
+#: src/pages/Auth.tsx
+msgid "Continue with {0}"
+msgstr "Continuer avec {0}"
+
+#: src/pages/Auth.tsx
+msgid "Continue with email"
+msgstr "Continuer avec l'e-mail"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Conversation"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Copied"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Copy"
+msgstr "Copier"
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Copy .env example"
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Could not check stored credentials."
+msgstr "Impossible de vérifier les identifiants enregistrés."
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Could not check teaching status. Refresh the view to continue."
+msgstr "Impossible de vérifier l'état de l'enseignement. Actualisez la vue pour continuer."
+
+#: src/components/DesktopUpdates.tsx
+msgid "Could not complete the update. Try again."
+msgstr "Impossible de terminer la mise à jour. Réessayez."
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Could not confirm feedback. Try again."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Could not connect"
+msgstr "Impossible de se connecter"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Could not connect this app. Check your account settings and try again."
+msgstr ""
+
+#: src/pages/shell/useShellComputer.ts
+msgid "Could not connect to the computer screen"
+msgstr "Impossible de se connecter à l'écran de l'ordinateur"
+
+#: src/components/AccountAccess.tsx
+#: src/lib/account-security.ts
+#: src/lib/mcp-connect.ts
+#: src/lib/sso-flow.ts
+#: src/lib/user-error.ts
+#: src/pages/Auth.tsx
+#: src/pages/shell/ShellOverlays.tsx
+#: src/pages/shell/useShellComputer.ts
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not continue"
+msgstr "Impossible de continuer"
+
+#. placeholder {0}: props.name
+#: src/components/ArtifactFileCard.tsx
+msgid "Could not download {0}. Try again."
+msgstr "Impossible de télécharger {0}. Réessayez."
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Could not download {name}. Try again."
+msgstr "Impossible de télécharger {name}. Réessayez."
+
+#: src/components/computer/FilesApp.tsx
+msgid "Could not download file"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not export conversation"
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+msgid "Could not list files"
+msgstr ""
+
+#: src/components/ErrorBoundary.tsx
+#: src/components/LazyOverlay.tsx
+msgid "Could not load"
+msgstr "Impossible de charger"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load candidate records"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/recruiting/shared.tsx
+msgid "Could not load candidate records. Try refreshing."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Could not load candidates"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Could not load commands"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load contact details"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Could not load integrations"
+msgstr "Impossible de charger les intégrations"
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not load notes."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Could not load recruiting"
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not load reminders."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not load search results"
+msgstr "Impossible de charger les résultats de recherche"
+
+#: src/lib/account-security.ts
+#: src/pages/Auth.tsx
+msgid "Could not load sign-in options"
+msgstr "Impossible de charger les options de connexion"
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Could not load this file."
+msgstr "Impossible de charger ce fichier."
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not load this role’s candidate records."
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Could not load update status"
+msgstr "Impossible de charger l'état de la mise à jour"
+
+#: src/components/computer/FilesApp.tsx
+msgid "Could not open file"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Could not open terminal"
+msgstr "Impossible d'ouvrir le terminal"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Could not open this role."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Could not reach the model server."
+msgstr "Impossible de joindre le serveur du modèle."
+
+#: src/lib/computer-sandbox.ts
+#: src/lib/user-error.ts
+#: src/pages/Auth.tsx
+msgid "Could not reach the server"
+msgstr "Impossible d'atteindre le serveur"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Could not read candidate records."
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Could not reset password"
+msgstr "Impossible de réinitialiser le mot de passe"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Could not run routine"
+msgstr "Impossible d'exécuter la routine"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Could not save routine"
+msgstr "Impossible d'enregistrer la routine"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Could not save shortlist"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Could not save the note."
+msgstr ""
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Could not save the reminder."
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Could not send reset email"
+msgstr "Impossible d'envoyer l'e-mail de réinitialisation"
+
+#: src/lib/call-session-engine.ts
+msgid "Could not send that"
+msgstr "Impossible d'envoyer cela"
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Could not start teaching"
+msgstr "Impossible de démarrer l'enseignement"
+
+#: src/pages/shell/useShellComputer.ts
+msgid "Could not take control"
+msgstr "Impossible de prendre le contrôle"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Could not update computer"
+msgstr "Impossible de mettre à jour l'ordinateur"
+
+#: src/pages/shell/useShellMessages.ts
+msgid "Could not update reaction"
+msgstr "Impossible de mettre à jour la réaction"
+
+#: src/components/computer/FilesApp.tsx
+#: src/pages/shell/useShellCreation.ts
+msgid "Could not upload file"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Could not verify computer setup ({failureMessage}). Fix the connection, then check again."
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Count through"
+msgstr ""
+
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Create"
+msgstr "Créer"
+
+#: src/pages/Auth.tsx
+msgid "Create account"
+msgstr "Créer un compte"
+
+#: src/pages/shell/bot-picker.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Create new Bot"
+msgstr "Créer un nouveau bot"
+
+#: src/pages/shell/bot-picker.tsx
+msgid "Create new Group"
+msgstr "Créer un nouveau groupe"
+
+#: src/pages/shell/bot-picker.tsx
+msgid "Create new Space"
+msgstr "Créer un nouvel espace"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Create reminder"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Create your WeKruit Headhunter account"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Criterion name unavailable"
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+msgid "Current password"
+msgstr "Mot de passe actuel"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Current role"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current tenure"
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Customize bot avatar"
+msgstr "Personnaliser l'avatar du bot"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Cutoff date"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Dashboard"
+msgstr ""
+
+#. placeholder {0}: draft.email.date
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Date: {0}"
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "day"
+msgstr "jour"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Days unavailable."
+msgstr ""
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Default"
+msgstr "Par défaut"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay unavailable."
+msgstr ""
+
+#. placeholder {0}: step.delay
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Delay: {0} days"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Delete"
+msgstr "Supprimer"
+
+#. placeholder {0}: bot.name
+#. placeholder {0}: group.name
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Delete {0}"
+msgstr "Supprimer {0}"
+
+#: src/components/AccountAccess.tsx
+msgid "Delete account"
+msgstr "Supprimer le compte"
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Delete space"
+msgstr "Supprimer l'espace"
+
+#: src/pages/ShellMessage.tsx
+msgid "deleted"
+msgstr "supprimé"
+
+#: src/components/AccountAccess.tsx
+msgid "Deletion code"
+msgstr "Code de suppression"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Description"
+msgstr "Description"
+
+#: src/components/DesktopUpdates.tsx
+msgid "Desktop app"
+msgstr "Application de bureau"
+
+#: src/components/DesktopUpdates.tsx
+msgid "Desktop update"
+msgstr "Mise à jour du bureau"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Direct MCP"
+msgstr "MCP direct"
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Dismiss"
+msgstr "Fermer"
+
+#: src/pages/shell/Composer.tsx
+msgid "Dismiss error"
+msgstr "Fermer l'erreur"
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Docker is configured but computers are not responding. Confirm the sandbox supervisor is running, then recreate the stack after changing .env."
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Don’t have an account?"
+msgstr "Vous n'avez pas de compte ?"
+
+#: src/lib/ticket-status.ts
+#: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Done"
+msgstr "Terminé"
+
+#: src/components/computer/FilesApp.tsx
+msgid "Download"
+msgstr "Télécharger"
+
+#. placeholder {0}: basename(entry.path)
+#. placeholder {0}: props.name
+#: src/components/ArtifactFileCard.tsx
+#: src/components/computer/FilesApp.tsx
+msgid "Download {0}"
+msgstr "Télécharger {0}"
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Download {name}"
+msgstr "Télécharger {name}"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Download Executor"
+msgstr "Télécharger l'exécuteur"
+
+#: src/components/DesktopUpdates.tsx
+msgid "Downloading…"
+msgstr "Téléchargement en cours…"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Draft"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Draft reply"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Draft skill"
+msgstr "Compétence en brouillon"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Drag, drop, or paste an image"
+msgstr "Glissez, déposez ou collez une image"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Due"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Edit"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Education"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Email"
+msgstr "E-mail"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email content unavailable."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Email draft"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Email is not allowed to register"
+msgstr "Cette adresse e-mail ne peut pas s’inscrire"
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email step unavailable."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Email steps unavailable."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Email thread or message"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Email verification required"
+msgstr "Vérification de l’e-mail requise"
+
+#. placeholder {0}: draft.candidateEmail
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Email: {0}"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Emails"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Employment rule"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Enter a password"
+msgstr "Saisissez un mot de passe"
+
+#: src/lib/user-error.ts
+msgid "Enter a valid email"
+msgstr "Saisissez une adresse e-mail valide"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Enter an API key before testing."
+msgstr "Saisissez une clé API avant de tester."
+
+#: src/lib/roster-status.ts
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Error"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Evidence"
+msgstr ""
+
+#. placeholder {0}: group.title
+#. placeholder {0}: item.chat.name
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Expand {0}"
+msgstr "Développer {0}"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Export conversation"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Export this week's candidate list and drop it in the shared folder"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Extra high"
+msgstr "Très élevé"
+
+#: src/components/CloudAgentCard.tsx
+msgid "failed"
+msgstr "échoué"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Failed to load recruiting data"
+msgstr ""
+
+#: src/pages/shell/useShellMessages.ts
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Failed to send message"
+msgstr "Échec de l'envoi du message"
+
+#: src/pages/shell/useShellAgentActions.ts
+msgid "Failed to stop"
+msgstr "Échec de l'arrêt"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Failed."
+msgstr "Échoué."
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Failure handling"
+msgstr "Gestion des échecs"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Feedback sent"
+msgstr ""
+
+#: src/components/computer/FilesApp.tsx
+msgid "File is too large to upload."
+msgstr ""
+
+#: src/components/computer/ComputerWorkspace.tsx
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Files"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Finish subscription sign-in, then test again."
+msgstr "Terminez la connexion par abonnement, puis testez à nouveau."
+
+#: src/components/CloudAgentCard.tsx
+msgid "finished"
+msgstr "terminé"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Finished"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Finished."
+msgstr "Terminé."
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Fit"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Fixed date"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Forgot password?"
+msgstr "Mot de passe oublié ?"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "From"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Full assessment"
+msgstr ""
+
+#: src/pages/WindowChrome.tsx
+msgid "Fullscreen"
+msgstr "Plein écran"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Gap"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Get credentials"
+msgstr "Obtenir les identifiants"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Good example"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Good example: {name}"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Group"
+msgstr "Groupe"
+
+#: src/components/call/CallCard.tsx
+msgid "Hang up"
+msgstr "Raccrocher"
+
+#: src/lib/call-session-engine.ts
+msgid "Hang up first, then answer on screen."
+msgstr ""
+
+#: src/lib/call-session-engine.ts
+msgid "Hang up, then answer on screen."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "Hide bots"
+msgstr "Masquer les bots"
+
+#: src/pages/Shell.tsx
+msgid "Hide navigation"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Hide password"
+msgstr "Masquer le mot de passe"
+
+#: src/components/call/VoiceChatCard.tsx
+msgid "Hide transcript"
+msgstr "Masquer la transcription"
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "High"
+msgstr "Élevé"
+
+#: src/lib/ticket-priority.ts
+msgid "High"
+msgstr "Élevé"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "How to check"
+msgstr "Comment vérifier"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "I edited the attached email sequence. Keep this as the current unsent draft for this role. Do not send or enroll anyone."
+msgstr ""
+
+#: src/pages/Shell.tsx
+msgid "I’m done"
+msgstr "J'ai terminé"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Image upload area"
+msgstr "Zone de téléchargement d'image"
+
+#: src/lib/ticket-status.ts
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "In progress"
+msgstr ""
+
+#: src/lib/ticket-status.ts
+msgid "In review"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Inbox"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Inputs"
+msgstr "Entrées"
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Instance API key"
+msgstr "Clé API de l'instance"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Integration options"
+msgstr "Options d'intégration"
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Integrations"
+msgstr "Intégrations"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Interested"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Interjection applied"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Interjection queued"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal assessment"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal assessment: current"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal assessment: outdated"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict: met"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict: unknown"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Internal verdict: unmet"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Interrupted, resuming…"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Interview"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Introduced"
+msgstr ""
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Is a company deck available?"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Job Brief"
+msgstr ""
+
+#: src/pages/shell/Transcript.tsx
+msgid "Jump to latest"
+msgstr "Aller au plus récent"
+
+#: src/pages/shell/chat-context.tsx
+msgid "Jump to replied message: {excerpt}"
+msgstr "Aller au message cité : {excerpt}"
+
+#: src/lib/relative-time.ts
+msgid "just now"
+msgstr "à l'instant"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Key work"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Last 7 days · UTC"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Last contacted"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Last reply"
+msgstr ""
+
+#: src/components/DesktopUpdates.tsx
+msgid "Later"
+msgstr "Plus tard"
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Launched {app}"
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+msgid "Link SSO"
+msgstr "Associer SSO"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "LinkedIn"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "LinkedIn missing"
+msgstr ""
+
+#. placeholder {0}: candidate.linkedinUrl ?? t`LinkedIn missing`
+#: src/pages/shell/Composer.tsx
+msgid "LinkedIn: {0}"
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Listed skill"
+msgstr ""
+
+#: src/pages/shell/Transcript.tsx
+msgid "Load earlier messages"
+msgstr "Charger les messages précédents"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Load more"
+msgstr "Charger plus"
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Loading preview…"
+msgstr "Chargement de l'aperçu…"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Loading roles…"
+msgstr ""
+
+#: src/App.tsx
+#: src/components/markdown-link-prompt.tsx
+#: src/pages/Auth.tsx
+#: src/pages/recruiting/shared.tsx
+#: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/Transcript.tsx
+msgid "Loading…"
+msgstr "Chargement…"
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Local"
+msgstr "Local"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Location"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Log out"
+msgstr "Se déconnecter"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Looks good, find more"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Low"
+msgstr "Faible"
+
+#: src/lib/ticket-priority.ts
+msgid "Low"
+msgstr "Faible"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Match"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Match score"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Match tier"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Max"
+msgstr "Max"
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "MCP endpoint"
+msgstr "Point de terminaison MCP"
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Medium"
+msgstr "Moyen"
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Memory"
+msgstr "Mémoire"
+
+#: src/pages/shell/Composer.tsx
+msgid "Mentions"
+msgstr "Mentions"
+
+#: src/lib/message-text.ts
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Message"
+msgstr "Message"
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Message"
+msgstr "Message"
+
+#: src/pages/shell/Composer.tsx
+msgid "Message {activeName}"
+msgstr "Message à {activeName}"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Message body unavailable"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Message composer"
+msgstr "Zone de composition"
+
+#: src/pages/ShellMessage.tsx
+msgid "Message from {peer}"
+msgstr "Message de {peer}"
+
+#: src/pages/shell/Composer.tsx
+msgid "Message…"
+msgstr "Message…"
+
+#: src/pages/ShellMessage.tsx
+msgid "Messaged {peer}"
+msgstr "A contacté {peer}"
+
+#: src/pages/recruiting/VerdictLabel.tsx
+msgid "Met"
+msgstr ""
+
+#: src/lib/call-session-engine.ts
+msgid "Microphone failed"
+msgstr "Le microphone a échoué"
+
+#. js-lingui-explicit-id
+#: src/lib/model-catalog.ts
+msgid "Minimal"
+msgstr "Minimal"
+
+#: src/pages/WindowChrome.tsx
+msgid "Minimize"
+msgstr "Réduire"
+
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Minimize bots"
+msgstr "Réduire les bots"
+
+#. placeholder {0}: rule.minimumMonths
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Minimum {0} complete calendar months"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Minimum complete calendar months"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Missing info"
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Model \"{modelId}\" was not listed."
+msgstr "Le modèle \"{modelId}\" n'est pas dans la liste."
+
+#: src/lib/model-connection-preflight.ts
+msgid "Models list OK. {modelCount, plural, one {# model} other {# models}} available. Chat was not tested."
+msgstr "Liste des modèles correcte. {modelCount, plural, one {# modèle disponible} other {# modèles disponibles}}. La conversation n'a pas été testée."
+
+#: src/lib/billing.ts
+msgid "month"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "More"
+msgstr "Plus"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "More computer actions"
+msgstr "Plus d'actions pour l'ordinateur"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Must not"
+msgstr ""
+
+#: src/components/call/CallCard.tsx
+msgid "Mute"
+msgstr "Couper le micro"
+
+#: src/components/teach/SkillDraftCard.tsx
+#: src/pages/Auth.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Name"
+msgstr "Nom"
+
+#: src/pages/shell/Composer.tsx
+msgid "Name missing"
+msgstr ""
+
+#. placeholder {0}: candidate.name ?? t`Name missing`
+#. placeholder {0}: draft.candidateName
+#: src/pages/shell/Composer.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Name: {0}"
+msgstr ""
+
+#: src/lib/roster-status.ts
+msgid "Needs an answer"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Needs confirmation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Needs input"
+msgstr "Nécessite une saisie"
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Needs scheduling"
+msgstr ""
+
+#: src/lib/roster-status.ts
+#: src/pages/Shell.tsx
+msgid "Needs you"
+msgstr "A besoin de vous"
+
+#: src/pages/Auth.tsx
+msgid "New password"
+msgstr "Nouveau mot de passe"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/useShellController.tsx
+msgid "New role"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "New Role"
+msgstr ""
+
+#. placeholder {0}: stage.nextStep
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Next: {0}"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No apps found"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "No bot activity yet."
+msgstr "Aucune activité du bot pour le moment."
+
+#: src/pages/shell/command-palette.tsx
+msgid "No bots"
+msgstr "Aucun bot"
+
+#: src/pages/shell/bot-picker.tsx
+msgid "No bots match"
+msgstr "Aucun bot ne correspond"
+
+#: src/pages/recruiting/shared.tsx
+msgid "No candidate records for this role yet."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No contacts for this role yet."
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "No dated sends in the available records."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No email variants returned."
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No evidence provided."
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "No internal assessment"
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No loaded candidates match these filters."
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "No loaded candidates match this date filter."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "No models listed."
+msgstr "Aucun modèle listé."
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "No notes yet."
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "No remote MCP servers found"
+msgstr "Aucun serveur MCP distant trouvé"
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "No role linked"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "No saved candidates"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No schedules returned."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No sequences returned."
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "No steps returned."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this candidate."
+msgstr ""
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "No stored emails for this role."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+#: src/pages/recruiting/InboxTab.tsx
+#: src/pages/ShellMessage.tsx
+msgid "No subject"
+msgstr ""
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "No supporting detail in the saved profile."
+msgstr ""
+
+#: src/lib/ticket-priority.ts
+msgid "Normal"
+msgstr ""
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "NOT"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Not a fit"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Not a fit: {name}"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Not reported"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Note"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Notes"
+msgstr ""
+
+#. placeholder {0}: call.botName
+#: src/components/call/CallCard.tsx
+msgid "On a call with {0}"
+msgstr "En appel avec {0}"
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Only empty spaces can be deleted. Delete its bots and groups first."
+msgstr "Seuls les espaces vides peuvent être supprimés. Supprimez d'abord ses bots et groupes."
+
+#: src/components/markdown-link-prompt.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Open"
+msgstr "Ouvrir"
+
+#. placeholder {0}: group.title
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Open {0}"
+msgstr "Ouvrir {0}"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Open {name}'s source profile"
+msgstr ""
+
+#: src/components/ComputersUnavailableHint.tsx
+msgid "Open computer settings"
+msgstr ""
+
+#: src/components/markdown-link-prompt.tsx
+msgid "Open external link?"
+msgstr "Ouvrir le lien externe ?"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Open in full window"
+msgstr "Ouvrir en fenêtre complète"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Open navigation"
+msgstr "Ouvrir la navigation"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Open role chat"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Open shell"
+msgstr "Ouvrir le shell"
+
+#: src/pages/recruiting/shared.tsx
+msgid "Open the role conversation to see its candidates."
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Open the saved sequence before editing it."
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Opened"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Opened {opens}"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Opened {path}"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Opened its thread."
+msgstr "Fil ouvert."
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Opening role…"
+msgstr ""
+
+#: src/App.tsx
+msgid "Opening your Space…"
+msgstr "Ouverture de votre espace…"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "OR"
+msgstr ""
+
+#: src/pages/memory-providers/SupermemorySettingsForm.tsx
+msgid "Organization API key"
+msgstr "Clé API de l'organisation"
+
+#: src/pages/shell/chat-context.tsx
+msgid "Original message unavailable"
+msgstr "Message d’origine indisponible"
+
+#. placeholder {0}: draft.email.recipients.join(", ")
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Original recipients: {0}"
+msgstr ""
+
+#. placeholder {0}: draft.email.sender
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Original sender: {0}"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Outreach drafts"
+msgstr "Outreach drafts"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Outreach status"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall direction"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Overall: {direction}"
+msgstr ""
+
+#. placeholder {0}: overdue.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Overdue ({0})"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Partial match"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Password"
+msgstr "Mot de passe"
+
+#: src/pages/Auth.tsx
+msgid "Password recovery is not configured for this server"
+msgstr "La récupération de mot de passe n'est pas configurée pour ce serveur"
+
+#: src/pages/Auth.tsx
+msgid "Password updated"
+msgstr "Mot de passe mis à jour"
+
+#: src/pages/Auth.tsx
+msgid "Passwords do not match"
+msgstr "Les mots de passe ne correspondent pas"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Paste your API key, then test again."
+msgstr "Collez votre clé API, puis testez à nouveau."
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Pause consideration"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Paused"
+msgstr "En pause"
+
+#: src/lib/message-text.ts
+#: src/pages/shell/chat-context.tsx
+msgid "Photo"
+msgstr "Photo"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Pick a model from the catalog."
+msgstr "Choisissez un modèle dans le catalogue."
+
+#: src/lib/model-connection-preflight.ts
+msgid "Pick a model from the list or enter a model id served by this endpoint."
+msgstr "Choisissez un modèle dans la liste ou saisissez un identifiant de modèle servi par ce point de terminaison."
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Prepare a personalized first email and follow-ups for this person using our saved evidence and playbook. Keep unknown facts marked, do not invent an email address, and save the drafts here without sending."
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Present"
+msgstr ""
+
+#. placeholder {0}: preview?.label ?? props.name
+#: src/components/ArtifactFileCard.tsx
+msgid "Preview {0}"
+msgstr "Aperçu de {0}"
+
+#: src/pages/ShellMessage.tsx
+msgid "Preview only"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Preview only. Ask for the complete message to read the full body."
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Profile"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Project ID"
+msgstr "ID du projet"
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Protected input"
+msgstr ""
+
+#: src/components/CloudAgentCard.tsx
+msgid "Pull request"
+msgstr "Demande de fusion"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Qualifying work"
+msgstr ""
+
+#: src/pages/shell/Transcript.tsx
+msgid "Quote"
+msgstr "Citer"
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Rank"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "React"
+msgstr "Réagir"
+
+#: src/pages/ShellMessage.tsx
+msgid "Reactions"
+msgstr "Réactions"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Read the attached materials for this role."
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Read this person's original email and complete conversation using the saved records and mailbox. Verify the person and current role, then prepare a reply here for me to edit. Only draft it; do not send."
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Reason"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Reason: {name}"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Recall and write"
+msgstr "Rappel et écriture"
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Recall only"
+msgstr "Rappel uniquement"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Received"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Recently discovered"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Recipients unavailable"
+msgstr ""
+
+#: src/App.tsx
+msgid "Reconnecting"
+msgstr "Reconnexion en cours"
+
+#: src/lib/roster-status.ts
+msgid "Reconnecting…"
+msgstr ""
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Recorded send activity"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Recording may have started, but the view could not refresh"
+msgstr "L'enregistrement a peut-être démarré, mais la vue n'a pas pu être actualisée"
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Recording started. Refresh the view to continue."
+msgstr "Enregistrement démarré. Actualisez la vue pour continuer."
+
+#. placeholder {0}: recording.goal
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Recording: {0}"
+msgstr "Enregistrement : {0}"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recover computer"
+msgstr "Récupérer l'ordinateur"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recover computer?"
+msgstr "Récupérer l’ordinateur ?"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recovering…"
+msgstr "Récupération en cours…"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recovery restores the last saved workspace. Unsaved work may be lost."
+msgstr "La récupération restaure le dernier espace de travail enregistré. Les travaux non enregistrés peuvent être perdus."
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Recreate a computer that is not working."
+msgstr "Recréer un ordinateur qui ne fonctionne pas."
+
+#: src/pages/recruiting/SequenceOverview.tsx
+msgid "Recruiter messages are unavailable for this role."
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/ShellConversation.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Recruiting"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Recruiting assistant"
+msgstr ""
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Recruiting views"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workflow"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Recruiting workspace"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Refine in chat"
+msgstr ""
+
+#: src/App.tsx
+#: src/components/LazyOverlay.tsx
+#: src/components/markdown-link-prompt.tsx
+#: src/pages/RecruitingPanel.tsx
+msgid "Refresh"
+msgstr "Actualiser"
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Refresh view"
+msgstr "Actualiser la vue"
+
+#: src/components/markdown-link-prompt.tsx
+msgid "Refreshing closes this link confirmation and may discard unsaved messages, attachments, reply context and selections. Refresh anyway?"
+msgstr "L’actualisation fermera cette confirmation de lien et peut entraîner la perte des messages, pièces jointes, contexte de réponse et sélections non enregistrés. Actualiser quand même ?"
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Refreshing…"
+msgstr "Actualisation en cours…"
+
+#: src/lib/user-error.ts
+msgid "Registration is closed"
+msgstr "Les inscriptions sont fermées"
+
+#: src/pages/Shell.tsx
+msgid "Release control"
+msgstr "Rendre le contrôle"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Reminder"
+msgstr ""
+
+#. placeholder {0}: attachment.file.name
+#: src/pages/shell/Composer.tsx
+msgid "Remove {0}"
+msgstr "Retirer {0}"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Remove {name} from shortlist"
+msgstr ""
+
+#. placeholder {0}: mention.name
+#: src/pages/shell/Composer.tsx
+msgid "Remove mention {0}"
+msgstr "Retirer la mention {0}"
+
+#. placeholder {0}: selectedSkill.name
+#: src/pages/shell/Composer.tsx
+msgid "Remove skill {0}"
+msgstr "Retirer la compétence {0}"
+
+#: src/pages/ShellMessage.tsx
+msgid "Removed with chat, computer, and memory."
+msgstr "Retiré avec la conversation, l'ordinateur et la mémoire."
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Rename section"
+msgstr "Renommer la section"
+
+#: src/pages/shell/ShellOverlays.tsx
+msgid "Rename space"
+msgstr "Renommer l'espace"
+
+#: src/pages/recruiting/SequenceOverview.tsx
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Replied"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Replied {replied}"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Reply"
+msgstr "Répondre"
+
+#: src/pages/shell/Composer.tsx
+msgid "Reply cancelled"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Reply to the selected email"
+msgstr ""
+
+#. placeholder {0}: replyNameRef.current
+#: src/pages/shell/Composer.tsx
+msgid "Replying to {0}"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Research round"
+msgstr ""
+
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Reset"
+msgstr "Réinitialiser"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Reset computer"
+msgstr "Réinitialiser l'ordinateur"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Reset computer?"
+msgstr "Réinitialiser l'ordinateur ?"
+
+#: src/pages/Auth.tsx
+msgid "Reset password"
+msgstr "Réinitialiser le mot de passe"
+
+#: src/pages/Auth.tsx
+msgid "Reset your password"
+msgstr "Réinitialisez votre mot de passe"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Resetting…"
+msgstr "Réinitialisation en cours…"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Resize chat"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Resize navigation"
+msgstr ""
+
+#: src/pages/ResizableSidePanel.tsx
+msgid "Resize panel"
+msgstr "Redimensionner le panneau"
+
+#: src/components/DesktopUpdates.tsx
+msgid "Restart to update"
+msgstr "Redémarrez pour mettre à jour"
+
+#: src/pages/shell/DeveloperSidebar.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Restore"
+msgstr "Restaurer"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Restore the last saved workspace."
+msgstr "Restaurer le dernier espace de travail enregistré."
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Restore the last saved workspace. Unsaved work on the computer is lost."
+msgstr "Restaurez le dernier espace de travail enregistré. Les travaux non enregistrés sur l'ordinateur seront perdus."
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Resume consideration"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Resume missing"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Resume ready"
+msgstr ""
+
+#. placeholder {0}: candidate.resumeUrl ?? t`Resume missing`
+#: src/pages/shell/Composer.tsx
+msgid "Resume: {0}"
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+#: src/pages/Auth.tsx
+#: src/pages/recruiting/RetryNotice.tsx
+msgid "Retry"
+msgstr "Réessayer"
+
+#: src/App.tsx
+msgid "Retry now"
+msgstr "Réessayer maintenant"
+
+#: src/pages/shell/useShellController.tsx
+msgid "Retry screen"
+msgstr "Réessayer l'écran"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Return to the original role before saving this draft."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "Review provider settings and test again."
+msgstr "Vérifiez les paramètres du fournisseur et testez à nouveau."
+
+#: src/pages/RecruitingPanel.tsx
+msgid "Role"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Role conversation"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role conversations"
+msgstr ""
+
+#: src/pages/recruiting/RoleSetup.tsx
+msgid "Role stage"
+msgstr ""
+
+#. placeholder {0}: candidate.roleVersion
+#: src/pages/shell/Composer.tsx
+msgid "Role version: {0}"
+msgstr ""
+
+#. placeholder {0}: candidate.roleTitle
+#. placeholder {0}: workspace.role.title
+#: src/pages/shell/Composer.tsx
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Role: {0}"
+msgstr ""
+
+#. placeholder {0}: round.round
+#. placeholder {1}: round.candidates.length
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} · {1} people"
+msgstr ""
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} feedback:"
+msgstr ""
+
+#. placeholder {0}: round.round
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Round {0} looks good. Start finding more people."
+msgstr ""
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Routine"
+msgstr "Routine"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Run time must be in the future."
+msgstr "L'horaire d'exécution doit être dans le futur."
+
+#: src/components/CloudAgentCard.tsx
+msgid "running"
+msgstr "en cours"
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "Salary range"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Save"
+msgstr "Enregistrer"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Save the workspace and install current software."
+msgstr "Enregistrer l’espace de travail et installer les logiciels actuels."
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Saved"
+msgstr "Enregistré"
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Saved candidates"
+msgstr ""
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Saved contact lookups"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Saved email"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Saved emails"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Saved results"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Saved role summary"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Saving…"
+msgstr "Enregistrement en cours…"
+
+#: src/lib/call-session-engine.ts
+msgid "Say yes or no, or answer in a sentence."
+msgstr "Dites oui ou non, ou répondez en une phrase."
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Schedule unavailable."
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Scheduled"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/shell/bot-picker.tsx
+#: src/pages/shell/command-palette.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Search"
+msgstr "Rechercher"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Search apps"
+msgstr "Rechercher des applications"
+
+#: src/pages/shell/command-palette.tsx
+msgid "Search bots and switch conversations"
+msgstr "Rechercher des bots et changer de conversation"
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Search candidates"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Search integrations.sh"
+msgstr "Rechercher sur integrations.sh"
+
+#: src/pages/recruiting/InboxTab.tsx
+msgid "Search loaded candidates"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Search refinement"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Search roles"
+msgstr ""
+
+#. placeholder {0}: index + 1
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Search update {0}"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Select a bot"
+msgstr "Sélectionnez un bot"
+
+#: src/pages/shell/Composer.tsx
+msgid "Send"
+msgstr "Envoyer"
+
+#: src/components/AccountAccess.tsx
+msgid "Send deletion code"
+msgstr "Envoyer le code de suppression"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Send feedback"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Send outcome unknown"
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Send recorded"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Send reset link"
+msgstr "Envoyer le lien de réinitialisation"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Sender unavailable"
+msgstr ""
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Sending schedule"
+msgstr ""
+
+#: src/pages/recruiting/CalibrationRound.tsx
+msgid "Sending…"
+msgstr "Envoi en cours…"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Sent"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequence"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Sequence status"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Sequences without a role"
+msgstr ""
+
+#: src/pages/memory-providers/SerenitySettingsForm.tsx
+msgid "Serenity endpoint is required."
+msgstr "Le point de terminaison Serenity est obligatoire."
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Server integrations"
+msgstr "Intégrations du serveur"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Server URL"
+msgstr "URL du serveur"
+
+#: src/components/call/CallCard.tsx
+#: src/pages/shell/ShellPanelContent.tsx
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Settings"
+msgstr "Paramètres"
+
+#: src/pages/shell/Composer.tsx
+msgid "Settings: General"
+msgstr "Paramètres : Général"
+
+#: src/pages/shell/Composer.tsx
+msgid "Settings: Usage"
+msgstr "Paramètres : Utilisation"
+
+#: src/components/integrations/IntegrationSetup.tsx
+msgid "Setup help"
+msgstr "Aide à la configuration"
+
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Shape"
+msgstr "Forme"
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Shell"
+msgstr "Shell"
+
+#: src/pages/recruiting/ContactsTab.tsx
+#: src/pages/RecruitingPanel.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Shortlist"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Shortlisted"
+msgstr ""
+
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Shortlisted only"
+msgstr ""
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Show bots"
+msgstr "Afficher les bots"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Show computer"
+msgstr "Afficher l'ordinateur"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Show less"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Show more"
+msgstr "Afficher plus"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/ShellConversation.tsx
+msgid "Show navigation"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Show password"
+msgstr "Afficher le mot de passe"
+
+#: src/pages/shell/ShellPanelContent.tsx
+msgid "Show settings"
+msgstr "Afficher les paramètres"
+
+#: src/components/call/VoiceChatCard.tsx
+msgid "Show transcript"
+msgstr "Afficher la transcription"
+
+#. placeholder {0}: rows.length
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Showing the first {0}"
+msgstr ""
+
+#: src/lib/localized-provider-hint.ts
+#: src/pages/Auth.tsx
+msgid "Sign in"
+msgstr "Se connecter"
+
+#: src/components/AccountAccess.tsx
+#: src/lib/user-error.ts
+msgid "Sign in again"
+msgstr ""
+
+#: src/pages/Auth.tsx
+msgid "Sign in to WeKruit Headhunter"
+msgstr ""
+
+#: src/lib/user-error.ts
+msgid "Sign in to your existing account to link SSO"
+msgstr "Connectez-vous à votre compte existant pour associer SSO"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Sign in with the subscription, or test the API key instead."
+msgstr "Connectez-vous avec l'abonnement, ou testez la clé API à la place."
+
+#: src/pages/Auth.tsx
+msgid "Sign up"
+msgstr "S'inscrire"
+
+#. placeholder {0}: skill.name
+#: src/pages/shell/Composer.tsx
+msgid "Skill {0}"
+msgstr "Compétence {0}"
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Skill evidence"
+msgstr ""
+
+#: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/Shell.tsx
+msgid "Skip"
+msgstr "Passer"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Skip for now"
+msgstr ""
+
+#: src/lib/localized-provider-hint.ts
+msgid "Skip or deploy key"
+msgstr "Passer ou clé de déploiement"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Skipped"
+msgstr ""
+
+#. placeholder {0}: skipped.join(", ")
+#: src/pages/shell/useShellMessages.ts
+msgid "Skipped {0}"
+msgstr "Ignoré {0}"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Software update"
+msgstr "Mise à jour logicielle"
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Some saved contact details could not be displayed."
+msgstr ""
+
+#: src/pages/shell/useShellController.tsx
+msgid "Something went wrong."
+msgstr "Une erreur s'est produite."
+
+#: src/App.tsx
+#: src/components/markdown-link-prompt.tsx
+#: src/lib/user-error.ts
+msgid "Something went wrong. Try again."
+msgstr "Un problème est survenu. Réessayez."
+
+#: src/pages/recruiting/SkillEvidence.tsx
+msgid "Source context"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Source text"
+msgstr ""
+
+#: src/components/ArtifactFileCard.tsx
+msgid "Source unavailable"
+msgstr ""
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Sources"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Speak"
+msgstr "Parler"
+
+#: src/pages/ShellMessage.tsx
+msgid "Speak this reply"
+msgstr "Lire cette réponse à voix haute"
+
+#: src/lib/user-error.ts
+msgid "SSO is temporarily unavailable. Try again."
+msgstr "SSO est temporairement indisponible. Réessayez."
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Start recording"
+msgstr "Démarrer l'enregistrement"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Start recruiting"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+#: src/lib/roster-status.ts
+msgid "Starting…"
+msgstr "Démarrage en cours…"
+
+#: src/pages/recruiting/CriteriaEditor.tsx
+msgid "Statement"
+msgstr ""
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+msgid "Status"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Steps"
+msgstr "Étapes"
+
+#: src/pages/Shell.tsx
+#: src/pages/shell/Composer.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Stop"
+msgstr "Arrêter"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Stop {name}"
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Stop considering"
+msgstr ""
+
+#: src/pages/ShellMessage.tsx
+msgid "Stop speaking"
+msgstr "Arrêter la lecture"
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Stop teaching"
+msgstr "Arrêter l'enseignement"
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Stopped"
+msgstr ""
+
+#. js-lingui-explicit-id
+#: src/lib/browser-notifications.ts
+msgid "Stopped."
+msgstr "Arrêté."
+
+#: src/pages/recruiting/CampaignObservedDetails.tsx
+msgid "Subject unavailable."
+msgstr ""
+
+#. placeholder {0}: draft.email.subject
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Subject: {0}"
+msgstr ""
+
+#: src/pages/shell/command-palette.tsx
+msgid "Switch bot"
+msgstr "Changer de bot"
+
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/RecruitingEvidenceTab.tsx
+msgid "Table"
+msgstr "Tableau"
+
+#: src/pages/Shell.tsx
+msgid "Take control"
+msgstr "Prendre le contrôle"
+
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Tasks"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "Teach a task"
+msgstr "Enseigner une tâche"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Teaching in progress. Stop teaching before sending a new message."
+msgstr "Enseignement en cours. Arrêtez l'enseignement avant d'envoyer un nouveau message."
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "Team Computer"
+msgstr "Ordinateur d'équipe"
+
+#: src/components/computer/ComputerWorkspace.tsx
+msgid "Terminal"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "Test"
+msgstr "Tester"
+
+#: src/components/ModelConnectionPreflightNotice.tsx
+msgid "Test API key"
+msgstr "Tester la clé API"
+
+#: src/components/ModelConnectionPreflightNotice.tsx
+msgid "Test sign-in"
+msgstr "Tester la connexion"
+
+#: src/components/ModelConnectionPreflightNotice.tsx
+msgid "Testing…"
+msgstr "Test en cours…"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "The API did not come back. Refresh this page."
+msgstr "L'API n'est pas revenue. Actualisez cette page."
+
+#: src/lib/model-connection-preflight.ts
+msgid "The connection timed out."
+msgstr "La connexion a expiré."
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "The file was saved. Return to the original role and retry to share it there."
+msgstr ""
+
+#: src/lib/model-connection-preflight.ts
+msgid "The provider is rate-limiting requests."
+msgstr "Le fournisseur limite le débit des requêtes."
+
+#: src/pages/Shell.tsx
+msgid "The recruiting team changed. Open the role again."
+msgstr ""
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "The recruiting team is not ready yet."
+msgstr ""
+
+#: src/pages/shell/useShellCreation.ts
+msgid "The workspace changed. Open the role again."
+msgstr ""
+
+#: src/pages/shell/computer-presentation.tsx
+msgid "This bot runs on this computer, not a Linux desktop. Shell and files use your home folder."
+msgstr "Ce bot s'exécute sur cet ordinateur, pas sur un bureau Linux. Le shell et les fichiers utilisent votre dossier personnel."
+
+#: src/components/ArtifactFileCard.tsx
+msgid "This file is not valid UTF-8 text."
+msgstr "Ce fichier n'est pas un texte UTF-8 valide."
+
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "This filter belongs to another role."
+msgstr ""
+
+#: src/components/AccountAccess.tsx
+msgid "This permanently deletes your account and data."
+msgstr "Cela supprime définitivement votre compte et vos données."
+
+#: src/lib/model-connection-preflight.ts
+msgid "This provider cannot be tested without saving."
+msgstr "Ce fournisseur ne peut pas être testé sans enregistrement."
+
+#: src/lib/model-connection-preflight.ts
+msgid "This provider is not connected yet."
+msgstr "Ce fournisseur n'est pas encore connecté."
+
+#: src/pages/Auth.tsx
+msgid "This reset link is invalid or expired"
+msgstr "Ce lien de réinitialisation est invalide ou a expiré"
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "This role changed. Select the candidate again."
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Thread"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Time not recorded"
+msgstr ""
+
+#. placeholder {0}: candidate.title
+#: src/pages/shell/Composer.tsx
+msgid "Title: {0}"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "To"
+msgstr ""
+
+#: src/lib/ticket-status.ts
+msgid "To do"
+msgstr ""
+
+#: src/pages/shell/bot-picker.tsx
+msgid "To:"
+msgstr "À :"
+
+#: src/pages/shell/chat-context.tsx
+msgid "Today"
+msgstr "Aujourd'hui"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Total experience"
+msgstr ""
+
+#: src/components/call/CallCard.tsx
+msgid "Transcript"
+msgstr "Transcription"
+
+#: src/pages/shell/Composer.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Try again"
+msgstr "Réessayer"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Try the test again."
+msgstr "Relancez le test."
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Type without recording"
+msgstr ""
+
+#: src/pages/recruiting/NotesTab.tsx
+msgid "Type your note here"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Unavailable"
+msgstr "Indisponible"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/SkillEvidence.tsx
+#: src/pages/recruiting/VerdictLabel.tsx
+msgid "Unknown"
+msgstr ""
+
+#: src/pages/recruiting/VerdictLabel.tsx
+msgid "Unmet"
+msgstr ""
+
+#: src/components/call/CallCard.tsx
+msgid "Unmute"
+msgstr "Réactiver le micro"
+
+#: src/pages/recruiting/CalibrationRound.tsx
+#: src/pages/recruiting/CandidateDirectory.tsx
+#: src/pages/recruiting/ContactsTab.tsx
+msgid "Unnamed candidate"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Unread"
+msgstr ""
+
+#: src/pages/recruiting/SequenceStats.tsx
+msgid "Unsubscribed"
+msgstr ""
+
+#. placeholder {0}: file.name
+#. placeholder {0}: pending.file.name
+#: src/pages/shell/useShellMessages.ts
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Unsupported file type: {0}"
+msgstr "Type de fichier non pris en charge : {0}"
+
+#: src/components/DesktopUpdates.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Up to date"
+msgstr "À jour"
+
+#. placeholder {0}: upcoming.length
+#: src/pages/recruiting/TasksTab.tsx
+msgid "Upcoming ({0})"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update"
+msgstr "Mettre à jour"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update available"
+msgstr "Mise à jour disponible"
+
+#: src/components/ComputerMaintenanceActions.tsx
+msgid "Update computer"
+msgstr "Mettre à jour l'ordinateur"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update failed"
+msgstr "Échec de la mise à jour"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Update finished with errors"
+msgstr "Mise à jour terminée avec des erreurs"
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Updated"
+msgstr "Mis à jour"
+
+#: src/components/ComputerMaintenanceActions.tsx
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Updating…"
+msgstr "Mise à jour en cours…"
+
+#: src/components/computer/FilesApp.tsx
+#: src/pages/shell/avatar-studio-popover.tsx
+msgid "Upload"
+msgstr "Télécharger"
+
+#: src/lib/ticket-priority.ts
+msgid "Urgent"
+msgstr ""
+
+#: src/pages/shell/ShellSidebar.tsx
+msgid "Usage"
+msgstr "Utilisation"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Use Connect to verify the key."
+msgstr "Utilisez Connecter pour vérifier la clé."
+
+#: src/components/teach/TeachRecordingChrome.tsx
+msgid "Use Protected input for passwords."
+msgstr ""
+
+#: src/pages/shell/useShellCreation.ts
+msgid "Use the attached files to define this role and start the search."
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Voice"
+msgstr "Voix"
+
+#: src/components/call/VoiceChatCard.tsx
+msgid "Voice chat"
+msgstr "Chat vocal"
+
+#: src/lib/model-connection-preflight.ts
+msgid "Wait a moment and test again."
+msgstr "Patientez un instant et testez à nouveau."
+
+#: src/pages/shell/useShellRecruiting.ts
+msgid "Wait for this role to finish loading before saving."
+msgstr ""
+
+#: src/pages/recruiting/CrmWorkbench.tsx
+msgid "Waiting for resume"
+msgstr ""
+
+#: src/components/SoftwareUpdateSection.tsx
+msgid "Waiting for the API to come back…"
+msgstr "En attente du retour de l'API…"
+
+#: src/lib/roster-status.ts
+msgid "Waiting in line…"
+msgstr "En attente dans la file…"
+
+#: src/lib/billing.ts
+msgid "week"
+msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "WeKruit home"
+msgstr ""
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "What location or remote work scope applies?"
+msgstr ""
+
+#: src/components/teach/TeachComputerOverlay.tsx
+msgid "What result will you demonstrate?"
+msgstr "Quel résultat allez-vous démontrer ?"
+
+#: src/pages/recruiting/useRecruitingWorkspace.ts
+msgid "What salary range may be stated in outreach?"
+msgstr ""
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "What to return"
+msgstr "Que retourner"
+
+#: src/components/teach/SkillDraftCard.tsx
+msgid "When to use"
+msgstr "Quand utiliser"
+
+#: src/lib/ticket-status.ts
+msgid "Won't do"
+msgstr ""
+
+#: src/lib/roster-status.ts
+msgid "Working in background…"
+msgstr "Travail en arrière-plan…"
+
+#: src/lib/roster-status.ts
+#: src/pages/Auth.tsx
+#: src/pages/ShellMessage.tsx
+msgid "Working…"
+msgstr "En cours…"
+
+#: src/pages/recruiting/AssessmentCard.tsx
+msgid "Worth checking"
+msgstr ""
+
+#: src/components/computer/TerminalApp.tsx
+msgid "Wrote {path}"
+msgstr ""
+
+#: src/pages/shell/useShellMessages.ts
+#: src/pages/shell/useShellRecruiting.ts
+msgid "XLSX is not supported yet. Save as CSV and upload again."
+msgstr ""
+
+#: src/lib/billing.ts
+msgid "year"
+msgstr ""
+
+#: src/pages/shell/chat-context.tsx
+#: src/pages/shell/DeveloperSidebar.tsx
+msgid "Yesterday"
+msgstr "Hier"
+
+#: src/pages/recruiting/NotesTab.tsx
+#: src/pages/shell/useShellController.tsx
+#: src/pages/ShellMessage.tsx
+msgid "You"
+msgstr "Vous"
+
+#: src/pages/Shell.tsx
+msgid "You have control"
+msgstr "Vous avez le contrôle"
+
+#: src/pages/Auth.tsx
+msgid "Your email address"
+msgstr "Votre adresse e-mail"
+
+#: src/pages/Auth.tsx
+msgid "Your name"
+msgstr "Votre nom"

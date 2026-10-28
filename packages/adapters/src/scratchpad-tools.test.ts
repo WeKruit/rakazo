@@ -25,7 +25,7 @@ describe("scratchpad tools store", () => {
 
     expect(findMany).toHaveBeenCalledWith({
       where: { spaceId: "ws", botId: "bot", status: { in: ["open", "parked"] } },
-      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+      orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
     });
     expect(items).toEqual([
       expect.objectContaining({ id: "1", title: "Open", status: "open" }),

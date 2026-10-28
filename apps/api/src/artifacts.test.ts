@@ -418,6 +418,11 @@ describe("internal recruiting context presentation", () => {
       ).rejects.toBeInstanceOf(ArtifactListCursorError);
     }
     queryRaw.mockClear();
+    await listOwnedArtifacts(deps, actor, { botId: "bot-1", offset: 400 });
+    const bounded = queryRaw.mock.calls[0]![0] as { strings: string[]; values: unknown[] };
+    expect(statement(bounded)).toContain('ORDER BY a."id" ASC LIMIT 200 OFFSET');
+    expect(bounded.values).toContain(400);
+    queryRaw.mockClear();
     await listOwnedArtifacts(deps, actor, { botId: "bot-1", includeDiagnostics: true });
     const query = queryRaw.mock.calls[0]![0] as { strings: string[]; values: unknown[] };
     expect(statement(query)).toContain("recruiting.context.adopted");

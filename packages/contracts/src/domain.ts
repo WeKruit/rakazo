@@ -1,3 +1,12 @@
+import { GROUP_MEMBER_MAX, GROUP_MEMBER_MIN } from "./conversation-limits.js";
+
+export {
+  GROUP_MEMBER_MAX,
+  GROUP_MEMBER_MIN,
+  REPLY_QUOTE_MAX_LENGTH,
+  truncateReplyQuote,
+} from "./conversation-limits.js";
+
 import * as z from "zod";
 import { AGENT_SECRET_NAME_PATTERN } from "./agent-secret-name.js";
 import { BotAvatarValueSchema } from "./bot-avatar.js";
@@ -100,19 +109,6 @@ export const GroupMemberSchema = z.object({
   status: z.string().optional(),
 });
 export type GroupMember = z.infer<typeof GroupMemberSchema>;
-
-/** Selected-text excerpt carried by a reply; capped so a quote stays a quote. */
-export const REPLY_QUOTE_MAX_LENGTH = 2_000;
-
-/** Cap an excerpt at the quote limit without splitting a surrogate pair. */
-export function truncateReplyQuote(value: string): string {
-  const truncated = value.slice(0, REPLY_QUOTE_MAX_LENGTH);
-  const last = truncated.charCodeAt(truncated.length - 1);
-  return last >= 0xd800 && last <= 0xdbff ? truncated.slice(0, -1) : truncated;
-}
-
-export const GROUP_MEMBER_MIN = 2;
-export const GROUP_MEMBER_MAX = 6;
 
 export const GroupSchema = z.object({
   id: Id,
@@ -283,10 +279,10 @@ export const SpaceSchema = z.object({
   canRename: z.boolean().optional(),
   /** True only when the current member may delete this non-default space. */
   canDelete: z.boolean().optional(),
-  bots: z.array(SpaceBotSchema),
-  groups: z.array(SpaceGroupSchema),
-  externalConversations: z.array(ExternalConversationSchema),
-  botSections: z.array(BotSectionSchema),
+  bots: z.array(SpaceBotSchema).max(200),
+  groups: z.array(SpaceGroupSchema).max(200),
+  externalConversations: z.array(ExternalConversationSchema).max(200),
+  botSections: z.array(BotSectionSchema).max(200),
 });
 export type Space = z.infer<typeof SpaceSchema>;
 
@@ -294,12 +290,13 @@ export const SpaceNavigationSchema = z.object({
   current: z.object({
     id: Id,
     name: z.string(),
-    bots: z.array(BotSchema),
-    groups: z.array(GroupSchema),
-    externalConversations: z.array(ExternalConversationSchema),
-    botSections: z.array(BotSectionSchema),
+    bots: z.array(BotSchema).max(200),
+    groups: z.array(GroupSchema).max(200),
+    externalConversations: z.array(ExternalConversationSchema).max(200),
+    botSections: z.array(BotSectionSchema).max(200),
   }),
-  spaces: z.array(SpaceSchema),
+  spaces: z.array(SpaceSchema).max(200),
+  nextOffset: z.number().int().nullable().optional(),
 });
 export type SpaceNavigation = z.infer<typeof SpaceNavigationSchema>;
 
@@ -1510,14 +1507,15 @@ export type BillingStatus = z.infer<typeof BillingStatusSchema>;
 
 export const AppBootstrapSchema = z.object({
   me: MeSchema,
-  bots: z.array(BotSchema),
-  groups: z.array(GroupSchema),
-  botSections: z.array(BotSectionSchema),
-  archivedBots: z.array(BotSchema),
-  archivedGroups: z.array(GroupSchema),
+  bots: z.array(BotSchema).max(200),
+  groups: z.array(GroupSchema).max(200),
+  botSections: z.array(BotSectionSchema).max(200),
+  archivedBots: z.array(BotSchema).max(200),
+  archivedGroups: z.array(GroupSchema).max(200),
   thread: ThreadSnapshotSchema.nullable(),
-  routines: z.array(RoutineSchema),
-  spaces: z.array(SpaceSchema),
+  routines: z.array(RoutineSchema).max(200),
+  spaces: z.array(SpaceSchema).max(200),
+  nextOffset: z.number().int().nullable().optional(),
 });
 export type AppBootstrap = z.infer<typeof AppBootstrapSchema>;
 
