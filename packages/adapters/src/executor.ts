@@ -178,6 +178,7 @@ import {
   admitRecruitingReply,
   answerPausedAskWithSteering,
   appendEventInTransaction,
+  automationRateLimited,
   bindRecruitingSchedulingOperation,
   claimRecruitingCrmImport,
   claimRecruitingReply,
@@ -228,6 +229,7 @@ import {
   SpaceLimitError,
   saveRecruitingCalibrationRound,
   searchHistory,
+  skipRateLimitedRun,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -4086,13 +4088,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
       // Automations in one thread take turns: a queued one is claimed only when no earlier run
       // there is still queued and no other run holds the turn. A person's message, a resumed
       // takeover and lease recovery keep their own claim path.
+      // A fire past its automation's per-minute cap is skipped before it ever starts.
       const leased =
         run.status === "queued" && isAutomationRunTrigger(run.trigger)
           ? await deps.prisma.$transaction(async (tx) => {
               await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`run-lane:${run.threadId}`}))::text`;
+              if (run.leaseFence === 0 && (await automationRateLimited(tx, run))) {
+                return (await skipRateLimitedRun(tx, run, now)) ? RATE_LIMITED : { count: 0 };
+              }
               return (await threadLaneBusy(tx, run)) ? null : lease(tx);
             })
           : await lease(deps.prisma);
+      if (leased === RATE_LIMITED) {
+        getLogger().warn("run.automation.rate_limited", {
+          runId,
+          trigger: run.trigger,
+          routineId: run.routineId,
+        });
+        await deps.events
+          .append({
+            spaceId: run.spaceId,
+            threadId: run.threadId,
+            botId: run.botId,
+            type: "run.cancelled",
+            runId,
+            payload: { reason: "rate_limited" },
+          })
+          .catch((error) => {
+            getLogger().warn("rate-limited run event not recorded", { error: String(error) });
+          });
+        return;
+      }
       if (!leased) {
         getLogger().info("run.lane.deferred", { runId, threadId: run.threadId });
         await deps.jobs.enqueue({
@@ -14203,6 +14229,8 @@ async function writeComputerRunRequeue(
   });
   return true;
 }
+
+const RATE_LIMITED = Symbol("rate-limited");
 
 /** Retry interval for an automation waiting for its turn in a thread. */
 const THREAD_LANE_RETRY_MS = 5_000;

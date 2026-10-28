@@ -1,11 +1,16 @@
 import type { BackgroundJob } from "@rakazo/adapter-kit";
+import { AUTOMATION_RATE_LIMITED_ERROR, AUTOMATION_RUNS_PER_MINUTE } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { createRunExecutor } from "./executor.js";
 
 type Row = {
   id: string;
+  spaceId: string;
+  taskId: string;
   threadId: string;
   botId: string;
+  routineId: string | null;
+  error: string | null;
   trigger: string;
   status: string;
   createdAt: Date;
@@ -23,12 +28,14 @@ const compare = (value: unknown) => (value instanceof Date ? value.getTime() : v
 function matches(row: Row, where: Where): boolean {
   return Object.entries(where).every(([key, condition]) => {
     if (key === "OR") return (condition as Where[]).some((branch) => matches(row, branch));
+    if (key === "AND") return (condition as Where[]).every((branch) => matches(row, branch));
     const value = row[key as keyof Row];
     if (condition instanceof Date || condition === null || typeof condition !== "object")
       return compare(value) === compare(condition);
     const filter = condition as Record<string, unknown>;
     if ("in" in filter && !(filter.in as unknown[]).includes(value)) return false;
     if ("not" in filter && value === filter.not) return false;
+    if ("gte" in filter && !(value !== null && compare(value) >= compare(filter.gte))) return false;
     if ("lt" in filter && !(value !== null && compare(value) < compare(filter.lt))) return false;
     if ("lte" in filter && !(value !== null && compare(value) <= compare(filter.lte))) return false;
     return true;
@@ -40,8 +47,12 @@ const CLAIMED = "claimed: the run left the queue";
 /** Runs in one database; the executor stops right after a successful claim. */
 function lane(seed: Array<Partial<Row> & Pick<Row, "id" | "trigger" | "status">>) {
   const rows: Row[] = seed.map((row, index) => ({
+    spaceId: "space-1",
+    taskId: `task-${row.id}`,
     threadId: "thread-1",
     botId: "bot-1",
+    routineId: null,
+    error: null,
     createdAt: new Date(Date.UTC(2026, 0, 1, 9, index)),
     checkpoint: null,
     leaseFence: 0,
@@ -67,14 +78,16 @@ function lane(seed: Array<Partial<Row> & Pick<Row, "id" | "trigger" | "status">>
   };
   const prisma = {
     run,
+    task: { updateMany: vi.fn(async () => ({ count: 1 })) },
     $queryRaw: vi.fn(async () => []),
     $transaction: vi.fn(async (work: (tx: unknown) => Promise<unknown>) => work(prisma)),
   };
   const enqueue = vi.fn(async (_job: BackgroundJob) => undefined);
+  const append = vi.fn(async () => ({}));
   const executor = createRunExecutor({
     prisma,
     jobs: { enqueue },
-    events: {},
+    events: { append },
     secrets: [],
   } as unknown as Parameters<typeof createRunExecutor>[0]);
   /** Continue a run; true when this worker claimed it. */
@@ -88,11 +101,12 @@ function lane(seed: Array<Partial<Row> & Pick<Row, "id" | "trigger" | "status">>
     }
   };
   const status = (id: string) => rows.find((row) => row.id === id)?.status;
+  const row = (id: string) => rows.find((candidate) => candidate.id === id);
   const set = (id: string, next: string) => {
     const row = rows.find((candidate) => candidate.id === id)!;
     row.status = next;
   };
-  return { start, status, set, enqueue, prisma };
+  return { start, status, set, row, enqueue, append, prisma };
 }
 
 describe("thread lanes for automation runs", () => {
@@ -167,5 +181,124 @@ describe("thread lanes for automation runs", () => {
       { id: "routine", trigger: "routine", status: "queued" },
     ]);
     expect(await db.start("routine")).toBe(true);
+  });
+});
+
+/** `count` fires of one automation, a second apart, all in one minute and already finished. */
+function burst(count: number, fire: Partial<Row> & Pick<Row, "trigger">) {
+  return Array.from({ length: count }, (_, index) => ({
+    id: `fire-${String(index).padStart(2, "0")}`,
+    status: "completed",
+    createdAt: new Date(Date.UTC(2026, 0, 1, 9, 0, index)),
+    ...fire,
+  }));
+}
+
+describe("automation rate cap", () => {
+  it("skips a routine's fire past its per-minute cap and records why", async () => {
+    const fires = burst(AUTOMATION_RUNS_PER_MINUTE + 1, { trigger: "routine", routineId: "r-1" });
+    fires.at(-1)!.status = "queued";
+    const last = fires.at(-1)!.id;
+    const db = lane(fires);
+
+    expect(await db.start(last)).toBe(false);
+    expect(db.row(last)).toMatchObject({
+      status: "cancelled",
+      error: AUTOMATION_RATE_LIMITED_ERROR,
+    });
+    expect(db.prisma.task.updateMany).toHaveBeenCalledWith({
+      where: { id: `task-${last}` },
+      data: { status: "cancelled" },
+    });
+    expect(db.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "run.cancelled",
+        runId: last,
+        payload: { reason: "rate_limited" },
+      }),
+    );
+    expect(db.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("lets the first fires of a burst run whatever order workers take them in", async () => {
+    const fires = burst(AUTOMATION_RUNS_PER_MINUTE + 1, { trigger: "webhook", routineId: "r-1" });
+    for (const fire of fires) fire.status = "queued";
+    const db = lane(fires);
+    // The newest fire is picked up first and is the one skipped.
+    expect(await db.start(fires.at(-1)!.id)).toBe(false);
+    expect(db.status(fires.at(-1)!.id)).toBe("cancelled");
+    expect(await db.start(fires[0]!.id)).toBe(true);
+  });
+
+  it("does not count skipped fires, so the cap resets once the storm stops", async () => {
+    const fires = burst(AUTOMATION_RUNS_PER_MINUTE + 1, { trigger: "bot_message" });
+    for (const fire of fires.slice(1, -1)) fire.error = AUTOMATION_RATE_LIMITED_ERROR;
+    fires.at(-1)!.status = "queued";
+    const db = lane(fires);
+    expect(await db.start(fires.at(-1)!.id)).toBe(true);
+  });
+
+  it("counts a bot's turns of one trigger together when no routine owns them", async () => {
+    const fires = burst(AUTOMATION_RUNS_PER_MINUTE, { trigger: "tickets" });
+    const db = lane([
+      ...fires,
+      {
+        id: "other-bot",
+        botId: "bot-2",
+        trigger: "tickets",
+        status: "queued",
+        createdAt: new Date(Date.UTC(2026, 0, 1, 9, 0, 30)),
+      },
+      {
+        id: "same-bot",
+        trigger: "tickets",
+        status: "queued",
+        createdAt: new Date(Date.UTC(2026, 0, 1, 9, 0, 31)),
+      },
+    ]);
+    expect(await db.start("other-bot")).toBe(true);
+    db.set("other-bot", "completed");
+    expect(await db.start("same-bot")).toBe(false);
+    expect(db.status("same-bot")).toBe("cancelled");
+  });
+
+  it("never caps a person's message or a run that already started once", async () => {
+    const db = lane([
+      ...burst(AUTOMATION_RUNS_PER_MINUTE, { trigger: "routine", routineId: "r-1" }),
+      {
+        id: "resumed",
+        trigger: "routine",
+        routineId: "r-1",
+        status: "queued",
+        leaseFence: 2,
+        createdAt: new Date(Date.UTC(2026, 0, 1, 9, 0, 40)),
+      },
+    ]);
+    expect(await db.start("resumed")).toBe(true);
+
+    const people = lane([
+      ...burst(AUTOMATION_RUNS_PER_MINUTE, { trigger: "user" }),
+      {
+        id: "message",
+        trigger: "user",
+        status: "queued",
+        createdAt: new Date(Date.UTC(2026, 0, 1, 9, 0, 40)),
+      },
+    ]);
+    expect(await people.start("message")).toBe(true);
+  });
+
+  it("forgets fires older than a minute", async () => {
+    const db = lane([
+      ...burst(AUTOMATION_RUNS_PER_MINUTE, { trigger: "routine", routineId: "r-1" }),
+      {
+        id: "later",
+        trigger: "routine",
+        routineId: "r-1",
+        status: "queued",
+        createdAt: new Date(Date.UTC(2026, 0, 1, 9, 1, 5)),
+      },
+    ]);
+    expect(await db.start("later")).toBe(true);
   });
 });

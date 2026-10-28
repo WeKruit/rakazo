@@ -111,6 +111,7 @@ async function runWithModel(
     routineId: options.trigger === "routine" ? "routine-1" : null,
     sourceMessageId: options.sourceMessage?.id ?? null,
     leaseFence: 0,
+    createdAt: new Date(),
   };
   const get = vi.fn(async () => new Uint8Array([1, 2, 3, 4]));
   let request: AgentRunRequest | undefined;
