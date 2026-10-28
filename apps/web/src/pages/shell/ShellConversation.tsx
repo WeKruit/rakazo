@@ -64,6 +64,10 @@ const SequenceTab = lazyPanel(() =>
 );
 
 import type { ReactNode } from "react";
+
+/** What the Try again button sends after a failed run; the bot picks up from the history. */
+const RETRY_TEXT = "Try again";
+
 export function ShellConversation({
   model,
   roleCreationForm,
@@ -879,6 +883,10 @@ export function ShellConversation({
                   runErrorId={emptyCrmChat ? null : displayedRunErrorId}
                   onRunErrorPresented={handleRunErrorPresented}
                   onDismissError={dismissComposerError}
+                  onRetry={() => {
+                    dismissComposerError();
+                    void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID());
+                  }}
                   sending={sending}
                   fileInputRef={fileInputRef}
                   onAttachmentPick={

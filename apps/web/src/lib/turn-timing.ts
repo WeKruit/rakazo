@@ -1,5 +1,6 @@
 import type { ProductEvent } from "@rakazo/contracts";
 import { isRunTerminalEvent } from "@rakazo/core";
+import { rpc } from "./rpc";
 
 /** Milliseconds from Send for one turn. Ids only: never prompt or reply text. */
 export type TurnTiming = {
@@ -87,7 +88,11 @@ export function reportTiming(timing: Timing) {
   store.__rakazoTimings = buffer;
   buffer.push(timing);
   if (buffer.length > KEEP) buffer.splice(0, buffer.length - KEEP);
-  if (timing.kind === "turn") console.info("[rakazo:timing]", timing);
+  if (timing.kind !== "turn") return;
+  console.info("[rakazo:timing]", timing);
+  const { kind: _kind, clientNonce: _nonce, runId, ...ms } = timing;
+  // Server logs give p50/p95 of what people actually saw; a lost report never matters.
+  if (runId) void rpc.threads.reportTiming({ runId, ...ms }).catch(() => undefined);
 }
 
 export const turnTimer = createTurnTimer({

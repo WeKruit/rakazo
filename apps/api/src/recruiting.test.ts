@@ -3014,6 +3014,104 @@ describe("saved recruiting correspondence", () => {
       expect(query.where.role).toEqual({ spaceId: "space", userId: "owner" });
     }
   });
+
+  it("shows emails from the multi-source contact lookup for this role's people only", async () => {
+    const { client, prisma } = contactFixture({
+      source: "local_contact_lookup",
+      people: [
+        {
+          name: "Saved Person",
+          linkedin_url: "https://www.linkedin.com/in/saved-person",
+          emails: [
+            {
+              address: "saved@example.test",
+              type: "personal",
+              status: null,
+              provider: "contactout",
+            },
+          ],
+          lookups: [{ provider: "fullenrich", outcome: "not_found" }],
+        },
+        {
+          name: "Someone Else",
+          linkedin_url: "https://www.linkedin.com/in/someone-else",
+          emails: [
+            { address: "else@example.test", type: "work", status: null, provider: "leadmagic" },
+          ],
+          lookups: [],
+        },
+      ],
+    });
+    client.mcpServer.findMany.mockReset().mockResolvedValue([
+      {
+        id: "mail",
+        name: "Contact enrichment",
+        endpoint: "https://mcp.fullenrich.com/mcp",
+        secretId: "encrypted-reference",
+        revision: 1,
+        enabled: true,
+        assignments: [{ botId: "main", allowAllTools: false, allowedTools: ["enrich_bulk"] }],
+      },
+    ]);
+    client.externalEffect.findMany.mockReset().mockResolvedValueOnce([
+      {
+        ...contactFixture({}).retained,
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "mail",
+              resourceRevision: 1,
+              toolName: "native_find_emails",
+            },
+            args: { people: [] },
+          },
+        ],
+      },
+    ]);
+    client.externalEffect.findMany.mockResolvedValueOnce([
+      {
+        id: "effect",
+        result: {
+          structuredContent: {
+            source: "local_contact_lookup",
+            people: [
+              {
+                name: "Saved Person",
+                linkedin_url: "https://www.linkedin.com/in/saved-person",
+                emails: [
+                  { address: "saved@example.test", type: "personal", status: null, provider: "x" },
+                ],
+                lookups: [],
+              },
+              {
+                name: "Someone Else",
+                linkedin_url: "https://www.linkedin.com/in/someone-else",
+                emails: [
+                  { address: "else@example.test", type: "work", status: null, provider: "x" },
+                ],
+                lookups: [],
+              },
+            ],
+          },
+        },
+      },
+    ]);
+    const result = await api.getRecruitingCorrespondence(prisma, actor, target, "contacts");
+    expect(result).toMatchObject({
+      status: "ready",
+      contacts: [
+        {
+          candidateKey: "linkedin:/in/saved-person",
+          emails: [{ address: "saved@example.test", status: null }],
+          source: "Contact enrichment",
+        },
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain("else@example.test");
+  });
   it("does not join a provider contact to another role or match by name", async () => {
     const { client, prisma } = contactFixture({ status: "FINISHED", results: [contactRow] });
     client.recruitingCandidate.findMany.mockResolvedValueOnce([
@@ -6664,7 +6762,7 @@ describe("role campaign read", () => {
     const setup = await api.getRecruitingRoleSetup(f.deps, actor, target);
     expect(setup).toEqual({
       ready: true,
-      playbookStage: { stage: "intake", label: "岗位录入", nextStep: null },
+      playbookStage: { stage: "intake", label: "Role intake", nextStep: null },
       attention: null,
       items: [
         {

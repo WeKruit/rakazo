@@ -198,7 +198,7 @@ import {
   deleteEmptySpaceForMember,
   deleteUnreferencedCredentialSecret,
   ensureBoard,
-  ensurePlatformPeopleSearch,
+  ensurePlatformServices,
   ensureRecruitingWorkspace,
   findDefaultModelCredential,
   findDefaultVoiceCredential,
@@ -633,7 +633,9 @@ export interface RouterDeps {
   cloudAgent?: CloudAgentConnection | null;
   prisma: PrismaClient;
   /** Narrow system capability for membership-checked creation across source/target Spaces. */
-  createSpaceForMember?: (input: Parameters<typeof createSpaceForMember>[1]) => ReturnType<typeof createSpaceForMember>;
+  createSpaceForMember?: (
+    input: Parameters<typeof createSpaceForMember>[1],
+  ) => ReturnType<typeof createSpaceForMember>;
   events: ThreadEvents;
   boardEvents: BoardEvents;
   ticketChanges: TicketChangeNotifier;
@@ -1166,7 +1168,9 @@ export function createRouter(deps: RouterDeps) {
       create: authed.spaces.create.handler(async ({ context, input }) => {
         let space: { id: string; name: string };
         try {
-          space = await (deps.createSpaceForMember ?? ((input) => createSpaceForMember(deps.prisma, input)))({
+          space = await (
+            deps.createSpaceForMember ?? ((input) => createSpaceForMember(deps.prisma, input))
+          )({
             currentSpaceId: context.actor.spaceId,
             userId: context.actor.userId,
             name: input.name,
@@ -1348,8 +1352,8 @@ export function createRouter(deps: RouterDeps) {
         });
       // Additive setup for older crews; a failure must not block sign-in.
       if (!input.offset)
-        await ensurePlatformPeopleSearch(deps.prisma, actor).catch((error: unknown) =>
-          getLogger().error("platform people search setup failed", error),
+        await ensurePlatformServices(deps.prisma, actor).catch((error: unknown) =>
+          getLogger().error("platform service setup failed", error),
         );
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
       if (!input.offset) void prewarmTeamComputer(deps, actor).catch(() => undefined);
@@ -2685,6 +2689,10 @@ export function createRouter(deps: RouterDeps) {
           totalMs: Math.round(finishedAt - startedAt),
         });
         return result;
+      }),
+      reportTiming: authed.threads.reportTiming.handler(({ context, input }) => {
+        getLogger().info("client.turn.timing", { spaceId: context.actor.spaceId, ...input });
+        return { ok: true as const };
       }),
       react: authed.threads.react.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);

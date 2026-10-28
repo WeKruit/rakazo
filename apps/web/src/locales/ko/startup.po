@@ -355,10 +355,6 @@ msgstr "첨부 파일"
 msgid "Authentication failed."
 msgstr "인증에 실패했습니다."
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Autumn rank"
-msgstr ""
-
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr ""
@@ -2852,10 +2848,13 @@ msgstr "소프트웨어 업데이트"
 msgid "Some saved contact details could not be displayed."
 msgstr ""
 
+#: src/pages/shell/useShellController.tsx
+msgid "Something went wrong."
+msgstr "문제가 발생했습니다."
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
-#: src/pages/shell/useShellController.tsx
 msgid "Something went wrong. Try again."
 msgstr "문제가 발생했습니다. 다시 시도하세요."
 
@@ -3099,6 +3098,7 @@ msgstr ""
 msgid "Transcript"
 msgstr "대화 기록"
 
+#: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "다시 시도"

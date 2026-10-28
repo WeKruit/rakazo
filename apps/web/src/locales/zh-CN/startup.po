@@ -355,10 +355,6 @@ msgstr "附件"
 msgid "Authentication failed."
 msgstr "身份验证失败。"
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Autumn rank"
-msgstr "Autumn 排名"
-
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr "可用时间"
@@ -2852,10 +2848,13 @@ msgstr "软件更新"
 msgid "Some saved contact details could not be displayed."
 msgstr "部分已保存的联系方式无法显示。"
 
+#: src/pages/shell/useShellController.tsx
+msgid "Something went wrong."
+msgstr "出了点问题。"
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
-#: src/pages/shell/useShellController.tsx
 msgid "Something went wrong. Try again."
 msgstr "出了点问题。请重试。"
 
@@ -3099,6 +3098,7 @@ msgstr "总工作年限"
 msgid "Transcript"
 msgstr "文字记录"
 
+#: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "重试"

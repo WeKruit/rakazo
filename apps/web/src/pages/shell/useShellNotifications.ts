@@ -26,6 +26,7 @@ export function useShellNotifications({
   manuallyUnread: RefObject<Set<string>>;
 }) {
   const notifiedBrowserEvents = useRef(new Set<string>());
+  const browserNotificationShownAt = useRef(new Map<string, number>());
   const pendingBrowserNotifications = useRef(new Map<string, PendingBrowserNotification>());
   const updateBotUnread = useCallback((id: string, unread: boolean) => {
     setBots((current) => {
@@ -81,6 +82,7 @@ export function useShellNotifications({
         permission: Notification.permission,
         notifiedEventIds: notifiedBrowserEvents.current,
         show: (title, body, tag) => new Notification(title, { body, tag }),
+        shownAt: browserNotificationShownAt.current,
       },
     );
     return result !== "pending";

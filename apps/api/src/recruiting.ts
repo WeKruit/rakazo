@@ -141,6 +141,8 @@ const NATIVE_INSTANTLY_READS = [
   "native_instantly_get_email",
 ];
 const isNativeInstantlyRead = (tool: string) => NATIVE_INSTANTLY_READS.includes(tool);
+/** The contact lookup that runs several providers; its receipt lists each person's emails. */
+const FIND_EMAILS = "native_find_emails";
 
 function correspondenceProvider(
   endpoint: string | null,
@@ -178,7 +180,7 @@ function correspondenceProvider(
     if (address === "https://mcp.cal.com/mcp")
       return { kind: "cal", tools: ["get_bookings", "get_booking", "get_availability"] };
   } else if (address === "https://mcp.fullenrich.com/mcp") {
-    return { kind: "fullenrich", tools: ["get_enrichment_results"] };
+    return { kind: "fullenrich", tools: ["get_enrichment_results", FIND_EMAILS] };
   }
   return null;
 }
@@ -201,7 +203,11 @@ function correspondenceAllows(
   assignment: { allowAllTools: boolean; allowedTools: unknown },
   tool: string,
 ) {
-  const assigned = isNativeInstantlyRead(tool) ? "list_emails" : tool;
+  const assigned = isNativeInstantlyRead(tool)
+    ? "list_emails"
+    : tool === FIND_EMAILS
+      ? "enrich_bulk"
+      : tool;
   return (
     assignment.allowAllTools ||
     (Array.isArray(assignment.allowedTools) && assignment.allowedTools.includes(assigned))
@@ -825,7 +831,7 @@ export async function getRecruitingRoleSetup(
         key: "campaign",
         state: "missing",
         label: "First email not prepared yet; prepared automatically on first outreach",
-        action: { kind: "ask_agent", prompt: "为这个岗位准备第一封邮件" },
+        action: { kind: "ask_agent", prompt: "Prepare the first email for this role" },
       });
       const email = await lastUsedMailbox(deps.prisma, actor.spaceId, campaign.serverId);
       items.push(
@@ -851,7 +857,7 @@ export async function getRecruitingRoleSetup(
             key: "crm",
             state: "missing",
             label: "Role record not linked yet",
-            action: { kind: "ask_agent", prompt: "为这个岗位准备候选人名单" },
+            action: { kind: "ask_agent", prompt: "Prepare the candidate list for this role" },
           },
     );
     const count = campaign.leads.length;
@@ -865,7 +871,10 @@ export async function getRecruitingRoleSetup(
               state: "missing",
               label: "No recipients for the first email yet",
               detail: { count },
-              action: { kind: "ask_agent", prompt: "把入围候选人加入第一封邮件的收件人" },
+              action: {
+                kind: "ask_agent",
+                prompt: "Add the shortlisted candidates as recipients of the first email",
+              },
             },
     );
     const ready = (key: string) => items.some((item) => item.key === key && item.state === "ready");
@@ -1339,7 +1348,7 @@ export async function getRecruitingCorrespondence(
               "search_events",
               "suggest_time",
             ]
-          : ["get_enrichment_results"];
+          : ["get_enrichment_results", FIND_EMAILS];
     const querySources = sourceRows.filter(
       (source) =>
         source.enabled &&
@@ -1686,6 +1695,24 @@ export async function getRecruitingCorrespondence(
         };
     }
     const contactKeys = new Set<string>();
+    // Only check identities present in a retained provider result, 200 keys per query. Reading
+    // every key in the role makes the contact view grow with the whole candidate pool.
+    const roleCandidateKeys = async (observedKeys: string[]) => {
+      const keys = new Set<string>();
+      for (let offset = 0; offset < observedKeys.length; offset += 200) {
+        const candidates = await prisma.recruitingCandidate.findMany({
+          where: {
+            roleId: workspace.role.id,
+            role: { spaceId: actor.spaceId, userId: actor.userId },
+            candidateKey: { in: observedKeys.slice(offset, offset + 200) },
+          },
+          select: { candidateKey: true },
+          take: 200,
+        });
+        for (const candidate of candidates) keys.add(candidate.candidateKey);
+      }
+      return keys;
+    };
     let parsed = false;
     const emails = new Map<string, RecruitingCorrespondence["emails"][number]>();
     const instantlyObservedAt = new Map<string, Date>();
@@ -1957,6 +1984,49 @@ export async function getRecruitingCorrespondence(
         });
         continue;
       }
+      if (provider.kind === "fullenrich" && body && call.route.toolName === FIND_EMAILS) {
+        if (!Array.isArray(body.people)) {
+          checkIssue(source.id, effect.updatedAt);
+          continue;
+        }
+        parsed = true;
+        const candidateKeys = await roleCandidateKeys([
+          ...new Set(
+            body.people.flatMap((row: unknown) => {
+              const url = correspondenceRecord(row)?.linkedin_url;
+              const identity = typeof url === "string" ? recruitingCalibrationIdentity(url) : null;
+              return identity ? [`linkedin:${identity}`] : [];
+            }),
+          ),
+        ]);
+        for (const row of body.people) {
+          const entry = correspondenceRecord(row);
+          const linkedinUrl = entry?.linkedin_url;
+          const identity =
+            typeof linkedinUrl === "string" ? recruitingCalibrationIdentity(linkedinUrl) : null;
+          if (!identity || !Array.isArray(entry?.emails) || !entry.emails.length) continue;
+          const candidateKey = `linkedin:${identity}`;
+          if (!candidateKeys.has(candidateKey) || contactKeys.has(candidateKey)) continue;
+          const contact = RecruitingCorrespondenceSchema.shape.contacts.element.safeParse({
+            candidateKey,
+            linkedinUrl,
+            emails: entry.emails.map((email) => {
+              const value = correspondenceRecord(email);
+              return { address: value?.address, status: value?.status ?? null };
+            }),
+            phones: [],
+            source: source.name,
+            checkedAt: effect.updatedAt.toISOString(),
+          });
+          if (!contact.success) {
+            checkIssue(source.id, effect.updatedAt);
+            continue;
+          }
+          contactKeys.add(candidateKey);
+          output.contacts.push(contact.data);
+        }
+        continue;
+      }
       if (provider.kind === "fullenrich" && body) {
         if (typeof call.args.enrichment_id !== "string" || !call.args.enrichment_id.trim()) {
           checkIssue(source.id, effect.updatedAt);
@@ -1971,8 +2041,6 @@ export async function getRecruitingCorrespondence(
           continue;
         }
         parsed = true;
-        // Only check identities present in this retained provider result. Reading every key in
-        // the role makes the contact view grow with the whole candidate pool.
         const observedKeys = [
           ...new Set(
             body.results.flatMap((row: unknown) => {
@@ -1983,19 +2051,7 @@ export async function getRecruitingCorrespondence(
             }),
           ),
         ];
-        const candidateKeys = new Set<string>();
-        for (let offset = 0; offset < observedKeys.length; offset += 200) {
-          const candidates = await prisma.recruitingCandidate.findMany({
-            where: {
-              roleId: workspace.role.id,
-              role: { spaceId: actor.spaceId, userId: actor.userId },
-              candidateKey: { in: observedKeys.slice(offset, offset + 200) },
-            },
-            select: { candidateKey: true },
-            take: 200,
-          });
-          for (const candidate of candidates) candidateKeys.add(candidate.candidateKey);
-        }
+        const candidateKeys = await roleCandidateKeys(observedKeys);
         for (const row of body.results) {
           const entry = correspondenceRecord(row);
           const input = correspondenceRecord(entry?.input);

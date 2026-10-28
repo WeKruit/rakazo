@@ -151,27 +151,35 @@ async function grant(
 }
 function slots(row: Awaited<ReturnType<typeof effect>>) {
   const { route, args } = call(row.request);
-  if (
-    route.toolName !== "get_availability" ||
-    args.format !== "range" ||
-    !Number.isSafeInteger(args.duration) ||
-    Number(args.duration) <= 0
-  )
-    return [];
+  if (route.toolName !== "get_availability" || args.format !== "range") return [];
   const body = successful(row);
   if (body.status !== "success" || !obj(body.data)) return [];
+  // Slots read in a local zone carry an offset; plans keep UTC. A fixed-length event type is read
+  // without a duration, so the slot's own interval is its length.
+  const utc = (value: unknown) =>
+    typeof value === "string" &&
+    /(?:Z|[+-]\d\d:\d\d)$/.test(value) &&
+    Number.isFinite(Date.parse(value))
+      ? value.endsWith("Z")
+        ? value
+        : new Date(value).toISOString()
+      : undefined;
   return Object.values(obj(body.data)!)
     .flatMap((value) => (Array.isArray(value) ? value : []))
     .flatMap((value) => {
       const slot = obj(value);
+      const start = utc(slot?.start);
+      const end = utc(slot?.end);
       const parsed = RecruitingSchedulingSlotSchema.safeParse({
         sourceId: route.resourceId,
         sourceRevision: route.resourceRevision,
         eventTypeId: args.eventTypeId,
         availabilityEffectId: row.id,
-        start: slot?.start,
-        end: slot?.end,
-        lengthInMinutes: args.duration,
+        start,
+        end,
+        lengthInMinutes:
+          args.duration ??
+          (start && end ? (Date.parse(end) - Date.parse(start)) / 60_000 : undefined),
       });
       return parsed.success &&
         typeof args.start === "string" &&

@@ -186,6 +186,7 @@ const sidebarPage = z.object({
   archived: z.boolean().default(false),
 });
 
+const TurnMs = z.number().int().nonnegative().max(86_400_000);
 const botId = z.object({ botId: Id });
 const groupId = z.object({ groupId: Id });
 const recruitingWorkspace = z.strictObject({
@@ -555,6 +556,19 @@ export const appContract = {
         runIds: z.array(Id).optional(),
       }),
     ),
+    /** Client-measured milliseconds from Send for one turn; logged only. */
+    reportTiming: oc
+      .input(
+        z.object({
+          runId: Id,
+          echoMs: TurnMs.optional(),
+          acceptedMs: TurnMs.optional(),
+          serverEchoMs: TurnMs.optional(),
+          firstTokenMs: TurnMs.optional(),
+          finalMs: TurnMs.optional(),
+        }),
+      )
+      .output(z.object({ ok: z.literal(true) })),
     react: oc
       .input(
         threadTarget.safeExtend({
@@ -729,32 +743,30 @@ export const appContract = {
       ]),
     ),
     listCandidates: oc.input(ListRecruitingCandidatesInput).output(ListRecruitingCandidatesOutput),
-    readView: oc
-      .input(ReadRecruitingViewInput)
-      .output(
-        z.discriminatedUnion("kind", [
-          z.strictObject({
-            kind: z.literal("candidates"),
-            workspace: recruitingWorkspace
-              .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
-              .nullable(),
-            data: ListRecruitingCandidatesOutput.nullable(),
-          }),
-          z.strictObject({
-            kind: z.literal("research"),
-            workspace: recruitingWorkspace
-              .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
-              .nullable(),
-            data: z
-              .strictObject({
-                tasks: z.array(RecruitingResearchTaskSchema).max(200),
-                actions: z.array(RecruitingResearchActionSchema).max(200),
-                observations: z.array(RecruitingResearchSavedObservationSchema).max(200),
-              })
-              .nullable(),
-          }),
-        ]),
-      ),
+    readView: oc.input(ReadRecruitingViewInput).output(
+      z.discriminatedUnion("kind", [
+        z.strictObject({
+          kind: z.literal("candidates"),
+          workspace: recruitingWorkspace
+            .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
+            .nullable(),
+          data: ListRecruitingCandidatesOutput.nullable(),
+        }),
+        z.strictObject({
+          kind: z.literal("research"),
+          workspace: recruitingWorkspace
+            .extend({ crmTarget: ListRecruitingCandidatesOutput.shape.crmTarget })
+            .nullable(),
+          data: z
+            .strictObject({
+              tasks: z.array(RecruitingResearchTaskSchema).max(200),
+              actions: z.array(RecruitingResearchActionSchema).max(200),
+              observations: z.array(RecruitingResearchSavedObservationSchema).max(200),
+            })
+            .nullable(),
+        }),
+      ]),
+    ),
 
     roleCandidates: oc
       .input(threadTarget.safeExtend(RecruitingRoleCandidatesInputFields))

@@ -39,6 +39,8 @@ function fixture(
     source?: MessageBlock[];
     /** The run's last recruiting_feedback call was rejected with this error. */
     feedbackError?: string;
+    /** People were saved after the round was accepted. */
+    scaledPage?: boolean;
   } = {},
 ) {
   const sendUserMessage = vi.fn(async () => ({
@@ -66,12 +68,13 @@ function fixture(
       },
       recruitingCandidatePage: {
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
+        findFirst: vi.fn(async () => (options.scaledPage ? { effectId: "page-9" } : null)),
       },
       recruitingCalibrationRound: {
         findFirst: vi.fn(async (args: { where: { approvedAt?: unknown } }) =>
           args.where.approvedAt
             ? options.acceptedRound
-              ? { id: "round-0" }
+              ? { approvedAt: new Date("2026-10-27T17:00:00Z") }
               : null
             : (options.round ?? null),
         ),
@@ -156,7 +159,7 @@ describe("guardRecruitingTurnEnd", () => {
         trigger: "follow_up",
         internal: true,
         clientNonce: "autocontinue:run-1:1",
-        prompt: expect.stringContaining("继续下一步："),
+        prompt: expect.stringContaining("Continue with the next step: "),
       }),
     );
     expect(f.enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
@@ -268,6 +271,25 @@ describe("guardRecruitingTurnEnd", () => {
     expect(text).toContain("10. **Person 9** · Warehouse Manager · Example Co · Atlanta");
   });
 
+  it("links each name to the LinkedIn profile its key names", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "linkedin:/in/runqi-guo", name: "Runqi Guo", company: "Pattern" },
+        ]),
+      },
+    } as never;
+    expect(
+      await recruitingRoundListText(prisma, {
+        threadId: "thread-1",
+        spaceId: "space-1",
+        roleId: "role-1",
+        candidateKeys: ["linkedin:/in/runqi-guo"],
+      }),
+    ).toContain("1. **[Runqi Guo](https://www.linkedin.com/in/runqi-guo)** · Pattern");
+  });
+
   it("lists only the saved people of a list still being written", async () => {
     const prisma = {
       externalEffect: { findMany: vi.fn(async () => []) },
@@ -290,6 +312,52 @@ describe("guardRecruitingTurnEnd", () => {
         knownOnly: true,
       }),
     ).toBe("");
+  });
+
+  it("shows the last person of a list being written once the key is whole, counting who is shown", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "linkedin:/in/ana", name: "Ana" },
+          { candidateKey: "linkedin:/in/bo", name: "Bo" },
+          { candidateKey: "linkedin:/in/bo-lee", name: "Bo Lee" },
+        ]),
+      },
+    } as never;
+    const input = { threadId: "thread-1", spaceId: "space-1", roleId: "role-1", knownOnly: true };
+    const whole = await recruitingRoundListText(prisma, {
+      ...input,
+      candidateKeys: ["linkedin:/in/bo-lee", "linkedin:/in/ana"],
+      lastMayBeCut: true,
+    });
+    expect(whole).toContain("2 people this round");
+    expect(whole).toContain("2. **[Ana](https://www.linkedin.com/in/ana)**");
+    // "bo" may still become "bo-lee": not shown yet.
+    const cut = await recruitingRoundListText(prisma, {
+      ...input,
+      candidateKeys: ["linkedin:/in/ana", "linkedin:/in/bo"],
+      lastMayBeCut: true,
+    });
+    expect(cut).toContain("1 person this round");
+    expect(cut).not.toContain("Bo");
+  });
+
+  it("names the must-haves a person's row does not show", async () => {
+    const prisma = {
+      externalEffect: { findMany: vi.fn(async () => []) },
+      recruitingCandidateOccurrence: {
+        findMany: vi.fn(async () => [{ candidateKey: "person-1", name: "Person 1" }]),
+      },
+    } as never;
+    const text = await recruitingRoundListText(prisma, {
+      threadId: "thread-1",
+      spaceId: "space-1",
+      roleId: "role-1",
+      candidateKeys: ["person-1"],
+      unverified: { "person-1": "初创公司经历" },
+    });
+    expect(text).toContain("1. **Person 1**\n   Not verified: 初创公司经历");
   });
 
   it.each([
@@ -397,7 +465,7 @@ describe("guardRecruitingTurnEnd", () => {
     });
     expect(result).toMatchObject({ action: "continued", count: 1 });
     expect(f.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining("「恢复后我会先提交完整简报") }),
+      expect.objectContaining({ prompt: expect.stringContaining('"恢复后我会先提交完整简报') }),
     );
     // Without a promise, a stage the recruiter owns still ends quietly.
     const quiet = fixture({ stage: "interview" });
@@ -439,7 +507,7 @@ describe("guardRecruitingTurnEnd", () => {
       max: 3,
     });
     expect(early.sendUserMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining("最后一次") }),
+      expect.objectContaining({ prompt: expect.stringContaining("last automatic continuation") }),
     );
   });
 
@@ -456,7 +524,9 @@ describe("guardRecruitingTurnEnd", () => {
     });
     expect(result).toMatchObject({ action: "capped", count: 3 });
     expect(f.sendUserMessage).not.toHaveBeenCalled();
-    expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("完成岗位信息"));
+    expect(f.postAssistant).toHaveBeenCalledWith(
+      expect.stringContaining("Complete the role details"),
+    );
   });
 
   it("says what was saved when the cap is reached after results were saved", async () => {
@@ -471,8 +541,10 @@ describe("guardRecruitingTurnEnd", () => {
       max: 3,
     });
     expect(result).toMatchObject({ action: "capped" });
-    expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("已保存 4 位候选人"));
-    expect(f.postAssistant).not.toHaveBeenCalledWith(expect.stringContaining("没有产出"));
+    expect(f.postAssistant).toHaveBeenCalledWith(expect.stringContaining("4 candidates are saved"));
+    expect(f.postAssistant).not.toHaveBeenCalledWith(
+      expect.stringContaining("did not produce a result"),
+    );
   });
 
   it("is disabled by RAKAZO_AUTOCONTINUE_MAX=0 and skips non-human triggers", async () => {
@@ -539,10 +611,12 @@ describe("guardRecruitingTurnEnd", () => {
     const failed = fixture({ stage: "feedback", feedbackError: "Not recorded: operation" });
     await expect(
       guardRecruitingTurnEnd(failed.deps, { ...input, postAssistant: failed.postAssistant }),
-    ).resolves.toMatchObject({ action: "continued", label: "保存反馈" });
+    ).resolves.toMatchObject({ action: "continued", label: "Save feedback" });
     expect(failed.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: expect.stringMatching(/没有成功[\s\S]*Not recorded: operation[\s\S]*不要说已记录/),
+        prompt: expect.stringMatching(
+          /just failed[\s\S]*Not recorded: operation[\s\S]*Do not say it is recorded/,
+        ),
       }),
     );
     // One retry per recruiter message.
@@ -553,7 +627,7 @@ describe("guardRecruitingTurnEnd", () => {
     });
     await guardRecruitingTurnEnd(again.deps, { ...input, postAssistant: again.postAssistant });
     expect(again.sendUserMessage).not.toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.stringContaining("没有成功") }),
+      expect.objectContaining({ prompt: expect.stringContaining("just failed") }),
     );
   });
 
@@ -587,11 +661,11 @@ describe("guardRecruitingTurnEnd", () => {
       postAssistant: promisedFix.postAssistant,
     });
     expect(promisedFix.sendUserMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ prompt: expect.not.stringContaining("规模化搜寻") }),
+      expect.objectContaining({ prompt: expect.not.stringContaining("Scaled search") }),
     );
 
     // The coordinator's own continuation still gets the step.
-    const own = fixture({ stage: "scale", savedCandidates: 232 });
+    const own = fixture({ stage: "scale", savedCandidates: 40 });
     await expect(
       guardRecruitingTurnEnd(own.deps, {
         run: { ...run, trigger: "follow_up", sourceMessageId: "nudge-1" },
@@ -658,7 +732,11 @@ describe("guardRecruitingTurnEnd", () => {
       pendingApproval: false,
       postAssistant: f.postAssistant,
     });
-    expect(result).toMatchObject({ action: "continued", stage: "feedback", label: "收集校准反馈" });
+    expect(result).toMatchObject({
+      action: "continued",
+      stage: "feedback",
+      label: "Collect calibration feedback",
+    });
   });
 
   it("presents the first ten from saved people before asking for feedback", async () => {
@@ -676,7 +754,7 @@ describe("guardRecruitingTurnEnd", () => {
       expect(result).toMatchObject({
         action: "continued",
         stage: "calibration_10",
-        label: "展示 10 人校准名单",
+        label: "Show the 10-person calibration list",
       });
     }
   });
@@ -697,7 +775,7 @@ describe("guardRecruitingTurnEnd", () => {
 });
 
 describe("guardRecruitingRoleCreate", () => {
-  function roleFixture(result: unknown, priorAutoContinues = 0) {
+  function roleFixture(result: unknown, priorAutoContinues = 0, toolEvents: unknown[] = []) {
     const sendUserMessage = vi.fn(async () => ({ messageId: "m-2", seq: 9, runId: "run-2" }));
     const enqueue = vi.fn(async () => undefined);
     const recent = Array.from({ length: priorAutoContinues }, (_, i) => ({
@@ -708,6 +786,7 @@ describe("guardRecruitingRoleCreate", () => {
       prisma: {
         message: { findMany: vi.fn(async () => recent) },
         externalEffect: { findFirst: vi.fn(async () => (result ? { result } : null)) },
+        event: { findMany: vi.fn(async () => toolEvents.map((payload) => ({ payload }))) },
       },
       events: { sendUserMessage },
       jobs: { enqueue },
@@ -743,7 +822,7 @@ describe("guardRecruitingRoleCreate", () => {
     expect(result).toMatchObject({ action: "continued", runId: "run-2" });
     expect(f.sendUserMessage).toHaveBeenCalledWith(
       expect.objectContaining({
-        prompt: expect.stringContaining("「我会在修复保存问题后继续。」"),
+        prompt: expect.stringContaining('"我会在修复保存问题后继续。"'),
       }),
     );
     const again = roleFixture(null, 1);
@@ -755,13 +834,48 @@ describe("guardRecruitingRoleCreate", () => {
     ).toMatchObject({ action: "ended" });
   });
 
+  // The 2026-10-27 16:30 LA attachment role: one create lost to a question card's pause, one
+  // refused by the tool's format check, then an apology with no question and no role.
+  it("pushes when the turn ends on a failure report, even with no refused save on record", async () => {
+    const f = roleFixture(null);
+    const result = await guardRecruitingRoleCreate(f.deps, {
+      ...input,
+      blocks: [
+        {
+          kind: "text",
+          text: "英语已记录为优先项。搜索已返回人才资料，但岗位尚未成功建立。抱歉，当前流程卡在岗位记录这一步。",
+        },
+      ],
+    });
+    expect(result).toMatchObject({ action: "continued", label: "Save the role" });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("until ten are shown") }),
+    );
+  });
+
+  it("pushes with the reason when the save was refused before reaching the server", async () => {
+    const f = roleFixture(null, 0, [
+      { name: "recruiting_role" },
+      { name: "recruiting_role", error: "sourceRefs.0.anchor: must match exactly one schema" },
+    ]);
+    const result = await guardRecruitingRoleCreate(f.deps, {
+      ...input,
+      blocks: [{ kind: "text", text: "已记录。" }],
+    });
+    expect(result).toMatchObject({ action: "continued", label: "Save the role" });
+    expect(f.sendUserMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ prompt: expect.stringContaining("must match exactly one schema") }),
+    );
+  });
+
   it("does not push after a saved create, a question, or a push it already made", async () => {
     const refused = { error: "refused" };
-    expect(await guardRecruitingRoleCreate(roleFixture(null).deps, input)).toMatchObject({
+    const done = { ...input, blocks: [{ kind: "text", text: "好的，已记下。" }] as MessageBlock[] };
+    expect(await guardRecruitingRoleCreate(roleFixture(null).deps, done)).toMatchObject({
       action: "ended",
     });
     expect(
-      await guardRecruitingRoleCreate(roleFixture({ status: "saved" }).deps, input),
+      await guardRecruitingRoleCreate(roleFixture({ status: "saved" }).deps, done),
     ).toMatchObject({ action: "ended" });
     const asked = { ...input, blocks: [{ kind: "ask", text: "地点？", status: "pending" }] };
     expect(
@@ -819,5 +933,30 @@ describe("answeredAsk", () => {
     expect(answeredAsk("这个岗位的地点要求如何设定？", answers)).toBeUndefined();
     expect(answeredAsk("这个岗位的语言要求怎么定？", answers)).toBeUndefined();
     expect(answeredAsk("Why?", answers)).toBeUndefined();
+  });
+
+  // 2026-10-27: a scale turn on a role that already held 137 people was pushed three times.
+  it("treats scale as delivered once people were saved after acceptance or the pool holds 100", async () => {
+    const reply: MessageBlock[] = [
+      { kind: "text", text: "结果中已有137位候选人，超过本轮100人的目标，无需追加搜索。" },
+    ];
+    for (const options of [
+      { savedCandidates: 137 },
+      { savedCandidates: 60, acceptedRound: true, scaledPage: true },
+    ]) {
+      const met = fixture({ stage: "scale", ...options });
+      await expect(
+        guardRecruitingTurnEnd(met.deps, {
+          run: { ...run, trigger: "follow_up", sourceMessageId: "nudge-1" },
+          roleId: "role-1",
+          blocks: reply,
+          handedOff: false,
+          pendingApproval: false,
+          postAssistant: met.postAssistant,
+        }),
+      ).resolves.toMatchObject({ action: "ended" });
+      expect(met.sendUserMessage).not.toHaveBeenCalled();
+      expect(met.postAssistant).not.toHaveBeenCalled();
+    }
   });
 });

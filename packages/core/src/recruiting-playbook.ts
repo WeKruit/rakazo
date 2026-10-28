@@ -23,12 +23,12 @@ export function validateRecruitingBrief(
       sources.set(source.id, source);
     }
   const requireSources = (ids: readonly string[], location: string) => {
-    const invalid = ids.find(
-      (id) => sources.get(id)?.readState !== "read" || !sources.get(id)?.quote,
-    );
+    // A read source without a quote still locates the fact (the server drops a quote it cannot
+    // match rather than refusing the save), so it counts as a citation.
+    const invalid = ids.find((id) => sources.get(id)?.readState !== "read");
     if (!ids.length || invalid !== undefined)
       throw new RecruitingPlaybookValidationError(
-        `${location}: ${!ids.length ? "add at least one source ID" : `source ID ${JSON.stringify(invalid)} is missing, unread or has no quote`}. Cite a full read source reference with an exact quote; user_instruction must cite the actual human-message reference.`,
+        `${location}: ${!ids.length ? "add at least one source ID" : `source ID ${JSON.stringify(invalid)} is missing or unread`}. Cite a read source reference; user_instruction must cite the actual human-message reference.`,
       );
   };
   if (
@@ -278,17 +278,17 @@ export const RECRUITING_PLAYBOOK_STAGES = [
 export type RecruitingPlaybookStage = (typeof RECRUITING_PLAYBOOK_STAGES)[number];
 
 export const recruitingPlaybookStageLabels = {
-  intake: "岗位录入",
-  calibration_10: "校准搜寻（10 人）",
-  feedback: "校准反馈",
-  scale: "规模化搜寻",
-  enrichment: "联系方式补全",
-  outreach: "外联",
-  replies: "候选人回复",
-  screening: "初筛",
-  submission: "推荐提交",
-  interview: "面试",
-  closed: "已关闭",
+  intake: "Role intake",
+  calibration_10: "Calibration search (10 people)",
+  feedback: "Calibration feedback",
+  scale: "Scaled search",
+  enrichment: "Contact lookup",
+  outreach: "Outreach",
+  replies: "Candidate replies",
+  screening: "Screening",
+  submission: "Submission",
+  interview: "Interview",
+  closed: "Closed",
 } as const satisfies Record<RecruitingPlaybookStage, string>;
 
 export function isRecruitingPlaybookStage(value: unknown): value is RecruitingPlaybookStage {
@@ -317,11 +317,15 @@ export type RecruitingPlaybookStep = {
   stage: RecruitingPlaybookStage;
   label: string;
   prompt: string;
+  /** Set when the step exists only to ask the recruiter's open clarifications. */
+  openClarifications?: number;
 };
 
 const CALIBRATION_TARGET = 10;
 const NEXT_STEP_CARD =
-  "展示完名单后，用一张问题卡（ask_user）主动给出下一步选择，例如「找 100 个类似的人」「先准备邮件活动」「再调一轮」。";
+  'After the list is shown, use one question card (ask_user) to offer the next step, for example "Find 100 similar people", "Draft the first email" or "Run another round". ';
+const ONLY_OWN_LIST =
+  "If the recruiter said not to look outside and to use only their own list, do not search: use only the imported people, state the actual count, and do not pad to 10.";
 
 /**
  * What the agent should do next for a role in `stage`. Null means the stage has no
@@ -335,64 +339,70 @@ export function nextPlaybookStep(
   if (open > 0 && (stage === "intake" || stage === "calibration_10"))
     return {
       stage,
-      label: `还有 ${open} 个待确认问题`,
+      label: `${open} open ${open === 1 ? "question" : "questions"} to confirm`,
       prompt:
-        "把剩余的待确认问题一次性列出来向用户提问（一张卡片），不要只保存答案就结束。问题没问完不能停。",
+        "Ask the recruiter all remaining open questions at once on one card. Do not end after only saving answers. Do not stop until every question has been asked.",
+      openClarifications: open,
     };
   switch (stage) {
     case "intake":
       return facts.hasBrief && facts.title
         ? {
             stage,
-            label: "开始校准搜寻",
-            prompt: `岗位已保存。立即在本轮用平台人才搜索做校准快速搜寻（同一步发出 web_search_advanced_exa 四条人才搜索，每条回来自动存进结果 → 选 ${CALIBRATION_TARGET} 人 → calibration_round），直接列出名单，不要先发进度消息。招聘者说过不要去外部找人、只用自己的名单时，不要搜索：只用已导入的人，如实说明人数，不要凑满 10 人。`,
+            label: "Start the calibration search",
+            prompt: `The role is saved. In this turn, run the calibration quick search with the platform people search now (issue four web_search_advanced_exa people searches in the same step; each result is saved automatically → pick ${CALIBRATION_TARGET} people → calibration_round), and list them directly without a progress message first. ${ONLY_OWN_LIST}`,
           }
         : {
             stage,
-            label: "完成岗位信息",
+            label: "Complete the role details",
             prompt:
-              "还有会改变搜索对象、材料里又没有的信息，就只问下一个问题（一次一个）；没有就在本轮下一步立刻发出校准人才搜索（每条回来自动出现在结果里），然后直接选出 10 人记录本轮，brief 由系统在名单出来后自动保存，不要自己保存或确认。已经有人保存在结果里时不要重新搜索，直接从中选。",
+              "If information that would change who to search for is still missing from the material, ask only the next question (one at a time). Otherwise, in the next step of this turn, issue the calibration people searches right away (each result appears in the results automatically), then pick 10 people and record the round. The system saves the brief after the list appears, so do not save or confirm it yourself. If people are already saved in the results, do not search again; pick from them.",
           };
     case "calibration_10": {
       const remaining = Math.max(0, CALIBRATION_TARGET - facts.savedCandidates);
       return {
         stage,
-        label: remaining ? `校准搜寻（还差 ${remaining} 人）` : "展示 10 人校准名单",
+        label: remaining
+          ? `Calibration search (${remaining} more needed)`
+          : "Show the 10-person calibration list",
         prompt: remaining
-          ? `用人才数据搜索做校准快速搜寻直到保存 ${CALIBRATION_TARGET} 人（当前 ${facts.savedCandidates}），完成后记录本轮（名单会自动列在聊天里）。招聘者说过不要去外部找人、只用自己的名单时，不要搜索：只用已导入的人，如实说明人数，不要凑满 10 人。`
-          : `不要重新搜索：从已保存的人里选 10 位记录为本轮（recruiting_research calibration_round），通过 Results 校准面板展示名单；面板已提供逐人反馈入口，不要另建逐人评分卡。${NEXT_STEP_CARD}允许用户针对任何人、任意子集或整体方向给一次反馈，不要求逐人评分。`,
+          ? `Run the calibration quick search with people data search until ${CALIBRATION_TARGET} people are saved (now ${facts.savedCandidates}), then record the round (the list is posted in chat automatically). ${ONLY_OWN_LIST}`
+          : `Do not search again: pick 10 of the saved people and record them as this round (recruiting_research calibration_round), shown in the Results calibration panel. The panel already has per-person feedback controls, so do not build a separate per-person rating card. ${NEXT_STEP_CARD}Let the recruiter give feedback once on anyone, any subset or the overall direction; do not require a rating for every person.`,
       };
     }
     case "feedback":
       return {
         stage,
-        label: "收集校准反馈",
-        prompt: `${facts.hasBrief ? "" : "brief 还没保存：先用一次 recruiting_role update 把 JD 和招聘者的回答存成 brief（失败就按错误改一次再存，不要重新搜索）。"}先看用户最新一条消息：如果是要找更多或类似的人、扩大搜索或直接开始（例如「找 100 个」「直接找」「不用再确认」，或在下一步卡片上选了找更多），这就是接受本轮：立刻用 recruiting_feedback（target round，operation approve，引用原话）记录，然后按规模化规则在本轮开始扩大搜索，不要再跑校准轮，也不要再要求确认。否则先用 recruiting_feedback 引用原话记下本轮意见（点名的人用 candidate review 加上他们的 key，要找的方向变了用 round scope），再把全部意见合进下一次快速搜索（同一 brief 加上反馈，换一种说法搜索，排除这个岗位已返回过的所有人），save_search 保存后选 10 位全新的人记录为下一轮并说明变化。${NEXT_STEP_CARD}只对个别人的评价不算接受；只要否定了本轮某些人或改了要找的方向，哪怕同时说了「多找…的人」，也是下一轮的反馈，不算接受；没有新反馈时不要重复追问。`,
+        label: "Collect calibration feedback",
+        prompt: `${facts.hasBrief ? "" : "The brief is not saved yet: first save the JD and the recruiter's answers as the brief with one recruiting_role update (if it fails, fix it once from the error and save again; do not search again). "}Read the recruiter's latest message first. If it asks to find more or similar people, widen the search or just start (for example "find 100", "just search", "no need to confirm", or picking find-more on the next-step card), that accepts this round: record it now with recruiting_feedback (target round, operation approve, quoting their words), then start scaling in this turn by the scale rules. Do not run another calibration round or ask for confirmation again. Otherwise, first record this round's feedback with recruiting_feedback, quoting their words (people they named go in candidate review with their keys; a changed search direction goes in round scope). Then fold all feedback into the next quick search (same brief plus the feedback, worded differently, excluding everyone already returned for this role), save_search, pick 10 new people, record them as the next round, and say what changed. ${NEXT_STEP_CARD}Comments on individual people are not acceptance. Rejecting some of this round's people or changing the search direction is feedback for the next round, not acceptance, even if they also say "find more people like …". When there is no new feedback, do not ask again.`,
       };
     case "scale":
       return {
         stage,
-        label: "规模化搜寻",
+        label: "Scaled search",
         prompt:
-          "本轮已获接受，开始扩大搜索：先自己用人才搜索分批扩大，每批同一步并行跑 4 个换说法的 web_search_advanced_exa 人才搜索、下一步 save_search，批与批之间不逐人阅读或排序，直到达到目标人数（默认 100）或一批新增不到 5 人；然后用 message_user 两三句话说明结果里已有多少人、是否还有深度搜索在继续、邮件草稿在准备；最后只转交一次（转交会结束你这一轮，之后的工具调用都会被拒）：人才搜索补不满目标、或需要领英以外的证据时，把剩下的人数交给搜寻同事做深度搜索，带上确认后的 brief、每轮反馈，并排除已返回的人，由搜寻同事开始后再让外联同事起草邮件；否则直接让外联同事按已保存的 brief 起草这个岗位的邮件序列（只是草稿，不导入、不启动、不发送）。",
+          "This round is accepted, so widen the search. First scale up yourself with people search in batches: each batch runs 4 differently worded web_search_advanced_exa people searches in parallel in one step, then save_search in the next step. Do not read or rank people between batches. Continue until the target count (default 100) is reached or a batch adds fewer than 5 new people. Then use message_user to say in two or three sentences how many people are in the results and whether a deep search is still running. Only if people search cannot reach the target, hand off once at the end (a handoff ends your turn, and later tool calls are refused): give the sourcing colleague the remaining count for a deep search, with the confirmed brief and every round's feedback, excluding people already returned. If the target is reached, do not hand off and do not run a deep search. Do not draft emails or hand emails to the outreach colleague unless the recruiter asked.",
       };
     case "enrichment":
       return {
         stage,
-        label: "补全候选人联系方式",
-        prompt: "为入围候选人补全联系方式；完成后汇报可触达人数。",
+        label: "Find candidate contact details",
+        prompt:
+          "Find contact details for the shortlisted candidates, then report how many can be reached.",
       };
     case "outreach":
       return {
         stage,
-        label: "准备外联",
-        prompt: "准备外联序列与名单，向用户请求发送确认。",
+        label: "Prepare outreach",
+        prompt:
+          "Prepare the outreach sequence and recipient list, and ask the recruiter to confirm sending.",
       };
     case "replies":
       return {
         stage,
-        label: "处理候选人回复",
-        prompt: "汇总新回复并给出建议的下一步（约面/跟进/关闭）。",
+        label: "Handle candidate replies",
+        prompt:
+          "Summarize new replies and suggest the next step for each (schedule, follow up or close).",
       };
     case "screening":
     case "submission":
@@ -414,6 +424,9 @@ const LIST_ROW_RE = /^\s*(?:[-*•]|\d+[.)、])\s+\S/gm;
 // Work promised for later in this chat: "我会…", "接下来…", "预计 3 点前…", "恢复后…", "I'll…".
 const PROMISE_RE =
   /我(?:会|将|马上|这就|随后|稍后|再)|接下来|稍后|稍等|请稍候|预计.{0,40}?(?:前|内|完成|给出|展示|汇报)|\bETA\b[^。.]{0,24}\d|恢复后|\bI(?:'|’)ll\b|\bI will\b|\bI(?:'|’)m going to\b|\blet me\b|\bnext,? I\b/i;
+// Work said to be under way: "已开始扩展搜索", "正在查找", "I've started the search".
+const STARTED_RE =
+  /已(?:经)?(?:开始|启动|发起)|正在(?:搜索|查找|寻找|扩展|扩大|检索)|\b(?:I(?:'|’)ve|I have) (?:started|kicked off|launched)\b|\bnow (?:searching|running)\b/i;
 // The recruiter's own move ends the turn: "你确认后我会发送" waits on them, not on the agent.
 const WAITS_ON_RECRUITER_RE =
   /(?:你|您)(?:确认|回复|同意|决定|选择|提供|补充|批准|点击)|请(?:你|您)?确认|确认后|取决于|once you|after you|when you|if you|depends on|after confirmation/i;
@@ -436,6 +449,33 @@ export function turnEndPromise(text: string): string | undefined {
   if (!PROMISE_RE.test(last) || WAITS_ON_RECRUITER_RE.test(last) || TREATMENT_RE.test(last))
     return undefined;
   return last;
+}
+
+/**
+ * The sentence claiming work is under way ("已开始扩展搜索") in a turn that ends without a
+ * question, else undefined. The caller checks whether anything really runs.
+ */
+export function turnEndStarted(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || QUESTION_RE.test(trimmed)) return undefined;
+  return trimmed
+    .split(/(?<=[。！!；;\n]|[.](?=\s|$))/)
+    .map((sentence) => sentence.trim())
+    .find((sentence) => STARTED_RE.test(sentence) && !WAITS_ON_RECRUITER_RE.test(sentence));
+}
+
+// A report that the work failed or is stuck: "抱歉，流程卡在…", "无法保存", "I couldn't…".
+const STUCK_RE =
+  /抱歉|卡在|卡住|失败|未成功|没成功|未能|没能|无法|不能继续|不可用|出错|故障|暂时不能|\bsorry\b|\bunable\b|\bfailed\b|\bcould(?:n['’]t| not)\b|\bcan(?:not|['’]t)\b|\bunavailable\b|\bstuck\b|\berror\b/i;
+
+/**
+ * The text when the turn ends by reporting a failure or blocker instead of a question or a
+ * result, else undefined. Such an ending has not done the work.
+ */
+export function turnEndStuck(text: string): string | undefined {
+  const trimmed = text.trim();
+  if (!trimmed || QUESTION_RE.test(trimmed) || !STUCK_RE.test(trimmed)) return undefined;
+  return trimmed;
 }
 
 /** The final turn's prose, joined. */

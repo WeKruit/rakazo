@@ -129,6 +129,7 @@ import {
   recruiterAskedToSend,
   recruiterConnectBlock,
   recruiterInstructedSend,
+  recruiterQuestionNotInEnglish,
   recruitingBriefConfirmedNextStep,
   recruitingNextStepCard,
   redactSecrets,
@@ -164,11 +165,11 @@ import type {
 import {
   admitRecruitingCrmImport,
   admitRecruitingReply,
+  answerPausedAskWithSteering,
   appendEventInTransaction,
   bindRecruitingSchedulingOperation,
   claimRecruitingCrmImport,
   claimRecruitingReply,
-  claimRecruitingResearchAction,
   claimRecruitingResearchReadEffect,
   completedRunBlocks,
   confirmRecruitingBrief,
@@ -210,14 +211,12 @@ import {
   readNativeReplyEmailProof,
   readRecruitingPlaybookStep,
   recordUsage,
-  recruitingResearchSnapshot,
   resolveRecruitingCampaignLead,
   resolveRecruitingCrmImport,
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
   searchHistory,
-  settleUncertainRecruitingResearchAction,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -447,6 +446,12 @@ import {
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
 import {
+  COMMUTE_MILES,
+  isRegionOnlyLocation,
+  locationOutliers,
+  outsideSearchArea,
+} from "./recruiting-location.js";
+import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
   RecruitingProfileError,
@@ -463,6 +468,7 @@ import {
   schedulingPlanHash,
   schedulingPlanReview,
 } from "./recruiting-scheduling.js";
+import { MIN_CURRENT_ROLE_MONTHS, shortCurrentTenure } from "./recruiting-tenure.js";
 import type { RecruitingResearchCallAdmission } from "./recruiting-tools.js";
 import {
   admitRecruitingResearchCall,
@@ -472,10 +478,10 @@ import {
   importRecruitingCandidateCsv,
   normalizeRecruitingRoleArgs,
   PEOPLE_SEARCH_AUTOSAVE_KEY,
-  prepareRecruitingResearchTool,
   RecruitingCandidateOutputError,
   RecruitingCsvImportError,
   RecruitingPeopleSearchError,
+  repairedRoleSave,
   resolveRecruitingResearchTool,
   saveNativeRecruitingCandidateResults,
   saveRecruitingPeopleSearch,
@@ -558,6 +564,7 @@ import {
   guardRecruitingTurnEnd,
   intakeAnswers,
   recruitingRoundListText,
+  recruitingRoundPeople,
 } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
 import {
@@ -959,10 +966,25 @@ export function shortQuestion(question: string, max = 240): string {
  * slow tools. Its first step runs at low thinking and opens with one line the recruiter sees.
  */
 const HANDOFF_OPENING_NOTE =
-  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in the language they write in, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history.";
+  "A teammate just handed this stage to you, and the recruiter has seen nothing since their last message. Begin your first step with one short sentence to the recruiter, in English, saying what you are doing now for this role or these people, without naming teammates, tools or internal ids, and make your first tool calls in that same step. The handoff note above and the conversation are your brief: read only what your next action still needs instead of re-reading the history.";
+
+/** Intake questions carry the search plan, so the searches start the moment the last one is answered. */
+const PLANNED_SEARCHES_NOTE =
+  "Every clarifying question you ask with ask_user before the first round also carries plannedSearches: the four people-search queries you would run if this answer were the last thing you need, written exactly as you would send them, describing the work rather than the hiring company's own job title and never naming the hiring company, because those queries return mostly its current staff. They run the moment the recruiter answers, so the first people appear right away, and you get their rows with the answer. Always include all four, even when you expect another question to follow. When the recruiter said not to look for people outside their own list, pass plannedSearches: [] and never search.";
+
+const nextStepAlreadyGiven = (reply: string) =>
+  `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round).`;
+
+const ASK_IN_ENGLISH =
+  "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
+
+const PLANNED_SEARCHES_MISSING =
+  "Not asked yet: before the first round every clarifying question carries plannedSearches, four people-search queries, because any answer may be the last one. Ask the same question again with the four plannedSearches, or with plannedSearches: [] when the recruiter said not to look for people outside their own list.";
 
 /** How long the answer turn waits for each planned search before picking without it. */
 const PLANNED_SEARCH_WAIT_MS = 6_000;
+/** With this many new people from the planned searches, the first ten come from them. */
+const PLANNED_POOL_ENOUGH = 30;
 export const PLANNED_SEARCH_LATE = Symbol("planned search still running");
 
 /**
@@ -990,9 +1012,30 @@ export async function settlePlannedSearches<T>(
 const ROLE_LEAD_IN =
   /^(?:新岗位|岗位|职位|招聘|new role|job title|job|role|position|hiring)\s*[:：]/i;
 
+/** Display width, with CJK characters counted twice. */
+const titleWidth = (text: string) =>
+  text.length + (text.match(/[\u3000-\u9fff\uff00-\uffef]/g)?.length ?? 0);
+const TITLE_WIDTH = 60;
+/** The text before the first top-level comma, so a parenthesised 「（亚特兰大，现场办公）」 stays whole. */
+function firstClause(text: string) {
+  let depth = 0;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index] as string;
+    if ("([（【".includes(char)) depth++;
+    else if (")]）】".includes(char)) depth = Math.max(0, depth - 1);
+    else if (
+      depth === 0 &&
+      (char === "，" || char === "、" || (char === "," && text[index + 1] === " "))
+    )
+      return text.slice(0, index);
+  }
+  return text;
+}
+
 /**
- * The title of a JD pasted as a message: its first line, or the line after a lead-in such as
- * 「新岗位：」. Short messages are instructions, not a JD, unless they open with a role lead-in.
+ * The title of a JD pasted as a message: its first line, or the line after a label such as
+ * 「新岗位：」 or "Job title:". A line that runs on into the JD keeps its first sentence, then its
+ * first clause. Short messages are instructions, not a JD, unless they open with a role lead-in.
  */
 export function pastedJobTitle(text: string): string | null {
   const trimmed = text.trim();
@@ -1003,10 +1046,15 @@ export function pastedJobTitle(text: string): string | null {
     .map((line) => line.trim())
     .filter(Boolean);
   const first = lines[0] ?? "";
-  const after = first.replace(/^[^:：]*[:：]\s*/, "");
-  const line = (/[:：]\s*$/.test(first) ? lines[1] : after || first) ?? "";
-  // A one-line JD runs on after the title: keep its first sentence.
-  const title = ledIn ? (line.split(/[。；;]|\.\s/)[0] ?? "") : line;
+  // Only a short label before the colon is a label; "…, Dallas TX. On-site: 3 days…" is the JD.
+  const label = first.match(/^([^:：]*)[:：]\s*/);
+  const labelled =
+    !!label &&
+    (ledIn || (titleWidth(label[1] as string) <= 24 && !/[.,;，。；]/.test(label[1] as string)));
+  const after = labelled ? first.slice((label as RegExpMatchArray)[0].length) : first;
+  let title = ((labelled && !after ? lines[1] : after) ?? "").replace(/^[#*\s]+|[*\s]+$/g, "");
+  if (ledIn || titleWidth(title) > TITLE_WIDTH) title = title.split(/[。；;]|\.\s/)[0] ?? "";
+  if (titleWidth(title) > TITLE_WIDTH) title = firstClause(title);
   return title.replace(/^[#*\s]+|[*\s]+$/g, "").slice(0, 120) || null;
 }
 
@@ -4832,9 +4880,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Before a role's first round the people search is already listed and the turn ends on
         // the next-step card, so the tool catalog would only cost a lookup step. A role built from
         // the recruiter's own list may never have a round, so it keeps the catalog.
+        // A bot with the people search is recruiting, even before a role is linked to the thread.
+        const recruitingSearch = discovered.some((tool) =>
+          tool.name.endsWith("web_search_advanced_exa"),
+        );
         const firstRoundPending =
           Boolean(thread.activeRecruitingRoleId) &&
-          discovered.some((tool) => tool.name.endsWith("web_search_advanced_exa")) &&
+          recruitingSearch &&
           !(await deps.prisma.recruitingCalibrationRound.findFirst({
             where: { roleId: thread.activeRecruitingRoleId ?? "", role: { spaceId: run.spaceId } },
             select: { id: true },
@@ -5156,11 +5208,76 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
         // Set before the first model step when a job link is saved as the thread's role.
         let linkRole: { saving: Promise<unknown>; note: string } | undefined;
-        // After the ten are shown the server saves the brief from the recruiter's intake answers;
-        // the next-step card waits for that save, so the pause never cuts it off.
+        // After the ten are shown the server saves the recruiter's intake answers as the brief, so
+        // the role always has one; the model's own brief save then replaces it. The next-step card
+        // waits for that save, so the pause never cuts it off.
         let briefSaving: Promise<unknown> | undefined;
+        // That save moves the role on a revision the model has not seen; its own brief save, which
+        // replaces the answers-only brief, still names the revision it recorded the round on.
+        let briefBump: { from: number; to: number } | undefined;
         // The round's people go into chat one by one while the model is still naming them; the
         // recorded round then replaces that message with the final list.
+        // show_picks put the first people in chat; the turn owes the recorded ten.
+        let firstPicksShown = false;
+        // People searches this run sent, so a short round can ask once two sets came back short.
+        let peopleSearchesRun = 0;
+        // A recruiter question written in Chinese without the recruiter asking for it goes back once.
+        let askLanguageBounced = false;
+        // New people the searches planned with the last answer returned. Once the first picks come
+        // from them and there are this many, the ten come from them instead of another search.
+        let plannedNewPeople = 0;
+        const plannedFresh = new Set<string>();
+        // Rows of planned searches that returned after the pick started, not yet shown to the model.
+        const lateSearchRows: string[] = [];
+        let plannedEarlyRefusalAt: number | undefined;
+        // People whose location or tenure the run already asked the model about once.
+        const locationAsked = new Set<string>();
+        /**
+         * Picked people whose saved location names only a country or a state, and those whose
+         * location shares no place with where the rest of the picks are.
+         */
+        const locationSlips = async (roleId: string, keys: readonly string[]) => {
+          const rows = await deps.prisma.recruitingCandidateOccurrence.findMany({
+            where: { roleId, candidateKey: { in: [...keys] } },
+            select: { candidateKey: true, name: true, location: true },
+          });
+          const regionOnly = new Map<string, string>();
+          const located = new Map<string, string>();
+          const labels = new Map<string, string>();
+          for (const key of keys) {
+            const seen = rows.filter((row) => row.candidateKey === key);
+            if (!seen.length) continue;
+            const location = seen.find((row) => !isRegionOnlyLocation(row.location))?.location;
+            const shown = seen.find((row) => row.location?.trim())?.location?.trim();
+            labels.set(
+              key,
+              `${seen.find((row) => row.name)?.name ?? key} (${shown || "no location"})`,
+            );
+            if (location) located.set(key, location);
+            else regionOnly.set(key, labels.get(key) as string);
+          }
+          const outliers = new Map(
+            locationOutliers(located).map((key) => [key, labels.get(key) as string]),
+          );
+          return { regionOnly, outliers };
+        };
+        /** Picked people whose profile passage shows every current role started under six months ago. */
+        const newInCurrentRole = async (roleId: string, keys: readonly string[]) => {
+          const people = await recruitingRoundPeople(deps.prisma, {
+            threadId: run.threadId,
+            spaceId: run.spaceId,
+            roleId,
+            candidateKeys: keys,
+          });
+          const newcomers = new Map<string, string>();
+          for (const key of keys) {
+            const person = people.get(key);
+            const months = shortCurrentTenure(person?.snippet);
+            if (months !== null)
+              newcomers.set(key, `${person?.name ?? key} (${months} months in the current role)`);
+          }
+          return newcomers;
+        };
         let roundStream:
           | { callId: string; shown: number; messageId?: string; posting: Promise<unknown> }
           | undefined;
@@ -5198,9 +5315,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             !Array.isArray(call.args.candidateKeys)
           )
             return;
-          // The last key may still be cut mid-word.
+          // The last key may still be cut mid-word; the list leaves it out until it names one person.
           const named = call.args.candidateKeys
-            .slice(0, -1)
             .filter((key): key is string => typeof key === "string")
             .map(savedCandidateKeyForm);
           // A retry after a refused key keeps the people already shown until it lists more.
@@ -5222,6 +5338,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 roleId,
                 candidateKeys: named,
                 knownOnly: true,
+                lastMayBeCut: true,
               });
               if (text) await showRoundList(text);
             })
@@ -5266,12 +5383,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   state: "known",
                   consequential: true,
                 })),
+                // The playbook's default tenure preference, shown so the recruiter can lift it. An
+                // inferred filter may only prefer, so it is worded as the people it prefers.
+                searchFilters: [
+                  {
+                    id: "tenure",
+                    mode: "prefer",
+                    origin: "inferred",
+                    statement: `People in their current role for ${MIN_CURRENT_ROLE_MONTHS} months or more`,
+                  },
+                ],
               },
             },
             `${runId}:brief-after-round`,
-          )) as { error?: unknown } | null;
+          )) as { error?: unknown; workspace?: { role?: { revision?: unknown } } | null } | null;
           if (saved?.error)
             getLogger().warn("brief not saved after the round", { error: saved.error });
+          const to = saved?.workspace?.role?.revision;
+          if (typeof to === "number" && to > role.revision) briefBump = { from: role.revision, to };
         };
         // After this run records a round, its only card is the next-step choice.
         const nextStepCardAfterRound = async () => {
@@ -5288,16 +5417,38 @@ export function createRunExecutor(deps: ExecutorDeps) {
             take: 1,
           });
           if (!round) return undefined;
-          const human = await deps.prisma.message.findFirst({
-            where: { threadId: thread.id, role: "user" },
+          return recruitingNextStepCard();
+        };
+        /** What the recruiter wrote after this run recorded its round, newest message. */
+        const recruiterReplyAfterRound = async () => {
+          const round = await deps.prisma.externalEffect.findFirst({
+            where: {
+              runId,
+              spaceId: run.spaceId,
+              kind: "recruiting_research",
+              status: "completed",
+              request: { path: ["operation"], equals: "calibration_round" },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { createdAt: true },
+          });
+          if (!round) return undefined;
+          const reply = await deps.prisma.message.findFirst({
+            where: {
+              threadId: thread.id,
+              role: "user",
+              botId: null,
+              createdAt: { gt: round.createdAt },
+            },
             orderBy: { seq: "desc" },
             select: { blocks: true },
           });
-          return recruitingNextStepCard(
-            /\p{Script=Han}/u.test(JSON.stringify(human?.blocks ?? "")),
-          );
+          const text = (Array.isArray(reply?.blocks) ? (reply.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+            .join("\n");
+          return text || undefined;
         };
-        const applyTool = async (
+        const applyToolNow = async (
           name: string,
           rawArgs: Record<string, unknown>,
           executionId: string,
@@ -5305,6 +5456,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          // Before the first picks, one step's extra searches are refused once: the model picks
+          // from the planned rows first, and may search again only if the answer changed the role.
+          const refusedEarly = () => {
+            const now = Date.now();
+            plannedEarlyRefusalAt ??= now;
+            return now - plannedEarlyRefusalAt < 3_000;
+          };
+          if (
+            (name.endsWith("web_search_advanced_exa") || name === "web_search") &&
+            plannedNewPeople >= PLANNED_POOL_ENOUGH &&
+            !executionId.startsWith(`${runId}:planned-search:`) &&
+            !(await deps.prisma.externalEffect.findFirst({
+              where: {
+                runId,
+                spaceId: run.spaceId,
+                kind: "recruiting_research",
+                status: "completed",
+                request: { path: ["operation"], equals: "calibration_round" },
+              },
+              select: { id: true },
+            })) &&
+            (firstPicksShown || refusedEarly())
+          ) {
+            const late = lateSearchRows.splice(0);
+            const lateText = late.length
+              ? `\n\nThe planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`
+              : "";
+            if (!firstPicksShown)
+              return {
+                error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people. First show the two to four clearest fits from those rows with show_picks, then record the ten with calibration_round. Search again only if the recruiter's answer changes who you are looking for.${lateText}`,
+              };
+            // Counts as the second set: when fewer than ten fit, the recruiter is asked instead.
+            peopleSearchesRun = Math.max(peopleSearchesRun, 8);
+            return {
+              error: `Not run: the searches planned with the answer already returned ${plannedNewPeople} new people, and the ten come from them. Record the ten now with calibration_round from those rows, starting with the people already shown; a must-have a row says nothing about is unknown, not failed. Only if fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on, as the round instructions say.${lateText}`,
+            };
+          }
+          if (name.endsWith("web_search_advanced_exa")) peopleSearchesRun++;
           // The model's first tools run once the role from a job link is saved.
           if (!executionId.startsWith(`${runId}:job-`)) await linkRole?.saving;
           // recruiting_research always acts on the thread's role; a model-supplied roleId is ignored
@@ -5324,6 +5513,48 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : name === "recruiting_role"
                 ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
                 : rawArgs;
+          if (
+            name === "recruiting_role" &&
+            args.operation === "update" &&
+            executionId !== `${runId}:brief-after-round`
+          )
+            await briefSaving;
+          if (
+            name === "recruiting_role" &&
+            args.operation === "update" &&
+            briefBump &&
+            args.expectedRevision === briefBump.from
+          )
+            args = { ...args, expectedRevision: briefBump.to };
+          // A brief save whose intent is missing or not copied from the recruiter's current
+          // message acts on that message, so the save never fails on the quote.
+          // A message the recruiter sent while this turn ran is the current one, so it is read now.
+          const latestHuman =
+            name === "recruiting_role" && args.operation === "update"
+              ? await deps.prisma.message.findFirst({
+                  where: { threadId: thread.id, role: "user" },
+                  orderBy: { seq: "desc" },
+                  select: { blocks: true },
+                })
+              : null;
+          const textsOf = (blocks: unknown) =>
+            (Array.isArray(blocks) ? (blocks as MessageBlock[]) : []).flatMap((block) =>
+              block.kind === "text" && block.text.trim() ? [block.text] : [],
+            );
+          const latestTexts = textsOf(latestHuman?.blocks);
+          const turnTexts = latestTexts.length ? latestTexts : textsOf(currentTurnMessage?.blocks);
+          const givenQuote = (args.intent as { quote?: unknown } | undefined)?.quote;
+          if (
+            name === "recruiting_role" &&
+            args.operation === "update" &&
+            turnTexts[0] &&
+            !(
+              typeof givenQuote === "string" &&
+              givenQuote &&
+              turnTexts.some((text) => text.includes(givenQuote))
+            )
+          )
+            args = { ...args, intent: { basis: "direct", quote: turnTexts[0] } };
           if (name === "recruiting_role" && args.operation !== "read")
             args = await fillRecruitingRoleArgs(
               deps.prisma,
@@ -5331,6 +5562,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               { threadId: thread.id },
               args,
             );
+          // A role revision on an operation that takes none is dropped instead of refusing the call.
+          if (
+            name === "recruiting_research" &&
+            Object.hasOwn(args, "expectedRoleRevision") &&
+            !REVISIONED_RESEARCH_OPERATIONS.has(String(args.operation))
+          ) {
+            const { expectedRoleRevision: _dropped, ...rest } = args;
+            args = rest;
+          }
           // A left-out role revision is the conversation's current one, so the call is not refused
           // for a field the server knows.
           if (
@@ -5349,6 +5589,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               args = { ...args, expectedRoleRevision: typed };
             else if (role) args = { ...args, expectedRoleRevision: role.revision };
           }
+          // An unverified note written as a list is one note, so the round records on the first call.
+          if (
+            name === "recruiting_research" &&
+            args.operation === "calibration_round" &&
+            args.unverified &&
+            typeof args.unverified === "object" &&
+            !Array.isArray(args.unverified)
+          )
+            args = {
+              ...args,
+              unverified: Object.fromEntries(
+                Object.entries(args.unverified as Record<string, unknown>).map(([key, value]) => [
+                  key,
+                  Array.isArray(value) ? value.map(String).join("、") : value,
+                ]),
+              ),
+            };
           if (
             name === "recruiting_research" &&
             args.operation === "calibration_round" &&
@@ -5383,6 +5640,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             feedbackArgsError = filled.error;
           }
           if (name === "recruiting_assess" && args.operation === "ask") {
+            // Clarifying questions come before the search: once this turn shows the ten, it
+            // ends on the next-step card instead of another question.
+            const rounds = await deps.prisma.externalEffect.findMany({
+              where: {
+                runId,
+                spaceId: run.spaceId,
+                kind: "recruiting_research",
+                status: "completed",
+                request: { path: ["operation"], equals: "calibration_round" },
+              },
+              select: { id: true },
+              take: 1,
+            });
+            if (rounds.length)
+              return {
+                error:
+                  "Clarifying questions come before the search, and the ten are already shown. Do not ask it: end the turn with the next-step card (ask_user).",
+              };
             if (typeof args.question === "string")
               args = { ...args, question: shortQuestion(args.question) };
           }
@@ -5420,7 +5695,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
             // run; calibration_round records the ten and replaces the list.
             const roleId = thread.activeRecruitingRoleId;
             if (!roleId) return { error: "This conversation has no active role." };
-            const keys = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
+            const picked = researchInput.data.candidateKeys.map(savedCandidateKeyForm);
+            // Someone whose profile shows only a country or a state, or under six months in the
+            // current role, is left out of the first picks rather than costing a step.
+            const [{ regionOnly }, recent] = await Promise.all([
+              locationSlips(roleId, picked),
+              newInCurrentRole(roleId, picked),
+            ]);
+            const left = [
+              regionOnly.size &&
+                `${[...regionOnly.values()].join(", ")}: the location shows only a country or a state.`,
+              recent.size &&
+                `${[...recent.values()].join(", ")}: under ${MIN_CURRENT_ROLE_MONTHS} months in the current role.`,
+            ]
+              .filter(Boolean)
+              .join(" ");
+            const keys = picked.filter((key) => !regionOnly.has(key) && !recent.has(key));
+            if (!keys.length)
+              return {
+                error: `Not shown: ${left} Pick people who fit every requirement.`,
+              };
             const text = await recruitingRoundListText(deps.prisma, {
               threadId: run.threadId,
               spaceId: run.spaceId,
@@ -5438,9 +5732,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             stream.shown = Math.max(stream.shown, keys.length);
             stream.posting = stream.posting.then(() => showRoundList(text));
             await stream.posting;
+            firstPicksShown = true;
+            const late = lateSearchRows.splice(0);
             return {
               shown: keys.length,
-              roundRecorded: false,
+              ...(left ? { notShown: left } : {}),
+              ...(late.length
+                ? {
+                    lateSearches: `The planned searches that were still running have returned; pick from their rows too:\n\n${late.join("\n\n")}`,
+                  }
+                : {}),
+              next: "These people are in chat now; the round is not recorded yet. Next, record the full ten with calibration_round, starting with these same people in the same order, picked from the rows you already have and never anyone currently at the hiring company; search again only if fewer than ten of all those rows fit, counting a requirement a row says nothing about as unknown, not failed, with four differently worded searches together in one step. Never ask anything or end the turn before calibration_round records the ten, unless fewer than ten fit after that second set of searches: then ask the recruiter how to go on, as the round instructions say.",
             };
           }
           if (
@@ -5453,6 +5755,39 @@ export function createRunExecutor(deps: ExecutorDeps) {
               spaceId: run.spaceId,
             });
             if (unsaved) return { error: unsaved };
+            const { regionOnly, outliers } = await locationSlips(
+              thread.activeRecruitingRoleId,
+              researchInput.data.candidateKeys,
+            );
+            // Asked once per person: when the same people come back the model has decided they fit
+            // (a role open to a whole country or state, or a real commute), and they are recorded.
+            const unasked = (people: Map<string, string>) =>
+              [...people].filter(([key]) => !locationAsked.has(key)).map(([, label]) => label);
+            const vague = unasked(regionOnly);
+            const far = unasked(outliers);
+            const recent = await newInCurrentRole(
+              thread.activeRecruitingRoleId,
+              researchInput.data.candidateKeys.map(savedCandidateKeyForm),
+            );
+            const newcomers = unasked(recent);
+            if (vague.length || far.length || newcomers.length) {
+              for (const key of [...regionOnly.keys(), ...outliers.keys(), ...recent.keys()])
+                locationAsked.add(key);
+              return {
+                error: [
+                  "Not recorded.",
+                  vague.length &&
+                    `${vague.join(", ")} show only a country or a state, which never counts inside a city or metro location scope.`,
+                  far.length &&
+                    `${far.join(", ")} ${far.length > 1 ? "are" : "is"} more than ${COMMUTE_MILES} miles from where the other picks are; check against the role's location scope.`,
+                  newcomers.length &&
+                    `${newcomers.join(", ")} started the current role under ${MIN_CURRENT_ROLE_MONTHS} months ago, which the round leaves out unless the recruiter asked for them.`,
+                  "Replace anyone outside the scope or new in their role with people from the rows who fit, and record the ten again. If they all fit, record the same ten again.",
+                ]
+                  .filter(Boolean)
+                  .join(" "),
+              };
+            }
           }
           const candidateOperation =
             name === "recruiting_feedback" &&
@@ -5788,70 +6123,47 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           if (
             researchInput?.success &&
-            ![
-              "prepare",
-              "continue",
-              "save_results",
-              "import_csv",
-              "save_search",
-              "calibration_round",
-            ].includes(researchInput.data.operation)
+            (researchInput.data.operation === "status" || researchInput.data.operation === "rows")
           ) {
             if (!deps.artifacts) return { error: "Recruiting research requires artifact storage" };
             try {
-              const input = researchInput.data;
-              if (
-                input.operation === "prepare" ||
-                input.operation === "continue" ||
-                input.operation === "save_results" ||
-                input.operation === "import_csv" ||
-                input.operation === "save_search" ||
-                input.operation === "calibration_round"
-              )
-                throw new IsolationError();
               researchSelection = await resolveRecruitingResearchTool(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
                 researchActor,
-                input,
+                researchInput.data,
                 context,
               );
-              if ("recoveredResult" in researchSelection && researchSelection.recoveredResult)
+              if (researchSelection.recoveredResult)
                 return redactConnectorPayload(researchSelection.recoveredResult, runSecrets);
-              if (researchSelection.recoveryEffectKind) {
-                name = researchSelection.recoveryEffectKind;
-                args = researchSelection.args;
-                connectorCall = { tool: name, args, route: researchSelection.route, executionId };
-              } else {
-                if (!deps.connector?.resolveCall)
-                  throw new Error("Recruiting research requires native MCP");
-                const resolved = await deps.connector.resolveCall(
-                  {
-                    tool: catalogExecuteToolName("mcp"),
-                    route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
-                    args: {
-                      id: catalogIdForRoute(researchSelection.route),
-                      arguments: researchSelection.args,
-                    },
-                    executionId,
+              if (!deps.connector?.resolveCall)
+                throw new Error("Recruiting research requires native MCP");
+              const resolved = await deps.connector.resolveCall(
+                {
+                  tool: catalogExecuteToolName("mcp"),
+                  route: { connectorId: "mcp", toolName: CATALOG_EXECUTE },
+                  args: {
+                    id: catalogIdForRoute(researchSelection.route),
+                    arguments: researchSelection.args,
                   },
-                  context,
-                );
-                const resolvedRoute = resolved?.call.route;
-                if (
-                  !resolved ||
-                  !resolvedRoute?.resourceId ||
-                  !approvalRoutesMatch(
-                    { ...resolvedRoute, resourceId: resolvedRoute.resourceId },
-                    researchSelection.route,
-                  )
+                  executionId,
+                },
+                context,
+              );
+              const resolvedRoute = resolved?.call.route;
+              if (
+                !resolved ||
+                !resolvedRoute?.resourceId ||
+                !approvalRoutesMatch(
+                  { ...resolvedRoute, resourceId: resolvedRoute.resourceId },
+                  researchSelection.route,
                 )
-                  throw new IsolationError();
-                if (BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)) throw new IsolationError();
-                name = resolved.tool.name;
-                args = resolved.call.args;
-                connectorCall = resolved.call;
-                resolvedTool = resolved.tool;
-              }
+              )
+                throw new IsolationError();
+              if (BUILTIN_AGENT_TOOL_NAMES.has(resolved.tool.name)) throw new IsolationError();
+              name = resolved.tool.name;
+              args = resolved.call.args;
+              connectorCall = resolved.call;
+              resolvedTool = resolved.tool;
             } catch (error) {
               return { error: sanitizeConnectorError(error, runSecrets) };
             }
@@ -6325,6 +6637,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     next: recruitingBriefConfirmedNextStep(saved.role.revision),
                   };
                 } catch (error) {
+                  // After the ten are shown the brief stays saved unconfirmed: an open question
+                  // is never asked after the search.
+                  if (
+                    error instanceof RecruitingPlaybookValidationError &&
+                    (await deps.prisma.recruitingCalibrationRound.findFirst({
+                      where: { roleId: call.data.roleId, role: { spaceId: run.spaceId } },
+                      select: { id: true },
+                    }))
+                  )
+                    return {
+                      confirmed: false,
+                      next: "The brief stays saved as it is; the ten are already shown. Ask nothing about the brief: end the turn with the next-step card (ask_user).",
+                    };
                   return { error: sanitizeConnectorError(error, runSecrets) };
                 }
               }
@@ -6452,50 +6777,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (connectorCall.route?.connectorId === "mcp" && !crmImportSelection) {
             try {
               const liveSchema = (resolvedTool ?? connectorTools.get(name))?.inputSchema;
-              if (liveSchema && !researchSelection?.recoveryEffectKind)
-                assertConnectorToolArgs(liveSchema, args);
+              if (liveSchema) assertConnectorToolArgs(liveSchema, args);
               researchAdmission = await admitRecruitingResearchCall(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
                 researchDispatchActor,
                 { ...connectorCall, tool: name, args },
                 context,
-                {
-                  actionId: researchSelection?.actionId,
-                  taskId: researchSelection?.taskId,
-                  frozenRequest: liveRoute
-                    ? boundDirectApprovalRequest(liveRoute, args, CATALOG_APPROVAL_TOOL)
-                    : effectRequest,
-                },
+                { taskId: researchSelection?.taskId },
               );
               if (researchSelection && !researchAdmission) throw new IsolationError();
             } catch (error) {
               return { error: sanitizeConnectorError(error, runSecrets) };
             }
           }
-          const researchMutation =
-            researchAdmission?.kind === "mutation" ? researchAdmission : undefined;
-          const settleResearchUncertainty = async () => {
-            if (!researchMutation?.effect) throw new IsolationError();
-            const settled = await settleUncertainRecruitingResearchAction(
-              deps.prisma,
-              researchActor.actor,
-              {
-                ...researchDispatchActor,
-                taskId: researchMutation.task.id,
-                actionId: researchMutation.action.id,
-                effectId: researchMutation.effect.id,
-                effectKind: researchMutation.effect.kind,
-                effectRequest: researchMutation.effect.request as Prisma.InputJsonValue,
-                result: uncertainEffectResult(name),
-              },
-            );
-            const gate = resolveDuplicateEffectGate(settled.effect, name);
-            if (gate.action !== "return") throw new IsolationError();
-            return { ...settled, result: gate.result };
-          };
           if (researchAdmission && disabledBuiltinTools.has("recruiting_research"))
             return { error: "This tool is disabled for this bot." };
-          if (researchAdmission?.kind === "read" && researchAdmission.recoveredResult)
+          if (researchAdmission?.recoveredResult)
             return redactConnectorPayload(researchAdmission.recoveredResult, runSecrets);
           const researchResult = async (
             admission: RecruitingResearchCallAdmission,
@@ -6521,42 +6818,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
               runSecrets,
             );
           };
-          if (researchMutation && researchMutation.status !== "ready") {
-            if (researchMutation.status === "completed")
-              return researchResult(researchMutation, researchMutation.effect?.result);
-            if (
-              researchMutation.status === "unknown" &&
-              researchMutation.effect &&
-              ["executing", "uncertain"].includes(researchMutation.effect.status)
-            ) {
-              const settled = await settleResearchUncertainty();
-              if (settled.effect.status === "completed")
-                return researchResult(
-                  {
-                    ...researchMutation,
-                    task: settled.task,
-                    action: settled.action,
-                    effect: settled.effect,
-                  },
-                  settled.effect.result,
-                  settled.effect,
-                );
-              if (settled.effect.status === "denied") return settled.result;
-              return {
-                status: "unknown",
-                ...recruitingResearchSnapshot(settled.task, settled.action),
-                ownerRunId: settled.effect.runId,
-                automaticRetry: false,
-              };
-            }
-            return {
-              status: researchMutation.status,
-              ...recruitingResearchSnapshot(researchMutation.task, researchMutation.action),
-              ownerRunId: researchMutation.ownerRunId,
-              automaticRetry: false,
-            };
-          }
-          if (researchMutation?.effect) effectRequest = researchMutation.effect.request;
           const viaConnector = !BUILTIN_AGENT_TOOL_NAMES.has(name);
           const memoryWrite = ["remember", "save_shared_memory", "save_memory"].includes(name);
           const currentMemoryThread = memoryWrite
@@ -6774,7 +7035,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               internalMailboxWrite,
           );
           // A run opened by external text may read and draft but never send or change records.
-          if (!verifiedInternalWrite && !researchMutation) {
+          if (!verifiedInternalWrite) {
             const refusal = externalTextTriggerToolRefusal(
               run.trigger,
               researchAdmission?.kind === "read" ? name : policyToolName,
@@ -6788,7 +7049,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
           }
           const requiresUnattendedApproval =
             !verifiedInternalWrite &&
-            !researchMutation &&
             unattendedTriggerToolRequiresApproval(
               run.trigger,
               researchAdmission?.kind === "read" ? name : policyToolName,
@@ -6797,7 +7057,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
           const requiresApprovalByDefault =
             !verifiedInternalWrite &&
-            !researchMutation &&
             (requiresUnattendedApproval ||
               toolRequiresApproval(
                 researchAdmission?.kind === "read" ? name : policyToolName,
@@ -7036,13 +7295,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : undefined) ??
             replyAdmission?.effect.idempotencyKey ??
             crmImportAdmission?.effect.idempotencyKey ??
-            researchMutation?.effect?.idempotencyKey ??
             (usesApprovalKey && occurrence === 0
               ? approvalEffectKey(runId, replayEffectToolName, args)
               : toolEffectIdempotencyKey(runId, replayEffectToolName, args, occurrence));
           // Connector read-only hints must not bypass approval, review, or replay decisions.
-          const domainEffect =
-            replyAdmission?.effect ?? crmImportAdmission?.effect ?? researchMutation?.effect;
+          const domainEffect = replyAdmission?.effect ?? crmImportAdmission?.effect;
           const applied = domainEffect
             ? { duplicate: true, effect: domainEffect }
             : READ_ONLY_AGENT_TOOLS.has(name)
@@ -7660,28 +7917,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           from,
                         },
                       )
-                    : researchMutation
-                      ? await claimRecruitingResearchAction(deps.prisma, researchActor.actor, {
+                    : researchAdmission
+                      ? await claimRecruitingResearchReadEffect(deps.prisma, researchActor.actor, {
                           runId,
                           leaseOwner: workerId,
                           leaseFence: fence,
-                          actionId: researchMutation.action.id,
                           effectId: applied!.effect.id,
                           from,
                         })
-                      : researchAdmission?.kind === "read"
-                        ? await claimRecruitingResearchReadEffect(
-                            deps.prisma,
-                            researchActor.actor,
-                            {
-                              runId,
-                              leaseOwner: workerId,
-                              leaseFence: fence,
-                              effectId: applied!.effect.id,
-                              from,
-                            },
-                          )
-                        : await claim(deps.prisma, applied!.effect.id);
+                      : await claim(deps.prisma, applied!.effect.id);
             } catch (error) {
               if (crmImportAdmission || replyAdmission) return roleError(error);
               throw error;
@@ -7737,15 +7981,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   claimedEffect = true;
                   return undefined;
                 }
-                if (researchMutation) return { status: "unknown", automaticRetry: false };
                 return settleUncertainEffect(deps.prisma, applied!.effect.id, name);
               }
             }
-            if (researchMutation)
-              return {
-                error: "Research action changed before dispatch; read its saved state.",
-                automaticRetry: false,
-              };
             throw uncertainEffectError(name);
           };
 
@@ -8214,7 +8452,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 const early = await claimOrReturn("intended");
                 if (early !== undefined) return early;
               } else {
-                if (researchMutation) return { status: "unknown", automaticRetry: false };
                 return settleUncertainEffect(deps.prisma, applied.effect.id, gate.toolName);
               }
             } else if (gate.action === "execute") {
@@ -8247,6 +8484,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !deps.artifacts ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
+              // Only the people search fills Results; a plain web search finds pages, not people.
+              route.toolName !== "web_search_advanced_exa" ||
               (returned !== null && typeof returned === "object" && "error" in returned)
             )
               return null;
@@ -8989,15 +9228,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               !deps.artifacts ||
               !researchInput?.success ||
-              (researchInput.data.operation !== "prepare" &&
-                researchInput.data.operation !== "continue" &&
-                researchInput.data.operation !== "save_results" &&
+              (researchInput.data.operation !== "save_results" &&
                 researchInput.data.operation !== "import_csv" &&
                 researchInput.data.operation !== "save_search" &&
                 researchInput.data.operation !== "calibration_round")
             )
               return finish({
-                error: "Recruiting research requires a valid preparation and artifact storage",
+                error: "Recruiting research requires a valid operation and artifact storage",
               });
             if (applied && !claimedEffect) {
               const early = await claimOrReturn("intended");
@@ -9031,6 +9268,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     spaceId: run.spaceId,
                     roleId: recorded.roleId,
                     candidateKeys: recorded.candidateKeys as string[],
+                    unverified: Object.fromEntries(
+                      Object.entries(researchInput.data.unverified ?? {}).map(([key, value]) => [
+                        savedCandidateKeyForm(key),
+                        value,
+                      ]),
+                    ),
                   });
                   await roundStream?.posting;
                   await (roundStream?.messageId
@@ -9086,32 +9329,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   context,
                 );
               }
-              if (researchInput.data.operation === "save_results") {
-                if (!applied || !claimedEffect) throw new IsolationError();
-                // The local projection and this native effect complete in one transaction.
-                return await saveNativeRecruitingCandidateResults(
-                  { prisma: deps.prisma, artifacts: deps.artifacts },
-                  {
-                    ...researchActor,
-                    leaseOwner: workerId,
-                    leaseFence: fence,
-                    effectId: applied.effect.id,
-                    effectRequest: applied.effect.request,
-                  },
-                  researchInput.data,
-                  context,
-                );
-              }
-              const result = await prepareRecruitingResearchTool(
+              if (!applied || !claimedEffect) throw new IsolationError();
+              // The local projection and this native effect complete in one transaction.
+              return await saveNativeRecruitingCandidateResults(
                 { prisma: deps.prisma, artifacts: deps.artifacts },
-                researchActor,
+                {
+                  ...researchActor,
+                  leaseOwner: workerId,
+                  leaseFence: fence,
+                  effectId: applied.effect.id,
+                  effectRequest: applied.effect.request,
+                },
                 researchInput.data,
                 context,
-                (sourceId, recallScope) =>
-                  adoptRecruitingContext("research_prepare", "tool_result", sourceId, recallScope),
               );
-              if ("roleContext" in result) await retainRecruitingSource(result.source);
-              return finish(redactConnectorPayload(result, runSecrets));
             } catch (error) {
               if (
                 (researchInput.data.operation === "save_results" ||
@@ -9323,7 +9554,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             try {
               result = await executeRole();
             } catch (error) {
-              return finish(roleError(error));
+              const refused = await finish(roleError(error));
+              // A save refused over its citations is repeated once by the server with them as
+              // plain locators and the recruiter's own words as the intent, so it never stops
+              // the work. Ownership checks still apply to the repeat.
+              const repeat = repairedRoleSave(args, error);
+              if (!repeat || executionId.endsWith(":repaired")) return refused;
+              getLogger().warn("recruiting.role.save_repaired", {
+                runId,
+                operation: args.operation,
+                error: error instanceof Error ? error.name : String(error),
+              });
+              const repeated: unknown = await applyTool(name, repeat, `${executionId}:repaired`);
+              return repeated && typeof repeated === "object" && "error" in repeated
+                ? refused
+                : repeated;
             }
             // Native writes complete their immutable domain receipt in the same transaction.
             if (args.operation === "read" && !(await persistEffectResult(result)))
@@ -10629,21 +10874,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   });
                 }
                 if (event.outcome === "uncertain" && declaredReadOnly !== true && applied) {
-                  if (researchMutation) {
-                    const settled = await settleResearchUncertainty();
-                    if (settled.effect.status === "completed")
-                      return researchResult(
-                        {
-                          ...researchMutation,
-                          task: settled.task,
-                          action: settled.action,
-                          effect: settled.effect,
-                        },
-                        settled.effect.result,
-                        settled.effect,
-                      );
-                    return settled.result;
-                  }
                   return settleUncertainEffect(deps.prisma, applied.effect.id, name);
                 }
               }
@@ -10710,6 +10940,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return saved ?? finished;
           }
           return finish({ error: `unknown tool ${name}` });
+        };
+        // A role save still running when a question card pauses the turn would lose its lease and be
+        // refused; the card waits for it instead.
+        const savesInFlight = new Set<Promise<unknown>>();
+        const applyTool = (...call: Parameters<typeof applyToolNow>) => {
+          const [name, rawArgs] = call;
+          const applied = applyToolNow(...call);
+          if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
+          const settled = applied.catch(() => undefined);
+          savesInFlight.add(settled);
+          void settled.then(() => savesInFlight.delete(settled));
+          return applied;
         };
 
         const pluginLine =
@@ -10788,13 +11030,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 error: String(error),
               });
             });
-          const revisionNote = "The new role has revision 1 once saved and no brief yet.";
+          const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in English, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
           try {
             if (pasted) {
               const title = pastedJobTitle(pasted.text)!;
               return {
                 saving: create(title, []),
-                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${revisionNote}`,
+                note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask}`,
               };
             }
             const url = jobLinkIn(block.text)!;
@@ -10827,7 +11069,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   quote: read.text.trim().slice(0, 300).trim(),
                 },
               ]),
-              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${revisionNote}`,
+              note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask}`,
             };
           } catch (error) {
             getLogger().warn("job link not read before the first step", { error: String(error) });
@@ -10907,17 +11149,77 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ).catch((error) => ({ error: String(error) })),
           );
           const results = await settlePlannedSearches(pendings, startedAt);
-          const searches = planned.data.queries.map((query, index) => {
-            const result = results[index];
-            if (result === PLANNED_SEARCH_LATE)
-              return `Search ${index + 1} "${query}": still running; its people are saved to Results when it returns.`;
+          type PlannedRow = { candidateKey?: unknown; location?: unknown; alreadyInPool?: unknown };
+          const rowsOf = (result: unknown): PlannedRow[] | undefined => {
             const people =
               result && typeof result === "object" && "people" in result
                 ? (result as { people: unknown }).people
-                : result;
-            return `Search ${index + 1} "${query}":\n${JSON.stringify(people).slice(0, 24_000)}`;
+                : undefined;
+            return Array.isArray(people)
+              ? people.filter((row): row is PlannedRow => Boolean(row) && typeof row === "object")
+              : undefined;
+          };
+          const keyOf = (row: PlannedRow) =>
+            typeof row.candidateKey === "string" ? row.candidateKey : undefined;
+          // The searches name the role's metro, so rows away from where most of them are, or
+          // showing only a country or a state, never make the ten: they are left out of the pick.
+          const outsideOf = (rows: PlannedRow[]) =>
+            outsideSearchArea(
+              new Map(
+                rows.flatMap((row) => {
+                  const key = keyOf(row);
+                  return key
+                    ? [[key, typeof row.location === "string" ? row.location : null] as const]
+                    : [];
+                }),
+              ),
+            );
+          const inArea = (rows: PlannedRow[], outside: Set<string>) =>
+            rows.filter((row) => !outside.has(keyOf(row) ?? ""));
+          // Late rows join a tool result, so their passages are shortened.
+          const compactRow = ({ snippet, ...row }: PlannedRow & { snippet?: unknown }) => ({
+            ...row,
+            ...(typeof snippet === "string" ? { snippet: snippet.slice(0, 300) } : {}),
           });
-          return `The last question has been answered. These are the retained results of its planned people searches; returned rows are saved to Results and include candidateKey.\n\n${searches.join("\n\n")}`;
+          const addFresh = (rows: PlannedRow[]) => {
+            for (const row of rows) {
+              const key = keyOf(row);
+              if (key && row.alreadyInPool === false) plannedFresh.add(key);
+            }
+            plannedNewPeople = plannedFresh.size;
+          };
+          const onTime = results.flatMap((result) =>
+            result === PLANNED_SEARCH_LATE ? [] : (rowsOf(result) ?? []),
+          );
+          const outside = outsideOf(onTime);
+          addFresh(inArea(onTime, outside));
+          // A search still running at the pick adds its people when it returns; a refused extra
+          // search hands them to the model instead of searching again.
+          results.forEach((result, index) => {
+            if (result !== PLANNED_SEARCH_LATE) return;
+            void pendings[index]?.then((late) => {
+              const rows = rowsOf(late);
+              if (!rows?.length) return;
+              const kept = inArea(rows, outsideOf([...onTime, ...rows]));
+              addFresh(kept);
+              lateSearchRows.push(
+                `Search ${index + 1} "${planned.data.queries[index]}":\n${JSON.stringify(kept.map(compactRow)).slice(0, 8_000)}`,
+              );
+            });
+          });
+          const searches = planned.data.queries.map((query, index) => {
+            const result = results[index];
+            if (result === PLANNED_SEARCH_LATE)
+              return `Search ${index + 1} "${query}": still running; its rows come back with your show_picks result, so start from the other searches and never wait or end the turn for it.`;
+            const rows = rowsOf(result);
+            return `Search ${index + 1} "${query}":\n${JSON.stringify(rows ? inArea(rows, outside) : result).slice(0, 24_000)}`;
+          });
+          const note = `The recruiter has answered your last question. The people searches you planned with it already ran, and each is saved to Results; their people rows are below. Each person's candidateKey is in their row: record the round with those exact keys, never one you write yourself. Unless the answer changes who you are looking for, your very first step is only one recruiting_research show_picks call naming the two to four clearest fits in these rows, with no text and no other call: each inside the location scope (a row whose location is only a country or a state never counts) and not currently at the hiring company. A person fits unless their row plainly shows them failing a hard requirement of the JD or the answers: a must-have past title, industry, company type such as a startup, years or location that the row's roles and dates contradict, a matching role that ended years ago, or retirement. A must-have the row says nothing about is unknown, not failed: it never rules them out and is never a reason to search again, and calibration_round's unverified names it for that person so the recruiter sees it. Nobody currently at the hiring company fits. Never pick someone who does not fit to fill the ten, and never treat a must-have as a preference. They appear in chat at once.`;
+          const next =
+            plannedNewPeople >= PLANNED_POOL_ENOUGH
+              ? `These searches returned ${plannedNewPeople} new people, so the ten come from them. Then record the ten with calibration_round, starting with the people already shown in the same order, with no new searches, web searches or profile lookups. If fewer than ten of them fit every hard requirement their rows show, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round. Keep the people already shown unless one clearly fails a hard requirement. Only if the answer changes who you are looking for, skip show_picks and instead run four new, differently worded people searches together as parallel calls in one step, then record the ten from all the rows.`
+              : `Then complete the ten: if the answer does not change who you are looking for and at least ten of these people fit, record the ten with calibration_round, starting with the people already shown in the same order, with no new searches and no save_search, however many searches ran. Search again only if the answer changes who you are looking for or fewer than ten of these people fit; then run four new, differently worded people searches together as parallel calls in one step, and record the ten from all the rows. If fewer than ten fit even then, show the ones who fit with show_picks and ask the recruiter how to go on (how many of the people found meet every requirement, which requirement rules out the most, relax it, or search deeper, saying in that option that it is slower and costs more) instead of recording the round; show_picks names only the people who fit. Keep the people already shown unless one clearly fails a hard requirement.`;
+          return `${note} ${next}\n\n${searches.join("\n\n")}`;
         };
         // These loads are independent, so they run together. The job role only starts on a thread
         // with no role and the intake note only on one with a role, so at most one does work.
@@ -10953,10 +11255,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ]),
         );
         linkRole = jobRole;
-        // The native intake skill owns next-step policy; this note carries retained data only.
-        const intakeNote = intake?.page
-          ? `The role's job page, already read and saved:\n\n${intake.page}`
-          : undefined;
+        // Once the planned searches ran, the pick note alone says what to do next.
+        const intakeNote =
+          intake &&
+          [
+            plannedNote
+              ? PLANNED_SEARCHES_NOTE
+              : `Never search connectors or tools before the people searches: once nothing is left to ask, issue the four people searches as your very next step. ${PLANNED_SEARCHES_NOTE}`,
+            intake.page &&
+              `The role's job page, already read and saved (never fetch it again):\n\n${intake.page}`,
+          ]
+            .filter(Boolean)
+            .join(" ");
         const intakeSkillNote =
           typeof intakeSkill?.content === "string"
             ? `Skill "${RECRUITING_INTAKE_SKILL_NAME}" (already loaded; never call skill_read for it):\n\n${intakeSkill.content}`
@@ -11416,21 +11726,53 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       runSecrets.push(...values),
                     ),
               onToolCallDelta: streamRoundPicks,
-              beforeAsk: async (question) => {
+              beforeAsk: async (question, plannedSearches) => {
                 await briefSaving;
-                // A run that recorded a round asks the next-step choice, which is asked anew each round.
-                if (await nextStepCardAfterRound()) return undefined;
+                // A run that recorded a round asks the next-step choice, which is asked anew each round,
+                // unless the recruiter already wrote their next step after the ten appeared.
+                if (await nextStepCardAfterRound()) {
+                  const reply = await recruiterReplyAfterRound();
+                  return reply ? { instead: nextStepAlreadyGiven(reply) } : undefined;
+                }
+                // Fewer than ten fit after a second set of searches: the recruiter decides how to go on.
+                if (firstPicksShown && peopleSearchesRun < 8)
+                  return {
+                    instead:
+                      "Not asked: the ten are not recorded yet. Record them now with calibration_round, starting with the people already shown in chat in the same order; then end on the next-step card.",
+                  };
                 const messages = await deps.prisma.message.findMany({
                   where: { threadId: thread.id },
                   orderBy: { seq: "asc" },
                   select: { role: true, blocks: true },
                 });
-                const nextStep = [true, false].map((zh) => recruitingNextStepCard(zh).text);
+                // Older rounds asked this card in Chinese; its answer is not an intake answer either.
+                const nextStep = [
+                  recruitingNextStepCard().text,
+                  "下一步怎么做？也可以直接对任何人或整体方向给反馈。",
+                ];
                 const known = answeredAsk(
                   question,
                   intakeAnswers(messages).filter(({ key }) => !nextStep.includes(key)),
                 );
                 if (known) return `"${known.key}" → "${known.value}"`;
+                // Recruiter-facing text is English even for a Chinese JD, unless they asked otherwise.
+                if (
+                  (hideVendors || recruitingSearch) &&
+                  !askLanguageBounced &&
+                  recruiterQuestionNotInEnglish(question, messages)
+                ) {
+                  askLanguageBounced = true;
+                  return { instead: ASK_IN_ENGLISH };
+                }
+                // Any intake answer may be the last one, and the first people come from the searches
+                // planned with it; without four of them the answer turn waits on its own searches.
+                // An explicit [] is the recruiter's own-list-only instruction.
+                if (
+                  (firstRoundPending || linkRole) &&
+                  (plannedSearches === undefined ||
+                    (plannedSearches.length > 0 && plannedSearches.length < 4))
+                )
+                  return { instead: PLANNED_SEARCHES_MISSING };
                 return undefined;
               },
               onToolCompleted: async (completion) => {
@@ -11655,6 +11997,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
               });
             } else if (event.type === "ask") {
+              await Promise.all(savesInFlight);
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
                 const card = await nextStepCardAfterRound();
@@ -11724,6 +12067,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               if (!paused) return;
               logRunTiming("waiting_input");
+              // A recruiter message that arrived while this turn was finishing answers the card.
+              const answeredBySteering = await answerPausedAskWithSteering(deps.prisma, {
+                spaceId: run.spaceId,
+                threadId: thread.id,
+                botId: bot.id,
+                runId,
+              }).catch((error) => {
+                getLogger().error("steering answer for paused ask", error);
+                return null;
+              });
+              if (answeredBySteering) {
+                getLogger().info("run.waiting_input.answered_by_steering", { runId });
+                await deps.events.notify(answeredBySteering.threadId, answeredBySteering.seq);
+                await deps.jobs
+                  .enqueue(runContinueJob(runId))
+                  .catch((error) => getLogger().error("steering answer enqueue", error));
+                return;
+              }
               await notifyRun(deps, run, {
                 kind: "help",
                 title: `${bot.name} needs an answer`,

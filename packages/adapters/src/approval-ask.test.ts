@@ -488,12 +488,12 @@ describe("buildApprovalAskBlock", () => {
     expect(block.text).toBe("Confirm sending the first email");
     expect(block.detail).toBe(
       [
-        "岗位: Founding Engineer",
-        "发件人: team@example.test",
-        "收件人 (2):",
+        "Role: Founding Engineer",
+        "From: team@example.test",
+        "To (2):",
         "- Ada Lovelace <ada@example.test>",
         "- bob@example.test",
-        "发送时间: Weekdays 09:00-17:00 America/Chicago",
+        "Send time: Weekdays 09:00-17:00 America/Chicago",
         "",
         "Confirm sending the first email to these recipients",
       ].join("\n"),
@@ -518,9 +518,9 @@ describe("buildApprovalAskBlock", () => {
         instantlyActivation: { ...display, firstEmail },
       }).detail;
     expect(card({ subject: "Founding Engineer", body: "Hi Ada,<br/>Open to a chat?" })).toContain(
-      "主题: Founding Engineer\n正文:\nHi Ada,\nOpen to a chat?",
+      "Subject: Founding Engineer\nBody:\nHi Ada,\nOpen to a chat?",
     );
-    expect(card(null)).toContain("正文: 还没有邮件内容");
+    expect(card(null)).toContain("Body: no email content yet");
   });
 
   it("shows a vendor-free reply card that sends only on confirmation", () => {
@@ -561,6 +561,34 @@ describe("buildApprovalAskBlock", () => {
     ]);
   });
 
+  it("shows an interview booking as who, when and what, without the calendar's name or ids", () => {
+    const block = buildApprovalAskBlock(
+      "booking-effect",
+      "mcp__cal-com__create_booking",
+      {
+        eventTypeId: 5852837,
+        start: "2026-10-30T19:00:00Z",
+        attendee: { name: "Ada Test", email: "ada@example.test", timeZone: "America/Chicago" },
+        bookingFieldsResponses: { title: "Interview – Front Desk Supervisor" },
+        location: { type: "integration", integration: "cal-video" },
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview booking → Ada Test");
+    expect(block.detail).toBe(
+      [
+        "Candidate: Ada Test <ada@example.test>",
+        "When: Fri, Oct 30, 2026, 2:00 PM CDT (America/Chicago)",
+        "Title: Interview – Front Desk Supervisor",
+        "Meeting: Video call",
+        "",
+        "The candidate gets a calendar invitation once you confirm.",
+      ].join("\n"),
+    );
+    expect(`${block.text}\n${block.detail}`).not.toMatch(/cal-com|Cal-com|5852837/);
+  });
+
   it("never names the mail server on a remote reply_to_email card", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",
@@ -584,8 +612,8 @@ describe("buildApprovalAskBlock", () => {
         schedule: null,
       },
     });
-    expect(pending.detail).toContain("岗位: this role");
-    expect(pending.detail).toContain("收件人 (unknown):");
+    expect(pending.detail).toContain("Role: this role");
+    expect(pending.detail).toContain("To (unknown):");
     expect(pending.detail).not.toMatch(/crm|campaign|lead|stop on reply/i);
   });
 

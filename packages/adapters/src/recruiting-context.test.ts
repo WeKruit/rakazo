@@ -1,10 +1,15 @@
 import { createHash } from "node:crypto";
 import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
+import {
+  RECRUITING_CALIBRATION_QUICK_SEARCH,
+  RECRUITING_PDF_RENDERING,
+  RECRUITING_ROUND_NEXT_STEP,
+  RECRUITING_SCALE_START,
+} from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import { loadRecruitingRunContext } from "./recruiting-context.js";
-import { buildRecruitingResearchRequest } from "./recruiting-research.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
 const db = vi.hoisted(() => ({
@@ -437,6 +442,13 @@ describe("recruiting run context", () => {
       );
       expect(text).toContain("Scheduling and outbound require their native approvals");
       expect(text).toContain("Internal record keeping does not require human approval by default");
+      for (const rule of [
+        RECRUITING_CALIBRATION_QUICK_SEARCH,
+        RECRUITING_ROUND_NEXT_STEP,
+        RECRUITING_SCALE_START,
+        RECRUITING_PDF_RENDERING,
+      ])
+        expect(text).toContain(rule);
       expect(text).not.toContain("research requires G0 on the current brief revision");
       expect(text).not.toContain("Candidate sourcing requires actual human G0 approval");
       expect(loaded!.text).toContain(text);
@@ -445,7 +457,7 @@ describe("recruiting run context", () => {
     },
   );
 
-  it("freezes retrieval filters separately from qualification in create and same-task continuation", async () => {
+  it("keeps retrieval filters separate from qualification and drops them after an edit", async () => {
     const source = {
       id: "human-filter",
       kind: "original_material" as const,
@@ -497,34 +509,9 @@ describe("recruiting run context", () => {
     const first = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
       reason: "search",
     });
-    const input = {
-      source,
-      intent: { basis: "direct" as const, quote: source.quote },
-      purpose: "calibration" as const,
-      approvalEffectId: "documents-approved",
-      route: {
-        connectorId: "mcp" as const,
-        resourceId: "sourcing",
-        resourceRevision: 1,
-        toolName: "research" as const,
-      },
-      instructions: "Find profiles with source evidence for every criterion.",
-      output: "Return all found profiles, including missing evidence.",
-      recallScope: null,
-    };
-    const created = buildRecruitingResearchRequest({
-      ...input,
-      context: first!,
-      operation: "create",
-    });
-    expect(created.manifest.args).toHaveProperty(
-      "prompt",
-      expect.stringContaining("Search filters control retrieval only"),
-    );
-    expect(JSON.stringify(created.manifest.args)).toContain(
-      "Exclude staffing agencies from retrieval",
-    );
-    expect(JSON.stringify(created.manifest.args)).toContain("Seven years; secret-value");
+    expect(first!.text).toContain("Search filters control retrieval only");
+    expect(first!.text).toContain("Exclude staffing agencies from retrieval");
+    expect(first!.text).toContain("Seven years; secret-value");
     const next = {
       role: { ...current.role, revision: 2, currentRevisionId: "revision-2" },
       revision: {
@@ -542,19 +529,8 @@ describe("recruiting run context", () => {
     const refreshed = await loadRecruitingRunContext(deps, run, { documents: [] }, context, {
       reason: "filter edit",
     });
-    const continued = buildRecruitingResearchRequest({
-      ...input,
-      context: refreshed!,
-      operation: "continue",
-      providerTaskId: "existing-provider-task",
-      route: { ...input.route, toolName: "reply" },
-    });
-    expect(continued.manifest.args).toHaveProperty("task_id", "existing-provider-task");
-    expect(JSON.stringify(continued.manifest.args)).not.toContain(
-      "Exclude staffing agencies from retrieval",
-    );
-    expect(JSON.stringify(continued.manifest.args)).toContain("Seven years; secret-value");
-    expect(continued.sha256).not.toBe(created.sha256);
+    expect(refreshed!.text).not.toContain("Exclude staffing agencies from retrieval");
+    expect(refreshed!.text).toContain("Seven years; secret-value");
     expect(refreshed!.contextArtifact.artifactId).not.toBe(first!.contextArtifact.artifactId);
     expect(current.revision.brief.searchFilters).toHaveLength(1);
   });

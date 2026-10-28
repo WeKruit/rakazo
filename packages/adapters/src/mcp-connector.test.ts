@@ -3219,6 +3219,14 @@ describe.each([
       vi.setSystemTime(Date.now() + DISCOVERY_FAILURE_TTL_MS);
       await expect(connector.discoverTools(scoped as never)).resolves.toEqual([
         expect.objectContaining({ name: `mcp__${name.toLowerCase()}__echo` }),
+        // The contact lookup rides on the enrichment connection.
+        ...(official.endpoint === "https://mcp.fullenrich.com/mcp"
+          ? [
+              expect.objectContaining({
+                route: expect.objectContaining({ toolName: "native_find_emails" }),
+              }),
+            ]
+          : []),
       ]);
       expect(
         state.headers.every((headers) => headers.authorization === "Bearer platform-service-key"),
@@ -3646,18 +3654,26 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(JSON.stringify(events)).not.toContain(f.state.key);
   });
 
-  it("get_campaign reads status and stop on reply with one GET", async () => {
+  it("get_campaign tells the sending mailbox apart from the recipients", async () => {
     const f = fixture();
     const events = await f.run("get_campaign", { campaign_id: CAMPAIGN });
     expect(events[0]).toMatchObject({
       type: "result",
       data: {
         structuredContent: {
-          result: { id: CAMPAIGN, status: 0, stop_on_reply: true },
+          result: {
+            id: CAMPAIGN,
+            status: 0,
+            stop_on_reply: true,
+            recipients: [],
+          },
         },
       },
     });
-    expect(f.state.requests).toEqual([{ method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` }]);
+    expect(f.state.requests).toEqual([
+      { method: "GET", path: `/api/v2/campaigns/${CAMPAIGN}` },
+      { method: "POST", path: "/api/v2/leads/list", body: { campaign: CAMPAIGN, limit: 100 } },
+    ]);
   });
 
   it("refuses a foreign sending mailbox without creating anything", async () => {
@@ -3774,6 +3790,33 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(await f.run("ensure_role_campaign", { role_id: "other-role" })).toMatchObject([
       { type: "error" },
     ]);
+  });
+
+  it("ensure_role_campaign send_hours pauses a live campaign, saves the hours and asks to activate", async () => {
+    const f = fixture();
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.campaign.status = 1;
+    f.state.requests.length = 0;
+    const result = f.result(
+      await f.run("ensure_role_campaign", { role_id: "role-1", send_hours: "any_time" }),
+    );
+    expect(result).toMatchObject({ sendHours: "any_time", paused: expect.any(String) });
+    const writes = f.state.requests.filter((r) => r.method !== "GET" && !r.path.endsWith("/list"));
+    expect(writes[0]).toEqual({ method: "POST", path: `/api/v2/campaigns/${CAMPAIGN}/pause` });
+    expect(writes[1]).toMatchObject({
+      method: "PATCH",
+      body: {
+        campaign_schedule: {
+          schedules: [
+            {
+              timing: { from: "00:00", to: "23:59" },
+              days: { "0": true, "6": true },
+              timezone: "America/Chicago",
+            },
+          ],
+        },
+      },
+    });
   });
 
   it("create_campaign in a role conversation binds the role, so ensure_role_campaign reuses it", async () => {

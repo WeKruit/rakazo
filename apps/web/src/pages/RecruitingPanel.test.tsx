@@ -4021,7 +4021,7 @@ it.each([false, true])(
       'select[aria-label="Candidate sort"]',
     )!;
     expect([...select.options].map((option) => option.textContent)).toEqual([
-      showDiagnostics ? "Autumn rank" : "Rank",
+      "Rank",
       "Match tier",
       "Match score",
       "Name",

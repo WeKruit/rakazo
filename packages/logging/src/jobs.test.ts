@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { runWithLogContext } from "./context.js";
 import {
   createJobCorrelation,
+  recordJobStatement,
   runCorrelatedJob,
   unwrapJobPayload,
   wrapJobPayload,
@@ -107,6 +108,27 @@ describe("job correlation envelope", () => {
       message: "job.completed",
       "job.outcome": "error",
       level: "error",
+    });
+  });
+
+  it("reports the job's database statements by source line, and nothing outside a job", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-worker", sinks: [sink] }));
+    recordJobStatement("adapters/src/outside.ts:1", 5);
+    await runCorrelatedJob({
+      name: "run.continue",
+      payload: { runId: "run-db" },
+      run: async () => {
+        recordJobStatement("db/src/recruiting.ts:10", 30);
+        recordJobStatement("db/src/recruiting.ts:10", 32);
+        recordJobStatement("adapters/src/executor.ts:20", 25);
+      },
+    });
+    expect(sink.events.at(-1)).toMatchObject({
+      message: "job.completed",
+      "db.statements": 3,
+      "db.ms": 87,
+      "db.sites": "db/src/recruiting.ts:10 ×2 62ms; adapters/src/executor.ts:20 ×1 25ms",
     });
   });
 });

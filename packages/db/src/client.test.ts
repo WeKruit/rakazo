@@ -1,5 +1,11 @@
 import { EventEmitter } from "node:events";
-import { createLogger, createTestSink, installLogger, runWithLogContext } from "@rakazo/logging";
+import {
+  createLogger,
+  createTestSink,
+  installLogger,
+  runCorrelatedJob,
+  runWithLogContext,
+} from "@rakazo/logging";
 import type { PoolClient } from "pg";
 import { Pool } from "pg";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -124,6 +130,73 @@ describe("pool wait log", () => {
     });
   });
 
+  it("reports a minute of slow statements even when no checkout waited", async () => {
+    vi.useFakeTimers({ now: 0 });
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
+    const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo", {
+      applicationName: "rakazo-api",
+    });
+    pools.push(pool);
+    const client = Object.assign(new EventEmitter(), {
+      query: (_text: string, callback?: (error: Error | null) => void) => {
+        if (callback) {
+          setTimeout(() => callback(null), 150);
+          return undefined;
+        }
+        return new Promise((resolve) => setTimeout(resolve, 150));
+      },
+    });
+    pool.emit("connect", client);
+    const statement = (viaCallback: boolean) =>
+      viaCallback
+        ? new Promise<void>((resolve) => client.query("select 1", () => resolve()))
+        : (client.query("select 1") as Promise<void>);
+
+    for (const viaCallback of [true, false, true]) {
+      const pending = statement(viaCallback);
+      await vi.advanceTimersByTimeAsync(150);
+      await pending;
+    }
+    vi.setSystemTime(61_000);
+    const last = statement(false);
+    await vi.advanceTimersByTimeAsync(150);
+    await last;
+
+    const reports = sink.events.filter((event) => event.message === "db.pool.wait");
+    expect(reports).toHaveLength(1);
+    expect(reports[0]).toMatchObject({
+      pool: "rakazo-api",
+      waited: 0,
+      queries: 4,
+      queryP50Ms: 150,
+    });
+  });
+
+  it("counts a job's statements under the line that sent them", async () => {
+    const sink = createTestSink();
+    installLogger(createLogger({ service: "rakazo-test", sinks: [sink] }));
+    const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo");
+    pools.push(pool);
+    const client = Object.assign(new EventEmitter(), { query: async () => undefined });
+    pool.emit("connect", client);
+    await runCorrelatedJob({
+      name: "run.continue",
+      payload: { runId: "run-1" },
+      run: async () => {
+        await client.query();
+        await client.query();
+      },
+    });
+    expect(sink.events.at(-1)).toMatchObject({
+      message: "job.completed",
+      "db.statements": 2,
+      "db.sites": expect.stringMatching(
+        /^db\/src\/client\.test\.ts:\d+ ×1 \d+ms; db\/src\/client\.test\.ts:\d+ ×1 /,
+      ),
+    });
+  });
+
   it("names the job and source line of sampled checkouts", async () => {
     vi.useFakeTimers({ now: 0 });
     const sink = createTestSink();
@@ -163,7 +236,11 @@ describe("closePoolSessions", () => {
   it("ends checked-out sessions too, and forgets ones that already ended", async () => {
     const pool = createPool("postgres://rakazo:rakazo@127.0.0.1:9/rakazo");
     pools.push(pool);
-    const session = () => Object.assign(new EventEmitter(), { end: vi.fn(async () => undefined) });
+    const session = () =>
+      Object.assign(new EventEmitter(), {
+        end: vi.fn(async () => undefined),
+        query: vi.fn(async () => undefined),
+      });
     const held = session();
     const gone = session();
     pool.emit("connect", held);

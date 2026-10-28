@@ -9,7 +9,11 @@ import {
 import { assertConnectorToolArgs, CATALOG_EXECUTE } from "./lazy-tool-catalog.js";
 import { mcpObject } from "./recruiting-research.js";
 
-/** Only the documented explicit-duration Cal.com booking form is supported. */
+/**
+ * Cal.com bookings with an explicit duration, or none for a fixed-length event type (Cal.com
+ * rejects lengthInMinutes there): the approved start must then be a returned slot, whose own end
+ * is the length booked.
+ */
 export async function preflightCalBooking(input: {
   connector: ConnectorProvider;
   context: AdapterContext;
@@ -55,11 +59,11 @@ export async function preflightCalBooking(input: {
     typeof start !== "string" ||
     !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(start) ||
     !Number.isFinite(Date.parse(start)) ||
-    !Number.isSafeInteger(lengthInMinutes) ||
-    Number(lengthInMinutes) <= 0
+    ((lengthInMinutes !== undefined || input.route.toolName !== "create_booking") &&
+      (!Number.isSafeInteger(lengthInMinutes) || Number(lengthInMinutes) <= 0))
   )
     return unavailable(
-      "the approved booking needs an explicit eventTypeId, UTC start and lengthInMinutes",
+      "the approved booking needs an explicit eventTypeId, UTC start and (to reschedule) lengthInMinutes",
     );
   // Non-standard routing/conflict overrides cannot be verified by a regular event-type slot read.
   if (
@@ -68,7 +72,9 @@ export async function preflightCalBooking(input: {
     )
   )
     return unavailable("this booking uses options outside the verified availability contract");
-  const endMs = Date.parse(start) + Number(lengthInMinutes) * 60_000;
+  // Without a duration, read the next hour of slots and take the one starting at the approved time.
+  const endMs =
+    Date.parse(start) + (lengthInMinutes === undefined ? 60 : Number(lengthInMinutes)) * 60_000;
   if (!Number.isFinite(endMs) || Math.abs(endMs) > 8.64e15)
     return unavailable("booking interval is invalid");
   const readArgs = {
@@ -76,7 +82,7 @@ export async function preflightCalBooking(input: {
     start,
     end: new Date(endMs).toISOString(),
     timeZone: "UTC",
-    duration: lengthInMinutes,
+    ...(lengthInMinutes === undefined ? {} : { duration: lengthInMinutes }),
     format: "range",
     ...(original ? { bookingUidToReschedule: original.snapshot.uid } : {}),
   };
@@ -177,7 +183,12 @@ export async function preflightCalBooking(input: {
       return unavailable("availability lacks exact interval coverage");
     const available = slots.some((slot) => {
       const value = slot as { start: string; end: string };
-      return Date.parse(value.start) === Date.parse(start) && Date.parse(value.end) === endMs;
+      return (
+        Date.parse(value.start) === Date.parse(start) &&
+        (lengthInMinutes === undefined
+          ? Date.parse(value.end) > Date.parse(start)
+          : Date.parse(value.end) === endMs)
+      );
     });
     if (!available)
       return {

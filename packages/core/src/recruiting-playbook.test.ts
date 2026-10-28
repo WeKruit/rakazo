@@ -16,6 +16,8 @@ import {
   requireRecruitingBriefConfirmation,
   requireRecruitingPlaybookGate,
   turnEndPromise,
+  turnEndStarted,
+  turnEndStuck,
   validateRecruitingBrief,
 } from "./recruiting-playbook.js";
 
@@ -101,7 +103,7 @@ describe("sourced recruiting intake", () => {
     const draft = brief();
     draft.fields[0] = { ...draft.fields[0]!, origin: "user_instruction", sourceRefIds: [] };
     expect(() => validateRecruitingBrief(draft, role)).toThrow(
-      "brief.fields[0].sourceRefIds: add at least one source ID. Cite a full read source reference with an exact quote; user_instruction must cite the actual human-message reference.",
+      "brief.fields[0].sourceRefIds: add at least one source ID. Cite a read source reference; user_instruction must cite the actual human-message reference.",
     );
     const answer = {
       ...source,
@@ -468,38 +470,39 @@ describe("playbook stage machine", () => {
       openClarifications: 2,
       savedCandidates: 0,
     });
-    expect(step?.label).toBe("还有 2 个待确认问题");
+    expect(step?.label).toBe("2 open questions to confirm");
+    expect(step?.openClarifications).toBe(2);
   });
 
   it("starts calibration once title and brief exist", () => {
     expect(
       nextPlaybookStep("intake", { title: "后端", hasBrief: true, savedCandidates: 0 })?.label,
-    ).toBe("开始校准搜寻");
+    ).toBe("Start the calibration search");
     expect(
       nextPlaybookStep("intake", { title: "后端", hasBrief: false, savedCandidates: 0 })?.label,
-    ).toBe("完成岗位信息");
+    ).toBe("Complete the role details");
   });
 
   it("counts remaining calibration profiles and stops at human-owned stages", () => {
     expect(
       nextPlaybookStep("calibration_10", { title: "x", hasBrief: true, savedCandidates: 4 })?.label,
-    ).toBe("校准搜寻（还差 6 人）");
+    ).toBe("Calibration search (6 more needed)");
     const present = nextPlaybookStep("calibration_10", {
       title: "x",
       hasBrief: true,
       savedCandidates: 10,
     })?.prompt;
     expect(present).toContain("calibration_round");
-    expect(present).toContain("不要求逐人评分");
-    expect(present).toContain("Results 校准面板");
-    expect(present).toContain("下一步选择");
+    expect(present).toContain("do not require a rating for every person");
+    expect(present).toContain("Results calibration panel");
+    expect(present).toContain("offer the next step");
     expect(nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt).toContain(
-      "10 位全新的人",
+      "pick 10 new people",
     );
     const feedback = nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt;
-    expect(feedback).toContain("「找 100 个」");
+    expect(feedback).toContain('"find 100"');
     expect(feedback).toContain("operation approve");
-    expect(feedback).toContain("下一步选择");
+    expect(feedback).toContain("offer the next step");
     expect(nextPlaybookStep("scale", { hasBrief: true, savedCandidates: 20 })?.prompt).toContain(
       "save_search",
     );
@@ -542,6 +545,24 @@ describe("classifyTurnEnd", () => {
 });
 
 // Endings seen in live role threads on 2026-10-25/26, where the turn stopped after promising.
+describe("turnEndStarted and turnEndStuck", () => {
+  // 2026-10-27 16:38, LA role: "lets find 50" ended on a claim with no question.
+  it("finds a claim of started work anywhere in a turn that asks nothing", () => {
+    const text =
+      "已开始扩展搜索，目标是新增 50 位，不重复首轮人选。后续结果会保留可点击的 LinkedIn 链接和来源；学历、语言仍会标为待核实。";
+    expect(turnEndStarted(text)).toContain("已开始扩展搜索");
+    expect(turnEndStarted("已保存 10 位候选人。")).toBeUndefined();
+    expect(turnEndStarted("已开始搜索。你希望先看哪一类？")).toBeUndefined();
+  });
+  // 2026-10-27 16:30, LA role: the turn ended on an apology with no question and no role.
+  it("finds a failure report that ends a turn without a question", () => {
+    expect(turnEndStuck("岗位尚未成功建立。抱歉，当前流程卡在岗位记录这一步。")).toBeTruthy();
+    expect(turnEndStuck("I couldn't save the role.")).toBeTruthy();
+    expect(turnEndStuck("岗位已保存，开始找人。")).toBeUndefined();
+    expect(turnEndStuck("保存失败了，要换个方式吗？")).toBeUndefined();
+  });
+});
+
 describe("turnEndPromise", () => {
   it.each([
     "岗位保存恢复后，我会把这项语言要求和 JD 一起纳入岗位简报，再继续搜索。",

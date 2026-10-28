@@ -355,10 +355,6 @@ msgstr "Anhang"
 msgid "Authentication failed."
 msgstr "Authentifizierung fehlgeschlagen."
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Autumn rank"
-msgstr ""
-
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr ""
@@ -2852,10 +2848,13 @@ msgstr ""
 msgid "Some saved contact details could not be displayed."
 msgstr ""
 
+#: src/pages/shell/useShellController.tsx
+msgid "Something went wrong."
+msgstr "Etwas ist schiefgelaufen."
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
-#: src/pages/shell/useShellController.tsx
 msgid "Something went wrong. Try again."
 msgstr "Etwas ist schiefgelaufen. Versuche es erneut."
 
@@ -3099,6 +3098,7 @@ msgstr ""
 msgid "Transcript"
 msgstr "Transkript"
 
+#: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "Erneut versuchen"

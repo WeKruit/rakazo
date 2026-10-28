@@ -216,7 +216,7 @@ describePostgres("calibration rounds (PostgreSQL)", () => {
     await expect(named).rejects.toThrow("linkedin:/in/jp azevedo (use jp-1)");
     await expect(
       recordRound([...keys("first").slice(0, 9), "linkedin:/in/jp azevedo"]),
-    ).rejects.toThrow(/Saved people not yet in this round: .*Jp Azevedo = jp-1/);
+    ).rejects.toThrow(/Saved people not yet in this round.*Jp Azevedo( \([^)]*\))? = jp-1/);
     expect(
       (await prisma.recruitingRole.findUniqueOrThrow({ where: { id: roleId } })).playbookStage,
     ).toBe("feedback");

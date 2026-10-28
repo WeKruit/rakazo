@@ -355,10 +355,6 @@ msgstr "Pièce jointe"
 msgid "Authentication failed."
 msgstr "Échec de l'authentification."
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Autumn rank"
-msgstr ""
-
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr ""
@@ -2852,10 +2848,13 @@ msgstr "Mise à jour logicielle"
 msgid "Some saved contact details could not be displayed."
 msgstr ""
 
+#: src/pages/shell/useShellController.tsx
+msgid "Something went wrong."
+msgstr "Une erreur s'est produite."
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
-#: src/pages/shell/useShellController.tsx
 msgid "Something went wrong. Try again."
 msgstr "Un problème est survenu. Réessayez."
 
@@ -3099,6 +3098,7 @@ msgstr ""
 msgid "Transcript"
 msgstr "Transcription"
 
+#: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "Réessayer"

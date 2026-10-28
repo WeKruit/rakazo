@@ -355,10 +355,6 @@ msgstr "Attachment"
 msgid "Authentication failed."
 msgstr "Authentication failed."
 
-#: src/pages/recruiting/RecruitingEvidenceTab.tsx
-msgid "Autumn rank"
-msgstr "Autumn rank"
-
 #: src/pages/recruiting/AvailabilityRanges.tsx
 msgid "Available time"
 msgstr "Available time"
@@ -2852,10 +2848,13 @@ msgstr "Software update"
 msgid "Some saved contact details could not be displayed."
 msgstr "Some saved contact details could not be displayed."
 
+#: src/pages/shell/useShellController.tsx
+msgid "Something went wrong."
+msgstr "Something went wrong."
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
-#: src/pages/shell/useShellController.tsx
 msgid "Something went wrong. Try again."
 msgstr "Something went wrong. Try again."
 
@@ -3099,6 +3098,7 @@ msgstr "Total experience"
 msgid "Transcript"
 msgstr "Transcript"
 
+#: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
 msgstr "Try again"

@@ -16,6 +16,11 @@ const FeedbackHistory = lazyPanel(() =>
   withFeatureMessages(() => import("./CandidateFeedback")).then((m) => m.FeedbackHistory),
 );
 
+/** A brief field key written as a label (「工作年限」, "Years of experience"), not an id or a question. */
+function isBriefLabel(key: string) {
+  return key.length <= 24 && !/[_?？:：]/.test(key);
+}
+
 export function RecruitingSummary({ model }: { model: ReturnType<typeof useRecruitingWorkspace> }) {
   const { t } = useLingui();
   const {
@@ -119,6 +124,8 @@ export function RecruitingSummary({ model }: { model: ReturnType<typeof useRecru
                   <div className="hire-criterion-row" key={field.key}>
                     {Object.hasOwn(briefFieldLabels, field.key) ? (
                       <span>{briefFieldLabels[field.key]}</span>
+                    ) : isBriefLabel(field.key) ? (
+                      <span>{field.key}</span>
                     ) : null}
                     <strong className="whitespace-pre-wrap">{field.value}</strong>
                     {field.state === "conflict" ? (

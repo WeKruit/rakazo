@@ -73,7 +73,7 @@ image = (
         "pnpm install --offline --frozen-lockfile",
         "pnpm --filter @rakazo/db generate",
         "pnpm --filter @rakazo/web check",
-        "RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=zh-CN pnpm --filter @rakazo/web build",
+        "RAKAZO_ALLOW_DEV_SECRETS=1 VITE_DEFAULT_UI_LOCALE=en pnpm --filter @rakazo/web build",
         # Precompiled API/worker entrypoints: cold start runs JavaScript, not tsx.
         "node scripts/bundle-server.mjs api worker",
     )

@@ -23,6 +23,7 @@ import {
   databaseCapacityBackoffMs,
   GraphileJobPublisher,
   GraphileJobWorkerHost,
+  idlePollInterval,
 } from "./wakeup.js";
 
 function handlers(): BackgroundJobHandlers {
@@ -251,7 +252,8 @@ describe("GraphileJobWorkerHost runner lifecycle", () => {
       new URL("../../../apps/worker/src/index.ts", import.meta.url),
       "utf8",
     );
-    const options = source.match(/new GraphileJobWorkerHost\(sessionPool,\s*\{([^}]*)\}\)/)?.[1] ?? "";
+    const options =
+      source.match(/new GraphileJobWorkerHost\(sessionPool,\s*\{([^}]*)\}\)/)?.[1] ?? "";
     const noHandleSignals = /\bnoHandleSignals:\s*true\b/.test(options);
     expect(noHandleSignals).toBe(true);
     expect(source).toContain('process.once("SIGTERM", () => void stop())');
@@ -280,6 +282,18 @@ describe("GraphileJobWorkerHost runner lifecycle", () => {
     await stopping;
     expect(stop).toHaveBeenCalledOnce();
     expect(first.runner.kill).not.toHaveBeenCalled();
+  });
+
+  it("keeps idle polling near five fetches a second however many slots run", async () => {
+    const first = mockRunner();
+    run.mockResolvedValueOnce(first.runner);
+    const host = new GraphileJobWorkerHost({} as Pool, { concurrency: 50 });
+    await host.start(handlers());
+    expect(run).toHaveBeenCalledWith(
+      expect.objectContaining({ concurrency: 50, pollInterval: 10_000 }),
+    );
+    expect(idlePollInterval(4)).toBe(2_000);
+    await host.stop();
   });
 
   it("backs off then restarts when runner.promise rejects with 53300", async () => {

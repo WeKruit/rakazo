@@ -4,16 +4,13 @@ import { boundDirectApprovalRequest, readRecruitingResearchReadArtifact } from "
 import type * as Database from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import {
-  admitRecruitingResearchAction,
   bindRecruitingResearchReadEffect,
   executeRecruitingRoleMutation,
   getRecruitingWorkspace,
   IsolationError,
   listUnmappedRecruitingResearchReads,
-  prepareRecruitingResearchAction,
   readNativeRecruitingCandidatePage,
   readRecruitingResearchContext,
-  reconcileRecruitingResearchAction,
   recordRecruitingResearchObservation,
   recruitingResearchSnapshot,
   saveNativeRecruitingCandidatePage,
@@ -27,7 +24,6 @@ import { builtinAgentTools } from "./builtin-tools.js";
 import { parametersFor } from "./pi-runtime.js";
 import { executeRecruitingAssessmentTool } from "./recruiting-assessment.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
-import { buildRecruitingResearchRequest } from "./recruiting-research.js";
 import * as tools from "./recruiting-tools.js";
 import { executeRecruitingRoleTool } from "./recruiting-tools.js";
 
@@ -36,12 +32,9 @@ vi.mock("@rakazo/db", async (importOriginal) => ({
   executeRecruitingRoleMutation: vi.fn(),
   getRecruitingWorkspace: vi.fn(),
   readRecruitingResearchContext: vi.fn(),
-  prepareRecruitingResearchAction: vi.fn(),
   recruitingResearchSnapshot: vi.fn(),
-  admitRecruitingResearchAction: vi.fn(),
   bindRecruitingResearchReadEffect: vi.fn(),
   listUnmappedRecruitingResearchReads: vi.fn(),
-  reconcileRecruitingResearchAction: vi.fn(),
   recordRecruitingResearchObservation: vi.fn(),
   saveRecruitingAssessment: vi.fn(),
   readNativeRecruitingCandidatePage: vi.fn(),
@@ -546,7 +539,6 @@ describe("native research preparation", () => {
     readAt: "2026-01-01T00:00:00.000Z",
     quote: input.intent.quote,
   };
-  const { mcpServerId: _mcpServerId, ...continuationInput } = input;
   const context = {
     spaceId: actor.spaceId,
     userId: actor.userId,
@@ -629,28 +621,24 @@ describe("native research preparation", () => {
   } as LoadedRecruitingRunContext;
 
   function researchFixture(operation: "create" | "continue" = "create") {
-    const request = buildRecruitingResearchRequest({
-      context: loaded,
-      source,
-      intent: input.intent,
-      purpose: input.purpose,
-      approvalEffectId: input.approvalEffectId,
-      route: {
-        connectorId: "mcp",
-        resourceId: "source",
-        resourceRevision: 2,
-        toolName: operation === "create" ? "research" : "reply",
+    const route = {
+      connectorId: "mcp" as const,
+      resourceId: "source",
+      resourceRevision: 2,
+      toolName: operation === "create" ? "research" : "reply",
+    };
+    const bytes = Buffer.from(JSON.stringify({ route }), "utf8");
+    const request = {
+      manifest: {
+        route,
+        args:
+          operation === "create"
+            ? { prompt: "Find engineers" }
+            : { task_id: "provider-original", message: "Find engineers" },
       },
-      instructions: input.instructions,
-      output: input.output,
-      recallScope: input.recallScope,
-      ...(operation === "create"
-        ? { operation: "create" as const }
-        : {
-            operation: "continue" as const,
-            providerTaskId: "provider-original",
-          }),
-    });
+      bytes,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
     const task = {
       id: "task",
       roleId: "role",
@@ -756,20 +744,6 @@ describe("native research preparation", () => {
     vi.mocked(recruitingResearchSnapshot).mockImplementation(
       (task, action) => ({ task, action }) as never,
     );
-    vi.mocked(admitRecruitingResearchAction).mockResolvedValue({
-      status: "ready",
-      task,
-      action,
-      effect,
-      ownerRunId: "run",
-    } as never);
-    vi.mocked(reconcileRecruitingResearchAction).mockImplementation(
-      async (_db, _actor, receipt) =>
-        ({
-          task: { ...task, providerTaskId: receipt.providerTaskId ?? task.providerTaskId },
-          action: { ...action, deliveryState: receipt.deliveryState },
-        }) as never,
-    );
     vi.mocked(recordRecruitingResearchObservation).mockResolvedValue({ task, action } as never);
     vi.mocked(listUnmappedRecruitingResearchReads).mockResolvedValue([]);
     vi.mocked(bindRecruitingResearchReadEffect).mockResolvedValue({ saved } as never);
@@ -788,10 +762,7 @@ describe("native research preparation", () => {
       args: request.manifest.args,
     };
     const admit = () =>
-      tools.admitRecruitingResearchCall(deps, trusted, call, context, {
-        actionId: action.id,
-        frozenRequest,
-      });
+      tools.admitRecruitingResearchCall(deps, trusted, call, context, { taskId: task.id });
     return {
       request,
       task,
@@ -1131,9 +1102,7 @@ describe("native research preparation", () => {
       return f.saved as never;
     });
     const call = { ...f.call, tool: read.effect.kind, route: read.route, args: read.args };
-    const result = await tools.admitRecruitingResearchCall(f.deps, f.trusted, call, context, {
-      frozenRequest: read.effect.request,
-    });
+    const result = await tools.admitRecruitingResearchCall(f.deps, f.trusted, call, context, {});
     expect(result).toMatchObject({
       kind: "read",
       recoveredResult: {
@@ -1174,369 +1143,19 @@ describe("native research preparation", () => {
           args: { task_id: "unrelated-native-task" },
         },
         context,
-        { frozenRequest: {} },
+        {},
       ),
     ).resolves.toBeUndefined();
     expect(listUnmappedRecruitingResearchReads).not.toHaveBeenCalled();
     expect(readRecruitingResearchContext).not.toHaveBeenCalled();
   });
 
-  it("freezes actual prompt bytes and verified human source before preparing without dispatch", async () => {
-    vi.mocked(readRecruitingResearchContext).mockResolvedValue({
-      source,
-      workspace: loaded.workspace,
-      server: { id: "source", revision: 2 },
-      action: null,
-      task: null,
-    } as never);
-    vi.mocked(prepareRecruitingResearchAction).mockImplementation(
-      async (_db, _actor, request) =>
-        ({
-          task: { id: "task" },
-          action: { id: "action", deliveryState: "prepared" },
-          requestArtifact: request.requestArtifact,
-        }) as never,
-    );
-    vi.mocked(recruitingResearchSnapshot).mockReturnValue({
-      task: { id: "task" },
-      action: { id: "action", deliveryState: "prepared" },
-    } as never);
-    let bytes: Uint8Array | undefined;
-    const artifacts = {
-      put: vi.fn(async (file: { bytes: Uint8Array }) => {
-        bytes = file.bytes;
-        return { id: "request-blob", hash: "not-a-sha256" };
-      }),
-    };
-    const loadContext = vi.fn(async () => loaded);
-    const result = await tools.prepareRecruitingResearchTool(
-      { prisma: {} as PrismaClient, artifacts: artifacts as never },
-      { actor, runId: "run", sourceMessageId: "original" },
-      input,
-      context,
-      loadContext,
-    );
-    const manifest = JSON.parse(Buffer.from(bytes!).toString("utf8"));
-    expect(manifest.args.prompt).toContain(loaded.text);
-    expect(manifest.args.prompt).toContain(input.instructions);
-    expect(manifest).toMatchObject({
-      version: 3,
-      purpose: "calibration",
-      approvalEffectId: "g1-approval",
-    });
-    expect(manifest.source.anchor.messageId).toBe("answer");
-    expect(loadContext).toHaveBeenCalledWith("answer", null);
-    expect(prepareRecruitingResearchAction).toHaveBeenCalledWith(
-      expect.anything(),
-      actor,
-      expect.objectContaining({
-        sourceMessageId: "answer",
-        purpose: "calibration",
-        approvalEffectId: "g1-approval",
-        requestArtifact: expect.objectContaining({
-          storageKey: "request-blob",
-          hash: expect.stringMatching(/^[a-f0-9]{64}$/),
-        }),
-      }),
-    );
-    expect(result).toMatchObject({
-      status: "prepared",
-      task: { id: "task" },
-      action: { id: "action" },
-    });
-  });
-
-  it("does not write or load a new adoption for inferred search intent", async () => {
-    vi.mocked(readRecruitingResearchContext).mockResolvedValue({
-      source,
-      workspace: loaded.workspace,
-      server: { id: "source", revision: 2 },
-      action: null,
-    } as never);
-    const artifacts = { put: vi.fn() };
-    const loadContext = vi.fn();
-    await expect(
-      tools.prepareRecruitingResearchTool(
-        { prisma: {} as PrismaClient, artifacts: artifacts as never },
-        { actor, runId: "run", sourceMessageId: "original" },
-        { ...input, intent: { ...input.intent, basis: "inferred" } },
-        context,
-        loadContext,
-      ),
-    ).resolves.toMatchObject({ status: "needs_clarification" });
-    expect(artifacts.put).not.toHaveBeenCalled();
-    expect(loadContext).not.toHaveBeenCalled();
-    expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
-  });
-
-  it("replays an existing prepared nonce from verified frozen bytes without another upload or adoption", async () => {
-    const f = researchFixture();
-    const loadContext = vi.fn();
-    await expect(
-      tools.prepareRecruitingResearchTool(f.deps, f.trusted, input, context, loadContext),
-    ).resolves.toMatchObject({
-      status: "prepared",
-      task: { id: "task" },
-      action: { id: "action" },
-      request: f.request.manifest.args,
-    });
-    expect(f.artifacts.get).toHaveBeenCalledWith("request-blob", context);
-    expect(f.artifacts.put).not.toHaveBeenCalled();
-    expect(loadContext).not.toHaveBeenCalled();
-    expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
-  });
-
-  it("rejects changed content under a saved nonce before any upload or preparation", async () => {
-    const f = researchFixture();
-    await expect(
-      tools.prepareRecruitingResearchTool(
-        f.deps,
-        f.trusted,
-        { ...input, instructions: "Different criteria" },
-        context,
-        vi.fn(),
-      ),
-    ).rejects.toThrow();
-    expect(f.artifacts.put).not.toHaveBeenCalled();
-    expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
-  });
-
-  it.each([{ purpose: "scale" as const }, { approvalEffectId: "other-approval" }])(
-    "rejects changed phase or approval under a saved nonce %#",
-    async (changed) => {
-      const f = researchFixture();
-      await expect(
-        tools.prepareRecruitingResearchTool(
-          f.deps,
-          f.trusted,
-          { ...input, ...changed },
-          context,
-          vi.fn(),
-        ),
-      ).rejects.toThrow();
-      expect(f.artifacts.put).not.toHaveBeenCalled();
-      expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
-    },
-  );
-
-  it("prepares an explicitly approved scale action on the same existing provider task", async () => {
-    const f = researchFixture("continue");
-    vi.mocked(readRecruitingResearchContext)
-      .mockResolvedValueOnce({ ...f.saved, action: null } as never)
-      .mockResolvedValueOnce(f.saved as never);
-    vi.mocked(prepareRecruitingResearchAction).mockImplementation(
-      async (_db, _actor, prepared) =>
-        ({ task: f.task, action: { ...f.action, ...prepared, id: "scale-action" } }) as never,
-    );
-    const result = await tools.prepareRecruitingResearchTool(
-      f.deps,
-      f.trusted,
-      {
-        ...continuationInput,
-        operation: "continue",
-        taskId: "task",
-        clientNonce: "scale-round",
-        purpose: "scale",
-        approvalEffectId: "g2-approval",
-      },
-      context,
-      async () => loaded,
-    );
-    expect(prepareRecruitingResearchAction).toHaveBeenCalledWith(
-      f.deps.prisma,
-      actor,
-      expect.objectContaining({
-        kind: "continue",
-        taskId: "task",
-        purpose: "scale",
-        approvalEffectId: "g2-approval",
-      }),
-    );
-    expect(result).toMatchObject({ task: { id: "task" } });
-    const manifest = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
-    expect(manifest).toMatchObject({
-      version: 3,
-      operation: "continue",
-      purpose: "scale",
-      approvalEffectId: "g2-approval",
-      args: {
-        task_id: "provider-original",
-        message: expect.stringContaining("Research purpose:\nscale"),
-      },
-    });
-  });
-
-  it("freezes the verified native G2 task before adopting its first formal scale action", async () => {
-    const f = researchFixture("continue");
-    vi.mocked(readRecruitingResearchContext).mockResolvedValue({
-      ...f.saved,
-      action: null,
-      task: null,
-      nativeResearchTarget: {
-        mcpServerId: "source",
-        serverRevision: 2,
-        providerTaskId: "provider-original",
-      },
-    } as never);
-    vi.mocked(prepareRecruitingResearchAction).mockImplementation(
-      async (_db, _actor, prepared) =>
-        ({
-          task: f.task,
-          action: { ...f.action, ...prepared, id: "native-scale-action" },
-        }) as never,
-    );
-    const round = continuationInput;
-    const nativeInput = {
-      ...round,
-      operation: "continue" as const,
-      purpose: "scale" as const,
-      approvalEffectId: "native-g2",
-      clientNonce: "native-scale",
-    };
-    const nativeTool = builtinAgentTools.find((entry) => entry.name === "recruiting_research")!;
-    expect(
-      validateToolArguments(
-        { ...nativeTool, parameters: parametersFor(nativeTool) },
-        { type: "toolCall", id: "native-scale", name: nativeTool.name, arguments: nativeInput },
-      ),
-    ).toEqual(nativeInput);
-    const result = await tools.prepareRecruitingResearchTool(
-      f.deps,
-      f.trusted,
-      nativeInput,
-      context,
-      async () => loaded,
-    );
-    expect(readRecruitingResearchContext).toHaveBeenCalledWith(
-      f.deps.prisma,
-      actor,
-      expect.objectContaining({
-        purpose: "scale",
-        approvalEffectId: "native-g2",
-        toolName: "reply",
-      }),
-    );
-    expect(prepareRecruitingResearchAction).toHaveBeenCalledWith(
-      f.deps.prisma,
-      actor,
-      expect.objectContaining({
-        kind: "continue",
-        purpose: "scale",
-        approvalEffectId: "native-g2",
-        providerTaskId: "provider-original",
-      }),
-    );
-    const manifest = JSON.parse(Buffer.from(f.uploads[0]!.bytes).toString("utf8"));
-    expect(manifest).toMatchObject({
-      version: 3,
-      operation: "continue",
-      purpose: "scale",
-      args: { task_id: "provider-original" },
-      route: { resourceId: "source", resourceRevision: 2, toolName: "reply" },
-    });
-    expect(result).toMatchObject({ task: { id: "task" } });
-  });
-
-  it.each([
-    { purpose: "scale" as const },
-    { purpose: null },
-    { approvalEffectId: "other-approval" },
-    { approvalEffectId: null },
-  ])("rejects action metadata that differs from verified frozen bytes %#", async (changed) => {
-    const f = researchFixture();
-    Object.assign(f.action, changed);
-    await expect(f.admit()).rejects.toThrow(IsolationError);
-    await expect(
-      tools.resolveRecruitingResearchTool(
-        f.deps,
-        f.trusted,
-        { operation: "start", actionId: "action" },
-        context,
-      ),
-    ).rejects.toThrow(IsolationError);
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    { purpose: "scale" },
-    { approvalEffectId: "other-approval" },
-    { purpose: undefined },
-    { approvalEffectId: undefined },
-  ])("rejects rehashed request metadata that differs from its action %#", async (changed) => {
-    const f = researchFixture();
-    const manifest = { ...f.request.manifest, ...changed };
-    if (changed.purpose === "scale" && "prompt" in manifest.args)
-      manifest.args = {
-        prompt: manifest.args.prompt.replace(
-          "Research purpose:\ncalibration",
-          "Research purpose:\nscale",
-        ),
-      };
-    const bytes = Buffer.from(JSON.stringify(manifest), "utf8");
-    const hash = createHash("sha256").update(bytes).digest("hex");
-    f.blobs.set("request-blob", bytes);
-    f.action.requestArtifactHash = hash;
-    f.saved.requestArtifact.hash = hash;
-    await expect(f.admit()).rejects.toThrow();
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-    expect(f.artifacts.put).not.toHaveBeenCalled();
-  });
-
   function useLegacyRequest(f: ReturnType<typeof researchFixture>) {
-    const legacy = JSON.parse(f.request.bytes.toString("utf8"));
-    legacy.version = 1;
-    delete legacy.purpose;
-    delete legacy.approvalEffectId;
-    delete legacy.candidateOutputSchema;
-    const key = legacy.operation === "create" ? "prompt" : "message";
-    legacy.args[key] = legacy.args[key]
-      .replace("Research purpose:\ncalibration\n\n", "")
-      .split("\n\nCanonical candidate output schema:")[0];
-    const bytes = Buffer.from(JSON.stringify(legacy), "utf8");
-    const hash = createHash("sha256").update(bytes).digest("hex");
-    f.blobs.set("request-blob", bytes);
-    f.action.requestArtifactHash = hash;
-    f.saved.requestArtifact.hash = hash;
     f.action.purpose = null;
     f.action.approvalEffectId = null;
     f.action.candidateOutputSchema = null;
-    return bytes;
+    return f.blobs.get("request-blob");
   }
-
-  it("keeps a legacy task readable but never upgrades its prepared action for dispatch", async () => {
-    const f = researchFixture("continue");
-    const bytes = useLegacyRequest(f);
-    await expect(
-      tools.resolveRecruitingResearchTool(
-        f.deps,
-        f.trusted,
-        { operation: "status", taskId: "task" },
-        context,
-      ),
-    ).resolves.toMatchObject({ args: { task_id: "provider-original" } });
-    await expect(f.admit()).rejects.toThrow();
-    await expect(
-      tools.resolveRecruitingResearchTool(
-        f.deps,
-        f.trusted,
-        { operation: "start", actionId: "action" },
-        context,
-      ),
-    ).rejects.toThrow();
-    await expect(
-      tools.prepareRecruitingResearchTool(
-        f.deps,
-        f.trusted,
-        { ...continuationInput, operation: "continue", taskId: "task" },
-        context,
-        vi.fn(),
-      ),
-    ).rejects.toThrow();
-    expect(f.blobs.get("request-blob")).toEqual(bytes);
-    expect(f.artifacts.put).not.toHaveBeenCalled();
-    expect(prepareRecruitingResearchAction).not.toHaveBeenCalled();
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-  });
 
   it("records rows from a legacy task without rewriting or assigning its mutation metadata", async () => {
     const f = researchFixture("continue");
@@ -1550,7 +1169,6 @@ describe("native research preparation", () => {
     const request = boundDirectApprovalRequest(call.route, call.args, "__rakazoCatalogTool");
     const admission = await tools.admitRecruitingResearchCall(f.deps, f.trusted, call, context, {
       taskId: "task",
-      frozenRequest: request,
     });
     const providerResult = {
       structuredContent: { rows: [{ value: "original raw report value" }], next_cursor: null },
@@ -1568,48 +1186,6 @@ describe("native research preparation", () => {
     expect(f.action).toMatchObject({ purpose: null, approvalEffectId: null });
     expect(f.blobs.get("request-blob")).toEqual(bytes);
     expect(recordRecruitingResearchObservation).toHaveBeenCalledOnce();
-    expect(reconcileRecruitingResearchAction).not.toHaveBeenCalled();
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-  });
-
-  it.each(["create", "continue"] as const)(
-    "resolves %s start to the verified original request",
-    async (operation) => {
-      const f = researchFixture(operation);
-      const result = await tools.resolveRecruitingResearchTool(
-        f.deps,
-        f.trusted,
-        { operation: "start", actionId: "action" },
-        context,
-      );
-      expect(result).toMatchObject({
-        operation,
-        actionId: "action",
-        taskId: "task",
-        route: f.call.route,
-        args: f.call.args,
-      });
-      expect(f.artifacts.put).not.toHaveBeenCalled();
-      expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-    },
-  );
-
-  it("rejects a tampered start Artifact before effect admission", async () => {
-    const f = researchFixture();
-    f.blobs.set(
-      "request-blob",
-      Buffer.from(JSON.stringify({ ...f.request.manifest, args: { prompt: "Incomplete" } })),
-    );
-    await expect(
-      tools.resolveRecruitingResearchTool(
-        f.deps,
-        f.trusted,
-        { operation: "start", actionId: "action" },
-        context,
-      ),
-    ).rejects.toThrow(/hash/i);
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-    expect(f.artifacts.put).not.toHaveBeenCalled();
   });
 
   it.each(["status", "rows"] as const)(
@@ -1648,72 +1224,6 @@ describe("native research preparation", () => {
         }),
       );
       expect(f.artifacts.put).not.toHaveBeenCalled();
-      expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-    },
-  );
-
-  it("admits exact frozen mutation arguments with the actual current dispatch lease", async () => {
-    const f = researchFixture();
-    await expect(f.admit()).resolves.toMatchObject({
-      kind: "mutation",
-      operation: "create",
-      status: "ready",
-      manifest: f.request.manifest,
-      task: f.task,
-      action: f.action,
-      effect: f.effect,
-    });
-    expect(admitRecruitingResearchAction).toHaveBeenCalledWith(
-      f.deps.prisma,
-      actor,
-      expect.objectContaining({
-        runId: "run",
-        leaseOwner: "worker",
-        leaseFence: 4,
-        actionId: "action",
-        frozenRequest: f.frozenRequest,
-        requestArtifact: { artifactId: "request-artifact", sha256: f.request.sha256 },
-        purpose: "calibration",
-        approvalEffectId: "g1-approval",
-      }),
-    );
-  });
-
-  it("preserves the saved effect kind when discovery renames the same bound MCP tool", async () => {
-    const f = researchFixture();
-    const renamed = { ...f.call, tool: "collision.mcp__source__research" };
-    await expect(
-      tools.admitRecruitingResearchCall(f.deps, f.trusted, renamed, context, {
-        actionId: "action",
-        frozenRequest: f.frozenRequest,
-      }),
-    ).resolves.toMatchObject({ kind: "mutation", effect: { id: "effect", kind: f.effect.kind } });
-    expect(admitRecruitingResearchAction).toHaveBeenCalledWith(
-      f.deps.prisma,
-      actor,
-      expect.objectContaining({ effectKind: f.effect.kind }),
-    );
-  });
-
-  it.each(["completed", "executing", "uncertain", "denied"])(
-    "resolves %s effect recovery using its saved kind",
-    async (status) => {
-      const f = researchFixture();
-      f.effect.status = status;
-      f.effect.kind = "original.mcp__source__research";
-      await expect(
-        tools.resolveRecruitingResearchTool(
-          f.deps,
-          f.trusted,
-          { operation: "start", actionId: "action" },
-          context,
-        ),
-      ).resolves.toMatchObject({
-        recoveryEffectKind: f.effect.kind,
-        route: f.call.route,
-        args: f.call.args,
-      });
-      expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
     },
   );
 
@@ -1728,31 +1238,13 @@ describe("native research preparation", () => {
       const f = researchFixture(operation);
       f.saved.thread.activeRecruitingRoleId = roleId;
       await expect(
-        tools.admitRecruitingResearchCall(f.deps, f.trusted, f.call, context, {
-          frozenRequest: f.frozenRequest,
-        }),
+        tools.admitRecruitingResearchCall(f.deps, f.trusted, f.call, context, {}),
       ).resolves.toBeUndefined();
       expect(f.prisma.run.findFirst).not.toHaveBeenCalled();
       expect(readRecruitingResearchContext).not.toHaveBeenCalled();
-      expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
       expect(f.artifacts.put).not.toHaveBeenCalled();
     },
   );
-
-  it("rejects an explicit action whose MCP arguments omit its frozen conditions", async () => {
-    const f = researchFixture();
-    await expect(
-      tools.admitRecruitingResearchCall(
-        f.deps,
-        f.trusted,
-        { ...f.call, args: { prompt: "Find anyone" } },
-        context,
-        { actionId: "action", frozenRequest: { prompt: "Find anyone" } },
-      ),
-    ).rejects.toThrow();
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
-    expect(f.artifacts.put).not.toHaveBeenCalled();
-  });
 
   it("leaves unrelated connector tools outside recruiting admission", async () => {
     const f = researchFixture();
@@ -1762,48 +1254,28 @@ describe("native research preparation", () => {
         f.trusted,
         { ...f.call, route: { ...f.call.route, toolName: "list_notes" } },
         context,
-        { frozenRequest: {} },
+        {},
       ),
     ).resolves.toBeUndefined();
     expect(readRecruitingResearchContext).not.toHaveBeenCalled();
-    expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
   });
 
-  it("validates an explicitly selected reply independently of the MCP hostname", async () => {
-    const f = researchFixture("continue");
-    f.prisma.mcpServer.findFirst.mockResolvedValue({ endpoint: "https://other.example.test/mcp" });
-
-    await expect(
-      tools.admitRecruitingResearchCall(f.deps, f.trusted, f.call, context, {
-        actionId: "action",
-        frozenRequest: f.frozenRequest,
-      }),
-    ).resolves.toMatchObject({ kind: "mutation", operation: "continue", status: "ready" });
-
-    expect(f.prisma.mcpServer.findFirst).not.toHaveBeenCalled();
-    expect(admitRecruitingResearchAction).toHaveBeenCalledOnce();
-  });
-
-  it.each(["action", "task"] as const)(
+  it.each(["task"] as const)(
     "still validates an explicit %s after the thread's role is unbound",
     async (selector) => {
       const f = researchFixture("continue");
       f.saved.thread.activeRecruitingRoleId = null;
       vi.mocked(readRecruitingResearchContext).mockReset().mockRejectedValue(new IsolationError());
-      const call =
-        selector === "action"
-          ? f.call
-          : {
-              ...f.call,
-              tool: "mcp__source__get_rows",
-              route: { ...f.call.route, toolName: "get_rows" },
-              args: { task_id: "provider-original" },
-            };
+      const call = {
+        ...f.call,
+        tool: "mcp__source__get_rows",
+        route: { ...f.call.route, toolName: "get_rows" },
+        args: { task_id: "provider-original" },
+      };
 
       await expect(
         tools.admitRecruitingResearchCall(f.deps, f.trusted, call, context, {
-          ...(selector === "action" ? { actionId: "action" } : { taskId: "task" }),
-          frozenRequest: f.frozenRequest,
+          taskId: selector,
         }),
       ).rejects.toThrow(IsolationError);
 
@@ -1812,28 +1284,37 @@ describe("native research preparation", () => {
         actor,
         expect.objectContaining({
           runId: "run",
-          ...(selector === "action" ? { actionId: "action" } : { taskId: "task" }),
+          taskId: selector,
         }),
       );
-      expect(admitRecruitingResearchAction).not.toHaveBeenCalled();
     },
   );
 
   it("hands a still-working task to the background poll once and says so in the tool result", async () => {
     const f = researchFixture("continue");
-    const admission = await f.admit();
+    const read = pendingRead(f);
     const enqueue = vi.fn(async () => undefined);
     const providerResult = {
-      structuredContent: { task_id: "provider-original", status: "accepted", activity: "queued" },
+      structuredContent: { task_id: "provider-original", state: "working", done: false },
     };
-    f.effect.status = "completed";
-    f.effect.result = providerResult;
+    const admission = {
+      kind: "read",
+      operation: "status",
+      saved: f.saved,
+      call: {
+        ...f.call,
+        route: { ...read.route, toolName: "get_task" },
+        args: { task_id: "provider-original", wait_seconds: 10 },
+      },
+    } as never;
+    const receipt = { effectId: read.effect.id, request: read.effect.request };
     const result = await tools.completeRecruitingResearchCall(
       { ...f.deps, jobs: { enqueue } },
       f.trusted,
-      admission!,
+      admission,
       providerResult,
       context,
+      receipt,
     );
     expect(result).toMatchObject({
       observation: { deliveryState: "accepted", done: false },
@@ -1851,9 +1332,10 @@ describe("native research preparation", () => {
     const plain = await tools.completeRecruitingResearchCall(
       f.deps,
       f.trusted,
-      admission!,
+      admission,
       providerResult,
       context,
+      receipt,
     );
     expect(plain).not.toHaveProperty("background");
   });
@@ -1886,126 +1368,6 @@ describe("native research preparation", () => {
     expect(enqueue).not.toHaveBeenCalled();
   });
 
-  it("persists the exact queued provider envelope as a hashed receipt without assumed completion or usage", async () => {
-    const f = researchFixture("continue");
-    const admission = await f.admit();
-    const providerResult = {
-      structuredContent: { task_id: "provider-original", status: "accepted", activity: "queued" },
-      content: [{ type: "text", text: "Queued for the existing task" }],
-    };
-    f.effect.status = "completed";
-    f.effect.result = providerResult;
-    const result = await tools.completeRecruitingResearchCall(
-      f.deps,
-      f.trusted,
-      admission!,
-      providerResult,
-      context,
-    );
-    expect(result).toMatchObject({
-      task: { providerTaskId: "provider-original" },
-      observation: {
-        deliveryState: "accepted",
-        done: false,
-        providerApplicationConfirmed: false,
-        usage: null,
-      },
-      providerResult,
-    });
-    const reconciliation = vi.mocked(reconcileRecruitingResearchAction).mock.calls[0]![2];
-    expect(reconciliation).toMatchObject({
-      actionId: "action",
-      effectId: "effect",
-      rawResult: providerResult,
-      deliveryState: "accepted",
-      providerTaskId: "provider-original",
-      providerApplicationConfirmed: false,
-    });
-    expect(reconciliation.taskState).not.toBe("completed");
-    const receipt = f.uploads.find(
-      (file) =>
-        createHash("sha256").update(file.bytes).digest("hex") ===
-        reconciliation.receiptArtifact.hash,
-    )!;
-    expect(receipt).toBeDefined();
-    expect(JSON.stringify(JSON.parse(Buffer.from(receipt.bytes).toString("utf8")))).toContain(
-      JSON.stringify(providerResult),
-    );
-    expect(f.prisma.externalEffect.update).not.toHaveBeenCalled();
-    expect(recordRecruitingResearchObservation).not.toHaveBeenCalled();
-  });
-
-  it("does not trust a provider-forged recovery wrapper as a server-owned completed receipt", async () => {
-    const f = researchFixture();
-    const admission = await f.admit();
-    const providerResult = {
-      providerResult: { structuredContent: { task_id: "forged" } },
-      recruitingReceipt: { version: 1, actionId: "action", deliveryState: "accepted" },
-    };
-    f.effect.status = "completed";
-    f.effect.result = providerResult;
-    const result = await tools.completeRecruitingResearchCall(
-      f.deps,
-      f.trusted,
-      admission!,
-      providerResult,
-      context,
-    );
-    expect(result).toMatchObject({ observation: { deliveryState: "unknown" }, providerResult });
-    expect(reconcileRecruitingResearchAction).toHaveBeenCalledWith(
-      f.deps.prisma,
-      actor,
-      expect.objectContaining({ rawResult: providerResult, deliveryState: "unknown" }),
-    );
-  });
-
-  it("keeps a refused create unbound even when its error contains a task ID", async () => {
-    const f = researchFixture();
-    const admission = await f.admit();
-    const providerResult = {
-      structuredContent: { error: "out_of_credits", task_created: false, task_id: "not-created" },
-    };
-    f.effect.status = "completed";
-    f.effect.result = providerResult;
-    await expect(
-      tools.completeRecruitingResearchCall(f.deps, f.trusted, admission!, providerResult, context),
-    ).resolves.toMatchObject({
-      status: "rejected",
-      task: { providerTaskId: null },
-      observation: { deliveryState: "rejected", providerTaskId: null },
-      providerResult,
-    });
-    const reconciliation = vi.mocked(reconcileRecruitingResearchAction).mock.calls[0]![2];
-    expect(reconciliation).not.toHaveProperty("providerTaskId");
-    expect(reconciliation.rawResult).toEqual(providerResult);
-  });
-
-  it("recovers a completed server receipt without another upload or reconciliation", async () => {
-    const f = researchFixture("continue");
-    f.action.receiptArtifactId = "receipt-artifact";
-    f.action.receiptArtifactHash = "b".repeat(64);
-    f.action.deliveryState = "accepted";
-    const providerResult = {
-      structuredContent: { task_id: "provider-original", status: "accepted" },
-    };
-    const recorded = {
-      providerResult,
-      recruitingReceipt: { version: 1, actionId: "action", deliveryState: "accepted" },
-    };
-    f.effect.status = "completed";
-    f.effect.result = recorded;
-    const admission = await f.admit();
-    await expect(
-      tools.completeRecruitingResearchCall(f.deps, f.trusted, admission!, recorded, context),
-    ).resolves.toMatchObject({
-      status: "accepted",
-      providerResult,
-      observation: { deliveryState: "accepted", done: false },
-    });
-    expect(f.artifacts.put).not.toHaveBeenCalled();
-    expect(reconcileRecruitingResearchAction).not.toHaveBeenCalled();
-  });
-
   it.each(["pending-continue", "original-create", "unreceipted-continue"])(
     "records read pages against selected %s without overwriting its mutation receipt",
     async (actionId) => {
@@ -2025,7 +1387,6 @@ describe("native research preparation", () => {
       };
       const admission = await tools.admitRecruitingResearchCall(f.deps, f.trusted, call, context, {
         taskId: "task",
-        frozenRequest: call.args,
       });
       expect(admission).toMatchObject({ kind: "read", operation: "rows" });
       const rows = [
@@ -2143,10 +1504,65 @@ describe("native research preparation", () => {
         expect(
           vi.mocked(recordRecruitingResearchObservation).mock.lastCall?.[2],
         ).not.toHaveProperty("usage");
-      expect(reconcileRecruitingResearchAction).not.toHaveBeenCalled();
       expect(f.action.receiptArtifactId).toBe(receipt);
     },
   );
 });
 
 import { createHash } from "node:crypto";
+
+describe("withCandidatePageSummary", () => {
+  const receipt = { status: "saved", roleId: "role", sourceEffectId: "page-2", candidateRows: [] };
+  const person = (key: string, match?: unknown) => ({
+    candidateKey: key,
+    name: key,
+    title: "Live Ops",
+    company: "Acme",
+    location: "Los Angeles",
+    linkedinUrl: `https://www.linkedin.com/in/${key}`,
+    matchFields: match ?? {},
+  });
+
+  it("names the new people saved on the page and counts the ones already in the pool", async () => {
+    const findMany = vi
+      .fn()
+      .mockResolvedValueOnce([person("a", { tier: "A" }), person("b"), person("c")])
+      .mockResolvedValueOnce([{ candidateKey: "b" }]);
+    const result = (await tools.withCandidatePageSummary(
+      { recruitingCandidateOccurrence: { findMany } } as unknown as PrismaClient,
+      receipt,
+      [{ grade: { value: "A" } }, { grade: "B" }, { grade: "B" }],
+    )) as { summary: { saved: number; newToRole: number; people: { name: string }[] } };
+    expect(result).toMatchObject({
+      ...receipt,
+      summary: { saved: 3, newToRole: 2, grades: { A: 1, B: 2 } },
+    });
+    expect(result.summary.people).toEqual([
+      {
+        name: "a",
+        title: "Live Ops",
+        company: "Acme",
+        location: "Los Angeles",
+        linkedinUrl: "https://www.linkedin.com/in/a",
+        match: { tier: "A" },
+      },
+      {
+        name: "c",
+        title: "Live Ops",
+        company: "Acme",
+        location: "Los Angeles",
+        linkedinUrl: "https://www.linkedin.com/in/c",
+      },
+    ]);
+  });
+
+  it("keeps the saved receipt when the summary cannot be read", async () => {
+    const findMany = vi.fn().mockRejectedValue(new Error("pool timeout"));
+    expect(
+      await tools.withCandidatePageSummary(
+        { recruitingCandidateOccurrence: { findMany } } as unknown as PrismaClient,
+        receipt,
+      ),
+    ).toBe(receipt);
+  });
+});

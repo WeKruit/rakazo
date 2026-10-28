@@ -488,6 +488,8 @@ export class PiAgentRuntime implements AgentRuntime {
             );
           },
           prepareNextTurnWithContext: async () => {
+            // Whatever was steered in so far reaches the model in the step that starts now.
+            host.steeredUnseen = 0;
             if (!request.claimSteering) return undefined;
             // A mid-stream claim still in flight already owns its ids; wait so neither
             // path claims the same row twice.
@@ -530,6 +532,9 @@ export class PiAgentRuntime implements AgentRuntime {
             .then((steering) => {
               seenSteeringIds.push(...steering.map((item) => item.id));
               for (const item of steering) steerIn(item);
+              // Unread until a step starts with them: an interjection can land after the step
+              // already called ask_user, so it counts too.
+              host.steeredUnseen = (host.steeredUnseen ?? 0) + steering.length;
               if (modelStreaming && steering.some((item) => item.interrupt)) {
                 interjected = true;
                 agent.abort();
@@ -543,6 +548,14 @@ export class PiAgentRuntime implements AgentRuntime {
         const interjectTimer = request.claimSteering
           ? setInterval(pollInterject, this.interjectPollMs)
           : undefined;
+        host.claimNewSteering = async () => {
+          if (!request.claimSteering || signal.aborted) return 0;
+          await interjectClaim;
+          const steering = await request.claimSteering([...seenSteeringIds]).catch(() => []);
+          seenSteeringIds.push(...steering.map((item) => item.id));
+          for (const item of steering) steerIn(item);
+          return steering.length;
+        };
         interjectTimer?.unref?.();
 
         const onAbort = () => {
@@ -738,6 +751,7 @@ export class PiAgentRuntime implements AgentRuntime {
               queue.push({ type: "text", text: "\n\n" });
               streamed += "\n\n";
             }
+            host.steeredUnseen = 0;
             await agent.continue();
           }
         } finally {
@@ -1710,6 +1724,14 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
               throw new Error(
                 "Ask one question at a time: ask only the single most decision-affecting question first, with options.",
               );
+            // A message the user sent while this question was being written may already answer
+            // it; read it before pausing, so the user is never left waiting behind the card.
+            const arrived = (host.steeredUnseen ?? 0) + ((await host.claimNewSteering?.()) ?? 0);
+            if (arrived)
+              return {
+                content: [{ type: "text", text: ASK_SUPERSEDED_BY_MESSAGE }],
+                details: args,
+              };
             const options = "options" in parsed.data ? parsed.data.options : undefined;
             const requestedSchema =
               "requestedSchema" in parsed.data ? parsed.data.requestedSchema : undefined;
@@ -2801,6 +2823,9 @@ interface EventQueue {
   iterate(): AsyncIterable<AgentRuntimeEvent>;
 }
 
+const ASK_SUPERSEDED_BY_MESSAGE =
+  "Not asked: the user sent a new message while this question was being written. It comes next; act on it, and ask this question again only if that message leaves it open.";
+
 interface ToolHost {
   context?: Partial<AdapterContext>;
   onContextDecision?: PiAgentRuntimeOptions["onContextDecision"];
@@ -2824,6 +2849,10 @@ interface ToolHost {
   pausePending: boolean;
   /** Shell commands that returned output and are still running. */
   pendingShells: Array<Promise<FinishedShellCommand>>;
+  /** Messages steered in while the current model step streamed; the model has not read them yet. */
+  steeredUnseen?: number;
+  /** Claims messages that arrived since the last read, steers them in and returns how many. */
+  claimNewSteering?: () => Promise<number>;
 }
 
 function toolCallBudgetExceededMessage(limit: number) {

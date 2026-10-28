@@ -135,6 +135,7 @@ vi.mock("../lib/rpc", async (importOriginal) => ({
       send: shellApi.send,
       answer: shellApi.answer,
       stop: shellApi.stop,
+      reportTiming: vi.fn(async () => ({ ok: true as const })),
       // An open, quiet stream: a rejected one makes the client resync on a real-time retry timer.
       subscribe: vi.fn(
         (_input: unknown, options?: { signal?: AbortSignal }) =>

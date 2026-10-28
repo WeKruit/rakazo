@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  RECRUITER_LANGUAGE,
   RECRUITING_CALIBRATION_QUICK_SEARCH,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
@@ -9,6 +10,7 @@ import {
   RECRUITING_SCALE_START,
   RECRUITING_SEARCH_BRIEF_TEMPLATE,
   RECRUITING_SEARCH_SAVED_NEXT_STEP,
+  recruiterQuestionNotInEnglish,
   recruitingBriefConfirmedNextStep,
 } from "./recruiting-defaults.js";
 
@@ -40,12 +42,23 @@ describe("calibration fast path", () => {
 });
 
 describe("maintained recruiting defaults", () => {
+  // Same budget Workloop uses: a longer prompt dilutes every rule in it. Shorten before adding.
+  it.each(RECRUITING_DEFAULT_BOTS)("$name instructions stay within 12,000 characters", (bot) => {
+    expect(bot.instructions.length).toBeLessThanOrEqual(12_000);
+  });
+
+  it.each(RECRUITING_DEFAULT_SKILLS)("$name skill stays within 8,000 characters", (skill) => {
+    expect(skill.body.length).toBeLessThanOrEqual(8_000);
+  });
+
   it.each(RECRUITING_DEFAULT_BOTS)(
     "$name asks only consequential questions and keeps preferences retractable",
     (bot) => {
       expect(bot.instructions).toContain("Never send a fixed questionnaire");
       expect(bot.instructions).toContain("Never ask a recruiter to confirm G0, G1 or G2");
       expect(bot.instructions).toContain("recalled preferences before asking");
+      expect(bot.instructions).toContain("list the choice you recommend first");
+      expect(bot.instructions).toContain("never hold finished results until all work is done");
       expect(bot.instructions).toContain(
         "withdraws or contradicts a preference, update or forget it",
       );
@@ -67,18 +80,32 @@ describe("maintained recruiting defaults", () => {
     expect(bot.instructions).toContain(
       "create it with schedule_create only after the recruiter says yes",
     );
-    expect(bot.instructions).toContain(
-      "keep IDs, tool names, gate codes, cursors and JSON internal",
-    );
   });
 
-  it.each(RECRUITING_DEFAULT_BOTS)("$name never names a vendor to the recruiter", (bot) => {
-    expect(bot.instructions).toContain(
+  it("never names a vendor or exposes setup to the recruiter", () => {
+    for (const part of [
+      "keep IDs, tool names, gate codes, cursors and JSON internal",
       "Never name a vendor or tool (Autumn, Coresignal, FullEnrich, ContactOut, LeadMagic, Instantly, Composio, Cal.com, Gmail, Google Calendar, HubSpot, MCP, API, REST) in chat replies, cards, progress lines, questions or emails",
-    );
-    expect(bot.instructions).toContain(
       "the only exception is a connect-request card, which names the provider to connect",
-    );
+      'never say CRM, campaign, leads, lead list, mailbox or sending-account binding, mapping or "setup" to the recruiter',
+      "do that setup silently and speak only in recruiter language",
+      "Give a zoned ETA only for background work that keeps running after this turn",
+      "you do now and never promise for a later time",
+    ])
+      expect(RECRUITER_LANGUAGE).toContain(part);
+  });
+
+  // Each shared rule has one source: the executor adds recruiter language to every recruiting
+  // run and the role context carries the calibration, scale and PDF rules.
+  it.each([
+    RECRUITER_LANGUAGE,
+    RECRUITING_CALIBRATION_QUICK_SEARCH,
+    RECRUITING_ROUND_NEXT_STEP,
+    RECRUITING_SCALE_START,
+    RECRUITING_PDF_RENDERING,
+  ])("keeps a shared rule out of bot instructions and skills (%#)", (rule) => {
+    for (const bot of RECRUITING_DEFAULT_BOTS) expect(bot.instructions).not.toContain(rule);
+    for (const skill of RECRUITING_DEFAULT_SKILLS) expect(skill.body).not.toContain(rule);
   });
 
   it.each(["main", "outreach"])(
@@ -115,9 +142,13 @@ describe("maintained recruiting defaults", () => {
     expect(main.instructions).toContain(
       "Round feedback before the calibration is accepted goes into your next quick search",
     );
-    expect(main.instructions).toContain("each search is saved to Results the moment it returns");
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
+      "each search is saved to Results the moment it returns",
+    );
     expect(main.instructions).not.toContain("Deep check, started in parallel");
-    expect(main.instructions).toContain("never for a calibration round except that top-up");
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
+      "never for a calibration round except that top-up",
+    );
     const sourcing = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Recruitment sourcing continuation",
     )!;
@@ -142,16 +173,13 @@ describe("maintained recruiting defaults", () => {
     const skill = (name: string) => RECRUITING_DEFAULT_SKILLS.find((s) => s.name === name)!.body;
     expect(skill("Recruitment sourcing continuation")).toContain(RECRUITING_SEARCH_BRIEF_TEMPLATE);
     const intake = skill("Recruitment intake and handoff");
-    for (const { body } of RECRUITING_DEFAULT_SKILLS)
-      expect(body).toContain("Never name a vendor or tool (Autumn");
-    expect(intake).toContain("Calibration rounds are quick searches you run yourself");
-    expect(intake).toContain('web_search_advanced_exa call with category "people"');
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
+      'web_search_advanced_exa call with category "people"',
+    );
     expect(intake).toContain("Always settle the language requirement");
     expect(intake).toContain("stays a preference, never a reject rule");
-    expect(intake).toContain("rather than a matching title");
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer")!;
-    const main = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!;
-    expect(main.instructions).toContain("rather than just a matching title");
+    expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain("rather than just a matching title");
     expect(sourcer.instructions).toContain("show that person as needing a check");
     const draft = RECRUITING_DEFAULT_SKILLS.find(
       (skill) => skill.name === "Review recruiting draft",
@@ -199,10 +227,6 @@ describe("maintained recruiting defaults", () => {
     (bot) => {
       expect(bot.instructions).not.toContain("with an honest zoned ETA for unfinished work");
       expect(bot.instructions).toContain(
-        "Give a zoned ETA only for background work that keeps running after this turn",
-      );
-      expect(bot.instructions).toContain("you do now and never promise for a later time");
-      expect(bot.instructions).toContain(
         "A turn never ends on a bare save or acknowledgement: after an answer, ask the next clarifying question at once, or when none is missing run the calibration search in the same turn.",
       );
       expect(bot.instructions).toContain("Main runs the quick search for exactly 10 profiles");
@@ -222,37 +246,31 @@ describe("maintained recruiting defaults", () => {
   });
 
   it.each(RECRUITING_DEFAULT_BOTS)("$name never exposes CRM, campaign or lead setup", (bot) => {
-    expect(bot.instructions).toContain(
-      'never say CRM, campaign, leads, lead list, mailbox or sending-account binding, mapping or "setup" to the recruiter',
-    );
-    expect(bot.instructions).toContain(
-      "do that setup silently and speak only in recruiter language",
-    );
     expect(bot.instructions).not.toContain("no CRM role is linked");
     expect(bot.instructions).not.toContain("set up a campaign, pick a mailbox");
   });
 
-  it("ships the PDF rendering rule in the intake skill", () => {
-    const intake = RECRUITING_DEFAULT_SKILLS.find(
-      (skill) => skill.name === "Recruitment intake and handoff",
-    )!;
-    expect(intake.body).toContain(RECRUITING_PDF_RENDERING);
+  it("keeps role documents off the calibration path", () => {
+    expect(RECRUITING_PDF_RENDERING).toContain("Noto Sans CJK SC");
     expect(RECRUITING_INTAKE_FLOW).toContain("Role documents never hold up the calibration search");
   });
 
-  it("keeps calibration searches parallel and tops up a short search", () => {
+  it("keeps calibration searches parallel and lets the recruiter decide a short round", () => {
     for (const part of [
       "issue four differently worded platform people searches together as parallel tool calls in one step",
       'highlightsQuery "concrete evidence of: "',
       "which lists them in chat with their profile passages",
-      "top up the same round with one research request on this role for only the missing number",
+      "never fill the round with people who fail a requirement",
+      "a requirement is never relaxed to fill the ten",
+      "offering to relax that named requirement or to keep searching with a deeper search",
+      "request research on this role for only the missing number of people",
       "Never tell the recruiter about search quotas",
     ])
       expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);
   });
 
   it("offers the next step after every round and starts scale on the recruiter's request", () => {
-    expect(RECRUITING_ROUND_NEXT_STEP).toContain("找 100 个类似的人");
+    expect(RECRUITING_ROUND_NEXT_STEP).toContain("Find 100 similar people");
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("ask_user");
     expect(RECRUITING_ROUND_NEXT_STEP).toContain("never list them again");
     for (const part of [
@@ -266,16 +284,17 @@ describe("maintained recruiting defaults", () => {
       "until the role holds the target or a wave adds fewer than five new people",
       "when the people search stopped short of the target",
       "everyone already returned excluded",
-      "a draft only: no campaign activation, import or send",
+      // 2026-10-27: "find 50" with 124 people saved still started paid research and an email draft.
+      "When Results already hold the target, there is no deeper search and no handoff.",
+      "Draft outreach email only when the recruiter asks for it",
       // A handoff ends the coordinator's turn: the searches and the update come first.
       "tell the recruiter in two or three lines with message_user",
       "end the turn with exactly one handoff, last",
-      "who then hands the email draft to the outreach teammate",
     ])
       expect(RECRUITING_SCALE_START).toContain(part);
     const sourcer = RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "sourcer");
     expect(sourcer?.instructions).toContain(
-      "hand it to Outreach only after the research is started, as your last call",
+      "Hand an email draft to Outreach only when the recruiter asked for one",
     );
     // Quick-search rounds leave no research task: the scale-out starts one without asking.
     expect(sourcer?.instructions).toContain(
@@ -283,10 +302,6 @@ describe("maintained recruiting defaults", () => {
     );
     for (const part of ["That request is the acceptance"])
       expect(RECRUITING_SCALE_START).toContain(part);
-    for (const bot of RECRUITING_DEFAULT_BOTS) {
-      expect(bot.instructions).toContain(RECRUITING_SCALE_START);
-      expect(bot.instructions).toContain(RECRUITING_ROUND_NEXT_STEP);
-    }
     expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(
       "nobody already returned for this role is ever shown again",
     );
@@ -323,5 +338,34 @@ describe("maintained recruiting defaults", () => {
       "meets every hard requirement",
     ])
       expect(RECRUITING_CALIBRATION_QUICK_SEARCH).toContain(part);
+  });
+});
+
+describe("recruiterQuestionNotInEnglish", () => {
+  const jd = { role: "user", blocks: [{ kind: "text", text: "新岗位：仓库运营经理（亚特兰大）" }] };
+
+  it("flags a Chinese question for a Chinese JD", () => {
+    expect(
+      recruiterQuestionNotInEnglish("仓库运营经理职位的中文要求应如何设定？我建议设为加分项。", [
+        jd,
+      ]),
+    ).toBe(true);
+  });
+
+  it("passes an English question that quotes a Chinese phrase", () => {
+    expect(
+      recruiterQuestionNotInEnglish("Should Chinese (中文) be required, preferred or not needed?", [
+        jd,
+      ]),
+    ).toBe(false);
+  });
+
+  it("passes Chinese once the recruiter asked for it", () => {
+    expect(
+      recruiterQuestionNotInEnglish("中文要求怎么定？", [
+        jd,
+        { role: "user", blocks: [{ kind: "text", text: "请用中文回复我" }] },
+      ]),
+    ).toBe(false);
   });
 });

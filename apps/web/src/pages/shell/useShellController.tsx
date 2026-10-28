@@ -816,11 +816,7 @@ export function useShellController() {
   );
   const runError = threadRunError(activeSnapshot, dismissedRunErrorIds);
   const displayedRunError =
-    !sendError && runError
-      ? showToolActivity
-        ? runError
-        : t`Something went wrong. Try again.`
-      : null;
+    !sendError && runError ? (showToolActivity ? runError : t`Something went wrong.`) : null;
   const displayedRunErrorId = displayedRunError ? (activeSnapshot?.run?.id ?? null) : null;
   const handleRunErrorPresented = useCallback((runId: string) => {
     rememberSeenRunErrorId(runId);

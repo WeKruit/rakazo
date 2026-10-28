@@ -3276,6 +3276,71 @@ describe("Pi runtime interject", () => {
     expect(providerState.agent!.state.errorMessage).toBeUndefined();
   });
 
+  it("reads a message that arrived during the step instead of pausing on that step's question", async () => {
+    const ask = message(
+      primary,
+      [
+        {
+          type: "toolCall",
+          id: "ask-1",
+          name: "ask_user",
+          arguments: { question: "What next?", options: ["Find 100", "Another round"] },
+        },
+      ],
+      "toolUse",
+    );
+    let calls = 0;
+    providerState.stream.mockImplementation(() => {
+      calls += 1;
+      if (calls > 1)
+        return stream(primary, message(primary, [{ type: "text", text: "Scaling." }], "stop"));
+      class SlowAsk extends AssistantMessageEventStream {
+        override async *[Symbol.asyncIterator]() {
+          yield { type: "start" as const, partial: { ...ask, content: [] } };
+          // The recruiter's message is claimed while this step streams, but the claim lands only
+          // after the step already called ask_user, too late for the interjection to abort it.
+          await new Promise((resolve) => setTimeout(resolve, 15));
+          yield* stream(primary, ask) as unknown as AsyncIterable<never>;
+        }
+      }
+      return new SlowAsk();
+    });
+    const input = request();
+    input.tools = [
+      ...input.tools,
+      {
+        name: "ask_user",
+        description: "Ask the user.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            question: { type: "string" },
+            options: { type: "array", items: { type: "string" } },
+          },
+          required: ["question"],
+        },
+        readOnly: true,
+      },
+    ];
+    let claims = 0;
+    input.claimSteering = vi.fn(async (seenIds: string[]) => {
+      claims += 1;
+      if (claims === 1 || seenIds.includes("steer-1")) return [];
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      return [
+        {
+          id: "steer-1",
+          messageId: "message-1",
+          text: "Find 100 more like them.",
+          interrupt: true as const,
+        },
+      ];
+    });
+    const events = await run(input, [], new PiAgentRuntime({ interjectPollMs: 5 }));
+    expect(events.some((event) => event.type === "ask")).toBe(false);
+    expect(events.at(-1)).toMatchObject({ type: "done" });
+  });
+
   it("drops an interrupted assistant message that carries no text", () => {
     const messages = [
       { role: "user", content: "hi", timestamp: 1 },

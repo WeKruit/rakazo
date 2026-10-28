@@ -104,7 +104,10 @@ describe("account preferences", () => {
         ]),
       },
       bot: {
-        findFirst: target,
+        // The platform-service setup looks for a recruiting lead first; this test bot is none.
+        findFirst: vi.fn((input: { where?: { mcpServers?: unknown } }) =>
+          input.where?.mcpServers ? Promise.resolve(null) : target(input),
+        ),
         findMany: vi.fn(async (input) =>
           input.select || input!.where!.archivedAt !== null ? [] : [bot],
         ),
