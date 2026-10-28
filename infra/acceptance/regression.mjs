@@ -388,7 +388,7 @@ const DISPATCH = [
   { ask: "帮我找前5个人的邮箱", owners: /outreach/i, capability: "contact lookup" },
   // Asked again: everyone was already looked up, so no source may be paid for them again.
   {
-    ask: "再找一次前5个人的contact",
+    ask: "前5个人的contact",
     owners: /outreach|main/i,
     capability: "repeat contact lookup",
     repeatLookup: true,
@@ -399,7 +399,6 @@ const DISPATCH = [
   { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
   { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
 ];
-const REPEAT_LOOKUP_MAX_MS = 10_000;
 /** Every event of a thread so far, from the replay of its event stream. */
 async function readEvents(groupId) {
   const controller = new AbortController();
@@ -461,19 +460,16 @@ if (wanted.has("dispatch"))
       const askedAt = new Date().toISOString();
       const { replies } = await say(groupId, item.ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
       if (item.repeatLookup) {
-        // A lookup answered from saved results reads the database only; a paid source call
-        // polls the provider for many seconds. The release check confirms it in the usage log.
-        const paid = (await readEvents(groupId)).filter(
-          (event) =>
-            event.type === "agent.tool.completed" &&
-            /find_emails/.test(event.payload?.name ?? "") &&
-            event.createdAt > askedAt &&
-            Number(event.payload?.durationMs ?? 0) > REPEAT_LOOKUP_MAX_MS,
-        );
-        if (paid.length)
-          failures.push(
-            `${item.capability}: ${paid.length} lookup call(s) took over ${REPEAT_LOOKUP_MAX_MS / 1000} s, so a source was likely paid again`,
-          );
+        // Everyone was already looked up, so no lookup in this turn may pay a source again.
+        const paid = (await readEvents(groupId))
+          .filter(
+            (event) =>
+              event.type === "agent.tool.completed" &&
+              event.createdAt > askedAt &&
+              event.payload?.lookup,
+          )
+          .reduce((sum, event) => sum + Number(event.payload.lookup.paid_lookups ?? 0), 0);
+        if (paid) failures.push(`${item.capability}: paid ${paid} source lookup(s) again`);
       }
       const handlers = new Set(
         replies.flatMap((message) => [
