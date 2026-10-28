@@ -164,9 +164,16 @@ export function profileFromLookup(
   result: unknown,
   endpoint: string,
   personKey: string,
-): { provider: string; facts: Facts } | null {
+): { provider: string; facts: Facts; photoUrl?: string } | null {
   const provider = providerFor(endpoint);
-  if (!provider) return null;
+  if (!provider) {
+    if (!isPeopleSearchEndpoint(endpoint)) return null;
+    const row = peopleFromSearch(result, endpoint).find(
+      (person) => linkedinPersonKey(person.linkedin_url) === personKey,
+    );
+    const facts = row && factsFromSearchRow(row);
+    return facts ? { provider: "people_search", facts, photoUrl: row.profile_image_url } : null;
+  }
   for (const record of records(result)) {
     if (!PROFILE_LINK_KEYS.some((key) => linkedinPersonKey(record[key]) === personKey)) continue;
     const facts = provider.normalize(record);
@@ -587,12 +594,13 @@ function summary(profile: RecruitingSavedProfile) {
   };
 }
 
-/** Saved profiles are the lookup cache; save stores only a lookup this run already made. */
+/** Saved profiles are the lookup cache; save stores only lookups this run already made. */
 export async function executeRecruitingProfilesTool(
   prisma: PrismaClient,
   actor: Actor,
   runId: string,
   input: RecruitingProfilesToolInput,
+  fetchPhoto?: Parameters<typeof inlineProfilePhotos>[1],
 ) {
   if (input.operation === "list") {
     const saved = await listRecruitingSavedProfiles(prisma, actor, input.candidateKeys);
@@ -602,25 +610,48 @@ export async function executeRecruitingProfilesTool(
     });
     return { items };
   }
-  if (!input.candidateKey.startsWith("linkedin:"))
+  const keys = input.operation === "save" ? [input.candidateKey] : input.candidateKeys;
+  if (keys.some((key) => !key.startsWith("linkedin:")))
     throw new RecruitingProfileError(
       "This person has no LinkedIn profile on record, so there is nothing to look up.",
     );
-  for (const call of await listRunToolResults(prisma, actor, runId)) {
-    const found = profileFromLookup(call.result, call.endpoint, input.candidateKey);
-    if (!found) continue;
-    const profile = await saveRecruitingSavedProfile(prisma, actor, runId, {
-      personKey: input.candidateKey,
-      provider: found.provider,
-      sourceEffectId: call.effectId,
-      fetchedAt: call.createdAt,
-      profile: found.facts,
-    });
-    return { saved: true, ...summary(profile) };
+  const calls = await listRunToolResults(prisma, actor, runId, 200);
+  const items = [];
+  for (const candidateKey of keys) {
+    const match = calls
+      .map((call) => ({ call, found: profileFromLookup(call.result, call.endpoint, candidateKey) }))
+      .find((entry) => entry.found);
+    if (!match?.found) {
+      items.push({ candidateKey, saved: false });
+      continue;
+    }
+    const { call, found } = match;
+    const photo = { profile_image_url: found.photoUrl };
+    if (photo.profile_image_url) await inlineProfilePhotos([photo], fetchPhoto);
+    try {
+      const profile = await saveRecruitingSavedProfile(prisma, actor, runId, {
+        personKey: candidateKey,
+        provider: found.provider,
+        sourceEffectId: call.effectId,
+        fetchedAt: call.createdAt,
+        profile: {
+          ...found.facts,
+          profileImageUrl: photo.profile_image_url ?? found.facts.profileImageUrl,
+        },
+      });
+      items.push({ saved: true, ...summary(profile) });
+    } catch (error) {
+      getLogger().warn("recruiting.profiles.save.skipped", { error: String(error) });
+      items.push({ candidateKey, saved: false });
+    }
   }
-  throw new RecruitingProfileError(
-    "No profile lookup for this person in this run. Fetch the person's full record by their LinkedIn URL with the connected profile-data connector first, then save.",
-  );
+  if (input.operation === "save") {
+    if (items[0]?.saved) return items[0];
+    throw new RecruitingProfileError(
+      "No profile lookup for this person in this run. Look the person up first with the people search, using their LinkedIn URL as the query, then save.",
+    );
+  }
+  return { items };
 }
 
 /** "Start – End" of a saved history line; "Present" is an open end. */
