@@ -210,6 +210,8 @@ export function ShellConversation({
     dismissComposerError,
     userName,
   } = model;
+  // While another role opens, its predecessor's pages and chat are not shown under its name.
+  const switchingRole = Boolean(openingCrmRole && !openingCrmRole.error);
   return (
     <main
       aria-hidden={mobileSidebarOpen || undefined}
@@ -306,7 +308,9 @@ export function ShellConversation({
           <TabLoading />
         </div>
       ) : null}
-      {(crmMode || (boundRoleCrmMode && effectiveCrmSelection)) && activeSnapshot?.threadId ? (
+      {!switchingRole &&
+      (crmMode || (boundRoleCrmMode && effectiveCrmSelection)) &&
+      activeSnapshot?.threadId ? (
         <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
           {effectiveCrmSelection ? (
             <RecruitingPanel
@@ -354,7 +358,7 @@ export function ShellConversation({
           )}
         </div>
       ) : null}
-      {workspaceCorrespondence && activeSnapshot?.threadId ? (
+      {!switchingRole && workspaceCorrespondence && activeSnapshot?.threadId ? (
         <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
           {currentBindingRead?.workspace && recruitingWorkspaceView !== "inbox" ? (
             <div className="recruiting-workspace-content">
@@ -395,7 +399,7 @@ export function ShellConversation({
           )}
         </div>
       ) : null}
-      {workspaceCandidates && knownThreadId ? (
+      {!switchingRole && workspaceCandidates && knownThreadId ? (
         <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
           <div className="recruiting-workspace-content">
             {recruitingWorkspaceView === "results" ? (
@@ -467,7 +471,12 @@ export function ShellConversation({
           <Trans>Chat with WeKruit</Trans>
         </Button>
       ) : null}
-      <div className={workspaceBrief ? "hire-brief-view rk-scroll" : "contents"}>
+      <div
+        className={cn(
+          workspaceBrief ? "hire-brief-view rk-scroll" : "contents",
+          switchingRole && "hidden",
+        )}
+      >
         {workspaceBrief ? (
           <div className="hire-brief-top">
             <div>

@@ -1304,6 +1304,13 @@ export const appContract = {
       // The longest origin: a scheme, a 253-character host name and a port.
       .input(z.object({ origin: z.string().max("https://".length + 253 + ":65535".length) }))
       .output(z.object({ icon: z.string().nullable(), retry: z.boolean().optional() })),
+    /**
+     * An organization's own website host, found from its name for its logo, or null when no site
+     * could be confirmed. `retry` means the server was too busy to look.
+     */
+    companySite: oc
+      .input(z.object({ name: z.string().max(200) }))
+      .output(z.object({ host: z.string().nullable(), retry: z.boolean().optional() })),
   },
   runs: {
     list: oc

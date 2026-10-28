@@ -130,7 +130,8 @@ function RecruitingWorkspace(props: Props & { userId?: string }) {
         <header className="hire-section-header">
           <h1>{shortlistView ? <Trans>Shortlist</Trans> : <Trans>Contacts</Trans>}</h1>
           {workspace ? <p>{workspace.role.title}</p> : null}
-          {candidatePage ? (
+          {/* Contacts counts every person it lists, search results and CRM records alike. */}
+          {shortlistView && candidatePage ? (
             <p>
               <Plural
                 value={candidatePage.counts.candidates}

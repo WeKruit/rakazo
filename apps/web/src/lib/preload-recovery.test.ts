@@ -2,7 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import { installPreloadRecovery } from "./preload-recovery";
 
 describe("preload recovery", () => {
-  function createTarget(store = new Map<string, string>(), onLine = true, isWorking = () => false) {
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  function createTarget(
+    store = new Map<string, string>(),
+    onLine = true,
+    isWorking = () => false,
+    serverOk: () => boolean = () => true,
+  ) {
     const timers: (() => void)[] = [];
     let listener: EventListener | undefined;
     const reload = vi.fn();
@@ -12,7 +18,8 @@ describe("preload recovery", () => {
       },
       clearTimeout: vi.fn(),
       removeEventListener: vi.fn(),
-      location: { reload },
+      fetch: vi.fn(async () => ({ ok: serverOk() })),
+      location: { reload, href: "https://app.test/app" },
       navigator: { onLine },
       sessionStorage: {
         getItem: (key: string) => store.get(key) ?? null,
@@ -28,11 +35,12 @@ describe("preload recovery", () => {
     return { listener: () => listener, reload, timers, dispose, target };
   }
 
-  it("reloads once without suppressing another failure during navigation", () => {
+  it("reloads once without suppressing another failure during navigation", async () => {
     const { listener, reload } = createTarget();
     const first = new Event("vite:preloadError", { cancelable: true });
     const second = new Event("vite:preloadError", { cancelable: true });
     listener()?.(first);
+    await settle();
     listener()?.(second);
 
     expect(first.defaultPrevented).toBe(true);
@@ -40,7 +48,7 @@ describe("preload recovery", () => {
     expect(reload).toHaveBeenCalledOnce();
   });
 
-  it("waits for native work to finish before reloading missing assets", () => {
+  it("waits for native work to finish before reloading missing assets", async () => {
     let working = true;
     const { listener, reload, timers } = createTarget(new Map(), true, () => working);
     const failure = new Event("vite:preloadError", { cancelable: true });
@@ -51,6 +59,27 @@ describe("preload recovery", () => {
     expect(reload).not.toHaveBeenCalled();
     working = false;
     timers[2]!();
+    await settle();
+    expect(reload).toHaveBeenCalledOnce();
+  });
+
+  it("waits for the server to answer again before reloading during a release", async () => {
+    let up = false;
+    const { listener, reload, timers } = createTarget(
+      new Map(),
+      true,
+      () => false,
+      () => up,
+    );
+    listener()?.(new Event("vite:preloadError", { cancelable: true }));
+    const again = new Event("vite:preloadError", { cancelable: true });
+    listener()?.(again);
+    expect(again.defaultPrevented).toBe(true);
+    await settle();
+    expect(reload).not.toHaveBeenCalled();
+    up = true;
+    timers[1]!();
+    await settle();
     expect(reload).toHaveBeenCalledOnce();
   });
 

@@ -231,11 +231,6 @@ export function ContactsTab(
           <Trans>Some saved contact details could not be displayed.</Trans>
         </p>
       ) : null}
-      {autumn && saved.data?.status === "not_checked" ? (
-        <p className="text-muted-foreground">
-          <Trans>Contact details have not been checked yet.</Trans>
-        </p>
-      ) : null}
       {total === null && loadedCount > 0 ? (
         <p className="mb-2 text-sm text-muted-foreground">
           <Trans>{loadedCount} loaded</Trans>

@@ -56,6 +56,8 @@ export function useProfileView({
         if (!mounted.current || visit.current !== current) return;
         current.pending = false;
         setState({ key, status: "failed" });
+        // View history is background record keeping: retry once quietly, never block the profile.
+        if (attempt === 0) setTimeout(() => mounted.current && setAttempt(1), 3000);
       });
   }, [key, visible, attempt]);
 

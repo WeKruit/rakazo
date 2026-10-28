@@ -1712,10 +1712,6 @@ msgstr "无法读取这个活动。"
 msgid "Could not read this sequence."
 msgstr "无法读取这个邮件序列。"
 
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Could not record this profile view."
-msgstr "未能记录本次档案查看。"
-
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "无法移除"
@@ -2508,6 +2504,11 @@ msgstr "按日期筛选"
 msgid "Filters"
 msgstr "筛选"
 
+#. placeholder {0}: person.name
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Find {0}'s full work history and education and save it to their profile."
+msgstr "查找 {0} 的完整工作经历和教育背景，并保存到他们的档案。"
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr "查找邮箱"
@@ -2516,6 +2517,10 @@ msgstr "查找邮箱"
 #: src/pages/Onboarding.tsx
 msgid "Find models"
 msgstr "查找模型"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Find work history"
+msgstr "查找工作经历"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx

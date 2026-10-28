@@ -1712,10 +1712,6 @@ msgstr ""
 msgid "Could not read this sequence."
 msgstr ""
 
-#: src/pages/recruiting/DetailPanel.tsx
-msgid "Could not record this profile view."
-msgstr ""
-
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "No se pudo quitar"
@@ -2508,6 +2504,11 @@ msgstr ""
 msgid "Filters"
 msgstr ""
 
+#. placeholder {0}: person.name
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Find {0}'s full work history and education and save it to their profile."
+msgstr ""
+
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find email"
 msgstr ""
@@ -2516,6 +2517,10 @@ msgstr ""
 #: src/pages/Onboarding.tsx
 msgid "Find models"
 msgstr "Buscar modelos"
+
+#: src/pages/recruiting/DetailPanel.tsx
+msgid "Find work history"
+msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx

@@ -886,7 +886,8 @@ export function useShellRecruiting({
     selection: CrmBrowseSelection,
     view: RecruitingWorkspaceView = "results",
   ) {
-    if (!selection.crmRoleId) return;
+    const crmRoleId = selection.crmRoleId;
+    if (!crmRoleId) return;
     const request = ++crmRoleOpenRequest.current;
     const submittedScope = crmComposerScope;
     const submittedUser = botsRefreshUser.current;
@@ -897,27 +898,64 @@ export function useShellRecruiting({
       currentCrmComposerScope.current === submittedScope &&
       botsRefreshUser.current === submittedUser &&
       (selectedSpaceId() ?? submittedSpace) === submittedSpace;
-    setOpeningCrmRole({ selection, view });
-    try {
-      const botIds = crmRoleBotIds();
-      if (botIds.length < GROUP_MEMBER_MIN)
-        throw new Error(t`The recruiting team is not ready yet.`);
-      const group = await rpc.groups.create({
+    const createGroup = (botIds: string[]) =>
+      rpc.groups.create({
         name: t`Recruiting`,
         botIds,
         crmRoleReference: {
           sourceId: selection.serverId,
           serverRevision: selection.serverRevision,
           organizationId: selection.organizationId,
-          crmRoleId: selection.crmRoleId,
+          crmRoleId,
         },
       });
-      if (!stillCurrent()) return;
+    const remember = (group: Group) =>
       setGroups((current) =>
         current.some((item) => item.id === group.id)
           ? current.map((item) => (item.id === group.id ? group : item))
           : [group, ...current],
       );
+    // A role that already has a conversation opens at once; the server refresh follows quietly.
+    const opened = groups.find(
+      (group) =>
+        group.crmRoleReference &&
+        matchesCrmRole(selection, {
+          serverId: group.crmRoleReference.sourceId,
+          serverRevision: group.crmRoleReference.serverRevision,
+          organizationId: group.crmRoleReference.organizationId,
+          crmRoleId: group.crmRoleReference.crmRoleId,
+        }),
+    );
+    if (opened) {
+      enterCrmRole(opened);
+      const botIds = crmRoleBotIds();
+      if (botIds.length >= GROUP_MEMBER_MIN)
+        void createGroup(botIds)
+          .then(remember)
+          .catch(() => undefined);
+      return;
+    }
+    setOpeningCrmRole({ selection, view });
+    try {
+      const botIds = crmRoleBotIds();
+      if (botIds.length < GROUP_MEMBER_MIN)
+        throw new Error(t`The recruiting team is not ready yet.`);
+      const group = await createGroup(botIds);
+      if (!stillCurrent()) return;
+      remember(group);
+      enterCrmRole(group);
+    } catch (error) {
+      if (stillCurrent())
+        setOpeningCrmRole({
+          selection,
+          view,
+          error: errorText(error, t`Could not open this role.`),
+        });
+    } finally {
+      if (!stillCurrent() && request === crmRoleOpenRequest.current) setOpeningCrmRole(null);
+    }
+
+    function enterCrmRole(group: Group) {
       setSelectedContact(null);
       setSelectedCorrespondence(null);
       setPanel(null);
@@ -930,15 +968,6 @@ export function useShellRecruiting({
         search.set("crmCandidate", searchParams.get("crmCandidate")!);
       navigate(`/app/g/${group.id}?${search}`);
       void refreshBots().catch(() => undefined);
-    } catch (error) {
-      if (stillCurrent())
-        setOpeningCrmRole({
-          selection,
-          view,
-          error: errorText(error, t`Could not open this role.`),
-        });
-    } finally {
-      if (!stillCurrent() && request === crmRoleOpenRequest.current) setOpeningCrmRole(null);
     }
   }
   const legacyCrmOpenKey =

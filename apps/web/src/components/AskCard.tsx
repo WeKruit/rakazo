@@ -324,7 +324,7 @@ function QuestionAskCard({
             : block.credential.origin}
         </div>
       ) : null}
-      {block.detail && !secretInput ? (
+      {block.detail && !secretInput && (canAnswer || block.status === "answered") ? (
         <pre className="mt-3 max-h-72 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-muted px-3.5 py-3 font-sans text-sm leading-relaxed text-foreground">
           {block.detail}
         </pre>
