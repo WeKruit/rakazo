@@ -726,10 +726,6 @@ msgstr "Connecting…"
 msgid "Connection test failed."
 msgstr "Connection test failed."
 
-#: src/pages/recruiting/ContactsTab.tsx
-msgid "Contact details have not been checked yet."
-msgstr "Contact details have not been checked yet."
-
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Contact layout"
 msgstr "Contact layout"
@@ -1019,6 +1015,10 @@ msgstr "Create your WeKruit Headhunter account"
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Criterion name unavailable"
 msgstr "Criterion name unavailable"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current"
+msgstr "Current"
 
 #: src/components/AccountAccess.tsx
 msgid "Current password"

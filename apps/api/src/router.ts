@@ -23,6 +23,7 @@ import {
 import type {
   CloudAgentConnection,
   CodexLiveCatalog,
+  CompanySiteResolver,
   ComposioProvider,
   ComputerExecutionLease,
   ConnectorRegistry,
@@ -58,6 +59,7 @@ import {
   computerSupportsUpdate,
   computerUpdateIsCurrent,
   computerUpdateView,
+  createCompanySiteResolver,
   createFaviconResolver,
   createTicket,
   createVoiceProvider,
@@ -652,6 +654,8 @@ export interface RouterDeps {
   codexCatalog?: CodexLiveCatalog;
   /** Site icons for links; defaults to the per-process cache that fetches them. */
   favicons?: FaviconResolver;
+  /** Organization websites found from their names, for logos; defaults to a per-process cache. */
+  companySites?: CompanySiteResolver;
   /**
    * Detached refresh for a stored credential whose bearer expired — the live
    * catalog path calls it instead of refreshing inline. Defaults to the
@@ -903,6 +907,7 @@ export function createRouter(deps: RouterDeps) {
     ? { provider: deps.env.defaultProvider }
     : null;
   const favicons = deps.favicons ?? createFaviconResolver();
+  const companySites = deps.companySites ?? createCompanySiteResolver();
   const refreshExpiredCredential =
     deps.refreshExpiredModelCredential ??
     ((scope: { userId: string; spaceId: string }, secretId: string, provider: string) =>
@@ -6806,6 +6811,9 @@ export function createRouter(deps: RouterDeps) {
     },
     links: {
       favicon: authed.links.favicon.handler(async ({ input }) => favicons.favicon(input.origin)),
+      companySite: authed.links.companySite.handler(async ({ input }) =>
+        companySites.companySite(input.name),
+      ),
     },
     runs: {
       list: authed.runs.list.handler(async ({ context, input }) => ({

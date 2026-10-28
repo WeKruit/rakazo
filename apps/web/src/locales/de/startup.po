@@ -726,10 +726,6 @@ msgstr "Verbindung wird hergestellt…"
 msgid "Connection test failed."
 msgstr "Verbindungstest fehlgeschlagen."
 
-#: src/pages/recruiting/ContactsTab.tsx
-msgid "Contact details have not been checked yet."
-msgstr ""
-
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Contact layout"
 msgstr ""
@@ -1018,6 +1014,10 @@ msgstr ""
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Criterion name unavailable"
+msgstr ""
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current"
 msgstr ""
 
 #: src/components/AccountAccess.tsx

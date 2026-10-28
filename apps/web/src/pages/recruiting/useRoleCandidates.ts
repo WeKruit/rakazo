@@ -1,7 +1,7 @@
 import type { RecruitingCandidate, RecruitingCrmDataOutput } from "@rakazo/contracts";
 import { useState } from "react";
 import type { RoleCandidateRow } from "./roleCandidates";
-import { mergeRoleCandidates, roleCandidateFit } from "./roleCandidates";
+import { isRecordId, mergeRoleCandidates, roleCandidateFit } from "./roleCandidates";
 import type { RecruitingTabProps } from "./shared";
 import { useCrmPages, useRoleCrm } from "./shared";
 
@@ -66,7 +66,8 @@ export function useRoleCandidates(props: RecruitingTabProps & { autumn?: AutumnC
       location: person.location,
       email: person.email,
       linkedinUrl: person.linkedinUrl,
-      value: person,
+      // Some imported records hold an internal company id where the name belongs.
+      value: isRecordId(person.company) ? { ...person, company: null } : person,
     })),
     fit: (candidate) => roleCandidateFit(candidate.latestSource?.report?.fields),
     sortByScore: autumn?.sortByScore ?? true,

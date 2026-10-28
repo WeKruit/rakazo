@@ -126,3 +126,10 @@ export function mergeRoleCandidates<A, C>({
   }
   return [...rows, ...crmOnly];
 }
+
+/** A bare UUID, which no person or company is named. */
+export function isRecordId(value: string | null | undefined) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    value?.trim() ?? "",
+  );
+}

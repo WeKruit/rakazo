@@ -272,3 +272,38 @@ export function EducationTimeline(props: {
 }) {
   return <Timeline {...props} kind="education" />;
 }
+
+/** The one position known when no work history was returned: the current title and employer. */
+export function CurrentPosition({
+  title,
+  company,
+  ...props
+}: {
+  title: string | null | undefined;
+  company: string | null | undefined;
+  Sources: SourcesRenderer;
+  asset?: ProfileAssets["company"];
+  link?: ProfileAssets["companyLink"];
+  hosts?: ReadonlyMap<string, string>;
+}) {
+  const { t } = useLingui();
+  const primary = title?.trim() || company?.trim();
+  if (!primary) return null;
+  const organization = company?.trim() || null;
+  return (
+    <ul className="space-y-4">
+      <Row
+        kind="experience"
+        entry={{
+          text: [title, organization].filter(Boolean).join(" · "),
+          structured: true,
+          primary,
+          ...(organization && primary !== organization ? { secondary: organization } : {}),
+          organization,
+          dateLabel: t`Current`,
+        }}
+        {...props}
+      />
+    </ul>
+  );
+}

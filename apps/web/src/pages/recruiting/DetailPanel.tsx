@@ -28,7 +28,7 @@ import { InterviewTab } from "./LazyViews";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
 import { CompanyLogo, OrgBadge } from "./OrgBadge";
 import { PersonAvatar } from "./ProfileImage";
-import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
+import { CurrentPosition, EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
   linkedinHandle,
@@ -39,7 +39,6 @@ import {
 } from "./profile";
 import { organizationLogo, profileAssets, profileContentFields } from "./profileAssets";
 import { organizationHosts } from "./quickOutput";
-import { RetryNotice } from "./RetryNotice";
 import { usePersonSequenceFacts } from "./SequenceStats";
 import { SkillEvidence } from "./SkillEvidence";
 import { statusText } from "./shared";
@@ -293,7 +292,9 @@ export function RecruitingDetailPanel({
     candidate && (sections.fit || sections.requirements.length || sections.summary)
       ? { id: "fit", label: t`Assessment` }
       : null,
-    sections.experience.length ? { id: "experience", label: t`Experience` } : null,
+    sections.experience.length || person.title || company
+      ? { id: "experience", label: t`Experience` }
+      : null,
     sections.education.length ? { id: "education", label: t`Education` } : null,
     sections.skills.length ? { id: "skills", label: t`Skills` } : null,
     sections.findings.length ? { id: "findings", label: t`Research findings` } : null,
@@ -349,11 +350,6 @@ export function RecruitingDetailPanel({
       </header>
       <div className="rk-scroll min-h-0 flex-1 overflow-y-auto">
         <div className="space-y-3 px-4 pt-4">
-          {profileView.status === "failed" ? (
-            <RetryNotice onRetry={profileView.retry}>
-              <Trans>Could not record this profile view.</Trans>
-            </RetryNotice>
-          ) : null}
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1 space-y-1">
               <h2
@@ -610,6 +606,31 @@ export function RecruitingDetailPanel({
                     link={assets.companyLink}
                     hosts={orgHosts}
                   />
+                </Section>
+              ) : person.title || company ? (
+                <Section id={anchorId("experience")} title={<Trans>Experience</Trans>}>
+                  <CurrentPosition
+                    title={person.title}
+                    company={company}
+                    Sources={Sources}
+                    asset={assets.company}
+                    link={assets.companyLink}
+                    hosts={orgHosts}
+                  />
+                  {onAskChat ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() =>
+                        onAskChat(
+                          t`Find ${person.name}'s full work history and education and save it to their profile.`,
+                        )
+                      }
+                    >
+                      <Trans>Find work history</Trans>
+                    </Button>
+                  ) : null}
                 </Section>
               ) : null}
               {sections.education.length ? (

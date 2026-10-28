@@ -726,10 +726,6 @@ msgstr "正在连接…"
 msgid "Connection test failed."
 msgstr "连接测试失败。"
 
-#: src/pages/recruiting/ContactsTab.tsx
-msgid "Contact details have not been checked yet."
-msgstr "联系方式尚未查询。"
-
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Contact layout"
 msgstr "联系人布局"
@@ -1019,6 +1015,10 @@ msgstr "创建你的 WeKruit Headhunter 账号"
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "Criterion name unavailable"
 msgstr "标准名称不可用"
+
+#: src/pages/recruiting/ProfileTimeline.tsx
+msgid "Current"
+msgstr "目前"
 
 #: src/components/AccountAccess.tsx
 msgid "Current password"
