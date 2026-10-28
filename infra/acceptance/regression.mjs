@@ -333,6 +333,7 @@ if (wanted.has("t1"))
     tenChecks(await settled(groupId), failures, { card: false });
     const draft = await say(groupId, "来个campign draft看看");
     const drafted = draft.replies.map(botText).join("\n");
+    fs.writeFileSync(path.join(OUT, "t1-draft.txt"), `${drafted}\n`);
     if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
       failures.push("campaign draft is not three emails shown in chat");
     if (!/^\s*[-*•]\s/m.test(drafted)) failures.push("job duties in the draft are not bullets");
