@@ -6,12 +6,17 @@ import type {
   RecruitingCrmTarget,
 } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
+import { useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import { Shimmer } from "../../components/ai/primitives";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
-import { rememberRecruitingRead } from "../../lib/recruiting-read-cache";
+import {
+  createRecruitingReadCache,
+  rememberRecruitingRead,
+  savedRecruitingRead,
+} from "../../lib/recruiting-read-cache";
 import { rpc } from "../../lib/rpc";
 
 /**
@@ -34,7 +39,6 @@ export type RecruitingTabProps = {
   readCacheScope?: string;
 };
 
-type Read<T> = { key: string; data?: T; failed?: boolean };
 type CacheSlot = { cache?: RecruitingReadCache; key?: string };
 
 /** Display-cache slot for one tab read; empty without a Shell scope. */
@@ -54,39 +58,26 @@ export function tabCacheSlot(
  * the cached or loading state stays on screen.
  */
 export function useKeyedRead<T>(key: string | null, load: () => Promise<T>, slot: CacheSlot = {}) {
-  const [read, setRead] = useState<Read<T>>();
+  const [local] = useState(createRecruitingReadCache);
+  const cache = slot.cache ?? local;
+  const read = useQuery(
+    {
+      queryKey: ["recruiting", slot.key ?? key, key],
+      enabled: key !== null,
+      queryFn: ({ signal }) => retryTransientRead(load, signal),
+    },
+    cache.client,
+  );
   useEffect(() => {
-    if (key === null) return;
-    let cancelled = false;
-    const abort = new AbortController();
-    const epoch = slot.cache?.epoch;
-    setRead({ key });
-    retryTransientRead(load, abort.signal)
-      .then((data) => {
-        if (cancelled) return;
-        if (slot.cache && epoch !== slot.cache.epoch) return setRead({ key, failed: true });
-        rememberRecruitingRead(slot.cache, slot.key, data, epoch);
-        setRead({ key, data });
-      })
-      .catch(() => {
-        if (!cancelled) setRead({ key, failed: true });
-      });
-    return () => {
-      cancelled = true;
-      abort.abort();
-    };
-    // `load` is derived from `key`; the key is the read's identity.
-  }, [key]);
-  const current = key !== null && read?.key === key ? read : undefined;
+    if (read.isSuccess && !read.isPlaceholderData)
+      rememberRecruitingRead(slot.cache, slot.key, read.data);
+  }, [read.data, read.isSuccess, read.isPlaceholderData, slot.cache, slot.key]);
   const data =
-    current?.data ??
-    (key !== null && !current?.failed && slot.key
-      ? (slot.cache?.entries.get(slot.key) as T | undefined)
-      : undefined);
+    read.data ?? (slot.key ? (savedRecruitingRead(cache, slot.key) as T | undefined) : undefined);
   return {
-    loading: key !== null && !data && !current?.failed,
-    failed: Boolean(current?.failed),
-    data,
+    loading: key !== null && read.isPending && data === undefined,
+    failed: read.isError,
+    data: key === null || read.isError ? undefined : data,
   };
 }
 

@@ -8,6 +8,7 @@ import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
+import type { PrismaClient } from "@rakazo/db";
 import type { createApp as CreateApp } from "../../../../apps/api/src/app.ts";
 
 const port = Number(process.env.API_PORT ?? 3191);
@@ -65,7 +66,7 @@ try {
   });
   try {
     const password = "local-isolation-password-a";
-    await seedAccount("a@isolation.test", password);
+    await seedAccount("a@isolation.test", password, handles.prisma);
     // The script must run in its own process: the API serves its requests from this one.
     exitCode = await new Promise<number>((resolve) => {
       spawn(
@@ -92,7 +93,7 @@ try {
 }
 process.exit(exitCode);
 
-async function seedAccount(email: string, password: string) {
+async function seedAccount(email: string, password: string, prisma: PrismaClient) {
   let cookie = "";
   async function post(route: string, body: unknown) {
     const response = await fetch(`${origin}${route}`, {
@@ -141,7 +142,7 @@ async function seedAccount(email: string, password: string) {
   };
   const message = page.messages.find((item) => item.role === "user");
   if (!message) throw new Error("A's message was not saved");
-  await rpc("recruiting/createRole", {
+  const saved = (await rpc("recruiting/createRole", {
     title: "A role",
     sourceRefs: [
       {
@@ -157,5 +158,25 @@ async function seedAccount(email: string, password: string) {
     definitionQuestions: [],
     sourceThreadId: head.threadId,
     expectedRevision: 0,
+  })) as { role: { id: string } };
+  await rpc("recruiting/reminders/create", {
+    roleId: saved.role.id,
+    title: "Synthetic follow-up",
+    dueAt: new Date(Date.now() + 86_400_000).toISOString(),
   });
+  // Exercise the authorized cross-Space bootstrap through the real RPC. The fake
+  // credentials are inert records only: no provider login or inference is requested.
+  const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+  const source = await prisma.spaceMember.findFirstOrThrow({ where: { userId: user.id } });
+  const model = await prisma.userModelCredential.create({ data: { userId: user.id, provider: "synthetic", label: "Fixture", secretId: "synthetic-unused" } });
+  const voice = await prisma.userVoiceCredential.create({ data: { userId: user.id, provider: "synthetic", secretId: "synthetic-unused" } });
+  await prisma.spaceModelPreference.create({ data: { userId: user.id, spaceId: source.spaceId, credentialId: model.id, modelId: "synthetic", isDefault: true } });
+  await prisma.spaceVoicePreference.create({ data: { userId: user.id, spaceId: source.spaceId, credentialId: voice.id, voiceId: "synthetic", isDefault: true } });
+  const created = await rpc("spaces/create", { name: "Synthetic copied preferences", userId: "forged-user", currentSpaceId: "forged-source", organizationId: "forged-org" });
+  const target = await prisma.space.findUniqueOrThrow({ where: { id: String(created.id) } });
+  if (target.organizationId !== source.organizationId || target.createdByUserId !== user.id) throw new Error("Space RPC accepted forged authority");
+  const scope = { spaceId: target.id, userId: user.id };
+  if (await prisma.notificationPreference.count({ where: scope }) !== 1 ||
+      await prisma.spaceModelPreference.count({ where: { ...scope, credentialId: model.id, modelId: "synthetic", isDefault: true } }) !== 1 ||
+      await prisma.spaceVoicePreference.count({ where: { ...scope, credentialId: voice.id, voiceId: "synthetic", isDefault: true } }) !== 1) throw new Error("Space RPC did not preserve personal defaults");
 }

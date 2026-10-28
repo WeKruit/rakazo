@@ -10,9 +10,14 @@ import { previewFromBlocks } from "./thread-listing.js";
 
 export function createExternalConversationRepos(prisma: PrismaClient) {
   return {
-    async listForSpaces(actor: Actor, spaceIds: string[]): Promise<ExternalConversation[]> {
+    async listForSpaces(
+      actor: Actor,
+      spaceIds: string[],
+      page?: { offset: number },
+    ): Promise<ExternalConversation[]> {
       if (spaceIds.length === 0) return [];
       const conversations = await prisma.externalConversation.findMany({
+        ...(page ? { take: 200, skip: page.offset } : {}),
         where: {
           spaceId: { in: spaceIds },
           userId: actor.userId,

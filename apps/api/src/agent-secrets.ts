@@ -28,11 +28,12 @@ async function requireSpaceOwner(prisma: PrismaClient, actor: Actor): Promise<vo
   if (!roles?.includes("owner")) throw new ORPCError("FORBIDDEN");
 }
 
-export async function listAgentSecrets(deps: AgentSecretDeps, actor: Actor) {
+export async function listAgentSecrets(deps: AgentSecretDeps, actor: Actor, offset?: number) {
   await requireSpaceOwner(deps.prisma, actor);
   const rows = await deps.prisma.agentSecret.findMany({
+    ...(offset === undefined ? {} : { take: 200, skip: offset }),
     where: { spaceId: actor.spaceId },
-    orderBy: [{ name: "asc" }],
+    orderBy: [{ name: "asc" }, { id: "asc" }],
     select: { id: true, name: true, createdAt: true, updatedAt: true },
   });
   return rows.map(agentSecretDto);

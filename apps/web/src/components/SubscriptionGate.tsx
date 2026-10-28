@@ -3,10 +3,13 @@ import type { ReactNode } from "react";
 import { lazy, Suspense, useEffect, useState } from "react";
 import { fetchAuthCapabilities } from "../lib/auth-capabilities";
 import { peekInitialBootstrap } from "../lib/bootstrap";
+import { withFeatureMessages } from "../lib/i18n";
 import { rpc } from "../lib/rpc";
 
 const PaywallPage = lazy(() =>
-  import("../pages/Paywall").then((module) => ({ default: module.PaywallPage })),
+  withFeatureMessages(() => import("../pages/Paywall")).then((module) => ({
+    default: module.PaywallPage,
+  })),
 );
 
 type GateState =

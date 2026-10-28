@@ -54,6 +54,7 @@ export async function listScratchpadItems(
     botId: string;
     status?: ScratchpadStatus;
     includeDone?: boolean;
+    offset?: number;
   },
 ) {
   const statusFilter = input.status
@@ -62,12 +63,13 @@ export async function listScratchpadItems(
       ? {}
       : { status: { in: OPEN_SCRATCHPAD_STATUSES } };
   const rows = await deps.prisma.scratchpadItem.findMany({
+    ...(input.offset === undefined ? {} : { take: 200, skip: input.offset }),
     where: {
       spaceId: input.spaceId,
       botId: input.botId,
       ...statusFilter,
     },
-    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
+    orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }, { id: "desc" }],
   });
   return rows.map(mapScratchpadItem);
 }

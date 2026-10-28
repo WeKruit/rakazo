@@ -26,10 +26,12 @@ import type {
   ComposioProvider,
   ComputerExecutionLease,
   ConnectorRegistry,
+  DurablePiOAuthLogins,
   FaviconResolver,
   getBotSecretMetadata,
   IntegrationProviderSettings,
   MemoryProviderResolver,
+  PiOAuthConnected,
   PiOAuthLogins,
   RemoteConnectorDependencies,
   TicketChangeNotifier,
@@ -240,6 +242,7 @@ import {
   toTicketDto,
   touchGroupUpdatedAt,
   upgradeRecruitingWorkspace,
+  withDatabaseActor,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { deleteAgentSecret, listAgentSecrets, putAgentSecret } from "./agent-secrets.js";
@@ -267,6 +270,7 @@ import {
   toComputerStatus,
 } from "./computer-status.js";
 import { searchIntegrationCatalog } from "./integration-catalog.js";
+import { paginateListOutput } from "./list-pagination.js";
 import {
   dismissMcpServerApprovals,
   resolveMcpApprovalCards,
@@ -330,6 +334,7 @@ import {
   updateRecruitingReminder,
 } from "./recruiting.js";
 import { syncRecruitingCrm } from "./recruiting-crm-sync.js";
+import { readRecruitingView } from "./recruiting-read-view.js";
 import {
   getRecruitingSchedulingPlans,
   saveRecruitingSchedulingPlan,
@@ -627,6 +632,10 @@ function mcpAssignmentDto(row: {
 export interface RouterDeps {
   cloudAgent?: CloudAgentConnection | null;
   prisma: PrismaClient;
+  /** Narrow system capability for membership-checked creation across source/target Spaces. */
+  createSpaceForMember?: (
+    input: Parameters<typeof createSpaceForMember>[1],
+  ) => ReturnType<typeof createSpaceForMember>;
   events: ThreadEvents;
   boardEvents: BoardEvents;
   ticketChanges: TicketChangeNotifier;
@@ -637,7 +646,7 @@ export interface RouterDeps {
   memoryProviders: MemoryProviderResolver;
   home: AgentHomeStore;
   secrets: SecretStore;
-  oauthLogins: PiOAuthLogins;
+  oauthLogins: PiOAuthLogins | DurablePiOAuthLogins;
   /** Live Codex catalog seam; defaults to the shared per-process cache. */
   codexCatalog?: CodexLiveCatalog;
   /** Site icons for links; defaults to the per-process cache that fetches them. */
@@ -872,6 +881,23 @@ export function createRouter(deps: RouterDeps) {
     );
   }
   const codexCatalog = deps.codexCatalog ?? new CodexCatalogCache();
+  const persistOAuth = (actor: Actor, login: PiOAuthConnected) =>
+    persistModelCredential(
+      deps,
+      actor,
+      {
+        provider: login.provider,
+        plaintext: serializeModelSecret({ kind: "oauth", credential: login.credential }),
+        label:
+          login.label ??
+          listPiCatalog().find((entry) => entry.provider === login.provider)?.providerName,
+        modelId: login.modelId,
+        thinkingLevel: login.thinkingLevel,
+        signal: login.signal,
+      },
+      codexCatalog,
+    );
+
   const deploymentModel = deps.env.deploymentModelConfigured
     ? { provider: deps.env.defaultProvider }
     : null;
@@ -1018,9 +1044,12 @@ export function createRouter(deps: RouterDeps) {
   });
   const agentSkills = createAgentSkillsService(deps.prisma);
 
-  const authed = os.use(async ({ context, next }) => {
+  const authed = os.use(async ({ context, next, path }, input) => {
     if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-    return next({ context: { ...context, actor: context.actor } });
+    return withDatabaseActor(context.actor, async () => {
+      const result = await next({ context: { ...context, actor: context.actor! } });
+      return { ...result, output: paginateListOutput(path, input, result.output) };
+    });
   });
 
   const boardEnabled = os
@@ -1028,9 +1057,12 @@ export function createRouter(deps: RouterDeps) {
       if (!deps.env?.ticketBoardEnabled) throw new ORPCError("NOT_FOUND");
       return next();
     })
-    .use(async ({ context, next }) => {
+    .use(async ({ context, next, path }, input) => {
       if (!context.actor) throw new ORPCError("UNAUTHORIZED");
-      return next({ context: { ...context, actor: context.actor } });
+      return withDatabaseActor(context.actor, async () => {
+        const result = await next({ context: { ...context, actor: context.actor! } });
+        return { ...result, output: paginateListOutput(path, input, result.output) };
+      });
     });
   const ticketDeps = {
     prisma: deps.prisma,
@@ -1080,8 +1112,8 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     spaces: {
-      list: authed.spaces.list.handler(async ({ context }) =>
-        spaceNavigationDto(deps, context.actor, repos, groupRepos),
+      list: authed.spaces.list.handler(async ({ context, input }) =>
+        spaceNavigationDto(deps, context.actor, repos, groupRepos, input?.offset ?? 0),
       ),
       subscribe: authed.spaces.subscribe.handler(async function* ({ context }) {
         // Signals are hints only: every wake re-reads the actor-scoped roster (bots + latest run +
@@ -1136,7 +1168,9 @@ export function createRouter(deps: RouterDeps) {
       create: authed.spaces.create.handler(async ({ context, input }) => {
         let space: { id: string; name: string };
         try {
-          space = await createSpaceForMember(deps.prisma, {
+          space = await (
+            deps.createSpaceForMember ?? ((input) => createSpaceForMember(deps.prisma, input))
+          )({
             currentSpaceId: context.actor.spaceId,
             userId: context.actor.userId,
             name: input.name,
@@ -1311,21 +1345,23 @@ export function createRouter(deps: RouterDeps) {
     },
     bootstrap: authed.bootstrap.handler(async ({ context, input }) => {
       const actor = context.actor;
-      await upgradeRecruitingWorkspace(deps.prisma, actor, {
-        sandboxKind: deps.env.sandboxProvider,
-        firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
-      });
+      if (!input.offset)
+        await upgradeRecruitingWorkspace(deps.prisma, actor, {
+          sandboxKind: deps.env.sandboxProvider,
+          firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+        });
       // Additive setup for older crews; a failure must not block sign-in.
-      await ensurePlatformServices(deps.prisma, actor).catch((error: unknown) =>
-        getLogger().error("platform service setup failed", error),
-      );
+      if (!input.offset)
+        await ensurePlatformServices(deps.prisma, actor).catch((error: unknown) =>
+          getLogger().error("platform service setup failed", error),
+        );
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
-      void prewarmTeamComputer(deps, actor).catch(() => undefined);
+      if (!input.offset) void prewarmTeamComputer(deps, actor).catch(() => undefined);
       const [me, navigation, archivedBots, archivedGroups, groupThread] = await Promise.all([
         meDto(deps, actor),
-        spaceNavigationDto(deps, actor, repos, groupRepos),
-        repos.listBots(actor, { archived: true }),
-        groupRepos.listGroups(actor, { archived: true }),
+        spaceNavigationDto(deps, actor, repos, groupRepos, input.offset ?? 0),
+        repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+        groupRepos.listGroups(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
         input.groupId
           ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
               threadSnapshot(deps, target),
@@ -1333,15 +1369,24 @@ export function createRouter(deps: RouterDeps) {
           : Promise.resolve(null),
       ]);
       const { bots, groups, botSections } = navigation.current;
-      const active = bots.find((bot) => bot.id === input.botId);
+      const active = input.botId
+        ? await deps.prisma.bot.findFirst({
+            where: {
+              id: input.botId,
+              userId: actor.userId,
+              spaceId: actor.spaceId,
+              archivedAt: null,
+            },
+          })
+        : null;
       const [thread, routines] = input.groupId
-        ? [groups.some((group) => group.id === input.groupId) ? groupThread : null, []]
+        ? [groupThread, []]
         : active
           ? await Promise.all([
               resolveThreadTarget(deps.prisma, actor, { botId: active.id }).then((target) =>
                 threadSnapshot(deps, target),
               ),
-              listRoutinesDto(deps, actor, active.id),
+              listRoutinesDto(deps, actor, active.id, input.offset ?? 0),
             ])
           : [null, []];
       return {
@@ -1364,6 +1409,13 @@ export function createRouter(deps: RouterDeps) {
           : null,
         routines,
         spaces: navigation.spaces,
+        nextOffset:
+          navigation.nextOffset !== null ||
+          archivedBots.length === 200 ||
+          archivedGroups.length === 200 ||
+          routines.length === 200
+            ? (input.offset ?? 0) + 200
+            : null,
       };
     }),
     deployment: {
@@ -1469,8 +1521,10 @@ export function createRouter(deps: RouterDeps) {
         );
         return deps.env.agentRuntime === "scripted" ? [...choices, scriptedCatalogEntry] : choices;
       }),
-      credentials: authed.models.credentials.handler(async ({ context }) => {
+      credentials: authed.models.credentials.handler(async ({ context, input }) => {
         const rows = await deps.prisma.userModelCredential.findMany({
+          take: 200,
+          skip: input?.offset ?? 0,
           where: { userId: context.actor.userId },
           include: {
             preferences: {
@@ -1659,6 +1713,7 @@ export function createRouter(deps: RouterDeps) {
           thinkingLevel: input.thinkingLevel,
           label: input.label,
           signal: context.signal,
+          persist: (login) => persistOAuth(context.actor, login),
         });
       }),
       submitOAuthCode: authed.models.submitOAuthCode.handler(async ({ context, input }) => {
@@ -1673,26 +1728,8 @@ export function createRouter(deps: RouterDeps) {
       }),
       finishOAuth: authed.models.finishOAuth.handler(async ({ context, input }) => {
         throwIfAborted(context.signal);
-        const result = await deps.oauthLogins.finish(
-          input.loginId,
-          context.actor,
-          async (login) => {
-            return persistModelCredential(
-              deps,
-              context.actor,
-              {
-                provider: login.provider,
-                plaintext: serializeModelSecret({ kind: "oauth", credential: login.credential }),
-                label:
-                  login.label ??
-                  listPiCatalog().find((entry) => entry.provider === login.provider)?.providerName,
-                modelId: login.modelId,
-                thinkingLevel: login.thinkingLevel,
-                signal: login.signal,
-              },
-              codexCatalog,
-            );
-          },
+        const result = await deps.oauthLogins.finish(input.loginId, context.actor, (login) =>
+          persistOAuth(context.actor, login),
         );
         if (result.status === "pending") {
           throw new ORPCError("CONFLICT", { message: "Sign-in has not finished yet." });
@@ -1906,9 +1943,15 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     bots: {
-      list: authed.bots.list.handler(async ({ context }) => repos.listBots(context.actor)),
+      page: authed.bots.page.handler(async ({ context, input }) => {
+        const items = await repos.listBots(context.actor, { ...input, limit: 200 });
+        return { items, nextOffset: items.length === 200 ? input.offset + 200 : null };
+      }),
+      list: authed.bots.list.handler(async ({ context }) =>
+        repos.listBots(context.actor, { limit: 200 }),
+      ),
       listArchived: authed.bots.listArchived.handler(async ({ context }) =>
-        repos.listBots(context.actor, { archived: true }),
+        repos.listBots(context.actor, { archived: true, limit: 200 }),
       ),
       get: authed.bots.get.handler(async ({ context, input }) => {
         const found = (await repos.listBots(context.actor)).find((bot) => bot.id === input.botId);
@@ -2331,9 +2374,26 @@ export function createRouter(deps: RouterDeps) {
           throw mapSpaceLifecycleError(error);
         }
       }),
-      list: authed.groups.list.handler(async ({ context }) => groupRepos.listGroups(context.actor)),
+      page: authed.groups.page.handler(async ({ context, input }) => {
+        const [items, total] = await Promise.all([
+          groupRepos.listGroups(context.actor, { ...input, limit: 200 }),
+          deps.prisma.chatGroup.count({
+            where: {
+              spaceId: context.actor.spaceId,
+              userId: context.actor.userId,
+              archivedAt: input.archived ? { not: null } : null,
+            },
+          }),
+        ]);
+        // Some persisted groups have fewer than two active members and are filtered out.
+        // Advance by database rows, not returned rows, so a sparse page is not the last page.
+        return { items, nextOffset: input.offset + 200 < total ? input.offset + 200 : null };
+      }),
+      list: authed.groups.list.handler(async ({ context }) =>
+        groupRepos.listGroups(context.actor, { limit: 200 }),
+      ),
       listArchived: authed.groups.listArchived.handler(async ({ context }) =>
-        groupRepos.listGroups(context.actor, { archived: true }),
+        groupRepos.listGroups(context.actor, { archived: true, limit: 200 }),
       ),
       get: authed.groups.get.handler(async ({ context, input }) => {
         const group = await groupRepos.getGroup(context.actor, input.groupId);
@@ -2446,8 +2506,10 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     botSections: {
-      list: authed.botSections.list.handler(async ({ context }) =>
-        repos.listBotSections(context.actor),
+      list: authed.botSections.list.handler(async ({ context, input }) =>
+        repos.listBotSectionsForSpaces(context.actor, [context.actor.spaceId], {
+          offset: input?.offset ?? 0,
+        }),
       ),
       create: authed.botSections.create.handler(async ({ context, input }) =>
         repos.createBotSection(context.actor, input),
@@ -3163,40 +3225,55 @@ export function createRouter(deps: RouterDeps) {
           throw error;
         }
       }),
-      updates: authed.computer.updates.handler(async ({ context }) => {
-        const rows = await deps.prisma.computerUpdate.findMany({
-          where: {
-            status: { in: ["queued", "running", "interrupted", "failed"] },
-            OR: [
-              { computer: { bots: { some: { userId: context.actor.userId, archivedAt: null } } } },
-              { action: "checkpoint", status: "interrupted", computer: { scope: "dedicated" } },
-            ],
-            computer: {
-              spaceId: context.actor.spaceId,
-              bots: { some: { userId: context.actor.userId } },
-            },
-          },
-          include: {
-            computer: {
-              include: {
-                bots: {
-                  where: { userId: context.actor.userId, archivedAt: null },
-                  select: { id: true, name: true },
+      updates: authed.computer.updates.handler(async ({ context, input }) => {
+        const selected = [];
+        let remaining = input?.offset ?? 0;
+        for (let offset = 0; ; offset += 200) {
+          const rows = await deps.prisma.computerUpdate.findMany({
+            take: 200,
+            skip: offset,
+            where: {
+              status: { in: ["queued", "running", "interrupted", "failed"] },
+              OR: [
+                {
+                  computer: { bots: { some: { userId: context.actor.userId, archivedAt: null } } },
                 },
-                updates: {
-                  where: { action: "checkpoint", status: "completed" },
-                  orderBy: { createdAt: "desc" },
-                  take: 1,
-                  select: { createdAt: true },
+                { action: "checkpoint", status: "interrupted", computer: { scope: "dedicated" } },
+              ],
+              computer: {
+                spaceId: context.actor.spaceId,
+                bots: { some: { userId: context.actor.userId } },
+              },
+            },
+            include: {
+              computer: {
+                include: {
+                  bots: {
+                    where: { userId: context.actor.userId, archivedAt: null },
+                    select: { id: true, name: true },
+                  },
+                  updates: {
+                    where: { action: "checkpoint", status: "completed" },
+                    orderBy: { createdAt: "desc" },
+                    take: 1,
+                    select: { createdAt: true },
+                  },
                 },
               },
             },
-          },
-          orderBy: { createdAt: "desc" },
-        });
-        return rows
-          .filter(computerUpdateIsCurrent)
-          .map((row) => computerUpdateView(row, context.actor.isDeploymentOwner));
+            orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          });
+          for (const row of rows) {
+            if (!computerUpdateIsCurrent(row)) continue;
+            if (remaining > 0) {
+              remaining--;
+              continue;
+            }
+            selected.push(computerUpdateView(row, context.actor.isDeploymentOwner));
+            if (selected.length === 200) return selected;
+          }
+          if (rows.length < 200) return selected;
+        }
       }),
       releaseInterrupted: authed.computer.releaseInterrupted.handler(async ({ context, input }) => {
         if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
@@ -3812,6 +3889,9 @@ export function createRouter(deps: RouterDeps) {
       readSource: authed.recruiting.readSource.handler(({ context, input }) =>
         readRecruitingSource(deps, context.actor, input),
       ),
+      readView: authed.recruiting.readView.handler(({ context, input }) =>
+        readRecruitingView(deps, context.actor, input, context.stillAuthorized),
+      ),
       listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
         listRecruitingCandidates(deps, context.actor, input),
       ),
@@ -3873,7 +3953,10 @@ export function createRouter(deps: RouterDeps) {
         return saved;
       }),
       listQuestions: authed.recruiting.listQuestions.handler(({ context, input }) =>
-        listRecruitingQuestions(deps.prisma, context.actor, input),
+        listRecruitingQuestions(deps.prisma, context.actor, {
+          ...input,
+          offset: input.offset ?? 0,
+        }),
       ),
       createRole: authed.recruiting.createRole.handler(async ({ context, input }) => {
         const saved = await createRecruitingRole(deps.prisma, context.actor, input, {
@@ -3945,7 +4028,10 @@ export function createRouter(deps: RouterDeps) {
         ),
       },
       listAssessments: authed.recruiting.listAssessments.handler(({ context, input }) =>
-        listRecruitingAssessments(deps.prisma, context.actor, input),
+        listRecruitingAssessments(deps.prisma, context.actor, {
+          ...input,
+          offset: input.offset ?? 0,
+        }),
       ),
       calibrationRound: authed.recruiting.calibrationRound.handler(async ({ context, input }) =>
         readRecruitingCalibrationRound(deps.prisma, context.actor, {
@@ -3966,13 +4052,16 @@ export function createRouter(deps: RouterDeps) {
         getRecruitingAssessment(deps.prisma, context.actor, input),
       ),
       listResearch: authed.recruiting.listResearch.handler(({ context, input }) =>
-        listRecruitingResearch(deps.prisma, context.actor, input),
+        listRecruitingResearch(deps.prisma, context.actor, { ...input, offset: input.offset ?? 0 }),
       ),
     },
     memory: {
       list: authed.memory.list.handler(async ({ context, input }) => {
         await requireMemoryBot(deps.prisma, context.actor, input.botId);
         const docs = await deps.prisma.memoryDocument.findMany({
+          orderBy: { id: "asc" },
+          take: 200,
+          skip: input?.offset ?? 0,
           where: {
             ...memoryDocumentWhere(context.actor),
             ...(input.botId ? { botId: input.botId } : {}),
@@ -3993,7 +4082,7 @@ export function createRouter(deps: RouterDeps) {
         updateMemoryDocument(deps, context.actor, input),
       ),
       history: authed.memory.history.handler(({ context, input }) =>
-        memoryHistory(deps.prisma, context.actor, input.documentId),
+        memoryHistory(deps.prisma, context.actor, input.documentId, input.offset ?? 0),
       ),
       exportMarkdown: authed.memory.exportMarkdown.handler(async ({ context, input }) => {
         await requireMemoryBot(deps.prisma, context.actor, input.botId);
@@ -4025,7 +4114,7 @@ export function createRouter(deps: RouterDeps) {
       ),
       list: authed.routines.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
-        return listRoutinesDto(deps, context.actor, input.botId);
+        return listRoutinesDto(deps, context.actor, input.botId, input.offset ?? 0);
       }),
       create: authed.routines.create.handler(async ({ context, input }) => {
         if (hasMixedOneShotSchedule(input.crons)) {
@@ -4223,6 +4312,7 @@ export function createRouter(deps: RouterDeps) {
             botId: input.botId,
             status: input.status,
             includeDone: input.includeDone ?? false,
+            offset: input.offset ?? 0,
           },
         );
       }),
@@ -4276,9 +4366,9 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     boards: {
-      list: boardEnabled.boards.list.handler(async ({ context }) => {
+      list: boardEnabled.boards.list.handler(async ({ context, input }) => {
         await ensureBoard(deps.prisma, context.actor.spaceId);
-        const rows = await listBoards(deps.prisma, context.actor.spaceId);
+        const rows = await listBoards(deps.prisma, context.actor.spaceId, input?.offset ?? 0);
         return rows.map(toBoardDto);
       }),
       get: boardEnabled.boards.get.handler(async ({ context }) => {
@@ -4362,6 +4452,8 @@ export function createRouter(deps: RouterDeps) {
             : {}),
         };
         const rows = await deps.prisma.ticket.findMany({
+          take: 200,
+          skip: input?.offset ?? 0,
           where,
           orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
         });
@@ -4421,14 +4513,19 @@ export function createRouter(deps: RouterDeps) {
           where: { id: input.ticketId, spaceId: context.actor.spaceId, boardId: board.id },
         });
         if (!ticket) throw new IsolationError();
-        const rows = await listTicketComments(deps.prisma, context.actor.spaceId, ticket.id);
+        const rows = await listTicketComments(
+          deps.prisma,
+          context.actor.spaceId,
+          ticket.id,
+          input.offset ?? 0,
+        );
         return rows.map(toTicketCommentDto);
       }),
     },
     skills: {
       list: authed.skills.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
-        return taughtSkills.list(context.actor, input.botId);
+        return taughtSkills.list(context.actor, input.botId, input.offset ?? 0);
       }),
       get: authed.skills.get.handler(async ({ context, input }) =>
         taughtSkills.get(context.actor, input.skillId),
@@ -4463,7 +4560,9 @@ export function createRouter(deps: RouterDeps) {
       ),
     },
     agentSkills: {
-      list: authed.agentSkills.list.handler(async ({ context }) => agentSkills.list(context.actor)),
+      list: authed.agentSkills.list.handler(async ({ context, input }) =>
+        agentSkills.list(context.actor, input?.offset ?? 0),
+      ),
       get: authed.agentSkills.get.handler(async ({ context, input }) =>
         agentSkills.get(context.actor, input),
       ),
@@ -4478,8 +4577,11 @@ export function createRouter(deps: RouterDeps) {
       ),
     },
     capabilities: {
-      list: authed.capabilities.list.handler(async ({ context }) => {
+      list: authed.capabilities.list.handler(async ({ context, input }) => {
         const rows = await deps.prisma.capabilityInstall.findMany({
+          orderBy: { id: "asc" },
+          take: 200,
+          skip: input?.offset ?? 0,
           where: {
             spaceId: context.actor.spaceId,
             userId: context.actor.userId,
@@ -4680,10 +4782,12 @@ export function createRouter(deps: RouterDeps) {
     },
     mcp: {
       servers: {
-        list: authed.mcp.servers.list.handler(async ({ context }) => {
+        list: authed.mcp.servers.list.handler(async ({ context, input }) => {
           const rows = await deps.prisma.mcpServer.findMany({
+            take: 200,
+            skip: input?.offset ?? 0,
             where: { spaceId: context.actor.spaceId, userId: context.actor.userId },
-            orderBy: [{ name: "asc" }, { createdAt: "asc" }],
+            orderBy: [{ name: "asc" }, { createdAt: "asc" }, { id: "asc" }],
           });
           const secretIds = rows.flatMap((row) => (row.secretId ? [row.secretId] : []));
           const secrets = secretIds.length
@@ -4944,14 +5048,16 @@ export function createRouter(deps: RouterDeps) {
         }),
       },
       assignments: {
-        all: authed.mcp.assignments.all.handler(async ({ context }) => {
+        all: authed.mcp.assignments.all.handler(async ({ context, input }) => {
           const rows = await deps.prisma.botMcpServer.findMany({
+            take: 200,
+            skip: input?.offset ?? 0,
             where: {
               spaceId: context.actor.spaceId,
               userId: context.actor.userId,
               bot: { archivedAt: null },
             },
-            orderBy: { createdAt: "asc" },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           });
           return rows.map(mcpAssignmentDto);
         }),
@@ -4966,12 +5072,14 @@ export function createRouter(deps: RouterDeps) {
           });
           if (!bot) throw new IsolationError();
           const rows = await deps.prisma.botMcpServer.findMany({
+            take: 200,
+            skip: input?.offset ?? 0,
             where: {
               botId: bot.id,
               spaceId: context.actor.spaceId,
               userId: context.actor.userId,
             },
-            orderBy: { createdAt: "asc" },
+            orderBy: [{ createdAt: "asc" }, { id: "asc" }],
           });
           return rows.map(mcpAssignmentDto);
         }),
@@ -5282,8 +5390,11 @@ export function createRouter(deps: RouterDeps) {
         );
         return catalogs.flat();
       }),
-      list: authed.connections.list.handler(async ({ context }) => {
+      list: authed.connections.list.handler(async ({ context, input }) => {
         const rows = await deps.prisma.connection.findMany({
+          orderBy: { id: "asc" },
+          take: 200,
+          skip: input?.offset ?? 0,
           where: { spaceId: context.actor.spaceId, userId: context.actor.userId },
         });
         return rows.map((row) => ({
@@ -6161,13 +6272,15 @@ export function createRouter(deps: RouterDeps) {
         }),
       },
       channels: {
-        list: authed.messaging.channels.list.handler(async ({ context }) => {
+        list: authed.messaging.channels.list.handler(async ({ context, input }) => {
           const identities = await messagingIdentitiesFor(deps.prisma, context.actor.userId);
           if (identities.length === 0) return [];
           const memberships = await deps.prisma.messagingChannelMember.findMany({
+            take: 200,
+            skip: input?.offset ?? 0,
             where: { identityId: { in: identities.map((identity) => identity.id) } },
             include: { channel: { include: { members: ACTIVE_CHANNEL_MEMBERS } } },
-            orderBy: { updatedAt: "desc" },
+            orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
           });
           return memberships.map((membership) => messagingChannelDto(membership));
         }),
@@ -6219,15 +6332,17 @@ export function createRouter(deps: RouterDeps) {
         }),
       },
       connections: {
-        list: authed.messaging.connections.list.handler(async ({ context }) => {
+        list: authed.messaging.connections.list.handler(async ({ context, input }) => {
           const identities = await messagingIdentitiesFor(deps.prisma, context.actor.userId);
           if (identities.length === 0) return [];
           const botIds = identities.map((identity) => identity.botId);
           const connections = await deps.prisma.agentConnection.findMany({
+            take: 200,
+            skip: input?.offset ?? 0,
             where: {
               OR: [{ requesterBotId: { in: botIds } }, { targetBotId: { in: botIds } }],
             },
-            orderBy: { updatedAt: "desc" },
+            orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
           });
           const myBotIds = new Set(botIds);
           return Promise.all(
@@ -6347,8 +6462,12 @@ export function createRouter(deps: RouterDeps) {
       ),
     },
     agentSecrets: {
-      list: authed.agentSecrets.list.handler(async ({ context }) =>
-        listAgentSecrets({ prisma: deps.prisma, secrets: deps.secrets }, context.actor),
+      list: authed.agentSecrets.list.handler(async ({ context, input }) =>
+        listAgentSecrets(
+          { prisma: deps.prisma, secrets: deps.secrets },
+          context.actor,
+          input?.offset ?? 0,
+        ),
       ),
       put: authed.agentSecrets.put.handler(async ({ context, input, signal }) =>
         putAgentSecret(
@@ -6396,13 +6515,15 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     approvalRules: {
-      list: authed.approvalRules.list.handler(async ({ context }) => {
+      list: authed.approvalRules.list.handler(async ({ context, input }) => {
         const rows = await deps.prisma.actionApprovalRule.findMany({
+          take: 200,
+          skip: input?.offset ?? 0,
           where: {
             spaceId: context.actor.spaceId,
             createdByUserId: context.actor.userId,
           },
-          orderBy: { createdAt: "asc" },
+          orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         });
         return rows.map((row) => ({
           id: row.id,
@@ -6476,7 +6597,7 @@ export function createRouter(deps: RouterDeps) {
     artifacts: {
       list: authed.artifacts.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
-        return listOwnedArtifacts(deps, context.actor, input);
+        return listOwnedArtifacts(deps, context.actor, { ...input, offset: input.offset ?? 0 });
       }),
       listSpace: authed.artifacts.listSpace.handler(async ({ context, input }) => {
         if (input.botId) await repos.getBot(context.actor, input.botId);
@@ -6490,7 +6611,7 @@ export function createRouter(deps: RouterDeps) {
         }
       }),
       listVersions: authed.artifacts.listVersions.handler(async ({ context, input }) => {
-        return listArtifactVersions(deps, context.actor, input);
+        return listArtifactVersions(deps, context.actor, { ...input, offset: input.offset ?? 0 });
       }),
       create: authed.artifacts.create.handler(async ({ context, input }) => {
         const botId = input.botId
@@ -6685,7 +6806,7 @@ export function createRouter(deps: RouterDeps) {
     },
     runs: {
       list: authed.runs.list.handler(async ({ context, input }) => ({
-        runs: await listSpaceRuns(deps.prisma, context.actor, input.filter),
+        runs: await listSpaceRuns(deps.prisma, context.actor, input.filter, input.offset ?? 0),
       })),
     },
     voice: {
@@ -6694,8 +6815,10 @@ export function createRouter(deps: RouterDeps) {
         const cred = await findDefaultVoiceCredential(deps.prisma, context.actor);
         return toVoiceStatus(cred);
       }),
-      credentials: authed.voice.credentials.handler(async ({ context }) => {
+      credentials: authed.voice.credentials.handler(async ({ context, input }) => {
         const rows = await deps.prisma.userVoiceCredential.findMany({
+          take: 200,
+          skip: input?.offset ?? 0,
           where: { userId: context.actor.userId },
           include: {
             preferences: {
@@ -6830,6 +6953,7 @@ async function spaceNavigationDto(
   actor: Actor,
   repos: ReturnType<typeof createRepos>,
   groupRepos: ReturnType<typeof createGroupRepos>,
+  offset = 0,
 ): Promise<SpaceNavigation> {
   const currentSpace = await deps.prisma.space.findUnique({
     where: { id: actor.spaceId },
@@ -6857,12 +6981,12 @@ async function spaceNavigationDto(
     contentBots,
     contentGroups,
   ] = await Promise.all([
-    repos.listBots(actor),
-    groupRepos.listGroups(actor),
-    repos.listSpaceBotsForSpaces(actor, inactiveSpaceIds),
-    groupRepos.listSpaceGroupsForSpaces(actor, inactiveSpaceIds),
-    repos.listBotSectionsForSpaces(actor, spaceIds),
-    createExternalConversationRepos(deps.prisma).listForSpaces(actor, spaceIds),
+    repos.listBots(actor, { limit: 200, offset }),
+    groupRepos.listGroups(actor, { limit: 200, offset }),
+    repos.listSpaceBotsForSpaces(actor, inactiveSpaceIds, { offset }),
+    groupRepos.listSpaceGroupsForSpaces(actor, inactiveSpaceIds, { offset }),
+    repos.listBotSectionsForSpaces(actor, spaceIds, { offset }),
+    createExternalConversationRepos(deps.prisma).listForSpaces(actor, spaceIds, { offset }),
     // Active-only navigation lists miss archived content in other spaces; count any
     // bot/group in the actor's spaces (including another member's) so a shared
     // non-empty space cannot look empty for onboarding redirects.
@@ -6891,7 +7015,16 @@ async function spaceNavigationDto(
   const sectionsFor = (spaceId: string) => sectionsBySpace.get(spaceId) ?? [];
   const staleClaimBefore = new Date(Date.now() - SPACE_DELETION_CLAIM_TIMEOUT_MS);
 
+  // Counts include filtered-out groups; an empty mapped page must still advance.
+  const scope = { userId: actor.userId, spaceId: { in: spaceIds } };
+  const totals = await Promise.all([
+    deps.prisma.bot.count({ where: scope }),
+    deps.prisma.chatGroup.count({ where: scope }),
+    deps.prisma.botSection.count({ where: scope }),
+    deps.prisma.externalConversation.count({ where: scope }),
+  ]);
   return {
+    nextOffset: Math.max(0, ...totals) > offset + 200 ? offset + 200 : null,
     current: {
       id: actor.spaceId,
       name: currentMembership.space.name,
@@ -7566,8 +7699,9 @@ function mapRoutine(row: {
   };
 }
 
-async function listRoutinesDto(deps: RouterDeps, actor: Actor, botId: string) {
+async function listRoutinesDto(deps: RouterDeps, actor: Actor, botId: string, offset?: number) {
   const rows = await deps.prisma.routine.findMany({
+    ...(offset === undefined ? {} : { take: 200, skip: offset, orderBy: { id: "asc" as const } }),
     where: { botId, spaceId: actor.spaceId },
   });
   return rows.map(mapRoutine);
