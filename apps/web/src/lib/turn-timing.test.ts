@@ -39,6 +39,15 @@ describe("turn timing", () => {
     expect(JSON.stringify(reports)).not.toContain("Here");
   });
 
+  it("reports a turn that ends on a question card", () => {
+    const reports: TurnTiming[] = [];
+    const timer = createTurnTimer({ now: () => 5, report: (timing) => reports.push(timing) });
+    timer.submit("nonce");
+    timer.accepted("nonce", "run");
+    timer.observe(event("run.waiting_input"));
+    expect(reports).toMatchObject([{ runId: "run", finalMs: 0 }]);
+  });
+
   it("ignores other runs and drops failed sends", () => {
     const reports: TurnTiming[] = [];
     const timer = createTurnTimer({ now: () => 1, report: (timing) => reports.push(timing) });
