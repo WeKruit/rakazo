@@ -406,10 +406,10 @@ function untilAborted<T>(promise: Promise<T | null>, signal: AbortSignal): Promi
   });
 }
 
-const BUSY = Symbol("busy");
+export const BUSY = Symbol("busy");
 
 /** At most `max` tasks at once; a bounded number wait a bounded time, the rest are BUSY. */
-function concurrencyLimit(max: number, maxWaiting: number, maxWaitMs: number) {
+export function concurrencyLimit(max: number, maxWaiting: number, maxWaitMs: number) {
   let active = 0;
   const waiting: Array<() => void> = [];
   const release = () => {

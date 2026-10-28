@@ -20,22 +20,26 @@ function logoInitials(name: string) {
 const companySites = new Map<string, string | null>();
 const pendingSites = new Map<string, Promise<string | null>>();
 
+const SITE_ATTEMPTS = 5;
+
 function lookupCompanySite(name: string, attempt = 0): Promise<string | null> {
   const key = name.trim().toLowerCase();
   if (companySites.has(key)) return Promise.resolve(companySites.get(key)!);
   const pending = pendingSites.get(key);
   if (pending) return pending;
-  // A logo is decoration: any failure, even a missing client, leaves the initials.
+  // A logo is decoration: any failure, even a missing client, leaves the initials. A busy
+  // server is not a miss, so it is asked again later and never remembered as one.
   const lookup = Promise.resolve()
     .then(() => rpc.links.companySite({ name: name.trim().slice(0, 200) }))
     .then(async ({ host, retry }) => {
       pendingSites.delete(key);
-      if (retry && attempt < 2) {
-        await new Promise((resolve) => setTimeout(resolve, 4000 * (attempt + 1)));
-        return lookupCompanySite(name, attempt + 1);
+      if (!retry) {
+        companySites.set(key, host);
+        return host;
       }
-      companySites.set(key, host);
-      return host;
+      if (attempt + 1 >= SITE_ATTEMPTS) return null;
+      await new Promise((resolve) => setTimeout(resolve, 3000 * (attempt + 1)));
+      return lookupCompanySite(name, attempt + 1);
     })
     .catch(() => {
       pendingSites.delete(key);
