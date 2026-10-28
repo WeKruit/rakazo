@@ -465,7 +465,7 @@ describe("shared Linux desktop lifecycle", () => {
   );
 
   it.skipIf(process.platform !== "linux")(
-    "reads the debugging port from a space-joined Chromium command line
+    "reads the debugging port from a space-joined Chromium command line",
     () => {
       const root = mkdtempSync(path.join(tmpdir(), "desktop-port-"));
       roots.push(root);
