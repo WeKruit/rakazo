@@ -389,7 +389,7 @@ function localContactTools(
   const tool: ConnectorTool = {
     name: `mcp__${assignment.server.slug}__find_emails`,
     description:
-      "Find email addresses for saved candidates. Pass each person's name, LinkedIn URL and current company. One call looks up the first 50; the result names who is left for the next call. Checks several contact sources one after another, each only for people still without an email, and reuses emails already found for this account. Waits for the result (up to about four minutes). Returns, per person, the emails found (type work or personal, and the source's delivery check, e.g. DELIVERABLE, or null when unchecked) and what each source did, plus a summary. Its results are the saved contacts. Does not send anything.",
+      "Find email addresses for saved candidates. Pass each person's name, LinkedIn URL and current company. One call looks up the first 50; the result names who is left for the next call. When the recruiter asks again after a lookup, pass the role's next results in the same order after those already looked up, never asking which. Checks several contact sources one after another, each only for people still without an email, and reuses emails already found for this account. Waits for the result (up to about four minutes). Returns, per person, the emails found (type work or personal, and the source's delivery check, e.g. DELIVERABLE, or null when unchecked) and what each source did, plus a summary. Its results are the saved contacts. Does not send anything.",
     inputSchema: z.toJSONSchema(FindEmailsInput, { io: "input" }),
     readOnly: true,
     route: {
