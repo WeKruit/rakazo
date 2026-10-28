@@ -17,8 +17,11 @@ import {
   planActionGate,
   resolveActionApproval,
   resolveActionApprovalDetail,
+  toolReadsExternalText,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
+  UNATTENDED_MEMORY_WRITE_REFUSAL,
+  unattendedMemoryWriteRefusal,
   unattendedTriggerToolRequiresApproval,
 } from "./action-approval.js";
 
@@ -478,6 +481,65 @@ describe("externalTextTriggerToolRefusal", () => {
       ).toBeUndefined();
       expect(externalTextTriggerToolRefusal(trigger, "gmail_send_email", true)).toBeUndefined();
     }
+  });
+});
+
+describe("unattendedMemoryWriteRefusal", () => {
+  const refusal = (
+    trigger: string,
+    toolName: string,
+    readExternalText: boolean,
+    preference = false,
+  ) =>
+    unattendedMemoryWriteRefusal({
+      trigger,
+      toolName,
+      preference,
+      readExternalText: () => readExternalText,
+    });
+
+  it.each(["routine", "tickets", "recruiting_research", "bot_message", "cloud_agent"])(
+    "holds memory, preference and skill writes in a %s run after external text",
+    async (trigger) => {
+      for (const name of [
+        "remember",
+        "save_shared_memory",
+        "save_memory",
+        "skill_create",
+        "skill_update",
+        "skill_delete",
+      ])
+        expect(await refusal(trigger, name, true)).toBe(UNATTENDED_MEMORY_WRITE_REFUSAL);
+      expect(await refusal(trigger, "recruiting_feedback", true, true)).toBe(
+        UNATTENDED_MEMORY_WRITE_REFUSAL,
+      );
+      expect(await refusal(trigger, "remember", false)).toBeUndefined();
+    },
+  );
+
+  it.each(["webhook", "messaging"])("treats a %s prompt as external text", async (trigger) => {
+    expect(await refusal(trigger, "remember", false)).toBe(UNATTENDED_MEMORY_WRITE_REFUSAL);
+  });
+
+  it("keeps business records autonomous and attended runs unchanged", async () => {
+    for (const name of [
+      "recruiting_candidates",
+      "recruiting_feedback",
+      "recruiting_notes",
+      "recruiting_crm_import",
+      "write_file",
+      "mcp__crm__crm_update_candidate_stage",
+    ])
+      expect(await refusal("webhook", name, true)).toBeUndefined();
+    for (const trigger of ["user", "follow_up", "call_end"])
+      expect(await refusal(trigger, "remember", true)).toBeUndefined();
+  });
+
+  it("counts connector results and external-text built-ins, not memory reads", () => {
+    expect(toolReadsExternalText("mcp__mail__get_email", true)).toBe(true);
+    expect(toolReadsExternalText("web_fetch", false)).toBe(true);
+    expect(toolReadsExternalText("read_memory", false)).toBe(false);
+    expect(toolReadsExternalText("remember", false)).toBe(false);
   });
 });
 

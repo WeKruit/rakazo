@@ -1,4 +1,5 @@
 import type { ActionApprovalRule as StoredActionApprovalRule } from "@rakazo/contracts";
+import { isAutomationRunTrigger } from "./run-state.js";
 
 const APPROVAL_EXEMPT_TOOLS = new Set([
   "computer_observe",
@@ -291,6 +292,65 @@ export function externalTextTriggerToolRefusal(
     IRREVERSIBLE_CONNECTOR_PATTERN.test(toolName)
     ? EXTERNAL_TEXT_TRIGGER_REFUSAL
     : undefined;
+}
+
+/** Triggers whose prompt itself carries external text: a webhook payload or an inbound message. */
+const EXTERNAL_PROMPT_TRIGGERS = new Set(["webhook", "messaging"]);
+// Built-ins whose results can carry email, page, file, provider or screen text. Every connector
+// tool counts as well, since its results come from outside.
+const EXTERNAL_TEXT_BUILTIN_TOOLS = new Set([
+  "web_fetch",
+  "web_search",
+  "browser_navigate",
+  "browser_snapshot",
+  "browser_act",
+  "computer_observe",
+  "computer_act",
+  "shell",
+  "read_file",
+  "artifact_read",
+  "read_history",
+  "search_history",
+  "recruiting_candidates",
+  "recruiting_profiles",
+  "recruiting_scheduling",
+  "cloud_agent_status",
+]);
+// Durable memory and skills a later run follows. Recruiting preference saves also count.
+const DURABLE_MEMORY_TOOLS = new Set([
+  "remember",
+  "save_shared_memory",
+  "save_memory",
+  "skill_create",
+  "skill_update",
+  "skill_delete",
+]);
+
+export const UNATTENDED_MEMORY_WRITE_REFUSAL =
+  "Nothing was saved. No one started this run, and it has read external text (an email, webhook or web page), so it cannot change memory, preferences or skills. Tell the user what you would save so they can confirm it in a conversation.";
+
+export function toolReadsExternalText(toolName: string, viaConnector: boolean): boolean {
+  return viaConnector || EXTERNAL_TEXT_BUILTIN_TOOLS.has(toolName);
+}
+
+/**
+ * A run no person started (routine, webhook, tickets, research wake, peer message or external
+ * message) must not save memory, preferences or skills once it has read external text: that text
+ * could otherwise instruct every later run. Business records stay autonomous. `readExternalText`
+ * is only consulted for an unattended durable-memory write.
+ */
+export async function unattendedMemoryWriteRefusal(input: {
+  trigger: string;
+  toolName: string;
+  preference: boolean;
+  readExternalText: () => boolean | Promise<boolean>;
+}): Promise<string | undefined> {
+  if (!isAutomationRunTrigger(input.trigger) && !EXTERNAL_TEXT_TRIGGERS.has(input.trigger))
+    return undefined;
+  if (!input.preference && !DURABLE_MEMORY_TOOLS.has(input.toolName)) return undefined;
+  if (EXTERNAL_PROMPT_TRIGGERS.has(input.trigger) || (await input.readExternalText()))
+    return UNATTENDED_MEMORY_WRITE_REFUSAL;
+  return undefined;
 }
 
 function categoryMatches(
