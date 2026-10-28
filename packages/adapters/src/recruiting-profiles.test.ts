@@ -390,6 +390,72 @@ describe("peopleFromSearch", () => {
   });
 });
 
+describe("profile lookups through the people search", () => {
+  const actor = {
+    spaceId: "s1",
+    userId: "u1",
+    email: "owner@example.com",
+    isDeploymentOwner: false,
+  };
+  beforeEach(() => vi.resetAllMocks());
+
+  it("saves each looked-up person and reports who had no lookup", async () => {
+    const createdAt = new Date("2026-10-28T21:00:00Z");
+    const text = JSON.stringify({
+      results: [
+        {
+          url: "https://linkedin.com/in/cara",
+          title: "Cara",
+          entities: [
+            {
+              properties: {
+                name: "Cara",
+                workHistory: [
+                  { title: "Lead", company: { name: "Delta" }, dates: { from: "2021-05" } },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+    db.listRunToolResults.mockResolvedValue([
+      {
+        effectId: "e1",
+        toolName: "web_search_advanced_exa",
+        endpoint: PLATFORM_SEARCH,
+        result: { content: [{ type: "text", text }] },
+        createdAt,
+      },
+    ]);
+    db.saveRecruitingSavedProfile.mockImplementation(async (_p, _a, _r, input) => ({
+      ...input.profile,
+      personKey: input.personKey,
+      provider: input.provider,
+      fetchedAt: input.fetchedAt.toISOString(),
+    }));
+    const result = await executeRecruitingProfilesTool({} as never, actor, "run1", {
+      operation: "save_many",
+      candidateKeys: ["linkedin:/in/cara", "linkedin:/in/dan"],
+    });
+    expect(result).toEqual({
+      items: [
+        expect.objectContaining({
+          candidateKey: "linkedin:/in/cara",
+          saved: true,
+          datedPositions: 1,
+        }),
+        { candidateKey: "linkedin:/in/dan", saved: false },
+      ],
+    });
+    expect(db.saveRecruitingSavedProfile.mock.calls[0]![3]).toMatchObject({
+      provider: "people_search",
+      sourceEffectId: "e1",
+      profile: { experience: [{ title: "Lead", company_name: "Delta", start_date: "May 2021" }] },
+    });
+  });
+});
+
 describe("fillRecruitingRoleProfiles", () => {
   const actor = {
     spaceId: "s1",

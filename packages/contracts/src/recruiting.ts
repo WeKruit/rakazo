@@ -1329,6 +1329,10 @@ export const RecruitingProfilesToolInputSchema = z.discriminatedUnion("operation
     candidateKeys: z.array(RecruitingId).min(1).max(50),
   }),
   z.strictObject({ operation: z.literal("save"), candidateKey: RecruitingId }),
+  z.strictObject({
+    operation: z.literal("save_many"),
+    candidateKeys: z.array(RecruitingId).min(1).max(50),
+  }),
 ]);
 export type RecruitingProfilesToolInput = z.infer<typeof RecruitingProfilesToolInputSchema>;
 

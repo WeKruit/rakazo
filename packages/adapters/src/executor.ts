@@ -472,6 +472,7 @@ import {
 import {
   executeRecruitingProfilesTool,
   isPeopleSearchEndpoint,
+  linkedinPersonKey,
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
@@ -8726,6 +8727,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               !route.resourceId ||
               // Only the people search fills Results; a plain web search finds pages, not people.
               route.toolName !== "web_search_advanced_exa" ||
+              // A search by one person's profile link is a profile lookup, not new people.
+              linkedinPersonKey(connectorCall.args?.query) ||
               (returned !== null && typeof returned === "object" && "error" in returned)
             )
               return null;
