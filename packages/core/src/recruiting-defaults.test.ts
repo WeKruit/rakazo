@@ -200,6 +200,16 @@ describe("maintained recruiting defaults", () => {
     expect(sourcer.instructions).toContain("Missing resume is unknown, never a rejection");
   });
 
+  it("Scheduling books or offers a new time instead of declining", () => {
+    const scheduling = RECRUITING_DEFAULT_BOTS.find((bot) => bot.name === "Scheduling");
+    expect(scheduling?.instructions).toContain(
+      "Never refuse a booking because the person has not been emailed, has not replied or has not agreed yet",
+    );
+    expect(scheduling?.instructions).toContain(
+      "offer to book that new time instead with the real openings",
+    );
+  });
+
   it("ends automated follow-ups on a candidate reply", () => {
     const outreach = RECRUITING_DEFAULT_BOTS.find((bot) => bot.name === "Outreach")!;
     expect(outreach.instructions).toContain("A candidate reply ends automated follow-ups");
