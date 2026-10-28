@@ -111,6 +111,44 @@ describe("bot tool permissions", () => {
 });
 
 describe("tool completion audit", () => {
+  it("records a contact lookup's counts but never its people", () => {
+    const structuredContent = {
+      source: "local_contact_lookup",
+      people: [{ name: "Private Person", linkedin_url: "https://www.linkedin.com/in/p" }],
+      summary: {
+        looked_up: 5,
+        found: 0,
+        verified: 0,
+        already_looked_up: 5,
+        paid_lookups: 0,
+        next_step: "x",
+      },
+    };
+    for (const result of [
+      { structuredContent },
+      {
+        kind: "agent_tool_result",
+        content: [{ type: "text", text: "x" }],
+        details: { structuredContent },
+      },
+    ]) {
+      const payload = toolCompletionAuditPayload({
+        name: "connectors_execute_tool",
+        executionId: "call-1",
+        durationMs: 5,
+        result,
+      });
+      expect(payload.lookup).toEqual({
+        looked_up: 5,
+        found: 0,
+        verified: 0,
+        already_looked_up: 5,
+        paid_lookups: 0,
+      });
+      expect(JSON.stringify(payload)).not.toContain("Private Person");
+    }
+  });
+
   it("records result metadata without persisting tool contents", () => {
     const payload = toolCompletionAuditPayload({
       name: "computer_observe",

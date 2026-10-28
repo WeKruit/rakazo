@@ -55,7 +55,7 @@ describe("findEmails", () => {
       { people },
       { ...options, fetch, keys: { fullenrich: "k1", contactout: "k2", leadmagic: "k3" } },
     );
-    expect(result.summary).toEqual({ looked_up: 3, found: 2, verified: 1 });
+    expect(result.summary).toEqual({ looked_up: 3, found: 2, verified: 1, paid_lookups: 3 });
     expect(result.people[0]!.emails).toEqual([
       {
         address: "ada.example@gmail.com",
@@ -129,7 +129,13 @@ describe("findEmails", () => {
     );
     // Only the source that never searched Cy runs; Bo costs nothing.
     expect(calls).toEqual(["POST api.leadmagic.io/v1/people/personal-email-finder"]);
-    expect(result.summary).toEqual({ looked_up: 2, found: 0, verified: 0, already_looked_up: 1 });
+    expect(result.summary).toEqual({
+      looked_up: 2,
+      found: 0,
+      verified: 0,
+      already_looked_up: 1,
+      paid_lookups: 1,
+    });
     expect(result.people[0]!.lookups.map((lookup) => lookup.provider)).toEqual([
       "fullenrich",
       "contactout",

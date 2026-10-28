@@ -48,6 +48,8 @@ export type FindEmailsResult = {
     verified: number;
     /** People no source was charged for, because every source already searched them before. */
     already_looked_up?: number;
+    /** People sent to at least one paid source in this call. */
+    paid_lookups: number;
     /** People past the first {@link LOOKUP_BATCH}, left for the next call. */
     not_looked_up?: number;
     next_step?: string;
@@ -196,6 +198,14 @@ export async function findEmails(
         ).length;
         return skipped ? { already_looked_up: skipped } : {};
       })(),
+      paid_lookups: people.filter((person) =>
+        person.lookups.some(
+          (lookup) =>
+            lookup.provider !== "saved" &&
+            lookup.outcome !== "skipped" &&
+            lookup.detail !== SEARCHED_BEFORE,
+        ),
+      ).length,
       ...(later.length
         ? {
             not_looked_up: later.length,
