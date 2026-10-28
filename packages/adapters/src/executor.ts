@@ -976,6 +976,11 @@ const PLANNED_SEARCHES_NOTE =
 const nextStepAlreadyGiven = (reply: string) =>
   `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round).`;
 
+/** Model failures that a fresh attempt can clear: a silent stream, a timeout or an outage. */
+const MODEL_OUTAGE =
+  /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|socket hang up/i;
+const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn once";
+
 const ASK_IN_ENGLISH =
   "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
 
@@ -4192,7 +4197,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ]);
         setupMark("contextLoad");
         // A recruiter never sees a provider's name; connect cards (not text) still name it.
-        const hideVendors = Boolean(
+        // A bot with the people search is recruiting too; that is known once its tools are listed.
+        let hideVendors = Boolean(
           isRecruitingSpawnKey(bot.spawnKey) || thread.activeRecruitingRoleId,
         );
         const visible = (text: string) => (hideVendors ? hideVendorNames(text) : text);
@@ -4889,10 +4895,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Before a role's first round the people search is already listed and the turn ends on
         // the next-step card, so the tool catalog would only cost a lookup step. A role built from
         // the recruiter's own list may never have a round, so it keeps the catalog.
-        // A bot with the people search is recruiting, even before a role is linked to the thread.
+        // A bot with the people search is recruiting, even before a role is linked to the thread:
+        // older crews' Main has no recruiting spawn key, so its first turns would get no English or
+        // vendor-name rules.
         const recruitingSearch = discovered.some((tool) =>
           tool.name.endsWith("web_search_advanced_exa"),
         );
+        if (recruitingSearch) hideVendors = true;
         const firstRoundPending =
           Boolean(thread.activeRecruitingRoleId) &&
           recruitingSearch &&
@@ -11766,7 +11775,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 if (known) return `"${known.key}" → "${known.value}"`;
                 // Recruiter-facing text is English even for a Chinese JD, unless they asked otherwise.
                 if (
-                  (hideVendors || recruitingSearch) &&
+                  hideVendors &&
                   !askLanguageBounced &&
                   recruiterQuestionNotInEnglish(question, messages)
                 ) {
@@ -12624,6 +12633,36 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const message = silenceWatch.fired
             ? SILENT_RUN_STOP_TEXT
             : redactSecrets(error instanceof Error ? error.message : String(error), runSecrets);
+          // A recruiter's request must not vanish because the model went silent or was briefly
+          // unavailable after its own retries: run the turn once more before reporting failure.
+          if (
+            hideVendors &&
+            !silenceWatch.fired &&
+            MODEL_OUTAGE.test(message) &&
+            !(await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } }))
+          ) {
+            const released = await writeComputerRunRequeue(
+              deps,
+              run,
+              workerId,
+              fence,
+              resumeCheckpoint,
+              heldForTakeover,
+              MODEL_OUTAGE_RETRY,
+            );
+            if (released) {
+              getLogger().warn("run.model_outage.retry", { runId, error: message.slice(0, 200) });
+              await deps.prisma.attempt.update({
+                where: { id: attempt.id },
+                data: { status: "failed", error: MODEL_OUTAGE_RETRY, finishedAt: new Date() },
+              });
+              await deps.jobs.enqueue({
+                ...runContinueJob(runId),
+                availableAt: new Date(Date.now() + computerRetryDelay(fence)),
+              });
+              return;
+            }
+          }
           const failed = await deps.events.finalizeRun({
             spaceId: run.spaceId,
             threadId: thread.id,
