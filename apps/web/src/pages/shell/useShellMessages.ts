@@ -15,6 +15,7 @@ import {
   answerableAskMessageIds,
   attachmentsForThread,
   inferAttachmentMimeType,
+  isStatusQuestion,
   isXlsxFileName,
   pendingUserMessageId,
   removePendingUserMessage,
@@ -480,7 +481,8 @@ export function useShellMessages({
             );
           }
         }
-        if (interject && interjectThreadId)
+        // A progress question is answered at once without reaching the work: nothing is queued.
+        if (interject && interjectThreadId && !isStatusQuestion(trimmed))
           setSteer({ threadId: interjectThreadId, state: "queued" });
         dropDelayedSetup();
         clearReply();
