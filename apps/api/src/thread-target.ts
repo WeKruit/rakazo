@@ -22,6 +22,7 @@ import {
   isActive,
   isConversationalRun,
   isStatusQuestion,
+  ONCE_ROUTINE_CRON,
   projectMessages,
   resolveGroupTargetBotIds,
   runFailureError,
@@ -1307,6 +1308,23 @@ export async function stopThreadRuns(
       select: { id: true, botId: true },
     });
     const ids = cancelled.map((run) => run.id);
+    if (runId === undefined) {
+      // Stopping the conversation also ends what would wake it later. Research the provider is
+      // still running is closed here, so its poll ignores the completion; a later reply on the
+      // same research reopens it. Pending one-shot reminders are disarmed, not deleted.
+      await tx.recruitingResearchTask.updateMany({
+        where: { state: "active", createdByRun: { threadId: target.threadId } },
+        data: { state: "closed" },
+      });
+      await tx.routine.updateMany({
+        where: {
+          threadId: target.threadId,
+          active: true,
+          crons: { equals: [ONCE_ROUTINE_CRON] },
+        },
+        data: { active: false, nextRunAt: null },
+      });
+    }
     if (ids.length) {
       // Steering the stopped run already claimed went into its context and ends with it.
       // Unclaimed rows (steered but not yet read, or a queued continuation's input) survive

@@ -4065,6 +4065,10 @@ describe("sendThreadMessage", () => {
 });
 
 describe("stopThreadRuns", () => {
+  const stopAllTables = () => ({
+    recruitingResearchTask: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    routine: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+  });
   it.each(["run-a", "run-foreign", "run-unknown"])(
     "stops only the requested run in the authorized thread: %s",
     async (runId) => {
@@ -4080,6 +4084,7 @@ describe("stopThreadRuns", () => {
       const releaseScreen = vi.fn().mockResolvedValue(undefined);
       const tx = {
         $queryRaw: vi.fn(),
+        ...stopAllTables(),
         thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 2 }) },
         run: {
           updateManyAndReturn: vi.fn(
@@ -4192,6 +4197,7 @@ describe("stopThreadRuns", () => {
   it("keeps unclaimed steering as pending input for the next run on a stop-all", async () => {
     const tx = {
       $queryRaw: vi.fn(),
+      ...stopAllTables(),
       thread: { update: vi.fn().mockResolvedValue({ nextEventSeq: 2 }) },
       run: {
         updateManyAndReturn: vi.fn().mockResolvedValue([{ id: "run-a", botId: "bot-a" }]),
@@ -4242,6 +4248,7 @@ describe("stopThreadRuns", () => {
     let nextEventSeq = 0;
     const transaction = {
       $queryRaw: vi.fn(),
+      ...stopAllTables(),
       thread: {
         update: vi.fn(async () => ({ nextEventSeq: ++nextEventSeq })),
       },
@@ -4384,6 +4391,7 @@ describe("stopThreadRuns", () => {
     });
     const transaction = {
       $queryRaw: vi.fn(),
+      ...stopAllTables(),
       thread: {
         update: vi.fn().mockResolvedValue({ nextEventSeq: 5 }),
       },
@@ -4494,6 +4502,7 @@ describe("stopThreadRuns", () => {
     const created: Array<Record<string, unknown>> = [];
     const transaction = {
       $queryRaw: vi.fn(),
+      ...stopAllTables(),
       thread: {
         update: vi.fn(async () => ({ nextEventSeq: ++nextEventSeq })),
       },
@@ -4585,9 +4594,51 @@ describe("stopThreadRuns", () => {
     expect(notify).toHaveBeenCalledWith("thread-1", 3);
   });
 
+  it("ends research and reminders that would wake the conversation, but not on a one-run stop", async () => {
+    const tables = stopAllTables();
+    const transaction = {
+      $queryRaw: vi.fn(),
+      ...tables,
+      run: { updateManyAndReturn: vi.fn().mockResolvedValue([]) },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof transaction) => unknown) =>
+        callback(transaction),
+      ),
+      computer: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      computerExecutionLease: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    } as unknown as PrismaClient;
+    const deps = { prisma, sandbox: {} as SandboxProvider, events: { notify: vi.fn() } as never };
+    const actor = { spaceId: "space-1", userId: "user-1" } as Actor;
+    const target = { kind: "bot", botId: "bot-1", threadId: "thread-1" } as ThreadTarget;
+
+    await stopThreadRuns(deps, actor, target, "run-1");
+    expect(tables.recruitingResearchTask.updateMany).not.toHaveBeenCalled();
+    expect(tables.routine.updateMany).not.toHaveBeenCalled();
+
+    await stopThreadRuns(deps, actor, target);
+    // Closed, so the research poll ignores the provider's completion and opens no wake.
+    expect(tables.recruitingResearchTask.updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { state: "active", createdByRun: { threadId: "thread-1" } },
+      data: { state: "closed" },
+    });
+    // Pending one-shot wakes in this conversation are disarmed; repeating routines are kept.
+    expect(tables.routine.updateMany).toHaveBeenCalledExactlyOnceWith({
+      where: { threadId: "thread-1", active: true, crons: { equals: ["@once"] } },
+      data: { active: false, nextRunAt: null },
+    });
+    // Queued follow-ups and handoffs are active runs, cancelled in the same commit.
+    expect(transaction.run.updateManyAndReturn).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { threadId: "thread-1", status: { in: expect.arrayContaining(["queued"]) } },
+      }),
+    );
+  });
+
   it("emits no event and skips the wake when nothing was running", async () => {
     const transaction = {
       $queryRaw: vi.fn(),
+      ...stopAllTables(),
       thread: { update: vi.fn() },
       run: {
         updateManyAndReturn: vi.fn().mockResolvedValue([]),
