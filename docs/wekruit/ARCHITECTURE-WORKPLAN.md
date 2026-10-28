@@ -23,7 +23,7 @@
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，线上未测） | Adam |
 | C5 | 多容器 | web/API 和 worker 拆分、独立 slot 与滚动发布 | 代码与本地验收已合入 [#334](https://github.com/WeKruit/rakazo/pull/334)：7,762通过/510跳过、真实PG与子进程23/23、Python17/17；实际云端滚动与连续对话未测，不标整体验收完成 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
-| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#338](https://github.com/WeKruit/rakazo/pull/338)后联系人321,748B gzip，7JS/35请求/17RPC/0重复；10-28 已登录聊天 285,238B，距 250KB 还差约 35KB；线上登录页 LCP 4.5–4.7 s（目标 2.5 s） | Adam |
+| D1 | 前端 | 首屏 JS 太大，要按需加载 | 登录页基本达标：[#425](https://github.com/WeKruit/rakazo/pull/425)、[#434](https://github.com/WeKruit/rakazo/pull/434) 上线后线上 Lighthouse 移动端登录页 LCP 4.5–4.7 s → 2.4–2.7 s（评分 0.6 → 0.8）；已登录聊天本地 Fast 4G 4.9 s → 约 4.05 s，线上已登录未测 | Claude |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 完成（本项代码验收）：重复RPC为0，[#301](https://github.com/WeKruit/rakazo/pull/301) 已合入 | Adam |
 | D3 | 前端 | 长列表虚拟滚动 | 完成（本地验收）：最多19行/36卡，无观测>50ms长任务；[#276](https://github.com/WeKruit/rakazo/pull/276)、[#300](https://github.com/WeKruit/rakazo/pull/300) 已合入 | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 完成：生产源文件最多1,499行，零超限；[#298](https://github.com/WeKruit/rakazo/pull/298) 已合入 | Adam |
@@ -317,6 +317,7 @@ CHECK
 - **本地门禁：** web 1,650、chat-ui 143、contracts 296、core 1,231 测试通过（core 5 既有跳过）；web/chat-ui/contracts/core/ui-web 的 `check` 全通过，Biome 和生产构建通过。新测试覆盖局部 Skeleton、消息冷加载时文本可见和安全、现有测试等待真实动态模块完成。
 - **第一阶段发布前复验：** 普通合并最新 #263 基线 `8188c88f3`（包含 A3 分页和 D3 候选虚拟列表），保留原始 lazy 实现；没有混入 D2/D4 或后续 D1 优化。修复合并后的重复 lazy 导入，Shell 测试等待真实冷加载按钮。web **1,655/1,655**、chat-ui **143/143** 通过；web/chat-ui/contracts/core/ui-web 五包 `check`、生产 zh-CN build、Biome 和 diff 检查通过。相同基线 dist 和浏览器脚本复测：登录页 **629,622 → 268,915 B gzip**，总请求 **26 → 48**、JS **16 → 40**；合成已登录聊天 **626,677 → 501,396 B gzip**，总请求 **47 → 97**、JS **15 → 65**。此组数字包含当前集成基线变化，不能归因全部来自 D1；最终 250 KB 和线上验收仍未达到/未执行。
 - **10-28 线上实测：** Lighthouse 移动端（模拟 Fast 4G）登录页 LCP 4.5–4.7 s，FCP 约 4.1 s，未达 2.5 s。本地合成已登录聊天首屏 JS 285,238 B gzip（第一阶段 350 KB 已过，250 KB 未到）。试过让页面模块、翻译和会话并行加载：本地 Lighthouse 对比没有变快（瓶颈是传输字节，不是请求顺序），没有提交。把 auth 校验换成 `zod/mini` 只让登录页少 13 KB，已登录首屏反而多 3 KB（Shell 本身要用完整 zod），也没有提交。再往下要减少首屏字节：例如 Shell 的 contracts 改用更小的校验、或首屏静态外壳，属于较大改动，按需排期。
+- **10-28 上线（#425、#434）：** Inter 改为本地字体（去掉阻塞渲染的第三方样式表）；会话、登录页模块和登录选项在启动时并行请求，冷启动 /app 时聊天页模块与会话同时下载；capabilities 校验器（zod）移出入口，入口脚本 157 → 123 KB gzip。线上登录页 LCP 2.4–2.7 s；未登录访问 /app 3.0 s。代价：未登录访问 /app 会多下载约 106 KB 用不上的聊天模块。
 - **剩余：** D1 尚未完成：已登录 350 KB 门槛、最终 250 KB 目标、Lighthouse Fast 4G LCP 均未验收；后续继续结合 D4 拆分降低初次真正加载字节及请求数。阶段小 PR 尚未发布，不得标完成。
 
 D1 本地复现命令（从仓库根目录；浏览器需要已安装匹配的 headless Chromium）：
