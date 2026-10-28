@@ -4932,6 +4932,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           tool.name.endsWith("web_search_advanced_exa"),
         );
         if (recruitingSearch) hideVendors = true;
+        // A JD sent as a file on a thread with no role: the model creates the role with its first
+        // question, so the intake rules apply before any role exists.
+        const attachedJob =
+          !thread.activeRecruitingRoleId &&
+          recruitingSearch &&
+          currentTurnMessage?.role === "user" &&
+          currentTurnMessage.blocks.some((block) => block.kind === "file");
         const firstRoundPending =
           Boolean(thread.activeRecruitingRoleId) &&
           recruitingSearch &&
@@ -11903,14 +11910,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // planned with it; without four of them the answer turn waits on its own searches.
                 // An explicit [] is the recruiter's own-list-only instruction.
                 if (
-                  (firstRoundPending || linkRole) &&
+                  (firstRoundPending || linkRole || attachedJob) &&
                   (plannedSearches === undefined ||
                     (plannedSearches.length > 0 && plannedSearches.length < 4))
                 )
                   return { instead: PLANNED_SEARCHES_MISSING };
                 // An empty plan once skipped the planned searches for a role with no own-list rule.
                 if (
-                  (firstRoundPending || linkRole) &&
+                  (firstRoundPending || linkRole || attachedJob) &&
                   plannedSearches?.length === 0 &&
                   !emptySearchesBounced
                 ) {
