@@ -220,7 +220,13 @@ if (wanted.has("progress"))
     });
     while (exit === undefined) {
       await sleep(2_000);
-      const report = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, "utf8")) : null;
+      // The latency harness rewrites its report while running; a half-written file is read again.
+      let report = null;
+      try {
+        report = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, "utf8")) : null;
+      } catch {
+        continue;
+      }
       if (asked || !report?.groupId || !report.milestones?.scale_sent) continue;
       if (!(await working(report.groupId))) continue;
       asked = true;
