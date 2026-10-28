@@ -23,7 +23,7 @@ export async function handoffToGroupBot(
     userId: string;
   },
   groupId: string,
-  input: { bot_id?: string; confirm_name?: string; message: string },
+  input: { bot_id?: string; confirm_name?: string; message: string; report_back?: boolean },
 ) {
   const deliveryKey = `group-handoff:${run.id}`;
   const committed = await withTransactionRetry(() =>
@@ -106,7 +106,8 @@ export async function handoffToGroupBot(
       const sourceHandoff = sourceBlocks.find(
         (block): block is Extract<MessageBlock, { kind: "handoff" }> => block.kind === "handoff",
       );
-      if (sourceHandoff?.fromBotId === targetId) {
+      // A returned stage may go back to its owner as a correction; anything else is a bounce.
+      if (sourceHandoff?.fromBotId === targetId && !sourceHandoff.report) {
         return {
           error:
             "do not hand this stage back to its sender; post the result in the shared thread instead",
@@ -126,6 +127,7 @@ export async function handoffToGroupBot(
         toBotId: targetId,
         text: input.message,
         hop,
+        ...(input.report_back ? { reportBack: true } : {}),
       };
       const message = await createThreadMessageInTransaction(tx, {
         threadId: run.threadId,
@@ -186,8 +188,127 @@ export async function handoffToGroupBot(
     ok: true,
     botId: committed.botId,
     runId: committed.runId,
-    note: "Handoff recorded. End this turn without narrating it; the next bot owns the next stage.",
+    note: input.report_back
+      ? "Handoff recorded. End this turn without narrating it; the result comes back to you when that stage ends, so you can check it before the user relies on it."
+      : "Handoff recorded. End this turn without narrating it; the next bot owns the next stage.",
   };
+}
+
+/**
+ * Returns a stage handed over with report_back to the member that asked for it, once the stage
+ * ends either way, so it can check the result against its brief. Idempotent per run; the result
+ * itself is already in the shared thread, so the report only points at it.
+ */
+export async function reportGroupHandoffOutcome(
+  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
+  run: {
+    id: string;
+    spaceId: string;
+    threadId: string;
+    botId: string;
+    userId: string;
+    sourceMessageId: string | null;
+  },
+  groupId: string,
+  outcome: { status: "completed" | "failed"; error?: string },
+): Promise<{ runId: string } | undefined> {
+  if (!run.sourceMessageId) return undefined;
+  const deliveryKey = `group-report:${run.id}`;
+  const committed = await withTransactionRetry(() =>
+    deps.prisma.$transaction(async (tx) => {
+      try {
+        await lockOwnedGroup(tx, run, groupId);
+      } catch (error) {
+        if (error instanceof IsolationError) return undefined;
+        throw error;
+      }
+      const source = await tx.message.findFirst({
+        where: { id: run.sourceMessageId!, threadId: run.threadId },
+        select: { blocks: true },
+      });
+      const parsed = MessageBlock.array().safeParse(source?.blocks ?? []);
+      const asked = parsed.success
+        ? parsed.data.find(
+            (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
+              block.kind === "handoff" && block.toBotId === run.botId && block.reportBack === true,
+          )
+        : undefined;
+      if (!asked || asked.fromBotId === run.botId) return undefined;
+      const existing = await tx.message.findUnique({
+        where: { threadId_clientNonce: { threadId: run.threadId, clientNonce: deliveryKey } },
+        select: { id: true },
+      });
+      if (existing) return undefined;
+      const member = await tx.chatGroupMember.findFirst({
+        where: { groupId, botId: asked.fromBotId, bot: { archivedAt: null } },
+        select: { botId: true },
+      });
+      if (!member) return undefined;
+      const hop = nextBotMessageHop(asked.hop);
+      if (botMessageHopExhausted(hop)) return undefined;
+      const text =
+        outcome.status === "completed"
+          ? "Finished the stage you handed me; my result is my last message above. Check it against what you asked for, then give the user the outcome or hand me a correction."
+          : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
+      const message = await createThreadMessageInTransaction(tx, {
+        threadId: run.threadId,
+        role: "bot",
+        blocks: [
+          {
+            kind: "handoff",
+            fromBotId: run.botId,
+            toBotId: asked.fromBotId,
+            text,
+            hop,
+            report: outcome.status,
+          },
+        ],
+        botId: run.botId,
+        runId: run.id,
+        clientNonce: deliveryKey,
+      });
+      const task = await tx.task.create({
+        data: {
+          spaceId: run.spaceId,
+          botId: asked.fromBotId,
+          threadId: run.threadId,
+          userId: run.userId,
+          prompt: text,
+          status: "queued",
+        },
+      });
+      const nextRun = await tx.run.create({
+        data: {
+          spaceId: run.spaceId,
+          botId: asked.fromBotId,
+          threadId: run.threadId,
+          taskId: task.id,
+          userId: run.userId,
+          status: "queued",
+          trigger: "follow_up",
+          sourceMessageId: message.id,
+        },
+      });
+      const event = await appendEventInTransaction(tx, {
+        spaceId: run.spaceId,
+        threadId: run.threadId,
+        botId: run.botId,
+        type: "group.handoff",
+        runId: run.id,
+        payload: { messageId: message.id, fromBotId: run.botId, toBotId: asked.fromBotId, text },
+      });
+      await touchGroupUpdatedAt(tx, groupId);
+      return { runId: nextRun.id, eventSeq: event.seq };
+    }),
+  );
+  if (!committed) return undefined;
+  await deps.events.notify(run.threadId, committed.eventSeq).catch((error) => {
+    getLogger().error("group report realtime notification", error);
+  });
+  await deps.jobs.enqueue(runContinueJob(committed.runId)).catch((error) => {
+    getLogger().error("group report enqueue", error);
+  });
+  return { runId: committed.runId };
 }
 
 export async function loadGroupContext(

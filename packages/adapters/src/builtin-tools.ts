@@ -654,7 +654,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "remember",
     description:
-      'Save this bot\'s native memory document. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once (include surrounding lines to disambiguate) and only that span changes; do not resend the whole document. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. An explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
+      'Save this bot\'s native memory document. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once (include surrounding lines to disambiguate) and only that span changes; do not resend the whole document. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. An explicitly requested private working note may summarize existing saved role state without becoming a reusable preference. Memory rules: one home per fact, so update the existing line instead of adding a duplicate; say where a fact came from; keep what the user said as theirs and mark what you only inferred as observed, not verified; when the user corrects a fact, change it in place and add "not X, per the user"; when they ask you to forget something, remove it and never record what it was; work information only.',
     inputSchema: {
       type: "object",
       properties: {
@@ -676,7 +676,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_shared_memory",
     description:
-      'Save a native memory document shared across this user\'s bots in this Space. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once and only that span changes. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback.',
+      'Save a native memory document shared across this user\'s bots in this Space. Read it with read_memory first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}: find must match the loaded document exactly once and only that span changes. Use content only to replace the whole document, preserving other facts. For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. Other recruiting feedback belongs in recruiting_feedback. Memory rules: one home per fact, so update the existing line instead of adding a duplicate; say where a fact came from; keep what the user said as theirs and mark what you only inferred as observed, not verified; when the user corrects a fact, change it in place and add "not X, per the user"; when they ask you to forget something, remove it and never record what it was; work information only.',
     inputSchema: {
       type: "object",
       properties: {
@@ -797,7 +797,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "search_history",
     description:
-      "Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections. scope:\"mine\" instead searches this user's other conversations in this Space (their other bots and group chats, never other people's), returning the conversation title, a short snippet and messageId plus threadId; follow one with read_history using both. When no message has every word, it returns the closest messages ranked by shared words (match:\"some_words_ranked\"); read them before trusting a match.",
+      'Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections. scope:"mine" instead searches this user\'s other conversations in this Space (their other bots and group chats, never other people\'s), returning the conversation title, a short snippet and messageId plus threadId; follow one with read_history using both. When no message has every word, it returns the closest messages ranked by shared words (match:"some_words_ranked"); read them before trusting a match. Saved memory lags and is an index, not the source: search here before saying you do not know or do not remember, and read the original before relying on an exact number, date, quote or decision from memory or a summary.',
     inputSchema: {
       type: "object",
       properties: {
@@ -885,7 +885,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "save_memory",
     description:
-      'Store a durable fact in this bot\'s semantic memory (preferences, decisions, recurring context). For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, read the native document with read_memory first and supply its scope, path and expectedRevision in recruitingFeedback (0 for a new document). These preferences are saved only in native memory: top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. In isolated scope, an explicitly requested private working note may summarize existing saved role state without becoming a reusable preference.',
+      'Store a durable fact in this bot\'s semantic memory (preferences, decisions, recurring context). For reusable recruiting preferences, prefer one recruiting_feedback call with target:"preference". If using recruitingFeedback here, read the native document with read_memory first and supply its scope, path and expectedRevision in recruitingFeedback (0 for a new document). These preferences are saved only in native memory: top-level content must be the complete resulting native document; recruitingFeedback.content is the full exact text added or replacing an anchored span, never a summary. Both must match the same edit. New role requirements, round scope changes and candidate decisions belong in recruiting_feedback. In isolated scope, an explicitly requested private working note may summarize existing saved role state without becoming a reusable preference. Memory rules: one home per fact, so update the existing line instead of adding a duplicate; say where a fact came from; keep what the user said as theirs and mark what you only inferred as observed, not verified; when the user corrects a fact, change it in place and add "not X, per the user"; when they ask you to forget something, remove it and never record what it was; work information only.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1340,7 +1340,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "handoff_to_bot",
     description:
-      "In a group chat only: transfer a genuinely distinct next stage to another current member. Appends a visible handoff and starts that bot asynchronously. A handoff ends your turn: later tool calls are refused and your reply is not shown, so finish your own work first and hand off last, at most once per turn. Do not hand a stage back merely to report or repeat the same work; post results in the shared thread.",
+      "In a group chat only: transfer a genuinely distinct next stage to another current member. Appends a visible handoff and starts that bot asynchronously. A handoff ends your turn: later tool calls are refused and your reply is not shown, so finish your own work first and hand off last, at most once per turn. Do not hand a stage back merely to report or repeat the same work; post results in the shared thread. Write message as a brief the member can finish without asking: the goal, done when (a result anyone can check), the context it needs, and what not to do. Set report_back when you need to check the result before the user relies on it: when the stage ends, finished or failed, it comes back to you as your next turn.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1350,6 +1350,10 @@ export const builtinAgentTools: ConnectorTool[] = [
           description: "Exact name of the target member when bot_id is omitted.",
         },
         message: { type: "string", description: "What the receiving bot should do next." },
+        report_back: {
+          type: "boolean",
+          description: "Hand the stage back to you when it ends, so you can check it.",
+        },
       },
       required: ["message"],
     },

@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import type { AdapterContext, MemorySnapshot, MemoryStore } from "@rakazo/adapter-kit";
 
 const MAX_AGENT_MEMORY_BYTES = 32 * 1024;
+const MEMORY_CUT_NOTICE_MAX_BYTES = 1024;
+const MEMORY_CUT_NOTICE = "\n\nCut for space; read with read_memory when relevant.";
 
 type ScopedMemoryDocument = MemorySnapshot["documents"][number] & {
   scope: "bot" | "user";
@@ -52,7 +54,30 @@ export async function loadAgentMemoryContext(
   const closing = "\n</durable_memory>";
   const fixedBytes = byteLength(preamble) + byteLength(closing);
   const sections: string[] = [];
-  let remainingBytes = maxBytes - fixedBytes;
+  // Memory that does not fit is named, never dropped silently: reserve room to say so.
+  const needed = documents
+    .filter((document) => document.content.trim())
+    .reduce(
+      (total, document) =>
+        total + byteLength(redact(document.path)) + byteLength(redact(document.content)) + 40,
+      0,
+    );
+  const cutNotice = (paths: string[]) => `${MEMORY_CUT_NOTICE.slice(0, -1)}: ${paths.join(", ")}.`;
+  const withContent = documents.filter((document) => document.content.trim());
+  const namedReserve = byteLength(
+    cutNotice(withContent.map((document) => `${document.scope}: ${redact(document.path)}`)),
+  );
+  // Name the cut documents when that costs little; otherwise just say memory was cut.
+  const noticeCap = Math.min(MEMORY_CUT_NOTICE_MAX_BYTES, Math.floor(maxBytes / 8));
+  const reserve =
+    needed <= maxBytes - fixedBytes
+      ? 0
+      : namedReserve <= noticeCap
+        ? namedReserve
+        : byteLength(MEMORY_CUT_NOTICE) <= noticeCap
+          ? byteLength(MEMORY_CUT_NOTICE)
+          : 0;
+  let remainingBytes = maxBytes - fixedBytes - reserve;
   const loaded: LoadedMemoryDocument[] = [];
   for (const document of documents) {
     const path = redact(document.path);
@@ -80,6 +105,19 @@ export async function loadAgentMemoryContext(
     remainingBytes -= headingBytes + byteLength(includedContent);
   }
 
+  const cut = loaded.filter(
+    (entry) => entry.disposition === "budget" || entry.disposition === "truncated",
+  );
+  if (sections.length && cut.length) {
+    const named = cutNotice(cut.map((entry) => `${entry.scope}: ${entry.path}`));
+    const notice =
+      remainingBytes + reserve >= byteLength(named)
+        ? named
+        : remainingBytes + reserve >= byteLength(MEMORY_CUT_NOTICE)
+          ? MEMORY_CUT_NOTICE
+          : "";
+    if (notice) sections.push(notice);
+  }
   return {
     ...(sections.length ? { text: `${preamble}${sections.join("")}${closing}` } : {}),
     documents: loaded,

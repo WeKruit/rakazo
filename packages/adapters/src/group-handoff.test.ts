@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { handoffToGroupBot } from "./group-handoff.js";
+import { handoffToGroupBot, reportGroupHandoffOutcome } from "./group-handoff.js";
 
 const run = {
   id: "run-a",
@@ -35,7 +35,9 @@ function harness(
       findUnique: vi.fn(async () => ({ status: "running" })),
       create: runCreate,
     },
+    chatGroupMember: { findFirst: vi.fn(async () => ({ botId: "bot-a" })) },
     message: {
+      findFirst: vi.fn(async () => ({ blocks: sourceBlocks })),
       findUnique: vi.fn(async () => existing ?? null),
       create: messageCreate,
     },
@@ -179,5 +181,90 @@ describe("group handoff ownership", () => {
       }),
     ).resolves.toEqual({ error: "cannot verify the group handoff chain" });
     expect(runCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("group handoff report back", () => {
+  const worker = { ...run, id: "run-b", botId: "bot-b", sourceMessageId: "message-0" };
+  const asked = {
+    kind: "handoff",
+    fromBotId: "bot-a",
+    toBotId: "bot-b",
+    text: "Goal: find ten people. Done when: ten saved profiles.",
+    hop: 1,
+    reportBack: true,
+  };
+
+  it("records report_back on the brief and tells the sender the result returns", async () => {
+    const { deps, messageCreate } = harness([{ kind: "text", text: "user request" }]);
+    const result = await handoffToGroupBot(deps as never, run, "group-1", {
+      bot_id: "bot-b",
+      message: asked.text,
+      report_back: true,
+    });
+    expect(result).toMatchObject({ ok: true, note: expect.stringContaining("comes back to you") });
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blocks: [expect.objectContaining({ reportBack: true })],
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    ["completed", undefined, "Finished the stage"],
+    ["failed", "provider down", "Could not finish the stage you handed me: provider down"],
+  ] as const)("wakes the sender when the stage %s", async (status, error, text) => {
+    const { deps, messageCreate, runCreate } = harness([asked]);
+    await expect(
+      reportGroupHandoffOutcome(deps as never, worker, "group-1", { status, error }),
+    ).resolves.toEqual({ runId: "run-b" });
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientNonce: "group-report:run-b",
+          blocks: [
+            expect.objectContaining({
+              fromBotId: "bot-b",
+              toBotId: "bot-a",
+              hop: 2,
+              report: status,
+              text: expect.stringContaining(text),
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(runCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ botId: "bot-a", trigger: "follow_up" }),
+      }),
+    );
+  });
+
+  it("stays quiet when the sender did not ask, or already got the report", async () => {
+    const plain = harness([{ ...asked, reportBack: undefined }]);
+    await expect(
+      reportGroupHandoffOutcome(plain.deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(plain.runCreate).not.toHaveBeenCalled();
+    const again = harness([asked], { sourceRuns: [] });
+    await expect(
+      reportGroupHandoffOutcome(again.deps as never, worker, "group-1", { status: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(again.runCreate).not.toHaveBeenCalled();
+  });
+
+  it("lets the sender hand a correction back after a report", async () => {
+    const { deps } = harness([
+      { ...asked, fromBotId: "bot-b", toBotId: "bot-a", hop: 2, report: "completed" },
+    ]);
+    await expect(
+      handoffToGroupBot(deps as never, run, "group-1", {
+        bot_id: "bot-b",
+        message: "Two of the ten are outside the area; replace them.",
+      }),
+    ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
   });
 });
