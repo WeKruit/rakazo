@@ -500,6 +500,9 @@ export class PiAgentRuntime implements AgentRuntime {
           prepareNextTurnWithContext: async () => {
             // Whatever was steered in so far reaches the model in the step that starts now.
             host.steeredUnseen = 0;
+            // Memory, skills or tools changed mid-run: a notice, never a rebuilt prompt prefix.
+            const notice = await request.claimContextNotice?.().catch(() => undefined);
+            if (notice) agent.steer({ role: "user", content: notice, timestamp: Date.now() });
             if (!request.claimSteering) return undefined;
             // A mid-stream claim still in flight already owns its ids; wait so neither
             // path claims the same row twice.
