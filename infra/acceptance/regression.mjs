@@ -119,11 +119,12 @@ function commonChecks(messages, failures) {
   }
 }
 /** The ten: a list of ten LinkedIn names, then a next-step card that recommends one option. */
-function tenChecks(messages, failures) {
+function tenChecks(messages, failures, { card = true } = {}) {
   const list = recruiterSees(messages).find((message) => /this round:/.test(botText(message)));
   const links = list ? (botText(list).match(/linkedin\.com\/in\//g)?.length ?? 0) : 0;
   if (links < 10) failures.push(`ten listed with LinkedIn links: ${links}/10`);
-  const next = cards(messages).find((card) => /what's next/i.test(card.text ?? ""));
+  if (!card) return;
+  const next = cards(messages).find((item) => /what's next/i.test(item.text ?? ""));
   if (!next) failures.push("no next-step card after the ten");
   else if (!/\bI'd\b/.test(next.text)) failures.push("next-step card recommends nothing");
 }
@@ -328,7 +329,8 @@ if (wanted.has("t1"))
     ]);
     if (code !== 0) failures.push("start or find-50 did not pass; see t1.log");
     const groupId = reportOf("t1").groupId;
-    tenChecks(await settled(groupId), failures);
+    // The scale message goes in right after the ten, so no next-step card is expected here.
+    tenChecks(await settled(groupId), failures, { card: false });
     const draft = await say(groupId, "来个campign draft看看");
     const drafted = draft.replies.map(botText).join("\n");
     if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
