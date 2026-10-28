@@ -1,4 +1,10 @@
-import { buildSkillMd, formatSkillsCatalogInstruction, parseSkillMd } from "@rakazo/core";
+import {
+  buildSkillMd,
+  expandSkillReferencesInPrompt,
+  formatSkillsCatalogInstruction,
+  memoryTidyRoutinePrompt,
+  parseSkillMd,
+} from "@rakazo/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
 import {
@@ -332,5 +338,19 @@ describe("skill tools", () => {
         newName: longName,
       }),
     ).toEqual({ error: "Skill name must be at most 80 characters." });
+  });
+
+  it("expands the default memory tidy routine into the built-in skill at fire time", async () => {
+    const records = await listAgentSkillRecords(makePrisma() as never, {
+      spaceId: "space-1",
+      userId: "user-1",
+    });
+    for (const shared of [true, false]) {
+      const prompt = expandSkillReferencesInPrompt(memoryTidyRoutinePrompt(shared), records);
+      expect(prompt).toMatch(/^Use skill: Tidy memory\n/);
+      expect(prompt).toContain('"## Forgotten"');
+      expect(prompt).toContain("expectedRevision");
+      expect(prompt).toMatch(/precondition: (bot_)?memory$/);
+    }
   });
 });

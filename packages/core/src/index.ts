@@ -40,6 +40,7 @@ export * from "./live-work.js";
 export * from "./markdown-plain.js";
 export * from "./match-score.js";
 export * from "./mcp.js";
+export * from "./memory-tidy.js";
 export * from "./message-pages.js";
 export * from "./message-reactions.js";
 export * from "./message-replies.js";

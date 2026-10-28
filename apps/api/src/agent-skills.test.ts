@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import type { Actor } from "@rakazo/contracts";
-import { buildSkillMd, RECRUITING_DEFAULT_SKILLS } from "@rakazo/core";
+import { buildSkillMd, MEMORY_TIDY_SKILL, RECRUITING_DEFAULT_SKILLS } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import { createAgentSkillsService, resolveSkillContent } from "./agent-skills.js";
@@ -11,7 +11,7 @@ const actor: Actor = {
   email: "user@rakazo.test",
   isDeploymentOwner: true,
 };
-const recruitingBuiltins = RECRUITING_DEFAULT_SKILLS.map(({ name }) =>
+const productBuiltins = [...RECRUITING_DEFAULT_SKILLS, MEMORY_TIDY_SKILL].map(({ name }) =>
   expect.objectContaining({ id: `builtin:${name}`, source: "builtin", readOnly: true }),
 );
 
@@ -80,11 +80,11 @@ describe("built-in skill precedence in the API", () => {
     async (name) => {
       const { service } = setup([savedSkill(name)]);
       await expect(service.list(actor)).resolves.toEqual([
-        ...recruitingBuiltins,
+        ...productBuiltins,
         expect.objectContaining({ id: "saved-1", name, readOnly: false }),
       ]);
       await expect(service.listWithContent(actor)).resolves.toEqual([
-        ...recruitingBuiltins,
+        ...productBuiltins,
         expect.objectContaining({ id: "saved-1", content: expect.stringContaining("Saved steps") }),
       ]);
       await expect(service.get(actor, { name: " INTERROGATE " })).resolves.toMatchObject({
@@ -127,7 +127,7 @@ describe("built-in skill precedence in the API", () => {
         readOnly: true,
       });
       await expect(service.list(actor)).resolves.toEqual([
-        ...recruitingBuiltins,
+        ...productBuiltins,
         expect.objectContaining({ id: "builtin:Interrogate" }),
       ]);
       await expect(service.get(actor, { skillId: "saved-1" })).rejects.toThrow();

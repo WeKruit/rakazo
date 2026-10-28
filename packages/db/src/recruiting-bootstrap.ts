@@ -3,6 +3,10 @@ import type { Actor } from "@rakazo/contracts";
 import { BOT_COLORS, GROUP_MEMBER_MAX } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
+  MEMORY_TIDY_ROUTINE_NAME,
+  memoryTidyRoutineCron,
+  memoryTidyRoutinePrompt,
+  nextCronDate,
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
@@ -128,6 +132,8 @@ type ManagedPreset = {
   members: string[];
   bots: Record<string, ManagedBot>;
   services: Record<string, ManagedService>;
+  /** Default routines by bot key, recorded once so a paused or deleted one is never recreated. */
+  routines?: Record<string, string>;
 };
 const digest = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const catalogDigest = (firstPartyMcpUrl?: string) =>
@@ -135,6 +141,7 @@ const catalogDigest = (firstPartyMcpUrl?: string) =>
     RECRUITING_DEFAULT_BOTS,
     recruitingServices(firstPartyMcpUrl),
     RECRUITING_DISABLED_BUILTIN_TOOLS,
+    [MEMORY_TIDY_ROUTINE_NAME, memoryTidyRoutinePrompt(true), memoryTidyRoutinePrompt(false)],
   ]);
 export function recruitingPresetId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-defaults-${digest([actor.spaceId, actor.userId])}`;
@@ -185,7 +192,8 @@ function readPreset(value: Prisma.JsonValue): ManagedPreset {
     !Array.isArray(value.members) ||
     !value.members.every((id) => typeof id === "string") ||
     !object(value.bots) ||
-    !object(value.services)
+    !object(value.services) ||
+    !validRoutines(value.routines)
   )
     throw new IsolationError("Recruiting defaults have no managed baseline");
   for (const bot of Object.values(value.bots))
@@ -218,6 +226,61 @@ function readPreset(value: Prisma.JsonValue): ManagedPreset {
   }
   return structuredClone(value) as unknown as ManagedPreset;
 }
+function validRoutines(value: unknown): value is Record<string, string> | undefined {
+  return (
+    value === undefined ||
+    (Boolean(value) &&
+      typeof value === "object" &&
+      !Array.isArray(value) &&
+      Object.values(value as object).every((id) => typeof id === "string"))
+  );
+}
+
+/**
+ * Give each recruiting bot the product-default nightly memory tidy, once. A bot that already has a
+ * routine by that name keeps it; a recorded routine is never recreated after a pause or delete.
+ * The lead's tidy also covers the user's shared memory. Rows hold only this actor's ids and the
+ * maintained prompt, and the job reconciler enqueues the first wakeup.
+ */
+async function ensureMemoryTidyRoutines(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  bots: Array<{ key: string; botId: string }>,
+  recorded: Record<string, string>,
+): Promise<void> {
+  const cron = memoryTidyRoutineCron(actor.userId);
+  for (const { key, botId } of bots) {
+    if (recorded[key] !== undefined) continue;
+    const existing = await tx.routine.findFirst({
+      where: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        botId,
+        name: MEMORY_TIDY_ROUTINE_NAME,
+      },
+      select: { id: true },
+    });
+    recorded[key] = (
+      existing ??
+      (await tx.routine.create({
+        data: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          botId,
+          name: MEMORY_TIDY_ROUTINE_NAME,
+          prompt: memoryTidyRoutinePrompt(key === "main"),
+          crons: [cron],
+          timezone: "UTC",
+          notify: false,
+          active: true,
+          nextRunAt: nextCronDate(cron, new Date()),
+        },
+        select: { id: true },
+      }))
+    ).id;
+  }
+}
+
 async function savePreset(
   tx: Prisma.TransactionClient,
   actor: Actor,
@@ -322,7 +385,22 @@ async function adoptLegacyCrew(
   await tx.agentSkill.deleteMany({
     where: { ...scope, source: "user", name: { in: names, mode: "insensitive" } },
   });
-  const record = { version: LEGACY_PRESET_VERSION, digest: target, config: { legacy: true } };
+  const prior =
+    installed?.config && typeof installed.config === "object" && !Array.isArray(installed.config)
+      ? installed.config.routines
+      : undefined;
+  const routines = validRoutines(prior) && prior ? { ...prior } : {};
+  await ensureMemoryTidyRoutines(
+    tx,
+    actor,
+    crew.map(({ role, bot }) => ({ key: role.key, botId: bot.id })),
+    routines,
+  );
+  const record = {
+    version: LEGACY_PRESET_VERSION,
+    digest: target,
+    config: { legacy: true, routines },
+  };
   if (installed) await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
   else
     await tx.capabilityInstall.create({
@@ -487,6 +565,19 @@ async function upgradeInTransaction(
       if (changed.count === 1) managed.fields[field] = digest(role[field]);
     }
   }
+  baseline.routines ??= {};
+  await ensureMemoryTidyRoutines(
+    tx,
+    actor,
+    RECRUITING_DEFAULT_BOTS.flatMap((role) => {
+      const managedBot = baseline.bots[role.key];
+      const bot = bots.find((item) => item.id === managedBot?.id);
+      return bot && !bot.archivedAt && group.members.some((member) => member.botId === bot.id)
+        ? [{ key: role.key, botId: bot.id }]
+        : [];
+    }),
+    baseline.routines,
+  );
   const servers = await tx.mcpServer.findMany({
     where: { spaceId: actor.spaceId, userId: actor.userId },
     include: { assignments: { where: { spaceId: actor.spaceId, userId: actor.userId } } },
@@ -831,6 +922,16 @@ export async function ensureRecruitingWorkspace(
             assignments,
           };
         }
+        baseline.routines = {};
+        await ensureMemoryTidyRoutines(
+          tx,
+          actor,
+          RECRUITING_DEFAULT_BOTS.flatMap((role) => {
+            const bot = baseline.bots[role.key];
+            return bot ? [{ key: role.key, botId: bot.id }] : [];
+          }),
+          baseline.routines,
+        );
         await savePreset(tx, actor, baseline, options.firstPartyMcpUrl);
       }
       const main = ownedBots.find((bot) => bot.spawnKey === spawnKey("main"));
