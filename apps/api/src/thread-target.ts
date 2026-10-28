@@ -1036,6 +1036,41 @@ export async function sendThreadMessage(
           clientNonce: input.clientNonce,
         });
         await assertCorrespondenceScope();
+        // In a crew the work may be running on any teammate, not only the one addressed.
+        const busy = isStatusQuestion(input.text)
+          ? (
+              await tx.run.findMany({
+                where: {
+                  threadId: target.threadId,
+                  botId: { in: memberBotIds },
+                  status: "running",
+                },
+                orderBy: { createdAt: "desc" },
+                select: { id: true, taskId: true, botId: true, status: true, trigger: true },
+              })
+            ).find((run) => run.status === "running" && steersUserMessage(run))
+          : undefined;
+        if (busy) {
+          await touchGroupUpdatedAt(tx, target.groupId);
+          const asked = await appendEventInTransaction(tx, {
+            spaceId: actor.spaceId,
+            threadId: target.threadId,
+            botId: busy.botId,
+            type: "thread.message.created",
+            payload: {
+              messageId: message.id,
+              role: "user",
+              blocks,
+              callId,
+              runIds: [busy.id],
+              replyToMessageId,
+              replyQuote,
+              replyPreview,
+            },
+          });
+          await answerStatusQuestion(tx, actor, target.threadId, busy.botId, busy, input.text);
+          return { message, runs: [busy], eventSeq: asked.seq };
+        }
         const activeRuns = await tx.run.findMany({
           where: {
             threadId: target.threadId,
