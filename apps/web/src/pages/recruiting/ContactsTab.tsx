@@ -2,7 +2,7 @@ import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingCandidate, RecruitingCorrespondence } from "@rakazo/contracts";
 import { Button } from "@rakazo/ui-web";
 import { Bookmark, Mail, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { CandidateDirectory } from "./CandidateDirectory";
 import type { ShortlistWeekFilter } from "./dashboard-drilldown";
 import { isInShortlistWeek } from "./dashboard-drilldown";
@@ -82,14 +82,18 @@ export function ContactsTab(
     },
   });
   const filter = props.shortlistWeekFilter;
-  const rows = filter
-    ? list.rows.filter(
-        (row) =>
-          props.roleId === filter.roleId &&
-          row.autumn?.roleId === filter.roleId &&
-          isInShortlistWeek(row.autumn, filter),
-      )
-    : list.rows;
+  const rows = useMemo(
+    () =>
+      filter
+        ? list.rows.filter(
+            (row) =>
+              props.roleId === filter.roleId &&
+              row.autumn?.roleId === filter.roleId &&
+              isInShortlistWeek(row.autumn, filter),
+          )
+        : list.rows,
+    [list.rows, filter, props.roleId],
+  );
   const loadedCount = rows.length;
   const total = filter
     ? list.more.hasMore || list.autumn?.loading || list.autumn?.failed

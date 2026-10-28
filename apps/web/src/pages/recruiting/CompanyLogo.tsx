@@ -1,5 +1,5 @@
 import { useLinkFavicon } from "@rakazo/chat-ui/web-contexts";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
 import { ProfileImage } from "./ProfileImage";
 import { profileImageUrl } from "./profileAssets";
@@ -70,7 +70,7 @@ function useCompanySite(name: string, enabled: boolean) {
  * reads the site's declared icon, so the browser never contacts the site); otherwise initials.
  * Without a returned website, our API looks for the organization's own site by its name.
  */
-export function CompanyLogo({
+export const CompanyLogo = memo(function CompanyLogo({
   name,
   src,
   host,
@@ -95,4 +95,4 @@ export function CompanyLogo({
       }`}
     />
   );
-}
+});

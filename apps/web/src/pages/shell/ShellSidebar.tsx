@@ -2,6 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { Button } from "@rakazo/ui-web";
 import { FolderOpen, Gauge, LayoutGrid, LogOut, Settings, SquareKanban } from "lucide-react";
 import type { CSSProperties } from "react";
+import { useMemo } from "react";
 import { DeferredPopover } from "../../components/DeferredPopover";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { PaneResizeHandle } from "../../components/PaneResizeHandle";
@@ -63,6 +64,19 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
     userName,
     initials,
   } = model;
+  const readCache = recruitingReadCache.current;
+  const crmContext = useMemo(
+    () =>
+      recruitingCacheScope
+        ? {
+            target: transcriptArtifactTarget,
+            scope: recruitingCacheScope,
+            cache: readCache,
+            refreshSignal: recruitingRefresh,
+          }
+        : undefined,
+    [recruitingCacheScope, transcriptArtifactTarget, readCache, recruitingRefresh],
+  );
   return (
     <aside
       data-testid="bots-sidebar"
@@ -90,16 +104,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             onPrefetchRole={(id) =>
               prefetchThread({ groupId: id }, groups.find((group) => group.id === id)?.spaceId)
             }
-            crmContext={
-              recruitingCacheScope
-                ? {
-                    target: transcriptArtifactTarget,
-                    scope: recruitingCacheScope,
-                    cache: recruitingReadCache.current,
-                    refreshSignal: recruitingRefresh,
-                  }
-                : undefined
-            }
+            crmContext={crmContext}
             crmSelection={effectiveCrmSelection}
             onOpenCrmRole={(selection) => void openCrmRole(selection)}
             groups={groups}

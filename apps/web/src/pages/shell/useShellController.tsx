@@ -83,6 +83,7 @@ import {
 } from "../../lib/right-panel-state";
 import { rpc } from "../../lib/rpc";
 import { readSeenRunErrorIds, rememberSeenRunErrorId } from "../../lib/run-error-storage";
+import { useNewPeopleDuringRun } from "../../lib/run-people-progress";
 import { sharedInflight } from "../../lib/shared-inflight";
 import {
   activeThreadRuns,
@@ -98,7 +99,6 @@ import type { PendingAttachment } from "../shell/Composer";
 import { isCommandPaletteHotkey } from "../shell/command-palette-hotkey";
 import { FALLBACK_BOT_COLOR } from "../shell/constants";
 import { memberName } from "../shell/group-members";
-import { useNewPeopleDuringRun } from "../../lib/run-people-progress";
 import { useShellComputer } from "./useShellComputer";
 
 export function useShellController() {
@@ -784,7 +784,7 @@ export function useShellController() {
     setReplyQuote(null);
   }, []);
   const currentRuns = activeThreadRuns(activeSnapshot);
-  const answerableAskIds = answerableAskMessageIds(
+  const currentAnswerableAskIds = answerableAskMessageIds(
     validatedThreadEpoch.current === historyEpoch.current &&
       (inGroup
         ? snapshotRef.current?.groupId === groupId
@@ -793,13 +793,17 @@ export function useShellController() {
       : null,
   );
   // A waiting question or confirmation reopens a collapsed role chat once per new card.
-  const pendingAskKey = answerableAskIds.join(",");
+  const pendingAskKey = currentAnswerableAskIds.join(",");
+  // Same cards keep the same list, so the transcript does not re-render for unrelated changes.
+  const answerableAskIds = useMemo(() => currentAnswerableAskIds, [pendingAskKey]);
   useEffect(() => {
     if (pendingAskKey && roleChatWorkspace) setRoleChatOpen(true);
   }, [pendingAskKey, roleChatWorkspace]);
-  const workingRuns = currentRuns.filter((run) =>
+  const currentWorkingRuns = currentRuns.filter((run) =>
     ["running", "queued", "leased"].includes(run.status),
   );
+  const workingRunsKey = currentWorkingRuns.map((run) => `${run.id}:${run.status}`).join(",");
+  const workingRuns = useMemo(() => currentWorkingRuns, [workingRunsKey]);
   const transcriptRunning = workingRuns.length > 0;
   const peopleAdded = useNewPeopleDuringRun({
     groupId: inGroup && !showToolActivity ? (groupId ?? undefined) : undefined,
@@ -837,15 +841,19 @@ export function useShellController() {
     },
     [bots, transcriptMembers],
   );
-  const workingBots: GroupAvatarMember[] = workingRuns.map((run) => {
-    const bot = resolveTranscriptBot(run.botId);
-    return {
-      botId: run.botId,
-      color: bot?.color ?? FALLBACK_BOT_COLOR,
-      name: bot?.name,
-      status: run.status,
-    };
-  });
+  const workingBots = useMemo(
+    () =>
+      workingRuns.map((run): GroupAvatarMember => {
+        const bot = resolveTranscriptBot(run.botId);
+        return {
+          botId: run.botId,
+          color: bot?.color ?? FALLBACK_BOT_COLOR,
+          name: bot?.name,
+          status: run.status,
+        };
+      }),
+    [workingRuns, resolveTranscriptBot],
+  );
   const resolveTranscriptMemberName = useCallback(
     (botId: string | undefined) => memberName(transcriptMembers, botId),
     [transcriptMembers],

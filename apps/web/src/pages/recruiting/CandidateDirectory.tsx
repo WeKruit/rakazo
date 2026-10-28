@@ -3,7 +3,7 @@ import { Badge, Button } from "@rakazo/ui-web";
 import type { VirtualItem } from "@tanstack/react-virtual";
 import { ExternalLink, LayoutGrid, MapPin, Table2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { useMemo, useRef, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { CandidateWindow } from "./CandidateWindow";
 import { CompanyLogo } from "./CompanyLogo";
 import { PersonAvatar } from "./ProfileImage";
@@ -81,7 +81,14 @@ function OrganizationName({ name, href }: { name: string; href: string | null })
   );
 }
 
-function Company({ profile, title }: { profile: DirectoryProfile; title: string | null }) {
+// Row cells take only stable per-row values, so opening a person re-renders just the selection.
+const Company = memo(function Company({
+  profile,
+  title,
+}: {
+  profile: DirectoryProfile;
+  title: string | null;
+}) {
   const { company, assets } = profile;
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -106,9 +113,15 @@ function Company({ profile, title }: { profile: DirectoryProfile; title: string 
       </div>
     </div>
   );
-}
+});
 
-function Education({ profile, compact = false }: { profile: DirectoryProfile; compact?: boolean }) {
+const Education = memo(function Education({
+  profile,
+  compact = false,
+}: {
+  profile: DirectoryProfile;
+  compact?: boolean;
+}) {
   const { school, assets } = profile;
   if (!school) return <span className="text-muted-foreground">—</span>;
   return (
@@ -144,9 +157,9 @@ function Education({ profile, compact = false }: { profile: DirectoryProfile; co
       </div>
     </div>
   );
-}
+});
 
-function Fit({
+const Fit = memo(function Fit({
   sections,
   compact = false,
 }: {
@@ -226,9 +239,9 @@ function Fit({
       })}
     </div>
   );
-}
+});
 
-function Status({ row }: { row: RoleCandidate }) {
+const Status = memo(function Status({ row }: { row: RoleCandidate }) {
   const activity = row.crm?.stage || row.crm?.outreachStatus;
   return (
     <div className="flex flex-wrap gap-1">
@@ -247,7 +260,7 @@ function Status({ row }: { row: RoleCandidate }) {
       ) : null}
     </div>
   );
-}
+});
 
 /** Source-only contact presentation. Loading, permissions, writes and profile navigation stay with the caller. */
 export function CandidateDirectory({

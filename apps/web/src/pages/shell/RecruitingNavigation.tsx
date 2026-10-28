@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ArtifactTarget } from "../../lib/artifact-open";
+import { memoWithLatestHandlers } from "../../lib/memo-latest";
 import { retryTransientRead } from "../../lib/read-retry";
 import type { RecruitingReadCache } from "../../lib/recruiting-read-cache";
 import { rememberRecruitingRead, savedRecruitingRead } from "../../lib/recruiting-read-cache";
@@ -62,7 +63,8 @@ function waitsOnUser(group: Group) {
   return Boolean(group.attention ?? group.needsInput);
 }
 
-export function RecruitingNavigation({
+// The shell re-renders on every panel or person change; the role list only when its data does.
+export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNavigation({
   groups,
   archivedGroups,
   archivedOpen,
@@ -572,4 +574,4 @@ export function RecruitingNavigation({
       </div>
     </div>
   );
-}
+});
