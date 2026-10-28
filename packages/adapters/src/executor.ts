@@ -5597,8 +5597,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
             (Array.isArray(blocks) ? (blocks as MessageBlock[]) : []).flatMap((block) =>
               block.kind === "text" && block.text.trim() ? [block.text] : [],
             );
+          // The latest message may belong to another teammate's run, so a quote from this turn's
+          // own message also stands; a quote from neither takes this turn's message.
           const latestTexts = textsOf(latestHuman?.blocks);
-          const turnTexts = latestTexts.length ? latestTexts : textsOf(currentTurnMessage?.blocks);
+          const ownTexts = textsOf(currentTurnMessage?.blocks);
+          const turnTexts = [...ownTexts, ...latestTexts];
           const givenQuote = (args.intent as { quote?: unknown } | undefined)?.quote;
           if (
             name === "recruiting_role" &&
@@ -12178,7 +12181,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 label: visible(redactSecrets(action.label, runSecrets)),
               }));
               await workspaceCheckpoint.flush();
-              if (event.plannedSearches?.length && (firstRoundPending || linkRole))
+              if (event.plannedSearches?.length && (firstRoundPending || linkRole || attachedJob))
                 await deps.events
                   .append({
                     spaceId: run.spaceId,
