@@ -161,6 +161,7 @@ describe("formatCompactedSummary", () => {
       "Rakazo-owned compacted context through message sequence 49",
     );
     expect(formatCompactedSummary("facts", 49)).toContain("<compacted_thread_summary>");
+    expect(formatCompactedSummary("facts", 49)).toContain("read it with search_history or read_history");
   });
 
   it("keeps summary text from closing its data boundary", () => {

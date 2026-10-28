@@ -75,6 +75,7 @@ import {
   clipContentWithFullOutput,
   clipToolResultText,
   clipWithFullOutput,
+  compactionReserveTokens,
   MODEL_ERROR_BODY_TIMEOUT_MS,
   MODEL_STREAM_FIRST_EVENT_TIMEOUT_MS,
   MODEL_STREAM_IDLE_TIMEOUT_MS,
@@ -1186,10 +1187,7 @@ function activeCompaction(
     const output = target.config.maxTokens ?? target.model.maxTokens;
     const settings = {
       ...DEFAULT_COMPACTION_SETTINGS,
-      reserveTokens: Math.min(
-        DEFAULT_COMPACTION_SETTINGS.reserveTokens,
-        Math.max(0, window - output),
-      ),
+      reserveTokens: compactionReserveTokens(window, output),
     };
     const wire = runtimeMessagesToLlm(context.messages);
     // Our runtime uses only native roles with exactly one provider message each.

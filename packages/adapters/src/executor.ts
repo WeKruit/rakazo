@@ -4383,6 +4383,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             addCanonical(turn.answer, "user");
           }
         }
+        // Teammates' messages carry the teammate's name, so a bot can tell who said what.
+        const teammateIds = [
+          ...new Set(
+            messages.flatMap((m) =>
+              m.role === "bot" && m.botId && m.botId !== run.botId ? [m.botId] : [],
+            ),
+          ),
+        ];
+        const teammateNames = new Map(
+          teammateIds.length
+            ? (
+                await deps.prisma.bot.findMany({
+                  where: { id: { in: teammateIds }, userId: run.userId, spaceId: run.spaceId },
+                  select: { id: true, name: true },
+                })
+              ).map((row) => [row.id, row.name])
+            : [],
+        );
         const threadContext = threadContextForRun(
           run.trigger,
           {
@@ -4395,7 +4413,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : m.role === "bot" && m.botId === run.botId
                   ? "assistant"
                   : "user") as "user" | "assistant" | "system",
-              content: `${m.role === "bot" && m.botId !== run.botId ? `[bot ${m.botId}] ` : ""}${messageToAgentHistoryText(m)}`,
+              content: `${m.role === "bot" && m.botId !== run.botId ? `[bot ${teammateLabel(m.botId, teammateNames)}] ` : ""}${messageToAgentHistoryText(m)}`,
             })),
             summary: thread.historyCompactionSummary,
             historyCompactedUpToSeq: thread.historyCompactedUpToSeq,
@@ -14802,4 +14820,13 @@ export async function withRecentTurnImages(
       ...(update.images ? { images: update.images } : {}),
     };
   });
+}
+
+/** Names a teammate in shared history; falls back to the id when the bot is gone. */
+export function teammateLabel(
+  botId: string | null | undefined,
+  names: ReadonlyMap<string, string>,
+): string {
+  const name = botId ? names.get(botId)?.trim() : undefined;
+  return name ? `${name.replace(/[[\]\n]/g, " ")} (id: ${botId})` : `${botId}`;
 }

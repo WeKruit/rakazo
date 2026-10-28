@@ -6,6 +6,7 @@ import {
   clipToolResultContent,
   clipToolResultText,
   clipWithFullOutput,
+  compactionReserveTokens,
   modelStreamMaxRetries,
   REASONING_MODEL_MAX_TOKENS,
   resolveCompletionMaxTokens,
@@ -201,5 +202,13 @@ describe("clipped tool output keeps a readable copy", () => {
     expect(await clipContentWithFullOutput([{ type: "text", text: "ok" }], store)).toEqual([
       { type: "text", text: "ok" },
     ]);
+  });
+});
+
+describe("compactionReserveTokens", () => {
+  it("compacts at about 80% of large windows and keeps the default floor on small ones", () => {
+    expect(compactionReserveTokens(200_000, 32_000)).toBe(40_000);
+    expect(compactionReserveTokens(40_000, 8_000)).toBe(16_384);
+    expect(compactionReserveTokens(20_000, 16_000)).toBe(4_000);
   });
 });
