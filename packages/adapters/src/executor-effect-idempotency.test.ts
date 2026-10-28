@@ -5491,6 +5491,26 @@ describe("resume brief", () => {
     expect(brief).toContain("(40 more entries omitted)");
   });
 
+  it("names the calls the interruption cut off", async () => {
+    const brief = (await resumeBriefForRun(
+      prismaWith([
+        {
+          type: "agent.tool.called",
+          payload: { name: "recruiting_role", executionId: "a", argsSummary: "operation=read" },
+        },
+        { type: "agent.tool.completed", payload: { name: "recruiting_role", executionId: "a" } },
+        {
+          type: "agent.tool.called",
+          payload: { name: "web_search_advanced_exa", executionId: "b", argsSummary: "query=cad" },
+        },
+      ]),
+      run,
+    ))!;
+    expect(brief).toContain("Cut off by the interruption");
+    expect(brief).toContain("- web_search_advanced_exa(query=cad)");
+    expect(brief).not.toContain("- recruiting_role(operation=read)\n- web");
+  });
+
   it("reports failures and redacts secrets from stored error text", async () => {
     const brief = (await resumeBriefForRun(
       prismaWith([

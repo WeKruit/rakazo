@@ -13495,11 +13495,15 @@ export async function resumeBriefForRun(
   const argsByExecution = new Map<string, string>();
   const calls: string[] = [];
   const sent: string[] = [];
+  // Calls started but never finished: the model must learn what the interruption cut off.
+  const inFlight = new Map<string, string>();
   for (const event of events) {
     const payload = (event.payload ?? {}) as Record<string, unknown>;
     if (event.type === "agent.tool.called") {
       if (typeof payload.executionId === "string" && typeof payload.argsSummary === "string")
         argsByExecution.set(payload.executionId, payload.argsSummary);
+      if (typeof payload.executionId === "string" && typeof payload.name === "string")
+        inFlight.set(payload.executionId, payload.name);
       continue;
     }
     if (event.type === "thread.message.created") {
@@ -13512,6 +13516,7 @@ export async function resumeBriefForRun(
       if (text) sent.push(text.length > 200 ? `${text.slice(0, 200)}…` : text);
       continue;
     }
+    if (typeof payload.executionId === "string") inFlight.delete(payload.executionId);
     if (typeof payload.name !== "string" || payload.outcome === "paused") continue;
     const executionId = typeof payload.executionId === "string" ? payload.executionId : "";
     const digest = createHash("sha256").update(executionId).digest("hex").slice(0, 12);
@@ -13525,7 +13530,10 @@ export async function resumeBriefForRun(
       `- ${payload.name}(${args ?? ""}) ${outcome}${stored ? `; full output saved as artifact ${stored.id} (artifact_read)` : ""}`,
     );
   }
-  if (calls.length === 0 && sent.length === 0) return undefined;
+  const cut = [...inFlight].map(
+    ([executionId, name]) => `- ${name}(${argsByExecution.get(executionId) ?? ""})`,
+  );
+  if (calls.length === 0 && sent.length === 0 && cut.length === 0) return undefined;
   const entries = [
     ...calls.slice(0, RESUME_BRIEF_MAX_ENTRIES),
     ...sent.slice(0, Math.max(0, RESUME_BRIEF_MAX_ENTRIES - calls.length)),
@@ -13538,6 +13546,12 @@ export async function resumeBriefForRun(
       ? ["Messages already sent to the user:", ...entries.slice(calls.length).map((t) => `- ${t}`)]
       : []),
     ...(omitted > 0 ? [`(${omitted} more entries omitted)`] : []),
+    ...(cut.length
+      ? [
+          "Cut off by the interruption, with no result (check whether each took effect before repeating it):",
+          ...cut.slice(0, RESUME_BRIEF_MAX_ENTRIES),
+        ]
+      : []),
   ].join("\n");
   brief = redactSecrets(brief, secrets);
   return brief.length > RESUME_BRIEF_MAX_CHARS
@@ -13657,7 +13671,7 @@ export function mayOpenModelStream(
 export { isExactNoResponse, NO_RESPONSE, stripNoResponseReply };
 
 export const LONG_WORK_PROGRESS_GUIDANCE =
-  "During long work, send a few short progress updates with message_user so the user can see what you are doing. Keep them brief and high-signal (a sentence or two, not a dump). Do not narrate every tool call. Thinking stays private. message_user is capped at 500 characters and will be silently cut off if you exceed it \u2014 never put your final answer, a report, or any long-form deliverable in it. Always put the complete final answer in your normal reply, never split across message_user calls, and never assume a message_user update already delivered your content.";
+  "On work that runs longer than a few minutes, send a one-line progress update with message_user at each natural checkpoint (a batch saved, a stage done) so the user can see what you are doing; if you need their input, put the question in your final reply instead. Keep them brief and high-signal (a sentence or two, not a dump). Do not narrate every tool call. Thinking stays private. message_user is capped at 500 characters and will be silently cut off if you exceed it \u2014 never put your final answer, a report, or any long-form deliverable in it. Always put the complete final answer in your normal reply, never split across message_user calls, and never assume a message_user update already delivered your content.";
 
 export const ROUTINE_SILENT_REPLY_GUIDANCE = `If this routine's prompt says to stay silent when there is nothing to report, the entire final assistant reply must be exactly ${NO_RESPONSE} — no surrounding prose, no variants, no progress updates, no all-clear, and no meta note that you are staying silent. Do not call message_user unless you have something to report.`;
 
