@@ -174,7 +174,7 @@ vi.mock("./pages/IntegrationSetup", () => ({ IntegrationSetupPage: () => null })
 vi.mock("./pages/LocalSettings", () => ({ LocalSettingsPage: () => null }));
 vi.mock("./pages/McpOAuthCallback", () => ({ McpOAuthCallbackPage: () => null }));
 
-import { App } from "./App";
+import { App, preloadFirstPage, usesSession } from "./App";
 
 it("loads the board chunk only after bootstrap enables the route", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
@@ -203,4 +203,18 @@ it("loads the board chunk only after bootstrap enables the route", async () => {
     await act(async () => root.unmount());
     vi.unstubAllGlobals();
   }
+});
+
+it("preloads only a cold sign-in page, and knows which pages read the session", () => {
+  const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+  for (const path of ["/", "/app", "/app/g/group-a", "/onboarding", "/sign-in/extra"])
+    expect(preloadFirstPage(path)).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();
+  expect(preloadFirstPage("/sign-in")).toBe(true);
+  expect(fetch).toHaveBeenCalledWith("/api/auth/capabilities", expect.anything());
+  fetch.mockRestore();
+  expect(usesSession("/app")).toBe(true);
+  expect(usesSession("/sign-in")).toBe(true);
+  expect(usesSession("/sso/callback")).toBe(false);
+  expect(usesSession("/desktop-settings")).toBe(false);
 });

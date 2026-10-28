@@ -17,6 +17,7 @@ import { LoadingState } from "./components/ai/primitives";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { SubscriptionGate } from "./components/SubscriptionGate";
 import { authClient } from "./lib/auth";
+import { fetchAuthCapabilities } from "./lib/auth-capabilities";
 import {
   getTicketBoardEnabled,
   invalidateInitialBootstrap,
@@ -40,12 +41,26 @@ const ShellPage = lazy(() =>
   import("./pages/Shell").then((module) => ({ default: module.ShellPage })),
 );
 
-const AuthPage = lazy(() =>
-  import("./pages/Auth").then((module) => ({ default: module.AuthPage })),
-);
+const loadAuth = () => import("./pages/Auth");
+const AuthPage = lazy(() => loadAuth().then((module) => ({ default: module.AuthPage })));
 const PasswordResetPage = lazy(() =>
-  import("./pages/Auth").then((module) => ({ default: module.PasswordResetPage })),
+  loadAuth().then((module) => ({ default: module.PasswordResetPage })),
 );
+
+const AUTH_PATHS = new Set(["/sign-in", "/sign-up", "/forgot-password", "/reset-password"]);
+
+/** Every page except the SSO popup and local settings starts by reading the session. */
+export function usesSession(pathname: string) {
+  return pathname !== SSO_CALLBACK_PATH && pathname !== LOCAL_SETTINGS_PAGE;
+}
+
+/** On a cold sign-in page, fetch its module and sign-in options alongside the session. */
+export function preloadFirstPage(pathname: string) {
+  if (!AUTH_PATHS.has(pathname)) return false;
+  void loadAuth().catch(() => undefined);
+  void fetchAuthCapabilities().catch(() => undefined);
+  return true;
+}
 const OnboardingPage = lazy(() =>
   withFeatureMessages(() => import("./pages/Onboarding")).then((module) => ({
     default: module.OnboardingPage,

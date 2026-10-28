@@ -1,10 +1,11 @@
 import { StrictMode, useEffect, useLayoutEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { App } from "./App";
+import { App, preloadFirstPage, usesSession } from "./App";
 import { I18nBootstrap } from "./components/I18nBootstrap";
 import { PlatformDesktopUpdates } from "./components/PlatformDesktopUpdates";
 import { applyUiDirection } from "./lib/apply-ui-direction";
+import { authClient } from "./lib/auth";
 import { markAfterPaint, markOnce } from "./lib/performance";
 import { installPreloadRecovery } from "./lib/preload-recovery";
 import { applyUiAppearance, watchSystemAppearance } from "./lib/ui-appearance";
@@ -15,6 +16,13 @@ markOnce("rk:renderer:module-evaluated");
 installPreloadRecovery();
 applyUiDirection(resolveUiLocale());
 applyUiAppearance();
+// The page module, translations and session load together rather than one after another.
+preloadFirstPage(window.location.pathname);
+
+function SessionWarmup() {
+  authClient.useSession();
+  return null;
+}
 
 function PerformanceProbe() {
   useLayoutEffect(() => {
@@ -33,6 +41,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <PerformanceProbe />
     <AppearanceSync />
+    {usesSession(window.location.pathname) ? <SessionWarmup /> : null}
     <I18nBootstrap>
       {/* Router state updates must not be transitions: under sustained urgent
           updates (SSE churn while a run streams) a pending navigation is
