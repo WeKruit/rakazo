@@ -1356,35 +1356,39 @@ export function createRouter(deps: RouterDeps) {
           sandboxKind: deps.env.sandboxProvider,
           firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
         });
-      // Additive setup for older crews; a failure must not block sign-in.
-      if (!input.offset)
-        await ensurePlatformServices(deps.prisma, actor).catch((error: unknown) =>
-          getLogger().error("platform service setup failed", error),
-        );
+      // Additive setup for older crews runs beside the reads below; it changes no field this
+      // returns, and a failure must not block sign-in.
+      const platformServices = input.offset
+        ? Promise.resolve()
+        : ensurePlatformServices(deps.prisma, actor).catch((error: unknown) =>
+            getLogger().error("platform service setup failed", error),
+          );
       // Fire-and-forget: wake a paused Team Computer so the first run skips the ~5 s wake.
       if (!input.offset) void prewarmTeamComputer(deps, actor).catch(() => undefined);
-      const [me, navigation, archivedBots, archivedGroups, groupThread] = await Promise.all([
-        meDto(deps, actor),
-        spaceNavigationDto(deps, actor, repos, groupRepos, input.offset ?? 0),
-        repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
-        groupRepos.listGroups(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
-        input.groupId
-          ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
-              threadSnapshot(deps, target),
-            )
-          : Promise.resolve(null),
-      ]);
+      const [me, navigation, archivedBots, archivedGroups, groupThread, active] = await Promise.all(
+        [
+          meDto(deps, actor),
+          spaceNavigationDto(deps, actor, repos, groupRepos, input.offset ?? 0),
+          repos.listBots(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          groupRepos.listGroups(actor, { archived: true, limit: 200, offset: input.offset ?? 0 }),
+          input.groupId
+            ? resolveThreadTarget(deps.prisma, actor, { groupId: input.groupId }).then((target) =>
+                threadSnapshot(deps, target),
+              )
+            : Promise.resolve(null),
+          input.botId && !input.groupId
+            ? deps.prisma.bot.findFirst({
+                where: {
+                  id: input.botId,
+                  userId: actor.userId,
+                  spaceId: actor.spaceId,
+                  archivedAt: null,
+                },
+              })
+            : Promise.resolve(null),
+        ],
+      );
       const { bots, groups, botSections } = navigation.current;
-      const active = input.botId
-        ? await deps.prisma.bot.findFirst({
-            where: {
-              id: input.botId,
-              userId: actor.userId,
-              spaceId: actor.spaceId,
-              archivedAt: null,
-            },
-          })
-        : null;
       const [thread, routines] = input.groupId
         ? [groupThread, []]
         : active
@@ -1395,6 +1399,7 @@ export function createRouter(deps: RouterDeps) {
               listRoutinesDto(deps, actor, active.id, input.offset ?? 0),
             ])
           : [null, []];
+      await platformServices;
       return {
         me,
         bots,
