@@ -5705,7 +5705,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (typeof args.question === "string")
               args = { ...args, question: shortQuestion(args.question) };
           }
-          if (handedOff) {
+          // The server's own repeat of a refused role save is not a new model call: it still runs.
+          if (handedOff && !executionId.endsWith(":repaired")) {
             return {
               error: "This stage was handed off. End the turn without more tool calls.",
             };
