@@ -21,9 +21,12 @@ import {
   callIdFromClientNonce,
   isActive,
   isConversationalRun,
+  isStatusQuestion,
   projectMessages,
   resolveGroupTargetBotIds,
   runFailureError,
+  statusAnswer,
+  workActivityForTool,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
 import type { Prisma, PrismaClient, ThreadEvents } from "@rakazo/db";
@@ -89,6 +92,54 @@ const STEERABLE_RUN_STATUSES = new Set(["queued", "leased", "running", "waiting_
  * steerable conversational run is active. When one is, the text steers that run and the
  * ask stays on its card.
  */
+/**
+ * A side question about progress ("how's it going?") sent while a conversational run works is
+ * answered from the live work, Workloop's btw: the work is neither interrupted nor told.
+ */
+async function answerStatusQuestion(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  threadId: string,
+  botId: string,
+  run: { id: string; status: string; trigger?: string | null },
+  text: string | undefined,
+): Promise<boolean> {
+  if (run.status !== "running" || !steersUserMessage(run) || !isStatusQuestion(text)) return false;
+  const [called, timing] = await Promise.all([
+    tx.event.findFirst({
+      where: { runId: run.id, type: "agent.tool.called" },
+      orderBy: { seq: "desc" },
+      select: { payload: true },
+    }),
+    tx.run.findUnique({ where: { id: run.id }, select: { startedAt: true, createdAt: true } }),
+  ]);
+  const tool = (called?.payload as { name?: unknown } | null)?.name;
+  const since = timing?.startedAt ?? timing?.createdAt;
+  const blocks: MessageBlock[] = [
+    {
+      kind: "text",
+      text: statusAnswer({
+        activity: typeof tool === "string" ? workActivityForTool(tool) : "working",
+        elapsedMs: since ? Date.now() - since.getTime() : 0,
+      }),
+    },
+  ];
+  const reply = await createThreadMessageInTransaction(tx, {
+    threadId,
+    role: "bot",
+    botId,
+    blocks,
+  });
+  await appendEventInTransaction(tx, {
+    spaceId: actor.spaceId,
+    threadId,
+    botId,
+    type: "thread.message.created",
+    payload: { messageId: reply.id, role: "bot", blocks },
+  });
+  return true;
+}
+
 function steersUserMessage(run: { status: string; trigger?: string | null }) {
   return STEERABLE_RUN_STATUSES.has(run.status) && isConversationalRun(run.trigger);
 }
@@ -835,15 +886,25 @@ export async function sendThreadMessage(
           const active = activeRuns.find(steersUserMessage) ?? activeRuns[0];
           if (active) {
             const steers = steersUserMessage(active);
-            await tx.steeringMessage.create({
-              data: {
-                messageId: message.id,
-                botId: target.botId,
-                userId: actor.userId,
-                runId: steers ? active.id : null,
-                ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
-              },
-            });
+            if (
+              !(await answerStatusQuestion(
+                tx,
+                actor,
+                target.threadId,
+                target.botId,
+                active,
+                input.text,
+              ))
+            )
+              await tx.steeringMessage.create({
+                data: {
+                  messageId: message.id,
+                  botId: target.botId,
+                  userId: actor.userId,
+                  runId: steers ? active.id : null,
+                  ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
+                },
+              });
             await tx.message.update({ where: { id: message.id }, data: { runId: active.id } });
             const event = await appendEventInTransaction(tx, {
               spaceId: actor.spaceId,
@@ -1012,15 +1073,18 @@ export async function sendThreadMessage(
           const active = activeByBotId.get(botId);
           if (active) {
             const steers = steersUserMessage(active);
-            await tx.steeringMessage.create({
-              data: {
-                messageId: message.id,
-                botId,
-                userId: actor.userId,
-                runId: steers ? active.id : null,
-                ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
-              },
-            });
+            if (
+              !(await answerStatusQuestion(tx, actor, target.threadId, botId, active, input.text))
+            )
+              await tx.steeringMessage.create({
+                data: {
+                  messageId: message.id,
+                  botId,
+                  userId: actor.userId,
+                  runId: steers ? active.id : null,
+                  ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
+                },
+              });
             runs.push(active);
             continue;
           }

@@ -325,3 +325,44 @@ export function formatWorkDuration(ms: number): string {
   if (hours) return `${hours}h ${minutes}m`;
   return `${minutes}m ${total % 60}s`;
 }
+
+/**
+ * A short "how is it going?" sent while an agent works. Like a side question it is answered
+ * from the live work itself, so the work is neither interrupted nor told about it.
+ */
+export function isStatusQuestion(text: string | undefined): boolean {
+  const trimmed = text?.trim() ?? "";
+  return (
+    trimmed.length > 0 &&
+    trimmed.length <= 40 &&
+    /进度|到哪|怎么样了|好了吗|好了没|还要多久|多久好|做完了吗|how(?:['’]s| is) it going|any (?:update|progress)|status\??$|progress\??$|how long|are you done|done yet|eta\??$/i.test(
+      trimmed,
+    )
+  );
+}
+
+const STATUS_LABELS: Record<WorkActivity, string> = {
+  files: "reading files",
+  search: "searching the web",
+  page: "reading a page",
+  context: "checking saved context",
+  memory: "saving notes",
+  connections: "checking connections",
+  connected_action: "using a connected app",
+  emails: "checking email",
+  availability: "checking availability",
+  drafting: "drafting email",
+  role: "reviewing the role",
+  candidates: "reviewing candidates",
+  research: "searching candidates",
+  feedback: "recording feedback",
+  crm: "checking candidate records",
+  question: "preparing a question",
+  specialist: "asking a specialist",
+  working: "working on it",
+};
+
+/** The reply to a status question: what is running now and for how long. */
+export function statusAnswer(input: { activity: WorkActivity; elapsedMs: number }): string {
+  return `Still working: ${STATUS_LABELS[input.activity]}, ${formatWorkDuration(input.elapsedMs)} so far. The result will appear here when it's ready.`;
+}
