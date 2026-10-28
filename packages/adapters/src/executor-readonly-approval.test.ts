@@ -308,7 +308,10 @@ function fixture({
       update: vi.fn(),
       updateMany: vi.fn(async (_input?: unknown) => ({ count: 1 })),
     },
-    thread: { findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })) },
+    thread: {
+      findUniqueOrThrow: vi.fn(async () => ({ id: run.threadId, groupId: null })),
+      findUnique: vi.fn(async () => ({ activeRecruitingRoleId: null as string | null })),
+    },
     message: { findMany: vi.fn(async (_query?: unknown): Promise<{ blocks: unknown }[]> => []) },
     event: { findMany: vi.fn(async (_query?: unknown): Promise<{ id: string }[]> => []) },
     task: { findUniqueOrThrow: vi.fn(async () => ({ id: run.taskId, prompt })) },
@@ -1324,7 +1327,10 @@ describe("native Instantly activation card", () => {
   };
   const inputSchema = {
     type: "object",
-    properties: { campaign_id: { type: "string" } },
+    properties: {
+      campaign_id: { type: "string" },
+      recipients: { type: "array", items: { type: "string" } },
+    },
     additionalProperties: false,
   };
   const card = (f: ReturnType<typeof fixture>) =>
@@ -1404,6 +1410,84 @@ describe("native Instantly activation card", () => {
     await f.run();
     expect(card(f).detail).toContain("Role: Founding Engineer");
     expect(card(f).detail).toContain("To (2):");
+  });
+
+  const withCampaign = (status: number) => ({
+    ...connectorResults,
+    native_instantly_get_campaign: {
+      structuredContent: {
+        ...connectorResults.native_instantly_get_campaign.structuredContent,
+        result: {
+          ...connectorResults.native_instantly_get_campaign.structuredContent.result,
+          status,
+        },
+      },
+    },
+  });
+  const bindRole = (f: ReturnType<typeof fixture>, extra: Record<string, unknown> = {}) => {
+    Object.assign(f.prisma.thread, {
+      findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role-1" })),
+    });
+    f.effects.push({
+      id: "binding",
+      kind: "instantly_role_campaign",
+      idempotencyKey: "instantly-role-campaign:instantly-1:role-1",
+      status: "completed",
+      request: { roleId: "role-1", serverId: "instantly-1" },
+      result: {
+        campaignId: "c-1",
+        campaignName: "Founding Engineer",
+        eaccount: "me@x.test",
+        leads: {},
+        ...extra,
+      },
+      runId: "run-0",
+      spaceId: "space-1",
+    } as never);
+  };
+
+  it("lists only the named recipient when the campaign holds other people", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults,
+      inputSchema,
+    });
+    f.setCalls([{ args: { recipients: ["Ada Lovelace"] }, executionId: "activate" }]);
+    bindRole(f);
+    await f.run();
+    expect(card(f).detail).toContain("To (1):\n- Ada Lovelace <ada@x.test>\nSend time:");
+    expect(card(f).detail).not.toContain("bob@x.test");
+  });
+
+  it("lists only the people waiting to be added to a campaign that is already sending", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults: withCampaign(1),
+      inputSchema,
+    });
+    bindRole(f, {
+      staged: { abe: { email: "abe@x.test", first_name: "Abe", emailType: "work" } },
+    });
+    f.setCalls([{ args: { recipients: ["abe@x.test"] }, executionId: "activate" }]);
+    await f.run();
+    expect(card(f).detail).toContain("To (1):\n- Abe <abe@x.test> (work email)\nSend time:");
+    expect(card(f).detail).not.toMatch(/ada@x\.test|bob@x\.test/);
+  });
+
+  it("shows no card when resuming would also email people who were not named", async () => {
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults: withCampaign(2),
+      inputSchema,
+    });
+    bindRole(f);
+    f.setCalls([{ args: { recipients: ["ada@x.test"] }, executionId: "activate" }]);
+    await f.run();
+    expect(f.pauseRunForInput).not.toHaveBeenCalled();
+    expect(f.results[0]).toMatchObject({ error: expect.stringContaining("would also email") });
   });
 });
 

@@ -80,6 +80,14 @@ const ActivateCampaignInput = z.strictObject({
   campaign_id: Uuid.optional().describe(
     "Omit inside a role conversation to activate the role's own campaign (created if needed).",
   ),
+  recipients: z
+    .array(z.string().trim().min(1).max(254))
+    .min(1)
+    .max(100)
+    .optional()
+    .describe(
+      "Only these people get the email: each one's email or name as added with add_shortlist_leads. Omit to send to everyone in the campaign.",
+    ),
 });
 const EnsureRoleCampaignInput = z.strictObject({
   role_id: RoleId,
@@ -183,7 +191,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email to its leads by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. Call it even when the campaign already holds other leads: the card lists every recipient and is the decision, so never ask in text whom to include.",
+    "Sends the campaign's first email by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. When the recruiter names who gets it, pass exactly those people as recipients: the card lists only them and nobody else in the campaign is emailed. Without recipients it sends to everyone in the campaign, and the card lists them all.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
@@ -208,14 +216,14 @@ export const nativeInstantlyWrites = [
     "add_shortlist_leads",
     AddShortlistLeadsInput,
     false,
-    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence); a person passed without an email gets the one an earlier contact lookup saved. Skips people with no email, on hold or passed for the role, or already in the campaign; records candidate_key -> lead id.",
+    "Adds the role's candidates the recruiter asked to contact to its campaign as leads (ensuring the campaign first); no shortlist is needed. Pass each person's email, email_type, first_name, company_name and personalization (their own opening line for {{personalization}} in the sequence); a person passed without an email gets the one an earlier contact lookup saved. Skips people with no email, on hold or passed for the role, or already in the campaign; records candidate_key -> lead id. When the campaign is already sending, the people are kept ready instead and are emailed only through activate_campaign with them as recipients.",
   ),
 ];
 const TOOL_NAMES = new Set(nativeInstantlyWrites.map((entry) => entry.toolName));
 export const isNativeInstantlyWrite = (toolName: string) => TOOL_NAMES.has(toolName);
 
 export type InstantlyRest = (
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ) => Promise<Record<string, unknown>>;
@@ -296,10 +304,12 @@ const ENROLLABLE = new Set([0, 2]);
 const ACTIVE = 1;
 const DRAFT = 0;
 async function requireEnrollable(rest: InstantlyRest, campaignId: string) {
-  const campaign = await rest("GET", `/campaigns/${campaignId}`);
-  if (!ENROLLABLE.has(campaign.status as number))
+  return enrollable((await rest("GET", `/campaigns/${campaignId}`)).status);
+}
+function enrollable(status: unknown) {
+  if (!ENROLLABLE.has(status as number))
     throw new Error(
-      `Campaign status ${String(campaign.status)} is not draft/paused; pause it before adding leads, then activate it (confirmation required).`,
+      `Campaign status ${String(status)} is not draft/paused; pause it before adding leads, then activate it (confirmation required).`,
     );
 }
 
@@ -417,6 +427,16 @@ type RoleBinding = {
   leads: Record<string, { leadId: string; email: string; emailType?: "work" | "personal" }>;
   /** True only when this product created the campaign; adopted or older bindings never get copy. */
   created?: boolean;
+  /** People added while the campaign was sending: not in it (not emailed) until a confirmed send. */
+  staged?: Record<string, StagedLead>;
+};
+type StagedLead = {
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  company_name?: string;
+  personalization?: string;
+  emailType?: "work" | "personal";
 };
 const bindingKey = (serverId: string, roleId: string) =>
   `instantly-role-campaign:${serverId}:${roleId}`;
@@ -502,6 +522,8 @@ export type InstantlyActivationDisplay = {
   schedule: string | null;
   /** The first email; null when the campaign has none, omitted when it could not be read. */
   firstEmail?: { subject: string; body: string } | null;
+  /** Why this send cannot be shown as exact recipients; no card is shown. */
+  refusal?: string;
 };
 export const EMPTY_ACTIVATION_DISPLAY: InstantlyActivationDisplay = {
   campaignName: null,
@@ -545,9 +567,99 @@ export async function readRoleCampaignBinding(
   const binding = effect.result as Partial<RoleBinding> | null;
   return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
 }
+/** A campaign lead or a staged person, as one send would address them. */
+type Person = StagedLead & { id?: string };
+type SendPlan =
+  /** Activate the campaign once `remove` (never-emailed people nobody named) are taken out. */
+  | { send: "activate"; recipients: Person[]; remove: Person[] }
+  /** Add these staged people to the already sending campaign: only they are newly emailed. */
+  | { send: "enroll"; recipients: Person[] }
+  | { refusal: string };
+
+const text = (value: unknown) =>
+  typeof value === "string" && value.trim() !== "" ? value.trim() : undefined;
+const fullName = (person: Person) =>
+  [person.first_name, person.last_name].filter((part) => text(part)).join(" ");
+const label = (people: Person[]) =>
+  people.map((person) => fullName(person) || person.email).join(", ");
+
+function asPerson(lead: Record<string, unknown>): Person[] {
+  if (typeof lead.email !== "string") return [];
+  const fields = ["first_name", "last_name", "company_name", "personalization"] as const;
+  return [
+    {
+      email: lead.email,
+      ...(typeof lead.id === "string" ? { id: lead.id } : {}),
+      ...Object.fromEntries(
+        fields.flatMap((key) => (text(lead[key]) ? [[key, text(lead[key])]] : [])),
+      ),
+    },
+  ];
+}
+
+/** One requested recipient: an exact email, else the one person with that full or first name. */
+function matchRecipient(people: Person[], wanted: string) {
+  const value = wanted.trim().toLowerCase();
+  for (const pick of [
+    (person: Person) => person.email.toLowerCase() === value,
+    (person: Person) =>
+      fullName(person).toLowerCase() === value || person.first_name?.toLowerCase() === value,
+  ]) {
+    const hits = people.filter(pick);
+    if (hits.length) return hits.length === 1 ? hits[0] : undefined;
+  }
+  return undefined;
+}
+
 /**
- * What the activate_campaign approval card shows: live name, status, lead count (up to 100) and
- * sending mailbox, read through the read-only native tools. Reads that fail leave fields null.
+ * Who one activate_campaign call emails, decided the same way for the card and for the send.
+ * Only a draft (never activated, so nobody in it was approved or emailed) may have unnamed people
+ * taken out; a campaign that has run keeps everyone and is resumed only when nobody else is in it.
+ */
+function planSend(status: unknown, leads: Person[], staged: Person[], wanted?: string[]): SendPlan {
+  const pending =
+    status === ACTIVE
+      ? staged.filter((s) => !leads.some((l) => sameAddress(l.email, s.email)))
+      : [];
+  if (!wanted)
+    return pending.length
+      ? { send: "enroll", recipients: pending }
+      : { send: "activate", recipients: leads, remove: [] };
+  const chosen: Person[] = [];
+  const unmatched: string[] = [];
+  for (const entry of wanted) {
+    const hit = matchRecipient([...leads, ...pending], entry);
+    if (!hit) unmatched.push(entry);
+    else if (!chosen.includes(hit)) chosen.push(hit);
+  }
+  if (unmatched.length)
+    return {
+      refusal: `Not in this campaign, or more than one person matches: ${unmatched.join(", ")}. Add each person with add_shortlist_leads, then call activate_campaign again with their emails as recipients.`,
+    };
+  const others = leads.filter((lead) => !chosen.includes(lead));
+  if (status === DRAFT) return { send: "activate", recipients: chosen, remove: others };
+  if (status === ACTIVE) {
+    const sending = chosen.filter((person) => leads.includes(person));
+    return sending.length
+      ? {
+          refusal: `Already in this campaign, which is sending, so nothing new goes to: ${label(sending)}.`,
+        }
+      : { send: "enroll", recipients: chosen };
+  }
+  return others.length
+    ? {
+        refusal: `This campaign has already run; resuming it would also email ${label(others)}, so nothing was sent. Ask the recruiter whether to resume it for everyone in it.`,
+      }
+    : { send: "activate", recipients: chosen, remove: [] };
+}
+
+const stagedPeople = (binding: Pick<RoleBinding, "staged"> | null | undefined): Person[] =>
+  Object.values(binding?.staged ?? {});
+
+/**
+ * What the activate_campaign approval card shows: live name, status, the people this call would
+ * email (up to 100 leads read) and sending mailbox, read through the read-only native tools. Reads
+ * that fail leave fields null; a send to named people that cannot be read or made exact is refused.
  */
 export async function describeCampaignActivation(
   read: (
@@ -556,10 +668,11 @@ export async function describeCampaignActivation(
   ) => Promise<Record<string, unknown> | undefined>,
   campaignId: string,
   fallbackMailbox: string | null = null,
-  bindingLeads: RoleBinding["leads"] = {},
+  binding: Pick<RoleBinding, "leads" | "staged"> | null = null,
+  wanted?: string[],
 ): Promise<InstantlyActivationDisplay> {
   const types = new Map(
-    Object.values(bindingLeads).flatMap((lead) =>
+    [...Object.values(binding?.leads ?? {}), ...stagedPeople(binding)].flatMap((lead) =>
       lead.emailType ? [[lead.email.toLowerCase(), lead.emailType] as const] : [],
     ),
   );
@@ -571,26 +684,23 @@ export async function describeCampaignActivation(
   ]);
   const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
   const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
-  const recipients = (items ?? []).flatMap((lead) => {
-    if (typeof lead.email !== "string") return [];
-    const name = [lead.first_name, lead.last_name]
-      .filter((part): part is string => typeof part === "string" && part.trim() !== "")
-      .join(" ");
-    const emailType = types.get(lead.email.toLowerCase());
-    const personalization =
-      typeof lead.personalization === "string" && lead.personalization.trim()
-        ? lead.personalization.trim()
-        : undefined;
-    return [
-      {
-        name: name || null,
-        email: lead.email,
-        ...(emailType ? { emailType } : {}),
-        ...(personalization ? { personalization } : {}),
-      },
-    ];
+  const plan =
+    campaign && items
+      ? planSend(campaign.status, items.flatMap(asPerson), stagedPeople(binding), wanted)
+      : wanted
+        ? { refusal: "This campaign could not be read, so nothing was sent; try again." }
+        : { send: "activate" as const, recipients: (items ?? []).flatMap(asPerson), remove: [] };
+  const recipients = ("refusal" in plan ? [] : plan.recipients).map((person) => {
+    const emailType = types.get(person.email.toLowerCase());
+    return {
+      name: fullName(person) || null,
+      email: person.email,
+      ...(emailType ? { emailType } : {}),
+      ...(person.personalization ? { personalization: person.personalization } : {}),
+    };
   });
   return {
+    ...("refusal" in plan ? { refusal: plan.refusal } : {}),
     campaignName: typeof campaign?.name === "string" ? campaign.name : null,
     status:
       typeof campaign?.status === "number"
@@ -979,9 +1089,24 @@ async function addShortlistLeads(
     });
   }
   const added: string[] = [];
+  const staged = { ...binding.staged };
+  const ready: string[] = [];
   let report: Record<string, unknown> | undefined;
-  if (pending.length) {
-    await requireEnrollable(rest, binding.campaignId);
+  // Adding to a sending campaign would email them at once, so they wait for the send card.
+  const status = pending.length
+    ? (await rest("GET", `/campaigns/${binding.campaignId}`)).status
+    : undefined;
+  if (status === ACTIVE)
+    for (const { candidate_key, email, email_type, ...fields } of pending) {
+      staged[candidate_key] = {
+        email,
+        ...Object.fromEntries(Object.entries(fields).filter(([, value]) => text(value))),
+        ...(email_type ? { emailType: email_type } : {}),
+      };
+      ready.push(candidate_key);
+    }
+  else if (pending.length) {
+    enrollable(status);
     report = await rest("POST", "/leads/add", {
       campaign_id: binding.campaignId,
       skip_if_in_workspace: false,
@@ -1006,20 +1131,181 @@ async function addShortlistLeads(
   }
   await prisma.externalEffect.update({
     where: { id: existing.effect.id },
-    data: { result: { ...binding, leads } as unknown as Prisma.InputJsonValue },
+    data: {
+      result: {
+        ...binding,
+        leads,
+        ...(Object.keys(staged).length ? { staged } : {}),
+      } as unknown as Prisma.InputJsonValue,
+    },
   });
   return {
     campaignId: binding.campaignId,
     added,
+    ...(ready.length
+      ? {
+          readyToSend: ready,
+          next: "The campaign is already sending, so these people were not added and nothing was sent. To email them, call activate_campaign with their emails as recipients.",
+        }
+      : {}),
     alreadyInCampaign: already,
     skippedMissingEmail: missingEmail.map((c) => c.candidate_key),
     notInRole: notInRole.map((c) => c.candidate_key),
     onHoldOrPassed: onHoldOrPassed.map((c) => c.candidate_key),
     notCreatedByProvider: pending
-      .filter((c) => !added.includes(c.candidate_key))
+      .filter((c) => !added.includes(c.candidate_key) && !ready.includes(c.candidate_key))
       .map((c) => c.candidate_key),
     leads,
     ...(report ? { providerReport: report } : {}),
+  };
+}
+
+/** Every lead of a campaign, paged; a send never acts on a partial list. */
+async function allLeads(rest: InstantlyRest, campaignId: string) {
+  const people: Person[] = [];
+  let after: unknown;
+  for (let page = 0; page < 10; page++) {
+    const listed = await rest("POST", "/leads/list", {
+      campaign: campaignId,
+      limit: 100,
+      ...(typeof after === "string" ? { starting_after: after } : {}),
+    });
+    const items = Array.isArray(listed.items) ? (listed.items as Record<string, unknown>[]) : [];
+    people.push(...items.flatMap(asPerson));
+    after = listed.next_starting_after;
+    if (items.length < 100 || typeof after !== "string" || !after) return people;
+  }
+  throw new Error("This campaign has more than 1,000 people; nothing was sent");
+}
+
+/** The active role's binding when it is bound to this campaign. */
+async function bindingOfCampaign(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  serverId: string,
+  campaignId: string,
+) {
+  const roleId = await activeRoleId(prisma, context);
+  const existing = roleId ? await readBinding(prisma, context, bindingKey(serverId, roleId)) : null;
+  return existing?.binding.campaignId === campaignId ? existing : null;
+}
+
+/**
+ * Sends exactly the planned recipients (see planSend): a draft loses the never-emailed people
+ * nobody named, and is activated only after a re-read shows exactly the named people remain; a
+ * sending campaign gets only the named staged people added. Nobody else is emailed by this call.
+ */
+async function activateCampaign(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  input: z.output<typeof ActivateCampaignInput>,
+) {
+  const campaignId =
+    input.campaign_id ??
+    (await ensureRoleCampaign(prisma, rest, context, serverId, { timezone: "America/Chicago" }))
+      .campaignId;
+  const campaign = await rest("GET", `/campaigns/${campaignId}`);
+  if (!firstEmail(campaign))
+    throw new Error(
+      "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
+    );
+  const bound = await bindingOfCampaign(prisma, context, serverId, campaignId);
+  const leads = await allLeads(rest, campaignId);
+  const plan = planSend(campaign.status, leads, stagedPeople(bound?.binding), input.recipients);
+  if ("refusal" in plan) throw new Error(plan.refusal);
+  const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
+  const save = async (binding: RoleBinding) => {
+    if (bound)
+      await prisma.externalEffect.update({
+        where: { id: bound.effect.id },
+        data: { result: binding as unknown as Prisma.InputJsonValue },
+      });
+  };
+  if (plan.send === "enroll") {
+    // Adding a lead to a sending campaign sends to that lead; nobody else is touched.
+    const report = await rest("POST", "/leads/add", {
+      campaign_id: campaignId,
+      skip_if_in_workspace: false,
+      leads: plan.recipients.map(
+        ({ email, first_name, last_name, company_name, personalization }) => ({
+          email,
+          ...(first_name ? { first_name } : {}),
+          ...(last_name ? { last_name } : {}),
+          ...(company_name ? { company_name } : {}),
+          ...(personalization ? { personalization } : {}),
+        }),
+      ),
+    });
+    const sent: string[] = [];
+    if (bound) {
+      const binding = { ...bound.binding, leads: { ...bound.binding.leads } };
+      const staged = { ...binding.staged };
+      for (const created of (report.created_leads ?? []) as { index: number; id: string }[]) {
+        const person = plan.recipients[created.index];
+        if (!person || typeof created.id !== "string") continue;
+        sent.push(person.email);
+        for (const [key, entry] of Object.entries(staged))
+          if (sameAddress(entry.email, person.email)) {
+            binding.leads[key] = {
+              leadId: created.id,
+              email: entry.email,
+              ...(entry.emailType ? { emailType: entry.emailType } : {}),
+            };
+            delete staged[key];
+          }
+      }
+      await save({ ...binding, staged });
+    } else
+      for (const created of (report.created_leads ?? []) as { index: number }[])
+        if (plan.recipients[created.index]) sent.push(plan.recipients[created.index]!.email);
+    return {
+      sent: sent.length > 0,
+      campaignId,
+      sendingMailbox,
+      recipients: sent,
+      notCreatedByProvider: plan.recipients
+        .filter((person) => !sent.includes(person.email))
+        .map((person) => person.email),
+    };
+  }
+  if (plan.remove.length) {
+    const removed: string[] = [];
+    try {
+      for (const lead of plan.remove) {
+        if (!lead.id) throw new Error(`No lead id for ${lead.email}; nothing was sent`);
+        await rest("DELETE", `/leads/${lead.id}`);
+        removed.push(lead.email);
+      }
+    } finally {
+      // Taken out of the campaign and the role's lead map, so a later send adds them again.
+      if (bound && removed.length)
+        await save({
+          ...bound.binding,
+          leads: Object.fromEntries(
+            Object.entries(bound.binding.leads).filter(
+              ([, lead]) => !removed.some((email) => sameAddress(email, lead.email)),
+            ),
+          ),
+        });
+    }
+    const remaining = await allLeads(rest, campaignId);
+    const exact =
+      remaining.length === plan.recipients.length &&
+      remaining.every((lead) => plan.recipients.some((p) => sameAddress(p.email, lead.email)));
+    if (!exact)
+      throw new Error(
+        "The campaign's people changed while preparing the send, so nothing was sent; call activate_campaign again",
+      );
+  }
+  const activated = await rest("POST", `/campaigns/${campaignId}/activate`);
+  // The provider echoes the campaign, whose email_list is the sending mailbox, not recipients.
+  return {
+    activated: true,
+    campaignId,
+    sendingMailbox: Array.isArray(activated.email_list) ? activated.email_list : sendingMailbox,
+    recipients: plan.recipients.map((person) => person.email),
   };
 }
 
@@ -1079,27 +1365,8 @@ export async function runInstantlyWrite(
     }
     case "native_instantly_update_lead_interest":
       return rest("POST", "/leads/update-interest-status", UpdateLeadInterestInput.parse(args));
-    case "native_instantly_activate_campaign": {
-      const campaignId =
-        ActivateCampaignInput.parse(args).campaign_id ??
-        (
-          await ensureRoleCampaign(prisma, rest, context, serverId, {
-            timezone: "America/Chicago",
-          })
-        ).campaignId;
-      if (!firstEmail(await rest("GET", `/campaigns/${campaignId}`)))
-        throw new Error(
-          "This campaign has no email yet; save the email with ensure_role_campaign steps, then activate again",
-        );
-      const campaign = await rest("POST", `/campaigns/${campaignId}/activate`);
-      // The provider echoes the campaign, whose email_list is the sending mailbox, not recipients.
-      return {
-        activated: true,
-        campaignId,
-        sendingMailbox: Array.isArray(campaign.email_list) ? campaign.email_list : [],
-        recipients: await leadEmails(rest, campaignId),
-      };
-    }
+    case "native_instantly_activate_campaign":
+      return activateCampaign(prisma, rest, context, serverId, ActivateCampaignInput.parse(args));
     case "native_instantly_pause_campaign":
       return rest("POST", `/campaigns/${CampaignIdInput.parse(args).campaign_id}/pause`);
     case "native_instantly_get_email":

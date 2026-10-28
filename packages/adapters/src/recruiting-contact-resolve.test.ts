@@ -447,10 +447,10 @@ describe("first campaign email", () => {
     expect(activate.description).toContain("confirmation card");
     const role = (key: string) => RECRUITING_DEFAULT_BOTS.find((b) => b.key === key)!;
     expect(role("main").instructions).toContain(
-      "call ensure_role_campaign, optionally get_campaign to show its name, id and lead count, then activate_campaign; its confirmation card is the one-time approval",
+      "call ensure_role_campaign, then activate_campaign with any people they named as recipients; its confirmation card is the one-time approval",
     );
     expect(role("outreach").instructions).toContain(
-      "then call activate_campaign, whose card lists every recipient and is the one confirmation",
+      "then call activate_campaign (recipients: the named people), whose card lists every recipient and is the one confirmation",
     );
   });
 });

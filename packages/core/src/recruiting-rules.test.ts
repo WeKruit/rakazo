@@ -858,7 +858,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "send to N takes the first results",
     in: "Outreach",
-    phrase: "take the role's first results up to that number (never ask which ones)",
+    phrase: "else the role's first results up to that number (never ask which ones)",
     why: '"Send to 20" stopped to ask which 20.',
   },
   {
@@ -879,6 +879,18 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     phrase:
       "whose card lists every recipient and is the one confirmation, even when a handoff says only to prepare",
     why: "Outreach asked in text about recipients, or stopped when a handoff said only to prepare.",
+  },
+  {
+    rule: "a send to named people goes only to them",
+    in: "Outreach",
+    phrase: "then call activate_campaign (recipients: the named people)",
+    why: '"Send this email to him" was refused because the campaign held 15 other unsent people.',
+  },
+  {
+    rule: "a send to named people goes only to them (Main)",
+    in: "Main",
+    phrase: "then activate_campaign with any people they named as recipients",
+    why: '"Send this email to him" was refused because the campaign held 15 other unsent people.',
   },
   {
     rule: "the send card is the one confirmation (Main)",
@@ -969,7 +981,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "contacts, drafts and sends go to Outreach",
     in: "Main",
     phrase:
-      "Hand an email draft, a contact lookup or a send to a number of people to Outreach as your last call, in the recruiter's words",
+      "Hand an email draft, a contact lookup or a send to named people or a number of people to Outreach as your last call, in the recruiter's words",
     why: 'Main refused "send to 20" and "find contacts" itself, and rewrote the request.',
   },
   {

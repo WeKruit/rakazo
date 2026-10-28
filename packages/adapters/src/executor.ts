@@ -8398,8 +8398,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               let campaignId =
                 typeof args.campaign_id === "string" ? (args.campaign_id as string) : null;
               let eaccount: string | null = null;
-              let bindingLeads: Awaited<ReturnType<typeof readRoleCampaignBinding>> = null;
-              if (!campaignId && approvalRoute.toolName === "native_instantly_activate_campaign") {
+              let roleBinding: Awaited<ReturnType<typeof readRoleCampaignBinding>> = null;
+              if (approvalRoute.toolName === "native_instantly_activate_campaign") {
                 const current = await deps.prisma.thread.findUnique({
                   where: { id: thread.id },
                   select: { activeRecruitingRoleId: true },
@@ -8412,9 +8412,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       current.activeRecruitingRoleId,
                     )
                   : null;
-                campaignId = binding?.campaignId ?? null;
-                eaccount = binding?.eaccount ?? null;
-                bindingLeads = binding;
+                // The role's own record (lead types, people waiting to be sent) applies only to its campaign.
+                if (binding && (!campaignId || campaignId === binding.campaignId)) {
+                  campaignId = binding.campaignId;
+                  eaccount = binding.eaccount ?? null;
+                  roleBinding = binding;
+                }
               }
               const connector = deps.connector;
               const read = async (tool: string, readArgs: Record<string, unknown>) => {
@@ -8446,16 +8449,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       read,
                       campaignId,
                       eaccount,
-                      bindingLeads?.leads,
+                      roleBinding,
+                      Array.isArray(args.recipients)
+                        ? args.recipients.filter(
+                            (entry): entry is string => typeof entry === "string",
+                          )
+                        : undefined,
                     )
                   : { ...EMPTY_ACTIVATION_DISPLAY, mailbox: eaccount };
               // A send card is only for something that would send: an email and its recipients.
               const unsendable =
-                instantlyActivation?.firstEmail === null
+                instantlyActivation?.refusal ??
+                (instantlyActivation?.firstEmail === null
                   ? "This campaign has no email yet; save it with ensure_role_campaign steps, then activate again."
                   : instantlyActivation?.recipientCount === 0
                     ? "This campaign has no recipients yet. Add the people the recruiter named (recruiting_candidates) with add_shortlist_leads, then activate again."
-                    : null;
+                    : null);
               if (unsendable) {
                 const result = { error: unsendable };
                 return (await completeEffect(deps, applied!.effect.id, "intended", result))
