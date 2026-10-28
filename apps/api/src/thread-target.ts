@@ -38,6 +38,7 @@ import {
   createGroupRepos,
   createRepos,
   createThreadMessageInTransaction,
+  declineConnectionAskInTransaction,
   expireComputerExecutionLeases,
   IsolationError,
   loadQueuedMessageIds,
@@ -166,6 +167,26 @@ async function answerStatusQuestion(
     payload: { messageId: reply.id, role: "bot", blocks },
   });
   return true;
+}
+
+/** A typed message moves past an open connect card; its run resumes and the message steers it. */
+async function declineConnectionAsks(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  threadId: string,
+  runs: Array<{ id: string; status: string }>,
+) {
+  for (const run of runs)
+    if (
+      run.status === "waiting_input" &&
+      (await declineConnectionAskInTransaction(tx, {
+        spaceId: actor.spaceId,
+        threadId,
+        runId: run.id,
+        answeredByUserId: actor.userId,
+      }))
+    )
+      run.status = "queued";
 }
 
 function steersUserMessage(run: { status: string; trigger?: string | null }) {
@@ -864,6 +885,7 @@ export async function sendThreadMessage(
             },
             select: { id: true, taskId: true, status: true, trigger: true },
           });
+          await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
           if (waitingRuns.length && !activeRuns.some(steersUserMessage)) {
             const answerText = input.text;
@@ -1091,6 +1113,7 @@ export async function sendThreadMessage(
           },
           select: { id: true, taskId: true, botId: true, status: true, trigger: true },
         });
+        await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
         const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
         const conversationalBotIds = new Set(

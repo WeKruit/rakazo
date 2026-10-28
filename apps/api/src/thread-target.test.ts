@@ -2969,6 +2969,7 @@ describe("sendThreadMessage", () => {
           runId: null,
           createdAt: new Date(),
         }),
+        findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn(),
       },
       run: {
@@ -3057,6 +3058,7 @@ describe("sendThreadMessage", () => {
           runId: null,
           createdAt: new Date(),
         }),
+        findMany: vi.fn().mockResolvedValue([]),
         update: vi.fn(),
       },
       run: {

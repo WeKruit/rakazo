@@ -21,6 +21,7 @@ import {
   clearThread,
   completedRunBlocks,
   completedRunSummary,
+  declineConnectionAskInTransaction,
   discardAnsweredSteering,
   finalizeComputerControlRelease,
   finalizeRun,
@@ -5396,6 +5397,20 @@ describe("connect card answers", () => {
         answer: "connected",
       }),
     ).toBeNull();
+    expect(f.run.status).toBe("waiting_input");
+  });
+
+  it("closes as not connected when the recruiter writes past it", async () => {
+    const f = connectFixture({ secretId: "secret-1" }, true);
+    expect(await declineConnectionAskInTransaction(f.tx as never, f.input)).toBe(true);
+    expect(f.run.status).toBe("queued");
+    expect(card(f)).toMatchObject({ status: "answered", answer: "not_connected" });
+    expect(prompt(f)).toContain("Instantly is still not connected.");
+  });
+
+  it("leaves other cards for their own answer", async () => {
+    const f = ordinaryAnswerFixture();
+    expect(await declineConnectionAskInTransaction(f.tx as never, f.input)).toBe(false);
     expect(f.run.status).toBe("waiting_input");
   });
 });

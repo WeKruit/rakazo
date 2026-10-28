@@ -1257,6 +1257,25 @@ export async function answerWaitingRunWithTextInTransaction(
 }
 
 /**
+ * A connect card cannot be answered by typing. A recruiter who writes past it has moved on, so the
+ * card closes as not connected and the run resumes; the caller delivers the message as steering.
+ */
+export async function declineConnectionAskInTransaction(
+  tx: Prisma.TransactionClient,
+  input: { spaceId: string; threadId: string; runId: string; answeredByUserId: string },
+): Promise<boolean> {
+  const found = await findPendingAsk(tx, input);
+  if (!found?.pendingAsk.connection) return false;
+  return Boolean(
+    await commitAnswerRunInput(tx, {
+      ...input,
+      messageId: found.messageId,
+      answer: "not_connected" satisfies ConnectionAskAnswer,
+    }),
+  );
+}
+
+/**
  * A recruiter who writes while the turn is still finishing (for example "find 100" typed as soon
  * as the ten appear) can land after the turn's last steering read and just before it pauses on a
  * question card. Sent a moment later, the same text would have answered the card, so it answers
