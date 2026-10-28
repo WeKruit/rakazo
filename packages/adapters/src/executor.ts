@@ -149,9 +149,11 @@ import {
   sendRecipients,
   sendToNote,
   shortQuestion,
+  toolReadsExternalText,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   truncatedPlainText,
+  unattendedMemoryWriteRefusal,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
   workActivityForTool,
@@ -4679,6 +4681,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let currentRecruitingContext: LoadedRecruitingRunContext | undefined;
         let memoryContext = loadedMemoryContext;
         let recruitingSourceMessageId = run.sourceMessageId ?? null;
+        // Whether this run has read external text, including on an earlier attempt.
+        let readExternalText = false;
+        const runReadExternalText = async () => {
+          if (readExternalText) return true;
+          const called = await deps.prisma.event.findMany({
+            where: { runId, threadId: thread.id, type: "agent.tool.called" },
+            select: { payload: true },
+          });
+          readExternalText = called.some((event) => {
+            const tool = (event.payload as { name?: unknown } | null)?.name;
+            return (
+              typeof tool === "string" &&
+              toolReadsExternalText(tool, !BUILTIN_AGENT_TOOL_NAMES.has(tool))
+            );
+          });
+          return readExternalText;
+        };
         const refreshMemoryContext = async () => {
           memoryContext = await loadAgentMemoryContext(
             deps.memory,
@@ -5630,6 +5649,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
+            readExternalText = true;
           // Before the first picks, one step's extra searches are refused once: the model picks
           // from the planned rows first, and may search again only if the answer changed the role.
           const refusedEarly = () => {
@@ -7041,6 +7062,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   : name;
           if (disabledBuiltinTools.has(policyToolName))
             return { error: "This tool is disabled for this bot." };
+          const memoryRefusal = await unattendedMemoryWriteRefusal({
+            trigger: run.trigger,
+            toolName: name,
+            preference: Boolean(recruitingPreference),
+            readExternalText: runReadExternalText,
+          });
+          if (memoryRefusal) return { error: memoryRefusal };
           const nativeCrmRoute = connectorCall.route;
           const ordinaryCrmWrite = Boolean(
             nativeCrmRoute?.connectorId === "mcp" &&
