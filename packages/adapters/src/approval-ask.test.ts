@@ -589,6 +589,56 @@ describe("buildApprovalAskBlock", () => {
     expect(`${block.text}\n${block.detail}`).not.toMatch(/cal-com|Cal-com|5852837/);
   });
 
+  it("shows an interview change as who, from and to, then the original booking", () => {
+    const originalBooking = {
+      uid: "booking-uid",
+      eventTypeId: 5852837,
+      start: "2026-10-30T19:00:00.000Z",
+      end: "2026-10-30T19:30:00.000Z",
+      status: "accepted",
+      attendees: [{ name: "Ada Test", email: "ada@example.test", timeZone: "America/Chicago" }],
+      hosts: [{ name: "Host" }],
+    };
+    const block = buildApprovalAskBlock(
+      "change-effect",
+      "mcp__cal-com__reschedule_booking",
+      {
+        bookingUid: "booking-uid",
+        start: "2026-11-02T20:00:00Z",
+        reschedulingReason: "Recruiter asked",
+        originalBooking,
+      },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(block.text).toBe("Confirm interview change → Ada Test");
+    expect(block.detail).toBe(
+      [
+        "Candidate: Ada Test <ada@example.test>",
+        "From: Fri, Oct 30, 2026, 2:00 PM CDT (America/Chicago)",
+        "To: Mon, Nov 2, 2026, 2:00 PM CST (America/Chicago)",
+        "Reason: Recruiter asked",
+        "",
+        "The candidate gets the new time once you confirm.",
+        "",
+        "Original booking:",
+        JSON.stringify(originalBooking, null, 2),
+      ].join("\n"),
+    );
+    const cancel = buildApprovalAskBlock(
+      "cancel-effect",
+      "mcp__cal-com__cancel_booking",
+      { bookingUid: "booking-uid", originalBooking },
+      [],
+      { oneTimeOnly: true },
+    );
+    expect(cancel.text).toBe("Confirm interview cancellation → Ada Test");
+    expect(cancel.detail?.split("\n").slice(0, 2)).toEqual([
+      "Candidate: Ada Test <ada@example.test>",
+      "Cancel: Fri, Oct 30, 2026, 2:00 PM CDT (America/Chicago)",
+    ]);
+  });
+
   it("never names the mail server on a remote reply_to_email card", () => {
     const block = buildApprovalAskBlock(
       "reply-effect",

@@ -270,6 +270,8 @@ const OUTBOUND_TITLES: Record<string, string> = {
   create_lead: "Confirm adding candidates to the campaign",
   add_leads_to_campaign_or_list_bulk: "Confirm adding candidates to the campaign",
   create_booking: "Confirm interview booking",
+  reschedule_booking: "Confirm interview change",
+  cancel_booking: "Confirm interview cancellation",
   googlecalendar_create_event: "Confirm interview booking",
   googlecalendar_quick_add: "Confirm interview booking",
   googlecalendar_events_import: "Confirm interview booking",
@@ -347,7 +349,7 @@ function formatApprovalDetail(
   recruiting?: RecruitingApprovalDisplay,
   crmImportTarget?: RecruitingCrmTarget,
 ): string | undefined {
-  const booking = formatBooking(toolName, args);
+  const booking = formatBooking(toolName, args) ?? formatBookingChange(toolName, args);
   if (booking) return booking;
   if (toolName === "recruiting_crm_target") {
     const target = args.target as RecruitingCrmTarget;
@@ -507,28 +509,24 @@ function formatApprovalDetail(
 
 type BookingAttendee = { name?: string; email?: string; timeZone?: string };
 
-/** The invitee of a calendar booking request, when the call creates one. */
+/** The invitee of a calendar booking request, or of the booking a change or cancellation targets. */
 function bookingAttendee(toolName: string, args: Record<string, unknown>) {
-  if (!/create_booking$/i.test(toolName)) return undefined;
-  const attendee = args.attendee;
+  const original = args.originalBooking as { attendees?: unknown } | undefined;
+  const attendee = /create_booking$/i.test(toolName)
+    ? args.attendee
+    : /(reschedule|cancel)_booking$/i.test(toolName) && Array.isArray(original?.attendees)
+      ? original.attendees[0]
+      : undefined;
   return attendee && typeof attendee === "object" && !Array.isArray(attendee)
     ? (attendee as BookingAttendee)
     : undefined;
 }
 
-/**
- * A booking card in the recruiter's terms: who is invited, when in their time zone, and what the
- * invite says. Every other field is still listed, so the card shows all that will be sent.
- */
-function formatBooking(toolName: string, args: Record<string, unknown>) {
-  const attendee = bookingAttendee(toolName, args);
-  if (!attendee || typeof args.start !== "string") return undefined;
-  const start = new Date(args.start);
-  if (Number.isNaN(start.getTime())) return undefined;
-  const zone = attendee.timeZone ?? "UTC";
-  let when: string;
+function bookingTime(value: string, zone: string) {
+  const time = new Date(value);
+  if (Number.isNaN(time.getTime())) return value;
   try {
-    when = `${new Intl.DateTimeFormat("en-US", {
+    return `${new Intl.DateTimeFormat("en-US", {
       weekday: "short",
       month: "short",
       day: "numeric",
@@ -537,10 +535,63 @@ function formatBooking(toolName: string, args: Record<string, unknown>) {
       minute: "2-digit",
       timeZone: zone,
       timeZoneName: "short",
-    }).format(start)} (${zone})`;
+    }).format(time)} (${zone})`;
   } catch {
-    when = args.start;
+    return value;
   }
+}
+
+/**
+ * A change or cancellation card: who, the current time and the new one in the candidate's zone,
+ * then the full original booking the approval is bound to.
+ */
+function formatBookingChange(toolName: string, args: Record<string, unknown>) {
+  const cancel = /cancel_booking$/i.test(toolName);
+  if (!cancel && !/reschedule_booking$/i.test(toolName)) return undefined;
+  const attendee = bookingAttendee(toolName, args);
+  const original = args.originalBooking as { start?: unknown } | undefined;
+  if (!attendee || typeof original?.start !== "string") return undefined;
+  const zone = attendee.timeZone ?? "UTC";
+  const reason = args.cancellationReason ?? args.reschedulingReason;
+  const known = new Set([
+    "bookingUid",
+    "start",
+    "originalBooking",
+    "cancellationReason",
+    "reschedulingReason",
+  ]);
+  return [
+    `Candidate: ${attendee.name ?? "unknown"}${attendee.email ? ` <${attendee.email}>` : ""}`,
+    cancel
+      ? `Cancel: ${bookingTime(original.start, zone)}`
+      : `From: ${bookingTime(original.start, zone)}`,
+    ...(!cancel && typeof args.start === "string" ? [`To: ${bookingTime(args.start, zone)}`] : []),
+    ...(typeof reason === "string" && reason ? [`Reason: ${reason}`] : []),
+    ...Object.entries(args)
+      .filter(([key, value]) => !known.has(key) && value !== undefined)
+      .map(
+        ([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`,
+      ),
+    "",
+    cancel
+      ? "The candidate is told the interview is cancelled once you confirm."
+      : "The candidate gets the new time once you confirm.",
+    "",
+    "Original booking:",
+    JSON.stringify(args.originalBooking, null, 2),
+  ].join("\n");
+}
+
+/**
+ * A booking card in the recruiter's terms: who is invited, when in their time zone, and what the
+ * invite says. Every other field is still listed, so the card shows all that will be sent.
+ */
+function formatBooking(toolName: string, args: Record<string, unknown>) {
+  if (!/create_booking$/i.test(toolName)) return undefined;
+  const attendee = bookingAttendee(toolName, args);
+  if (!attendee || typeof args.start !== "string") return undefined;
+  if (Number.isNaN(Date.parse(args.start))) return undefined;
+  const when = bookingTime(args.start, attendee.timeZone ?? "UTC");
   const fields =
     args.bookingFieldsResponses && typeof args.bookingFieldsResponses === "object"
       ? (args.bookingFieldsResponses as Record<string, unknown>)
