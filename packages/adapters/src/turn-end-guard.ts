@@ -198,6 +198,10 @@ export async function recruitingRoundListText(
     ? input.candidateKeys.filter((key, index) => people.has(key) && !cut(key, index))
     : input.candidateKeys;
   if (input.knownOnly && !keys.length) return "";
+  // The same open must-haves under every person say nothing about any one of them: say them once.
+  const notes = keys.map((key) => input.unverified?.[key]?.trim() ?? "");
+  const shared =
+    keys.length > 1 && notes[0] && notes.every((note) => note === notes[0]) ? notes[0] : undefined;
   const lines = keys.map((key, index) => {
     const person = people.get(key);
     // The saved key is the profile link, so the name opens the person's LinkedIn profile.
@@ -207,11 +211,35 @@ export async function recruitingRoundListText(
     const head = [name ? `**${name}**` : null, person?.title, person?.company, person?.location]
       .filter(Boolean)
       .join(" · ");
-    const passage = person?.snippet?.trim();
-    const unknown = input.unverified?.[key]?.trim();
-    return `${index + 1}. ${head}${passage ? `\n   > ${passage.length > 220 ? `${passage.slice(0, 220)}…` : passage}` : ""}${unknown ? `\n   Not verified: ${unknown}` : ""}`;
+    const passage = roundPassage(person?.snippet);
+    const unknown = shared ? undefined : input.unverified?.[key]?.trim();
+    return `${index + 1}. ${head}${passage ? `\n   > ${passage}` : ""}${unknown ? `\n   Not verified: ${unknown}` : ""}`;
   });
-  return `${lines.length} ${lines.length === 1 ? "person" : "people"} this round:\n\n${lines.join("\n")}`;
+  return `${lines.length} ${lines.length === 1 ? "person" : "people"} this round:${shared ? `\nNot verified for anyone yet: ${shared}` : ""}\n\n${lines.join("\n")}`;
+}
+
+const PASSAGE_MAX = 220;
+
+/**
+ * A profile passage as the recruiter reads it: without the search's field scaffolding
+ * ("Department: … • Level: …", "(US)", "...") and, when long, cut at a word, never mid-word.
+ */
+export function roundPassage(snippet: string | null | undefined): string | undefined {
+  const text = (snippet ?? "")
+    .replace(
+      /(?:Department|Level|Seniority|Function):\s*[^•\n]*?(?=\s*(?:•|$|\n|Department:|Level:|Seniority:|Function:))/gi,
+      " ",
+    )
+    .replace(/\s*•\s*/g, " ")
+    .replace(/\s*\((?:US|USA)\)/g, "")
+    .replace(/\s*\.{3,}\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return undefined;
+  if (text.length <= PASSAGE_MAX) return text;
+  const cut = text.slice(0, PASSAGE_MAX);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > PASSAGE_MAX * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "")}…`;
 }
 
 const PROMISE_LABEL = "Finish what the last message said it would do";
