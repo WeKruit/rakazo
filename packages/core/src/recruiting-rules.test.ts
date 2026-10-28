@@ -927,7 +927,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "replies go through the confirmation card",
     in: ["Main", "Outreach"],
     phrase:
-      "never refuse it, never send the text in chat instead, and never say there is no approval flow",
+      "so the call itself is the draft for review: call it rather than refusing or pasting the text in chat",
     why: "Agents refused to reply to a candidate, saying there was no approval flow.",
   },
   {
@@ -1002,6 +1002,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     in: "RECRUITER_LANGUAGE",
     phrase: "never decline a clear request or ask them to pick or review people first",
     why: "Agents declined clear requests or asked the recruiter to review people first.",
+  },
+  {
+    rule: "an unclear request gets a best guess or one question",
+    in: EVERY_BOT,
+    phrase:
+      "When a request is unclear, act on the most likely reading or ask one question with options; never decline work you or a teammate can do.",
+    why: "Agents refused vague asks, or asked the recruiter to pick what they could pick.",
   },
   {
     rule: "honest handoffs",

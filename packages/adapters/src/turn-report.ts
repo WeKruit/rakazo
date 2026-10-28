@@ -5,7 +5,8 @@ import type { ConnectorTool } from "@rakazo/adapter-kit";
  * run's own tool records instead of prompt prose:
  * - a turn that did consequential work ends with a visible report of it, and no card or guard
  *   replaces that report;
- * - a reply that declines something this agent or a teammate has a tool for gets one retry.
+ * - a reply that declines or defers the request, or hands the person a pick the agent could
+ *   make, gets one retry that asks for a best-guess action or one question card instead.
  */
 
 /** Work a person needs to hear about. Reads, lookups of saved state and questions are not work. */
@@ -220,6 +221,17 @@ export class TurnReportLedger {
     return owed;
   }
 
+  /** This attempt showed or recorded a round's people: the first-ten deliverable. */
+  presentedRound(): boolean {
+    return this.entries.some(
+      (entry) =>
+        entry.kind === "tool" &&
+        entry.name === "recruiting_research" &&
+        (entry.args.operation === "calibration_round" || entry.args.operation === "show_picks") &&
+        this.settled.get(entry.id)?.ok === true,
+    );
+  }
+
   /** Any consequential work in this attempt. */
   worked(): boolean {
     return this.entries.some((entry) => this.workOf(entry) !== undefined);
@@ -292,60 +304,90 @@ const TEAMMATE_KINDS: Record<Capability, RegExp> = {
 };
 
 /**
- * The sentence of a final reply that declines or defers a request, else undefined. Drawn from
- * the release regression's decline checks so the server and the harness agree.
+ * A final reply that refuses the request outright. Drawn from the release regression's decline
+ * checks so the server and the harness agree.
  */
 const DECLINE =
-  /\bI (?:can(?:no|['’])t|am unable to|['’]m unable to|am not able to|['’]m not able to|don['’]t have (?:access|a tool|the ability|permission))\b|\b(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)\b|\bnot something I can\b|\bnot (?:send-)?ready to send\b|\bcan(?:no|['’])t (?:send|look up|book|schedule|draft)\b|我(?:无法|不能|没法|没有权限)|无法(?:发送|完成|执行|代)/i;
+  /\bI (?:can(?:no|['’])t|am unable to|['’]m unable to|am not able to|['’]m not able to|don['’]t have (?:access|a tool|the ability|permission))\b|\b(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)\b|\bnot something I can\b|\bnot (?:send-)?ready to send\b|\bcan(?:no|['’])t (?:send|look up|book|schedule|draft|prepare)\b|我(?:无法|不能|没法|没有权限|做不了)|无法(?:发送|完成|执行|代|查|找|安排|准备)/i;
+/** A reply that offers the work back instead of doing it ("Do you want me to…?", 要不要我…). */
+const DEFER =
+  /\b(?:do you want|would you like|want) me to\b|\bshall I\b|\bshould I (?:go ahead|proceed|start|send|draft|look|find|search|book|schedule|reach|contact)\b|\bif you(?:['’]d| would)? like,? I can\b|要不要我|需要我.{0,24}[吗么]|是否需要我|要我.{0,24}[吗么]|需要你先|请先(?:确认|提供|告诉)/i;
+/** A reply that hands the recruiter a choice the agent could make ("Which people…?"). */
+const PICK =
+  /\bwhich (?:\d+ |of (?:them|these|the \w+) |ones?\b|people|candidates?|person|emails?|interviews?)[^.!?\n]{0,60}\b(?:should I|do you want|would you like|to (?:send|email|contact|reach|draft|look up|book|schedule|process|handle))\b|^which (?:\d+|ones?|people|candidates?|person)\b[^.!?\n]{0,30}[?？]$|(?:(?:哪些|哪几)(?:个|位)?(?:人|候选人)|哪位|哪个(?:人|候选人)).{0,20}(?:发|联系|约|处理|查|写)|(?:发给|联系|约)(?:谁|哪些|哪几|哪位)/i;
 
-export function declinedSentence(text: string): string | undefined {
-  return text
+export type DeclineKind = "decline" | "defer" | "pick";
+export type Declined = { sentence: string; kind: DeclineKind };
+
+/** The first sentence of a reply that declines, defers or hands back a pick, else undefined. */
+export function declinedSentence(text: string): Declined | undefined {
+  const sentences = text
     .split(/(?<=[.!?。！？\n])/)
     .map((sentence) => sentence.trim())
-    .find((sentence) => DECLINE.test(sentence));
+    .filter(Boolean);
+  for (const sentence of sentences) {
+    if (DECLINE.test(sentence)) return { sentence, kind: "decline" };
+    if (PICK.test(sentence)) return { sentence, kind: "pick" };
+    if (DEFER.test(sentence)) return { sentence, kind: "defer" };
+  }
+  return undefined;
 }
 
 export type Teammate = { id: string; name: string; about: string };
 
 export type DeclineRetry = { sentence: string; note: string };
 
+/** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
+export const DECLINE_RETRY_NOTE =
+  "Do not decline or defer. Take the most likely reading and do it now with your tools, or hand it to the teammate who can. If a detail that changes the result is missing, ask one question with ask_user, with concrete options. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what.";
+
 /**
- * One retry for a reply that declines a request this agent or a teammate can do: the declined
- * sentence must name the same kind of work the person asked for, and some tool or teammate must
- * do it. Undefined keeps the decline (a genuine gap, or nothing able to do it).
+ * One retry for a final reply that declines, defers or hands back a pick. A refusal is retried
+ * when the turn did nothing, or when it refuses the kind of work the person asked for (a refused
+ * aside inside a report of done work stands). An offer or a pick question is retried only when
+ * the turn did nothing: after real work, "want me to keep going?" is a fair next step. The note
+ * names the tools or teammate for the asked kind of work when there are any. Undefined keeps
+ * the reply.
  */
 export function declineRetry(input: {
   reply: string;
   request: string;
   tools: readonly Pick<ConnectorTool, "name">[];
   teammates: readonly Teammate[];
+  /** The turn did consequential work (see TurnReportLedger.worked). */
+  worked?: boolean;
 }): DeclineRetry | undefined {
-  const sentence = declinedSentence(input.reply);
-  if (!sentence) return undefined;
-  const kinds = (Object.keys(REQUEST_KINDS) as Capability[]).filter(
-    (kind) => REQUEST_KINDS[kind].test(input.request) && REQUEST_KINDS[kind].test(sentence),
+  const declined = declinedSentence(input.reply);
+  if (!declined) return undefined;
+  const { sentence } = declined;
+  const asked = (Object.keys(REQUEST_KINDS) as Capability[]).filter((kind) =>
+    REQUEST_KINDS[kind].test(input.request),
   );
-  if (!kinds.length) return undefined;
+  const refusesAsked = asked.some((kind) => REQUEST_KINDS[kind].test(sentence));
+  if (input.worked && !(declined.kind === "decline" && refusesAsked)) return undefined;
   const quoted = sentence.slice(0, 200);
-  for (const kind of kinds) {
-    const own = input.tools
+  const lead =
+    declined.kind === "pick"
+      ? `Your reply asked the user to choose ("${quoted}"). Choose yourself from the conversation: the people named, else the role's first results up to the number asked.`
+      : `Your reply ${declined.kind === "defer" ? "deferred" : "declined"} the request ("${quoted}").`;
+  const own = asked.flatMap((kind) =>
+    input.tools
       .map((tool) => tool.name)
-      .filter((name) => TOOL_KINDS[kind].test((name.split("__").at(-1) ?? name).toLowerCase()));
-    if (own.length)
-      return {
-        sentence,
-        note: `Your reply declined the request ("${quoted}"), but you have ${own.slice(0, 3).join(", ")} for it. Do it now with that tool; a send or booking still shows its confirmation card. If something is truly missing, say exactly what.`,
-      };
-  }
-  for (const kind of kinds) {
-    const mate = input.teammates.find((teammate) =>
-      TEAMMATE_KINDS[kind].test(`${teammate.name} ${teammate.about}`),
-    );
-    if (mate)
-      return {
-        sentence,
-        note: `Your reply declined the request ("${quoted}"), but ${mate.name} can do it. Hand it to ${mate.name} now with handoff_to_bot (bot_id ${mate.id}), quoting the user's words.`,
-      };
-  }
-  return undefined;
+      .filter((name) => TOOL_KINDS[kind].test((name.split("__").at(-1) ?? name).toLowerCase())),
+  );
+  const mate = own.length
+    ? undefined
+    : asked
+        .map((kind) =>
+          input.teammates.find((teammate) =>
+            TEAMMATE_KINDS[kind].test(`${teammate.name} ${teammate.about}`),
+          ),
+        )
+        .find(Boolean);
+  const named = own.length
+    ? ` You have ${[...new Set(own)].slice(0, 3).join(", ")} for it.`
+    : mate
+      ? ` ${mate.name} can do it: hand it to ${mate.name} now with handoff_to_bot (bot_id ${mate.id}), quoting the user's words.`
+      : "";
+  return { sentence, note: `${lead} ${DECLINE_RETRY_NOTE}${named}` };
 }
