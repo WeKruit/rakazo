@@ -1289,10 +1289,11 @@ export class McpConnector implements ConnectorProvider {
         ),
       };
     } catch (error) {
-      // Zod and our own messages carry no secrets; anything else stays generic.
+      // Zod and our own messages carry no secrets; the provider's own reason is redacted and kept
+      // so the agent can correct its arguments; anything else stays generic.
       const detail =
         error instanceof InstantlyRestError
-          ? ` HTTP ${error.status}.`
+          ? ` ${sanitizeConnectorError(error, redactions)}`
           : error instanceof z.ZodError
             ? ` Invalid arguments: ${z.prettifyError(error)}`
             : error instanceof Error && !(error instanceof IsolationError)

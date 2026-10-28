@@ -3480,6 +3480,7 @@ describe("local native Instantly campaign and lead tools", () => {
       campaigns: [] as Record<string, unknown>[],
       activeRoleId: null as string | null,
       deleted: false,
+      rejectPatch: "",
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -3560,6 +3561,8 @@ describe("local native Instantly campaign and lead tools", () => {
         if (url.pathname === "/api/v2/campaigns") return Response.json({ id: CAMPAIGN, ...body });
         if (url.pathname === `/api/v2/campaigns/${CAMPAIGN}`) {
           if (state.deleted) return new Response("{}", { status: 404 });
+          if (request.method === "PATCH" && state.rejectPatch)
+            return Response.json({ message: state.rejectPatch }, { status: 400 });
           if (request.method === "PATCH") Object.assign(state.campaign, body);
           return Response.json(state.campaign);
         }
@@ -4025,6 +4028,22 @@ describe("local native Instantly campaign and lead tools", () => {
     expect(JSON.stringify(patch?.body)).toContain(
       "<p>Hi {{firstName}},</p><p>The work:</p><p>• Run streams<br />• Q＆A</p><p>Best</p>",
     );
+  });
+
+  it("passes the provider's reason for a rejected save to the agent", async () => {
+    const f = fixture();
+    delete f.state.campaign.sequences;
+    await f.run("ensure_role_campaign", { role_id: "role-1" });
+    f.state.rejectPatch = "body/sequences/0/steps/0/variants/0/subject is too long";
+    const events = await f.run("ensure_role_campaign", {
+      role_id: "role-1",
+      steps: [{ subject: "Hi", body: "Hello", delay_days: 0 }],
+    });
+    expect(events[0]).toMatchObject({
+      type: "error",
+      message:
+        "Instantly native_instantly_ensure_role_campaign failed. HTTP 400: body/sequences/0/steps/0/variants/0/subject is too long",
+    });
   });
 
   it("reports a body the provider saved blank and rewrites it on the next save", async () => {
