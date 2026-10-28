@@ -65,7 +65,8 @@ export function createTurnTimer(options: {
         (event.type === "thread.message.created" && event.payload.role === "bot");
       if (visibleText && turn.timing.firstTokenMs === undefined)
         turn.timing.firstTokenMs = since(turn);
-      if (isRunTerminalEvent(event)) {
+      // A turn that ends on a question card waits for input instead of completing.
+      if (isRunTerminalEvent(event) || event.type === "run.waiting_input") {
         turn.timing.finalMs = since(turn);
         turns.delete(turn.timing.clientNonce);
         options.report(turn.timing);
