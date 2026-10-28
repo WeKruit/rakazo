@@ -950,7 +950,9 @@ async function main() {
       const busy = await rpc("threads/get", { groupId })
         .then(
           (snapshot) =>
-            (snapshot.activeRuns ?? []).length > 0 || snapshot.run?.status === "running",
+            // A run paused on a question is not working: the run reads it as waiting on the recruiter.
+            (snapshot.activeRuns ?? []).some((run) => run.status !== "waiting_input") ||
+            snapshot.run?.status === "running",
         )
         .catch(() => true);
       // Below the target, background research can still bring people after the turn ends, so the
