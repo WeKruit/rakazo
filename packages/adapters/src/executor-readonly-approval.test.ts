@@ -3622,7 +3622,7 @@ describe("unattended memory writes after external text", () => {
     executionId: "call-2",
   };
 
-  it.each(["routine", "recruiting_research", "bot_message"])(
+  it.each(["routine", "recruiting_research"])(
     "refuses a %s run's memory and skill writes once it read connector text",
     async (trigger) => {
       const f = fixture({ trigger });

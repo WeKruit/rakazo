@@ -347,6 +347,9 @@ export async function unattendedMemoryWriteRefusal(input: {
 }): Promise<string | undefined> {
   if (!isAutomationRunTrigger(input.trigger) && !EXTERNAL_TEXT_TRIGGERS.has(input.trigger))
     return undefined;
+  // A teammate handoff carries a person's request on (e.g. Sourcer saving the recruiter's
+  // stated preference after reading results), so it keeps the attended run's memory rights.
+  if (input.trigger === "bot_message") return undefined;
   if (!input.preference && !DURABLE_MEMORY_TOOLS.has(input.toolName)) return undefined;
   if (EXTERNAL_PROMPT_TRIGGERS.has(input.trigger) || (await input.readExternalText()))
     return UNATTENDED_MEMORY_WRITE_REFUSAL;

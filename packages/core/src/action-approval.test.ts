@@ -498,7 +498,12 @@ describe("unattendedMemoryWriteRefusal", () => {
       readExternalText: () => readExternalText,
     });
 
-  it.each(["routine", "tickets", "recruiting_research", "bot_message", "cloud_agent"])(
+  it("keeps a teammate handoff's memory rights", async () => {
+    expect(await refusal("bot_message", "remember", true)).toBeUndefined();
+    expect(await refusal("bot_message", "recruiting_feedback", true, true)).toBeUndefined();
+  });
+
+  it.each(["routine", "tickets", "recruiting_research", "cloud_agent"])(
     "holds memory, preference and skill writes in a %s run after external text",
     async (trigger) => {
       for (const name of [
