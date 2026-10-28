@@ -1822,6 +1822,12 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
                 },
               }),
               host.signal,
+              () =>
+                getLogger().warn("run.tool.abandoned", {
+                  runId: host.request.runId,
+                  tool: tool.name,
+                  executionId,
+                }),
             );
             if (isAgentToolExecutionResult(result)) {
               if (isToolPauseResult(result)) host.pausePending = true;
@@ -3888,15 +3894,35 @@ export function reliableStreamOptions(
   return next;
 }
 
+/** How long a stopped run's tool call may take to honour the abort before the run stops waiting. */
+export const STOPPED_TOOL_GRACE_MS = 10_000;
+
 /**
  * A stopped run (user stop, lease loss or the silence watch) must end even when a tool call
- * never settles; the abandoned call is left to finish or fail on its own.
+ * never settles. The call gets a short grace to honour the abort; after that the run stops
+ * waiting, `onAbandon` runs once, and the call is left to finish or fail on its own. Its write
+ * effect stays `executing`, which every later attempt treats as uncertain, so nothing is replayed.
  */
-export function untilStopped<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted) return Promise.reject(signal.reason);
+export function untilStopped<T>(
+  promise: Promise<T>,
+  signal: AbortSignal,
+  onAbandon?: () => void,
+  graceMs = STOPPED_TOOL_GRACE_MS,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
-    const onAbort = () => reject(signal.reason);
-    signal.addEventListener("abort", onAbort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onAbort = () => {
+      timer = setTimeout(() => {
+        onAbandon?.();
+        reject(signal.reason);
+      }, graceMs);
+      timer.unref?.();
+    };
+    if (signal.aborted) onAbort();
+    else signal.addEventListener("abort", onAbort, { once: true });
+    promise.then(resolve, reject).finally(() => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    });
   });
 }
