@@ -291,4 +291,3 @@ it("loads every CRM page while keeping the rendered window bounded", async () =>
     0, 25, 50, 75, 100,
   ]);
 });
-
