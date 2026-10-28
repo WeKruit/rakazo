@@ -4880,9 +4880,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Before a role's first round the people search is already listed and the turn ends on
         // the next-step card, so the tool catalog would only cost a lookup step. A role built from
         // the recruiter's own list may never have a round, so it keeps the catalog.
+        // A bot with the people search is recruiting, even before a role is linked to the thread.
+        const recruitingSearch = discovered.some((tool) =>
+          tool.name.endsWith("web_search_advanced_exa"),
+        );
         const firstRoundPending =
           Boolean(thread.activeRecruitingRoleId) &&
-          discovered.some((tool) => tool.name.endsWith("web_search_advanced_exa")) &&
+          recruitingSearch &&
           !(await deps.prisma.recruitingCalibrationRound.findFirst({
             where: { roleId: thread.activeRecruitingRoleId ?? "", role: { spaceId: run.spaceId } },
             select: { id: true },
@@ -11753,7 +11757,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 if (known) return `"${known.key}" → "${known.value}"`;
                 // Recruiter-facing text is English even for a Chinese JD, unless they asked otherwise.
                 if (
-                  hideVendors &&
+                  (hideVendors || recruitingSearch) &&
                   !askLanguageBounced &&
                   recruiterQuestionNotInEnglish(question, messages)
                 ) {
