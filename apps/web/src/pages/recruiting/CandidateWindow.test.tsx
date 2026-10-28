@@ -4,7 +4,7 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CandidateWindowProps } from "./CandidateWindow";
-import { CandidateWindow } from "./CandidateWindow";
+import { CandidateWindow, keepsReadingPlace } from "./CandidateWindow";
 
 vi.mock("@lingui/react/macro", () => ({
   Trans: ({ children }: { children: ReactNode }) => children,
@@ -98,6 +98,12 @@ it.each(["table", "cards"] as const)(
     await render([...keys].reverse());
     expect(viewport.scrollTop).toBe(0);
     expect(offsets.current[mode]).toEqual({ offset: 0, measurements: [] });
+    // A person streamed in or updated at the top keeps the reader where they were.
+    viewport.scrollTop = 170;
+    await act(async () => viewport.dispatchEvent(new Event("scroll", { bubbles: true })));
+    await render(["candidate-new", ...[...keys].reverse().slice(0, 79)]);
+    expect(viewport.scrollTop).toBe(170);
+    expect(offsets.current[mode].offset).toBe(170);
   },
 );
 
@@ -124,4 +130,14 @@ it("loads the virtual runtime only above the existing 80-row threshold", async (
   });
   expect(runtime.loaded).toBe(1);
   expect(container.querySelector("[data-virtual-window]")).not.toBeNull();
+});
+
+it("keeps the reading place only when a few people are added or moved to the top", () => {
+  const keys = ["a", "b", "c", "d"];
+  expect(keepsReadingPlace(keys, ["new", ...keys])).toBe(true);
+  expect(keepsReadingPlace(keys, ["c", "a", "b", "d"])).toBe(true);
+  expect(keepsReadingPlace(keys, [...keys].reverse())).toBe(false);
+  expect(keepsReadingPlace(keys, ["b", "a", "c", "d"].slice(1))).toBe(false);
+  expect(keepsReadingPlace(keys, ["x", "y"])).toBe(false);
+  expect(keepsReadingPlace([], ["a"])).toBe(false);
 });

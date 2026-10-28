@@ -15,6 +15,18 @@ export type CandidateWindowProps = {
   offsets: RefObject<Record<"table" | "cards", { offset: number; measurements: VirtualItem[] }>>;
 };
 
+/** True when the new list is the old one with a few people (at most ten, under half) added or moved to the top. */
+export function keepsReadingPlace(previous: readonly string[], next: readonly string[]) {
+  const top = next.indexOf(previous[0] ?? "");
+  if (top < 1 || top > 10 || top * 2 >= next.length) return false;
+  const moved = new Set(next.slice(0, top));
+  const nextKeys = new Set(next);
+  const previousKeys = new Set(previous);
+  const expected = previous.filter((key) => !moved.has(key) && nextKeys.has(key));
+  const actual = next.slice(top).filter((key) => previousKeys.has(key));
+  return expected.length === actual.length && expected.every((key, i) => key === actual[i]);
+}
+
 const VirtualCandidateWindow = lazyPanel(() =>
   import("./VirtualCandidateWindow").then((module) => module.VirtualCandidateWindow),
 );
@@ -41,14 +53,17 @@ function SmallCandidateWindow({
 }: CandidateWindowProps) {
   const scrollRef = useRef<HTMLElement>(null);
   const firstKey = itemKeys[0];
-  const previousFirstKey = useRef(firstKey);
+  const previousKeys = useRef(itemKeys);
   useEffect(() => {
-    if (previousFirstKey.current !== firstKey) {
-      previousFirstKey.current = firstKey;
+    const previous = previousKeys.current;
+    previousKeys.current = itemKeys;
+    if (previous[0] !== firstKey) {
+      // A few people added or updated above keep the reader's place; a new sort or filter resets it.
+      if (keepsReadingPlace(previous, itemKeys)) return;
       offsets.current[mode] = { offset: 0, measurements: [] };
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     }
-  }, [firstKey, mode, offsets]);
+  }, [firstKey, itemKeys, mode, offsets]);
   const keyboard = (event: KeyboardEvent<HTMLElement>) => {
     if (!(event.target instanceof HTMLElement) || !event.target.matches("[data-candidate-name]"))
       return;

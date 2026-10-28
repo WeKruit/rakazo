@@ -4,6 +4,7 @@ import type { KeyboardEvent } from "react";
 import { cloneElement, Fragment, useCallback, useEffect, useRef, useState } from "react";
 
 import type { CandidateWindowProps } from "./CandidateWindow";
+import { keepsReadingPlace } from "./CandidateWindow";
 
 /** Virtualizes measured rows, retaining the focused row so scrolling never discards focus. */
 export function VirtualCandidateWindow({
@@ -75,15 +76,18 @@ export function VirtualCandidateWindow({
     ),
   });
   const firstKey = itemKeys[0];
-  const previousFirstKey = useRef(firstKey);
+  const previousKeys = useRef(itemKeys);
   useEffect(() => {
-    if (previousFirstKey.current !== firstKey) {
-      previousFirstKey.current = firstKey;
+    const previous = previousKeys.current;
+    previousKeys.current = itemKeys;
+    if (previous[0] !== firstKey) {
+      // A few people added or updated above keep the reader's place; a new sort or filter resets it.
+      if (keepsReadingPlace(previous, itemKeys)) return;
       offsets.current[mode] = { offset: 0, measurements: [] };
       virtualizer.scrollToOffset(0);
       if (scrollRef.current) scrollRef.current.scrollTop = 0;
     }
-  }, [firstKey, mode, offsets, virtualizer]);
+  }, [firstKey, itemKeys, mode, offsets, virtualizer]);
   const focusRow = (index: number) => {
     setFocusedKey(itemKeys[index]);
     virtualizer.scrollToIndex(Math.floor(index / columns), { align: "auto" });
