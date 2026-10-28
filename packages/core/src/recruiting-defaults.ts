@@ -106,6 +106,21 @@ export function asksAboutThesePeople(text: string): boolean {
 export const NAMED_EMAILS_NOTE =
   "They mean the role's people: tell Outreach to write one first email per person for the people they named, else the role's first ten results, each with that person's name and current title or company from their saved profile, never a placeholder such as [candidate name] or {{first_name}}, whether or not their emails are found yet.";
 
+/**
+ * A request to send the first email to a number of people ("发20个人的先", "send to 20"). Main's
+ * handoff once rewrote it as "prepare drafts, do not send", and Outreach stopped without the card.
+ */
+export function asksToSendTo(text: string): number | undefined {
+  const match =
+    /发(?:给|送)?\s*(\d+)\s*(?:个|位|人)/.exec(text) ??
+    /\bsend\b[^.?!\n]{0,30}?\bto\s+(\d+)\b/i.exec(text);
+  return match ? Number(match[1]) : undefined;
+}
+
+export function sendToNote(count: number) {
+  return `They asked to send the first email to ${count} people: tell Outreach to run its send-to-a-number steps for the role's first ${count} results (saved emails, look up only missing ones, save the sequence, add the people with an email, then activate_campaign) and end on the send card, which is the recruiter's review. Never turn it into separate unsent drafts or tell Outreach not to send; the card sends nothing until the recruiter confirms.`;
+}
+
 /** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
 /**
  * A question to the recruiter written mostly in Chinese when no recruiter message asked for

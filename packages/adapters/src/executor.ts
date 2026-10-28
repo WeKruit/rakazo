@@ -78,6 +78,7 @@ import {
   applyJudgeDecision,
   asksAboutThesePeople,
   asksForOutreach,
+  asksToSendTo,
   assertTransition,
   attachmentExtensionForMimeType,
   blocksToAgentHistoryText,
@@ -145,6 +146,7 @@ import {
   sandboxCommandTimeoutMs,
   sendBodyText,
   sendRecipients,
+  sendToNote,
   toolRequiresApproval,
   toolRequiresExplicitApproval,
   truncatedPlainText,
@@ -11354,8 +11356,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 })
                 .catch(() => null)
             : null;
+        const sendCount = asksToSendTo(currentTurnText);
         const dispatchNote = outreachAsk
-          ? `The recruiter asked for contacts, an email draft or a send: that is Outreach's work. Hand it to Outreach now with handoff_to_bot (bot_id ${outreachAsk.botId}) as your only step, quoting the recruiter's exact words; never decline it, never ask which people and never call the saved results unready. Tell Outreach to show what is already done for these people first (contacts already found, a saved draft) and do only what is missing.${asksAboutThesePeople(currentTurnText) ? ` ${NAMED_EMAILS_NOTE}` : ""}`
+          ? `The recruiter asked for contacts, an email draft or a send: that is Outreach's work. Hand it to Outreach now with handoff_to_bot (bot_id ${outreachAsk.botId}) as your only step, quoting the recruiter's exact words; never decline it, never ask which people and never call the saved results unready. Tell Outreach to show what is already done for these people first (contacts already found, a saved draft) and do only what is missing.${asksAboutThesePeople(currentTurnText) ? ` ${NAMED_EMAILS_NOTE}` : ""}${sendCount ? ` ${sendToNote(sendCount)}` : ""}`
           : undefined;
         // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
         // sits next to their message, where it holds.
