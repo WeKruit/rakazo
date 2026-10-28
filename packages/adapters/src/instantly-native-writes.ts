@@ -183,7 +183,7 @@ export const nativeInstantlyWrites = [
     "activate_campaign",
     ActivateCampaignInput,
     false,
-    "Sends the campaign's first email to its leads by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread.",
+    "Sends the campaign's first email to its leads by activating it (also resumes a paused one); the campaign needs its email saved first (ensure_role_campaign steps). This is the only way to send a campaign email; it shows the native confirmation card — call it and let the human confirm, do not refuse or ask for a thread. Call it even when the campaign already holds other leads: the card lists every recipient and is the decision, so never ask in text whom to include.",
   ),
   tool("pause_campaign", CampaignIdInput, false, "Pauses a campaign; stops further sends."),
   tool(
