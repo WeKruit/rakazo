@@ -201,7 +201,23 @@ export async function loadGroupContext(
       members: {
         where: { bot: { archivedAt: null } },
         include: {
-          bot: { select: { id: true, name: true, title: true, description: true } },
+          bot: {
+            select: {
+              id: true,
+              name: true,
+              title: true,
+              description: true,
+              mcpServers: {
+                where: { server: { enabled: true } },
+                select: {
+                  allowAllTools: true,
+                  allowedTools: true,
+                  server: { select: { name: true, description: true } },
+                },
+                orderBy: { createdAt: "asc" },
+              },
+            },
+          },
         },
         orderBy: { createdAt: "asc" },
       },
@@ -210,7 +226,21 @@ export async function loadGroupContext(
   if (!group) return undefined;
   return renderGroupMembersContext(
     group.name,
-    group.members.map((member) => member.bot),
+    group.members.map(({ bot: { mcpServers, ...bot } }) => ({
+      ...bot,
+      // Read from the bot's real service assignments, so the roster never drifts from them.
+      capabilities: mcpServers.map(({ server, allowAllTools, allowedTools }) => {
+        const tools =
+          !allowAllTools && Array.isArray(allowedTools)
+            ? allowedTools.filter((tool): tool is string => typeof tool === "string")
+            : [];
+        const about = server.description
+          .trim()
+          .split(/(?<=\.)\s/)[0]
+          ?.slice(0, 120);
+        return `${server.name}${about ? ` (${about})` : ""}${tools.length ? `: ${tools.join(", ")}` : ""}`;
+      }),
+    })),
     self,
   );
 }
