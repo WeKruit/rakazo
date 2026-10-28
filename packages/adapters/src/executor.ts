@@ -76,6 +76,7 @@ import {
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
+  asksForOutreach,
   assertTransition,
   attachmentExtensionForMimeType,
   blocksToAgentHistoryText,
@@ -11285,6 +11286,32 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ]),
         );
         linkRole = jobRole;
+        // Contacts, drafts and sends belong to Outreach: any other recruiting teammate dispatches
+        // them instead of answering (or declining) them itself.
+        const outreachAsk =
+          thread.groupId &&
+          run.trigger === "user" &&
+          isRecruitingSpawnKey(bot.spawnKey) &&
+          !bot.spawnKey?.endsWith(":outreach") &&
+          currentTurnMessage?.role === "user" &&
+          asksForOutreach(
+            currentTurnMessage.blocks
+              .map((block) => (block.kind === "text" ? block.text : ""))
+              .join(" "),
+          )
+            ? await deps.prisma.chatGroupMember
+                .findFirst({
+                  where: {
+                    groupId: thread.groupId,
+                    bot: { spawnKey: { endsWith: ":outreach" }, archivedAt: null },
+                  },
+                  select: { botId: true },
+                })
+                .catch(() => null)
+            : null;
+        const dispatchNote = outreachAsk
+          ? `The recruiter asked for contacts, an email draft or a send: that is Outreach's work. Hand it to Outreach now with handoff_to_bot (bot_id ${outreachAsk.botId}) as your only step, quoting the recruiter's exact words; never decline it, never ask which people and never call the saved results unready. Tell Outreach to show what is already done for these people first (contacts already found, a saved draft) and do only what is missing.`
+          : undefined;
         // Once the planned searches ran, the pick note alone says what to do next.
         const intakeNote =
           intake &&
@@ -11310,6 +11337,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : basePrompt,
           intakeSkillNote,
           linkRole?.note,
+          dispatchNote,
           !linkRole &&
           !thread.activeRecruitingRoleId &&
           currentTurnMessage?.role === "user" &&
