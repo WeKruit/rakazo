@@ -161,3 +161,22 @@ it("books a fixed-length event type without a duration when a slot starts at the
   });
   expect(await f.check({ args })).toMatchObject({ code: "CALENDAR_SLOT_CONFLICT" });
 });
+
+it("tells the agent to drop the length when a fixed-length event is open at that time", async () => {
+  const f = fixture();
+  f.tool.inputSchema.required = ["eventTypeId", "start", "end", "timeZone", "format"];
+  const open = { "2026-11-01": [{ start: f.args.start, end: "2026-11-01T06:00:00Z" }] };
+  f.connector.execute.mockImplementation(async function* (call: { args: object }) {
+    yield {
+      type: "result" as const,
+      data: {
+        structuredContent: { status: "success", data: "duration" in call.args ? {} : open },
+      },
+    };
+  });
+  expect(await f.check()).toMatchObject({ code: "CALENDAR_LENGTH_UNSUPPORTED" });
+  f.connector.execute.mockImplementation(async function* () {
+    yield { type: "result" as const, data: { structuredContent: { status: "success", data: {} } } };
+  });
+  expect(await f.check()).toMatchObject({ code: "CALENDAR_SLOT_CONFLICT" });
+});

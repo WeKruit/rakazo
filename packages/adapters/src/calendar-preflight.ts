@@ -78,15 +78,15 @@ export async function preflightCalBooking(input: {
   const endMs = Date.parse(start) + (length === undefined ? 60 : Number(length)) * 60_000;
   if (!Number.isFinite(endMs) || Math.abs(endMs) > 8.64e15)
     return unavailable("booking interval is invalid");
-  const readArgs = {
+  const readArgsFor = (duration: unknown) => ({
     eventTypeId,
     start,
     end: new Date(endMs).toISOString(),
     timeZone: "UTC",
-    ...(lengthInMinutes === undefined ? {} : { duration: lengthInMinutes }),
+    ...(duration === undefined ? {} : { duration }),
     format: "range",
     ...(original ? { bookingUidToReschedule: original.snapshot.uid } : {}),
-  };
+  });
   if (!input.route.resourceId || typeof input.route.resourceRevision !== "number")
     return unavailable("the approved calendar source identity is incomplete");
   const route = {
@@ -100,7 +100,10 @@ export async function preflightCalBooking(input: {
     candidate.resourceId === route.resourceId &&
     candidate.resourceRevision === route.resourceRevision &&
     candidate.toolName === route.toolName;
-  try {
+  type Slot = { start: string; end: string };
+  const readSlots = async (
+    readArgs: ReturnType<typeof readArgsFor>,
+  ): Promise<Slot[] | ReturnType<typeof unavailable>> => {
     await input.authorize(input.route);
     await input.authorize(route);
     const discovered = await input.connector.discoverTools(input.context);
@@ -182,22 +185,39 @@ export async function preflightCalBooking(input: {
       )
     )
       return unavailable("availability lacks exact interval coverage");
-    const available = slots.some((slot) => {
-      const value = slot as { start: string; end: string };
-      return (
-        Date.parse(value.start) === Date.parse(start) &&
+    return slots as Slot[];
+  };
+  const opens = (slots: Slot[]) =>
+    slots.some(
+      (slot) =>
+        Date.parse(slot.start) === Date.parse(start) &&
         (length === undefined
-          ? Date.parse(value.end) > Date.parse(start)
-          : Date.parse(value.end) === endMs)
-      );
-    });
-    if (!available)
+          ? Date.parse(slot.end) > Date.parse(start)
+          : Date.parse(slot.end) === endMs),
+    );
+  try {
+    const slots = await readSlots(readArgsFor(lengthInMinutes));
+    if (!Array.isArray(slots)) return slots;
+    if (!opens(slots)) {
+      // A fixed-length event type offers no slot for a requested duration, and Cal.com rejects
+      // the booking too: when the same time is open without one, say how to retry.
+      if (lengthInMinutes !== undefined) {
+        const fixed = await readSlots(readArgsFor(undefined)).catch(() => undefined);
+        if (Array.isArray(fixed) && opens(fixed))
+          return {
+            ...unavailable(
+              "this event type has one fixed length; book the same time again without lengthInMinutes",
+            ),
+            code: "CALENDAR_LENGTH_UNSUPPORTED",
+          };
+      }
       return {
         ...unavailable(
           "the approved slot is no longer available; prepare a new proposal and approval",
         ),
         code: "CALENDAR_SLOT_CONFLICT",
       };
+    }
     return undefined;
   } catch {
     return unavailable("availability authorization, source or schema changed, or the read failed");
