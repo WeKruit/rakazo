@@ -12,6 +12,8 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+import { NO_RESPONSE } from "./silent-reply.js";
 
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -197,7 +199,8 @@ export async function handoffToGroupBot(
 /**
  * Returns a stage handed over with report_back to the member that asked for it, once the stage
  * ends either way, so it can check the result against its brief. Idempotent per run; the result
- * itself is already in the shared thread, so the report only points at it.
+ * itself is already in the shared thread, so the report only points at it. A `progress` report is
+ * the one mid-stage check-in: it never follows the stage's final report.
  */
 export async function reportGroupHandoffOutcome(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -210,10 +213,11 @@ export async function reportGroupHandoffOutcome(
     sourceMessageId: string | null;
   },
   groupId: string,
-  outcome: { status: "completed" | "failed"; error?: string },
+  outcome: { status: "completed" | "failed" | "progress"; error?: string },
 ): Promise<{ runId: string } | undefined> {
   if (!run.sourceMessageId) return undefined;
-  const deliveryKey = `group-report:${run.id}`;
+  const finalKey = `group-report:${run.id}`;
+  const deliveryKey = outcome.status === "progress" ? `group-checkin:${run.id}` : finalKey;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       try {
@@ -234,11 +238,13 @@ export async function reportGroupHandoffOutcome(
           )
         : undefined;
       if (!asked || asked.fromBotId === run.botId) return undefined;
-      const existing = await tx.message.findUnique({
-        where: { threadId_clientNonce: { threadId: run.threadId, clientNonce: deliveryKey } },
-        select: { id: true },
-      });
-      if (existing) return undefined;
+      for (const clientNonce of new Set([deliveryKey, finalKey])) {
+        const existing = await tx.message.findUnique({
+          where: { threadId_clientNonce: { threadId: run.threadId, clientNonce } },
+          select: { id: true },
+        });
+        if (existing) return undefined;
+      }
       const member = await tx.chatGroupMember.findFirst({
         where: { groupId, botId: asked.fromBotId, bot: { archivedAt: null } },
         select: { botId: true },
@@ -249,7 +255,9 @@ export async function reportGroupHandoffOutcome(
       const text =
         outcome.status === "completed"
           ? "Finished the stage you handed me; my result is my last message above. Check it against what you asked for, then give the user the outcome or hand me a correction."
-          : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
+          : outcome.status === "progress"
+            ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
+            : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
       const message = await createThreadMessageInTransaction(tx, {
         threadId: run.threadId,
         role: "bot",
@@ -309,6 +317,118 @@ export async function reportGroupHandoffOutcome(
     getLogger().error("group report enqueue", error);
   });
   return { runId: committed.runId };
+}
+
+type StageDeps = Pick<ExecutorDeps, "prisma" | "events" | "jobs">;
+type WorkerTurn = {
+  id: string;
+  spaceId: string;
+  threadId: string;
+  botId: string;
+  userId: string;
+  sourceMessageId: string | null;
+  trigger: string;
+  clientNonce?: string | null;
+};
+
+/** The worker's latest finished handed-in turn in this thread: the stage its research belongs to. */
+async function handedStage(
+  prisma: StageDeps["prisma"],
+  worker: Pick<WorkerTurn, "spaceId" | "threadId" | "botId" | "userId">,
+) {
+  return prisma.run.findFirst({
+    where: {
+      spaceId: worker.spaceId,
+      threadId: worker.threadId,
+      botId: worker.botId,
+      userId: worker.userId,
+      trigger: "follow_up",
+      status: "completed",
+      sourceMessageId: { not: null },
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      spaceId: true,
+      threadId: true,
+      botId: true,
+      userId: true,
+      sourceMessageId: true,
+    },
+  });
+}
+
+/**
+ * A worker's turn ended in a group. A handed-in turn that leaves its own research running at the
+ * provider has not finished the stage, so its report waits. That research's wakes continue the
+ * same stage: the first partial-results wake sends the one mid-stage check-in, and the turn that
+ * ends with nothing of the worker's still running delivers the final report.
+ */
+export async function reportGroupStageOutcome(
+  deps: StageDeps,
+  turn: WorkerTurn,
+  groupId: string,
+  outcome: { status: "completed" | "failed"; error?: string },
+): Promise<{ runId: string } | undefined> {
+  const wake = turn.trigger === "recruiting_research";
+  if (!wake && turn.trigger !== "follow_up") return undefined;
+  const partial = wake && Boolean(turn.clientNonce?.includes(":rows:"));
+  if (partial && outcome.status === "failed") return undefined;
+  const stage = wake ? await handedStage(deps.prisma, turn) : turn;
+  if (!stage) return undefined;
+  if (outcome.status === "completed") {
+    const thread = await deps.prisma.thread.findUnique({
+      where: { id: turn.threadId },
+      select: { activeRecruitingRoleId: true },
+    });
+    const running =
+      thread?.activeRecruitingRoleId &&
+      (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId, Date.now(), {
+        botId: turn.botId,
+        threadId: turn.threadId,
+      }));
+    if (running)
+      return partial
+        ? reportGroupHandoffOutcome(deps, stage, groupId, { status: "progress" })
+        : undefined;
+    if (partial) return undefined;
+  }
+  return reportGroupHandoffOutcome(deps, stage, groupId, outcome);
+}
+
+/** The worker's research stopped being followed before the provider finished it. */
+export async function reportStalledGroupStage(
+  deps: StageDeps,
+  worker: Pick<WorkerTurn, "spaceId" | "threadId" | "botId" | "userId">,
+): Promise<void> {
+  const thread = await deps.prisma.thread.findFirst({
+    where: { id: worker.threadId, spaceId: worker.spaceId },
+    select: { groupId: true },
+  });
+  if (!thread?.groupId) return;
+  const stage = await handedStage(deps.prisma, worker);
+  if (!stage) return;
+  await reportGroupHandoffOutcome(deps, stage, thread.groupId, {
+    status: "failed",
+    error: "the search is still not finished at the provider after two hours of checks",
+  });
+}
+
+/** A delegator's turn that answers a teammate's mid-stage check-in may end silently. */
+export function isStageCheckIn(
+  trigger: string,
+  blocks: readonly MessageBlock[] | undefined,
+  botId: string,
+): boolean {
+  return (
+    trigger === "follow_up" &&
+    Boolean(
+      blocks?.some(
+        (block) =>
+          block.kind === "handoff" && block.toBotId === botId && block.report === "progress",
+      ),
+    )
+  );
 }
 
 export async function loadGroupContext(

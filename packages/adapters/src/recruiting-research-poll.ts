@@ -41,6 +41,13 @@ export type RecruitingResearchPollDeps = {
   prisma: PrismaClient;
   jobs: JobPublisher;
   connector?: ConnectorProvider;
+  /** Told once when a task stops being followed before the provider finished it. */
+  onStalled?: (run: {
+    spaceId: string;
+    userId: string;
+    botId: string;
+    threadId: string;
+  }) => Promise<void>;
 };
 
 /** The wake nonce of the provider round in progress: the latest accepted reply on the task, or the first round. */
@@ -80,7 +87,8 @@ async function recruitingResearchRound(
 /**
  * True while a role's research round is still running at the provider: an active task whose
  * current round started within the poll window and has not woken the thread yet. A turn that
- * ends while waiting on it is not a stall; the wake brings the results.
+ * ends while waiting on it is not a stall; the wake brings the results. `startedBy` narrows it
+ * to research one bot started in one conversation, which is whom its wake returns to.
  */
 export async function recruitingResearchInFlight(
   prisma: Pick<PrismaClient, "externalEffect" | "recruitingResearchTask"> & {
@@ -88,9 +96,15 @@ export async function recruitingResearchInFlight(
   },
   roleId: string,
   now = Date.now(),
+  startedBy?: { botId: string; threadId: string },
 ): Promise<boolean> {
   const tasks = await prisma.recruitingResearchTask.findMany({
-    where: { roleId, state: "active", providerTaskId: { not: null } },
+    where: {
+      roleId,
+      state: "active",
+      providerTaskId: { not: null },
+      ...(startedBy ? { createdByRun: startedBy } : {}),
+    },
     select: {
       id: true,
       providerTaskId: true,
@@ -283,7 +297,12 @@ export async function pollRecruitingResearch(
     if (rows !== null) await wakeForPartialRows(deps, task, run, nonce, rows);
   }
   if (!terminal) {
-    if (attempt + 1 >= RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS) return;
+    if (attempt + 1 >= RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS) {
+      await deps.onStalled?.(run).catch((error) => {
+        getLogger().error("recruiting research stall report", error);
+      });
+      return;
+    }
     await deps.jobs.enqueue(
       recruitingResearchPollJob(
         { taskId: task.id, attempt: attempt + 1 },
