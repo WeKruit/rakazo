@@ -59,7 +59,7 @@ const EVENT_BATCH_SIZE = 200;
  * attached to a live conversational run carry it; it is cleared when a row reverts to
  * pending so the pending filters (originTrigger null | "messaging") still match.
  */
-const INTERRUPT_ORIGIN = "interrupt";
+export const INTERRUPT_ORIGIN = "interrupt";
 const PUSH_CATCH_UP_MS = 30_000;
 const POLL_ONLY_CATCH_UP_MS = 400;
 /** Without push, each sidebar wake re-lists the roster, so poll no faster than the old client did. */
@@ -790,7 +790,12 @@ export async function claimSteering(
       botId: input.botId,
       runId: input.runId,
       type: "run.steering.claimed",
-      payload: { steeringIds: steering.map((item) => item.id), nextMessageSeq },
+      payload: {
+        steeringIds: steering.map((item) => item.id),
+        // Clients drop these from the visible input queue: they are part of the run now.
+        messageIds: [...new Set(steering.map((item) => item.messageId))],
+        nextMessageSeq,
+      },
     });
     return steering.map((item) => ({
       id: item.id,
@@ -2112,6 +2117,7 @@ export const SIDEBAR_EVENT_TYPES: ReadonlySet<ProductEvent["type"]> = new Set<Pr
     "run.failed",
     "run.cancelled",
     "thread.message.created",
+    "thread.message.deleted",
     "bot.spawned",
     "bot.updated",
     "bot.archived",

@@ -390,9 +390,9 @@ describe("threadSnapshot", () => {
       threadId: "thread-1",
       bot: { computer: null },
     } as ThreadTarget);
-    await vi.waitFor(() => expect(started).toHaveLength(4));
-    // All four reads were issued before any of them resolved.
-    expect([...started].sort()).toEqual(["cursor", "messages", "run", "run"]);
+    await vi.waitFor(() => expect(started).toHaveLength(5));
+    // All five reads (the window and the input queue are both messages) were issued before any resolved.
+    expect([...started].sort()).toEqual(["cursor", "messages", "messages", "run", "run"]);
     for (const open of gates) open();
     await expect(pending).resolves.toMatchObject({ cursor: 7, messagesCursor: null });
   });

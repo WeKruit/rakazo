@@ -31,7 +31,7 @@ import {
   workActivityForTool,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
-import type { Prisma, PrismaClient, ThreadEvents } from "@rakazo/db";
+import type { Prisma, PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db";
 import {
   answerWaitingRunWithTextInTransaction,
   appendEventInTransaction,
@@ -40,8 +40,11 @@ import {
   createThreadMessageInTransaction,
   expireComputerExecutionLeases,
   IsolationError,
+  loadQueuedMessageIds,
   lockOwnedGroup,
+  QueuedMessageError,
   touchGroupUpdatedAt,
+  updateQueuedMessage,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
@@ -443,36 +446,39 @@ export async function threadSnapshot(
       deps.prisma.$transaction(
         async (tx) => {
           await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
-          const [messagePage, last, waitingRun, busyOrFailed] = await Promise.all([
-            loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
-            tx.event.findFirst({
-              where: { threadId: target.threadId },
-              orderBy: { seq: "desc" },
-              select: { seq: true },
-            }),
-            // Waiting asks win over a concurrent busy run, including peer bot_message
-            // and ticket runs. Busy ticket work stays off the transcript below.
-            tx.run.findFirst({
-              where: {
-                botId: target.botId,
-                threadId: target.threadId,
-                status: { in: ["waiting_input", "waiting_takeover"] },
-              },
-              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-            }),
-            tx.run.findFirst({
-              where: {
-                botId: target.botId,
-                threadId: target.threadId,
-                // Hide peer bot_message and background ticket busy/failed noise; waiting is handled above.
-                trigger: { notIn: ["bot_message", ...BACKGROUND_RUN_TRIGGERS] },
-                status: { in: [...ACTIVE_RUN_STATUSES, "failed"] },
-              },
-              // The id tiebreak keeps ordering deterministic under equal
-              // timestamps, matching the supersession probe below.
-              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-            }),
-          ]);
+          const [messagePage, last, waitingRun, busyOrFailed, queuedMessageIds] = await Promise.all(
+            [
+              loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
+              tx.event.findFirst({
+                where: { threadId: target.threadId },
+                orderBy: { seq: "desc" },
+                select: { seq: true },
+              }),
+              // Waiting asks win over a concurrent busy run, including peer bot_message
+              // and ticket runs. Busy ticket work stays off the transcript below.
+              tx.run.findFirst({
+                where: {
+                  botId: target.botId,
+                  threadId: target.threadId,
+                  status: { in: ["waiting_input", "waiting_takeover"] },
+                },
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              }),
+              tx.run.findFirst({
+                where: {
+                  botId: target.botId,
+                  threadId: target.threadId,
+                  // Hide peer bot_message and background ticket busy/failed noise; waiting is handled above.
+                  trigger: { notIn: ["bot_message", ...BACKGROUND_RUN_TRIGGERS] },
+                  status: { in: [...ACTIVE_RUN_STATUSES, "failed"] },
+                },
+                // The id tiebreak keeps ordering deterministic under equal
+                // timestamps, matching the supersession probe below.
+                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              }),
+              loadQueuedMessageIds(tx, target.threadId),
+            ],
+          );
           const run = waitingRun ?? busyOrFailed;
           // A failed run is only the thread's word while it is still the newest
           // terminal run; otherwise a stale failure would resurface in the
@@ -524,6 +530,7 @@ export async function threadSnapshot(
             last,
             run: currentRun,
             liveEvents,
+            queuedMessageIds,
           };
         },
         { timeout: 15_000, maxWait: 5_000 },
@@ -536,6 +543,7 @@ export async function threadSnapshot(
       messages: messagesWithLiveEvents(core.messagePage.messages, core.liveEvents),
       olderCursor: core.messagePage.olderCursor,
       ...core.window,
+      queuedMessageIds: core.queuedMessageIds,
       run: core.run ? mapRun(core.run) : null,
       computer: toComputerStatus(target.botId, target.bot.computer, busyBotName),
     };
@@ -544,7 +552,7 @@ export async function threadSnapshot(
   const core = await deps.prisma.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
-      const [messagePage, last, activeRuns, recentTerminals] = await Promise.all([
+      const [messagePage, last, activeRuns, recentTerminals, queuedMessageIds] = await Promise.all([
         loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
         tx.event.findFirst({
           where: { threadId: target.threadId },
@@ -575,6 +583,7 @@ export async function threadSnapshot(
           orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
           take: 50,
         }),
+        loadQueuedMessageIds(tx, target.threadId),
       ]);
       const liveEvents =
         activeRuns.length > 0
@@ -602,6 +611,7 @@ export async function threadSnapshot(
         activeRuns,
         terminalRun: pickLatestTerminalRun(recentTerminals),
         liveEvents,
+        queuedMessageIds,
       };
     },
     { timeout: 15_000, maxWait: 5_000 },
@@ -616,6 +626,7 @@ export async function threadSnapshot(
     messages: messagesWithLiveEvents(core.messagePage.messages, core.liveEvents),
     olderCursor: core.messagePage.olderCursor,
     ...core.window,
+    queuedMessageIds: core.queuedMessageIds,
     // Match the live reducer: a failed latest terminal stays in run even while siblings are
     // still active or start late. A newer completed/cancelled terminal clears it.
     run:
@@ -911,16 +922,15 @@ export async function sendThreadMessage(
           const active = activeRuns.find(steersUserMessage) ?? activeRuns[0];
           if (active) {
             const steers = steersUserMessage(active);
-            if (
-              !(await answerStatusQuestion(
-                tx,
-                actor,
-                target.threadId,
-                target.botId,
-                active,
-                input.text,
-              ))
-            )
+            const queued = !(await answerStatusQuestion(
+              tx,
+              actor,
+              target.threadId,
+              target.botId,
+              active,
+              input.text,
+            ));
+            if (queued)
               await tx.steeringMessage.create({
                 data: {
                   messageId: message.id,
@@ -945,6 +955,7 @@ export async function sendThreadMessage(
                 replyToMessageId,
                 replyQuote,
                 replyPreview,
+                ...(queued ? { queued: true } : {}),
               },
             });
             return { message, runs: [active], eventSeq: event.seq };
@@ -1124,6 +1135,8 @@ export async function sendThreadMessage(
           }
         }
         const runs: Array<{ id: string; taskId: string; botId: string; status: string }> = [];
+        // Queued only while every addressed bot holds it as unread steering.
+        let steeredCount = 0;
         for (const botId of targetBotIds) {
           const answered = answeredByBotId.get(botId);
           if (answered) {
@@ -1135,7 +1148,8 @@ export async function sendThreadMessage(
             const steers = steersUserMessage(active);
             if (
               !(await answerStatusQuestion(tx, actor, target.threadId, botId, active, input.text))
-            )
+            ) {
+              steeredCount += 1;
               await tx.steeringMessage.create({
                 data: {
                   messageId: message.id,
@@ -1145,6 +1159,7 @@ export async function sendThreadMessage(
                   ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
                 },
               });
+            }
             runs.push(active);
             continue;
           }
@@ -1202,6 +1217,7 @@ export async function sendThreadMessage(
             replyToMessageId,
             replyQuote,
             replyPreview,
+            ...(steeredCount > 0 && steeredCount === targetBotIds.length ? { queued: true } : {}),
           },
         });
         return { message, runs, eventSeq: event.seq };
@@ -1234,6 +1250,41 @@ export async function sendThreadMessage(
     }
   }
   return sendResult(committed.message, committed.runs);
+}
+
+/** Edit, remove, or send now a message the working reply has not read yet. */
+export async function updateQueuedThreadMessage(
+  deps: { prisma: PrismaClient; events: ThreadEvents; jobs: JobPublisher },
+  actor: Actor,
+  target: ThreadTarget,
+  input: { messageId: string; change: QueuedMessageChange },
+) {
+  const result = await updateQueuedMessage(deps.prisma, {
+    spaceId: actor.spaceId,
+    threadId: target.threadId,
+    userId: actor.userId,
+    messageId: input.messageId,
+    change: input.change,
+  }).catch((error: unknown) => {
+    if (error instanceof QueuedMessageError) {
+      throw new ORPCError(error.code === "applied" ? "CONFLICT" : "BAD_REQUEST", {
+        message: error.message,
+      });
+    }
+    throw error;
+  });
+  await Promise.all([
+    result.eventSeq == null
+      ? undefined
+      : deps.events.notify(target.threadId, result.eventSeq).catch((error) => {
+          // Subscribers catch up from the durable event cursor after a missed realtime wake.
+          getLogger().error("queued message realtime notification", error);
+        }),
+    enqueueRunsNeedingContinue(
+      deps.jobs,
+      result.startedRunIds.map((id) => ({ id, status: "queued" })),
+    ),
+  ]);
 }
 
 /**

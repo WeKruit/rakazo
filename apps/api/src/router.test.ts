@@ -5625,6 +5625,7 @@ describe("threads.followUp", () => {
             role: "user",
             blocks: [{ kind: "text", text }],
             runIds: ["run-1"],
+            ...(active ? { queued: true } : {}),
           },
         }),
       });

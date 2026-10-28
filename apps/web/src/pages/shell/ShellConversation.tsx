@@ -43,6 +43,7 @@ const RoleSetupCard = lazyPanel(() =>
 import type { SchedulingPlanHandoff } from "../recruiting/SchedulingPlan";
 import { TabLoading } from "../recruiting/shared";
 import { Composer } from "../shell/Composer";
+import { QueuedMessages } from "../shell/queued-messages";
 import { Transcript } from "../shell/Transcript";
 import type { useShellController } from "../shell/useShellController";
 import { WindowChrome } from "../WindowChrome";
@@ -203,12 +204,13 @@ export function ShellConversation({
     workingRuns,
     transcriptRunning,
     composerRunning,
-    shownSteer,
     resuming,
     displayedRunError,
     displayedRunErrorId,
     handleRunErrorPresented,
     transcriptMessages,
+    queuedMessages,
+    changeQueuedMessage,
     transcriptArtifactTarget,
     resolveTranscriptBot,
     workingBots,
@@ -848,18 +850,22 @@ export function ShellConversation({
                     })}
                 </div>
               ) : null}
-              {resuming || shownSteer ? (
+              {resuming ? (
                 <div
                   role="status"
                   className="px-6 pb-2 text-center text-[13px] text-muted-foreground"
                 >
-                  {resuming ? (
-                    <Trans>Interrupted, resuming…</Trans>
-                  ) : shownSteer === "applied" ? (
-                    <Trans>Interjection applied</Trans>
-                  ) : (
-                    <Trans>Interjection queued</Trans>
-                  )}
+                  <Trans>Interrupted, resuming…</Trans>
+                </div>
+              ) : null}
+              {!emptyCrmChat && queuedMessages.length ? (
+                <div className="-mb-2 px-3 md:px-6">
+                  <QueuedMessages
+                    messages={queuedMessages}
+                    onEdit={(id, text) => changeQueuedMessage(id, { action: "edit", text })}
+                    onRemove={(id) => changeQueuedMessage(id, { action: "remove" })}
+                    onSendNow={(id) => changeQueuedMessage(id, { action: "send_now" })}
+                  />
                 </div>
               ) : null}
               {recordingSkill ? (

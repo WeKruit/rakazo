@@ -53,6 +53,8 @@ export type LiveThread = {
   computer?: { busyBotName: string | null } | null;
   /** Tool calls by execution id, so a start and its completion close as a pair in any order. */
   toolExecutions?: { open: string[]; done: string[] };
+  /** User messages a working reply has not read yet; they stay editable until it does. */
+  queuedMessageIds?: readonly string[];
 };
 
 export type LiveThreadEvent = {
@@ -77,8 +79,10 @@ const SNAPSHOT_EVENT_TYPES = new Set([
   "agent.tool.completed",
   "thread.message.created",
   "thread.message.updated",
+  "thread.message.deleted",
   "thread.message.reaction",
   "run.started",
+  "run.steering.claimed",
   "run.requeued",
   "run.waiting_input",
   "computer.takeover.requested",
@@ -258,9 +262,27 @@ export function reduceThreadEvent<S extends LiveThread>(prev: S, event: LiveThre
   return next as S;
 }
 
+function withoutQueued(prev: LiveThread, ids: readonly unknown[]): LiveThread {
+  const queued = prev.queuedMessageIds;
+  if (!queued?.some((id) => ids.includes(id))) return prev;
+  return { ...prev, queuedMessageIds: queued.filter((id) => !ids.includes(id)) };
+}
+
 function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
   const payload = event.payload ?? {};
   const cursor = nextCursor(prev, event);
+  if (event.type === "run.steering.claimed") {
+    const ids = Array.isArray(payload.messageIds) ? payload.messageIds : [];
+    return { ...withoutQueued(prev, ids), cursor };
+  }
+  if (event.type === "thread.message.deleted") {
+    const id = payload.messageId;
+    return {
+      ...withoutQueued(prev, [id]),
+      cursor,
+      messages: prev.messages.filter((message) => message.id !== id),
+    };
+  }
   if (event.type === "run.requeued") {
     const status = payload.status;
     const run = runsOf(prev).find((candidate) => candidate.id === event.runId);
@@ -285,7 +307,15 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     };
   }
   if (event.type === "thread.cleared") {
-    return { ...prev, cursor, messages: [], olderCursor: null, run: null, activeRuns: [] };
+    return {
+      ...prev,
+      cursor,
+      messages: [],
+      olderCursor: null,
+      run: null,
+      activeRuns: [],
+      queuedMessageIds: [],
+    };
   }
   if (event.type === "run.started") {
     // A replayed start older than the snapshot must not revive a run that already ended.
@@ -519,7 +549,19 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     );
     const { remaining } = takeLiveMessage(base.messages, progressMessageId(event));
     const without = remaining.filter((message) => !replacedSubagent(message, replacedSubagentIds));
-    return { ...base, cursor, messages: upsertMessageById(without, next) };
+    const queued = base.queuedMessageIds ?? [];
+    // A replay older than the snapshot must not requeue a message the run already read.
+    const queues =
+      event.type === "thread.message.created" &&
+      payload.queued === true &&
+      (event.seq ?? 0) > (prev.cursor ?? -1) &&
+      !queued.includes(id);
+    return {
+      ...base,
+      cursor,
+      messages: upsertMessageById(without, next),
+      ...(queues ? { queuedMessageIds: [...queued, id] } : {}),
+    };
   }
   return prev;
 }

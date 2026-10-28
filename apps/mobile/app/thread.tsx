@@ -1448,6 +1448,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
                 event.type === "agent.tool.completed" ||
                 event.type === "thread.message.created" ||
                 event.type === "thread.message.updated" ||
+                event.type === "thread.message.deleted" ||
                 event.type === "thread.message.reaction" ||
                 event.type === "thread.subagent" ||
                 event.type === "thread.cloud_agent" ||

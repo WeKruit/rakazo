@@ -556,6 +556,19 @@ export const appContract = {
         runIds: z.array(Id).optional(),
       }),
     ),
+    /** Change a message still waiting for the working reply; CONFLICT once the run read it. */
+    updateQueued: oc
+      .input(
+        threadTarget.safeExtend({
+          messageId: Id,
+          change: z.discriminatedUnion("action", [
+            z.object({ action: z.literal("edit"), text: z.string().trim().min(1) }),
+            z.object({ action: z.literal("remove") }),
+            z.object({ action: z.literal("send_now") }),
+          ]),
+        }),
+      )
+      .output(z.object({ ok: z.literal(true) })),
     /** Client-measured milliseconds from Send for one turn; logged only. */
     reportTiming: oc
       .input(

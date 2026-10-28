@@ -31,6 +31,8 @@ export const ProductEventType = z.enum([
   "thread.message.created",
   "thread.cleared",
   "thread.message.updated",
+  /** A queued message its sender removed before the run read it. */
+  "thread.message.deleted",
   "thread.message.reaction",
   "thread.progress",
   "thread.artifact",
