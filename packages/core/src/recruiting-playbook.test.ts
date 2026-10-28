@@ -496,6 +496,8 @@ describe("playbook stage machine", () => {
     expect(present).toContain("do not require a rating for every person");
     expect(present).toContain("Results calibration panel");
     expect(present).toContain("offer the next step");
+    // Ten saved people outside the role's area are not ten fits: one more search, not a relax ask.
+    expect(present).toContain("Search again only when fewer than ten saved people fit");
     expect(nextPlaybookStep("feedback", { hasBrief: true, savedCandidates: 44 })?.prompt).toContain(
       "pick 10 new people",
     );

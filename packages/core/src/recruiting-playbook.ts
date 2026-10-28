@@ -367,7 +367,7 @@ export function nextPlaybookStep(
           : "Show the 10-person calibration list",
         prompt: remaining
           ? `Run the calibration quick search with people data search until ${CALIBRATION_TARGET} people are saved (now ${facts.savedCandidates}), then record the round (the list is posted in chat automatically). ${ONLY_OWN_LIST}`
-          : `Do not search again: pick 10 of the saved people and record them as this round (recruiting_research calibration_round), shown in the Results calibration panel. The panel already has per-person feedback controls, so do not build a separate per-person rating card. ${NEXT_STEP_CARD}Let the recruiter give feedback once on anyone, any subset or the overall direction; do not require a rating for every person.`,
+          : `Pick 10 of the saved people and record them as this round (recruiting_research calibration_round), shown in the Results calibration panel. Search again only when fewer than ten saved people fit the role's hard requirements such as its location: then run four new, differently worded people searches together in one step and record the ten from all saved people; never ask the recruiter to relax a requirement before that search. The panel already has per-person feedback controls, so do not build a separate per-person rating card. ${NEXT_STEP_CARD}Let the recruiter give feedback once on anyone, any subset or the overall direction; do not require a rating for every person.`,
       };
     }
     case "feedback":
