@@ -112,6 +112,7 @@ import {
 } from "./subagent-delivery.js";
 import { sanitizeThought } from "./thought.js";
 import { textContentArg } from "./tool-text.js";
+import { REPORT_BEFORE_END } from "./turn-report.js";
 
 const running = new Map<string, { controller: AbortController; work: Promise<void> }>();
 interface ToolCallBudget {
@@ -740,11 +741,16 @@ export class PiAgentRuntime implements AgentRuntime {
                 silentToolContinuations < MAX_SILENT_TOOL_CONTINUATIONS
               ) {
                 silentToolContinuations += 1;
+                // Unreported work: the last continuation asks for the report itself.
+                const owed = request.reportOwed?.() ?? false;
                 agent.followUp({
                   role: "user",
-                  content: request.allowSilentEmpty
-                    ? SILENT_ALLOWED_TOOL_CONTINUATION_PROMPT
-                    : SILENT_TOOL_CONTINUATION_PROMPT,
+                  content:
+                    owed && silentToolContinuations === MAX_SILENT_TOOL_CONTINUATIONS
+                      ? REPORT_BEFORE_END
+                      : request.allowSilentEmpty && !owed
+                        ? SILENT_ALLOWED_TOOL_CONTINUATION_PROMPT
+                        : SILENT_TOOL_CONTINUATION_PROMPT,
                   timestamp: Date.now(),
                 });
               }
@@ -857,8 +863,9 @@ export class PiAgentRuntime implements AgentRuntime {
             streamed = budgetMessage;
           }
         } else if (!host.pausePending && toolWorkPendingFinal) {
-          if (request.allowSilentEmpty) {
-            // Scheduled/FYI runs may finish after tools with no user-visible text.
+          // Scheduled/FYI runs may finish after tools with no user-visible text; unreported work
+          // ends empty too, and the host posts the report from its own records.
+          if (request.allowSilentEmpty || request.reportOwed?.()) {
             streamed = "";
           } else {
             throw new Error(MISSING_TOOL_FINAL_RESPONSE_ERROR);

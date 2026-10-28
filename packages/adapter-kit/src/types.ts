@@ -520,6 +520,11 @@ export interface AgentRunRequest {
   allowSilentEmpty?: boolean;
   /** Contextual fallback when a non-silent run produces no written response. */
   emptyResponseText?: string;
+  /**
+   * True while the run's consequential work has no visible report yet. The runtime then asks for
+   * one before ending and, if the model still writes none, ends empty for the host to report.
+   */
+  reportOwed?: () => boolean;
   executeTool?: (
     name: string,
     args: Record<string, unknown>,

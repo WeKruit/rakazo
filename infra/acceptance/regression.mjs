@@ -7,8 +7,9 @@
 // Usage:
 //   RAKAZO_URL=https://… RAKAZO_ORIGIN=https://… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
 //     node infra/acceptance/regression.mjs [--suite gate|full] [--cases <dir>] [--only a,b] [--out <dir>]
-//   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50,
-//                  pasted English JD (needs <cases>/t3.txt)
+//   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50
+//                  (which must end with a report stating the new count), pasted English JD
+//                  (needs <cases>/t3.txt)
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
 //                  coordinator in the t1 chat, or --dispatch-group <id>), and the booking card
@@ -144,6 +145,51 @@ function tenChecks(messages, failures, { card = true } = {}) {
   if (!next) failures.push("no next-step card after the ten");
   else if (!/\bI'd\b/.test(next.text)) failures.push("next-step card recommends nothing");
 }
+
+/**
+ * The scale-out turn ends with a report that states the new count: its last text, before any
+ * card, names more people than the role had when the request was sent. A card or a guard may
+ * follow the report but never stand in for it.
+ */
+function scaleReportChecks(messages, failures, scale) {
+  if (!scale?.at) return failures.push("no scale request was sent");
+  const sentAt = Date.parse(scale.at);
+  const later = messages.filter((message) => Date.parse(message.createdAt) > sentAt);
+  // The window ends at the recruiter's next message; a progress question does not end it.
+  const next = later.find(
+    (message) =>
+      message.role === "user" &&
+      !message.internal &&
+      !/进度|how(?:['’]s| is) it going|status/i.test(botText(message)),
+  );
+  const turn = recruiterSees(later).filter(
+    (message) =>
+      (!next || Date.parse(message.createdAt) < Date.parse(next.createdAt)) &&
+      !/^Still working:/.test(botText(message)),
+  );
+  const texts = turn
+    .map((message) =>
+      (message.blocks ?? [])
+        .filter((block) => block.kind === "text")
+        .map((block) => block.text ?? "")
+        .join("\n"),
+    )
+    .filter((text) => text.trim());
+  const last = texts.at(-1);
+  if (!last) return failures.push("scale-out ended without a report");
+  const counts = [
+    ...last.matchAll(/(\d{2,})\s*(?:more\s+|new\s+)?(?:people|candidates|profiles|人)/gi),
+  ].map((match) => Number(match[1]));
+  const before = Number(scale.before ?? 0);
+  if (!counts.some((count) => count > before))
+    failures.push(
+      `scale-out report does not state the new count (had ${before}): "${last.slice(0, 160)}"`,
+    );
+}
+
+// The send confirmation card: an approval the recruiter has not answered.
+const sendCard = (message) =>
+  (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId);
 
 /** Sends one recruiter message and waits until the crew settles. Never answers a card. */
 async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
@@ -294,7 +340,11 @@ if (wanted.has("progress"))
     if (exit !== 0)
       failures.push("find-50 did not pass after the progress question; see progress.log");
     const report = reportOf("progress");
-    if (report.groupId) commonChecks(await messagesOf(report.groupId), failures);
+    if (report.groupId) {
+      const messages = await settled(report.groupId);
+      commonChecks(messages, failures);
+      scaleReportChecks(messages, failures, report.milestones?.scale_sent);
+    }
   });
 
 if (wanted.has("t3"))
@@ -348,8 +398,11 @@ if (wanted.has("t1"))
     ]);
     if (code !== 0) failures.push("start or find-50 did not pass; see t1.log");
     const groupId = reportOf("t1").groupId;
-    // The scale message goes in right after the ten, so no next-step card is expected here.
-    tenChecks(await settled(groupId), failures, { card: false });
+    // The scale message goes in right after the ten, so no next-step card is expected here, and
+    // the scale-out ends with its own report.
+    const scaled = await settled(groupId);
+    tenChecks(scaled, failures, { card: false });
+    scaleReportChecks(scaled, failures, reportOf("t1").milestones?.scale_sent);
     const draft = await say(groupId, "来个campign draft看看", {
       until: (replies) =>
         (replies
@@ -374,8 +427,6 @@ if (wanted.has("t1"))
         `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
       );
     // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
-    const sendCard = (message) =>
-      (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId);
     const send = await say(groupId, "发20个人的先", {
       until: (replies) => replies.some(sendCard),
       limitMs: 8 * 60_000,
@@ -402,7 +453,13 @@ const DISPATCH = [
     repeatLookup: true,
   },
   { ask: "给第一个人写一封邮件草稿", owners: /outreach/i, capability: "email draft" },
-  { ask: "把这封邮件发给他", owners: /outreach/i, capability: "send confirmation" },
+  // A one-person send right after the draft ends on its confirmation card, never a decline.
+  {
+    ask: "send this email to them",
+    owners: /outreach/i,
+    capability: "send confirmation",
+    sendCard: true,
+  },
   { ask: "下周二我有哪些时间可以面试", owners: /schedul/i, capability: "availability" },
   { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
   { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
@@ -466,7 +523,13 @@ if (wanted.has("dispatch"))
     const notes = [];
     for (const item of DISPATCH) {
       const askedAt = new Date().toISOString();
-      const { replies } = await say(groupId, item.ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
+      const { replies } = await say(groupId, item.ask, {
+        quietMs: 45_000,
+        limitMs: 6 * 60_000,
+        ...(item.sendCard ? { until: (replies) => replies.some(sendCard) } : {}),
+      });
+      if (item.sendCard && !replies.some(sendCard))
+        failures.push(`${item.capability}: did not end on a send confirmation card`);
       if (item.repeatLookup) {
         // Everyone was already looked up, so no lookup in this turn may pay a source again.
         const paid = (await readEvents(groupId))
