@@ -362,7 +362,27 @@ const STATUS_LABELS: Record<WorkActivity, string> = {
   working: "working on it",
 };
 
-/** The reply to a status question: what is running now and for how long. */
-export function statusAnswer(input: { activity: WorkActivity; elapsedMs: number }): string {
-  return `Still working: ${STATUS_LABELS[input.activity]}, ${formatWorkDuration(input.elapsedMs)} so far. The result will appear here when it's ready.`;
+/** The middle of past durations of the same kind of work, or undefined with fewer than three. */
+export function typicalDurationMs(durations: readonly number[]): number | undefined {
+  if (durations.length < 3) return undefined;
+  const sorted = [...durations].sort((a, b) => a - b);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+/**
+ * The reply to a status question: what is running now, for how long, and, when past runs of the
+ * same kind give a typical length, roughly how much is left.
+ */
+export function statusAnswer(input: {
+  activity: WorkActivity;
+  elapsedMs: number;
+  typicalMs?: number;
+}): string {
+  const now = `Still working: ${STATUS_LABELS[input.activity]}, ${formatWorkDuration(input.elapsedMs)} so far.`;
+  if (input.typicalMs === undefined) return `${now} The result will appear here when it's ready.`;
+  const left = input.typicalMs - input.elapsedMs;
+  if (left <= 0)
+    return `${now} This is taking longer than usual; the result will appear here when it's ready.`;
+  const minutes = Math.ceil(left / 60_000);
+  return `${now} Usually done in ${left < 60_000 ? "under a minute" : `about ${minutes} min`}.`;
 }

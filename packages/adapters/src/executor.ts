@@ -530,7 +530,11 @@ import {
   observeShellCommand,
   SHELL_STILL_RUNNING_NOTICE,
 } from "./shell-command-stream.js";
-import { createSilenceWatch, SILENT_RUN_STOP_TEXT } from "./silence-watch.js";
+import {
+  createSilenceWatch,
+  SILENT_RUN_RETRIED_TEXT,
+  SILENT_RUN_STOP_TEXT,
+} from "./silence-watch.js";
 import { isExactNoResponse, NO_RESPONSE, stripNoResponseReply } from "./silent-reply.js";
 import {
   listAgentSkillRecords,
@@ -12709,17 +12713,24 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await requeueComputerRun(deps, run, workerId, fence, resumeCheckpoint, heldForTakeover);
             return;
           }
+          const reported = redactSecrets(
+            error instanceof Error ? error.message : String(error),
+            runSecrets,
+          );
+          const retryable = hideVendors && (silenceWatch.fired || MODEL_OUTAGE.test(reported));
+          const retried =
+            retryable &&
+            (await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } })) > 0;
           const message = silenceWatch.fired
-            ? SILENT_RUN_STOP_TEXT
-            : redactSecrets(error instanceof Error ? error.message : String(error), runSecrets);
-          // A recruiter's request must not vanish because the model went silent or was briefly
-          // unavailable after its own retries: run the turn once more before reporting failure.
-          if (
-            hideVendors &&
-            !silenceWatch.fired &&
-            MODEL_OUTAGE.test(message) &&
-            !(await deps.prisma.attempt.count({ where: { runId, error: MODEL_OUTAGE_RETRY } }))
-          ) {
+            ? retried
+              ? SILENT_RUN_RETRIED_TEXT
+              : SILENT_RUN_STOP_TEXT
+            : reported;
+          // A recruiter's request must not vanish because the model went silent, the run made no
+          // progress for the silence limit, or the model was briefly unavailable after its own
+          // retries: resume the turn once (the resume brief says what was done and cut off)
+          // before reporting failure.
+          if (retryable && !retried) {
             const released = await writeComputerRunRequeue(
               deps,
               run,

@@ -4,6 +4,9 @@
  */
 export const SILENT_RUN_LIMIT_MS = 20 * 60_000;
 export const SILENT_RUN_STOP_TEXT = "Stopped after 20 minutes without progress.";
+/** The same stop after one automatic resume also made no progress. */
+export const SILENT_RUN_RETRIED_TEXT =
+  "Stopped: no progress for 20 minutes, even after one automatic retry.";
 
 /**
  * Watches a run's runtime events. `touch` marks activity; once nothing has arrived for `limitMs`,
