@@ -37,6 +37,19 @@ const object = (value: unknown) =>
     : undefined;
 const sameEmail = (a: unknown, b: string) =>
   typeof a === "string" && a.toLowerCase() === b.toLowerCase();
+/** The create_booking arguments the reviewed plan allows, used when the agent passes none. */
+export function schedulingBookingArguments(plan: RecruitingSchedulingPlan) {
+  return {
+    eventTypeId: plan.calendar.eventTypeId,
+    start: plan.calendar.start,
+    lengthInMinutes: plan.calendar.lengthInMinutes,
+    attendee: {
+      name: plan.candidate.name,
+      email: plan.candidate.email,
+      timeZone: plan.candidate.timeZone,
+    },
+  };
+}
 export function assertSchedulingCall(
   plan: RecruitingSchedulingPlan,
   operation: "book" | "confirm",

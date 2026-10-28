@@ -85,7 +85,8 @@ export const RecruitingSchedulingToolInputSchema = z.discriminatedUnion("operati
   z.strictObject({
     operation: z.literal("book"),
     planId: Id,
-    arguments: z.record(z.string(), z.unknown()),
+    // Omitted: the server books the reviewed plan's own slot and candidate.
+    arguments: z.record(z.string(), z.unknown()).optional(),
   }),
   z.strictObject({
     operation: z.literal("confirm"),
