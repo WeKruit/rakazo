@@ -62,10 +62,11 @@ import { oauthMaterialSecrets } from "./mcp-oauth.js";
 import { type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
+  lookedUpContacts,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   requireQuickSearchBeforeResearch,
-  savedContactEmails,
+  savedContactLookups,
 } from "./recruiting-research.js";
 import {
   assertSchedulingCall,
@@ -389,7 +390,7 @@ function localContactTools(
   const tool: ConnectorTool = {
     name: `mcp__${assignment.server.slug}__find_emails`,
     description:
-      "Find email addresses for saved candidates. Pass each person's name, LinkedIn URL and current company. One call looks up the first 50; the result names who is left for the next call. When the recruiter asks again after a lookup, pass the role's next results in the same order after those already looked up, never asking which. Checks several contact sources one after another, each only for people still without an email, and reuses emails already found for this account. A source with no credits left is skipped for the next one, so never check credits or hold back a lookup over a low balance. Waits for the result (up to about four minutes). Returns, per person, the emails found (type work or personal, and the source's delivery check, e.g. DELIVERABLE, or null when unchecked) and what each source did, plus a summary. Its results are the saved contacts. Does not send anything.",
+      "Find email addresses for saved candidates. Pass each person's name, LinkedIn URL and current company. One call looks up the first 50; the result names who is left for the next call. When the recruiter asks again after a lookup, pass the role's next results in the same order after those already looked up, never asking which. Checks several contact sources one after another, each only for people still without an email, and reuses emails already found for this account. A source that already found nothing for someone, on any role, is never charged for them again (the summary counts people skipped this way as already_looked_up); pass recheck only when the recruiter explicitly asks to search those people again. A source with no credits left is skipped for the next one, so never check credits or hold back a lookup over a low balance. Waits for the result (up to about four minutes). Returns, per person, the emails found (type work or personal, and the source's delivery check, e.g. DELIVERABLE, or null when unchecked) and what each source did, plus a summary. Its results are the saved contacts. Does not send anything.",
     inputSchema: z.toJSONSchema(FindEmailsInput, { io: "input" }),
     readOnly: true,
     route: {
@@ -768,8 +769,13 @@ export class McpConnector implements ConnectorProvider {
             }));
           if (assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT)
             for (const tool of remoteTools) directTools.add(tool);
-          remoteTools.push(...localTools(assignment, listed.tools));
-          return remoteTools;
+          const local = localTools(assignment, listed.tools);
+          // Contact lookups go through find_emails, which never pays twice for one person.
+          const lookup = local.some((tool) => tool.route?.toolName === FIND_EMAILS);
+          return [
+            ...remoteTools.filter((tool) => !lookup || tool.route?.toolName !== "enrich_bulk"),
+            ...local,
+          ];
         } catch (error) {
           // A single unavailable server must not hide tools from other connectors.
           getLogger().error(
@@ -901,6 +907,18 @@ export class McpConnector implements ConnectorProvider {
         call.route,
         call.route.toolName,
       );
+      if (
+        assignment.server.endpoint === FULLENRICH_MCP &&
+        assignment.server.transport === "streamable_http" &&
+        call.route.toolName === "enrich_bulk"
+      ) {
+        yield {
+          type: "error",
+          message:
+            "Contact lookups go through find_emails, which reuses people already looked up. Call find_emails instead.",
+        };
+        return;
+      }
       const peopleSearch =
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
@@ -1346,11 +1364,13 @@ export class McpConnector implements ConnectorProvider {
       const contactout = process.env.CONTACTOUT_API_KEY?.trim();
       const leadmagic = process.env.LEADMAGIC_API_KEY?.trim();
       redactions.push(...[fullenrich, contactout, leadmagic].filter((key): key is string => !!key));
+      const saved = await lookedUpContacts(this.prisma, context);
+      await savedContactLookups(this.prisma, context, server, FIND_EMAILS, saved);
       const result = await findEmails(input, {
         fetch: safeFetch,
         signal: context.signal,
         keys: { fullenrich, contactout, leadmagic },
-        saved: await savedContactEmails(this.prisma, context, server, FIND_EMAILS),
+        ...saved,
       });
       yield {
         type: "result",

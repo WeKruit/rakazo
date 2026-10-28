@@ -15,7 +15,7 @@ import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingResearch, listRunToolResults } from "@rakazo/db";
 import { readActorArtifact } from "./artifact-read.js";
-import type { FoundEmail } from "./contact-lookup.js";
+import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
@@ -197,28 +197,46 @@ export async function requireFullEnrichJobOwnership(
   );
 }
 
-/** Emails this account's earlier contact lookups on this connection found, by LinkedIn key. */
-export async function savedContactEmails(
+/** What this account's earlier contact lookups did, by LinkedIn key. */
+export type SavedContactLookups = {
+  /** Emails already found. */
+  emails: Map<string, FoundEmail[]>;
+  /** Sources that already searched for a person and found nothing; never charged again. */
+  searched: Map<string, Set<ContactProvider>>;
+};
+
+/** What this account's earlier contact lookups on this connection found, by LinkedIn key. */
+export async function savedContactLookups(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId">,
   server: Pick<McpServer, "id" | "revision">,
   toolName: string,
-): Promise<Map<string, FoundEmail[]>> {
-  const saved = new Map<string, FoundEmail[]>();
+  into: SavedContactLookups = { emails: new Map(), searched: new Map() },
+): Promise<SavedContactLookups> {
   for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, toolName)) {
     const people = mcpObject(receipt.result)?.people;
     for (const person of Array.isArray(people) ? people : []) {
       const entry = record(person);
       const key = linkedinPersonKey(entry?.linkedin_url);
+      if (!key) continue;
       const emails = Array.isArray(entry?.emails) ? (entry.emails as FoundEmail[]) : [];
-      if (key && emails.length && !saved.has(key)) saved.set(key, emails);
+      if (emails.length && !into.emails.has(key)) into.emails.set(key, emails);
+      for (const lookup of Array.isArray(entry?.lookups) ? entry.lookups : []) {
+        const attempt = record(lookup);
+        const provider = attempt?.provider;
+        if (
+          attempt?.outcome === "not_found" &&
+          (provider === "fullenrich" || provider === "contactout" || provider === "leadmagic")
+        )
+          into.searched.set(key, (into.searched.get(key) ?? new Set()).add(provider));
+      }
     }
   }
-  return saved;
+  return into;
 }
 
-/** Emails this account's contact lookups saved, by LinkedIn key, across its lookup connections. */
-export async function lookedUpContactEmails(
+/** What this account's contact lookups did, across its lookup connections and every role. */
+export async function lookedUpContacts(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId">,
 ) {
@@ -231,16 +249,18 @@ export async function lookedUpContactEmails(
     },
     select: { id: true, revision: true },
   });
-  const found = new Map<string, FoundEmail[]>();
+  const saved: SavedContactLookups = { emails: new Map(), searched: new Map() };
   for (const server of servers)
-    for (const [key, emails] of await savedContactEmails(
-      prisma,
-      actor,
-      server,
-      "native_find_emails",
-    ))
-      if (!found.has(key)) found.set(key, emails);
-  return found;
+    await savedContactLookups(prisma, actor, server, "native_find_emails", saved);
+  return saved;
+}
+
+/** Emails this account's contact lookups saved, by LinkedIn key, across its lookup connections. */
+export async function lookedUpContactEmails(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+) {
+  return (await lookedUpContacts(prisma, actor)).emails;
 }
 
 /** The best saved email for a person: a deliverable one first. */
