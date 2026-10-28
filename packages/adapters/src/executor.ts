@@ -986,6 +986,8 @@ export { shortQuestion };
 /** "find 50", "找100个", "scale to 200": the number of people the recruiter asked to reach. */
 export function requestedPeopleTarget(text: string): number | undefined {
   if (/e-?mail|contact|outreach|send|draft|邮件|联系|发/i.test(text)) return undefined;
+  // Updating saved people ("work history for these 11 people") is not a search for more.
+  if (/work history|experience|education|photo|经历|学历|头像/i.test(text)) return undefined;
   const match =
     /(?:find|get|source|search(?:\s+for)?|scale(?:\s+(?:up|out))?(?:\s+to)?|widen\s+to|找|搜|扩大到)\D{0,15}?(\d{2,4})/i.exec(
       text,

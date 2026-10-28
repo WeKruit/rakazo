@@ -12,12 +12,15 @@ describe("requested people target", () => {
     expect(requestedPeopleTarget(text)).toBe(target);
   });
 
-  it.each(["find emails for 20 people", "send to the first 20", "Run another round", "find 5"])(
-    "%s has no search target",
-    (text) => {
-      expect(requestedPeopleTarget(text)).toBeUndefined();
-    },
-  );
+  it.each([
+    "find emails for 20 people",
+    "send to the first 20",
+    "Run another round",
+    "find 5",
+    "Look up full work history, education and photo for these 11 people",
+  ])("%s has no search target", (text) => {
+    expect(requestedPeopleTarget(text)).toBeUndefined();
+  });
 
   it.each([
     ["lets find 50", 69, 119],
