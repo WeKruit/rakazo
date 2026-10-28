@@ -3483,6 +3483,21 @@ export function toolCompletionFromResult(
   return { ...base, result, paused };
 }
 
+/** A contact lookup's counts only (no people), so its cost is auditable. */
+function contactLookupCounts(result: unknown) {
+  const object = (value: unknown) =>
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  const summary = [result, object(result)?.details, object(result)?.result]
+    .map((value) => object(object(value)?.structuredContent))
+    .find((value) => value?.source === "local_contact_lookup")?.summary;
+  const counts = Object.entries(object(summary) ?? {}).filter(
+    ([, value]) => typeof value === "number",
+  );
+  return counts.length ? Object.fromEntries(counts) : undefined;
+}
+
 export function toolCompletionAuditPayload(
   completion: AgentToolCompletion,
   secrets: string[] = [],
@@ -3501,6 +3516,8 @@ export function toolCompletionAuditPayload(
   if (error !== undefined) {
     payload.error = sanitizeConnectorError(error, secrets);
   }
+  const lookup = contactLookupCounts(completion.result);
+  if (lookup) payload.lookup = lookup;
   if (!isAuditableToolResult(completion.result)) return payload;
 
   payload.contentTypes = completion.result.content.flatMap((part) => {
