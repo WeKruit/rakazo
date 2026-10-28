@@ -713,6 +713,9 @@ function measureFirstTen(events, round) {
     hiringCompanyStaff: hiringStaff.map((p) => `${p.name} · ${p.company}`),
   };
   if (!allShown) violation("ten_not_in_chat", `${names.length} names never all in chat`);
+  // The recruiter sees the first people within 20 s of their last answer (or of the JD with no questions).
+  if (result.firstPeopleInChatS == null || result.firstPeopleInChatS > 20)
+    violation("first_people_slow", `first people at ${result.firstPeopleInChatS ?? "never"} s`);
   if (!result.tenRecordedBeforeCard) violation("card_before_ten", "next-step card came first");
   if (result.questions && !result.plannedSearches)
     violation("no_planned_searches", "the last question carried no planned searches");
