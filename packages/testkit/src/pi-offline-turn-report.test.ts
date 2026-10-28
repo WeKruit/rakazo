@@ -3,7 +3,9 @@ import type { AgentRunRequest, AgentRuntimeEvent, ConnectorTool } from "@rakazo/
 import { PiAgentRuntime } from "@rakazo/adapters";
 import { afterEach, describe, expect, it } from "vitest";
 import { builtinAgentTools } from "../../adapters/src/builtin-tools.js";
+import { planDeclineRetry } from "../../adapters/src/turn-end-guard.js";
 import {
+  DECLINE_RETRY_NOTE,
   REPORT_BEFORE_ASK,
   REPORT_BEFORE_END,
   TurnReportLedger,
@@ -42,16 +44,18 @@ async function runWithLedger(
   model: AgentRunRequest["model"],
   tools: ConnectorTool[],
   ledger: TurnReportLedger,
+  prompt = "Find 50 people for the role.",
 ) {
   const runtime = new PiAgentRuntime();
   const runId = randomUUID();
   cleanups.push(() => runtime.abort(runId));
   const events: AgentRuntimeEvent[] = [];
+  let reply = "";
   for await (const event of runtime.run({
     botId: "fixture-bot",
     threadId: "fixture-thread",
     runId,
-    prompt: "Find 50 people for the role.",
+    prompt,
     instructions: "Complete the requested task.",
     history: [],
     tools,
@@ -69,13 +73,14 @@ async function runWithLedger(
     },
   })) {
     events.push(event);
+    if (event.type === "text") reply += event.text;
     if (event.type === "text" && event.text.trim()) ledger.report();
     if (event.type === "tool") {
       ledger.tool(event.executionId, event.name, event.args);
       if (event.name === "message_user") ledger.report();
     }
   }
-  return events;
+  return Object.assign(events, { reply });
 }
 
 describe("turn report invariant on real Pi with an offline model", () => {
@@ -157,5 +162,83 @@ describe("turn report invariant on real Pi with an offline model", () => {
     model.assertComplete();
     expect(events.at(-1)).toEqual({ type: "done" });
     expect(ledger.owed()).toEqual(["people_search"]);
+  }, 30_000);
+
+  it("retries a declined final reply once, then accepts the next reply", async () => {
+    const findEmails: ConnectorTool = {
+      name: "mcp__wekruit__find_emails",
+      description: "Look up emails",
+      inputSchema: {
+        type: "object",
+        properties: { people: { type: "array", items: { type: "string" } } },
+        required: ["people"],
+        additionalProperties: false,
+      },
+    };
+    const request = "前5个人的contact";
+    const model = await startModelEmulator({
+      steps: [
+        {
+          expect() {},
+          response: {
+            type: "text",
+            text: "I can't verify whether other contact details are saved from the records available here.",
+          },
+        },
+        {
+          expect(request) {
+            expect(lastUserText(request)).toContain(DECLINE_RETRY_NOTE.slice(0, 40));
+            expect(lastUserText(request)).toContain(findEmails.name);
+          },
+          response: {
+            type: "tool",
+            id: "lookup-1",
+            name: findEmails.name,
+            arguments: { people: ["Ana", "Ben", "Cy", "Dee", "Eli"] },
+          },
+        },
+        {
+          expect() {},
+          response: {
+            type: "text",
+            text: "Found emails for 4 of the first 5. I can't find one for Eli in any source.",
+          },
+        },
+      ],
+    });
+    cleanups.push(() => model.close());
+    // The thread's newest messages, newest first, as the guard reads them.
+    const thread: { clientNonce: string | null }[] = [{ clientNonce: "send:human" }];
+    const deps = {
+      prisma: {
+        message: { findMany: async () => thread.slice(0, 2) },
+        chatGroupMember: { findMany: async () => [] },
+      },
+    } as unknown as Parameters<typeof planDeclineRetry>[0];
+    const guard = (reply: string, ledger: TurnReportLedger) =>
+      planDeclineRetry(deps, {
+        run: { threadId: "fixture-thread", botId: "fixture-bot" },
+        reply,
+        blocks: [{ kind: "text", text: reply }],
+        request,
+        tools: [findEmails],
+        worked: ledger.worked(),
+        presentedRound: ledger.presentedRound(),
+      });
+
+    const first = new TurnReportLedger(true);
+    const declined = await runWithLedger(model.model, [findEmails], first, request);
+    const retry = await guard(declined.reply, first);
+    expect(retry?.sentence).toContain("I can't verify");
+
+    thread.unshift({ clientNonce: "autocontinue:run-1:decline" });
+    const second = new TurnReportLedger(true);
+    const retried = await runWithLedger(model.model, [findEmails], second, retry!.note);
+    model.assertComplete();
+    expect(retried.some((event) => event.type === "tool" && event.name === findEmails.name)).toBe(
+      true,
+    );
+    // A genuine gap after the one retry stands.
+    expect(await guard(retried.reply, second)).toBeUndefined();
   }, 30_000);
 });

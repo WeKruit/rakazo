@@ -12911,7 +12911,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 ),
               );
-          // A reply declining what this bot or a teammate can do is held back for one retry; the
+          // A reply that declines, defers or hands back a pick is held back for one retry; the
           // work this turn did is still reported.
           const declineRetried =
             turnReport.enabled &&
@@ -12929,6 +12929,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     )
                     .join("\n"),
                   tools,
+                  worked: turnReport.worked(),
+                  presentedRound: turnReport.presentedRound(),
+                  stage: async () => {
+                    const roleId = (
+                      await deps.prisma.thread.findUnique({
+                        where: { id: thread.id },
+                        select: { activeRecruitingRoleId: true },
+                      })
+                    )?.activeRecruitingRoleId;
+                    return roleId
+                      ? (await readRecruitingPlaybookStep(deps.prisma, roleId))?.stage
+                      : undefined;
+                  },
                 }).catch((error) => {
                   getLogger().error("run.decline guard", error);
                   return undefined;

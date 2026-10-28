@@ -657,10 +657,15 @@ export async function guardRecruitingRoleCreate(
 
 const CARD_KINDS = new Set(["ask", "approval", "mcp_approval", "connect", "app_connect", "choice"]);
 
+/** Stages whose own questions and lists are the turn's deliverable: an offer there is not a deferral. */
+const QUESTION_STAGES = new Set(["intake", "calibration_10"]);
+
 /**
- * A final reply that declines a request this bot or a teammate has a tool for, once per human
- * message: the retry note naming that tool or teammate, else undefined (the decline stands).
- * A card or question card already shown is the turn's real boundary and is never retried.
+ * A final reply that declines, defers or hands back a pick, once per human message: the retry
+ * note (naming the tool or teammate for the asked work when there is one), else undefined and
+ * the reply stands. A card or question card already shown is the turn's real boundary, and a
+ * turn that presented the ten is the first-ten deliverable, so neither is ever retried; nor is
+ * an offer or pick question while the role is still in intake or its first calibration.
  */
 export async function planDeclineRetry(
   deps: { prisma: Pick<PrismaClient, "message" | "chatGroupMember"> },
@@ -671,10 +676,18 @@ export async function planDeclineRetry(
     blocks: readonly MessageBlock[];
     request: string;
     tools: readonly { name: string }[];
+    /** The turn did consequential work. */
+    worked?: boolean;
+    /** The turn showed or recorded the round's ten. */
+    presentedRound?: boolean;
+    /** The role's playbook stage, read only when an offer or pick question needs it. */
+    stage?: () => Promise<string | undefined>;
   },
 ): Promise<DeclineRetry | undefined> {
-  if (!input.request.trim() || !declinedSentence(input.reply)) return undefined;
+  const declined = input.request.trim() ? declinedSentence(input.reply) : undefined;
+  if (!declined || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
+  if (declined.kind !== "decline" && input.worked) return undefined;
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: input.run.threadId,
@@ -712,10 +725,13 @@ export async function planDeclineRetry(
         orderBy: { createdAt: "asc" },
       })
     : [];
+  if (declined.kind !== "decline" && QUESTION_STAGES.has((await input.stage?.()) ?? ""))
+    return undefined;
   return declineRetry({
     reply: input.reply,
     request: input.request,
     tools: input.tools,
+    worked: input.worked,
     teammates: members.map(({ bot }) => ({
       id: bot.id,
       name: bot.name,

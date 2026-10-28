@@ -1065,6 +1065,21 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("never retries the first ten, intake offers or an offer after real work", async () => {
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const offer = { ...input, reply: "Do you want me to include remote people?", request: "go" };
+    expect(await planDeclineRetry(human, { ...input, presentedRound: true })).toBeUndefined();
+    const stage = vi.fn(async () => "intake");
+    expect(await planDeclineRetry(human, { ...offer, stage })).toBeUndefined();
+    expect(stage).toHaveBeenCalledOnce();
+    expect(
+      await planDeclineRetry(human, { ...offer, worked: true, stage: async () => "scale" }),
+    ).toBeUndefined();
+    expect((await planDeclineRetry(human, { ...offer, stage: async () => "scale" }))?.note).toMatch(
+      /^Your reply deferred the request/,
+    );
+  });
+
   it("leaves a turn that ended on a card alone", async () => {
     expect(
       await planDeclineRetry(

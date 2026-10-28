@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  DECLINE_RETRY_NOTE,
   declinedSentence,
   declineRetry,
   questionStatesWork,
@@ -108,16 +109,75 @@ it("questionStatesWork", () => {
   expect(questionStatesWork("Added 70 people. Keep going?")).toBe(true);
 });
 
+describe("declinedSentence", () => {
+  // Final replies seen in dispatch acceptance runs and earlier recruiter chats.
+  const declines: [string, string][] = [
+    [
+      "I can't verify whether other contact details are saved from the records available here.",
+      "decline",
+    ],
+    [
+      "I can't safely use the available approval flow for a send to Abe alone because it would include the other recipients.",
+      "decline",
+    ],
+    [
+      "I can't find the original email thread or the saved outreach record, so I can't prepare a send-ready message or approval card yet.",
+      "decline",
+    ],
+    ["Not ready to send: contact history and suppression unknown.", "decline"],
+    ["我无法确认这些人的邮箱是否已保存。", "decline"],
+    ["我不能直接发送这封邮件。", "decline"],
+    ["我没法查到他的联系方式。", "decline"],
+    ["I haven't looked up their emails yet. Do you want me to do that now?", "defer"],
+    ["Would you like me to draft the first email?", "defer"],
+    ["Want me to book Wednesday afternoon?", "defer"],
+    ["需要你先确认收件人，我再准备邮件。", "defer"],
+    ["要不要我先帮你查一下他们的邮箱？", "defer"],
+    ["Which people should I send this to?", "pick"],
+    ["Which people?", "pick"],
+    ["Which of them do you want me to email?", "pick"],
+    ["你想发给哪些人？", "pick"],
+  ];
+  it.each(declines)("flags %s", (reply, kind) => {
+    expect(declinedSentence(reply)?.kind).toBe(kind);
+  });
+
+  // Reports, results and real questions that are not a decline.
+  const reports = [
+    "Added 70 people. The pool is now 139.",
+    "I didn't send anything.",
+    "Nothing was sent.",
+    "No emails were sent yet; the send card is waiting for you.",
+    "Found emails for 4 of the first 5 people; Dana Li has none on file.",
+    "Here are the ten for this round.",
+    "Which of these look closest to what you want?",
+    "已为前5个人找到邮箱，其中1人没有找到。",
+    "Booked Wednesday at 2 PM; the confirmation card is above.",
+    "The send card is above; once you confirm, the five emails go out.",
+    "下周三约哪天下午比较方便？",
+  ];
+  it.each(reports)("leaves %s alone", (reply) => {
+    expect(declinedSentence(reply)).toBeUndefined();
+  });
+
+  it("returns the declining sentence itself", () => {
+    expect(
+      declinedSentence("Added 20 people. I can't verify tenure for three of them.")?.sentence,
+    ).toBe("I can't verify tenure for three of them.");
+  });
+});
+
 describe("declineRetry", () => {
   const replyThread =
     "I can't send this message through the available approval flow: it requires replying to an existing email.";
   const notReady = "Not ready to send: contact history and suppression unknown.";
-  it("detects the declines seen in regression runs", () => {
-    expect(declinedSentence(replyThread)).toBe(replyThread);
-    expect(declinedSentence(notReady)).toBe(
-      "Not ready to send: contact history and suppression unknown.",
-    );
-    expect(declinedSentence("Added 70 people. The pool is now 139.")).toBeUndefined();
+
+  it("asks for a best-guess action or one question card, never a decline", () => {
+    const retry = declineRetry({ reply: notReady, request: "send it", tools: [], teammates: [] });
+    expect(retry?.note).toContain(DECLINE_RETRY_NOTE);
+    expect(DECLINE_RETRY_NOTE).toContain("Do not decline or defer");
+    expect(DECLINE_RETRY_NOTE).toContain("ask one question with ask_user");
+    expect(DECLINE_RETRY_NOTE).toContain("shows its own card");
   });
 
   it("names this bot's own tool first", () => {
@@ -128,7 +188,6 @@ describe("declineRetry", () => {
       teammates: [],
     });
     expect(retry?.note).toContain("instantly__mail__activate_campaign");
-    expect(retry?.note).toContain("confirmation card");
   });
 
   it("points a contact decline at the saved-email lookup, which reuses earlier results", () => {
@@ -155,10 +214,26 @@ describe("declineRetry", () => {
     expect(retry?.note).toContain("handoff_to_bot (bot_id bot-o)");
   });
 
-  it("keeps a decline nobody can do, or one about other work", () => {
+  it("retries a vague ask the agent deferred or handed back as a pick", () => {
     expect(
-      declineRetry({ reply: notReady, request: "send it", tools: [], teammates: [] }),
-    ).toBeUndefined();
+      declineRetry({
+        reply: "Which people should I contact?",
+        request: "处理一下前几个",
+        tools: [],
+        teammates: [],
+      })?.note,
+    ).toMatch(/^Your reply asked the user to choose/);
+    expect(
+      declineRetry({
+        reply: "I haven't drafted it yet. Do you want me to?",
+        request: "改一下邮件",
+        tools: [],
+        teammates: [],
+      })?.note,
+    ).toMatch(/^Your reply deferred the request/);
+  });
+
+  it("keeps an aside or an offer after real work", () => {
     // The declined sentence is about verification, not the requested search.
     expect(
       declineRetry({
@@ -166,7 +241,27 @@ describe("declineRetry", () => {
         request: "find 20 more",
         tools: [{ name: "exa__web_search_advanced_exa" }],
         teammates: [],
+        worked: true,
       }),
     ).toBeUndefined();
+    expect(
+      declineRetry({
+        reply: "Added 20 people; the pool is now 70. Want me to find 30 more?",
+        request: "find 20 more",
+        tools: [{ name: "exa__web_search_advanced_exa" }],
+        teammates: [],
+        worked: true,
+      }),
+    ).toBeUndefined();
+    // Refusing the asked kind of work is retried even after other work.
+    expect(
+      declineRetry({
+        reply: "Drafted the email. I can't send it from here.",
+        request: "send this email to them",
+        tools: [{ name: "activate_campaign" }],
+        teammates: [],
+        worked: true,
+      })?.note,
+    ).toContain("activate_campaign");
   });
 });

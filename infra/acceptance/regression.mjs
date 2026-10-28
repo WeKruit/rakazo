@@ -12,7 +12,9 @@
 //                  (needs <cases>/t3.txt)
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
-//                  coordinator in the t1 chat, or --dispatch-group <id>), and the booking card
+//                  coordinator in the t1 chat, or --dispatch-group <id>), ambiguous (vague asks
+//                  in the same chat, or --ambiguous-group <id>: an action or one question card,
+//                  never a decline or deferral), and the booking card
 //                  (--t5-group <id> --t5-say <text>), and answering a question card whose wait
 //                  expired (--expired-group <id>, a test chat with a question left unanswered for a day)
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
@@ -266,7 +268,18 @@ const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.js
 const wanted = new Set(
   option("--only")?.split(",") ??
     (SUITE === "full"
-      ? ["smoke", "first10", "progress", "t3", "first10-long", "t1", "dispatch", "t5", "expired"]
+      ? [
+          "smoke",
+          "first10",
+          "progress",
+          "t3",
+          "first10-long",
+          "t1",
+          "dispatch",
+          "ambiguous",
+          "t5",
+          "expired",
+        ]
       : ["smoke", "first10", "progress", "t3"]),
 );
 
@@ -513,7 +526,11 @@ async function readEvents(groupId) {
   return events;
 }
 const DECLINED =
-  /\b(?:I (?:can(?:no|['’])t|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b/i;
+  /\b(?:I (?:can(?:no|['’])t|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
+// Offering the work back instead of doing it; the server retries these once, so one left in a
+// reply means the retry did not take.
+const DEFERRED =
+  /\b(?:do you want|would you like|want) me to\b|\bshall I\b|要不要我|是否需要我|需要你先/i;
 
 if (wanted.has("dispatch"))
   await stage("dispatch", async (failures) => {
@@ -579,6 +596,54 @@ if (wanted.has("dispatch"))
     }
     fs.writeFileSync(path.join(OUT, "dispatch.txt"), `${notes.join("\n\n")}\n`);
     fs.writeFileSync(path.join(OUT, "dispatch.events.json"), JSON.stringify(steps, null, 1));
+  });
+
+// Vague recruiter asks in the t1 chat: each gets a best-guess action (a tool call, a handoff, or
+// the action's own card) or exactly one question card, never a decline or an offer to do it.
+// Cards are left unanswered, so nothing is sent or booked.
+const AMBIGUOUS = [
+  "发一下",
+  "约一下他",
+  "这个人怎么样",
+  "处理一下前几个",
+  "contact",
+  "再来点",
+  "改一下邮件",
+];
+if (wanted.has("ambiguous"))
+  await stage("ambiguous", async (failures) => {
+    const groupId =
+      option("--ambiguous-group") ??
+      option("--dispatch-group") ??
+      (wanted.has("t1") ? reportOf("t1").groupId : undefined);
+    if (!groupId) return failures.push("pass --ambiguous-group or run t1 first");
+    const notes = [];
+    const steps = [];
+    for (const ask of AMBIGUOUS) {
+      const askedAt = new Date().toISOString();
+      const { replies } = await say(groupId, ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
+      const events = (await readEvents(groupId).catch(() => [])).filter(
+        (event) => event.createdAt > askedAt && event.type.startsWith("agent.tool."),
+      );
+      const acted =
+        events.some((event) => event.type === "agent.tool.completed") ||
+        replies.some((message) => (message.blocks ?? []).some((block) => block.kind === "handoff"));
+      const asks = cards(recruiterSees(replies));
+      const text = recruiterSees(replies).map(botText).join("\n");
+      notes.push(`## ${ask}\ntools: ${events.length}, cards: ${asks.length}\n${text}`);
+      if (!replies.length) failures.push(`「${ask}」: no reply`);
+      else if (!acted && asks.length !== 1)
+        failures.push(`「${ask}」: no action and ${asks.length} question cards (want one)`);
+      const declined = text.match(DECLINED) ?? text.match(DEFERRED);
+      if (declined)
+        failures.push(
+          `「${ask}」: declined or deferred "…${text.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
+        );
+      commonChecks(replies, failures);
+      steps.push({ ask, events });
+    }
+    fs.writeFileSync(path.join(OUT, "ambiguous.txt"), `${notes.join("\n\n")}\n`);
+    fs.writeFileSync(path.join(OUT, "ambiguous.events.json"), JSON.stringify(steps, null, 1));
   });
 
 if (wanted.has("t5"))
