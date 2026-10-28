@@ -104,6 +104,7 @@ import {
   inferAttachmentMimeType,
   internalMcpWriteEndpoint,
   isApprovalAskBlock,
+  isAutomationRunTrigger,
   isBackgroundRunTrigger,
   isCallClientNonce,
   isMessagingChannelRun,
@@ -4058,27 +4059,46 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
       const fence = nextFence(run.leaseFence);
       const now = new Date();
-      const leased = await deps.prisma.run.updateMany({
-        where: {
-          id: runId,
-          ...continueRunClaimFence(run),
-          OR: [
-            { status: { in: ["queued", "waiting_takeover"] } },
-            {
-              status: { in: ["leased", "running"] },
-              leaseExpiresAt: { lte: now },
-            },
-          ],
-        },
-        data: {
-          status: "leased",
-          leaseOwner: workerId,
-          leaseFence: fence,
-          leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
-          error: null,
-          checkpoint: null,
-        },
-      });
+      const lease = (db: Pick<PrismaClient, "run">) =>
+        db.run.updateMany({
+          where: {
+            id: runId,
+            ...continueRunClaimFence(run),
+            OR: [
+              { status: { in: ["queued", "waiting_takeover"] } },
+              {
+                status: { in: ["leased", "running"] },
+                leaseExpiresAt: { lte: now },
+              },
+            ],
+          },
+          data: {
+            status: "leased",
+            leaseOwner: workerId,
+            leaseFence: fence,
+            leaseExpiresAt: new Date(Date.now() + 5 * 60_000),
+            error: null,
+            checkpoint: null,
+          },
+        });
+      // Automations in one thread take turns: a queued one is claimed only when no earlier run
+      // there is still queued and no other run holds the turn. A person's message, a resumed
+      // takeover and lease recovery keep their own claim path.
+      const leased =
+        run.status === "queued" && isAutomationRunTrigger(run.trigger)
+          ? await deps.prisma.$transaction(async (tx) => {
+              await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${`run-lane:${run.threadId}`}))::text`;
+              return (await threadLaneBusy(tx, run)) ? null : lease(tx);
+            })
+          : await lease(deps.prisma);
+      if (!leased) {
+        getLogger().info("run.lane.deferred", { runId, threadId: run.threadId });
+        await deps.jobs.enqueue({
+          ...runContinueJob(runId),
+          availableAt: new Date(Date.now() + THREAD_LANE_RETRY_MS),
+        });
+        return;
+      }
       if (leased.count !== 1) return;
 
       const current = await deps.prisma.run.findUniqueOrThrow({
@@ -14154,6 +14174,32 @@ async function writeComputerRunRequeue(
     getLogger().error("run requeue realtime notification", error);
   });
   return true;
+}
+
+/** Retry interval for an automation waiting for its turn in a thread. */
+const THREAD_LANE_RETRY_MS = 5_000;
+
+/**
+ * Whether another run holds this thread's turn, or an earlier run there is still queued.
+ * Runs waiting for a person (an ask or a takeover) do not hold the turn, so automations
+ * keep running while nobody answers.
+ */
+async function threadLaneBusy(
+  tx: Pick<PrismaClient, "run">,
+  run: { id: string; threadId: string; createdAt: Date },
+): Promise<boolean> {
+  const blockers = await tx.run.count({
+    where: {
+      threadId: run.threadId,
+      id: { not: run.id },
+      OR: [
+        { status: { in: ["leased", "running"] } },
+        { status: "queued", createdAt: { lt: run.createdAt } },
+        { status: "queued", createdAt: run.createdAt, id: { lt: run.id } },
+      ],
+    },
+  });
+  return blockers > 0;
 }
 
 async function requeueComputerRun(
