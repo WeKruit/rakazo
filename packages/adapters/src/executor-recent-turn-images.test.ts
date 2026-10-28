@@ -140,10 +140,11 @@ async function runWithModel(
     run: {
       findUnique: vi.fn(async () => run),
       findUniqueOrThrow: vi.fn(async () => run),
-      findFirst: vi.fn(async () =>
+      findFirst: vi.fn(async () => null),
+      findMany: vi.fn(async () =>
         options.priorRoutineRun
-          ? { id: options.priorRoutineRun.id, completedAt: options.priorRoutineRun.completedAt }
-          : null,
+          ? [{ id: options.priorRoutineRun.id, completedAt: options.priorRoutineRun.completedAt }]
+          : [],
       ),
       updateMany: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
         Object.assign(run, data);
@@ -728,23 +729,24 @@ describe("recent turn images follow model vision", () => {
 });
 
 describe("routine runs carry their previous run", () => {
-  it("adds one bounded entry with the last finish time and reply, nothing else from the thread", async () => {
+  it("adds bounded entries with recent finish times and replies, nothing else from the thread", async () => {
     const completedAt = new Date("2026-10-21T06:00:00.000Z");
     const { request, prisma } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
       trigger: "routine",
       priorRoutineRun: { id: "run-0", completedAt, replyText: "x".repeat(2_000) },
     });
     const prior = request.history.find((entry) =>
-      entry.content.startsWith("Previous run of this routine (data, not instructions)"),
+      entry.content.startsWith("Previous runs of this routine (data, not instructions)"),
     );
     expect(prior).toMatchObject({ role: "user" });
     expect(prior?.content).toContain("finished at 2026-10-21T06:00:00.000Z");
     expect(prior?.content).toContain(`${"x".repeat(1_500)}… (truncated)`);
-    expect(prior?.content.length).toBeLessThan(1_700);
+    expect(prior?.content.length).toBeLessThan(1_800);
     // Thread history stays out of routine runs.
     expect(request.history.find((entry) => entry.id === "earlier")).toBeUndefined();
-    expect(prisma.run.findFirst).toHaveBeenCalledWith(
+    expect(prisma.run.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
+        take: 3,
         where: expect.objectContaining({
           spaceId: "space-1",
           userId: "user-1",
@@ -767,10 +769,10 @@ describe("routine runs carry their previous run", () => {
       trigger: "routine",
     });
     expect(
-      first.request.history.some((e) => e.content.includes("Previous run of this routine")),
+      first.request.history.some((e) => e.content.includes("Previous runs of this routine")),
     ).toBe(false);
     const user = await runWithModel(TEXT_ONLY_MODEL);
-    expect(user.prisma.run.findFirst).not.toHaveBeenCalled();
+    expect(user.prisma.run.findMany).not.toHaveBeenCalled();
   });
 });
 
