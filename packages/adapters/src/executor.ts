@@ -589,10 +589,14 @@ import {
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
   intakeAnswers,
+  planDeclineRetry,
   recruitingRoundListText,
   recruitingRoundPeople,
+  sendDeclineRetry,
 } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
+import type { TurnWork } from "./turn-report.js";
+import { questionStatesWork, TurnReportLedger, turnReportText } from "./turn-report.js";
 import {
   botMessageOutcomeFromMidTurn,
   clampUserProgressMessage,
@@ -4590,6 +4594,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const quietRun =
           runAllowsSilentEmpty(run.trigger) || isStageCheckIn(run.trigger, turnBlocks, bot.id);
         const allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun || quietRun;
+        // Someone waits on this turn: its consequential work ends with a visible report.
+        const turnReport = new TurnReportLedger(
+          !quietRun && !allowSilentPeerMessage && !isBackgroundRunTrigger(run.trigger),
+        );
         const emptyResponseText = peerMessage
           ? peerMessage.intent === "result" ||
             peerMessage.intent === "status" ||
@@ -5663,6 +5671,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!thread.activeRecruitingRoleId) return undefined;
           if (!(await roundRecordedThisRun())) return undefined;
           return recruitingNextStepCard();
+        };
+        // The next-step card stands in for the agent's own question only right after the round
+        // (a brief save after it aside): the round's list is then the report, and the recruiter
+        // has not written their next step.
+        const nextStepCardInstead = async () => {
+          const last = turnReport.lastWork(["role"]);
+          if (last !== undefined && last !== "round") return undefined;
+          const card = await nextStepCardAfterRound();
+          if (!card || (await recruiterReplyAfterRound())) return undefined;
+          return card;
+        };
+        /** The server's short report of work the model left unreported. */
+        const turnReportFor = async (work: readonly TurnWork[]) => {
+          const roleId = (
+            await deps.prisma.thread.findUnique({
+              where: { id: thread.id },
+              select: { activeRecruitingRoleId: true },
+            })
+          )?.activeRecruitingRoleId;
+          const saved = roleId
+            ? (await readRecruitingPlaybookStep(deps.prisma, roleId).catch(() => null))
+                ?.savedCandidates
+            : undefined;
+          return turnReportText(work, saved);
         };
         /** What the recruiter wrote after this run recorded its round, newest message. */
         const recruiterReplyAfterRound = async () => {
@@ -11253,8 +11285,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // refused; the card waits for it instead.
         const savesInFlight = new Set<Promise<unknown>>();
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
-          const [name, rawArgs] = call;
-          const applied = applyToolNow(...call);
+          const [name, rawArgs, executionId] = call;
+          const applied = applyToolNow(...call).then(
+            (result) => {
+              turnReport.settle(executionId, {
+                ok: toolResultError(result) === undefined,
+                result,
+                readOnly: connectorReadOnly.get(executionId),
+              });
+              return result;
+            },
+            (error: unknown) => {
+              turnReport.settle(executionId, { ok: false });
+              throw error;
+            },
+          );
           if (name !== "recruiting_role" || rawArgs.operation === "read") return applied;
           const settled = applied.catch(() => undefined);
           savesInFlight.add(settled);
@@ -12062,6 +12107,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               script,
               allowSilentEmpty: allowSilentEmptyRun,
               emptyResponseText,
+              reportOwed: turnReport.enabled ? () => turnReport.owed().length > 0 : undefined,
               executeTool: scripted ? undefined : applyTool,
               storeToolOutput:
                 scripted || !deps.artifacts
@@ -12099,12 +12145,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
               onToolCallDelta: streamRoundPicks,
               beforeAsk: async (question, plannedSearches) => {
                 await briefSaving;
+                await turnReport.caughtUpToAsk();
                 // A run that recorded a round asks the next-step choice, which is asked anew each round,
-                // unless the recruiter already wrote their next step after the ten appeared.
+                // unless the recruiter already wrote their next step after the ten appeared: then it
+                // acts on that first, and may ask its own question after reporting what it did.
                 if (await nextStepCardAfterRound()) {
                   const reply = await recruiterReplyAfterRound();
-                  return reply ? { instead: nextStepAlreadyGiven(reply) } : undefined;
+                  if (reply && !turnReport.worked())
+                    return { instead: nextStepAlreadyGiven(reply) };
+                  if (await nextStepCardInstead()) return undefined;
+                  const unreported = turnReport.bounceAsk(question);
+                  return unreported ? { instead: unreported } : undefined;
                 }
+                const unreported = turnReport.bounceAsk(question);
+                if (unreported) return { instead: unreported };
                 // Fewer than ten fit after a second set of searches: the recruiter decides how to go on.
                 if (firstPicksShown && peopleSearchesRun < 8)
                   return {
@@ -12336,6 +12390,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
 
             firstModelEventMs ??= Date.now() - runtimeStartedAt;
             if (event.type === "text") {
+              if (event.text.trim()) turnReport.report();
               assembled += event.text;
               currentTextSegment += event.text;
               toolCallStreak = { key: undefined, count: 0 };
@@ -12383,8 +12438,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
               await Promise.all(savesInFlight);
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
-                const card = await nextStepCardAfterRound();
+                const card = await nextStepCardInstead();
                 if (card) {
+                  turnReport.report();
                   event.text = card.text;
                   event.detail = undefined;
                   event.actions = card.options.map((label, index) => ({
@@ -12399,6 +12455,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 containsSecret(JSON.stringify(event.requestedSchema), runSecrets)
               )
                 throw new Error("Ask form contains protected input");
+              // The card never replaces a report: unreported work gets the server's report first.
+              if (questionStatesWork(event.text)) turnReport.report();
+              const unreportedWork = turnReport.owed();
+              if (unreportedWork.length) {
+                const report = await turnReportFor(unreportedWork);
+                await publishMessage(
+                  deps,
+                  run,
+                  "bot",
+                  [{ kind: "text", text: report }],
+                  undefined,
+                  userProgressClientNonce(run.id, midTurnProgressCount++),
+                );
+                midTurnUserTexts.push(report);
+                publishedMidTurnUserMessage = true;
+                turnReport.report();
+              }
               const safeText = visible(redactSecrets(event.text, runSecrets));
               const safeDetail = event.detail
                 ? visible(redactSecrets(event.detail, runSecrets))
@@ -12552,6 +12625,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
               });
               return;
             } else if (event.type === "tool") {
+              turnReport.tool(event.executionId, event.name, event.args);
+              if (event.name === "message_user") turnReport.report();
               // Preserve event ordering when the throttle still holds recent narration: the
               // client must see that text before the tool call it describes.
               await flushProgress();
@@ -12731,6 +12806,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 } else {
                   assembled = event.text;
                   currentTextSegment += event.text;
+                  if (event.text.trim()) turnReport.report();
                 }
               }
             }
@@ -12782,9 +12858,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
           flushPendingTools();
           // Only routine runs and check-in answers are instructed to emit NO_RESPONSE. Other
           // allowSilentEmpty wakes (FYI, messaging) may finish truly empty.
-          const silentReply = quietRun
+          let silentReply = quietRun
             ? stripNoResponseReply(assembled, messageSegments)
             : { assembled, blocks: messageSegments };
+          // Consequential work ends with a report of it: when the model wrote none (its report
+          // step included), the server reports from the run's own records.
+          const unreportedAtEnd = handedOff ? [] : turnReport.owed();
+          if (unreportedAtEnd.length && !silentReply.assembled.trim()) {
+            const report = await turnReportFor(unreportedAtEnd);
+            silentReply = {
+              assembled: report,
+              blocks: appendTextSegment(silentReply.blocks, report),
+            };
+            turnReport.report();
+          }
           let completionBlocks = silentReply.blocks;
           if (!silentReply.assembled || isBackgroundRunTrigger(run.trigger)) {
             // Mid-turn progress already posted durable chat messages; skip the empty
@@ -12799,13 +12886,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               skipEmptyFallback: publishedTerminalSubagent || publishedMidTurnUserMessage,
             });
           }
-          const blocks = handedOff
+          let blocks = handedOff
             ? []
             : finalBlocksAfterMidTurnProgress(
                 redactBlocks(completionBlocks, runSecrets, hideVendors),
                 publishedMidTurnUserMessage || quietRun,
               );
-          const text = handedOff
+          let text = handedOff
             ? ""
             : visible(
                 redactSecrets(
@@ -12813,6 +12900,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   runSecrets,
                 ),
               );
+          // A reply declining what this bot or a teammate can do is held back for one retry; the
+          // work this turn did is still reported.
+          const declineRetried =
+            turnReport.enabled &&
+            !handedOff &&
+            !messagingChannelRun &&
+            (run.trigger === "user" || run.trigger === "follow_up")
+              ? await planDeclineRetry(deps, {
+                  run: { threadId: thread.id, botId: bot.id },
+                  groupId: thread.groupId,
+                  reply: text,
+                  blocks,
+                  request: (currentTurnMessage?.blocks ?? [])
+                    .map((block) =>
+                      "text" in block && typeof block.text === "string" ? block.text : "",
+                    )
+                    .join("\n"),
+                  tools,
+                }).catch((error) => {
+                  getLogger().error("run.decline guard", error);
+                  return undefined;
+                })
+              : undefined;
+          if (declineRetried) {
+            const work = turnReport.owedWithoutFinalReply();
+            text = work.length ? await turnReportFor(work) : "";
+            blocks = text ? [{ kind: "text", text }] : [];
+          }
           if (containsSecret(text, runSecrets)) {
             throw new Error("refusing to persist a secret in the thread");
           }
@@ -12876,6 +12991,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
+          } else if (declineRetried) {
+            await sendDeclineRetry(
+              deps,
+              { ...run, threadId: thread.id, userId: run.userId },
+              declineRetried,
+            ).catch((error) => getLogger().error("run.decline retry", error));
+            recruitingContinued = true;
           } else if (
             !messagingChannelRun &&
             (thread.activeRecruitingRoleId || isRecruitingSpawnKey(bot.spawnKey))

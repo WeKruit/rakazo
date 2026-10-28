@@ -7,6 +7,7 @@ import {
   guardRecruitingRoleCreate,
   guardRecruitingTurnEnd,
   intakeAnswers,
+  planDeclineRetry,
   recruitingRoundListText,
   roundPassage,
 } from "./turn-end-guard.js";
@@ -999,5 +1000,59 @@ describe("roundPassage", () => {
     const cut = roundPassage(long)!;
     expect(cut.endsWith("word…")).toBe(true);
     expect(cut.length).toBeLessThanOrEqual(221);
+  });
+});
+
+describe("planDeclineRetry", () => {
+  const prisma = (recent: { clientNonce: string | null }[]) =>
+    ({
+      message: { findMany: vi.fn(async () => recent) },
+      chatGroupMember: {
+        findMany: vi.fn(async () => [
+          {
+            bot: {
+              id: "bot-o",
+              name: "Outreach",
+              title: "Outreach",
+              description: "Finds contacts, writes drafts and sends email",
+              mcpServers: [],
+            },
+          },
+        ]),
+      },
+    }) as unknown as Parameters<typeof planDeclineRetry>[0]["prisma"];
+  const input = {
+    run: { threadId: "thread-1", botId: "bot-m" },
+    groupId: "group-1",
+    reply: "Not ready to send: contact history and suppression unknown.",
+    blocks: [{ kind: "text", text: "Not ready to send." }] as MessageBlock[],
+    request: "send this email to them",
+    tools: [{ name: "recruiting_role" }],
+  };
+
+  it("retries a decline once per human message, handing it to the teammate who can", async () => {
+    const retry = await planDeclineRetry(
+      { prisma: prisma([{ clientNonce: "send:human" }]) },
+      input,
+    );
+    expect(retry?.note).toContain("bot_id bot-o");
+    expect(
+      await planDeclineRetry(
+        { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) },
+        input,
+      ),
+    ).toBeUndefined();
+  });
+
+  it("leaves a turn that ended on a card alone", async () => {
+    expect(
+      await planDeclineRetry(
+        { prisma: prisma([{ clientNonce: "send:human" }]) },
+        {
+          ...input,
+          blocks: [{ kind: "ask", text: "Confirm sending", status: "pending" }] as MessageBlock[],
+        },
+      ),
+    ).toBeUndefined();
   });
 });

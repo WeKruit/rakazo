@@ -12,6 +12,8 @@ import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
+import type { DeclineRetry } from "./turn-report.js";
+import { declinedSentence, declineRetry } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
@@ -611,4 +613,105 @@ export async function guardRecruitingRoleCreate(
     label: typeof error !== "string" && promise ? PROMISE_LABEL : "Save the role",
     count: 1,
   };
+}
+
+const CARD_KINDS = new Set(["ask", "approval", "mcp_approval", "connect", "app_connect", "choice"]);
+
+/**
+ * A final reply that declines a request this bot or a teammate has a tool for, once per human
+ * message: the retry note naming that tool or teammate, else undefined (the decline stands).
+ * A card or question card already shown is the turn's real boundary and is never retried.
+ */
+export async function planDeclineRetry(
+  deps: { prisma: Pick<PrismaClient, "message" | "chatGroupMember"> },
+  input: {
+    run: { threadId: string; botId: string };
+    groupId?: string | null;
+    reply: string;
+    blocks: readonly MessageBlock[];
+    request: string;
+    tools: readonly { name: string }[];
+  },
+): Promise<DeclineRetry | undefined> {
+  if (!input.request.trim() || !declinedSentence(input.reply)) return undefined;
+  if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
+  const recent = await deps.prisma.message.findMany({
+    where: {
+      threadId: input.run.threadId,
+      OR: [
+        { role: "user" },
+        { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
+      ],
+    },
+    orderBy: { seq: "desc" },
+    take: 2,
+    select: { clientNonce: true },
+  });
+  if (countTrailingAutoContinues(recent) > 0) return undefined;
+  const members = input.groupId
+    ? await deps.prisma.chatGroupMember.findMany({
+        where: {
+          groupId: input.groupId,
+          botId: { not: input.run.botId },
+          bot: { archivedAt: null },
+        },
+        select: {
+          bot: {
+            select: {
+              id: true,
+              name: true,
+              title: true,
+              description: true,
+              mcpServers: {
+                where: { server: { enabled: true } },
+                select: { server: { select: { name: true, description: true } } },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "asc" },
+      })
+    : [];
+  return declineRetry({
+    reply: input.reply,
+    request: input.request,
+    tools: input.tools,
+    teammates: members.map(({ bot }) => ({
+      id: bot.id,
+      name: bot.name,
+      about: [
+        bot.title,
+        bot.description,
+        ...bot.mcpServers.map(({ server }) => `${server.name} ${server.description}`),
+      ]
+        .filter(Boolean)
+        .join(" "),
+    })),
+  });
+}
+
+/** Starts the one retry of a declined turn as an internal continuation of the same bot. */
+export async function sendDeclineRetry(
+  deps: Pick<TurnEndGuardDeps, "events" | "jobs">,
+  run: TurnEndGuardInput["run"],
+  retry: DeclineRetry,
+) {
+  getLogger().info("run.autocontinue", { runId: run.id, stage: "decline", reason: "declined" });
+  const text = `${retry.note}${AUTO_NOTE}`;
+  const sent = await deps.events.sendUserMessage({
+    spaceId: run.spaceId,
+    threadId: run.threadId,
+    botId: run.botId,
+    userId: run.userId,
+    blocks: [{ kind: "text", text }],
+    prompt: text,
+    trigger: "follow_up",
+    internal: true,
+    clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:decline`,
+  });
+  if (sent.runId)
+    await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
+      getLogger().error("run.autocontinue enqueue", error);
+    });
+  return sent.runId ?? null;
 }
