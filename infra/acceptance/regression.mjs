@@ -10,7 +10,9 @@
 //   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50,
 //                  pasted English JD (needs <cases>/t3.txt)
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
-//                  (<cases>/t1.pdf), and the booking card (--t5-group <id> --t5-say <text>)
+//                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
+//                  coordinator in the t1 chat, or --dispatch-group <id>), and the booking card
+//                  (--t5-group <id> --t5-say <text>)
 //   --cases <dir>  private JD fixtures; they stay out of this public repository
 //   RAKAZO_EXPECT_SHA  passed to smoke.mjs so /ready must serve the released revision
 // Node 20+, no dependencies. Prints no credentials. Exit code 0 only when every case passes.
@@ -207,7 +209,7 @@ const reportOf = (name) => JSON.parse(fs.readFileSync(path.join(OUT, `${name}.js
 const wanted = new Set(
   option("--only")?.split(",") ??
     (SUITE === "full"
-      ? ["smoke", "first10", "progress", "t3", "first10-long", "t1", "t5"]
+      ? ["smoke", "first10", "progress", "t3", "first10-long", "t1", "dispatch", "t5"]
       : ["smoke", "first10", "progress", "t3"]),
 );
 
@@ -376,6 +378,57 @@ if (wanted.has("t1"))
       .join("\n\n");
     fs.writeFileSync(path.join(OUT, "t1-chat.txt"), `${transcript}\n`);
     commonChecks(await messagesOf(groupId), failures);
+  });
+
+// Each ask names a specialist capability; the coordinator must get it done by the member who has
+// it (or do it itself), never decline. Cards are left unanswered, so nothing is sent or booked.
+const DISPATCH = [
+  { ask: "再找20个人", owners: /sourc|main/i, capability: "search and scale" },
+  { ask: "帮我找前5个人的邮箱", owners: /outreach/i, capability: "contact lookup" },
+  { ask: "给第一个人写一封邮件草稿", owners: /outreach/i, capability: "email draft" },
+  { ask: "把这封邮件发给他", owners: /outreach/i, capability: "send confirmation" },
+  { ask: "下周二我有哪些时间可以面试", owners: /schedul/i, capability: "availability" },
+  { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
+  { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
+];
+const DECLINED =
+  /\b(?:I (?:can(?:no|')t|am unable to|'m unable to|'m not able to|don't have (?:access|a tool|the ability))|(?:that's|this is|it's) (?:outside|beyond) (?:my|what I)|not something I can)\b/i;
+
+if (wanted.has("dispatch"))
+  await stage("dispatch", async (failures) => {
+    const groupId =
+      option("--dispatch-group") ?? (wanted.has("t1") ? reportOf("t1").groupId : undefined);
+    if (!groupId) return failures.push("pass --dispatch-group or run t1 first");
+    const { members } = await rpc("groups/get", { groupId });
+    const nameOf = new Map(members.map((member) => [member.botId, member.name ?? ""]));
+    const notes = [];
+    for (const item of DISPATCH) {
+      const { replies } = await say(groupId, item.ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
+      const handlers = new Set(
+        replies.flatMap((message) => [
+          nameOf.get(message.botId) ?? "",
+          ...(message.blocks ?? [])
+            .filter((block) => block.kind === "handoff")
+            .map((block) => nameOf.get(block.toBotId) ?? ""),
+        ]),
+      );
+      const text = recruiterSees(replies).map(botText).join("\n");
+      log.push(
+        `## ${item.capability}: ${item.ask}\nhandled by: ${[...handlers].filter(Boolean).join(", ")}\n${text}`,
+      );
+      if (!replies.length) failures.push(`${item.capability}: no reply`);
+      else if (![...handlers].some((name) => item.owners.test(name)))
+        failures.push(
+          `${item.capability}: not handled by the member who can (${[...handlers].filter(Boolean).join(", ") || "nobody"})`,
+        );
+      const declined = text.match(DECLINED);
+      if (declined)
+        failures.push(
+          `${item.capability}: declined "…${text.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
+        );
+      commonChecks(replies, failures);
+    }
+    fs.writeFileSync(path.join(OUT, "dispatch.txt"), `${notes.join("\n\n")}\n`);
   });
 
 if (wanted.has("t5"))

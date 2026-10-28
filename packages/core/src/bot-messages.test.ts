@@ -238,6 +238,10 @@ describe("group members roster", () => {
       "Outreach (id: b_2) [can use: contact-lookup (Finds work and personal emails.); mail: send_email]",
     );
     expect(context).toContain("Before saying something cannot be done, check this roster");
+    expect(context).toContain(
+      "Never decline a request from the people in this chat except for a safety reason",
+    );
+    expect(context).toContain("hand that stage on after posting your result");
   });
 
   it("reuses the same roster line formatting as the teammate directory", () => {
