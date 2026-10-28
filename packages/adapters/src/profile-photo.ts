@@ -23,14 +23,26 @@ export function linkedinPhotoUrl(value: unknown): string | undefined {
   }
 }
 
+/** A saved profile keeps at most this many characters per value. */
+export const PROFILE_PHOTO_MAX_LENGTH = 4000;
+
 export async function encodeProfilePhoto(bytes: Uint8Array): Promise<string> {
   const { default: sharp } = await import("sharp");
-  const webp = await sharp(bytes, { limitInputPixels: 4096 * 4096, animated: false })
-    .rotate()
-    .resize(PROFILE_PHOTO_SIZE, PROFILE_PHOTO_SIZE, { fit: "cover", position: "centre" })
-    .webp({ quality: 70 })
-    .toBuffer();
-  return `data:image/webp;base64,${webp.toString("base64")}`;
+  // A busy photo can exceed the limit at full quality; step down until it fits.
+  for (const [size, quality] of [
+    [PROFILE_PHOTO_SIZE, 70],
+    [PROFILE_PHOTO_SIZE, 45],
+    [64, 45],
+  ] as const) {
+    const webp = await sharp(bytes, { limitInputPixels: 4096 * 4096, animated: false })
+      .rotate()
+      .resize(size, size, { fit: "cover", position: "centre" })
+      .webp({ quality })
+      .toBuffer();
+    const url = `data:image/webp;base64,${webp.toString("base64")}`;
+    if (url.length <= PROFILE_PHOTO_MAX_LENGTH) return url;
+  }
+  throw new Error("Profile photo is too large");
 }
 
 type PhotoFetch = (url: string) => Promise<Uint8Array>;
