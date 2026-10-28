@@ -3508,6 +3508,13 @@ describe("local native Instantly campaign and lead tools", () => {
       },
       externalEffect: {
         findUnique: vi.fn(async ({ where }) => state.effects.get(where.idempotencyKey) ?? null),
+        findMany: vi.fn(async ({ where }) =>
+          [...state.effects.values()].filter(
+            (e) =>
+              e.kind === where.kind &&
+              (e.request as { roleId?: string } | undefined)?.roleId !== where.NOT?.request?.equals,
+          ),
+        ),
         findFirst: vi.fn(async () => {
           const bound = [...state.effects.values()].filter(
             (e) => e.kind === "instantly_role_campaign",
@@ -3856,6 +3863,30 @@ describe("local native Instantly campaign and lead tools", () => {
       f.state.requests.some((r) => r.method === "POST" && r.path === "/api/v2/campaigns"),
     ).toBe(false);
     expect(f.prisma.externalEffect.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("never adopts a same-title campaign another role is bound to", async () => {
+    const f = fixture();
+    f.state.campaigns = [
+      {
+        id: "with-leads",
+        name: "Founding Engineer",
+        status: 2,
+        timestamp_created: "2026-10-01",
+        stop_on_reply: true,
+      },
+    ];
+    // The original role already owns it; this role (a test copy with the same title) does not.
+    f.state.effects.set("other-role-binding", {
+      id: "effect-other",
+      kind: "instantly_role_campaign",
+      idempotencyKey: "other-role-binding",
+      request: { roleId: "role-original" },
+      result: { campaignId: "with-leads" },
+    });
+    const ensured = f.result(await f.run("ensure_role_campaign", { role_id: "role-1" }));
+    expect(ensured).toMatchObject({ created: true });
+    expect(ensured.campaignId).not.toBe("with-leads");
   });
 
   it("repairs an empty mapped campaign to the same-title campaign that has the leads", async () => {

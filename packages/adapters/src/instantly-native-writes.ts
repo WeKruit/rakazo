@@ -652,7 +652,7 @@ async function ensureRoleCampaign(
     const better =
       campaign && (await hasLeads(rest, mappedId))
         ? undefined
-        : (await sameTitleCampaigns(rest, role)).find(
+        : (await sameTitleCampaigns(prisma, context, rest, role)).find(
             (entry) => entry.campaign.id !== mappedId && (!campaign || entry.leads),
           );
     if (campaign && !better) {
@@ -711,7 +711,7 @@ async function ensureRoleCampaign(
     (stale ? existing!.binding.eaccount : await defaultMailbox(prisma, rest, context, serverId));
   // The user-visible name is the role title; the role id lives in the stored mapping's request.
   const name = role.title;
-  const adopt = (await sameTitleCampaigns(rest, role)).find(
+  const adopt = (await sameTitleCampaigns(prisma, context, rest, role)).find(
     (entry) => entry.campaign.id !== existing?.binding.campaignId,
   )?.campaign;
   const campaign = adopt ?? (await createCampaign(rest, { ...input, eaccount, name }));
@@ -769,13 +769,35 @@ async function hasLeads(rest: InstantlyRest, campaignId: unknown) {
  * Draft/paused campaigns titled exactly like the role (case-insensitive; a legacy " [role <id>]"
  * suffix is ignored), ordered best first: with leads, then newest.
  */
-async function sameTitleCampaigns(rest: InstantlyRest, role: { id: string; title: string }) {
+/**
+ * Unbound campaigns named like the role, those with leads first. A campaign another role is already
+ * bound to stays that role's: a test copy or a second role with the same title must never take over
+ * (and add people to) a live campaign.
+ */
+async function sameTitleCampaigns(
+  prisma: PrismaClient,
+  context: AdapterContext,
+  rest: InstantlyRest,
+  role: { id: string; title: string },
+) {
   const found = await rest("GET", `/campaigns?search=${encodeURIComponent(role.title)}&limit=100`);
   const title = role.title.trim().toLowerCase();
+  const otherRoles = await prisma.externalEffect.findMany({
+    where: {
+      spaceId: context.spaceId,
+      kind: "instantly_role_campaign",
+      NOT: { request: { path: ["roleId"], equals: role.id } },
+    },
+    select: { result: true },
+  });
+  const boundElsewhere = new Set(
+    otherRoles.map(({ result }) => (result as Partial<RoleBinding> | null)?.campaignId),
+  );
   const matches = (Array.isArray(found.items) ? (found.items as Record<string, unknown>[]) : [])
     .filter(
       (campaign) =>
         typeof campaign.id === "string" &&
+        !boundElsewhere.has(campaign.id) &&
         (campaign.status === 0 || campaign.status === 2) &&
         typeof campaign.name === "string" &&
         campaign.name.replace(` [role ${role.id}]`, "").trim().toLowerCase() === title,

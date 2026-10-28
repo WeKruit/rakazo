@@ -983,9 +983,9 @@ const PLANNED_SEARCHES_NOTE =
 const nextStepAlreadyGiven = (reply: string) =>
   `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round).`;
 
-/** Model failures that a fresh attempt can clear: a silent stream, a timeout or an outage. */
+/** Model failures that a fresh attempt can clear: a silent or dropped stream, a timeout or an outage. */
 const MODEL_OUTAGE =
-  /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|socket hang up/i;
+  /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|socket hang up|^terminated$/i;
 const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn once";
 
 /** A JD that states no years leaves the range to ask; round 1 of the playtest skipped it. */
