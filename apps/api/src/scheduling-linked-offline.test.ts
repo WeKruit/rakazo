@@ -1487,7 +1487,7 @@ describe("linked offline scheduling receipts", () => {
         },
       });
       const card = messages.at(-1)!;
-      expect(JSON.stringify(card.blocks)).toContain("originalBooking");
+      expect(JSON.stringify(card.blocks)).toContain("Original booking:");
       const input = {
         spaceId: f.runData.spaceId,
         threadId: f.runData.threadId,

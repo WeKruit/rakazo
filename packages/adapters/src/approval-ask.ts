@@ -559,6 +559,7 @@ function formatBookingChange(toolName: string, args: Record<string, unknown>) {
     "originalBooking",
     "cancellationReason",
     "reschedulingReason",
+    "lengthInMinutes",
   ]);
   return [
     `Candidate: ${attendee.name ?? "unknown"}${attendee.email ? ` <${attendee.email}>` : ""}`,
@@ -566,6 +567,7 @@ function formatBookingChange(toolName: string, args: Record<string, unknown>) {
       ? `Cancel: ${bookingTime(original.start, zone)}`
       : `From: ${bookingTime(original.start, zone)}`,
     ...(!cancel && typeof args.start === "string" ? [`To: ${bookingTime(args.start, zone)}`] : []),
+    ...(typeof args.lengthInMinutes === "number" ? [`Length: ${args.lengthInMinutes} min`] : []),
     ...(typeof reason === "string" && reason ? [`Reason: ${reason}`] : []),
     ...Object.entries(args)
       .filter(([key, value]) => !known.has(key) && value !== undefined)
