@@ -205,9 +205,11 @@ it("loads the board chunk only after bootstrap enables the route", async () => {
   }
 });
 
-it("preloads only a cold sign-in page, and knows which pages read the session", () => {
+it("preloads a cold chat or sign-in page, and knows which pages read the session", () => {
   const fetch = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
-  for (const path of ["/", "/app", "/app/g/group-a", "/onboarding", "/sign-in/extra"])
+  for (const path of ["/app", "/app/bot-a", "/app/g/group-a"])
+    expect(preloadFirstPage(path)).toBe(true);
+  for (const path of ["/", "/app/artifacts", "/app/board", "/onboarding", "/sign-in/extra"])
     expect(preloadFirstPage(path)).toBe(false);
   expect(fetch).not.toHaveBeenCalled();
   expect(preloadFirstPage("/sign-in")).toBe(true);
