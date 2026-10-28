@@ -329,11 +329,10 @@ export async function stopTeachingSession(
 
 export function createTaughtSkillsService(deps: TaughtSkillsDeps) {
   return {
-    async list(actor: Actor, botId: string, offset?: number): Promise<TaughtSkill[]> {
+    async list(actor: Actor, botId: string): Promise<TaughtSkill[]> {
       const rows = await deps.prisma.taughtSkill.findMany({
         where: { spaceId: actor.spaceId, botId, userId: actor.userId },
-        orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
-        ...(offset === undefined ? {} : { take: 200, skip: offset }),
+        orderBy: { updatedAt: "desc" },
       });
       return rows.map(mapTaughtSkill);
     },

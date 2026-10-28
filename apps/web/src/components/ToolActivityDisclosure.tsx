@@ -7,9 +7,7 @@ import { formatToolActivityDuration, toolStepCount } from "../lib/tool-activity-
 type ToolStep = Extract<ThreadMessage["blocks"][number], { kind: "steps" }>["steps"][number];
 
 /** While a run is live, only the most recent steps are listed so a long run does not push the chat down. */
-import { LIVE_TOOL_STEP_WINDOW } from "./tool-activity-window";
-
-export { LIVE_TOOL_STEP_WINDOW } from "./tool-activity-window";
+export const LIVE_TOOL_STEP_WINDOW = 6;
 
 export function ToolSteps({
   steps,

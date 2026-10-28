@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { initials } from "./profile";
 import { profileImageUrl } from "./profileAssets";
 
 /** Failed/missing supplied assets remain honest initials, with no lookup or generated image. */
@@ -40,26 +39,5 @@ export function ProfileImage({
         fallback
       )}
     </span>
-  );
-}
-
-export function PersonAvatar({
-  name,
-  src,
-  size = "md",
-}: {
-  name: string;
-  src?: string | null;
-  size?: "sm" | "md";
-}) {
-  return (
-    <ProfileImage
-      src={src}
-      photo
-      fallback={initials(name)}
-      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-muted font-medium text-muted-foreground ${
-        size === "sm" ? "size-8 text-[11px]" : "size-14 text-base"
-      }`}
-    />
   );
 }

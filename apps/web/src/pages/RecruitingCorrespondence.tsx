@@ -17,11 +17,7 @@ import type { ArtifactTarget } from "../lib/artifact-open";
 import { fetchArtifactBytes } from "../lib/artifact-open";
 import { retryTransientRead } from "../lib/read-retry";
 import type { RecruitingReadCache } from "../lib/recruiting-read-cache";
-import {
-  clearRecruitingReads,
-  rememberRecruitingRead,
-  savedRecruitingRead,
-} from "../lib/recruiting-read-cache";
+import { clearRecruitingReads, rememberRecruitingRead } from "../lib/recruiting-read-cache";
 import { rpc } from "../lib/rpc";
 import { AvailabilityRanges } from "./recruiting/AvailabilityRanges";
 import { useRecruitingDetail } from "./recruiting/detail";
@@ -407,7 +403,7 @@ function SavedCorrespondenceView({
   const key = JSON.stringify([artifactTarget, view, refreshSignal, refresh]);
   const scopeKey = JSON.stringify([readCacheScope, artifactTarget, view]);
   const savedWorkspace = readCacheScope
-    ? (savedRecruitingRead(readCache, `${readCacheScope}:workspace`) as
+    ? (readCache?.entries.get(`${readCacheScope}:workspace`) as
         | { workspace: Awaited<ReturnType<typeof rpc.recruiting.getWorkspace>> }
         | undefined)
     : undefined;
@@ -431,7 +427,7 @@ function SavedCorrespondenceView({
       scopeKey,
       data:
         (cacheKey
-          ? (savedRecruitingRead(readCache, cacheKey) as SavedCorrespondence | undefined)
+          ? (readCache?.entries.get(cacheKey) as SavedCorrespondence | undefined)
           : undefined) ?? (readCache && current?.scopeKey === scopeKey ? current?.data : undefined),
     }));
     void retryTransientRead(

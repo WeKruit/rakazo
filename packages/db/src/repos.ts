@@ -216,13 +216,11 @@ export function createRepos(prisma: PrismaClient) {
   async function listBotSectionsForSpaces(
     actor: Actor,
     spaceIds: string[],
-    page?: { offset: number },
   ): Promise<Array<BotSection & { spaceId: string }>> {
     if (spaceIds.length === 0) return [];
     const sections = await prisma.botSection.findMany({
-      ...(page ? { take: 200, skip: page.offset } : {}),
       where: { spaceId: { in: spaceIds }, userId: actor.userId },
-      orderBy: [{ position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
     });
     return sections.map((section) => ({
       id: section.id,
@@ -234,14 +232,9 @@ export function createRepos(prisma: PrismaClient) {
     }));
   }
 
-  async function listSpaceBotsForSpaces(
-    actor: Actor,
-    spaceIds: string[],
-    page?: { offset: number },
-  ): Promise<SpaceBot[]> {
+  async function listSpaceBotsForSpaces(actor: Actor, spaceIds: string[]): Promise<SpaceBot[]> {
     if (spaceIds.length === 0) return [];
     const bots = await prisma.bot.findMany({
-      ...(page ? { take: 200, skip: page.offset } : {}),
       where: {
         spaceId: { in: spaceIds },
         userId: actor.userId,
@@ -271,7 +264,7 @@ export function createRepos(prisma: PrismaClient) {
         },
         runs: activeRunSelection,
       },
-      orderBy: [{ pinned: "desc" }, { position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      orderBy: [{ pinned: "desc" }, { position: "asc" }, { createdAt: "asc" }],
     });
     return bots.map((bot) => {
       if (!bot.thread) throw new IsolationError("Bot is missing its thread");
@@ -404,10 +397,7 @@ export function createRepos(prisma: PrismaClient) {
       }
     },
 
-    async listBots(
-      actor: Actor,
-      options: { archived?: boolean; offset?: number; limit?: number } = {},
-    ): Promise<Bot[]> {
+    async listBots(actor: Actor, options: { archived?: boolean } = {}): Promise<Bot[]> {
       const bots = await prisma.bot.findMany({
         where: {
           spaceId: actor.spaceId,
@@ -424,10 +414,7 @@ export function createRepos(prisma: PrismaClient) {
           runs: activeRunSelection,
           computer: { select: { scope: true } },
         },
-        orderBy: [{ pinned: "desc" }, { position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-        ...(options.limit === undefined
-          ? {}
-          : { take: Math.min(200, Math.max(1, options.limit)), skip: options.offset ?? 0 }),
+        orderBy: [{ pinned: "desc" }, { position: "asc" }, { createdAt: "asc" }],
       });
       const candidateRunIds = [
         ...new Set(

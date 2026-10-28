@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { LinkFavicons } from "@rakazo/chat-ui/web-contexts";
-import { LinkFaviconsContext, RemoteImagesContext } from "@rakazo/chat-ui/web-contexts";
+import type { LinkFavicons } from "@rakazo/chat-ui/web";
+import { LinkFaviconsContext, RemoteImagesContext } from "@rakazo/chat-ui/web";
 import { LOCAL_SETTINGS_PAGE } from "@rakazo/contracts";
 import { Button, Skeleton } from "@rakazo/ui-web";
 import {
@@ -24,7 +24,6 @@ import {
   subscribeTicketBoardEnabled,
 } from "./lib/bootstrap";
 import { discardCall } from "./lib/call-session";
-import { withFeatureMessages } from "./lib/i18n";
 import { markAfterPaint, markOnce } from "./lib/performance";
 import { getRemoteImagesEnabled, subscribeRemoteImages } from "./lib/remote-images-preference";
 import { rpc, selectedSpaceId, subscribeSpaceSelection } from "./lib/rpc";
@@ -35,10 +34,10 @@ import {
   showSessionUnavailable,
 } from "./lib/session-gate";
 import { completeSsoCallback, SSO_CALLBACK_PATH } from "./lib/sso-flow";
-
-const ShellPage = lazy(() =>
-  import("./pages/Shell").then((module) => ({ default: module.ShellPage })),
-);
+import { IntegrationSetupPage } from "./pages/IntegrationSetup";
+import { LocalSettingsPage } from "./pages/LocalSettings";
+import { McpOAuthCallbackPage } from "./pages/McpOAuthCallback";
+import { ShellPage } from "./pages/Shell";
 
 const AuthPage = lazy(() =>
   import("./pages/Auth").then((module) => ({ default: module.AuthPage })),
@@ -47,39 +46,16 @@ const PasswordResetPage = lazy(() =>
   import("./pages/Auth").then((module) => ({ default: module.PasswordResetPage })),
 );
 const OnboardingPage = lazy(() =>
-  withFeatureMessages(() => import("./pages/Onboarding")).then((module) => ({
-    default: module.OnboardingPage,
-  })),
+  import("./pages/Onboarding").then((module) => ({ default: module.OnboardingPage })),
 );
 const WelcomePage = lazy(() =>
-  withFeatureMessages(() => import("./pages/Welcome")).then((module) => ({
-    default: module.WelcomePage,
-  })),
+  import("./pages/Welcome").then((module) => ({ default: module.WelcomePage })),
 );
 const ArtifactsPage = lazy(() =>
-  withFeatureMessages(() => import("./pages/Artifacts")).then((module) => ({
-    default: module.ArtifactsPage,
-  })),
-);
-const IntegrationSetupPage = lazy(() =>
-  withFeatureMessages(() => import("./pages/IntegrationSetup")).then((module) => ({
-    default: module.IntegrationSetupPage,
-  })),
-);
-const LocalSettingsPage = lazy(() =>
-  withFeatureMessages(() => import("./pages/LocalSettings")).then((module) => ({
-    default: module.LocalSettingsPage,
-  })),
-);
-const McpOAuthCallbackPage = lazy(() =>
-  withFeatureMessages(() => import("./pages/McpOAuthCallback")).then((module) => ({
-    default: module.McpOAuthCallbackPage,
-  })),
+  import("./pages/Artifacts").then((module) => ({ default: module.ArtifactsPage })),
 );
 const BoardPage = lazy(() =>
-  withFeatureMessages(() => import("./pages/Board")).then((module) => ({
-    default: module.BoardPage,
-  })),
+  import("./pages/Board").then((module) => ({ default: module.BoardPage })),
 );
 
 function SsoCallbackPage() {
@@ -107,9 +83,7 @@ export function App() {
           {window.location.pathname === SSO_CALLBACK_PATH ? (
             <SsoCallbackPage />
           ) : window.location.pathname === LOCAL_SETTINGS_PAGE ? (
-            <Suspense fallback={<GateFallback />}>
-              <LocalSettingsPage />
-            </Suspense>
+            <LocalSettingsPage />
           ) : (
             <SessionApp />
           )}

@@ -24,13 +24,14 @@ import { HighlightText } from "./evidence";
 import { fieldLabel } from "./fieldLabels";
 import type { RecruitingInboxEmail } from "./InboxTab";
 import { InboxWithReply } from "./InboxTab";
-import { InterviewTab } from "./LazyViews";
+import { InterviewTab } from "./InterviewTab";
 import { NotesTab, noteCandidateKeys } from "./NotesTab";
 import { CompanyLogo, OrgBadge } from "./OrgBadge";
-import { PersonAvatar } from "./ProfileImage";
+import { ProfileImage } from "./ProfileImage";
 import { EducationTimeline, ExperienceTimeline } from "./ProfileTimeline";
 import {
   candidateSections,
+  initials,
   linkedinHandle,
   shortFact,
   sourceLabel,
@@ -45,6 +46,27 @@ import { SkillEvidence } from "./SkillEvidence";
 import { statusText } from "./shared";
 import { reminderCandidateKeys, TasksTab } from "./TasksTab";
 import { useProfileView } from "./useProfileView";
+
+export function PersonAvatar({
+  name,
+  src,
+  size = "md",
+}: {
+  name: string;
+  src?: string | null;
+  size?: "sm" | "md";
+}) {
+  return (
+    <ProfileImage
+      src={src}
+      photo
+      fallback={initials(name)}
+      className={`grid shrink-0 place-items-center overflow-hidden rounded-full bg-muted font-medium text-muted-foreground ${
+        size === "sm" ? "size-8 text-[11px]" : "size-14 text-base"
+      }`}
+    />
+  );
+}
 
 /** Stored outreach state plus the saved sequence numbers; nothing when neither exists. */
 function OutreachSection({

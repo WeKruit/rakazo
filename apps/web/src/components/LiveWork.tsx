@@ -10,8 +10,7 @@ import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
 import { LoadingState, Shimmer } from "./ai/primitives";
-import { ToolSteps } from "./ToolActivityDisclosure";
-import { LIVE_TOOL_STEP_WINDOW } from "./tool-activity-window";
+import { LIVE_TOOL_STEP_WINDOW, ToolSteps } from "./ToolActivityDisclosure";
 
 function useWorkActivityLabels(): Record<WorkActivity, string> {
   const { t } = useLingui();

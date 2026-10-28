@@ -33,7 +33,6 @@ vi.mock("@rakazo/ui-web", () => {
         </button>
       );
     },
-    Skeleton: Pass,
     AlertDialogContent: Pass,
     AlertDialogFooter: Pass,
     AlertDialogHeader: Pass,
@@ -46,8 +45,7 @@ vi.mock("@rakazo/ui-web", () => {
   };
 });
 
-import { lazyPanel } from "./ErrorBoundary";
-import { lazyOverlay } from "./LazyOverlay";
+import { lazyOverlay } from "./ErrorBoundary";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -133,48 +131,4 @@ it("contains a render error thrown by a loaded overlay", async () => {
 
   expect(container.textContent).toContain("Composer draft");
   expect(container.textContent).toContain("Could not load");
-});
-
-it("shows a scoped skeleton then mounts a deferred panel without removing the shell", async () => {
-  let finish!: (panel: () => ReactNode) => void;
-  const Panel = lazyPanel(
-    () =>
-      new Promise<() => ReactNode>((resolve) => {
-        finish = resolve;
-      }),
-  );
-  await act(async () => {
-    root.render(
-      <>
-        <input defaultValue="draft" />
-        <Panel />
-      </>,
-    );
-  });
-  expect(container.querySelector('[aria-busy="true"]')).not.toBeNull();
-  expect(container.querySelector("input")?.value).toBe("draft");
-  await act(async () => {
-    finish(() => <div>Loaded panel</div>);
-  });
-  expect(container.textContent).toContain("Loaded panel");
-  expect(container.querySelector('[aria-busy="true"]')).toBeNull();
-  expect(container.querySelector("input")?.value).toBe("draft");
-});
-
-it("keeps the current localized progress visible while a panel chunk is still pending", async () => {
-  type Props = { label: string };
-  let loaded!: (component: (props: Props) => ReactNode) => void;
-  const Progress = lazyPanel<Props>(
-    () =>
-      new Promise((resolve) => {
-        loaded = resolve;
-      }),
-    ({ label }) => <p role="status">{label}</p>,
-  );
-  await renderInShell(<Progress label="正在启动…" />);
-  expect(container.querySelector('[role="status"]')?.textContent).toBe("正在启动…");
-  await renderInShell(<Progress label="正在重试…" />);
-  expect(container.querySelector('[role="status"]')?.textContent).toBe("正在重试…");
-  await act(async () => loaded(({ label }) => <p data-testid="loaded-progress">{label}</p>));
-  expect(container.querySelector('[data-testid="loaded-progress"]')?.textContent).toBe("正在重试…");
 });

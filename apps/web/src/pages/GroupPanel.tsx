@@ -462,4 +462,10 @@ export function GroupSettings({
   );
 }
 
-export { memberName } from "./shell/group-members";
+export function memberName(
+  members: Group["members"] | undefined,
+  botId: string | undefined,
+): string | undefined {
+  if (!botId || !members) return undefined;
+  return members.find((member) => member.botId === botId)?.name;
+}

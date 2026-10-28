@@ -16,7 +16,7 @@ import path from "node:path";
 import type { AdapterContext, AgentHomeStore, PortableFile } from "@rakazo/adapter-kit";
 import { fileHandlePath } from "./file-handle-path.js";
 
-type StoreSignal = Pick<AdapterContext, "signal"> & Partial<AdapterContext>;
+type StoreSignal = Pick<AdapterContext, "signal">;
 
 export class LocalAgentHomeStore implements AgentHomeStore {
   private readonly botWrites = new Map<string, Promise<void>>();
@@ -53,19 +53,14 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     return "working";
   }
 
-  async commit(
-    botId: string,
-    src: string,
-    context: AdapterContext,
-    expectedRevision?: string,
-  ): Promise<string> {
+  async commit(botId: string, src: string, context: AdapterContext): Promise<string> {
     return this.withBotWrite(botId, async () => {
       await this.recoverInterruptedCommit(botId);
       const staging = await this.stagingDir(botId);
       try {
         await copyDir(src, staging);
         await this.replaceLocal(botId, staging);
-        return this.finishWrite(botId, context, expectedRevision);
+        return this.finishWrite(botId, context);
       } finally {
         await rm(staging, { recursive: true, force: true });
       }
@@ -89,7 +84,7 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     await this.withBotWrite(botId, async () => {
       await this.recoverInterruptedCommit(botId);
       await edit(this.pathFor(botId));
-      await this.finishWrite(botId, context, undefined, "stored-edit");
+      await this.finishWrite(botId, context);
     });
   }
 
@@ -213,12 +208,7 @@ export class LocalAgentHomeStore implements AgentHomeStore {
     _context: StoreSignal | undefined,
   ): Promise<void> {}
 
-  protected async finishWrite(
-    botId: string,
-    context: StoreSignal | undefined,
-    _expectedRevision?: string,
-    _source?: "stored-edit",
-  ) {
+  protected async finishWrite(botId: string, context: StoreSignal | undefined) {
     const revision = `rev-${Date.now()}-${randomUUID().slice(0, 8)}`;
     await this.publish(botId, revision, context);
     await this.writeRevision(botId, revision);

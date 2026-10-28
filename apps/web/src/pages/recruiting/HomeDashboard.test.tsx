@@ -1,4 +1,3 @@
-import "../../lib/query.test-support";
 // @vitest-environment jsdom
 import type { Group } from "@rakazo/contracts";
 import type { ReactNode } from "react";

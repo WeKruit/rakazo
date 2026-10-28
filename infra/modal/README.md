@@ -5,7 +5,7 @@ For the proposed PR/staging/promotion path, see
 Its activation requires separate owner approval; this file is not a release authorization.
 Deployments now require the named Volume to exist; they never create it implicitly.
 
-This deployment runs the API (including the built web app and screen proxy), worker and Pi runtime
+This deployment runs the original Web preview server, API, worker and Pi runtime
 in one initial Modal container. It requires an external PostgreSQL database and a
 native sandbox provider. No Docker daemon or additional agent harness is used.
 
@@ -56,11 +56,7 @@ modal deploy --strategy recreate infra/modal/app.py
 
 The entrypoint obtains its registered public URL from Modal and gives that same
 origin to native authentication and Web/API configuration. It applies the unchanged
-upstream migrations before starting the API and worker services. The API owns both
-the loopback port 3100 and the public port 8000. `WEB_STATIC_DIR` points at the
-built web directory; Vite is used at build time only. Public routes include
-`/api`, `/rpc`, `/ready`, `/health`, static files and the capability-checked
-HTTP/WebSocket screen proxy. Internal API routes remain on port 3100. The Volume is mounted at
+upstream migrations before starting the three services. The Volume is mounted at
 `/data` for native artifacts and workspace checkpoints, with a final commit after
 the services stop. One container avoids concurrent containers writing the same
 native file store; scaling requires revisiting that storage boundary.
