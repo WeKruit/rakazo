@@ -6,6 +6,7 @@ import {
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  recruitingBotKey,
 } from "@rakazo/core";
 import type { Bot, BotMcpServer, CapabilityInstall, McpServer, PrismaClient } from "./client.js";
 import { Prisma } from "./client.js";
@@ -903,10 +904,7 @@ function toolsFor(
   service: RecruitingService,
   bot: { name?: string; spawnKey?: string | null },
 ): string[] {
-  const key =
-    RECRUITING_DEFAULT_BOTS.find(
-      (role) => bot.spawnKey?.endsWith(`:${role.key}`) || (!bot.spawnKey && bot.name === role.name),
-    )?.key ?? "";
+  const key = recruitingBotKey(bot) ?? "";
   return service.toolsByBot?.[key] ?? service.tools;
 }
 

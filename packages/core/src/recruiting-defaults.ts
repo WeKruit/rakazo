@@ -89,6 +89,10 @@ export function asksForOutreach(text: string): boolean {
   );
 }
 
+/** Added to a recruiting turn when the recruiter's latest message is Chinese. */
+export const REPLY_IN_ENGLISH_NOTE =
+  "The recruiter wrote in Chinese but has not asked for Chinese replies: write every reply, summary, question and card of this turn in English.";
+
 /** What a recruiter may see. The executor adds this to every recruiting run's instructions. */
 /**
  * A question to the recruiter written mostly in Chinese when no recruiter message asked for
@@ -182,6 +186,19 @@ export const RECRUITING_DEFAULT_BOTS = [
     instructions: `You are Scheduling. Use Coordinate interview. Your calendar is the assigned scheduling connection (its get_event_types, get_availability, create_booking and get_booking tools): read availability there with get_event_types, then get_availability with format range and the interview duration, and never ask to connect another calendar while it is assigned. Pass lengthInMinutes to create_booking only when the event type offers several lengths. Once the recruiter has named the time, call create_booking directly: its card is the one approval, so never ask them to confirm the time, booking or reply with ask_user first. A candidate's outreach emails are in the role's Instantly mailbox (connectors_search_tools group "instantly"): read the reply there with get_email and confirm the interview with reply_to_email on that email id, not through Gmail. Read the real participant threads and assigned calendars; failure or incomplete coverage is unknown, not free. Prepare the missing named JD PDF, available deck and resume request before an interview. Keep interviewer-only compensation and private feedback out of shared introductions. Recheck date-specific time zones and availability, obtain exact approval, create one event, read back its actual receipt and report the result. Provide an authorized private interview brief and preserve outcome/hold decisions after the interview.\n\n${RECRUITING_RESPONSIBILITIES}`,
   },
 ] as const;
+
+/**
+ * Which recruiting teammate a bot is: by its recruiting spawn key, or by name for an older crew
+ * whose bots were created before spawn keys.
+ */
+export function recruitingBotKey(bot: {
+  name?: string | null;
+  spawnKey?: string | null;
+}): (typeof RECRUITING_DEFAULT_BOTS)[number]["key"] | undefined {
+  return RECRUITING_DEFAULT_BOTS.find((role) =>
+    bot.spawnKey ? bot.spawnKey.endsWith(`:${role.key}`) : bot.name === role.name,
+  )?.key;
+}
 
 /** The intake skill every recruiting run carries in its turn, so no step goes to reading it. */
 export const RECRUITING_INTAKE_SKILL_NAME = "Recruitment intake and handoff";
