@@ -28,6 +28,14 @@ describe("sourced profile images", () => {
     expect(organizationLogo("Previous Employer", assets.company)).toBeNull();
   });
 
+  it("shows the photo copy saved with the person", () => {
+    const saved = "data:image/webp;base64,UklGRg==";
+    expect(profileAssets([field("Profile image url", saved)]).photo).toBe(saved);
+    expect(
+      profileAssets([field("Profile image url", "data:image/svg+xml;base64,PHN2Zz4=")]).photo,
+    ).toBeNull();
+  });
+
   it("never derives photos or logos from a profile or citation URL", () => {
     expect(
       profileAssets([
