@@ -13,6 +13,8 @@ export const FindEmailsInput = z.strictObject({
     )
     .min(1)
     .max(500),
+  /** Search again people a source already found nothing for; only when the recruiter asks. */
+  recheck: z.boolean().optional(),
 });
 /** People one call looks up; the rest are named in the result for the next call. */
 export const LOOKUP_BATCH = 50;
@@ -44,6 +46,8 @@ export type FindEmailsResult = {
     looked_up: number;
     found: number;
     verified: number;
+    /** People no source was charged for, because every source already searched them before. */
+    already_looked_up?: number;
     /** People past the first {@link LOOKUP_BATCH}, left for the next call. */
     not_looked_up?: number;
     next_step?: string;
@@ -56,7 +60,9 @@ export type ContactLookupOptions = {
   keys: ContactLookupKeys;
   signal: AbortSignal;
   /** Emails this account already paid for, by LinkedIn key; reused instead of a new lookup. */
-  saved?: ReadonlyMap<string, FoundEmail[]>;
+  emails?: ReadonlyMap<string, FoundEmail[]>;
+  /** Sources that already found nothing for a person, by LinkedIn key; not charged again. */
+  searched?: ReadonlyMap<string, ReadonlySet<ContactProvider>>;
   waitMs?: number;
   pollMs?: number;
   sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -66,6 +72,7 @@ const FULLENRICH = "https://app.fullenrich.com/api/v1/contact/enrich/bulk";
 const CONTACTOUT = "https://api.contactout.com/v1/people/linkedin";
 const LEADMAGIC = "https://api.leadmagic.io/v1/people/personal-email-finder";
 const EMAIL = z.email();
+const SEARCHED_BEFORE = "searched before; nothing found";
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value && typeof value === "object" && !Array.isArray(value)
@@ -142,17 +149,24 @@ export async function findEmails(
         outcome: "skipped",
         detail: "no LinkedIn profile link",
       });
-    const saved = person.key ? options.saved?.get(person.key) : undefined;
+    const saved = person.key ? options.emails?.get(person.key) : undefined;
     if (saved?.length) {
       for (const email of saved) add(person, email);
       person.lookups.push({ provider: "saved", outcome: "found" });
     }
   }
-  const open = () => people.filter((person) => person.key && !person.emails.length);
+  // A source that already searched a person and found nothing is never charged for them again.
+  const open = (provider: ContactProvider) =>
+    people.filter((person) => {
+      if (!person.key || person.emails.length) return false;
+      if (input.recheck || !options.searched?.get(person.key)?.has(provider)) return true;
+      person.lookups.push({ provider, outcome: "not_found", detail: SEARCHED_BEFORE });
+      return false;
+    });
 
-  await fullEnrich(open(), options, sleep, add);
-  for (const person of open()) await contactOut(person, options, add);
-  for (const person of open()) await leadMagic(person, options, add);
+  await fullEnrich(open("fullenrich"), options, sleep, add);
+  for (const person of open("contactout")) await contactOut(person, options, add);
+  for (const person of open("leadmagic")) await leadMagic(person, options, add);
 
   const output = people.map(({ key: _key, company: _company, ...person }) => ({
     ...person,
@@ -171,6 +185,17 @@ export async function findEmails(
       verified: output.filter((person) =>
         person.emails.some((email) => email.status === "DELIVERABLE"),
       ).length,
+      ...(() => {
+        const skipped = people.filter(
+          (person) =>
+            !person.emails.length &&
+            person.lookups.some((lookup) => lookup.detail === SEARCHED_BEFORE) &&
+            person.lookups.every(
+              (lookup) => lookup.detail === SEARCHED_BEFORE || lookup.outcome === "skipped",
+            ),
+        ).length;
+        return skipped ? { already_looked_up: skipped } : {};
+      })(),
       ...(later.length
         ? {
             not_looked_up: later.length,

@@ -90,7 +90,7 @@ describe("findEmails", () => {
         ...options,
         fetch,
         keys: { fullenrich: "k1" },
-        saved: new Map([
+        emails: new Map([
           [
             "linkedin:/in/ada-example",
             [
@@ -112,6 +112,43 @@ describe("findEmails", () => {
       { provider: "leadmagic", outcome: "skipped", detail: "not configured" },
     ]);
     expect(calls).toEqual(["POST app.fullenrich.com/api/v1/contact/enrich/bulk"]);
+  });
+
+  it("never charges a source again for someone it already found nothing for", async () => {
+    const searched = new Map([
+      ["linkedin:/in/bo-sample", new Set(["fullenrich", "contactout", "leadmagic"] as const)],
+      ["linkedin:/in/cy-nobody", new Set(["fullenrich", "contactout"] as const)],
+    ]);
+    const keys = { fullenrich: "k1", contactout: "k2", leadmagic: "k3" };
+    const { fetch, calls } = provider({
+      "https://api.leadmagic.io/": () => new Response("{}", { status: 404 }),
+    });
+    const result = await findEmails(
+      { people: people.slice(1) },
+      { ...options, fetch, keys, searched },
+    );
+    // Only the source that never searched Cy runs; Bo costs nothing.
+    expect(calls).toEqual(["POST api.leadmagic.io/v1/people/personal-email-finder"]);
+    expect(result.summary).toEqual({ looked_up: 2, found: 0, verified: 0, already_looked_up: 1 });
+    expect(result.people[0]!.lookups.map((lookup) => lookup.provider)).toEqual([
+      "fullenrich",
+      "contactout",
+      "leadmagic",
+    ]);
+    expect(result.people[0]!.lookups.every((lookup) => lookup.outcome === "not_found")).toBe(true);
+
+    const again = provider({
+      "https://app.fullenrich.com/api/v1/contact/enrich/bulk/": () =>
+        ok({ status: "FINISHED", datas: [] }),
+      "https://app.fullenrich.com/api/v1/contact/enrich/bulk": () => ok({ enrichment_id: "job" }),
+      "https://api.contactout.com/": () => new Response("{}", { status: 404 }),
+      "https://api.leadmagic.io/": () => new Response("{}", { status: 404 }),
+    });
+    await findEmails(
+      { people: people.slice(1, 2), recheck: true },
+      { ...options, fetch: again.fetch, keys, searched },
+    );
+    expect(again.calls.some((call) => call.includes("fullenrich"))).toBe(true);
   });
 
   it("records a lookup still running at the deadline and moves on", async () => {

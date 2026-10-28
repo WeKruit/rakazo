@@ -8,6 +8,7 @@ import {
   projectRecruitingCandidateReport,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
+  savedContactLookups,
 } from "./recruiting-research.js";
 
 describe("FullEnrich job ownership", () => {
@@ -884,5 +885,61 @@ describe("candidate reports from saved people-search pages", () => {
     expect(saved).toEqual({ name: "Sam Reid", current_title: "Research Scientist" });
     expect(report).toBeDefined();
     await expect(read({ ...source, rowIndex: 5 })).rejects.toThrow();
+  });
+});
+
+describe("savedContactLookups", () => {
+  it("keeps found emails and which sources already found nothing, by person", async () => {
+    const effect = (people: unknown[]) => ({
+      request: [
+        "__rakazoCatalogTool",
+        "direct",
+        {
+          route: {
+            connectorId: "mcp",
+            resourceId: "enrich",
+            resourceRevision: 1,
+            toolName: "native_find_emails",
+          },
+          args: { people: [] },
+        },
+      ],
+      result: { structuredContent: { people } },
+    });
+    const findMany = vi.fn(async () => [
+      effect([
+        {
+          linkedin_url: "https://www.linkedin.com/in/no-match",
+          emails: [],
+          lookups: [
+            { provider: "fullenrich", outcome: "failed", detail: "no credits left" },
+            { provider: "contactout", outcome: "not_found" },
+          ],
+        },
+      ]),
+      effect([
+        {
+          linkedin_url: "https://www.linkedin.com/in/found",
+          emails: [{ address: "a@x.test", type: "work", status: null, provider: "fullenrich" }],
+          lookups: [{ provider: "fullenrich", outcome: "found" }],
+        },
+        {
+          linkedin_url: "https://www.linkedin.com/in/no-match",
+          emails: [],
+          lookups: [{ provider: "leadmagic", outcome: "not_found" }],
+        },
+      ]),
+    ]);
+    const saved = await savedContactLookups(
+      { externalEffect: { findMany } } as never,
+      { userId: "user", spaceId: "space" },
+      { id: "enrich", revision: 1 },
+      "native_find_emails",
+    );
+    expect([...saved.emails.keys()]).toEqual(["linkedin:/in/found"]);
+    // A source that failed (no credits) has not searched yet, so it may still run.
+    expect(saved.searched.get("linkedin:/in/no-match")).toEqual(
+      new Set(["contactout", "leadmagic"]),
+    );
   });
 });
