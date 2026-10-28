@@ -13,6 +13,7 @@ import {
   listRunToolResults,
   saveRecruitingSavedProfile,
 } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import { inlineProfilePhotos, linkedinPhotoUrl } from "./profile-photo.js";
 
 type Facts = Omit<RecruitingSavedProfile, "personKey" | "provider" | "fetchedAt">;
@@ -706,13 +707,19 @@ export async function fillRecruitingRoleProfiles(
         const key = linkedinPersonKey(row.linkedin_url)!;
         const facts = factsFromSearchRow(row);
         if (!facts || !missing.has(key)) continue;
-        await saveRecruitingSavedProfile(prisma, actor, runId, {
-          personKey: key,
-          provider: "people_search",
-          sourceEffectId: call.effectId,
-          fetchedAt: call.createdAt,
-          profile: facts,
-        });
+        try {
+          await saveRecruitingSavedProfile(prisma, actor, runId, {
+            personKey: key,
+            provider: "people_search",
+            sourceEffectId: call.effectId,
+            fetchedAt: call.createdAt,
+            profile: facts,
+          });
+        } catch (error) {
+          // One unusable record never stops the rest of the role.
+          getLogger().warn("recruiting.profiles.fill.skipped", { error: String(error) });
+          continue;
+        }
         if (facts.profileImageUrl) photos += 1;
         missing.delete(key);
       }
