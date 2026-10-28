@@ -76,6 +76,7 @@ import {
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
+  asksAboutThesePeople,
   asksForOutreach,
   assertTransition,
   attachmentExtensionForMimeType,
@@ -112,6 +113,7 @@ import {
   messagingChannelId,
   messagingChannelPrivacyBlock,
   messagingDmSurfaceNote,
+  NAMED_EMAILS_NOTE,
   nextCronDateAcross,
   nextFence,
   oneTimeMcpWriteEndpoint,
@@ -11289,17 +11291,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
         linkRole = jobRole;
         // Contacts, drafts and sends belong to Outreach: any other recruiting teammate dispatches
         // them instead of answering (or declining) them itself.
+        const currentTurnText =
+          currentTurnMessage?.blocks
+            .map((block) => (block.kind === "text" ? block.text : ""))
+            .join(" ") ?? "";
         const outreachAsk =
           thread.groupId &&
           run.trigger === "user" &&
           hideVendors &&
           recruitingBotKey(bot) !== "outreach" &&
           currentTurnMessage?.role === "user" &&
-          asksForOutreach(
-            currentTurnMessage.blocks
-              .map((block) => (block.kind === "text" ? block.text : ""))
-              .join(" "),
-          )
+          asksForOutreach(currentTurnText)
             ? await deps.prisma.chatGroupMember
                 .findFirst({
                   where: {
@@ -11317,7 +11319,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 .catch(() => null)
             : null;
         const dispatchNote = outreachAsk
-          ? `The recruiter asked for contacts, an email draft or a send: that is Outreach's work. Hand it to Outreach now with handoff_to_bot (bot_id ${outreachAsk.botId}) as your only step, quoting the recruiter's exact words; never decline it, never ask which people and never call the saved results unready. Tell Outreach to show what is already done for these people first (contacts already found, a saved draft) and do only what is missing.`
+          ? `The recruiter asked for contacts, an email draft or a send: that is Outreach's work. Hand it to Outreach now with handoff_to_bot (bot_id ${outreachAsk.botId}) as your only step, quoting the recruiter's exact words; never decline it, never ask which people and never call the saved results unready. Tell Outreach to show what is already done for these people first (contacts already found, a saved draft) and do only what is missing.${asksAboutThesePeople(currentTurnText) ? ` ${NAMED_EMAILS_NOTE}` : ""}`
           : undefined;
         // A recruiter writing Chinese pulls replies into Chinese despite the system rule; the note
         // sits next to their message, where it holds.

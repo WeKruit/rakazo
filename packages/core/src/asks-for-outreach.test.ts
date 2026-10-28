@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { asksForOutreach, recruitingBotKey } from "./recruiting-defaults.js";
+import { asksAboutThesePeople, asksForOutreach, recruitingBotKey } from "./recruiting-defaults.js";
 
 describe("asksForOutreach", () => {
   it("matches contact, draft and send requests", () => {
@@ -26,5 +26,13 @@ describe("recruitingBotKey", () => {
     expect(recruitingBotKey({ name: "Outreach", spawnKey: null })).toBe("outreach");
     expect(recruitingBotKey({ name: "Outreach", spawnKey: "onboarding:first" })).toBeUndefined();
     expect(recruitingBotKey({ name: "Writer", spawnKey: null })).toBeUndefined();
+  });
+});
+
+describe("asksAboutThesePeople", () => {
+  it("spots a draft for the people already found", () => {
+    expect(asksAboutThesePeople("根据这些人选修改第一封邮件草稿")).toBe(true);
+    expect(asksAboutThesePeople("write the email for these candidates")).toBe(true);
+    expect(asksAboutThesePeople("来个campign draft看看")).toBe(false);
   });
 });
