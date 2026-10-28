@@ -221,6 +221,25 @@ describe("group members roster", () => {
     expect(context).not.toContain("orchestrator");
   });
 
+  it("lists each member's assigned services so no one says a teammate's work can't be done", () => {
+    const context = renderGroupMembersContext(
+      "Hiring",
+      [
+        { id: "b_1", name: "Main" },
+        {
+          id: "b_2",
+          name: "Outreach",
+          capabilities: ["contact-lookup (Finds work and personal emails.)", "mail: send_email"],
+        },
+      ],
+      { id: "b_1", name: "Main" },
+    );
+    expect(context).toContain(
+      "Outreach (id: b_2) [can use: contact-lookup (Finds work and personal emails.); mail: send_email]",
+    );
+    expect(context).toContain("Before saying something cannot be done, check this roster");
+  });
+
   it("reuses the same roster line formatting as the teammate directory", () => {
     const members = [
       {
