@@ -114,8 +114,11 @@ function commonChecks(messages, failures) {
     if (han > latin) failures.push(`not English: "${text.slice(0, 80)}"`);
     if (text.includes("、")) failures.push(`Chinese list separator: "${text.slice(0, 80)}"`);
     if (VENDORS.test(text)) failures.push(`vendor name: "${text.match(VENDORS)[0]}"`);
-    if (REFUSAL.test(text))
-      failures.push(`declined or deferred a request: "${text.match(REFUSAL)[0]}"`);
+    const refusal = text.match(REFUSAL);
+    if (refusal)
+      failures.push(
+        `declined or deferred a request: "…${text.slice(Math.max(0, refusal.index - 80), refusal.index + 80)}…"`,
+      );
   }
 }
 /** The ten: a list of ten LinkedIn names, then a next-step card that recommends one option. */
@@ -337,6 +340,8 @@ if (wanted.has("t1"))
     const draft = await say(groupId, "来个campign draft看看");
     const drafted = draft.replies.map(botText).join("\n");
     fs.writeFileSync(path.join(OUT, "t1-draft.txt"), `${drafted}\n`);
+    if (/\{\{\s*\w+\s*\}\}/.test(drafted))
+      failures.push("campaign draft in chat shows {{variables}}");
     if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
       failures.push("campaign draft is not three emails shown in chat");
     if (!/^\s*[-*•]\s/m.test(drafted)) failures.push("job duties in the draft are not bullets");
@@ -357,6 +362,10 @@ if (wanted.has("t1"))
     });
     if (!send.replies.some(sendCard))
       failures.push("「发20个人的先」 did not end on a send confirmation card");
+    const transcript = (await messagesOf(groupId))
+      .map((message) => `[${message.role}] ${botText(message)}`)
+      .join("\n\n");
+    fs.writeFileSync(path.join(OUT, "t1-chat.txt"), `${transcript}\n`);
     commonChecks(await messagesOf(groupId), failures);
   });
 
