@@ -236,6 +236,7 @@ suite("slot replacement controller with local processes and real PostgreSQL", ()
     const result = await replaceWorkerSlot(db.prisma, platform, { ...input(), timeoutMs: 100 });
     expect(result.status).toBe("postponed");
     expect(platform.mutations).toEqual(["drain"]);
+    expect(result).toMatchObject({ mutated: true });
     const peer = platform.children.find((child) => child.target.slot === "worker-b")!;
     expect((await platform.health(peer.target, peer.id)).state).toBe("ready");
     expect(await listSessionAdmissions(db.prisma)).toHaveLength(2);
@@ -274,6 +275,12 @@ suite("slot replacement controller with local processes and real PostgreSQL", ()
     expect(result.status).toBe("postponed");
     expect(platform.mutations).toEqual([]);
     expect(platform.children).toHaveLength(0);
+    // Nothing changed, so the controller lease is released for the next attempt.
+    expect(result).toMatchObject({ mutated: false });
+    expect(
+      (await sql.query('SELECT "replacementToken" FROM session_admission_budget')).rows[0]
+        .replacementToken,
+    ).toBeNull();
   });
   it("an existing replacement controller blocks a second controller before any process mutation", async () => {
     platform = new LocalProcessPlatform();

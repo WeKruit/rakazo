@@ -51,6 +51,7 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
   private closed = false;
   private closing: Promise<void> | undefined;
   private disposing: Promise<void> | undefined;
+  private disposeFailure: unknown;
 
   constructor(private readonly options: PostgresRealtimeOptions) {
     this.clientFactory =
@@ -114,6 +115,7 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
       if (client) await this.disposeClient(client);
       if (this.options.verifyConnection) await this.connecting?.catch(() => undefined);
       await this.disposing;
+      if (this.disposeFailure !== undefined) throw this.disposeFailure;
     })();
     return this.closing;
   }
@@ -195,10 +197,17 @@ export class PostgresRealtimeFanout implements RealtimeFanout {
     if (candidate === this.connectingClient) this.connectingClient = undefined;
     else if (candidate === this.client) this.client = undefined;
     else return;
-    this.disposing = Promise.all([this.disposing, this.disposeClient(candidate)]).then(
+    // A failed end() must not block every later reconnect. Keep it for close() to report.
+    const disposing = Promise.all([this.disposing, this.disposeClient(candidate)]).then(
       () => undefined,
+      (error: unknown) => {
+        this.disposeFailure ??= error;
+      },
     );
-    void this.disposing.catch(() => undefined);
+    this.disposing = disposing;
+    void disposing.then(() => {
+      if (this.disposing === disposing) this.disposing = undefined;
+    });
     this.scheduleReconnect();
   }
 

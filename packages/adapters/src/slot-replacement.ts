@@ -72,7 +72,7 @@ export class ModalSlotPlatform implements SlotPlatform {
     const { stdout } = await promisify(execFile)(this.python, args, {
       cwd: this.cwd,
       timeout:
-        action === "deploy" ? 300_000 : action === "drain" ? (timeoutSeconds + 5) * 1000 : 3_000,
+        action === "deploy" ? 300_000 : action === "drain" ? (timeoutSeconds + 5) * 1000 : 30_000,
       maxBuffer: 1024 * 1024,
     });
     const records = stdout.split("\n").filter((line) => line.startsWith("RAKAZO_SLOT_RESULT "));
@@ -120,7 +120,8 @@ export class ModalSlotPlatform implements SlotPlatform {
 }
 
 /** One independently deployed worker slot per invocation; peer readiness is checked before critical steps and during polling.
- * Any error retains the global controller lease for attended recovery, never TTL takeover.
+ * An error before the old worker is drained releases the lease, since nothing changed. Any later
+ * error retains it for attended recovery, never TTL takeover.
  */
 export async function replaceWorkerSlot(
   prisma: PrismaClient,
@@ -184,6 +185,7 @@ export async function replaceWorkerSlot(
       await wait(Math.min(250, deadline - now()));
     }
   };
+  let mutated = false;
   try {
     await platform.validateTarget(target, input.generation);
     await readyPeer();
@@ -202,6 +204,7 @@ export async function replaceWorkerSlot(
     );
     if (!oldAdmission) throw new Error("Old worker admission identity missing");
     // No stop/deploy is issued on drain timeout or failure.
+    mutated = true;
     await platform.drain(target, old, Math.max(1, Math.ceil(input.timeoutMs / 1000)));
     const assertQuiesced = async () => {
       await readyPeer();
@@ -256,10 +259,16 @@ export async function replaceWorkerSlot(
     await releaseSessionReplacement(prisma, lease);
     return { status: "completed" as const, slot: target.slot, generation: input.generation };
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (!mutated) {
+      await releaseSessionReplacement(prisma, lease);
+      return { status: "postponed" as const, slot: target.slot, reason, mutated };
+    }
     return {
       status: "postponed" as const,
       slot: target.slot,
-      reason: error instanceof Error ? error.message : String(error),
+      reason,
+      mutated,
       recoveryOwner: lease.owner,
     };
   }

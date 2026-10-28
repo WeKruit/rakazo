@@ -243,4 +243,33 @@ describe("PostgresRealtimeFanout", () => {
     expect(realtime.close()).toBe(first);
     await expect(realtime.close()).rejects.toThrow("unconfirmed");
   });
+
+  it("reconnects after a dropped session socket fails to close, and reports it on close", async () => {
+    vi.useFakeTimers();
+    const clients: FakeClient[] = [];
+    const realtime = new PostgresRealtimeFanout({
+      connectionString: "postgres://unused",
+      publisher: { query: async () => undefined },
+      clientFactory: () => {
+        const client = new FakeClient();
+        clients.push(client);
+        return client;
+      },
+      verifyConnection: async () => undefined,
+      reconnectBaseMs: 10,
+      reconnectMaxMs: 10,
+      random: () => 0.5,
+    });
+    const received: string[] = [];
+    await realtime.subscribe("thread:a", (payload) => received.push(payload));
+    await vi.advanceTimersByTimeAsync(0);
+    vi.spyOn(clients[0]!, "end").mockRejectedValue(new Error("socket close unconfirmed"));
+    clients[0]!.disconnect();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(clients).toHaveLength(2);
+    expect(clients[1]!.queries).toContain("LISTEN rakazo_events");
+    clients[1]!.notify("rakazo_events", JSON.stringify({ topic: "thread:a", payload: "x" }));
+    expect(received).toContain("x");
+    await expect(realtime.close()).rejects.toThrow("unconfirmed");
+  });
 });
