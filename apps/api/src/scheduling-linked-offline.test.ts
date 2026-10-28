@@ -1071,7 +1071,9 @@ describe("linked offline scheduling receipts", () => {
       }
       const isBooking = name === createBooking.name;
       const blockedBooking = isBooking && scenario === "booking_conflict";
-      const dispatchCount = isBooking && !blockedBooking ? 2 : 1;
+      // A blocked booking with a length reads availability twice: with the length, then without
+      // it to tell a taken time from a fixed-length event type.
+      const dispatchCount = isBooking ? 2 : 1;
       expect(f.connector.execute).toHaveBeenCalledTimes(count + dispatchCount);
       if (!blockedBooking)
         expect(f.connector.execute).toHaveBeenLastCalledWith(
