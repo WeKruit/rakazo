@@ -10,20 +10,20 @@
 
 | # | 方向 | 项目 | 状态 | 负责 |
 |---|---|---|---|---|
-| A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已有上线记录（#259）；50 并发验收未测 | — |
+| A1 | 数据库 | 查询走事务模式连接池，会话名额只留给监听和锁 | 已上线（#259）。10-28 线上 4 小时日志：EMAXCONNSESSION 0 次，最长等待 1,504 ms（发布后冷启动），查询 p50 约 21 ms；50 并发压测见 E2 | — |
 | A2 | 数据库 | 数据库行级安全与 actor 隔离 | 部分完成：99模型已审计[#336](https://github.com/WeKruit/rakazo/pull/336)，33表opt-in策略[#337](https://github.com/WeKruit/rakazo/pull/337)；PG22/22，API144 OK+98未覆盖，线上延迟未测 | Adam |
 | A3 | 数据库 | 列表接口都分页、有上限 | 已合入 [#277](https://github.com/WeKruit/rakazo/pull/277)，本地门禁通过；线上 p95 未测 | Adam |
-| A4 | 数据库 | schema 和迁移文件不一致 | 阻塞（线上外键元数据待核实，[#268](https://github.com/WeKruit/rakazo/pull/268)） | Adam |
+| A4 | 数据库 | schema 和迁移文件不一致 | 完成：schema 对齐迁移（4 个外键 `onUpdate: NoAction`），本地重放迁移后 diff 为空；不改数据库 | Claude |
 | A5 | 数据库 | 对话开头到第一次搜索的查询次数（现 150–220 条，约 3–5 秒）：合并重复读取，缩短对话行锁 | 进行中 | Claude（工具出错率线程） |
-| B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 本分支；本地回归通过，线上未测 | — |
-| B2 | 任务队列 | 每分钟记录一次排队情况 | 本分支；部署后分钟日志未测 | — |
+| B1 | 任务队列 | 给对话预留任务槽，定时任务不能占满 | 已上线；10-28 线上 4 小时 readyChats 始终为 0（集中触发压测见 E2） | — |
+| B2 | 任务队列 | 每分钟记录一次排队情况 | 完成：线上每分钟一条 `jobs.queue`，4 小时 236 条 | — |
 | C1 | 多容器 | 附件放对象存储 | 代码已合并（#260）；存储配置阻塞 | — |
 | C2 | 多容器 | 电脑工作目录放对象存储 | 代码已合并（#262）；存储配置阻塞 | — |
 | C3 | 多容器 | 手机推送 token 放数据库 | 本地门禁通过（[#272](https://github.com/WeKruit/rakazo/pull/272)），线上未测 | Adam |
 | C4 | 多容器 | 应用内模型订阅登录的状态不能只存在进程内存里 | 本地验收通过（[#274](https://github.com/WeKruit/rakazo/pull/274)，线上未测） | Adam |
 | C5 | 多容器 | web/API 和 worker 拆分、独立 slot 与滚动发布 | 代码与本地验收已合入 [#334](https://github.com/WeKruit/rakazo/pull/334)：7,762通过/510跳过、真实PG与子进程23/23、Python17/17；实际云端滚动与连续对话未测，不标整体验收完成 | Adam |
 | C6 | 多容器 | 生产环境不用 `vite preview` 提供网页 | 本地门禁通过（[#265](https://github.com/WeKruit/rakazo/pull/265)），线上验收未完成 | Adam |
-| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#338](https://github.com/WeKruit/rakazo/pull/338)后联系人321,748B gzip，7JS/35请求/17RPC/0重复；最终250KB仍差71,748B，线上LCP未测 | Adam |
+| D1 | 前端 | 首屏 JS 太大，要按需加载 | 部分完成：[#338](https://github.com/WeKruit/rakazo/pull/338)后联系人321,748B gzip，7JS/35请求/17RPC/0重复；10-28 已登录聊天 285,238B，距 250KB 还差约 35KB；线上登录页 LCP 4.5–4.7 s（目标 2.5 s） | Adam |
 | D2 | 前端 | 服务端数据的缓存是手写的，要统一 | 完成（本项代码验收）：重复RPC为0，[#301](https://github.com/WeKruit/rakazo/pull/301) 已合入 | Adam |
 | D3 | 前端 | 长列表虚拟滚动 | 完成（本地验收）：最多19行/36卡，无观测>50ms长任务；[#276](https://github.com/WeKruit/rakazo/pull/276)、[#300](https://github.com/WeKruit/rakazo/pull/300) 已合入 | Adam |
 | D4 | 前端 | 拆分超大组件文件 | 完成：生产源文件最多1,499行，零超限；[#298](https://github.com/WeKruit/rakazo/pull/298) 已合入 | Adam |
@@ -132,7 +132,12 @@ SQL
 - **实测与限制：** 见 [A3 本地验收记录](./A3-PAGINATION-VALIDATION.md)。合成 PostgreSQL 数据 1,000 候选人，100 次采样：原全岗位查询 1,000 行、p95 0.88 ms；按已观察身份查询 20 行、p95 0.49 ms。机器人 1,000 条在 `200/200/200/200/200/0` 六页中无遗漏、无重复。真实本地 HTTP+PostgreSQL 的 1,000 人联系人 RPC：首轮 p95 32.44 ms，此前复测 p95 26.37 ms，F1 合入后发布门禁复测 p95 26.58 ms（各 100 samples/10 warmups）；固定合成 session actor，其余授权和 DB 查询真实。实际浏览器 contacts 1×1000→5×200 请求，JS gzip 625,224→626,840 bytes。后续整份 recruiting PostgreSQL 回归 285 passed、候选人单元 425 passed、DB 含 cross-package 类型检查通过。**线上联系人 RPC p95 还没测，不标完成**。没有部署、云配置变更或真实岗位/候选人测试。
 
 
-### A4 schema 和迁移不一致 — 阻塞，尚未通过验收
+### A4 schema 和迁移不一致 — 完成（2026-10-28）
+
+- **决定：** 线上迁移账本与 main 的迁移一致（132 条），这 4 个外键在迁移里都没有写 `ON UPDATE`，所以线上是 `NO ACTION`。主键不会被更新，两种行为在实际使用中相同。保留数据库现状，把 `schema.prisma` 改成 `onUpdate: NoAction`，不生成迁移。
+- **验收：** 在空的本地 PostgreSQL 16 重放全部迁移后，`prisma migrate diff --exit-code` 为空；改之前同一命令输出 4 个 DROP 和 4 个 ADD。db 的 Postgres 测试 207/207 通过。
+
+以下是当时的排查记录。
 
 - **纠正现状（2026-10-27 本地实测）：** 在独立 PostgreSQL 16.15 空库重放全部 129 个迁移成功。四个外键**都存在**，不是缺失；差异是迁移默认的 `ON UPDATE NO ACTION` 与 Prisma 未显式指定 `onUpdate` 时的 `CASCADE`：
   - `computer_updates_computerId_fkey`
@@ -311,6 +316,7 @@ CHECK
 - **实测口径：** Node 24.19.0、生产 `zh-CN` 构建，gzip 为每个实际 JS 文件 gzip 字节之和。静态入口闭包 594,217 → 238,200 B；入口加 Shell 静态依赖 594,217 → 397,601 B，**仍大于 350 KB**。真实本地 Chromium 冷启动：登录页 629,622 → 273,491 B、总请求 26 → 56、JS 请求 16 → 49；合成已登录单条消息聊天 626,677 → 504,041 B、总请求 47 → 101、JS 请求 15 → 69。更多小分块增加请求数；不能把静态入口达标当成已登录聊天达标。页面请求统计到目标内容出现后 1 秒，全部 API/auth 都是合成响应，不含真实岗位/候选人。
 - **本地门禁：** web 1,650、chat-ui 143、contracts 296、core 1,231 测试通过（core 5 既有跳过）；web/chat-ui/contracts/core/ui-web 的 `check` 全通过，Biome 和生产构建通过。新测试覆盖局部 Skeleton、消息冷加载时文本可见和安全、现有测试等待真实动态模块完成。
 - **第一阶段发布前复验：** 普通合并最新 #263 基线 `8188c88f3`（包含 A3 分页和 D3 候选虚拟列表），保留原始 lazy 实现；没有混入 D2/D4 或后续 D1 优化。修复合并后的重复 lazy 导入，Shell 测试等待真实冷加载按钮。web **1,655/1,655**、chat-ui **143/143** 通过；web/chat-ui/contracts/core/ui-web 五包 `check`、生产 zh-CN build、Biome 和 diff 检查通过。相同基线 dist 和浏览器脚本复测：登录页 **629,622 → 268,915 B gzip**，总请求 **26 → 48**、JS **16 → 40**；合成已登录聊天 **626,677 → 501,396 B gzip**，总请求 **47 → 97**、JS **15 → 65**。此组数字包含当前集成基线变化，不能归因全部来自 D1；最终 250 KB 和线上验收仍未达到/未执行。
+- **10-28 线上实测：** Lighthouse 移动端（模拟 Fast 4G）登录页 LCP 4.5–4.7 s，FCP 约 4.1 s，未达 2.5 s。本地合成已登录聊天首屏 JS 285,238 B gzip（第一阶段 350 KB 已过，250 KB 未到）。试过让页面模块、翻译和会话并行加载：本地 Lighthouse 对比没有变快（瓶颈是传输字节，不是请求顺序），没有提交。把 auth 校验换成 `zod/mini` 只让登录页少 13 KB，已登录首屏反而多 3 KB（Shell 本身要用完整 zod），也没有提交。再往下要减少首屏字节：例如 Shell 的 contracts 改用更小的校验、或首屏静态外壳，属于较大改动，按需排期。
 - **剩余：** D1 尚未完成：已登录 350 KB 门槛、最终 250 KB 目标、Lighthouse Fast 4G LCP 均未验收；后续继续结合 D4 拆分降低初次真正加载字节及请求数。阶段小 PR 尚未发布，不得标完成。
 
 D1 本地复现命令（从仓库根目录；浏览器需要已安装匹配的 headless Chromium）：
