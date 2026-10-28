@@ -386,12 +386,66 @@ if (wanted.has("t1"))
 const DISPATCH = [
   { ask: "再找20个人", owners: /sourc|main/i, capability: "search and scale" },
   { ask: "帮我找前5个人的邮箱", owners: /outreach/i, capability: "contact lookup" },
+  // Asked again: everyone was already looked up, so no source may be paid for them again.
+  {
+    ask: "再找一次前5个人的contact",
+    owners: /outreach|main/i,
+    capability: "repeat contact lookup",
+    repeatLookup: true,
+  },
   { ask: "给第一个人写一封邮件草稿", owners: /outreach/i, capability: "email draft" },
   { ask: "把这封邮件发给他", owners: /outreach/i, capability: "send confirmation" },
   { ask: "下周二我有哪些时间可以面试", owners: /schedul/i, capability: "availability" },
   { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
   { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
 ];
+const REPEAT_LOOKUP_MAX_MS = 10_000;
+/** Every event of a thread so far, from the replay of its event stream. */
+async function readEvents(groupId) {
+  const controller = new AbortController();
+  let idle = setTimeout(() => controller.abort(), 15_000);
+  const events = [];
+  try {
+    if (EMAIL && !cookie) await signIn();
+    const response = await fetch(`${BASE}/rpc/threads/subscribe`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "text/event-stream",
+        origin: ORIGIN,
+        ...(cookie ? { cookie } : { authorization: `Bearer ${TOKEN}` }),
+      },
+      body: JSON.stringify({ json: { groupId, cursor: 0 } }),
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`threads/subscribe ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      // The replay arrives at once; a quiet stream means it has caught up.
+      clearTimeout(idle);
+      idle = setTimeout(() => controller.abort(), 3_000);
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data:")) continue;
+        try {
+          const data = JSON.parse(line.slice(5));
+          events.push(data.json ?? data);
+        } catch {}
+      }
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") throw error;
+  } finally {
+    clearTimeout(idle);
+  }
+  return events;
+}
 const DECLINED =
   /\b(?:I (?:can(?:no|['’])t|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b/i;
 
@@ -404,7 +458,23 @@ if (wanted.has("dispatch"))
     const nameOf = new Map(members.map((member) => [member.botId, member.name ?? ""]));
     const notes = [];
     for (const item of DISPATCH) {
+      const askedAt = new Date().toISOString();
       const { replies } = await say(groupId, item.ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
+      if (item.repeatLookup) {
+        // A lookup answered from saved results reads the database only; a paid source call
+        // polls the provider for many seconds. The release check confirms it in the usage log.
+        const paid = (await readEvents(groupId)).filter(
+          (event) =>
+            event.type === "agent.tool.completed" &&
+            /find_emails/.test(event.payload?.name ?? "") &&
+            event.createdAt > askedAt &&
+            Number(event.payload?.durationMs ?? 0) > REPEAT_LOOKUP_MAX_MS,
+        );
+        if (paid.length)
+          failures.push(
+            `${item.capability}: ${paid.length} lookup call(s) took over ${REPEAT_LOOKUP_MAX_MS / 1000} s, so a source was likely paid again`,
+          );
+      }
       const handlers = new Set(
         replies.flatMap((message) => [
           nameOf.get(message.botId) ?? "",
