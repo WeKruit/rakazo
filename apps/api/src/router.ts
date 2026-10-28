@@ -72,6 +72,7 @@ import {
   ensureComputerWorkspaceLayout,
   estimateCatalogTokenCostUsd,
   expireComputerControl,
+  fillRecruitingRoleProfiles,
   forgetBotSecret,
   hasActiveComputerControl,
   hasPlatformMcpCredential,
@@ -3936,6 +3937,9 @@ export function createRouter(deps: RouterDeps) {
           await resolveThreadTarget(deps.prisma, context.actor, input),
           input,
         ),
+      ),
+      fillRoleProfiles: authed.recruiting.fillRoleProfiles.handler(({ context, input }) =>
+        fillRecruitingRoleProfiles(deps.prisma, context.actor, input.roleId),
       ),
       listCandidateSources: authed.recruiting.listCandidateSources.handler(({ context, input }) =>
         listRecruitingCandidateSources(deps, context.actor, input),
