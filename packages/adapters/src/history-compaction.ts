@@ -1,7 +1,7 @@
 import type { AgentRunRequest, AgentRuntime, JobPublisher } from "@rakazo/adapter-kit";
 import { historyCompactJob } from "@rakazo/adapter-kit";
 import type { MessageBlock } from "@rakazo/contracts";
-import { blocksToAgentHistoryText } from "@rakazo/core";
+import { blocksToAgentHistoryText, isOpenAskBlock } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { recordUsage } from "@rakazo/db";
 import { getLogger, unwrapJobPayload } from "@rakazo/logging";
@@ -361,9 +361,7 @@ export async function compactHistory(
     const protectedIndex = batch.findIndex(
       (message) =>
         message.id === origin?.sourceMessageId ||
-        (message.blocks as MessageBlock[]).some(
-          (block) => block.kind === "ask" && block.status !== "answered",
-        ),
+        (message.blocks as MessageBlock[]).some(isOpenAskBlock),
     );
     if (protectedIndex >= 0) batch = batch.slice(0, protectedIndex);
   }

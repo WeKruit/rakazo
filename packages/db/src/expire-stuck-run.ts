@@ -2,6 +2,7 @@ import type { MessageBlock } from "@rakazo/contracts";
 import type { StuckWorkStatus } from "@rakazo/core";
 import { ACTIVE_RUN_STATUSES, stuckWorkExpiredNonce, stuckWorkStatusMessage } from "@rakazo/core";
 import type { Prisma } from "./client.js";
+import { closeRunAsksInTransaction } from "./closed-asks.js";
 import { expireComputerExecutionLeases } from "./computers.js";
 import {
   appendEventInTransaction,
@@ -85,23 +86,32 @@ export async function expireStuckRun(
     });
   }
 
-  const text = stuckWorkStatusMessage(input.status);
-  const blocks: MessageBlock[] = [{ kind: "meta", text }];
-  const message = await createThreadMessageInTransaction(tx, {
-    threadId: run.threadId,
-    role: "system",
-    blocks,
-    botId: run.botId,
-    clientNonce: stuckWorkExpiredNonce(input.runId),
-    markUnread: true,
-  });
-  await appendEventInTransaction(tx, {
+  // A closed card already says the wait ended; only a wait without one gets a status line.
+  const closedCards = await closeRunAsksInTransaction(tx, {
     spaceId: run.spaceId,
     threadId: run.threadId,
     botId: run.botId,
-    type: "thread.message.created",
-    payload: { messageId: message.id, role: "system", blocks },
+    runId: input.runId,
   });
+  if (!closedCards) {
+    const text = stuckWorkStatusMessage(input.status);
+    const blocks: MessageBlock[] = [{ kind: "meta", text }];
+    const message = await createThreadMessageInTransaction(tx, {
+      threadId: run.threadId,
+      role: "system",
+      blocks,
+      botId: run.botId,
+      clientNonce: stuckWorkExpiredNonce(input.runId),
+      markUnread: true,
+    });
+    await appendEventInTransaction(tx, {
+      spaceId: run.spaceId,
+      threadId: run.threadId,
+      botId: run.botId,
+      type: "thread.message.created",
+      payload: { messageId: message.id, role: "system", blocks },
+    });
+  }
   const cancelledEvent = await appendEventInTransaction(tx, {
     spaceId: run.spaceId,
     threadId: run.threadId,

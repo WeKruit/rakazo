@@ -1,9 +1,57 @@
 import type {
+  AskAnswer,
   AskFormContent,
   AskFormField,
   AskFormResponse,
   AskRequestedSchema,
+  MessageBlock,
 } from "@rakazo/contracts";
+import { parseAskFormResponse } from "@rakazo/contracts";
+
+type AskBlock = Extract<MessageBlock, { kind: "ask" }>;
+
+/** Still waiting for a person. A card closed when its wait expired is not. */
+export function isOpenAskBlock(block: { kind: string; status?: string }): boolean {
+  return block.kind === "ask" && block.status !== "answered" && block.status !== "expired";
+}
+
+export type ClosedAskAnswer = {
+  /** The person's answer as an ordinary message. */
+  text: string;
+  /** Recorded on the card, as a live answer would record it. */
+  recorded: string;
+  formResponse?: AskFormResponse;
+};
+
+/** One message per closed card, however often a stale card is pressed. */
+export function closedAskClientNonce(messageId: string): string {
+  return `closed-ask:${messageId}`;
+}
+
+/**
+ * A press on a card whose run already ended becomes an ordinary message, so the work starts
+ * the way any message starts it. Approvals, secrets and connection cards stay on their own gates:
+ * a stale consent is never replayed, and a secret is never message text.
+ */
+export function closedAskAnswer(block: AskBlock, answer: AskAnswer): ClosedAskAnswer | null {
+  if (block.status === "answered") return null;
+  if (block.approvalEffectId || block.input === "secret" || block.credential || block.connection)
+    return null;
+  if (block.requestedSchema) {
+    let formResponse: AskFormResponse;
+    try {
+      formResponse = parseAskFormResponse(block.requestedSchema, answer);
+    } catch {
+      return null;
+    }
+    if (formResponse.action !== "accept") return null;
+    const text = askFormAnswerText(block.requestedSchema, formResponse);
+    return { text, recorded: text, formResponse };
+  }
+  if (typeof answer !== "string" || !answer.trim()) return null;
+  const choice = resolveAskChoice(answer, block.actions);
+  return { text: choice?.label ?? answer, recorded: choice?.id ?? answer };
+}
 
 export function askFormAnswerText(schema: AskRequestedSchema, response: AskFormResponse): string {
   if (response.action === "cancel") return "Cancelled";
@@ -96,7 +144,7 @@ export function answerableAskMessageIds(snapshot: AskSnapshot | null): string[] 
   for (let index = snapshot.messages.length - 1; index >= 0; index -= 1) {
     const message = snapshot.messages[index];
     if (!message?.runId || !waitingRunIds.has(message.runId)) continue;
-    if (message.blocks.some((block) => block.kind === "ask" && block.status !== "answered")) {
+    if (message.blocks.some(isOpenAskBlock)) {
       ids.unshift(message.id);
       waitingRunIds.delete(message.runId);
     }

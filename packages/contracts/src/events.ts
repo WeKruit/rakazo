@@ -310,7 +310,8 @@ export const AskBlockSchema = z
     // an ask persisted before an owner toggles the private-HTTP flag still
     // validates on replay.
     credential: botSecretDestinationSchema({ allowPrivateHttpOrigin: true }).optional(),
-    status: z.enum(["pending", "answered"]).optional(),
+    /** expired: the wait ended before anyone answered; the card is closed. */
+    status: z.enum(["pending", "answered", "expired"]).optional(),
     answer: z.string().optional(),
     requestedSchema: AskRequestedSchema.optional(),
     formResponse: AskFormResponseSchema.optional(),

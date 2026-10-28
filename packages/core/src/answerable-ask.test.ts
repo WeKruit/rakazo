@@ -6,6 +6,8 @@ import {
   askFormContent,
   askFormDefaults,
   askFormOptions,
+  closedAskAnswer,
+  isOpenAskBlock,
   latestAnswerableAskMessageId,
   pendingInputAttention,
   resolveAskChoice,
@@ -194,5 +196,89 @@ describe("pending input attention", () => {
     );
     expect(pendingInputAttention([{ ...question, status: "answered" }])).toBeNull();
     expect(pendingInputAttention(null)).toBeNull();
+  });
+});
+
+describe("closed cards", () => {
+  it("treats an expired card as closed everywhere an open card is looked for", () => {
+    expect(isOpenAskBlock({ kind: "ask", status: "pending" })).toBe(true);
+    expect(isOpenAskBlock({ kind: "ask" })).toBe(true);
+    expect(isOpenAskBlock({ kind: "ask", status: "expired" })).toBe(false);
+    expect(isOpenAskBlock({ kind: "ask", status: "answered" })).toBe(false);
+    expect(
+      answerableAskMessageIds({
+        activeRuns: [{ id: "run-1", status: "waiting_input" }],
+        messages: [{ id: "ask-1", runId: "run-1", blocks: [{ kind: "ask", status: "expired" }] }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("turns a press on a closed question, choice or form into the message a person would type", () => {
+    const actions = [
+      { id: "remote", label: "Remote is fine" },
+      { id: "onsite", label: "Onsite only" },
+    ];
+    expect(
+      closedAskAnswer({ kind: "ask", text: "Which city?", status: "expired" }, "Paris"),
+    ).toEqual({ text: "Paris", recorded: "Paris" });
+    expect(
+      closedAskAnswer({ kind: "ask", text: "Location?", status: "expired", actions }, "onsite"),
+    ).toEqual({ text: "Onsite only", recorded: "onsite" });
+    const requestedSchema = {
+      type: "object" as const,
+      properties: { seniority: { type: "string" as const, title: "Seniority" } },
+      required: ["seniority"],
+    };
+    expect(
+      closedAskAnswer(
+        { kind: "ask", text: "Details", status: "expired", requestedSchema },
+        { action: "accept", content: { seniority: "Staff" } },
+      ),
+    ).toEqual({
+      text: "Seniority: Staff",
+      recorded: "Seniority: Staff",
+      formResponse: { action: "accept", content: { seniority: "Staff" } },
+    });
+    expect(
+      closedAskAnswer(
+        { kind: "ask", text: "Details", status: "expired", requestedSchema },
+        { action: "cancel" },
+      ),
+    ).toBeNull();
+  });
+
+  it("never replays a stale approval, a secret or a connection as a message", () => {
+    expect(
+      closedAskAnswer(
+        {
+          kind: "ask",
+          text: "Send the email?",
+          status: "expired",
+          approvalEffectId: "effect-1",
+          actions: [
+            { id: "allow", label: "Allow" },
+            { id: "deny", label: "Deny" },
+          ],
+        },
+        "allow",
+      ),
+    ).toBeNull();
+    expect(
+      closedAskAnswer({ kind: "ask", text: "API key", status: "expired", input: "secret" }, "sk"),
+    ).toBeNull();
+    expect(
+      closedAskAnswer(
+        {
+          kind: "ask",
+          text: "Connect Gmail",
+          status: "expired",
+          connection: { serverId: "server-1", name: "Gmail", reason: "Read replies" },
+        },
+        "connected",
+      ),
+    ).toBeNull();
+    expect(
+      closedAskAnswer({ kind: "ask", text: "Which city?", status: "answered" }, "Paris"),
+    ).toBeNull();
   });
 });

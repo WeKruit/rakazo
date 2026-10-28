@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { selectedAskActionLabel } from "@rakazo/core";
+import { answerableAskMessageIds, selectedAskActionLabel } from "@rakazo/core";
 import type { ReactNode } from "react";
 import { act } from "react";
 import { createRoot } from "react-dom/client";
@@ -417,3 +417,37 @@ it.each([
     }
   },
 );
+
+it("closes an expired card even before its run ends, then shows the answer a message gave it", () => {
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const actions = [
+    { id: "remote", label: "Remote is fine" },
+    { id: "onsite", label: "Onsite only" },
+  ];
+  const render = (block: AskBlock) => {
+    // Same rule the transcript uses; the run row may still read waiting for an instant.
+    const canAnswer = answerableAskMessageIds({
+      run: { id: "run-1", status: "waiting_input" },
+      messages: [{ id: "ask-1", runId: "run-1", blocks: [block] }],
+    }).includes("ask-1");
+    act(() => root.render(<AskCard block={block} canAnswer={canAnswer} onAnswer={vi.fn()} />));
+  };
+  try {
+    render({ kind: "ask", text: "Remote or onsite?", status: "expired", actions });
+    expect(container.textContent).toContain("No longer active");
+    expect(container.querySelectorAll("button")).toHaveLength(0);
+
+    render({
+      kind: "ask",
+      text: "Remote or onsite?",
+      status: "answered",
+      answer: "onsite",
+      actions,
+    });
+    expect(container.textContent).toContain("Answered: Onsite only");
+    expect(container.textContent).not.toContain("No longer active");
+  } finally {
+    act(() => root.unmount());
+  }
+});

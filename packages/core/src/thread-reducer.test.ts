@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { answerableAskMessageIds } from "./answerable-ask.js";
 import { userVisibleMessages } from "./message-visibility.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import {
@@ -256,5 +257,65 @@ describe("queued input", () => {
     expect(removed.queuedMessageIds).toEqual([]);
     const replayed = reduceThreadEvent({ ...base, cursor: 20 }, queued);
     expect(replayed.queuedMessageIds).toBeUndefined();
+  });
+});
+
+describe("expired wait", () => {
+  const card = { kind: "ask", text: "Which city?", status: "pending" } as const;
+  const waiting = fold(base, [
+    event(11, "run.started", { trigger: "user" }),
+    event(12, "thread.message.created", { messageId: "ask-1", role: "bot", blocks: [card] }),
+    event(13, "run.waiting_input"),
+  ]);
+
+  it("closes the card the moment the wait expires, before the run ends", () => {
+    expect(answerableAskMessageIds(waiting)).toEqual(["ask-1"]);
+    const closed = reduceThreadEvent(
+      waiting,
+      event(14, "thread.message.updated", {
+        messageId: "ask-1",
+        role: "bot",
+        blocks: [{ ...card, status: "expired" }],
+      }),
+    );
+    expect(answerableAskMessageIds(closed)).toEqual([]);
+    const ended = reduceThreadEvent(closed, event(15, "run.cancelled"));
+    expect(ended.activeRuns).toEqual([]);
+    expect(answerableAskMessageIds(ended)).toEqual([]);
+    expect(ended.messages.map((message) => message.id)).toEqual(["ask-1"]);
+  });
+
+  it("starts the answer like any message: the card shows the answer and a new run works", () => {
+    const ended = fold(waiting, [
+      event(14, "thread.message.updated", {
+        messageId: "ask-1",
+        role: "bot",
+        blocks: [{ ...card, status: "expired" }],
+      }),
+      event(15, "run.cancelled"),
+    ]);
+    const restarted = fold(ended, [
+      {
+        ...event(16, "thread.message.created", {
+          messageId: "user-1",
+          role: "user",
+          blocks: [{ kind: "text", text: "Paris" }],
+          replyToMessageId: "ask-1",
+        }),
+        runId: "run-2",
+      },
+      event(17, "thread.message.updated", {
+        messageId: "ask-1",
+        role: "bot",
+        blocks: [{ ...card, status: "answered", answer: "Paris" }],
+      }),
+      { ...event(18, "run.started", { trigger: "user" }), runId: "run-2" },
+    ]);
+    expect(restarted.messages.map((message) => message.id)).toEqual(["ask-1", "user-1"]);
+    expect(restarted.messages[0]?.blocks).toEqual([
+      { ...card, status: "answered", answer: "Paris" },
+    ]);
+    expect(restarted.run).toMatchObject({ id: "run-2", status: "running" });
+    expect(answerableAskMessageIds(restarted)).toEqual([]);
   });
 });
