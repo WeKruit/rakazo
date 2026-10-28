@@ -16,7 +16,11 @@ const Uuid = z.uuid();
 const Email = z.email().max(254);
 const Step = z.strictObject({
   subject: z.string().min(1).max(500),
-  body: z.string().min(1).max(20_000).describe("HTML; use <br/> for line breaks."),
+  body: z
+    .string()
+    .min(1)
+    .max(20_000)
+    .describe('Plain text: a blank line between paragraphs, "• " to start a bullet.'),
   delay_days: z
     .number()
     .int()
@@ -298,29 +302,21 @@ async function requireOwnMailbox(rest: InstantlyRest, eaccount: string) {
 }
 
 /**
- * The provider stores a body containing "&" as blank, even an encoded entity, so "&" and the
- * characters that would need one are sent as their full-width forms; plain text becomes HTML
- * paragraphs.
+ * The provider stores a body containing "&" as blank, even an encoded entity, and drops text that
+ * is not inside a paragraph, so every body is sent as plain-text paragraphs: HTML is read as text
+ * (a list becomes bullet lines) and "&" and the characters that would need an entity become their
+ * full-width forms.
  */
-const ENTITY: Record<string, string> = {
-  amp: "＆",
-  lt: "＜",
-  gt: "＞",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
-const WIDE: Record<string, string> = { "&": "＆", "<": "＜", ">": "＞" };
 function bodyHtml(body: string) {
-  if (/<[a-z][^>]*>/i.test(body))
-    return body
-      .replace(/&(?:#(\d+)|#x([\da-f]+)|([a-z]+));/gi, (entity, dec, hex, name) => {
-        if (name) return ENTITY[String(name).toLowerCase()] ?? entity;
-        const char = String.fromCodePoint(Number.parseInt(dec ?? hex, dec ? 10 : 16));
-        return WIDE[char] ?? char;
-      })
-      .replace(/&/g, "＆");
-  return body
+  const text = /<[a-z][^>]*>/i.test(body)
+    ? htmlToPlainText(
+        body
+          .replace(/<\/?[ou]l\b[^>]*>/gi, "<br /><br />")
+          .replace(/<li\b[^>]*>/gi, "<br />• ")
+          .replace(/<\/li>/gi, ""),
+      )
+    : body;
+  return text
     .replace(/\r\n?/g, "\n")
     .replace(/&/g, "＆")
     .replace(/</g, "＜")
