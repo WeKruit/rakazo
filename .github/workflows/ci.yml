@@ -3,10 +3,10 @@ on:
   push:
     branches: [main]
   pull_request:
-    # Docs-only changes never affect the build; skip the heavy suites for them.
+    # Planning notes and root *.md are never read by builds or tests. docs/** and app markdown are (skill docs, smoke tests, blog), so they stay covered.
     paths-ignore:
-      - "docs/**"
-      - "**/*.md"
+      - ".planning/**"
+      - "*.md"
   workflow_dispatch:
 
 permissions:
