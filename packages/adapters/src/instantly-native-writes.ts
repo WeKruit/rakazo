@@ -6,6 +6,7 @@ import { z } from "zod";
 import { readBoundedText } from "./connector-http.js";
 import type { FoundEmail } from "./contact-lookup.js";
 import { htmlToPlainText } from "./keyless-http-web.js";
+import { linkedinPersonKey } from "./recruiting-profiles.js";
 import { bestLookedUpEmail, lookedUpContactEmails } from "./recruiting-research.js";
 
 /**
@@ -96,7 +97,7 @@ const EnsureRoleCampaignInput = z.strictObject({
     "Change when emails may go out; an active campaign is paused for the change and needs activate_campaign again.",
   ),
   recipients: Recipients.describe(
-    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or name as added with add_shortlist_leads; everyone else keeps the role's email.",
+    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or full name; a candidate of this role with a saved email who is not in the campaign yet is added first. Everyone else keeps the role's email.",
   ),
 });
 const AddShortlistLeadsInput = z.strictObject({
@@ -952,9 +953,18 @@ async function ensureRoleCampaign(
   context: AdapterContext,
   serverId: string,
   input: z.output<typeof EnsureRoleCampaignInput>,
-) {
+  /** People this call already added for its recipients; set only on the retry after adding. */
+  added?: string[],
+): Promise<{ campaignId: string } & Record<string, unknown>> {
   const role = await requireRole(prisma, context, input.role_id);
   const key = bindingKey(serverId, role.id);
+  // Named recipients who are this role's saved candidates are added first, as add_shortlist_leads
+  // would, and the email is then saved for them; only people who cannot be told apart stop it.
+  const addThenSave = async (unmatched: string[]) => {
+    if (added) throw new Error(notFound(unmatched));
+    const people = await addSavedRecipients(prisma, rest, context, serverId, role.id, unmatched);
+    return ensureRoleCampaign(prisma, rest, context, serverId, input, people);
+  };
   const existing = await readBinding(prisma, context, key);
   let stale: string | null = null;
   if (existing) {
@@ -973,7 +983,11 @@ async function ensureRoleCampaign(
             (entry) => entry.campaign.id !== mappedId && (!campaign || entry.leads),
           );
     if (campaign && !better) {
-      if (input.recipients) return saveOwnEmail(prisma, rest, existing, campaign, input);
+      if (input.recipients) {
+        const saved = await saveOwnEmail(prisma, rest, existing, campaign, input);
+        if (saved.unmatched) return addThenSave(saved.unmatched);
+        return added?.length ? { ...saved, addedToCampaign: added } : saved;
+      }
       const patched = campaign.stop_on_reply !== true;
       const current = firstEmail(campaign);
       const templated = isTemplated(campaign);
@@ -1048,10 +1062,7 @@ async function ensureRoleCampaign(
       to: better ? String(better.campaign.id) : null,
     });
   }
-  if (input.recipients)
-    throw new Error(
-      "Add these people with add_shortlist_leads first, then save their email again with recipients.",
-    );
+  if (input.recipients) return addThenSave(input.recipients);
   if (!context.runId) throw new IsolationError("A run is required to bind a role campaign");
   const eaccount =
     input.eaccount ??
@@ -1124,6 +1135,88 @@ function withTemplate(steps: { delay: unknown; delay_unit?: unknown; variants: u
   ];
 }
 
+const notFound = (people: string[]) =>
+  `Nothing was saved: ${people.join(", ")} is not one of this role's candidates with a saved email, or more than one person matches. Ask the recruiter one question: which person they mean, by full name or email.`;
+
+/**
+ * Adds the named people who are this role's saved candidates to its campaign the way
+ * add_shortlist_leads does (a sending campaign keeps them ready instead). A name or email that
+ * matches no candidate, or more than one, is refused with one question for the recruiter.
+ */
+async function addSavedRecipients(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  context: AdapterContext,
+  serverId: string,
+  roleId: string,
+  wanted: string[],
+) {
+  const rows = await prisma.recruitingCandidate.findMany({
+    where: { roleId },
+    select: {
+      candidateKey: true,
+      occurrences: { select: { name: true, company: true, linkedinUrl: true } },
+    },
+  });
+  const found = await lookedUpContactEmails(prisma, context);
+  const people = rows.map((row) => {
+    const name = row.occurrences.map((o) => text(o.name)).find(Boolean) ?? "";
+    const profiles = [row.candidateKey, ...row.occurrences.map((o) => o.linkedinUrl)];
+    const emails = [...new Set(profiles.map((value) => linkedinPersonKey(value)))]
+      .filter((key): key is string => Boolean(key))
+      .flatMap((key) => found.get(key) ?? []);
+    return {
+      key: row.candidateKey,
+      name,
+      company: row.occurrences.map((o) => text(o.company)).find(Boolean),
+      emails,
+      best: bestLookedUpEmail(found, ...profiles),
+    };
+  });
+  const unknown: string[] = [];
+  const noEmail: string[] = [];
+  const candidates: z.output<typeof AddShortlistLeadsInput>["candidates"] = [];
+  for (const entry of wanted) {
+    const value = entry.trim().toLowerCase();
+    const byEmail = people.filter((p) => p.emails.some((e) => sameAddress(e.address, value)));
+    const byName = people.filter((p) => p.name.toLowerCase() === value);
+    const byFirst = people.filter((p) => p.name.toLowerCase().split(/\s+/)[0] === value);
+    const hits = value.includes("@") ? byEmail : byName.length ? byName : byFirst;
+    const person = hits.length === 1 ? hits[0]! : undefined;
+    const email = value.includes("@")
+      ? person?.emails.find((e) => sameAddress(e.address, value))
+      : person?.best;
+    if (!person) unknown.push(entry);
+    else if (!email) noEmail.push(person.name || entry);
+    else if (!candidates.some((c) => c.candidate_key === person.key)) {
+      const [first, ...last] = person.name.split(/\s+/).filter(Boolean);
+      candidates.push({
+        candidate_key: person.key,
+        email: email.address,
+        email_type: email.type,
+        ...(first ? { first_name: first } : {}),
+        ...(last.length ? { last_name: last.join(" ") } : {}),
+        ...(person.company ? { company_name: person.company } : {}),
+      });
+    }
+  }
+  if (noEmail.length)
+    throw new Error(
+      `Nothing was saved: ${noEmail.join(", ")} has no saved email yet. Find their email with find_emails, then save their email again with the same recipients.`,
+    );
+  if (unknown.length) throw new Error(notFound(unknown));
+  const out = await addShortlistLeads(prisma, rest, context, serverId, {
+    role_id: roleId,
+    candidates,
+  });
+  const stopped = candidates.filter((c) => out.onHoldOrPassed.includes(c.candidate_key));
+  if (stopped.length)
+    throw new Error(
+      `Nothing was saved: ${stopped.map((c) => [c.first_name, c.last_name].filter(Boolean).join(" ") || c.email).join(", ")} is on hold or passed for this role. Ask the recruiter one question: take them off hold and email them, or leave them out?`,
+    );
+  return candidates.map((c) => c.email!);
+}
+
 const askAbout = (who: string, why: string) =>
   `${who}'s own email was not saved and nothing was sent: ${why}. Ask the recruiter one question: send ${who} the role's saved email instead, or keep this email unsent?`;
 
@@ -1159,10 +1252,7 @@ async function saveOwnEmail(
     if (!hit) unmatched.push(entry);
     else if (!chosen.includes(hit)) chosen.push(hit);
   }
-  if (unmatched.length)
-    throw new Error(
-      `Not in this role's campaign, or more than one person matches: ${unmatched.join(", ")}. Add each person with add_shortlist_leads, then save their email again.`,
-    );
+  if (unmatched.length) return { unmatched };
   const who = label(chosen);
   if (binding.created !== true)
     throw new Error(askAbout(who, "this role's campaign was set up outside this product"));

@@ -2192,6 +2192,204 @@ describe("MCP connector session cache", () => {
     await connector.close();
   });
 
+  it("keeps each agent's core work tools direct when the rest moves to the catalog", async () => {
+    const core = ["create_booking", "get_availability", "get_event_types", "cancel_booking"];
+    const state = {
+      failNext: false,
+      initializations: 0,
+      tools: [
+        ...Array.from({ length: 30 }, (_, index) => ({
+          name: `tool_${index}`,
+          inputSchema: { type: "object" },
+        })),
+        ...core.map((name) => ({ name, inputSchema: { type: "object" } })),
+      ],
+    };
+    vi.stubGlobal("fetch", mcpFetch(state));
+    const discover = async (bot: Record<string, unknown>) => {
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi.fn().mockResolvedValue([{ ...ASSIGNMENT, bot }]),
+            findFirst: vi.fn().mockResolvedValue(ASSIGNMENT),
+          },
+        } as never,
+        {} as never,
+        { network: TEST_NETWORK },
+      );
+      try {
+        return await connector.discoverTools({
+          spaceId: "w1",
+          userId: "u1",
+          botId: "bot-1",
+          signal: new AbortController().signal,
+        } as never);
+      } finally {
+        await connector.close();
+      }
+    };
+    const tools = await discover({ name: "Scheduling", spawnKey: "recruiting:u1:scheduling" });
+    expect(tools.map((tool) => tool.name)).toEqual([
+      ...core.map((name) => `mcp__demo__${name}`),
+      "connectors_search_tools",
+      "connectors_load_tool",
+      "connectors_execute_tool",
+    ]);
+    // The catalog index no longer lists them, so a search never finds them twice.
+    expect(tools.find((tool) => tool.name === "connectors_search_tools")?.description).not.toMatch(
+      /create_booking/,
+    );
+    // Another agent with the same connection keeps its tools in the catalog.
+    expect((await discover({ name: "Researcher", spawnKey: null })).map((t) => t.name)).toEqual([
+      "connectors_search_tools",
+      "connectors_load_tool",
+      "connectors_execute_tool",
+    ]);
+  });
+
+  describe("a connection whose provider refuses access", () => {
+    const MAIL = {
+      ...SERVER,
+      id: "server-mail",
+      slug: "mail",
+      endpoint: "https://mail.example.test/mcp",
+    };
+    const MAIL_ASSIGNMENT = { ...ASSIGNMENT, serverId: MAIL.id, server: MAIL };
+    const REFUSAL =
+      "Access to this tool requires that your Google Cloud project (123) is enrolled in the Workspace Developer Preview Program.";
+    function setup(callText = REFUSAL) {
+      const mail = {
+        failNext: false,
+        initializations: 0,
+        calls: [] as string[],
+        tools: [
+          { name: "create_draft", inputSchema: { type: "object" } },
+          { name: "list_drafts", inputSchema: { type: "object" } },
+        ],
+        callResult: { isError: true, content: [{ type: "text", text: callText }] },
+      };
+      const campaigns = {
+        failNext: false,
+        initializations: 0,
+        tools: [
+          {
+            name: "ensure_role_campaign",
+            description: "Saves the role's email draft in its campaign.",
+            inputSchema: { type: "object" },
+          },
+          { name: "get_weather", description: "Weather.", inputSchema: { type: "object" } },
+        ],
+      };
+      const mailFetch = mcpFetch(mail, MAIL.endpoint);
+      const campaignFetch = mcpFetch(campaigns);
+      vi.stubGlobal("fetch", (input: string | URL | Request, init?: RequestInit) =>
+        logicalHref(input, init) === MAIL.endpoint
+          ? mailFetch(input, init)
+          : campaignFetch(input, init),
+      );
+      const connector = new McpConnector(
+        {
+          botMcpServer: {
+            findMany: vi.fn().mockResolvedValue([MAIL_ASSIGNMENT, ASSIGNMENT]),
+            findFirst: vi.fn(async ({ where }) =>
+              where.serverId === MAIL.id ? MAIL_ASSIGNMENT : ASSIGNMENT,
+            ),
+          },
+        } as never,
+        {} as never,
+        { network: TEST_NETWORK },
+      );
+      const context = {
+        spaceId: "w1",
+        userId: "u1",
+        botId: "bot-1",
+        signal: new AbortController().signal,
+      };
+      const call = async (toolName: string, viaCatalog = false) => {
+        const events = [];
+        for await (const event of connector.execute(
+          viaCatalog
+            ? {
+                tool: "connectors_execute_tool",
+                executionId: `catalog-${toolName}`,
+                route: { connectorId: "mcp", toolName: "__catalog_execute" },
+                args: { id: `mcp__mail__${toolName}`, arguments: {} },
+              }
+            : {
+                tool: `mcp__mail__${toolName}`,
+                executionId: toolName,
+                route: { connectorId: "mcp", resourceId: MAIL.id, resourceRevision: 1, toolName },
+                args: {},
+              },
+          context as never,
+        ))
+          events.push(event);
+        return events;
+      };
+      return { mail, connector, context, call };
+    }
+
+    it("says once that it cannot be used, points to the alternative, and stops calling it", async () => {
+      const { mail, connector, context, call } = setup();
+      try {
+        expect((await connector.discoverTools(context as never)).map((t) => t.name)).toContain(
+          "mcp__mail__create_draft",
+        );
+        const first = await call("create_draft");
+        expect(first).toEqual([
+          {
+            type: "error",
+            message:
+              "This connection can't be used right now: its provider refused access for this account (a setup, enrollment or permission problem), so retrying will not help, and its tools are left out for a while. Do this work with mcp__demo__ensure_role_campaign instead. Never name this connection or its provider to the recruiter.",
+          },
+        ]);
+        // The provider's own text, with its project number, never reaches the agent.
+        expect(JSON.stringify(first)).not.toContain("123");
+        // Later calls in the run, direct or through the catalog, never reach the provider.
+        expect(await call("list_drafts")).toEqual([
+          { type: "error", message: expect.stringMatching(/^This connection can't be used/) },
+        ]);
+        expect(await call("list_drafts", true)).toEqual([
+          { type: "error", message: expect.stringMatching(/^This connection can't be used/) },
+        ]);
+        expect(mail.calls).toEqual(["create_draft"]);
+        // Discovery, even the background refresh, leaves its tools out for the window.
+        for (const operationId of [undefined, DISCOVERY_REFRESH_OPERATION]) {
+          const names = (await connector.discoverTools({ ...context, operationId } as never)).map(
+            (t) => t.name,
+          );
+          expect(names).toEqual(["mcp__demo__ensure_role_campaign", "mcp__demo__get_weather"]);
+        }
+        // It is never permanent: after the window the connection is offered and called again.
+        vi.useFakeTimers({ now: Date.now() + DISCOVERY_FAILURE_TTL_MS + 1, toFake: ["Date"] });
+        expect((await connector.discoverTools(context as never)).map((t) => t.name)).toContain(
+          "mcp__mail__create_draft",
+        );
+        await call("create_draft");
+        expect(mail.calls).toEqual(["create_draft", "create_draft"]);
+      } finally {
+        vi.useRealTimers();
+        await connector.close();
+      }
+    });
+
+    it("leaves a connection usable after an argument error", async () => {
+      const { mail, connector, context, call } = setup("Invalid argument: 'to' is required.");
+      try {
+        expect(await call("create_draft")).toEqual([
+          { type: "result", data: expect.objectContaining({ isError: true }) },
+        ]);
+        await call("create_draft");
+        expect(mail.calls).toEqual(["create_draft", "create_draft"]);
+        expect((await connector.discoverTools(context as never)).map((t) => t.name)).toContain(
+          "mcp__mail__create_draft",
+        );
+      } finally {
+        await connector.close();
+      }
+    });
+  });
+
   it("exposes 20 MCP tools directly and switches at 21", async () => {
     const context = {
       spaceId: "w1",
@@ -3484,6 +3682,10 @@ describe("local native Instantly campaign and lead tools", () => {
       deleted: false,
       rejectPatch: "",
       lookups: [] as Record<string, unknown>[],
+      /** The role's saved candidates, as a role-wide candidate read returns them. */
+      candidates: [] as Record<string, unknown>[],
+      /** Whether an added lead shows up in the role campaign's own lead list. */
+      addToCampaign: false,
       effects: new Map<string, Record<string, unknown>>(),
       requests: [] as { method: string; path: string; body?: unknown }[],
     };
@@ -3508,12 +3710,14 @@ describe("local native Instantly campaign and lead tools", () => {
       },
       recruitingCandidate: {
         findMany: vi.fn(async ({ where }) =>
-          (where.candidateKey.in as string[])
-            .filter((key) => key !== "not-in-role")
-            .map((candidateKey) => ({
-              candidateKey,
-              consideration: candidateKey === "held" ? { operation: "hold" } : null,
-            })),
+          !where.candidateKey
+            ? state.candidates
+            : (where.candidateKey.in as string[])
+                .filter((key) => key !== "not-in-role")
+                .map((candidateKey) => ({
+                  candidateKey,
+                  consideration: candidateKey === "held" ? { operation: "hold" } : null,
+                })),
         ),
       },
       externalEffect: {
@@ -3612,6 +3816,13 @@ describe("local native Instantly campaign and lead tools", () => {
               ),
             ),
           });
+        if (url.pathname === "/api/v2/leads/add" && state.addToCampaign)
+          state.campaignLeads.push(
+            ...body.leads.map((lead: Record<string, unknown>) => ({
+              ...lead,
+              id: `lead-${lead.email}`,
+            })),
+          );
         if (url.pathname === "/api/v2/leads/add")
           return Response.json({
             status: "success",
@@ -4626,8 +4837,109 @@ describe("local native Instantly campaign and lead tools", () => {
           /exactly one step/,
         );
         expect(await message({ steps: [OWN], recipients: ["nobody@x.test"] })).toMatch(
-          /add_shortlist_leads/,
+          /Ask the recruiter one question: which person they mean/,
         );
+        expect(patches(f)).toEqual([]);
+      });
+
+      const ZOE_PROFILE = "https://www.linkedin.com/in/zoe-q";
+      const savedCandidate = (key: string, name: string) => ({
+        candidateKey: key,
+        occurrences: [{ name, company: "Acme", linkedinUrl: key }],
+      });
+      const lookupOf = (people: { linkedin_url: string; address: string }[]) => ({
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "enrich",
+              resourceRevision: 1,
+              toolName: "native_find_emails",
+            },
+            args: { people: [] },
+          },
+        ],
+        result: {
+          structuredContent: {
+            people: people.map(({ linkedin_url, address }) => ({
+              linkedin_url,
+              emails: [{ address, type: "work", status: "DELIVERABLE", provider: "a" }],
+            })),
+          },
+        },
+      });
+
+      it("adds a saved candidate of the role who is not in the campaign yet, then saves", async () => {
+        const { f, binding } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [savedCandidate(ZOE_PROFILE, "Zoe Quinn")];
+        f.state.lookups = [lookupOf([{ linkedin_url: ZOE_PROFILE, address: "zoe@x.test" }])];
+        const zoe = { subject: "Zoe, a founding role", body: "Hi Zoe,\n\nA note just for you." };
+        const out = f.result(
+          await f.run("ensure_role_campaign", { steps: [zoe], recipients: ["Zoe Quinn"] }),
+        );
+        expect(out).toMatchObject({
+          ownEmailSavedFor: ["zoe@x.test"],
+          addedToCampaign: ["zoe@x.test"],
+        });
+        expect(f.state.requests.filter((r) => r.path === "/api/v2/leads/add")).toEqual([
+          expect.objectContaining({
+            body: expect.objectContaining({
+              leads: [
+                expect.objectContaining({
+                  email: "zoe@x.test",
+                  first_name: "Zoe",
+                  last_name: "Quinn",
+                  company_name: "Acme",
+                }),
+              ],
+            }),
+          }),
+        ]);
+        expect(binding.result).toMatchObject({
+          leads: { [ZOE_PROFILE]: { email: "zoe@x.test" } },
+          drafts: { "zoe@x.test": zoe },
+        });
+        // A sending campaign keeps the person ready instead of emailing them on add.
+        const sending = await roleWithSixteen();
+        sending.f.state.campaign.status = 1;
+        sending.f.state.candidates = [savedCandidate(ZOE_PROFILE, "Zoe Quinn")];
+        sending.f.state.lookups = f.state.lookups;
+        await sending.f.run("ensure_role_campaign", { steps: [zoe], recipients: ["zoe@x.test"] });
+        expect(sends(sending.f)).toEqual([]);
+        expect(Object.keys((sending.binding.result as { staged: object }).staged)).toEqual([
+          ZOE_PROFILE,
+        ]);
+      });
+
+      it("still refuses an unknown or ambiguous person with one question, adding nobody", async () => {
+        const { f } = await roleWithSixteen();
+        f.state.addToCampaign = true;
+        f.state.candidates = [
+          savedCandidate("https://www.linkedin.com/in/sam-a", "Sam Lee"),
+          savedCandidate("https://www.linkedin.com/in/sam-b", "Sam Lee"),
+          savedCandidate("https://www.linkedin.com/in/kim", "Kim Park"),
+        ];
+        f.state.lookups = [
+          lookupOf([
+            { linkedin_url: "https://www.linkedin.com/in/sam-a", address: "sam.a@x.test" },
+            { linkedin_url: "https://www.linkedin.com/in/sam-b", address: "sam.b@x.test" },
+          ]),
+        ];
+        const message = async (recipients: string[]) =>
+          (
+            (await f.run("ensure_role_campaign", { steps: [OWN], recipients }))[0] as {
+              message: string;
+            }
+          ).message;
+        for (const who of ["Sam Lee", "Sam", "Nobody Known", "nobody@x.test"])
+          expect(await message([who])).toContain(
+            `Nothing was saved: ${who} is not one of this role's candidates with a saved email, or more than one person matches. Ask the recruiter one question: which person they mean, by full name or email.`,
+          );
+        expect(await message(["Kim Park"])).toMatch(/Kim Park has no saved email yet.*find_emails/);
+        expect(f.state.requests.filter((r) => r.path === "/api/v2/leads/add")).toEqual([]);
         expect(patches(f)).toEqual([]);
       });
     });

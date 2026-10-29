@@ -408,3 +408,52 @@ function termsScore(entry: CatalogEntry, query: string): number {
   if (!scores.length) return 4;
   return Math.min(3.9, Math.min(...scores) + (1 - scores.length / terms.length) * 0.9);
 }
+
+const ACTION_WORDS = new Set(
+  "get list create update delete remove add send search read find fetch set make new save by for the a an of to from with tool tools api v1 v2 batch bulk all one many".split(
+    " ",
+  ),
+);
+/** The nouns of a tool's name ("create_draft" -> "draft"), singular. */
+function nameNouns(name: string): string[] {
+  const words = name
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 3 && !ACTION_WORDS.has(word))
+    .map((word) => (word.length > 4 && word.endsWith("s") ? word.slice(0, -1) : word));
+  return [...new Set(words)];
+}
+
+/**
+ * Other tools that do the same kind of work as one tool, best first: those whose name or
+ * description mentions its nouns, a core tool before others. Deterministic; no model call.
+ */
+export function relatedTools(
+  tools: readonly ConnectorTool[],
+  toolName: string,
+  isCore: (tool: ConnectorTool) => boolean = () => false,
+  limit = 3,
+): ConnectorTool[] {
+  const nouns = nameNouns(toolName);
+  if (!nouns.length) return [];
+  return tools
+    .map((tool) => {
+      const name = tool.name.toLowerCase();
+      const description = tool.description.toLowerCase();
+      const score = nouns.reduce(
+        (total, noun) => total + (name.includes(noun) ? 2 : description.includes(noun) ? 1 : 0),
+        0,
+      );
+      return { tool, score };
+    })
+    .filter(({ score }) => score > 0)
+    .sort(
+      (left, right) =>
+        right.score - left.score ||
+        Number(isCore(right.tool)) - Number(isCore(left.tool)) ||
+        left.tool.name.localeCompare(right.tool.name),
+    )
+    .slice(0, limit)
+    .map(({ tool }) => tool);
+}
