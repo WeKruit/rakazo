@@ -225,6 +225,7 @@ describe("people search rate limits", () => {
         { message: "people_search.rate_limited", attempt: 1, retryMs: 1_000, exhausted: false },
         { message: "people_search.rate_limited", attempt: 2, retryMs: 2_000, exhausted: false },
         { message: "people_search.rate_limited", attempt: 3, retryMs: 0, exhausted: true },
+        { message: "mcp.call.failed" },
       ]);
       expect(JSON.stringify(sink.events)).not.toContain("fake-search-key");
       expect(JSON.stringify(sink.events)).not.toContain("test role");
