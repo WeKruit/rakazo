@@ -1808,7 +1808,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
       // One unified table: contact details live in the person's panel, not in table cells.
       expect(
         [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
-      ).toEqual(["Name", "Current role", "Location", "Status", "Fit", "Actions"]);
+      ).toEqual(["Name", "Current role", "Location", "Status", "Actions"]);
       expect(api.correspondence).toHaveBeenCalledExactlyOnceWith({
         groupId: "group-1",
         view: "contacts",
@@ -8749,7 +8749,6 @@ it("keeps workspace shortlist and contacts navigation out of saved filters and c
     "Current role",
     "Location",
     "Status",
-    "Fit",
     "Actions",
   ]);
   expect(api.setCandidateShortlist).not.toHaveBeenCalled();
