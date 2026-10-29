@@ -83,6 +83,11 @@ test("developer diagnostics opens an on-demand per-run trace with measured and u
     /completed · 500ms/,
   );
   await expect(page.getByLabel(/web_search · tool/)).toHaveAttribute("title", /failed · 3s/);
+  await expect(page.getByLabel(/^Retry · retry/)).toHaveAttribute(
+    "title",
+    /^retry · Duration not recorded/,
+  );
+  await expect(page.getByTestId("run-trace-timeline")).not.toContainText("unknown");
   await captureScreenshot(page, testInfo, "developer-run-trace");
 });
 

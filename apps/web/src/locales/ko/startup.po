@@ -26,6 +26,11 @@ msgstr ""
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr ""
 
+#. placeholder {0}: step.peopleWithEmail
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{0, plural, one {# person with email} other {# people with email}}"
+msgstr ""
+
 #. placeholder {0}: file.name
 #: src/pages/shell/useShellMessages.ts
 msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
@@ -1188,6 +1193,10 @@ msgstr "이미지를 끌어다 놓거나 붙여넣으세요"
 msgid "Due"
 msgstr ""
 
+#: src/components/RunTrace.tsx
+msgid "Duration not recorded"
+msgstr ""
+
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
@@ -1607,6 +1616,10 @@ msgstr "미리보기를 불러오는 중…"
 msgid "Loading roles…"
 msgstr ""
 
+#: src/components/RunTrace.tsx
+msgid "Loading trace…"
+msgstr ""
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/Auth.tsx
@@ -1890,6 +1903,10 @@ msgstr "나열된 모델이 없습니다."
 msgid "No notes yet."
 msgstr ""
 
+#: src/components/RunTrace.tsx
+msgid "No recorded calls"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
 msgstr ""
@@ -2116,6 +2133,7 @@ msgstr "API 키를 붙여넣은 뒤 다시 테스트하세요."
 msgid "Pause consideration"
 msgstr ""
 
+#: src/components/ToolActivityDisclosure.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
 msgstr "일시 중지됨"
@@ -2549,6 +2567,10 @@ msgstr "자동 실행"
 msgid "Run time must be in the future."
 msgstr "실행 시간은 미래여야 합니다."
 
+#: src/components/RunTrace.tsx
+msgid "Run trace"
+msgstr ""
+
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "실행 중"
@@ -2930,6 +2952,10 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: src/components/ToolActivityDisclosure.tsx
+msgid "Step failed"
+msgstr ""
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Steps"
 msgstr "실행 단계"
@@ -3114,6 +3140,10 @@ msgstr "오늘"
 
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
+msgstr ""
+
+#: src/components/RunTrace.tsx
+msgid "Trace unavailable"
 msgstr ""
 
 #: src/components/call/CallCard.tsx

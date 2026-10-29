@@ -26,6 +26,11 @@ msgstr ""
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr ""
 
+#. placeholder {0}: step.peopleWithEmail
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{0, plural, one {# person with email} other {# people with email}}"
+msgstr ""
+
 #. placeholder {0}: file.name
 #: src/pages/shell/useShellMessages.ts
 msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
@@ -1188,6 +1193,10 @@ msgstr "Görüntüyü sürükleyip bırakın veya yapıştırın"
 msgid "Due"
 msgstr ""
 
+#: src/components/RunTrace.tsx
+msgid "Duration not recorded"
+msgstr ""
+
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
@@ -1607,6 +1616,10 @@ msgstr "Önizleme yükleniyor…"
 msgid "Loading roles…"
 msgstr ""
 
+#: src/components/RunTrace.tsx
+msgid "Loading trace…"
+msgstr ""
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/Auth.tsx
@@ -1890,6 +1903,10 @@ msgstr "Listelenen model yok."
 msgid "No notes yet."
 msgstr ""
 
+#: src/components/RunTrace.tsx
+msgid "No recorded calls"
+msgstr ""
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
 msgstr ""
@@ -2116,6 +2133,7 @@ msgstr "API anahtarını yapıştır, sonra yeniden test et."
 msgid "Pause consideration"
 msgstr ""
 
+#: src/components/ToolActivityDisclosure.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
 msgstr ""
@@ -2549,6 +2567,10 @@ msgstr "Rutin"
 msgid "Run time must be in the future."
 msgstr ""
 
+#: src/components/RunTrace.tsx
+msgid "Run trace"
+msgstr ""
+
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "çalışıyor"
@@ -2930,6 +2952,10 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: src/components/ToolActivityDisclosure.tsx
+msgid "Step failed"
+msgstr ""
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Steps"
 msgstr "Adımlar"
@@ -3114,6 +3140,10 @@ msgstr "Bugün"
 
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
+msgstr ""
+
+#: src/components/RunTrace.tsx
+msgid "Trace unavailable"
 msgstr ""
 
 #: src/components/call/CallCard.tsx
