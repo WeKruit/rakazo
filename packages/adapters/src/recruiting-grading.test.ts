@@ -76,7 +76,11 @@ function fixture(options: {
     },
     botMcpServer: {
       findMany: vi.fn(async () =>
-        (options.researchBots ?? ["sourcer"]).map((botId) => ({ botId })),
+        (options.researchBots ?? ["sourcer"]).map((botId) => ({
+          botId,
+          serverId: "server-1",
+          server: { slug: "research" },
+        })),
       ),
     },
     $transaction: vi.fn(async (callback: (client: unknown) => Promise<unknown>) => callback(tx)),
@@ -129,6 +133,7 @@ describe("startRecruitingGrading", () => {
     expect(prompt).not.toContain("in/graded");
     expect(prompt).not.toContain("in/sent");
     expect(prompt).toContain("don't look for anyone new");
+    expect(prompt).toContain('connectors_execute_tool with id "server-1:research"');
     expect(f.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ name: "run.continue", payload: { runId: "grade-run" } }),
     );
