@@ -369,6 +369,7 @@ async function unsavedFeedback(
     prompt: text,
     trigger: "follow_up",
     internal: true,
+    skipWaitingRuns: true,
     clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:1`,
   });
   if (sent.runId)
@@ -541,6 +542,7 @@ export async function guardRecruitingTurnEnd(
     prompt: text,
     trigger: "follow_up",
     internal: true,
+    skipWaitingRuns: true,
     clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:${count}`,
   });
   if (sent.runId)
@@ -641,6 +643,7 @@ export async function guardRecruitingRoleCreate(
     prompt,
     trigger: "follow_up",
     internal: true,
+    skipWaitingRuns: true,
     clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:1`,
   });
   if (sent.runId)
@@ -784,6 +787,7 @@ export async function sendDeclineRetry(
     prompt: text,
     trigger: "follow_up",
     internal: true,
+    skipWaitingRuns: true,
     clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:decline`,
   });
   if (sent.runId)

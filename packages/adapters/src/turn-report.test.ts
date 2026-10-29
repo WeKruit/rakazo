@@ -32,6 +32,7 @@ describe("turnWork", () => {
     // A catalog read without a read-only hint is still a read, named by its id.
     const wrote = { ok: true, readOnly: false } as const;
     expect(turnWork("connectors_execute_tool", { id: "srv:get_bookings" }, wrote)).toBeUndefined();
+    expect(turnWork("connectors_execute_tool", { id: "srv:whoami" }, wrote)).toBeUndefined();
     expect(
       turnWork("connectors_execute_tool", { id: "srv:native_instantly_list_emails" }, wrote),
     ).toBeUndefined();

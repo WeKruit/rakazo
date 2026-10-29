@@ -3604,6 +3604,39 @@ describe("sendUserMessage", () => {
     );
   });
 
+  it("starts a continuation run beside a run still waiting on an earlier card", async () => {
+    const { tx, prisma, input } = routineDeliveryFixture();
+    const continuation = {
+      ...input,
+      routineEvent: undefined,
+      trigger: "follow_up" as const,
+      internal: true,
+      clientNonce: "autocontinue:run:decline",
+    };
+    await sendUserMessage(prisma as unknown as PrismaClient, {
+      ...continuation,
+      skipWaitingRuns: true,
+    });
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ status: { in: ["running", "queued", "leased"] } }),
+      }),
+    );
+    // Without the flag the waiting run would take the message as steering.
+    tx.run.findMany.mockClear();
+    await sendUserMessage(prisma as unknown as PrismaClient, {
+      ...continuation,
+      clientNonce: "autocontinue:run:2",
+    });
+    expect(tx.run.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: ["running", "queued", "leased", "waiting_input", "waiting_takeover"] },
+        }),
+      }),
+    );
+  });
+
   it("persists authored candidate feedback in the native message transaction and rejects stale metadata before steering", async () => {
     const { tx, prisma, input } = routineDeliveryFixture();
     const owner = { spaceId: input.spaceId, userId: input.userId };
