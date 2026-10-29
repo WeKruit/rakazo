@@ -2,7 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   handoffToGroupBot,
-  isStageCheckIn,
+  isQuietStageReport,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
   reportStalledGroupStage,
@@ -477,11 +477,14 @@ describe("long stage check-in", () => {
 
   it("lets only the check-in answer end silently", () => {
     const checkIn = [{ ...asked, fromBotId: "bot-b", toBotId: "bot-a", report: "progress" }];
-    expect(isStageCheckIn("follow_up", checkIn as never, "bot-a")).toBe(true);
-    expect(isStageCheckIn("follow_up", checkIn as never, "bot-b")).toBe(false);
+    expect(isQuietStageReport("follow_up", checkIn as never, "bot-a")).toBe(true);
+    expect(isQuietStageReport("follow_up", checkIn as never, "bot-b")).toBe(false);
     expect(
-      isStageCheckIn("follow_up", [{ ...checkIn[0], report: "completed" }] as never, "bot-a"),
+      isQuietStageReport("follow_up", [{ ...checkIn[0], report: "completed" }] as never, "bot-a"),
+    ).toBe(true);
+    expect(
+      isQuietStageReport("follow_up", [{ ...checkIn[0], report: "failed" }] as never, "bot-a"),
     ).toBe(false);
-    expect(isStageCheckIn("user", checkIn as never, "bot-a")).toBe(false);
+    expect(isQuietStageReport("user", checkIn as never, "bot-a")).toBe(false);
   });
 });

@@ -327,7 +327,7 @@ const TEAMMATE_KINDS: Record<Capability, RegExp> = {
  * checks so the server and the harness agree.
  */
 const DECLINE =
-  /\bI (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach))|am unable to|['’]m unable to|am not able to|['’]m not able to|don['’]t have (?:access|a tool|the ability|permission))\b|\b(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)\b|\bnot something I can\b|\bnot (?:send-)?ready to send\b|\bcan(?:no|['’])t (?:send|look up|book|schedule|draft|prepare)\b|我(?:无法|不能|没法|没有权限|做不了)|无法(?:发送|完成|执行|代|查|找|安排|准备)/i;
+  /\bI (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach|check|verify|confirm))|am unable to|['’]m unable to|am not able to|['’]m not able to|don['’]t have (?:access|a tool|the ability|permission))\b|\b(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)\b|\bnot something I can\b|\bnot (?:send-)?ready to send\b|\bcan(?:no|['’])t (?:send|look up|book|schedule|draft|prepare)\b|我(?:无法|不能|没法|没有权限|做不了)|无法(?:发送|完成|执行|代|查|找|安排|准备)/i;
 /** A reply that offers the work back instead of doing it ("Do you want me to…?", 要不要我…). */
 const DEFER =
   /\b(?:do you want|would you like|want) me to\b|\bshall I\b|\bshould I (?:go ahead|proceed|start|send|draft|look|find|search|book|schedule|reach|contact)\b|\bif you(?:['’]d| would)? like,? I can\b|要不要我|需要我.{0,24}[吗么]|是否需要我|要我.{0,24}[吗么]|需要你先|请先(?:确认|提供|告诉)/i;
@@ -408,12 +408,14 @@ export type DeclineRetry = { sentence: string; note: string; keep?: string; card
 
 /** Model-facing: a draft shown in chat with {{variables}} is written again for a real person. */
 export const DRAFT_VARIABLES_NOTE =
-  "Your draft shows template variables. A draft in the chat is written for a real person: use the name and current title or company of the person it is for, else the role's first result from recruiting_candidates, and show the whole draft again. Never {{variables}}, placeholders or brackets in a draft; only a send uses them.";
+  "Your draft shows template variables or placeholders. A draft in the chat is written for a real person: use the name and current title or company of the person it is for, else the role's first result from recruiting_candidates, and show the whole draft again. Never {{variables}}, placeholders or brackets in a draft; only a send uses them.";
 
 /** A drafted email shown with {{variables}} instead of a real person's details. */
 export function draftVariables(reply: string): DeclineRetry | undefined {
   if (!DRAFT_START.test(reply)) return undefined;
-  const variable = reply.match(/\{\{\s*[\w.]+\s*\}\}/)?.[0];
+  const variable = reply.match(
+    /\{\{\s*[\w.]+\s*\}\}|\[(?:your|candidate|recipient|first|last|full|company|name|title|role|recruiter|sender)\b[^\]\n]{0,30}\](?!\()/i,
+  )?.[0];
   return variable ? { sentence: variable, note: DRAFT_VARIABLES_NOTE } : undefined;
 }
 

@@ -3,22 +3,22 @@ import { randomUUID } from "node:crypto";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import {
-  beginSessionAdmissionShutdown,
   acquireSessionReplacement,
-  releaseSessionReplacement,
+  beginSessionAdmissionShutdown,
   configureSessionAdmissionBudget,
   createDb,
   createPool,
   listSessionAdmissions,
   registerSessionConnection,
   releaseSessionAdmission,
+  releaseSessionReplacement,
   reserveSessionAdmission,
   setDesiredSessionGeneration,
 } from "@rakazo/db";
 import { Client, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { PostgresRealtimeFanout } from "./realtime.js";
 import type { RealtimeListenerClient } from "./realtime.js";
+import { PostgresRealtimeFanout } from "./realtime.js";
 import { SessionAdmissionRuntime } from "./session-admission-runtime.js";
 
 const url = process.env.SESSION_ADMISSION_TEST_DATABASE_URL;

@@ -1116,6 +1116,10 @@ describe("planDeclineRetry", () => {
       worked: true,
     });
     expect(retry?.note).toContain("written for a real person");
+    const signed = reply.replace("{{firstName}}", "Abe") + "\n\nBest,\n[Your Name]";
+    expect(
+      (await planDeclineRetry(human, { ...input, reply: signed, request: "draft" }))?.sentence,
+    ).toBe("[Your Name]");
     const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
     expect(await planDeclineRetry(retried, { ...input, reply, request: "draft" })).toBeUndefined();
     expect(
