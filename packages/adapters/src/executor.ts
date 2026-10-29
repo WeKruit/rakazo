@@ -465,6 +465,7 @@ import {
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
 import {
+  GRADE_TOOL_CALL_STOP,
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
   scheduleRecruitingGrading,
@@ -5479,6 +5480,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Rows of planned searches that returned after the pick started, not yet shown to the model.
         const lateSearchRows: string[] = [];
         let plannedEarlyRefusalAt: number | undefined;
+        let gradingToolCalls = 0;
         // People whose location or tenure the run already asked the model about once.
         const locationAsked = new Set<string>();
         /**
@@ -5727,7 +5729,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ) => {
           context.signal.throwIfAborted();
           if (run.trigger === "recruiting_grade") {
-            const refusal = gradingToolRefusal(name, rawArgs, run.clientNonce);
+            const refusal = gradingToolRefusal(name, rawArgs, run.clientNonce, gradingToolCalls++);
+            if (gradingToolCalls > GRADE_TOOL_CALL_STOP) {
+              getLogger().warn("recruiting.grade.stopped", {
+                runId: run.id,
+                calls: gradingToolCalls,
+              });
+              runAbortController?.abort(new Error("Grading stopped after too many tool calls."));
+            }
             getLogger().info("recruiting.grade.tool", {
               runId: run.id,
               name,
