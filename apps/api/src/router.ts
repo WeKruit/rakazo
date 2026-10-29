@@ -3971,7 +3971,10 @@ export function createRouter(deps: RouterDeps) {
                 spaceId: context.actor.spaceId,
                 userId: context.actor.userId,
                 activeRecruitingRoleId: input.roleId,
+                // The role's conversation, not a handoff or task thread that also points at it.
+                OR: [{ groupId: { not: null } }, { botId: { not: null } }],
               },
+              orderBy: { createdAt: "desc" },
               select: { id: true },
             }),
           )

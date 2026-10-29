@@ -155,7 +155,10 @@ export async function startRecruitingGrading(
     },
   });
   const role = thread?.activeRecruitingRole;
-  if (!thread || !role || role.archivedAt || role.userId !== thread.userId) return;
+  const skipped = (reason: string) =>
+    getLogger().info("recruiting.grade.skipped", { threadId: payload.threadId, reason });
+  if (!thread || !role || role.archivedAt || role.userId !== thread.userId)
+    return skipped("no role");
   const busy = await deps.prisma.run.findFirst({
     where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
     select: { id: true },
@@ -168,7 +171,7 @@ export async function startRecruitingGrading(
           new Date(now + BUSY_RETRY_MS),
         ),
       );
-    return;
+    return skipped("busy");
   }
   const requests = await deps.prisma.run.findMany({
     where: { threadId: thread.id, clientNonce: { startsWith: RECRUITING_GRADE_NONCE_PREFIX } },
@@ -188,7 +191,7 @@ export async function startRecruitingGrading(
   const latest = requests[0];
   const latestAge = latest ? now - latest.createdAt.getTime() : Number.POSITIVE_INFINITY;
   const latestResearch = latest && researchByRun.get(latest.id);
-  if (!latestResearch && latestAge < NOT_STARTED_HOLD_MS) return;
+  if (!latestResearch && latestAge < NOT_STARTED_HOLD_MS) return skipped("hold");
   if (latestResearch && latestAge < IN_FLIGHT_MS) {
     const saved = await deps.prisma.run.findFirst({
       where: {
@@ -197,7 +200,7 @@ export async function startRecruitingGrading(
       },
       select: { id: true },
     });
-    if (!saved) return;
+    if (!saved) return skipped("in flight");
   }
   // People whose request never reached the research service are sent again.
   const sent = sentUrls(
@@ -229,9 +232,9 @@ export async function startRecruitingGrading(
     skip.add(row.candidateKey);
     people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
   }
-  if (!people.size) return;
+  if (!people.size) return skipped("nobody to grade");
   const grader = await researchTeammate(deps.prisma, thread);
-  if (!grader) return;
+  if (!grader) return skipped("no research teammate");
   const prompt = recruitingGradePrompt([...people.values()]);
   const batch = createHash("sha256")
     .update([...people.keys()].join("\n"))
