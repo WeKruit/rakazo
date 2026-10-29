@@ -728,8 +728,6 @@ export interface BackgroundJobPayloads {
   "cloud_agent.poll": { agentId: string };
   /** Check one active recruiting research task at the provider; scope is loaded from the database. */
   "recruiting_research.poll": { taskId: string; attempt?: number };
-  /** Hand a role conversation's newly found, ungraded people to the research service. */
-  "recruiting_grade.start": { threadId: string; attempt?: number };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

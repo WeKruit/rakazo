@@ -16,7 +16,6 @@ import type { McpServer, PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingResearch, listRunToolResults } from "@rakazo/db";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
-import { NOT_GRADING_TASK, RECRUITING_GRADE_NONCE_PREFIX } from "./recruiting-grading.js";
 import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles.js";
 
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
@@ -138,16 +137,15 @@ export async function requireQuickSearchBeforeResearch(
   const scope = { spaceId: context.spaceId, userId: context.userId };
   const run = await prisma.run.findFirst({
     where: { id: context.runId, ...scope },
-    select: { clientNonce: true, thread: { select: { activeRecruitingRoleId: true } } },
+    select: { thread: { select: { activeRecruitingRoleId: true } } },
   });
   const roleId = run?.thread.activeRecruitingRoleId;
-  // Grading people a search already found is not a search.
-  if (!roleId || run.clientNonce?.startsWith(RECRUITING_GRADE_NONCE_PREFIX)) return;
+  if (!roleId) return;
   const [searchAssigned, earlierResearch, acceptedRound] = await Promise.all([
     prisma.botMcpServer.count({
       where: { ...scope, server: { ...scope, slug: "people-search", enabled: true } },
     }),
-    prisma.recruitingResearchTask.count({ where: { roleId, ...NOT_GRADING_TASK } }),
+    prisma.recruitingResearchTask.count({ where: { roleId } }),
     prisma.recruitingCalibrationRound.count({ where: { roleId, approvedAt: { not: null } } }),
   ]);
   if (!searchAssigned || earlierResearch || acceptedRound) return;

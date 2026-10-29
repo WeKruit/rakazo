@@ -464,7 +464,6 @@ import {
   RecruitingFeedbackValidationError,
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
-import { scheduleRecruitingGrading } from "./recruiting-grading.js";
 import {
   COMMUTE_MILES,
   isRegionOnlyLocation,
@@ -8829,11 +8828,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
                       }))
                     : rows;
-                  // People new to the role get the research service's grade once the turn settles.
-                  if ((saved as { newPeople?: unknown }).newPeople)
-                    await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
-                      getLogger().warn("recruiting grade schedule", { error: String(error) }),
-                    );
                   // The role's total, so a scale-out stops at its target without counting rows.
                   const peopleInResults = await deps.prisma.recruitingCandidate.count({
                     where: { roleId },
