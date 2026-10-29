@@ -714,7 +714,11 @@ export async function planDeclineRetry(
   const declined = input.request.trim() ? retryReason(input.reply, input.request) : undefined;
   if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
-  if (!variables && declined?.kind !== "decline" && input.worked) return undefined;
+  // After the asked work, a closing question or offer stands, on a card rather than in text.
+  if (!variables && declined && declined.kind !== "decline" && input.worked)
+    return !input.handedIn && QUESTION_STAGES.has((await input.stage?.()) ?? "")
+      ? undefined
+      : questionCard(input.reply, declined);
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: input.run.threadId,

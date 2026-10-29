@@ -453,7 +453,7 @@ if (wanted.has("t1"))
           .match(/subject:/gi)?.length ?? 0) >= 3,
       limitMs: 8 * 60_000,
     });
-    const drafted = draft.replies.map(botText).join("\n");
+    const drafted = recruiterSees(draft.replies).map(botText).join("\n");
     fs.writeFileSync(path.join(OUT, "t1-draft.txt"), `${drafted}\n`);
     if (/\{\{\s*\w+\s*\}\}/.test(drafted))
       failures.push("campaign draft in chat shows {{variables}}");
