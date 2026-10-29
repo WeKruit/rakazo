@@ -216,36 +216,53 @@ describe("startRecruitingGrading", () => {
 });
 
 describe("gradingToolRefusal", () => {
-  it("lets a grading turn only grade and save", () => {
-    for (const [name, args] of [
-      ["mcp__research__research", { query: "grade" }],
-      ["mcp__research__get_task", { task_id: "t" }],
-      ["mcp__research__get_rows", { task_id: "t" }],
-      ["recruiting_research", { operation: "save_results" }],
-      ["recruiting_candidates", { operation: "list" }],
-      ["skill_read", {}],
-      ["connectors_search_tools", { query: "research" }],
-      ["connectors_load_tool", { id: "server-1:research" }],
-      ["connectors_execute_tool", { id: "server-1:research", arguments: { prompt: "grade" } }],
-      ["connectors_execute_tool", { id: "mcp__research__get_rows", arguments: { task_id: "t" } }],
-    ] as const)
-      expect(gradingToolRefusal(name, args)).toBeUndefined();
-    for (const [name, args] of [
-      ["recruiting_role", { operation: "update" }],
-      ["recruiting_research", { operation: "calibration_round" }],
-      ["recruiting_feedback", { target: "round", operation: "approve" }],
-      ["recruiting_shortlist", {}],
-      ["ask_user", {}],
-      ["message_user", {}],
-      ["handoff_to_bot", {}],
-      ["mcp__research__reply", { task_id: "t" }],
-      ["mcp__research__research", { task_id: "t" }],
-      ["mcp__mail__send_email", {}],
-      ["connectors_execute_tool", { id: "server-1:reply", arguments: { task_id: "t" } }],
-      ["connectors_execute_tool", { id: "server-1:research", arguments: { task_id: "t" } }],
-      ["connectors_execute_tool", { id: "server-2:send_email", arguments: {} }],
-      ["connectors_execute_tool", { id: "mcp__mail__send_email", arguments: {} }],
-    ] as const)
-      expect(gradingToolRefusal(name, args)).toMatch(/only grades/);
+  const start = `${RECRUITING_GRADE_NONCE_PREFIX}thread:batch`;
+  const save = "recruiting-research-wake:task:1";
+  const never = [
+    ["recruiting_role", { operation: "update" }],
+    ["recruiting_research", { operation: "calibration_round" }],
+    ["recruiting_feedback", { target: "round", operation: "approve" }],
+    ["recruiting_shortlist", {}],
+    ["ask_user", {}],
+    ["message_user", {}],
+    ["handoff_to_bot", {}],
+    ["scratchpad_add", {}],
+    ["mcp__research__reply", { task_id: "t" }],
+    ["mcp__research__research", { task_id: "t" }],
+    ["mcp__mail__send_email", {}],
+    ["connectors_execute_tool", { id: "server-1:reply", arguments: { task_id: "t" } }],
+    ["connectors_execute_tool", { id: "server-1:research", arguments: { task_id: "t" } }],
+    ["connectors_execute_tool", { id: "server-2:send_email", arguments: {} }],
+    ["connectors_execute_tool", { id: "mcp__mail__send_email", arguments: {} }],
+  ] as const;
+  const either = [
+    ["recruiting_candidates", { operation: "list" }],
+    ["skill_read", {}],
+    ["connectors_search_tools", { query: "research" }],
+    ["connectors_load_tool", { id: "server-1:research" }],
+  ] as const;
+  const reads = [
+    ["mcp__research__get_task", { task_id: "t" }],
+    ["mcp__research__get_rows", { task_id: "t" }],
+    ["recruiting_research", { operation: "save_results" }],
+    ["connectors_execute_tool", { id: "mcp__research__get_rows", arguments: { task_id: "t" } }],
+  ] as const;
+  const starts = [
+    ["mcp__research__research", { query: "grade" }],
+    ["connectors_execute_tool", { id: "server-1:research", arguments: { prompt: "grade" } }],
+  ] as const;
+
+  it("lets the request turn only start the research, then end", () => {
+    for (const [name, args] of [...either, ...starts])
+      expect(gradingToolRefusal(name, args, start)).toBeUndefined();
+    for (const [name, args] of [...never, ...reads])
+      expect(gradingToolRefusal(name, args, start)).toMatch(/end the turn/);
+  });
+
+  it("lets the turn the research's finish wakes only read and save its rows", () => {
+    for (const [name, args] of [...either, ...reads])
+      expect(gradingToolRefusal(name, args, save)).toBeUndefined();
+    for (const [name, args] of [...never, ...starts])
+      expect(gradingToolRefusal(name, args, save)).toMatch(/only reads/);
   });
 });

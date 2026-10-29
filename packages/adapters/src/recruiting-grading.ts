@@ -43,15 +43,18 @@ const GRADING_BUILTIN_TOOLS = new Set([
   "task_catalog",
 ]);
 const GRADING_RESEARCH_OPERATIONS = new Set(["status", "rows", "save_results"]);
-const GRADING_PROVIDER_TOOLS = new Set(["research", "get_task", "get_rows", "credits"]);
+/** The request turn only starts research; the turn its finish wakes reads and saves the grades. */
+const START_PROVIDER_TOOLS = new Set(["research", "credits"]);
+const SAVE_PROVIDER_TOOLS = new Set(["get_task", "get_rows"]);
 /** The connector catalog that lists and runs tools beyond the directly loaded ones. */
 const CATALOG_READ_TOOLS = new Set(["connectors_search_tools", "connectors_load_tool"]);
 const CATALOG_EXECUTE_TOOL = "connectors_execute_tool";
 
-/** A research provider call a grading turn may make: start research, read a task, or credits. */
-function gradingProviderCall(tool: string, args: Record<string, unknown>): boolean {
-  if (!GRADING_PROVIDER_TOOLS.has(tool)) return false;
-  return args.task_id === undefined || tool === "get_task" || tool === "get_rows";
+/** A research provider call this grading turn may make. */
+function gradingProviderCall(tool: string, args: Record<string, unknown>, start: boolean): boolean {
+  return start
+    ? START_PROVIDER_TOOLS.has(tool) && args.task_id === undefined
+    : SAVE_PROVIDER_TOOLS.has(tool);
 }
 
 /** The provider tool name in a direct name (`mcp__server__tool`) or a catalog id (`server:tool`). */
@@ -75,24 +78,31 @@ const record = (value: unknown): Record<string, unknown> =>
 /**
  * Why a grading turn may not call this tool, or undefined when it may. A grading turn only grades
  * people already in Results: it never changes the role, its brief or stage, the people's status,
- * or messages anyone, whatever the model decides.
+ * or messages anyone, whatever the model decides. The request turn (`clientNonce` with the grading
+ * prefix) only starts the research; the background follow-up wakes another grading turn when it
+ * finishes, and that turn only reads and saves its rows.
  */
 export function gradingToolRefusal(
   name: string,
   args: Record<string, unknown>,
+  clientNonce: string | null,
 ): string | undefined {
+  const start = Boolean(clientNonce?.startsWith(RECRUITING_GRADE_NONCE_PREFIX));
   const direct = /^mcp__.+__([^_].*)$/.exec(name)?.[1];
   const executed =
     name === CATALOG_EXECUTE_TOOL ? providerToolName(String(args.id ?? "")) : undefined;
   const allowed =
     GRADING_BUILTIN_TOOLS.has(name) ||
     CATALOG_READ_TOOLS.has(name) ||
-    (name === "recruiting_research" && GRADING_RESEARCH_OPERATIONS.has(String(args.operation))) ||
-    (direct !== undefined && gradingProviderCall(direct, args)) ||
-    (executed !== undefined && gradingProviderCall(executed, record(args.arguments)));
-  return allowed
-    ? undefined
-    : "Not run: this turn only grades people already in Results. Start the grading research, or read and save its rows with recruiting_research save_results; nothing else.";
+    (!start &&
+      name === "recruiting_research" &&
+      GRADING_RESEARCH_OPERATIONS.has(String(args.operation))) ||
+    (direct !== undefined && gradingProviderCall(direct, args, start)) ||
+    (executed !== undefined && gradingProviderCall(executed, record(args.arguments), start));
+  if (allowed) return undefined;
+  return start
+    ? "Not run: this turn only starts the grading research. Once it has started, the grades are read and saved automatically when it finishes, so end the turn with an empty reply."
+    : "Not run: this turn only reads the grading research's rows and saves them with recruiting_research save_results; nothing else.";
 }
 
 /** Reply guidance for a grading turn, which nobody reads in the chat. */
