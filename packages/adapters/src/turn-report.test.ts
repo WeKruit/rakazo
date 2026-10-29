@@ -268,6 +268,31 @@ describe("declineRetry", () => {
     ).toMatch(/^Your reply deferred the request/);
   });
 
+  it("keeps a reply that shows the drafted email, whatever its aside", () => {
+    expect(
+      declineRetry({
+        reply:
+          "The separate draft search wasn't available, so I can't confirm whether an older draft exists.\n\n**Email 1 — Day 0**\nSubject: TikTok LIVE role\n\nHi Adrian,",
+        request: "The recruiter's exact words are “来个campign draft看看”.",
+        tools: [],
+        teammates: [],
+      }),
+    ).toBeUndefined();
+  });
+
+  it("retries a send that ended without its card, even after other work", () => {
+    expect(
+      declineRetry({
+        reply:
+          "The saved pool has 134 people, so I can't treat all 20 as eligible by default. I need the original ordered first-20 list.",
+        request: "发20个人的先",
+        tools: [{ name: "activate_campaign" }],
+        teammates: [],
+        worked: true,
+      })?.note,
+    ).toContain("activate_campaign");
+  });
+
   it("keeps an aside or an offer after real work", () => {
     // The declined sentence is about verification, not the requested search.
     expect(
