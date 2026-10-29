@@ -60,6 +60,7 @@ import {
   computerUpdateIsCurrent,
   computerUpdateView,
   createCompanySiteResolver,
+  createExaOrganizationSearch,
   createFaviconResolver,
   createTicket,
   createVoiceProvider,
@@ -912,7 +913,9 @@ export function createRouter(deps: RouterDeps) {
     ? { provider: deps.env.defaultProvider }
     : null;
   const favicons = deps.favicons ?? createFaviconResolver();
-  const companySites = deps.companySites ?? createCompanySiteResolver();
+  const companySites =
+    deps.companySites ??
+    createCompanySiteResolver({ searchOrganizations: createExaOrganizationSearch() });
   const refreshExpiredCredential =
     deps.refreshExpiredModelCredential ??
     ((scope: { userId: string; spaceId: string }, secretId: string, provider: string) =>

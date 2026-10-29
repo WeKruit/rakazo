@@ -80,16 +80,26 @@ export type CompanySiteResolver = {
   companySite(name: string): Promise<CompanySiteAnswer>;
 };
 
+/** Organizations matching a name, each with its own website and the name the index gives it. */
+export type OrganizationSearch = (
+  name: string,
+  signal: AbortSignal,
+) => Promise<{ url: string; title: string }[]>;
+
 export type CompanySiteResolverOptions = {
   fetch?: typeof globalThis.fetch;
+  /** Asked first; the likely domains for the name are tried only when it confirms no site. */
+  searchOrganizations?: OrganizationSearch;
   resolveHostname?: ResolveHostname;
   now?: () => number;
 };
 
 /**
  * Finds an organization's own website from its name, so its logo can be its site icon without a
- * third-party logo service. Only the likely domains for the name are tried, and a site is accepted
- * only when its own page title names the organization; anything uncertain stays without a logo.
+ * third-party logo service. An organization index is asked first and its answer is kept only when
+ * the indexed name matches; otherwise the likely domains for the name are tried, and a site is
+ * accepted only when its own page title names the organization. Anything uncertain stays without
+ * a logo.
  * Every fetch goes through the SSRF-checked fetcher, and answers are cached per name, misses too.
  */
 export function createCompanySiteResolver(
@@ -190,6 +200,10 @@ async function findCompanySite(
   options: CompanySiteResolverOptions,
   signal: AbortSignal,
 ): Promise<string | null> {
+  const indexed = options.searchOrganizations
+    ? await indexedSite(options.searchOrganizations, tokens, signal)
+    : null;
+  if (indexed) return indexed;
   for (const host of companySiteCandidates(tokens)) {
     if (signal.aborted) return null;
     const page = await fetchSafeWebBytes(`https://${host}/`, {
@@ -210,4 +224,28 @@ async function findCompanySite(
     return new URL(page.url).hostname.replace(/^www\./, "");
   }
   return null;
+}
+
+/** Directories and profile sites that describe an organization but are not its own site. */
+const NOT_OWN_SITE =
+  /(?:^|\.)(?:linkedin\.com|wikipedia\.org|facebook\.com|crunchbase\.com|zoominfo\.com|bloomberg\.com|glassdoor\.com|indeed\.com|x\.com|twitter\.com|instagram\.com|youtube\.com|exa\.ai)$/;
+
+async function indexedSite(
+  search: OrganizationSearch,
+  tokens: readonly string[],
+  signal: AbortSignal,
+): Promise<string | null> {
+  if (tokens.length === 1 && GENERIC_WORDS.has(tokens[0]!)) return null;
+  const results = await search(tokens.join(" "), signal).catch(() => []);
+  for (const { url, title } of results) {
+    const host = URL.canParse(url) ? new URL(url).hostname.replace(/^www\./, "") : "";
+    if (!host || NOT_OWN_SITE.test(host)) continue;
+    if (sameName(title, tokens)) return host;
+  }
+  return null;
+}
+
+/** Whether an indexed name is the searched name, ignoring case, accents and legal suffixes. */
+function sameName(title: string, tokens: readonly string[]): boolean {
+  return companyTokens(title).join(" ") === tokens.join(" ");
 }

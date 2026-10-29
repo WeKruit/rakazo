@@ -73,4 +73,30 @@ describe("company site", () => {
     const answers = await Promise.all(names.map((name) => resolver.companySite(name)));
     expect(answers).toEqual(names.map((name) => ({ host: `${name}.com` })));
   });
+
+  it("takes the indexed organization's own site before guessing domains", async () => {
+    const fetch = vi.fn(async () => new Response("", { status: 404 }));
+    const searchOrganizations = vi.fn(async () => [
+      {
+        url: "https://www.linkedin.com/school/example-state-university/",
+        title: "Example State University",
+      },
+      { url: "https://www.esu.edu/", title: "Example State University" },
+    ]);
+    const resolver = createCompanySiteResolver({ fetch, searchOrganizations });
+    expect(await resolver.companySite("Example State University")).toEqual({ host: "esu.edu" });
+    expect(await resolver.companySite("example state university")).toEqual({ host: "esu.edu" });
+    expect(searchOrganizations).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("ignores an indexed organization with another name and falls back to guessing", async () => {
+    const fetch = vi.fn(async () => new Response("", { status: 404 }));
+    const searchOrganizations = vi.fn(async () => [
+      { url: "https://acme-tools.com/", title: "Acme Tools" },
+    ]);
+    const resolver = createCompanySiteResolver({ fetch, searchOrganizations });
+    expect(await resolver.companySite("Acme Robotics")).toEqual({ host: null });
+    expect(fetch).toHaveBeenCalled();
+  });
 });
