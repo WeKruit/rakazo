@@ -5727,7 +5727,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         ) => {
           context.signal.throwIfAborted();
           if (run.trigger === "recruiting_grade") {
-            const refusal = gradingToolRefusal(name, rawArgs);
+            const refusal = gradingToolRefusal(name, rawArgs, run.clientNonce);
             getLogger().info("recruiting.grade.tool", {
               runId: run.id,
               name,
