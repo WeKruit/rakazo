@@ -321,7 +321,11 @@ export type Declined = { sentence: string; kind: DeclineKind };
 
 /** The first sentence of a reply that declines, defers or hands back a pick, else undefined. */
 export function declinedSentence(text: string): Declined | undefined {
-  const sentences = text
+  // A drafted email is the deliverable, not the reply's own words: its "Would you be open…?"
+  // is no question to the user, so only the text before the first email is read.
+  const draft = text.search(/(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:)/i);
+  const own = draft >= 0 ? text.slice(0, draft) : text;
+  const sentences = own
     .split(/(?<=[.!?。！？\n])/)
     .map((sentence) => sentence.trim())
     .filter(Boolean);
