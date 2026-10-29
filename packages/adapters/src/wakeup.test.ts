@@ -14,6 +14,7 @@ function handlers(): BackgroundJobHandlers {
     "messaging.deliver": vi.fn(async () => undefined),
     "cloud_agent.poll": vi.fn(async () => undefined),
     "recruiting_research.poll": vi.fn(async () => undefined),
+    "recruiting_grade.start": vi.fn(async () => undefined),
   };
 }
 

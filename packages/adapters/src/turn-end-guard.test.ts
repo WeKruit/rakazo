@@ -645,6 +645,20 @@ describe("guardRecruitingTurnEnd", () => {
     }
   });
 
+  it("leaves the playbook alone after a turn that only asked for grades", async () => {
+    const f = fixture();
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run: { ...run, trigger: "recruiting_research", clientNonce: "recruiting-grade:thread-1:e" },
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    });
+    expect(result).toEqual({ action: "ended", classification: "none" });
+    expect(f.sendUserMessage).not.toHaveBeenCalled();
+  });
+
   it("leaves a delegated specialist turn to the bot that asked for it", async () => {
     const f = fixture();
     const result = await guardRecruitingTurnEnd(f.deps, {

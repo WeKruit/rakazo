@@ -11,6 +11,7 @@ import {
 import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { isRecruitingGradingRun } from "./recruiting-grading.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import type { DeclineRetry } from "./turn-report.js";
 import { declinedSentence, declineRetry } from "./turn-report.js";
@@ -64,6 +65,7 @@ export type TurnEndGuardInput = {
     botId: string;
     userId: string;
     trigger: string;
+    clientNonce?: string | null;
     /** The message that started the run: a teammate's handoff when the stage was handed to it. */
     sourceMessageId?: string | null;
   };
@@ -398,7 +400,10 @@ export async function guardRecruitingTurnEnd(
   if (
     max === 0 ||
     !GUARDED_TRIGGERS.has(run.trigger) ||
-    (run.trigger === "bot_message" && input.returnsToRequester)
+    (run.trigger === "bot_message" && input.returnsToRequester) ||
+    // Grading people already in Results ends when the grades are saved; the playbook waits.
+    (run.trigger === "recruiting_research" &&
+      (await isRecruitingGradingRun(deps.prisma, run.clientNonce)))
   )
     return { action: "ended", classification: "none" };
   const unsaved = await unsavedFeedback(deps, input);

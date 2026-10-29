@@ -66,6 +66,7 @@ export async function sweepIdleRecruitingRoles(deps: {
           botId: true,
           userId: true,
           trigger: true,
+          clientNonce: true,
           status: true,
           updatedAt: true,
         },
