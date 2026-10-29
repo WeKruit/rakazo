@@ -43,7 +43,7 @@ function fixture(
     feedbackError?: string;
     /** People were saved after the round was accepted. */
     scaledPage?: boolean;
-    /** Since the recruiter's message, saved people's profiles were updated and nobody new saved. */
+    /** Since the recruiter's message the role only looked people up: no playbook work. */
     profileUpdate?: boolean;
   } = {},
 ) {
@@ -72,7 +72,6 @@ function fixture(
               : null,
         ),
       },
-      recruitingSavedProfile: { count: vi.fn(async () => (options.profileUpdate ? 3 : 0)) },
       recruitingCandidatePage: {
         count: vi.fn(async () => 0),
         aggregate: vi.fn(async () => ({ _sum: { rowCount: options.savedRows ?? null } })),
@@ -95,7 +94,9 @@ function fixture(
               ? { result: { error: options.feedbackError } }
               : null,
         ),
-        findMany: vi.fn(async () => (options.profileUpdate ? [{ id: "lookup-1" }] : [])),
+        findMany: vi.fn(async () =>
+          options.profileUpdate ? [{ id: "lookup-1", kind: "connector_call" }] : [],
+        ),
       },
       recruitingResearchTask: {
         findMany: vi.fn(async () =>
@@ -200,7 +201,7 @@ describe("guardRecruitingTurnEnd", () => {
     },
   );
 
-  it("leaves the next step to the recruiter after updating saved people's profiles", async () => {
+  it("leaves the next step to the recruiter after looking up saved people, saved or not", async () => {
     const f = fixture({ stage: "calibration_10", savedCandidates: 16, profileUpdate: true });
     const result = await guardRecruitingTurnEnd(f.deps, {
       run,
@@ -212,6 +213,24 @@ describe("guardRecruitingTurnEnd", () => {
     });
     expect(result.action).toBe("ended");
     expect(f.sendUserMessage).not.toHaveBeenCalled();
+  });
+
+  it("still pushes the next step after playbook work since the recruiter's message", async () => {
+    const f = fixture({ stage: "calibration_10", savedCandidates: 16, profileUpdate: true });
+    (
+      f.deps.prisma.externalEffect.findMany as unknown as {
+        mockResolvedValue: (value: unknown) => void;
+      }
+    ).mockResolvedValue([{ id: "brief-1", kind: "recruiting_role" }]);
+    const result = await guardRecruitingTurnEnd(f.deps, {
+      run,
+      roleId: "role-1",
+      blocks: statusNote,
+      handedOff: false,
+      pendingApproval: false,
+      postAssistant: f.postAssistant,
+    });
+    expect(result.action).toBe("continued");
   });
 
   it("does not treat feedback-stage saves or a prose question as a delivered review", async () => {

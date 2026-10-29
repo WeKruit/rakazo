@@ -436,7 +436,7 @@ describe("profile lookups through the people search", () => {
     }));
     const result = await executeRecruitingProfilesTool({} as never, actor, "run1", {
       operation: "save_many",
-      candidateKeys: ["linkedin:/in/cara", "linkedin:/in/dan"],
+      candidateKeys: ["linkedin:/in/cara", "linkedin:/in/dan", "name:erin"],
     });
     expect(result).toEqual({
       items: [
@@ -446,6 +446,7 @@ describe("profile lookups through the people search", () => {
           datedPositions: 1,
         }),
         { candidateKey: "linkedin:/in/dan", saved: false },
+        { candidateKey: "name:erin", saved: false, reason: "no LinkedIn profile on record" },
       ],
     });
     expect(db.saveRecruitingSavedProfile.mock.calls[0]![3]).toMatchObject({
