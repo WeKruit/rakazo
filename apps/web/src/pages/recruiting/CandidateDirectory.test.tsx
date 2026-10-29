@@ -271,3 +271,15 @@ it("uses source-revision-matched criterion definitions in table and cards, never
   expect(view.textContent).not.toContain("C++ production systems");
   expect(view.textContent).toContain("Criterion name unavailable · R4 · Partial match");
 });
+
+it("shows the Fit column only once someone in the list has an assessment", async () => {
+  const { view, render } = await mount(
+    <CandidateDirectory rows={[row("a"), row("b")]} onOpen={vi.fn()} />,
+  );
+  const headers = () => [...view.querySelectorAll("thead th")].map((th) => th.textContent);
+  expect(headers()).not.toContain("Fit");
+  await render(
+    <CandidateDirectory rows={[row("a"), row("b", [field("Grade", "A")])]} onOpen={vi.fn()} />,
+  );
+  expect(headers()).toContain("Fit");
+});
