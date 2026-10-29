@@ -1,5 +1,13 @@
+import type { WorkSession } from "@rakazo/core";
+import {
+  formatWorkDuration,
+  workActivityLabel,
+  workProgressLabel,
+  workSessionElapsedMs,
+  workSessionSteps,
+} from "@rakazo/core";
 import { useEffect } from "react";
-import { View } from "react-native";
+import { Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import Animated, {
   cancelAnimation,
@@ -50,21 +58,35 @@ function Dot({
  * `compact` is a single dot for list rows — decorative there, so the row's own
  * accessibility label carries the state instead.
  */
-export function WorkingIndicator({ compact = false, tint }: { compact?: boolean; tint?: string }) {
+export function WorkingIndicator({
+  compact = false,
+  tint,
+  session,
+}: {
+  compact?: boolean;
+  tint?: string;
+  session?: WorkSession | null;
+}) {
   const tokens = useMobileTokens();
   const { t } = useI18n();
   const reducedMotion = useReducedMotion();
   const progress = useSharedValue(0);
+  const workProgress = session?.progress;
+  const label = workProgress
+    ? t(workProgressLabel(workProgress))
+    : session?.current
+      ? `${t(workActivityLabel(session.current))}…`
+      : t("Working…");
 
   useEffect(() => {
-    if (reducedMotion) return;
+    if (reducedMotion || session?.endedAt) return;
     progress.value = withRepeat(
       withTiming(1, { duration: CYCLE_MS, easing: Easing.linear }),
       -1,
       false,
     );
     return () => cancelAnimation(progress);
-  }, [progress, reducedMotion]);
+  }, [progress, reducedMotion, session?.endedAt]);
 
   if (compact) {
     return (
@@ -79,31 +101,72 @@ export function WorkingIndicator({ compact = false, tint }: { compact?: boolean;
       </View>
     );
   }
+  if (session?.endedAt) {
+    return (
+      <Text style={{ color: tokens.mutedForeground, fontSize: 13, marginTop: 8 }}>
+        {t("Worked for {duration}", {
+          duration: formatWorkDuration(workSessionElapsedMs(session, Date.now())),
+        })}
+      </Text>
+    );
+  }
+  // ponytail: cap live rows like web; completed history remains in the shared session.
+  const steps = workSessionSteps(session ?? null).slice(-6);
   return (
-    <View
-      accessibilityLabel={t("Working…")}
-      accessibilityRole="text"
-      style={{
-        alignSelf: "flex-start",
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-        backgroundColor: tokens.muted,
-        paddingHorizontal: 14,
-        paddingVertical: 12,
-        borderRadius: 20,
-      }}
-    >
-      {DOTS.map((index) => (
-        <Dot
-          key={index}
-          progress={progress}
-          offset={index / DOTS.length}
-          size={7}
-          still={reducedMotion}
-          color={tokens.mutedForeground}
-        />
+    <View style={{ flexShrink: 1, gap: 4 }}>
+      {steps.map((step, index) => (
+        <Text key={index} style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+          <Text
+            accessibilityLabel={
+              step.status === "failed"
+                ? t("Step failed")
+                : step.status === "paused"
+                  ? t("Paused")
+                  : undefined
+            }
+            style={{ color: step.status ? tokens.warning : tokens.success }}
+          >
+            {step.status ? "! " : "✓ "}
+          </Text>
+          {t(workActivityLabel(step.activity))}
+          {step.count > 1 ? ` ×${step.count}` : ""}
+          {step.peopleWithEmail !== undefined
+            ? ` · ${t(step.peopleWithEmail === 1 ? "{count} person with email" : "{count} people with email", { count: step.peopleWithEmail })}`
+            : ""}
+        </Text>
       ))}
+      <View
+        accessibilityLabel={label}
+        accessibilityRole="text"
+        accessibilityLiveRegion="polite"
+        style={{
+          alignSelf: "flex-start",
+          flexShrink: 1,
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 6,
+          backgroundColor: tokens.muted,
+          paddingHorizontal: 14,
+          paddingVertical: 12,
+          borderRadius: 20,
+        }}
+      >
+        {DOTS.map((index) => (
+          <Dot
+            key={index}
+            progress={progress}
+            offset={index / DOTS.length}
+            size={7}
+            still={reducedMotion}
+            color={tokens.mutedForeground}
+          />
+        ))}
+        {session ? (
+          <Text style={{ color: tokens.mutedForeground, fontSize: 13, flexShrink: 1 }}>
+            {label}
+          </Text>
+        ) : null}
+      </View>
     </View>
   );
 }

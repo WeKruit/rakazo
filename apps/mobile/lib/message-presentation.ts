@@ -123,3 +123,11 @@ export function truncateQuoteExcerpt(value: string): string {
   const last = truncated.charCodeAt(truncated.length - 1);
   return last >= 0xd800 && last <= 0xdbff ? truncated.slice(0, -1) : truncated;
 }
+
+/** Native recruiter view keeps business content and exact consent, never internal routing. */
+export function recruiterMessageBlocks(blocks: readonly MessageBlock[]): MessageBlock[] {
+  return blocks.filter(
+    (block) =>
+      !["handoff", "bot_message_sent", "bot_message_received", "child_bot"].includes(block.kind),
+  );
+}

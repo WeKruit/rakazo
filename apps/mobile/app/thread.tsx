@@ -1,5 +1,4 @@
 import type { MenuAction } from "@expo/ui/community/menu";
-import { ChatMarkdown } from "@rakazo/chat-ui/native";
 import type {
   AgentSkillCatalogEntry,
   AskAnswer,
@@ -46,6 +45,7 @@ import {
   resolveComposerSendPlan,
   resolvePersonaColorDef,
   selectedAskActionLabel,
+  specialistWorkLabel,
   threadWindowMessages,
   timeSeparatorIds,
   trackWork,
@@ -181,6 +181,7 @@ import {
   isCenteredAgentEvent,
   messagePresentationSegments,
   quotableMessageSegments,
+  recruiterMessageBlocks,
   truncateQuoteExcerpt,
 } from "../lib/message-presentation";
 import { native, useMobileTokens, useResolvedAppearance, useThemedStyles } from "../lib/native";
@@ -624,7 +625,13 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const reactionView = useMemo(
     () =>
       projectMessageReactions(
-        userVisibleMessages(snap?.messages ?? [], { includePeerReceipts: true })
+        userVisibleMessages(
+          (snap?.messages ?? []).map((message) =>
+            message.role === "user"
+              ? message
+              : { ...message, blocks: recruiterMessageBlocks(message.blocks) },
+          ),
+        )
           .map((message) => {
             const dismissed = dismissedChoiceQuestions.get(message.id);
             if (!dismissed) return message;
@@ -671,7 +678,17 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const notificationThreadId = snap?.threadId ?? requestedThreadId ?? currentBot?.threadId;
   activeThreadId.current = notificationThreadId;
   const currentBotStatus = snap ? snap.run?.status : currentBot?.status;
-  const hasLiveProgress = visibleMessages.some((message) => message.id.startsWith("progress:"));
+  const hasLiveProgress = visibleMessages.some(
+    (message) =>
+      message.id.startsWith("progress:") &&
+      message.blocks.some(
+        (block) =>
+          block.kind === "progress" &&
+          !block.phase &&
+          !block.activity &&
+          Boolean(block.text.trim()),
+      ),
+  );
   const workingGroupBots = useMemo(() => {
     if (!inGroup) return [];
     const seen = new Set<string>();
@@ -2235,7 +2252,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const workingFooter =
     !inGroup && currentBot && isWorkingStatus(currentBotStatus) && !hasLiveProgress ? (
       <View
-        accessibilityLabel={t("{name} is working", { name: currentBot.name })}
+        accessibilityLabel={t("Working…")}
         accessibilityRole="text"
         style={{
           flexDirection: "row",
@@ -2251,16 +2268,12 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           size={28}
           status={currentBotStatus}
         />
-        <WorkingIndicator />
+        <WorkingIndicator session={liveWorkSession} />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : inGroup && workingGroupBots.length > 0 ? (
       <View
-        accessibilityLabel={
-          workingGroupBots.length === 1
-            ? t("{name} is working", { name: workingGroupBots[0]?.name ?? t("Agent") })
-            : t("{count} agents working", { count: workingGroupBots.length })
-        }
+        accessibilityLabel={t("Working…")}
         accessibilityRole="text"
         style={{
           flexDirection: "row",
@@ -2282,9 +2295,11 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
             </View>
           ))}
         </View>
-        <WorkingIndicator />
+        <WorkingIndicator session={liveWorkSession} />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
+    ) : workSession?.endedAt && !working && visibleMessages.at(-1)?.role !== "user" ? (
+      <WorkingIndicator session={workSession} />
     ) : null;
 
   const loadEarlierControl =
@@ -3201,7 +3216,6 @@ const MessageBubble = memo(function MessageBubble({
   const colorScheme = useResolvedAppearance();
   const tokens = mobileTokens();
   const { t } = useI18n();
-  const [peerExpanded, setPeerExpanded] = useState(false);
   const artifactTarget: MobileArtifactTarget = groupId ? { groupId } : { botId };
   const cardBotId = message.botId ?? botId;
   const computerBotId = message.botId ?? (groupId ? undefined : botId);
@@ -3359,63 +3373,6 @@ const MessageBubble = memo(function MessageBubble({
       </View>
     );
   }
-  const handoff = message.blocks.find((block) => block.kind === "handoff");
-  if (handoff) {
-    const from = memberName(members, handoff.fromBotId) ?? t("bot");
-    const to = memberName(members, handoff.toBotId) ?? t("bot");
-    return (
-      <AgentEventLabel
-        actionProps={actionProps}
-        label={t("{from} messaged {to}", { from, to })}
-        detail={handoff.text}
-        expanded={peerExpanded}
-        onToggle={() => setPeerExpanded((expanded) => !expanded)}
-      />
-    );
-  }
-  const peerMessage = message.blocks.find(
-    (
-      block,
-    ): block is Extract<MessageBlock, { kind: "bot_message_sent" | "bot_message_received" }> =>
-      block.kind === "bot_message_sent" || block.kind === "bot_message_received",
-  );
-  if (peerMessage) {
-    const sent = peerMessage.kind === "bot_message_sent";
-    const peer = sent ? peerMessage.toBotName : peerMessage.fromBotName;
-    const peerBotId = sent ? peerMessage.toBotId : peerMessage.fromBotId;
-    const label = sent
-      ? t("Messaged {peer}", { peer: peer ?? t("Bot") })
-      : t("Message from {peer}", { peer: peer ?? t("Bot") });
-    const peerColor =
-      bots.find((bot) => bot.id === peerBotId)?.color ??
-      members?.find((member) => member.botId === peerBotId)?.color ??
-      tokens.mutedForeground;
-    // Compact receipt only: peer bodies stay out of the human thread.
-    // Full view-only peer chat is web-first; mobile keeps the chip without expand.
-    return (
-      <Pressable
-        {...actionProps}
-        accessible
-        accessibilityLabel={label}
-        style={{
-          width: "100%",
-          paddingVertical: 4,
-          alignItems: "center",
-          justifyContent: "flex-start",
-          flexDirection: "row",
-          gap: 6,
-        }}
-      >
-        <BotAvatar color={peerColor} identity={peerBotId} size={16} />
-        <Text
-          numberOfLines={1}
-          style={{ color: tokens.mutedForeground, fontSize: 13.5, flexShrink: 1 }}
-        >
-          {label}
-        </Text>
-      </Pressable>
-    );
-  }
   const channelMessage = message.blocks.find(
     (block): block is Extract<MessageBlock, { kind: "channel_message" }> =>
       block.kind === "channel_message",
@@ -3441,44 +3398,16 @@ const MessageBubble = memo(function MessageBubble({
     const running = special.status === "running";
     const failed = special.status === "failed";
     return (
-      <Pressable
-        {...actionProps}
-        style={{
-          width: "90%",
-          borderRadius: 18,
-          borderWidth: 1,
-          borderColor: tokens.border,
-          backgroundColor: tokens.card,
-          paddingHorizontal: 16,
-          paddingVertical: 14,
-        }}
+      <View
+        accessibilityLiveRegion="polite"
+        style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4 }}
       >
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            gap: 8,
-          }}
-        >
-          <Text style={{ color: tokens.foreground, fontSize: 15, fontWeight: "600" }}>
-            {special.name || t("subagent")}
-          </Text>
-          <Text
-            style={{
-              color: failed ? tokens.destructive : running ? tokens.warning : tokens.success,
-              fontSize: 13,
-            }}
-          >
-            {running
-              ? t("Running")
-              : special.status === "failed"
-                ? t("Failed")
-                : special.status === "completed"
-                  ? t("Completed")
-                  : special.status}
-          </Text>
-        </View>
-      </Pressable>
+        <BotAvatar color={tokens.mutedForeground} identity={special.agentId} size={18} />
+        <Text style={{ color: failed ? tokens.warning : tokens.mutedForeground, fontSize: 13 }}>
+          {t(specialistWorkLabel(special.status))}
+        </Text>
+        {running ? <WorkingIndicator compact /> : null}
+      </View>
     );
   }
   if (special?.kind === "cloud_agent") {
@@ -3888,63 +3817,6 @@ function MessageTextCard({
         colorScheme={colorScheme}
         streaming={message.id.startsWith("progress:")}
       />
-    </Pressable>
-  );
-}
-
-function AgentEventLabel({
-  label,
-  detail,
-  expanded,
-  onToggle,
-  actionProps,
-}: {
-  label: string;
-  detail?: string;
-  expanded: boolean;
-  onToggle: () => void;
-  actionProps: MessageActionProps;
-}) {
-  const colorScheme = useResolvedAppearance();
-  const tokens = mobileTokens();
-  const { t } = useI18n();
-  return (
-    <Pressable
-      {...actionProps}
-      onPress={onToggle}
-      accessibilityRole="button"
-      accessibilityLabel={expanded ? t("Hide {label}", { label }) : t("Show {label}", { label })}
-      style={{ width: "100%", paddingVertical: 4, alignItems: "center" }}
-    >
-      <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-        <NativeSymbol
-          ios="arrow.left.arrow.right"
-          android="swap-horizontal"
-          size={12}
-          color={tokens.mutedForeground}
-        />
-        <Text style={{ color: tokens.mutedForeground, fontSize: 13.5, textAlign: "center" }}>
-          {label}
-        </Text>
-      </View>
-      {expanded && detail ? (
-        <View
-          style={{
-            width: "100%",
-            marginTop: 6,
-            borderRadius: 14,
-            borderWidth: 1,
-            borderColor: tokens.border,
-            backgroundColor: tokens.card,
-            paddingHorizontal: 14,
-            paddingVertical: 10,
-          }}
-        >
-          <ChatMarkdown palette={tokens} colorScheme={colorScheme}>
-            {detail}
-          </ChatMarkdown>
-        </View>
-      ) : null}
     </Pressable>
   );
 }

@@ -9,6 +9,7 @@ import {
   isCenteredAgentEvent,
   messagePresentationSegments,
   quotableMessageSegments,
+  recruiterMessageBlocks,
   threadCardWidth,
   truncateQuoteExcerpt,
 } from "./message-presentation";
@@ -253,4 +254,28 @@ describe("truncateQuoteExcerpt", () => {
     expect(truncated).toHaveLength(REPLY_QUOTE_MAX_LENGTH - 1);
     expect(truncated).toBe("x".repeat(REPLY_QUOTE_MAX_LENGTH - 1));
   });
+});
+
+it("removes internal handoff bodies while keeping business text and exact approvals", () => {
+  const ask: MessageBlock = {
+    kind: "ask",
+    text: "Send this exact draft?",
+    detail: "Original draft",
+    approvalEffectId: "consent",
+    actions: [{ id: "allow", label: "Allow once" }],
+  };
+  const text: MessageBlock = { kind: "text", text: "The shortlist is ready." };
+  expect(
+    recruiterMessageBlocks([
+      { kind: "handoff", fromBotId: "a", toBotId: "b", text: "private task" },
+      {
+        kind: "bot_message_sent",
+        toBotId: "b",
+        toBotName: "Internal worker",
+        text: "private task",
+      },
+      text,
+      ask,
+    ]),
+  ).toEqual([text, ask]);
 });
