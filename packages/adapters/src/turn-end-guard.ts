@@ -771,6 +771,18 @@ export async function planDeclineRetry(
 }
 
 /** Starts the one retry of a declined turn as an internal continuation of the same bot. */
+/** The nonce of the retry message for a declined turn; its run continues that turn's stage. */
+export function declineRetryNonce(runId: string): string {
+  return `${AUTOCONTINUE_NONCE_PREFIX}${runId}:decline`;
+}
+
+/** The declined turn a retry message was sent for, from that message's nonce. */
+export function declinedRunId(clientNonce: string | null | undefined): string | undefined {
+  if (!clientNonce?.startsWith(AUTOCONTINUE_NONCE_PREFIX) || !clientNonce.endsWith(":decline"))
+    return undefined;
+  return clientNonce.slice(AUTOCONTINUE_NONCE_PREFIX.length, -":decline".length) || undefined;
+}
+
 export async function sendDeclineRetry(
   deps: Pick<TurnEndGuardDeps, "events" | "jobs">,
   run: TurnEndGuardInput["run"],
@@ -788,7 +800,7 @@ export async function sendDeclineRetry(
     trigger: "follow_up",
     internal: true,
     skipWaitingRuns: true,
-    clientNonce: `${AUTOCONTINUE_NONCE_PREFIX}${run.id}:decline`,
+    clientNonce: declineRetryNonce(run.id),
   });
   if (sent.runId)
     await deps.jobs.enqueue(runContinueJob(sent.runId)).catch((error) => {
