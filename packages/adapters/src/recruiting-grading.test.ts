@@ -30,7 +30,8 @@ function fixture(options: {
   found?: Occurrence[];
   graded?: string[];
   requests?: Array<{ id: string; createdAt: Date; task: { prompt: string } }>;
-  researchTask?: boolean;
+  /** Request run ids that started research. */
+  researched?: string[];
   gradesSaved?: boolean;
   researchBots?: string[];
 }) {
@@ -56,7 +57,12 @@ function fixture(options: {
       findMany: vi.fn(async () => options.requests ?? []),
     },
     recruitingResearchTask: {
-      findFirst: vi.fn(async () => (options.researchTask ? { id: "research" } : null)),
+      findMany: vi.fn(async () =>
+        (options.researched ?? []).map((createdByRunId) => ({
+          id: `research-${createdByRunId}`,
+          createdByRunId,
+        })),
+      ),
     },
     recruitingCandidateOccurrence: {
       findMany: vi.fn(async ({ where }: { where: { page?: unknown } }) =>
@@ -99,7 +105,13 @@ describe("startRecruitingGrading", () => {
           createdAt: new Date(now - 3 * 60 * 60_000),
           task: { prompt: "Grade these\n\n- sent: https://x.test/in/sent" },
         },
+        {
+          id: "never-started",
+          createdAt: new Date(now - 4 * 60 * 60_000),
+          task: { prompt: "Grade these\n\n- new-b: https://x.test/in/new-b" },
+        },
       ],
+      researched: ["old-request"],
     });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
@@ -145,17 +157,28 @@ describe("startRecruitingGrading", () => {
 
   it("waits for the previous batch's grades before sending the next", async () => {
     const request = { id: "request", createdAt: new Date(now - 60_000), task: { prompt: "" } };
-    const waiting = fixture({ found: [person("a")], requests: [request], researchTask: true });
+    const waiting = fixture({ found: [person("a")], requests: [request], researched: ["request"] });
     await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
     expect(waiting.runCreate).not.toHaveBeenCalled();
     const saved = fixture({
       found: [person("a")],
       requests: [request],
-      researchTask: true,
+      researched: ["request"],
       gradesSaved: true,
     });
     await startRecruitingGrading(saved.deps, { threadId: "thread" }, now);
     expect(saved.runCreate).toHaveBeenCalledOnce();
+  });
+
+  it("holds the next batch for a while after a request that never started research", async () => {
+    const request = { id: "request", createdAt: new Date(now - 60_000), task: { prompt: "" } };
+    const recent = fixture({ found: [person("a")], requests: [request] });
+    await startRecruitingGrading(recent.deps, { threadId: "thread" }, now);
+    expect(recent.runCreate).not.toHaveBeenCalled();
+    const old = { ...request, createdAt: new Date(now - 31 * 60_000) };
+    const later = fixture({ found: [person("a")], requests: [old] });
+    await startRecruitingGrading(later.deps, { threadId: "thread" }, now);
+    expect(later.runCreate).toHaveBeenCalledOnce();
   });
 
   it("does nothing when everyone is graded or no teammate has the research service", async () => {
@@ -177,6 +200,10 @@ describe("gradingToolRefusal", () => {
       ["recruiting_research", { operation: "save_results" }],
       ["recruiting_candidates", { operation: "list" }],
       ["skill_read", {}],
+      ["connectors_search_tools", { query: "research" }],
+      ["connectors_load_tool", { id: "server-1:research" }],
+      ["connectors_execute_tool", { id: "server-1:research", arguments: { prompt: "grade" } }],
+      ["connectors_execute_tool", { id: "mcp__research__get_rows", arguments: { task_id: "t" } }],
     ] as const)
       expect(gradingToolRefusal(name, args)).toBeUndefined();
     for (const [name, args] of [
@@ -190,6 +217,10 @@ describe("gradingToolRefusal", () => {
       ["mcp__research__reply", { task_id: "t" }],
       ["mcp__research__research", { task_id: "t" }],
       ["mcp__mail__send_email", {}],
+      ["connectors_execute_tool", { id: "server-1:reply", arguments: { task_id: "t" } }],
+      ["connectors_execute_tool", { id: "server-1:research", arguments: { task_id: "t" } }],
+      ["connectors_execute_tool", { id: "server-2:send_email", arguments: {} }],
+      ["connectors_execute_tool", { id: "mcp__mail__send_email", arguments: {} }],
     ] as const)
       expect(gradingToolRefusal(name, args)).toMatch(/only grades/);
   });

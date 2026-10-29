@@ -16,6 +16,8 @@ const MAX_ATTEMPTS = 120;
 export const GRADE_BATCH = 50;
 /** A grading request whose grades never came back stops holding up the next batch after this. */
 const IN_FLIGHT_MS = 2 * 60 * 60_000;
+/** After a grading request that never started research, the next batch waits this long. */
+const NOT_STARTED_HOLD_MS = 30 * 60_000;
 const RESEARCH_MCP = "https://api.autumn.ai/mcp";
 const RESEARCH_WAKE_PREFIX = "recruiting-research-wake:";
 const BUSY_STATUSES = ["queued", "leased", "running"];
@@ -41,7 +43,34 @@ const GRADING_BUILTIN_TOOLS = new Set([
   "task_catalog",
 ]);
 const GRADING_RESEARCH_OPERATIONS = new Set(["status", "rows", "save_results"]);
-const GRADING_PROVIDER_TOOL = /^mcp__.+__(research|get_task|get_rows|credits)$/;
+const GRADING_PROVIDER_TOOLS = new Set(["research", "get_task", "get_rows", "credits"]);
+/** The connector catalog that lists and runs tools beyond the directly loaded ones. */
+const CATALOG_READ_TOOLS = new Set(["connectors_search_tools", "connectors_load_tool"]);
+const CATALOG_EXECUTE_TOOL = "connectors_execute_tool";
+
+/** A research provider call a grading turn may make: start research, read a task, or credits. */
+function gradingProviderCall(tool: string, args: Record<string, unknown>): boolean {
+  if (!GRADING_PROVIDER_TOOLS.has(tool)) return false;
+  return args.task_id === undefined || tool === "get_task" || tool === "get_rows";
+}
+
+/** The provider tool name in a direct name (`mcp__server__tool`) or a catalog id (`server:tool`). */
+function providerToolName(id: string): string | undefined {
+  const direct = /^mcp__.+__([^_].*)$/.exec(id)?.[1];
+  if (direct) return direct;
+  const separator = id.lastIndexOf(":");
+  if (separator < 0) return undefined;
+  try {
+    return decodeURIComponent(id.slice(separator + 1));
+  } catch {
+    return undefined;
+  }
+}
+
+const record = (value: unknown): Record<string, unknown> =>
+  value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 
 /**
  * Why a grading turn may not call this tool, or undefined when it may. A grading turn only grades
@@ -52,11 +81,15 @@ export function gradingToolRefusal(
   name: string,
   args: Record<string, unknown>,
 ): string | undefined {
+  const direct = /^mcp__.+__([^_].*)$/.exec(name)?.[1];
+  const executed =
+    name === CATALOG_EXECUTE_TOOL ? providerToolName(String(args.id ?? "")) : undefined;
   const allowed =
     GRADING_BUILTIN_TOOLS.has(name) ||
+    CATALOG_READ_TOOLS.has(name) ||
     (name === "recruiting_research" && GRADING_RESEARCH_OPERATIONS.has(String(args.operation))) ||
-    (GRADING_PROVIDER_TOOL.test(name) && args.task_id === undefined) ||
-    (GRADING_PROVIDER_TOOL.test(name) && /__(get_task|get_rows)$/.test(name));
+    (direct !== undefined && gradingProviderCall(direct, args)) ||
+    (executed !== undefined && gradingProviderCall(executed, record(args.arguments)));
   return allowed
     ? undefined
     : "Not run: this turn only grades people already in Results. Start the grading research, or read and save its rows with recruiting_research save_results; nothing else.";
@@ -142,25 +175,36 @@ export async function startRecruitingGrading(
     orderBy: { createdAt: "desc" },
     select: { id: true, createdAt: true, task: { select: { prompt: true } } },
   });
-  // One batch at a time: the wake that saves a batch's grades schedules the next one.
+  const research = requests.length
+    ? await deps.prisma.recruitingResearchTask.findMany({
+        where: { createdByRunId: { in: requests.map((request) => request.id) } },
+        select: { id: true, createdByRunId: true },
+      })
+    : [];
+  const researchByRun = new Map(research.map((task) => [task.createdByRunId, task.id]));
+  // One batch at a time: the wake that saves a batch's grades schedules the next one. A request
+  // that never started research holds the next batch for half an hour, so a failing grading turn
+  // can't repeat every few minutes.
   const latest = requests[0];
-  if (latest && now - latest.createdAt.getTime() < IN_FLIGHT_MS) {
-    const research = await deps.prisma.recruitingResearchTask.findFirst({
-      where: { createdByRunId: latest.id },
+  const latestAge = latest ? now - latest.createdAt.getTime() : Number.POSITIVE_INFINITY;
+  const latestResearch = latest && researchByRun.get(latest.id);
+  if (!latestResearch && latestAge < NOT_STARTED_HOLD_MS) return;
+  if (latestResearch && latestAge < IN_FLIGHT_MS) {
+    const saved = await deps.prisma.run.findFirst({
+      where: {
+        threadId: thread.id,
+        clientNonce: { startsWith: `${RESEARCH_WAKE_PREFIX}${latestResearch}:` },
+      },
       select: { id: true },
     });
-    const saved =
-      research &&
-      (await deps.prisma.run.findFirst({
-        where: {
-          threadId: thread.id,
-          clientNonce: { startsWith: `${RESEARCH_WAKE_PREFIX}${research.id}:` },
-        },
-        select: { id: true },
-      }));
-    if (research && !saved) return;
+    if (!saved) return;
   }
-  const sent = sentUrls(requests.map((request) => request.task?.prompt ?? ""));
+  // People whose request never reached the research service are sent again.
+  const sent = sentUrls(
+    requests
+      .filter((request) => researchByRun.has(request.id))
+      .map((request) => request.task?.prompt ?? ""),
+  );
   const [graded, found] = await Promise.all([
     // Rows the research service returned carry its grade, whatever it concluded.
     deps.prisma.recruitingCandidateOccurrence.findMany({
