@@ -285,6 +285,10 @@ export function CandidateDirectory({
     cards: { offset: 0, measurements: [] as VirtualItem[] },
   });
   const showEducation = profiles.some((profile) => profile.school);
+  // Fit is the research provider's own assessment; people from the quick search have none yet.
+  const showFit = profiles.some(
+    (profile) => profile.sections.fit || profile.sections.requirements.length,
+  );
   const sourceLink = (profile: DirectoryProfile, name: string) =>
     profile.profileUrl ? (
       <a
@@ -366,9 +370,11 @@ export function CandidateDirectory({
                 <th scope="col" className="w-[10%] px-3 py-2 font-medium">
                   <Trans>Status</Trans>
                 </th>
-                <th scope="col" className="w-[13%] px-3 py-2 font-medium">
-                  <Trans>Fit</Trans>
-                </th>
+                {showFit ? (
+                  <th scope="col" className="w-[13%] px-3 py-2 font-medium">
+                    <Trans>Fit</Trans>
+                  </th>
+                ) : null}
                 {renderActions ? (
                   <th scope="col" className="w-[16%] px-3 py-2 font-medium">
                     <Trans>Actions</Trans>
@@ -410,9 +416,11 @@ export function CandidateDirectory({
                 <td className="px-3 py-2">
                   <Status row={row} />
                 </td>
-                <td className="px-3 py-2">
-                  <Fit sections={profile.sections} compact />
-                </td>
+                {showFit ? (
+                  <td className="px-3 py-2">
+                    <Fit sections={profile.sections} compact />
+                  </td>
+                ) : null}
                 {renderActions ? (
                   <td className="px-3 py-2">
                     <div className="flex flex-wrap items-center gap-2">
@@ -479,9 +487,11 @@ export function CandidateDirectory({
                     <Education profile={profile} />
                   </div>
                 ) : null}
-                <div className="mt-4 flex-1 border-t border-border pt-3">
-                  <Fit sections={profile.sections} />
-                </div>
+                {showFit ? (
+                  <div className="mt-4 flex-1 border-t border-border pt-3">
+                    <Fit sections={profile.sections} />
+                  </div>
+                ) : null}
                 <div className="mt-3">
                   <Status row={row} />
                 </div>
