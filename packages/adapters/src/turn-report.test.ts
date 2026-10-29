@@ -163,6 +163,12 @@ describe("declinedSentence", () => {
   it.each(reports)("leaves %s alone", (reply) => {
     expect(declinedSentence(reply)).toBeUndefined();
   });
+  it("reads only the reply's own words before a drafted email", () => {
+    const draft = (intro: string) =>
+      `${intro}\n\n**Email 1 — Day 0**\n**Subject:** TikTok LIVE role\n\nHi Adrian,\n\nWould you be open to a brief conversation?\n\nSubject: Following up\n\nCan't make it this week?`;
+    expect(declinedSentence(draft("The three-email sequence is prepared."))).toBeUndefined();
+    expect(declinedSentence(draft("I can't find the saved draft."))?.kind).toBe("decline");
+  });
 
   it("returns the declining sentence itself", () => {
     expect(
