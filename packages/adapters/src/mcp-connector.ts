@@ -553,11 +553,13 @@ export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   ],
   scheduling: [
     "get_event_types",
+    "get_event_type",
     "get_availability",
     "create_booking",
     "reschedule_booking",
     "cancel_booking",
     "get_booking",
+    "get_bookings",
   ],
 };
 const coreName = (tool: ConnectorTool) =>
