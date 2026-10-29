@@ -56,3 +56,25 @@ export const RunsListOutputSchema = z.object({
   runs: z.array(RunActivityRowSchema),
 });
 export type RunsListOutput = z.infer<typeof RunsListOutputSchema>;
+
+/** Deployment-owner diagnostics assembled from existing run audit events and usage. */
+export const RunTraceSchema = z.object({
+  runId: Id,
+  status: RunStatus,
+  startedAt: IsoDate,
+  completedAt: IsoDate.nullable(),
+  rows: z.array(
+    z.object({
+      id: Id,
+      kind: z.enum(["model", "tool", "handoff", "retry"]),
+      label: z.string(),
+      startedAt: IsoDate,
+      /** Null means only the occurrence/completion timestamp was recorded. */
+      durationMs: z.number().nonnegative().nullable(),
+      status: z.enum(["running", "completed", "failed", "paused", "unknown"]),
+      tokens: z.number().int().nonnegative().nullable(),
+      costUsd: z.number().nonnegative().nullable(),
+    }),
+  ),
+});
+export type RunTrace = z.infer<typeof RunTraceSchema>;

@@ -176,7 +176,12 @@ import {
   RecruitingSchedulingPlanSchema,
   RecruitingSchedulingSlotSchema,
 } from "./recruiting-scheduling.js";
-import { RoutineHistorySchema, RoutineRunCursorSchema, RunsListOutputSchema } from "./runs.js";
+import {
+  RoutineHistorySchema,
+  RoutineRunCursorSchema,
+  RunsListOutputSchema,
+  RunTraceSchema,
+} from "./runs.js";
 import { SearchQueryOutputSchema } from "./search.js";
 
 const listPageFields = { offset: z.number().int().min(0).max(1000000).optional() };
@@ -1340,6 +1345,9 @@ export const appContract = {
     ),
   },
   runs: {
+    trace: oc
+      .input(z.object({ runId: Id, includeDiagnostics: z.boolean() }))
+      .output(RunTraceSchema),
     list: oc
       .input(z.object({ filter: z.enum(["active", "recent"]) }).safeExtend(listPageFields))
       .output(RunsListOutputSchema),
