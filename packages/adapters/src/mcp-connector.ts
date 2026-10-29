@@ -1253,6 +1253,14 @@ export class McpConnector implements ConnectorProvider {
           );
       }
       if (result.isError && providerRefusesConnection(mcpErrorText(result))) {
+        getLogger().warn("mcp.call.refused", {
+          server: assignment.server.slug,
+          tool: call.route.toolName,
+          error: sanitizeConnectorError(
+            mcpErrorText(result),
+            material ? oauthMaterialSecrets(material) : [],
+          ).slice(0, 300),
+        });
         this.refuseConnection(assignment.server, context, call.route.toolName);
         yield {
           type: "error",
@@ -1269,6 +1277,11 @@ export class McpConnector implements ConnectorProvider {
       if (sessionKey && !(error instanceof PeopleSearchRateLimitError))
         await this.evict(sessionKey);
       let message = sanitizeConnectorError(error, secrets);
+      getLogger().warn("mcp.call.failed", {
+        server: calledServer?.slug ?? null,
+        tool: call.route.toolName,
+        error: message.slice(0, 300),
+      });
       if (calledServer && providerRefusesConnection(message)) {
         this.refuseConnection(calledServer, context, call.route.toolName);
         message = await this.refusedMessage(call.route.toolName, calledServer.id, context);
