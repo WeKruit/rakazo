@@ -10,9 +10,13 @@ export async function recruitingChatFixture(
     running?: boolean;
     failed?: boolean;
     appearance?: "light" | "dark";
+    developer?: boolean;
+    workState?: "thinking" | "retrying" | "compacting";
   } = {},
 ) {
-  const createdAt = "2026-10-23T10:00:00.000Z";
+  const createdAt = options.running
+    ? new Date(Date.now() - 42_000).toISOString()
+    : "2026-10-23T10:00:00.000Z";
   const bot = {
     id: "bot-fixture",
     spaceId: "space-fixture",
@@ -90,6 +94,49 @@ export async function recruitingChatFixture(
       ],
     },
   ];
+  if (options.workState) {
+    messages.splice(
+      messages.findIndex((message) => message.id === "calibration-question"),
+      1,
+    );
+    messages.push(
+      {
+        ...message("subagent:specialist", "bot", ""),
+        blocks: [
+          {
+            kind: "subagent",
+            agentId: "internal-specialist",
+            name: "Internal worker",
+            task: "private task",
+            status: "running",
+          },
+        ],
+      },
+      {
+        ...message("progress:run-fixture", "bot", ""),
+        runId: "run-fixture",
+        blocks: [
+          { kind: "steps", steps: [{ label: "Recruiting role", count: 1 }] },
+          {
+            kind: "progress",
+            text: "",
+            activity: true,
+            phase: options.workState,
+            summary: options.workState === "thinking" ? "Reviewing the search" : undefined,
+          },
+        ],
+      },
+    );
+  }
+  if (options.developer)
+    messages.push({
+      ...message("tool-fixture", "bot", ""),
+      runId: "run-fixture",
+      blocks: [
+        { kind: "steps", steps: [{ label: "Read file", count: 1 }], durationMs: 1200 },
+        { kind: "text", text: "The saved criteria are ready for your review." },
+      ],
+    });
   const thread = {
     threadId: bot.threadId,
     groupId: group.id,
@@ -138,7 +185,7 @@ export async function recruitingChatFixture(
   const me = {
     userId: "user-fixture",
     spaceId: bot.spaceId,
-    isDeploymentOwner: false,
+    isDeploymentOwner: options.developer ?? false,
     ticketBoardEnabled: false,
     billingEnabled: false,
   };
@@ -175,10 +222,14 @@ export async function recruitingChatFixture(
   });
   let feedbackState = options.feedback ?? "empty";
 
-  await page.addInitScript((appearance) => {
-    localStorage.setItem("rakazo.showToolActivity", "off");
-    localStorage.setItem("rakazo.uiAppearance", appearance);
-  }, options.appearance ?? "light");
+  await page.addInitScript(
+    ({ appearance, developer }) => {
+      if (localStorage.getItem("rakazo.showToolActivity") === null)
+        localStorage.setItem("rakazo.showToolActivity", developer ? "on" : "off");
+      localStorage.setItem("rakazo.uiAppearance", appearance);
+    },
+    { appearance: options.appearance ?? "light", developer: options.developer ?? false },
+  );
   await page.route("**/*", async (route) => {
     const url = new URL(route.request().url());
     if (url.hostname !== "127.0.0.1" && url.hostname !== "localhost") return route.abort();
@@ -203,6 +254,8 @@ export async function recruitingChatFixture(
           },
         },
       });
+    if (url.pathname === "/api/auth/account-security")
+      return route.fulfill({ status: 404, body: "" });
     if (url.pathname === "/api/auth/capabilities")
       return route.fulfill({ json: { emailPassword: true, billing: false } });
     if (!url.pathname.startsWith("/rpc/")) {
@@ -215,6 +268,10 @@ export async function recruitingChatFixture(
     calls.push({ procedure, input });
     const reply = (json: unknown) => route.fulfill({ json: { json } });
     switch (procedure) {
+      case "approvalRules/list":
+        return reply([]);
+      case "autoReview/get":
+        return reply({ enabled: false });
       case "bootstrap":
         return reply(bootstrap);
       case "me":
@@ -234,6 +291,10 @@ export async function recruitingChatFixture(
         await sendReady;
         return reply({ runId: "sent-fixture" });
       case "threads/stop":
+        return reply({ ok: true });
+      case "recruiting/roleCandidates":
+        return reply({ candidates: [], cursor: null, total: 0, hasMore: false });
+      case "recruiting/readView":
         return reply({ ok: true });
       case "recruiting/getWorkspace":
         return reply(workspace);

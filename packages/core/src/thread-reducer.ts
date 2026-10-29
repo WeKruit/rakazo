@@ -2,6 +2,7 @@ import type { MessageBlock, ReplyPreview } from "@rakazo/contracts";
 import { RUN_TRIGGERS } from "@rakazo/contracts";
 import {
   appendToolCallSegment,
+  completeToolStep,
   isRunTerminalEvent,
   progressMessageId,
   reduceLiveMessageBlocks,
@@ -52,7 +53,7 @@ export type LiveThread = {
   members?: ReadonlyArray<{ botId: string; status?: string }>;
   computer?: { busyBotName: string | null } | null;
   /** Tool calls by execution id, so a start and its completion close as a pair in any order. */
-  toolExecutions?: { open: string[]; done: string[] };
+  toolExecutions?: { open: string[]; done: Record<string, Record<string, unknown>> };
   /** User messages a working reply has not read yet; they stay editable until it does. */
   queuedMessageIds?: readonly string[];
 };
@@ -232,13 +233,16 @@ function closeAllToolCalls(message: LiveThreadMessage): LiveThreadMessage {
 /** Ends one call; the activity marker stays while another call is still open. */
 function closeToolExecution(
   message: LiveThreadMessage,
-  executions: { open: string[]; done: string[] },
+  executions: { open: string[]; done: Record<string, Record<string, unknown>> },
   executionId: string,
   name: string,
-): { message: LiveThreadMessage; toolExecutions: { open: string[]; done: string[] } } {
+): {
+  message: LiveThreadMessage;
+  toolExecutions: { open: string[]; done: Record<string, Record<string, unknown>> };
+} {
   const toolExecutions = {
     open: executions.open.filter((id) => id !== executionId),
-    done: executions.done.filter((id) => id !== executionId),
+    done: Object.fromEntries(Object.entries(executions.done).filter(([id]) => id !== executionId)),
   };
   if (!toolExecutions.open.length) return { message: closeAllToolCalls(message), toolExecutions };
   let blocks: MessageBlock[] = [];
@@ -442,7 +446,32 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     return {
       ...prev,
       cursor,
-      messages: prev.messages.filter((message) => message.id !== progressMessageId(event)),
+      messages: prev.messages.flatMap((message) => {
+        if (message.id !== progressMessageId(event)) return [message];
+        const marker = message.blocks.at(-1);
+        let blocks = closeAllToolCalls(message).blocks.filter((block) => block.kind === "steps");
+        if (marker?.kind === "progress" && marker.activity && !marker.phase) {
+          const names = marker.pendingToolNames?.length
+            ? marker.pendingToolNames
+            : marker.text === "" && blocks.at(-1)?.kind === "steps"
+              ? [blocks.at(-1)!.steps.at(-1)?.label ?? ""]
+              : [];
+          for (const name of names)
+            blocks = completeToolStep(blocks, { name, outcome: "paused" }).filter(
+              (block) => block.kind === "steps",
+            );
+        }
+        return blocks.length
+          ? [
+              {
+                ...message,
+                id: `work:${event.runId ?? event.id}`,
+                blocks,
+                createdAt: event.createdAt ?? message.createdAt,
+              },
+            ]
+          : [];
+      }),
       members: updateMemberStatus(prev.members, event.botId, nextMemberRun?.status ?? "idle"),
       // Execution ids only pair calls within live runs.
       toolExecutions: activeRuns?.length ? prev.toolExecutions : undefined,
@@ -473,11 +502,17 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     if (event.type !== "agent.tool.called" || !executionId)
       return { ...prev, cursor, messages: [...remaining, message] };
     const open = [...(prev.toolExecutions?.open ?? []), executionId];
-    const done = prev.toolExecutions?.done ?? [];
+    const done = prev.toolExecutions?.done ?? {};
     // Its completion was stored first, so the call is already over.
-    const closed = done.includes(executionId)
+    const completion = Object.hasOwn(done, executionId) ? done[executionId] : undefined;
+    const closed = completion
       ? closeToolExecution(message, { open, done }, executionId, name)
       : { message, toolExecutions: { open, done } };
+    if (completion)
+      closed.message = {
+        ...closed.message,
+        blocks: completeToolStep(closed.message.blocks, completion),
+      };
     return {
       ...prev,
       cursor,
@@ -490,13 +525,26 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
     const executionId = toolExecutionId(payload);
     if (executionId && !prev.toolExecutions?.open.includes(executionId)) {
       const open = prev.toolExecutions?.open ?? [];
-      const done = [...(prev.toolExecutions?.done ?? []), executionId];
+      const found = (payload.lookup as { found?: unknown } | undefined)?.found;
+      const done = {
+        ...prev.toolExecutions?.done,
+        [executionId]: {
+          name: typeof payload.name === "string" ? payload.name : "",
+          outcome: ["succeeded", "error", "paused"].includes(String(payload.outcome))
+            ? payload.outcome
+            : undefined,
+          lookup: Number.isSafeInteger(found) && Number(found) >= 0 ? { found } : undefined,
+        },
+      };
       return { ...prev, cursor, toolExecutions: { open, done } };
     }
     let toolExecutions = prev.toolExecutions;
     const messages = prev.messages.map((message) => {
       if (message.id !== liveId) return message;
-      if (!executionId || !prev.toolExecutions) return closeAllToolCalls(message);
+      if (!executionId || !prev.toolExecutions) {
+        const closed = closeAllToolCalls(message);
+        return { ...closed, blocks: completeToolStep(closed.blocks, payload) };
+      }
       const closed = closeToolExecution(
         message,
         prev.toolExecutions,
@@ -504,7 +552,7 @@ function reduce(prev: LiveThread, event: LiveThreadEvent): LiveThread {
         String(payload.name ?? ""),
       );
       toolExecutions = closed.toolExecutions;
-      return closed.message;
+      return { ...closed.message, blocks: completeToolStep(closed.message.blocks, payload) };
     });
     return { ...prev, cursor, messages, toolExecutions };
   }

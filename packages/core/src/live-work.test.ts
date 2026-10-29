@@ -7,8 +7,11 @@ import {
   formatWorkDuration,
   observeWorkSession,
   runWorkSteps,
+  specialistWorkLabel,
   trackWork,
   workActivityForTool,
+  workActivityLabel,
+  workProgressLabel,
   workSessionElapsedMs,
   workSessionSteps,
 } from "./live-work.js";
@@ -265,4 +268,216 @@ describe("formatting", () => {
     expect(formatWorkClock(ms)).toBe(clock);
     expect(formatWorkDuration(ms)).toBe(duration);
   });
+});
+
+describe("specialistWorkLabel", () => {
+  it("uses closed business status words", () => {
+    expect(specialistWorkLabel("running")).toBe("A specialist is working…");
+    expect(specialistWorkLabel("completed")).toBe("Specialist finished");
+    expect(specialistWorkLabel("failed")).toBe("Specialist needs attention");
+  });
+});
+
+describe("work progress", () => {
+  it("keeps the latest runtime phase and clears it on the next update", () => {
+    const thread = {
+      runs: [{ id: "run", status: "running", startedAt: at(0) }],
+      messages: [
+        {
+          id: "progress:run",
+          runId: "run",
+          blocks: [
+            {
+              kind: "progress",
+              activity: true,
+              text: "",
+              phase: "thinking",
+              summary: "Reviewing the search",
+            } as MessageBlock,
+          ],
+        },
+      ],
+    };
+    const session = observeWorkSession(null, thread, at(1));
+    expect(session?.progress).toEqual({ phase: "thinking", summary: "Reviewing the search" });
+    expect(workProgressLabel(session?.progress)).toBe("Reviewing the search");
+    thread.messages[0]!.blocks = [{ kind: "progress", text: "", activity: true }];
+    expect(observeWorkSession(session, thread, at(2))?.progress).toBeUndefined();
+  });
+  it("uses plain phase and activity labels", () => {
+    expect(workProgressLabel({ phase: "retrying" })).toBe("Trying again…");
+    expect(workProgressLabel({ phase: "compacting" })).toBe("Reviewing context…");
+    expect(workProgressLabel({ phase: "thinking" })).toBe("Thinking…");
+    expect(workActivityLabel("research")).toBe("Searching candidates");
+  });
+});
+
+describe("work step outcomes", () => {
+  it("preserves outcomes across live updates and turn completion without duplicating steps", () => {
+    const runs = [{ id: "r", status: "running", startedAt: at(0) }];
+    const message = (steps: MessageBlock[]) => ({
+      id: "progress:r",
+      runId: "r",
+      blocks: steps,
+      createdAt: at(2),
+    });
+    let session = observeWorkSession(
+      null,
+      {
+        runs,
+        messages: [message([{ kind: "steps", steps: [{ label: "Web search", count: 1 }] }])],
+      },
+      at(1),
+    );
+    session = observeWorkSession(
+      session,
+      {
+        runs,
+        messages: [
+          message([
+            { kind: "steps", steps: [{ label: "Web search", count: 1, status: "failed" }] },
+          ]),
+        ],
+      },
+      at(2),
+    );
+    expect(workSessionSteps(session)).toEqual([{ activity: "search", count: 1, status: "failed" }]);
+    session = observeWorkSession(session, { runs: [], messages: [] }, at(3));
+    expect(workSessionSteps(session)).toEqual([{ activity: "search", count: 1, status: "failed" }]);
+  });
+});
+
+it("does not consume a completed step as current during a runtime phase", () => {
+  expect(
+    runWorkSteps({
+      blocks: [
+        { kind: "steps", steps: [{ label: "Web search", count: 1, status: "failed" }] },
+        { kind: "progress", text: "", activity: true, phase: "retrying" },
+      ],
+    }),
+  ).toEqual({ done: [{ activity: "search", status: "failed" }], current: null });
+});
+
+it("keeps the audited outcome when completion and terminal arrive before a render", () => {
+  let thread: LiveThread = { threadId: "t", cursor: 0, messages: [], run: null, olderCursor: null };
+  const ev = (seq: number, type: string, payload = {}): LiveThreadEvent => ({
+    id: `e${seq}`,
+    seq,
+    type,
+    runId: "r",
+    threadId: "t",
+    createdAt: at(seq),
+    payload,
+  });
+  thread = reduceThreadEvent(thread, ev(1, "run.started"));
+  thread = reduceThreadEvent(
+    thread,
+    ev(2, "agent.tool.called", { name: "web_search", executionId: "x" }),
+  );
+  let session = observeWorkSession(
+    null,
+    { runs: thread.activeRuns ?? [], messages: thread.messages },
+    at(2),
+  );
+  thread = reduceThreadEvent(
+    thread,
+    ev(3, "agent.tool.completed", { name: "web_search", executionId: "x", outcome: "error" }),
+  );
+  thread = reduceThreadEvent(thread, ev(4, "run.failed", { error: "private failure" }));
+  expect(thread.messages.some((message) => message.id.startsWith("progress:"))).toBe(false);
+  session = observeWorkSession(
+    session,
+    { runs: thread.activeRuns ?? [], messages: thread.messages },
+    at(4),
+  );
+  expect(workSessionSteps(session)).toEqual([{ activity: "search", count: 1, status: "failed" }]);
+});
+
+it("uses durable final outcomes once without duplicating the live call", () => {
+  let thread: LiveThread = { threadId: "t", cursor: 0, messages: [], run: null, olderCursor: null };
+  const ev = (seq: number, type: string, payload = {}): LiveThreadEvent => ({
+    id: `e${seq}`,
+    seq,
+    type,
+    runId: "r",
+    threadId: "t",
+    createdAt: at(seq),
+    payload,
+  });
+  thread = reduceThreadEvent(thread, ev(1, "run.started"));
+  thread = reduceThreadEvent(
+    thread,
+    ev(2, "agent.tool.called", { name: "connectors_execute_tool", executionId: "x" }),
+  );
+  let session = observeWorkSession(
+    null,
+    { runs: thread.activeRuns ?? [], messages: thread.messages },
+    at(2),
+  );
+  thread = reduceThreadEvent(
+    thread,
+    ev(3, "agent.tool.completed", {
+      name: "connectors_execute_tool",
+      executionId: "x",
+      outcome: "succeeded",
+      lookup: { found: 3 },
+    }),
+  );
+  thread = reduceThreadEvent(
+    thread,
+    ev(4, "thread.message.created", {
+      messageId: "reply",
+      role: "bot",
+      blocks: [
+        {
+          kind: "steps",
+          steps: [{ label: "Connectors execute tool", count: 1, peopleWithEmail: 3 }],
+        },
+        { kind: "text", text: "Found contact details." },
+      ],
+    }),
+  );
+  thread = reduceThreadEvent(thread, ev(5, "run.completed"));
+  session = observeWorkSession(
+    session,
+    { runs: thread.activeRuns ?? [], messages: thread.messages },
+    at(5),
+  );
+  expect(workSessionSteps(session)).toEqual([
+    { activity: "connected_action", count: 1, peopleWithEmail: 3 },
+  ]);
+  expect(thread.messages).toHaveLength(1);
+});
+
+it("marks an interrupted call paused without changing completed steps during thinking", () => {
+  const ev = (seq: number, type: string, payload = {}): LiveThreadEvent => ({
+    id: `e${seq}`,
+    seq,
+    type,
+    runId: "r",
+    threadId: "t",
+    createdAt: at(seq),
+    payload,
+  });
+  const start: LiveThread = {
+    threadId: "t",
+    cursor: 0,
+    messages: [],
+    run: null,
+    olderCursor: null,
+  };
+  const called = [
+    ev(1, "run.started"),
+    ev(2, "agent.tool.called", { name: "web_search", executionId: "x" }),
+  ].reduce(reduceThreadEvent, start);
+  const interrupted = reduceThreadEvent(called, ev(3, "run.failed", { error: "private reason" }));
+  expect(runWorkSteps(interrupted.messages[0]).done).toEqual([
+    { activity: "search", status: "paused" },
+  ]);
+  const thinking = [
+    ev(3, "agent.tool.completed", { name: "web_search", executionId: "x", outcome: "succeeded" }),
+    ev(4, "thread.progress", { text: "", activity: true, phase: "thinking" }),
+    ev(5, "run.failed", { error: "private reason" }),
+  ].reduce(reduceThreadEvent, called);
+  expect(runWorkSteps(thinking.messages[0]).done).toEqual(["search"]);
 });

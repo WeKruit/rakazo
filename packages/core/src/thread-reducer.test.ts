@@ -180,6 +180,45 @@ describe("tool step closure by execution", () => {
     live(thread).some((block) => block.kind === "progress" && block.activity === true);
   const started = reduceThreadEvent(base, event(11, "run.started", { trigger: "user" }));
 
+  it("keeps failed repeated calls distinct and carries audited contact counts", () => {
+    const end = fold(started, [
+      event(12, "agent.tool.called", { name: "connectors_execute_tool", executionId: "a" }),
+      event(13, "agent.tool.called", { name: "connectors_execute_tool", executionId: "b" }),
+      event(14, "agent.tool.completed", {
+        name: "connectors_execute_tool",
+        executionId: "a",
+        outcome: "error",
+        error: "private detail",
+      }),
+      event(15, "agent.tool.completed", {
+        name: "connectors_execute_tool",
+        executionId: "b",
+        outcome: "succeeded",
+        lookup: { found: 3 },
+      }),
+    ]);
+    expect(live(end)).toEqual([
+      {
+        kind: "steps",
+        steps: [
+          { label: "Connectors execute tool", count: 1, status: "failed" },
+          { label: "Connectors execute tool", count: 1, peopleWithEmail: 3 },
+        ],
+      },
+    ]);
+    expect(JSON.stringify(live(end))).not.toContain("private detail");
+  });
+
+  it("keeps outcome metadata when completion arrives before its call", () => {
+    const end = fold(started, [
+      event(12, "agent.tool.completed", { name: "web_search", executionId: "a", outcome: "error" }),
+      event(13, "agent.tool.called", { name: "web_search", executionId: "a" }),
+    ]);
+    expect(live(end)).toEqual([
+      { kind: "steps", steps: [{ label: "Web search", count: 1, status: "failed" }] },
+    ]);
+  });
+
   it("keeps a step closed when its completion was stored before its start", () => {
     const end = fold(started, [
       event(12, "agent.tool.completed", {
@@ -318,4 +357,25 @@ describe("expired wait", () => {
     expect(restarted.run).toMatchObject({ id: "run-2", status: "running" });
     expect(answerableAskMessageIds(restarted)).toEqual([]);
   });
+});
+
+it("preserves safe thinking phase and summary through the shared reducer", () => {
+  const next = reduceThreadEvent(
+    base,
+    event(11, "thread.progress", {
+      text: "",
+      activity: true,
+      phase: "thinking",
+      summary: "Reviewing the role",
+    }),
+  );
+  expect(next.messages[0]?.blocks).toEqual([
+    {
+      kind: "progress",
+      text: "",
+      activity: true,
+      phase: "thinking",
+      summary: "Reviewing the role",
+    },
+  ]);
 });

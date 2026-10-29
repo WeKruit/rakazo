@@ -1,4 +1,4 @@
-import { Plural } from "@lingui/react/macro";
+import { Plural, useLingui } from "@lingui/react/macro";
 import type { ThreadMessage } from "@rakazo/contracts";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
@@ -21,6 +21,7 @@ export function ToolSteps({
   /** Show only the last `limit` steps, with a count of the earlier ones above them. */
   limit?: number;
 }) {
+  const { t } = useLingui();
   const hidden = limit !== undefined && steps.length > limit ? steps.length - limit : 0;
   const shown = hidden > 0 ? steps.slice(hidden) : steps;
   return (
@@ -32,14 +33,15 @@ export function ToolSteps({
       ) : null}
       {shown.map((step, offset) => {
         const index = hidden + offset;
-        const isCurrent = index === currentIndex;
+        const isCurrent = !step.status && index === currentIndex;
         return (
           <div key={index} className="flex min-w-0 items-center gap-2 leading-5">
             <span
-              className={`text-[12px] ${isCurrent ? "text-warning" : "text-success"}`}
+              className={`text-[12px] ${isCurrent || step.status ? "text-warning" : "text-success"}`}
+              aria-hidden
               style={{ animation: isCurrent ? "rkPulse 1.2s ease-in-out infinite" : undefined }}
             >
-              {isCurrent ? "◷" : "✓"}
+              {step.status ? "!" : isCurrent ? "◷" : "✓"}
             </span>
             <span
               className={`min-w-0 flex-1 truncate text-[13px] ${
@@ -47,8 +49,24 @@ export function ToolSteps({
               }`}
               title={step.label}
             >
+              {step.status ? (
+                <span className="sr-only">
+                  {step.status === "failed" ? t`Step failed` : t`Paused`}:{" "}
+                </span>
+              ) : null}
               {step.label}
               {step.count > 1 ? ` ×${step.count}` : ""}
+              {step.peopleWithEmail !== undefined ? (
+                <>
+                  {" "}
+                  ·{" "}
+                  <Plural
+                    value={step.peopleWithEmail}
+                    one="# person with email"
+                    other="# people with email"
+                  />
+                </>
+              ) : null}
             </span>
           </div>
         );

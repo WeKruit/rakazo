@@ -74,7 +74,7 @@ describe("tool card render decisions", () => {
     expect(messageHasVisibleBlocks([approval], false)).toBe(true);
   });
 
-  it("hides native delegation chrome while preserving mixed business results and exact consent", () => {
+  it("keeps specialist state while hiding delegation payloads and preserving exact consent", () => {
     const approval: MessageBlock = {
       kind: "ask",
       text: "Send this exact draft?",
@@ -99,6 +99,7 @@ describe("tool card render decisions", () => {
       },
     ];
     expect(renderableMessageBlocks([...internal, textBlock, approval], false)).toEqual([
+      internal[2],
       textBlock,
       approval,
     ]);
@@ -107,7 +108,7 @@ describe("tool card render decisions", () => {
       textBlock,
       approval,
     ]);
-    expect(messageHasVisibleBlocks(internal, false)).toBe(false);
+    expect(messageHasVisibleBlocks(internal, false)).toBe(true);
   });
 
   it("never surfaces a progress block marked as activity", () => {

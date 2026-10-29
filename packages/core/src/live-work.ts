@@ -1,4 +1,5 @@
 import type { MessageBlock } from "@rakazo/contracts";
+import { hideVendorNames } from "./vendor-names.js";
 
 /**
  * What an agent is doing, in categories every client can word for people. Derived only
@@ -117,23 +118,36 @@ type WorkRun = {
 
 /** One run's live steps: finished calls in order, and the call still in flight. */
 export function runWorkSteps(message: Pick<WorkMessage, "blocks"> | undefined): {
-  done: WorkActivity[];
+  done: WorkItem[];
   current: WorkActivity | null;
 } {
   if (!message) return { done: [], current: null };
   const done = message.blocks.flatMap((block) =>
     block.kind === "steps"
       ? block.steps.flatMap((step) =>
-          Array.from({ length: step.count }, () => workActivityForTool(step.label)),
+          Array.from({ length: step.count }, (): WorkItem => {
+            const activity = workActivityForTool(step.label);
+            return step.status || step.peopleWithEmail !== undefined
+              ? {
+                  activity,
+                  ...(step.status ? { status: step.status } : {}),
+                  ...(step.peopleWithEmail === undefined
+                    ? {}
+                    : { peopleWithEmail: step.peopleWithEmail }),
+                }
+              : activity;
+          }),
         )
       : [],
   );
   const marker = message.blocks.at(-1);
   if (marker?.kind !== "progress" || marker.activity !== true) return { done, current: null };
+  if (marker.phase) return { done, current: null };
   const pending = marker.pendingToolNames?.at(-1);
   if (pending) return { done, current: workActivityForTool(pending) };
   // The steps block already holds the call this empty marker follows.
-  if (marker.text === "" && done.length) return { done: done.slice(0, -1), current: done.at(-1)! };
+  if (marker.text === "" && done.length)
+    return { done: done.slice(0, -1), current: itemActivity(done.at(-1)!) };
   return { done, current: "working" };
 }
 
@@ -150,20 +164,32 @@ export type WorkSession = {
   endedAt: string | null;
   runIds: string[];
   /** Steps from live rows that later messages cleared. */
-  earlier: WorkActivity[];
+  earlier: WorkItem[];
   /** Latest live steps per run, to tell growth from a fresh row. */
-  live: Record<string, WorkActivity[]>;
+  live: Record<string, WorkItem[]>;
   current: WorkActivity | null;
+  progress?: { phase: "thinking" | "compacting" | "retrying"; summary?: string };
 };
 
-export type WorkStep = { activity: WorkActivity; count: number };
+export type WorkStep = {
+  activity: WorkActivity;
+  count: number;
+  status?: "failed" | "paused";
+  peopleWithEmail?: number;
+};
+export type WorkItem = WorkActivity | Omit<WorkStep, "count">;
+
+function itemActivity(item: WorkItem): WorkActivity {
+  return typeof item === "string" ? item : item.activity;
+}
 
 /** A later run joins the turn when it starts this soon after the previous one ended. */
 export const WORK_SESSION_CONTINUE_MS = 15_000;
 
-function isPrefix(prefix: readonly WorkActivity[], list: readonly WorkActivity[]) {
+function isPrefix(prefix: readonly WorkItem[], list: readonly WorkItem[]) {
   return (
-    prefix.length <= list.length && prefix.every((activity, index) => list[index] === activity)
+    prefix.length <= list.length &&
+    prefix.every((activity, index) => itemActivity(list[index]!) === itemActivity(activity))
   );
 }
 
@@ -202,13 +228,27 @@ export function observeWorkSession(
         .filter((message) => message.runId && runIds.has(message.runId))
         .map((message) => message.createdAt),
     );
-    const finished = Object.values(previous.live).flat();
+    const completedRows = previous.runIds.flatMap((runId) => {
+      const rows = thread.messages.filter((message) => message.runId === runId);
+      const row =
+        rows.find((message) => message.id === `progress:${runId}`) ??
+        rows.filter((message) => message.blocks.some((block) => block.kind === "steps")).at(-1);
+      return row ? [runWorkSteps(row).done] : [];
+    });
+    const finished = completedRows.length
+      ? completedRows.flat()
+      : Object.values(previous.live).flat();
     return {
       ...previous,
       endedAt: last && time(last) >= time(previous.startedAt) ? last : now,
-      earlier: [...previous.earlier, ...finished, ...(previous.current ? [previous.current] : [])],
+      earlier: [
+        ...previous.earlier,
+        ...finished,
+        ...(!completedRows.length && previous.current ? [previous.current] : []),
+      ],
       live: {},
       current: null,
+      progress: undefined,
     };
   }
   const runStart = working
@@ -235,16 +275,26 @@ export function observeWorkSession(
     ? { ...previous, endedAt: null }
     : { startedAt, endedAt: null, runIds: [], earlier: [], live: {}, current: null };
   const earlier = [...base.earlier];
-  const live: Record<string, WorkActivity[]> = {};
+  const live: Record<string, WorkItem[]> = {};
   const workingIds = new Set(working.map((run) => run.id));
   // A member that finished while others work keeps its steps in the turn.
   for (const [runId, steps] of Object.entries(base.live))
     if (!workingIds.has(runId)) earlier.push(...steps);
   let current: WorkActivity | null = null;
   let currentSeq = -Infinity;
+  let progress: WorkSession["progress"];
+  let progressSeq = -Infinity;
   for (const run of working) {
     const row = thread.messages.find((message) => message.id === `progress:${run.id}`);
     const steps = runWorkSteps(row);
+    const marker = row?.blocks.at(-1);
+    if (marker?.kind === "progress" && marker.phase && (row?.seq ?? 0) >= progressSeq) {
+      progress = {
+        phase: marker.phase,
+        ...(marker.summary ? { summary: hideVendorNames(marker.summary) } : {}),
+      };
+      progressSeq = row?.seq ?? 0;
+    }
     const seen = base.live[run.id] ?? [];
     if (!isPrefix(seen, steps.done)) earlier.push(...seen);
     live[run.id] = steps.done;
@@ -260,6 +310,7 @@ export function observeWorkSession(
     earlier,
     live,
     current,
+    ...(progress ? { progress } : {}),
   };
   return previous && sameSession(previous, next) ? previous : next;
 }
@@ -290,10 +341,18 @@ function sameSession(a: WorkSession, b: WorkSession): boolean {
 export function workSessionSteps(session: WorkSession | null): WorkStep[] {
   if (!session) return [];
   const steps: WorkStep[] = [];
-  for (const activity of [...session.earlier, ...Object.values(session.live).flat()]) {
+  for (const item of [...session.earlier, ...Object.values(session.live).flat()]) {
+    const row = typeof item === "string" ? { activity: item } : item;
     const last = steps.at(-1);
-    if (last?.activity === activity) last.count += 1;
-    else steps.push({ activity, count: 1 });
+    if (
+      last?.activity === row.activity &&
+      !last.status &&
+      !row.status &&
+      last.peopleWithEmail === undefined &&
+      row.peopleWithEmail === undefined
+    )
+      last.count += 1;
+    else steps.push({ ...row, count: 1 });
   }
   return steps;
 }
@@ -385,4 +444,32 @@ export function statusAnswer(input: {
     return `${now} This is taking longer than usual; the result will appear here when it's ready.`;
   const minutes = Math.ceil(left / 60_000);
   return `${now} Usually done in ${left < 60_000 ? "under a minute" : `about ${minutes} min`}.`;
+}
+
+/** Closed role words: runtime names and task text stay in diagnostics. */
+export function specialistWorkLabel(status: "running" | "completed" | "failed"): string {
+  return status === "running"
+    ? "A specialist is working…"
+    : status === "completed"
+      ? "Specialist finished"
+      : "Specialist needs attention";
+}
+
+/** Shared recruiter copy for native work rows. */
+export function workActivityLabel(activity: WorkActivity): string {
+  const label = STATUS_LABELS[activity];
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+/** Only the runtime's safe summary, never progress text or raw reasoning. */
+export function workProgressLabel(progress?: WorkSession["progress"]): string {
+  if (!progress) return "";
+  return (
+    progress.summary ||
+    (progress.phase === "thinking"
+      ? "Thinking…"
+      : progress.phase === "retrying"
+        ? "Trying again…"
+        : "Reviewing context…")
+  );
 }

@@ -620,7 +620,10 @@ export const Transcript = memo(function Transcript({
               message.id.startsWith("progress:") &&
               message.blocks.some(
                 (block) =>
-                  block.kind === "progress" && !isToolActivityBlock(block) && Boolean(block.text),
+                  block.kind === "progress" &&
+                  !isToolActivityBlock(block) &&
+                  Boolean(block.text) &&
+                  !block.phase,
               ),
           )
         ) ? (

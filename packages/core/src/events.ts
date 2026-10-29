@@ -119,6 +119,11 @@ export function projectMessages(
       durableSubagents.clear();
       continue;
     }
+    if (event.type === "agent.tool.completed") {
+      const live = liveById.get(progressMessageId(event));
+      if (live) live.blocks = completeToolStep(live.blocks, payload);
+      continue;
+    }
     if (event.type === "thread.subagent") {
       const block = subagentBlockFromPayload(payload);
       if (durableSubagents.has(block.agentId)) continue;
@@ -266,17 +271,32 @@ export function reduceLiveMessageBlocks(
       ? update.payload?.activity === true
       : tail?.kind === "progress" && tail.activity === true;
 
-  if (pendingToolNames.length > 0 && endsSentence(tailText)) {
-    let next = activity ? [...segments] : appendTextSegment(segments, tailText);
-    for (const name of pendingToolNames) next = appendToolCallSegment(next, name);
-    return next;
-  }
   // Runtime phases with no text of their own still show until the next progress update.
   const phase =
     update.type === "progress" &&
-    (update.payload?.phase === "compacting" || update.payload?.phase === "retrying")
+    (update.payload?.phase === "thinking" ||
+      update.payload?.phase === "compacting" ||
+      update.payload?.phase === "retrying")
       ? update.payload.phase
       : undefined;
+  if (pendingToolNames.length > 0 && endsSentence(tailText)) {
+    let next = activity ? [...segments] : appendTextSegment(segments, tailText);
+    for (const name of pendingToolNames) next = appendToolCallSegment(next, name);
+    if (phase)
+      return [
+        ...next,
+        {
+          kind: "progress",
+          text: "",
+          activity: true,
+          phase,
+          ...(update.type === "progress" && typeof update.payload?.summary === "string"
+            ? { summary: update.payload.summary.slice(0, 80) }
+            : {}),
+        },
+      ];
+    return next;
+  }
   if (!tailText && !phase) return [...segments];
   return [
     ...segments,
@@ -285,7 +305,14 @@ export function reduceLiveMessageBlocks(
       text: tailText,
       ...(activity ? { activity: true as const } : {}),
       ...(pendingToolNames.length > 0 ? { pendingToolNames } : {}),
-      ...(phase ? { phase } : {}),
+      ...(phase
+        ? {
+            phase,
+            ...(update.type === "progress" && typeof update.payload?.summary === "string"
+              ? { summary: update.payload.summary.slice(0, 80) }
+              : {}),
+          }
+        : {}),
     },
   ];
 }
@@ -297,12 +324,52 @@ function liveMessageText(blocks: readonly MessageBlock[]): string {
     .join("");
 }
 
-export type ToolStep = { label: string; count: number };
+export type ToolStep = Extract<MessageBlock, { kind: "steps" }>["steps"][number];
+
+/** Attach only closed outcomes and audited counts; raw results and errors stay in diagnostics. */
+export function completeToolStep(
+  blocks: readonly MessageBlock[],
+  payload: Record<string, unknown>,
+): MessageBlock[] {
+  const status =
+    payload.outcome === "error" ? "failed" : payload.outcome === "paused" ? "paused" : undefined;
+  const lookup = asRecord(payload.lookup);
+  const found =
+    payload.outcome === "succeeded" &&
+    Number.isSafeInteger(lookup.found) &&
+    Number(lookup.found) >= 0
+      ? Number(lookup.found)
+      : undefined;
+  if (!status && found === undefined) return [...blocks];
+  const label = humanizeToolName(String(payload.name ?? ""));
+  for (let b = blocks.length - 1; b >= 0; b--) {
+    const block = blocks[b];
+    if (block?.kind !== "steps") continue;
+    for (let s = block.steps.length - 1; s >= 0; s--) {
+      const step = block.steps[s]!;
+      if (step.label !== label || step.status || step.peopleWithEmail !== undefined) continue;
+      const updated: ToolStep = {
+        label,
+        count: 1,
+        ...(status ? { status } : {}),
+        ...(found === undefined ? {} : { peopleWithEmail: found }),
+      };
+      const steps = [
+        ...block.steps.slice(0, s),
+        updated,
+        ...(step.count > 1 ? [{ ...step, count: step.count - 1 }] : []),
+        ...block.steps.slice(s + 1),
+      ];
+      return [...blocks.slice(0, b), { ...block, steps }, ...blocks.slice(b + 1)];
+    }
+  }
+  return [...blocks];
+}
 
 export function appendToolStep(steps: readonly ToolStep[], toolName: string): ToolStep[] {
   const label = humanizeToolName(toolName);
   const last = steps.at(-1);
-  if (last && last.label === label) {
+  if (last && last.label === label && !last.status && last.peopleWithEmail === undefined) {
     return [...steps.slice(0, -1), { label, count: last.count + 1 }];
   }
   return [...steps, { label, count: 1 }];

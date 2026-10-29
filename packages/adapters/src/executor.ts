@@ -89,6 +89,7 @@ import {
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
+  completeToolStep,
   connectorKindFromToolName,
   containsSecret,
   createStreamingRedactor,
@@ -3581,9 +3582,11 @@ export async function appendToolCompletionAudit(
   target: { spaceId: string; threadId: string; botId: string; runId: string },
   completion: AgentToolCompletion,
   secrets: string[] = [],
+  onPayload?: (payload: Record<string, unknown>) => void,
 ): Promise<void> {
   try {
     const payload = toolCompletionAuditPayload(completion, secrets);
+    onPayload?.(payload);
     await deps.events.append({
       spaceId: target.spaceId,
       threadId: target.threadId,
@@ -5282,19 +5285,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
         }
         // Tool calls that land mid-sentence wait here until the narration catches up to a
         // sentence boundary, so the step chips never render in the middle of a clause.
-        let pendingToolNames: string[] = [];
+        let pendingTools: {
+          name: string;
+          executionId: string;
+          completion?: Record<string, unknown>;
+        }[] = [];
         const flushPendingTools = () => {
           if (currentTextSegment) {
             messageSegments = appendTextSegment(messageSegments, currentTextSegment);
             currentTextSegment = "";
           }
-          for (const name of pendingToolNames) {
-            messageSegments = appendToolCallSegment(messageSegments, name);
+          for (const pending of pendingTools) {
+            messageSegments = appendToolCallSegment(messageSegments, pending.name);
+            if (pending.completion)
+              messageSegments = completeToolStep(messageSegments, pending.completion);
           }
-          pendingToolNames = [];
+          pendingTools = [];
         };
         const tryFlushPendingTools = () => {
-          if (pendingToolNames.length > 0 && endsSentence(currentTextSegment)) flushPendingTools();
+          if (pendingTools.length > 0 && endsSentence(currentTextSegment)) flushPendingTools();
+        };
+        const completeRunStep = (payload: Record<string, unknown>) => {
+          const pending = pendingTools.find((step) => step.executionId === payload.executionId);
+          if (pending) pending.completion = payload;
+          else messageSegments = completeToolStep(messageSegments, payload);
         };
         let pendingProgress = "";
         let lastProgressAt = 0;
@@ -12298,6 +12312,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   },
                   withConnectorReadOnly(completion),
                   runSecrets,
+                  completeRunStep,
                 );
               },
               claimContextNotice: scripted ? undefined : contextWatch?.claimNotice,
@@ -12639,6 +12654,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     error: disabledToolError("request_takeover"),
                   },
                   runSecrets,
+                  completeRunStep,
                 );
                 continue;
               }
@@ -12728,7 +12744,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               } finally {
                 toolCalledAudit(event.executionId).release();
               }
-              pendingToolNames.push(event.name);
+              pendingTools.push({ name: event.name, executionId: event.executionId });
               if (event.name === "request_takeover") lastTakeoverExecutionId = event.executionId;
               tryFlushPendingTools();
               // A tool call is followed by another model call: stop here when the run is
@@ -12789,6 +12805,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       ),
                     ),
                     runSecrets,
+                    completeRunStep,
                   );
                   if (isToolPauseResult(result)) return;
                 } catch (error) {
@@ -12807,6 +12824,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       error,
                     },
                     runSecrets,
+                    completeRunStep,
                   );
                   throw error;
                 }
