@@ -121,6 +121,7 @@ import {
   savePushToken,
   scheduleComputerControlExpiry,
   scheduleComputerSleep,
+  scheduleRecruitingGrading,
   screenLeaseIdForRun,
   scriptedCatalogEntry,
   selectDefaultCredentialId,
@@ -3961,9 +3962,23 @@ export function createRouter(deps: RouterDeps) {
       readView: authed.recruiting.readView.handler(({ context, input }) =>
         readRecruitingView(deps, context.actor, input, context.stillAuthorized),
       ),
-      listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
-        listRecruitingCandidates(deps, context.actor, input),
-      ),
+      listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) => {
+        // Opening a role makes sure everyone in it gets the research service's grade.
+        void deps.prisma.thread
+          .findFirst({
+            where: {
+              spaceId: context.actor.spaceId,
+              userId: context.actor.userId,
+              activeRecruitingRoleId: input.roleId,
+            },
+            select: { id: true },
+          })
+          .then((thread) => thread && scheduleRecruitingGrading(deps.jobs, thread.id))
+          .catch((error) =>
+            getLogger().warn("recruiting grade schedule", { error: String(error) }),
+          );
+        return listRecruitingCandidates(deps, context.actor, input);
+      }),
       roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
         getRecruitingRoleCandidates(
           {

@@ -12,6 +12,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { isRecruitingGradingRun } from "./recruiting-grading.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 
@@ -372,6 +373,8 @@ export async function reportGroupStageOutcome(
 ): Promise<{ runId: string } | undefined> {
   const wake = turn.trigger === "recruiting_research";
   if (!wake && turn.trigger !== "follow_up") return undefined;
+  // Grades for people already in Results are no teammate's stage outcome.
+  if (wake && (await isRecruitingGradingRun(deps.prisma, turn.clientNonce))) return undefined;
   const partial = wake && Boolean(turn.clientNonce?.includes(":rows:"));
   if (partial && outcome.status === "failed") return undefined;
   const stage = wake ? await handedStage(deps.prisma, turn) : turn;

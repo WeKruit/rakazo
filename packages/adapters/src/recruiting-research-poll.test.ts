@@ -1,6 +1,7 @@
 import type { ConnectorCall, ConnectorEvent } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
+import { NOT_GRADING_TASK } from "./recruiting-grading.js";
 import {
   pollRecruitingResearch,
   RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS,
@@ -188,7 +189,7 @@ describe("pollRecruitingResearch", () => {
       expect.objectContaining({
         where: expect.objectContaining({
           roleId: "role",
-          createdByRun: { botId: "bot", threadId: "thread" },
+          AND: [NOT_GRADING_TASK, { createdByRun: { botId: "bot", threadId: "thread" } }],
         }),
       }),
     );
@@ -216,6 +217,31 @@ describe("pollRecruitingResearch", () => {
     expect(prompt.data.prompt).toContain("including unassessed people");
     expect(f.enqueue).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ name: "run.continue", payload: { runId: "wake-1" } }),
+    );
+  });
+
+  it("saves grades quietly and never wakes for partial rows on a grading request", async () => {
+    const grading = { createdByRun: { ...task.createdByRun, clientNonce: "recruiting-grade:t:e" } };
+    const partial = fixture({
+      task: grading,
+      provider: { structuredContent: { ...working.structuredContent, progress: { rows: 40 } } },
+    });
+    await pollRecruitingResearch(partial.deps, { taskId: "task" });
+    expect(partial.runs).toHaveLength(0);
+    const done = fixture({ task: grading, provider: completed });
+    await pollRecruitingResearch(done.deps, { taskId: "task" });
+    expect(done.runs).toEqual([expect.objectContaining({ clientNonce: nonce })]);
+    const prompt = vi.mocked(done.tx.task.create).mock.calls[0]![0 as never] as never as {
+      data: { prompt: string };
+    };
+    expect(prompt.data.prompt).toContain("grades for people already in Results");
+    expect(prompt.data.prompt).toContain("do not ask anything");
+    expect(prompt.data.prompt).not.toContain("question card");
+    expect(done.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: "recruiting_grade.start",
+        payload: { threadId: "thread" },
+      }),
     );
   });
 
