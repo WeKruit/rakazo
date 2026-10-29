@@ -10,6 +10,7 @@ import {
   planDeclineRetry,
   recruitingRoundListText,
   roundPassage,
+  turnRequestText,
 } from "./turn-end-guard.js";
 
 const run = {
@@ -1040,6 +1041,26 @@ describe("roundPassage", () => {
     const cut = roundPassage(long)!;
     expect(cut.endsWith("word…")).toBe(true);
     expect(cut.length).toBeLessThanOrEqual(221);
+  });
+});
+
+describe("turnRequestText", () => {
+  const handoff = (report?: "completed"): MessageBlock => ({
+    kind: "handoff",
+    fromBotId: "main",
+    toBotId: "bot-1",
+    text: "The recruiter's exact words are “改一下邮件”.",
+    ...(report ? { report } : {}),
+  });
+
+  it("reads the person's message, else the brief a teammate handed in", () => {
+    expect(
+      turnRequestText({ blocks: [{ kind: "text", text: "发一下" }] }, undefined, "bot-1"),
+    ).toBe("发一下");
+    // A specialist's handed-in stage is a request too, so its declines get the same retry.
+    expect(turnRequestText(undefined, { blocks: [handoff()] }, "bot-1")).toContain("改一下邮件");
+    expect(turnRequestText(undefined, { blocks: [handoff("completed")] }, "bot-1")).toBe("");
+    expect(turnRequestText(undefined, { blocks: [handoff()] }, "bot-2")).toBe("");
   });
 });
 

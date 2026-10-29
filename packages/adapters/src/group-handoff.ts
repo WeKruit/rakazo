@@ -25,9 +25,18 @@ export async function handoffToGroupBot(
     userId: string;
   },
   groupId: string,
-  input: { bot_id?: string; confirm_name?: string; message: string; report_back?: boolean },
+  input: {
+    /** The answer a resumed run continues from: each answered turn may hand off once more. */
+    turnKey?: string;
+    bot_id?: string;
+    confirm_name?: string;
+    message: string;
+    report_back?: boolean;
+  },
 ) {
-  const deliveryKey = `group-handoff:${run.id}`;
+  const deliveryKey = input.turnKey
+    ? `group-handoff:${run.id}:${input.turnKey}`
+    : `group-handoff:${run.id}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       try {

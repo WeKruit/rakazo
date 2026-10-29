@@ -599,6 +599,7 @@ import {
   recruitingRoundListText,
   recruitingRoundPeople,
   sendDeclineRetry,
+  turnRequestText,
 } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
@@ -1070,6 +1071,9 @@ const YEARS_OPEN_NOTE =
 const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
 
+/** A handed-off request has one owner, so the recruiter gets one question about it. */
+export const ASK_AFTER_HANDOFF =
+  "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
 const ASK_IN_ENGLISH =
   "Not asked: questions and options to the recruiter are written in English unless they asked for another language. Ask the same question again in English, with the same options and plannedSearches.";
 
@@ -11137,6 +11141,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
             if (met) return finish({ skipped: met });
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
+              turnKey: nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
               confirm_name: args.confirm_name ? String(args.confirm_name) : undefined,
               message: String(args.message ?? ""),
@@ -12178,6 +12183,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     ),
               onToolCallDelta: streamRoundPicks,
               beforeAsk: async (question, plannedSearches) => {
+                if (handedOff) return { instead: ASK_AFTER_HANDOFF };
                 await briefSaving;
                 await turnReport.caughtUpToAsk();
                 // A run that recorded a round asks the next-step choice, which is asked anew each round,
@@ -12946,11 +12952,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   groupId: thread.groupId,
                   reply: text,
                   blocks,
-                  request: (currentTurnMessage?.blocks ?? [])
-                    .map((block) =>
-                      "text" in block && typeof block.text === "string" ? block.text : "",
-                    )
-                    .join("\n"),
+                  request: turnRequestText(
+                    currentTurnMessage,
+                    handedIn
+                      ? historyMessages.find((message) => message.id === run.sourceMessageId)
+                      : undefined,
+                    bot.id,
+                  ),
                   tools,
                   worked: turnReport.worked(),
                   presentedRound: turnReport.presentedRound(),
