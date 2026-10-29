@@ -465,6 +465,11 @@ import {
   recruitingFeedbackInputError,
 } from "./recruiting-feedback.js";
 import {
+  GRADING_REPLY_GUIDANCE,
+  gradingToolRefusal,
+  scheduleRecruitingGrading,
+} from "./recruiting-grading.js";
+import {
   COMMUTE_MILES,
   isRegionOnlyLocation,
   locationOutliers,
@@ -5702,6 +5707,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
           observer?: AgentToolExecutionObserver,
         ) => {
           context.signal.throwIfAborted();
+          if (run.trigger === "recruiting_grade") {
+            const refusal = gradingToolRefusal(name, rawArgs);
+            if (refusal) return { error: refusal };
+          }
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
             readExternalText = true;
           // Before the first picks, one step's extra searches are refused once: the model picks
@@ -8828,6 +8837,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
                       }))
                     : rows;
+                  // People new to the role get the research service's grade once the turn settles.
+                  if ((saved as { newPeople?: unknown }).newPeople)
+                    await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
+                      getLogger().warn("recruiting grade schedule", { error: String(error) }),
+                    );
                   // The role's total, so a scale-out stops at its target without counting rows.
                   const peopleInResults = await deps.prisma.recruitingCandidate.count({
                     where: { roleId },
@@ -14159,6 +14173,7 @@ export const TICKET_SILENT_REPLY_GUIDANCE =
   "Ticket work is reported on the board, not in chat. Put updates and results in ticket_comment and keep the ticket status current with ticket_update. Use the existing ask or approval mechanism when user input is needed. Leave the final reply empty.";
 
 export function runReplyGuidance(trigger: string): string {
+  if (trigger === "recruiting_grade") return GRADING_REPLY_GUIDANCE;
   if (isBackgroundRunTrigger(trigger)) return TICKET_SILENT_REPLY_GUIDANCE;
   return runAllowsSilentEmpty(trigger)
     ? ROUTINE_SILENT_REPLY_GUIDANCE
