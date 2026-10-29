@@ -589,8 +589,9 @@ if (wanted.has("dispatch"))
       steps.push({
         capability: item.capability,
         ask: item.ask,
-        events: (await readEvents(groupId).catch(() => [])).filter(
-          (event) => event.createdAt > askedAt && event.type.startsWith("agent.tool."),
+        ...traceOf(
+          (await readEvents(groupId).catch(() => [])).filter((event) => event.createdAt > askedAt),
+          replies,
         ),
       });
     }
@@ -601,6 +602,24 @@ if (wanted.has("dispatch"))
 // Vague recruiter asks in the t1 chat: each gets a best-guess action (a tool call, a handoff, or
 // the action's own card) or exactly one question card, never a decline or an offer to do it.
 // Cards are left unanswered, so nothing is sent or booked.
+// What each step's messages and runs looked like, kept before the end-of-run archive: block kinds
+// and text lengths only, so a silent or hidden reply can be told apart from a cut-off run.
+const traceOf = (events, replies) => ({
+  events: events.filter((event) => /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type)),
+  messages: replies.map((message) => ({
+    id: message.id,
+    role: message.role,
+    botId: message.botId,
+    internal: Boolean(message.internal),
+    createdAt: message.createdAt,
+    blocks: (message.blocks ?? []).map((block) => ({
+      kind: block.kind,
+      text: (block.text ?? block.question ?? "").length,
+      ...(block.status ? { status: block.status } : {}),
+    })),
+  })),
+});
+
 // "clarify": who, what or when is open, so the turn must end on one card: a question with
 // options, or the send/booking card naming exact recipients. The rest may act or ask.
 const AMBIGUOUS = [
@@ -624,9 +643,10 @@ if (wanted.has("ambiguous"))
     for (const { ask, clarify } of AMBIGUOUS) {
       const askedAt = new Date().toISOString();
       const { replies } = await say(groupId, ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
-      const events = (await readEvents(groupId).catch(() => [])).filter(
-        (event) => event.createdAt > askedAt && event.type.startsWith("agent.tool."),
+      const allEvents = (await readEvents(groupId).catch(() => [])).filter(
+        (event) => event.createdAt > askedAt,
       );
+      const events = allEvents.filter((event) => event.type.startsWith("agent.tool."));
       const acted =
         events.some((event) => event.type === "agent.tool.completed") ||
         replies.some((message) => (message.blocks ?? []).some((block) => block.kind === "handoff"));
@@ -634,6 +654,8 @@ if (wanted.has("ambiguous"))
       const text = recruiterSees(replies).map(botText).join("\n");
       notes.push(`## ${ask}\ntools: ${events.length}, cards: ${asks.length}\n${text}`);
       if (!replies.length) failures.push(`「${ask}」: no reply`);
+      else if (!text.trim() && !asks.length)
+        failures.push(`「${ask}」: ended with nothing the recruiter can see`);
       else if (clarify && asks.length !== 1)
         failures.push(
           `「${ask}」: unclear request ended on ${asks.length} cards (want one question)`,
@@ -646,7 +668,7 @@ if (wanted.has("ambiguous"))
           `「${ask}」: declined or deferred "…${text.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
         );
       commonChecks(replies, failures);
-      steps.push({ ask, events });
+      steps.push({ ask, ...traceOf(allEvents, replies) });
     }
     fs.writeFileSync(path.join(OUT, "ambiguous.txt"), `${notes.join("\n\n")}\n`);
     fs.writeFileSync(path.join(OUT, "ambiguous.events.json"), JSON.stringify(steps, null, 1));
