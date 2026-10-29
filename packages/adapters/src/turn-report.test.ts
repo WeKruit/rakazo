@@ -5,6 +5,7 @@ import {
   declineRetry,
   questionStatesWork,
   REPORT_BEFORE_ASK,
+  retryReason,
   TEXT_QUESTION_NOTE,
   TurnReportLedger,
   turnReportText,
@@ -222,6 +223,16 @@ describe("declineRetry", () => {
     expect(
       declineRetry({ reply, request: "发一下", tools: [], teammates: [], worked: true }),
     ).toBeUndefined();
+  });
+
+  it("does not read a lookup that rules out sending as a send request", () => {
+    const reply =
+      "Found 9 saved emails and checked the one gap.\n\nNo email was sent or activated.";
+    expect(
+      retryReason(reply, "Look up emails for the first 10 people. Do not send anything."),
+    ).toBeUndefined();
+    expect(retryReason(reply, "找邮箱，先不要发")).toBeUndefined();
+    expect(retryReason(reply, "send them the email")?.kind).toBe("decline");
   });
 
   it("catches a past-tense refusal of a send", () => {
