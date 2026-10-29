@@ -191,6 +191,18 @@ describe("declineRetry", () => {
     expect(retry?.note).toContain("instantly__mail__activate_campaign");
   });
 
+  it("catches a past-tense refusal of a send", () => {
+    expect(
+      declinedSentence(
+        "I couldn’t stage the exact one-off email for approval: Aiyi is already in the role’s existing email sequence.",
+      ),
+    ).toBeDefined();
+    // An honest shortfall is a report, not a refusal.
+    expect(
+      declinedSentence("I couldn't find anyone new in Austin, so the total is still 40."),
+    ).toBeUndefined();
+  });
+
   it("points a contact decline at the saved-email lookup, which reuses earlier results", () => {
     const retry = declineRetry({
       reply:
