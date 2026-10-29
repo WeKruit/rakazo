@@ -293,7 +293,10 @@ export async function startRecruitingGrading(
   });
 }
 
-/** The conversation's bot assigned the research service: the thread's own bot or a group member. */
+/**
+ * The conversation's bot that may start research: the thread's own bot or a group member whose
+ * research service assignment allows the research tool, not only reads of earlier research.
+ */
 async function researchTeammate(
   prisma: PrismaClient,
   thread: { spaceId: string; userId: string; botId: string | null; groupId: string | null },
@@ -318,10 +321,21 @@ async function researchTeammate(
       server: { endpoint: RESEARCH_MCP, enabled: true },
       bot: { archivedAt: null },
     },
-    select: { botId: true, serverId: true, server: { select: { slug: true } } },
+    select: {
+      botId: true,
+      serverId: true,
+      allowAllTools: true,
+      allowedTools: true,
+      server: { select: { slug: true } },
+    },
   });
   for (const id of members) {
-    const row = assigned.find((candidate) => candidate.botId === id);
+    const row = assigned.find(
+      (candidate) =>
+        candidate.botId === id &&
+        (candidate.allowAllTools ||
+          (candidate.allowedTools as unknown[] | null)?.includes("research")),
+    );
     if (row) return { botId: row.botId, slug: row.server.slug, serverId: row.serverId };
   }
   return null;
