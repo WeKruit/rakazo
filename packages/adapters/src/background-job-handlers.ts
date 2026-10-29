@@ -21,7 +21,6 @@ import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
-import { startRecruitingGrading } from "./recruiting-grading.js";
 import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import {
   pauseRoutineAfterRepeatedFailures,
@@ -162,9 +161,8 @@ export function createBackgroundJobHandlers(deps: {
         payload,
       );
     },
-    "recruiting_grade.start": async (payload) => {
-      await startRecruitingGrading({ prisma: deps.prisma, jobs: deps.jobs }, payload);
-    },
+    // Paused: grading turns ended without starting research, so batches repeated without grades.
+    "recruiting_grade.start": async () => {},
     "history.compact": async (payload) => {
       // New automatic summaries carry a validated origin; do not revive unattributed legacy work.
       if (!payload.sourceRunId && deps.executor.contextStrategy !== "current") return;
