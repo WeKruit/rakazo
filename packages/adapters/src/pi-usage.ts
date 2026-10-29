@@ -247,14 +247,29 @@ export function observedPiStream(
   const reported: ReportedUsageFields = new Set();
   const callId = randomUUID();
   let usageAccountingWallMs: number | null = null;
+  let callStartedAt: string | undefined;
+  let streamStartedAt: number | undefined;
+  let streamEndedAt: number | undefined;
+  let outcome: "completed" | "error" | "cancelled" = "completed";
   const emitUsage = async (usage: AgentUsage, operationKind = attribution.operationKind) => {
-    const event = {
-      type: "usage" as const,
+    const event: Extract<AgentRuntimeEvent, { type: "usage" }> = {
+      type: "usage",
       ...usage,
       provider: model.provider,
       model: model.id,
       callId,
       operationKind,
+      ...(callStartedAt !== undefined &&
+      streamStartedAt !== undefined &&
+      streamEndedAt !== undefined
+        ? {
+            timing: {
+              startedAt: callStartedAt,
+              durationMs: Math.max(0, streamEndedAt - streamStartedAt),
+              outcome: outcome === "completed" ? ("completed" as const) : ("failed" as const),
+            },
+          }
+        : {}),
       ...(attribution.agentId ? { agentId: attribution.agentId } : {}),
     };
     try {
@@ -280,12 +295,9 @@ export function observedPiStream(
     let partialMessage: AssistantMessage | undefined;
     let providerError: unknown;
     let providerThrew = false;
-    let streamStartedAt: number | undefined;
-    let streamEndedAt: number | undefined;
     let firstStreamEventMs: number | null = null;
     let firstTextDeltaMs: number | null = null;
     let streamOutcome: "completed" | "error" | "cancelled" | "empty" | undefined;
-    let outcome: "completed" | "error" | "cancelled" = "completed";
     try {
       // A tool-budget or cancellation stop can reach Pi's next-turn hook after
       // aborting. It is not a model invocation and must not create unknown usage.
@@ -314,6 +326,7 @@ export function observedPiStream(
         ...(observer ? { maxRetries: 0 } : {}),
       };
       let upstream: ReturnType<Models["streamSimple"]>;
+      callStartedAt = new Date(Date.now()).toISOString();
       streamStartedAt = performance.now();
       getLogger().info("model.stream.started", {
         callId,

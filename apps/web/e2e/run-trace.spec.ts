@@ -25,7 +25,7 @@ test("developer diagnostics opens an on-demand per-run trace with measured and u
               kind: "model",
               label: "test / test-model",
               startedAt: "2026-01-01T00:00:01.000Z",
-              durationMs: null,
+              durationMs: 500,
               status: "completed",
               tokens: 120,
               costUsd: 0.002,
@@ -76,6 +76,11 @@ test("developer diagnostics opens an on-demand per-run trace with measured and u
   await expect(page.getByLabel(/test \/ test-model · model/)).toHaveAttribute(
     "title",
     /120 tokens · \$0.0020/,
+  );
+  await expect(page.getByTestId("run-trace-timeline")).toContainText("completed · 10s");
+  await expect(page.getByLabel(/test \/ test-model · model/)).toHaveAttribute(
+    "title",
+    /completed · 500ms/,
   );
   await expect(page.getByLabel(/web_search · tool/)).toHaveAttribute("title", /failed · 3s/);
   await captureScreenshot(page, testInfo, "developer-run-trace");

@@ -6,6 +6,7 @@ import type {
   AgentModelOAuthCredential,
   AgentRunRequest,
   AgentRuntime,
+  AgentRuntimeEvent,
   AgentToolCompletion,
   AgentToolExecutionObserver,
   ArtifactStore,
@@ -70,6 +71,7 @@ import {
   RecruitingSearchesPlannedPayloadSchema,
   RecruitingShortlistToolInputSchema,
   RetainedRecruitingApprovalRequestSchema,
+  UsageRecordedPayloadSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -3575,6 +3577,26 @@ export function toolCompletionAuditPayload(
     payload.height = record.height;
   }
   return payload;
+}
+
+/** Timing shares the existing audit log; a missing diagnostic must never fail paid work. */
+export async function appendUsageTimingAudit(
+  deps: { events: Pick<ThreadEvents, "append"> },
+  target: { spaceId: string; threadId: string; botId: string; runId: string },
+  event: Extract<AgentRuntimeEvent, { type: "usage" }>,
+): Promise<void> {
+  const payload = UsageRecordedPayloadSchema.safeParse({ callId: event.callId, ...event.timing });
+  if (!payload.success) return;
+  try {
+    await deps.events.append({
+      ...target,
+      type: "usage.recorded",
+      payload: payload.data,
+      allowCancelledRun: true,
+    });
+  } catch {
+    getLogger().warn("model timing audit append failed");
+  }
 }
 
 export async function appendToolCompletionAudit(
@@ -7810,8 +7832,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   );
                   provider = createAutoReviewProvider("llm", {
                     llm: {
-                      onUsage: (event) =>
-                        recordUsage(deps.prisma, event, {
+                      onUsage: async (event) => {
+                        await recordUsage(deps.prisma, event, {
                           spaceId: run.spaceId,
                           userId: run.userId,
                           botId: bot.id,
@@ -7819,7 +7841,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                           runId,
                           operationId: `auto-review:${runId}`,
                           operationKind: "setup",
-                        }),
+                        });
+                        await appendUsageTimingAudit(
+                          deps,
+                          { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
+                          event,
+                        );
+                      },
                       runtime: deps.runtime,
                       checker: checker!,
                       apiKey: judgeKey.oauth ? undefined : judgeKey.apiKey,
@@ -12131,6 +12159,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   parentRunId: runId,
                   operationId: runId,
                 });
+                await appendUsageTimingAudit(
+                  deps,
+                  { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
+                  event,
+                );
               },
               prompt,
               contextStrategy,
@@ -12891,6 +12924,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 parentRunId: runId,
                 operationId: runId,
               });
+              await appendUsageTimingAudit(
+                deps,
+                { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
+                event,
+              );
             } else if (event.type === "done") {
               if (!assembled && event.text) {
                 if (publishedMidTurnUserMessage || discardedMidTurnNarration) {

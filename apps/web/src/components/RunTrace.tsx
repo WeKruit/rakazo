@@ -3,6 +3,7 @@ import type { RunTrace } from "@rakazo/contracts";
 import { formatWorkDuration } from "@rakazo/core";
 import { useEffect, useState } from "react";
 import { rpc } from "../lib/rpc";
+import { formatToolActivityDuration } from "../lib/tool-activity-view";
 
 /** Deployment-owner diagnostics only; the API independently checks both owner and account. */
 export function RunTraceDisclosure({ runId, enabled }: { runId: string; enabled: boolean }) {
@@ -67,6 +68,7 @@ function RunTraceContent({ runId }: { runId: string }) {
     <div className="space-y-2 rounded-lg border border-border p-3" data-testid="run-trace-timeline">
       <div className="break-all font-mono text-xs text-muted-foreground">
         {trace.runId} · {trace.status}
+        {trace.completedAt ? ` · ${formatWorkDuration(Date.parse(trace.completedAt) - start)}` : ""}
       </div>
       {trace.rows.length ? (
         <ul className="space-y-2" aria-label="Run trace">
@@ -74,7 +76,7 @@ function RunTraceContent({ runId }: { runId: string }) {
             const offset = Math.max(0, ((Date.parse(row.startedAt) - start) / (end - start)) * 100);
             const width =
               row.durationMs === null ? 0 : Math.max(0, (row.durationMs / (end - start)) * 100);
-            const detail = `${row.kind} · ${row.status} · ${row.durationMs === null ? "Duration not recorded" : formatWorkDuration(row.durationMs)} · ${row.tokens === null ? "Tokens not recorded" : `${row.tokens} tokens`} · ${row.costUsd === null ? "Cost not recorded" : `$${row.costUsd.toFixed(4)}`}`;
+            const detail = `${row.kind} · ${row.status} · ${row.durationMs === null ? "Duration not recorded" : formatToolActivityDuration(row.durationMs)} · ${row.tokens === null ? "Tokens not recorded" : `${row.tokens} tokens`} · ${row.costUsd === null ? "Cost not recorded" : `$${row.costUsd.toFixed(4)}`}`;
             return (
               <li
                 key={row.id}

@@ -53,6 +53,7 @@ function setup() {
       findMany: vi.fn().mockResolvedValue([
         {
           id: "usage",
+          callId: "existing-call",
           provider: "fake",
           model: "fake-model",
           createdAt: at(8),
@@ -197,4 +198,79 @@ it("includes native peer-message handoffs without exposing exchanged task text",
     durationMs: null,
   });
   expect(JSON.stringify(trace)).not.toContain("private");
+});
+
+it("joins measured model timing only by exact call id, retaining legacy unknown durations", async () => {
+  const { db, prisma } = setup();
+  prisma.event.findMany.mockResolvedValue([
+    {
+      id: "timing",
+      type: "usage.recorded",
+      createdAt: at(4),
+      payload: {
+        callId: "call-1",
+        startedAt: at(1).toISOString(),
+        durationMs: 3000,
+        outcome: "failed",
+      },
+    },
+  ]);
+  prisma.usageRecord.findMany.mockResolvedValue([
+    {
+      id: "usage",
+      callId: "call-1",
+      provider: "fake",
+      model: "fake-model",
+      createdAt: at(8),
+      totalTokens: null,
+      costUsd: null,
+    },
+    {
+      id: "legacy",
+      callId: "old-call",
+      provider: "fake",
+      model: "fake-model",
+      createdAt: at(9),
+      totalTokens: 4,
+      costUsd: 0.01,
+    },
+  ]);
+  const trace = await readRunTrace(db, actor, { runId: "run", includeDiagnostics: true });
+  expect(trace.rows).toEqual([
+    expect.objectContaining({
+      id: "usage",
+      kind: "model",
+      startedAt: at(1).toISOString(),
+      durationMs: 3000,
+      status: "failed",
+      tokens: null,
+      costUsd: null,
+    }),
+    expect.objectContaining({ id: "legacy", durationMs: null, status: "unknown" }),
+  ]);
+});
+it("rejects malformed timing instead of inventing a model duration", async () => {
+  const { db, prisma } = setup();
+  prisma.event.findMany.mockResolvedValue([
+    {
+      id: "timing",
+      type: "usage.recorded",
+      createdAt: at(4),
+      payload: { callId: "call-1", startedAt: "bad-date", durationMs: -1, outcome: "completed" },
+    },
+  ]);
+  prisma.usageRecord.findMany.mockResolvedValue([
+    {
+      id: "usage",
+      callId: "call-1",
+      provider: "fake",
+      model: "fake-model",
+      createdAt: at(8),
+      totalTokens: 40,
+      costUsd: 0.01,
+    },
+  ]);
+  expect(
+    (await readRunTrace(db, actor, { runId: "run", includeDiagnostics: true })).rows[0],
+  ).toMatchObject({ durationMs: null, startedAt: at(8).toISOString() });
 });
