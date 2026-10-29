@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  describeCampaignActivation,
   describeReplyToEmail,
   isNativeInstantlyWrite,
   nativeInstantlyWrites,
@@ -88,5 +89,98 @@ describe("native reply_to_email", () => {
       body: "收到，谢谢",
     });
     expect(JSON.stringify(display)).not.toContain("Instantly");
+  });
+});
+
+describe("activation card for one person's own first email", () => {
+  const campaign = {
+    id: "c-1",
+    name: "Founding Engineer",
+    status: 0,
+    email_list: ["me@x.test"],
+    sequences: [
+      { steps: [{ variants: [{ subject: "{{rk_subject}}", body: "<p>{{rk_body}}</p>" }] }] },
+    ],
+  };
+  const role = { subject: "Founding role", body: "Hi {{firstName}},\n\nOpen to a chat?" };
+  const leads = [
+    {
+      id: "l1",
+      email: "ada@x.test",
+      first_name: "Ada",
+      payload: { rk_subject: "Ada, your compiler work", rk_body: "Hi Ada,<br /><br />Just you." },
+    },
+    {
+      id: "l2",
+      email: "bob@x.test",
+      first_name: "Bob",
+      payload: { rk_subject: "Founding role", rk_body: "Hi Bob,<br /><br />Open to a chat?" },
+    },
+  ];
+  const read = async (tool: string) =>
+    tool === "native_instantly_get_campaign" ? campaign : { items: leads };
+  const binding = { leads: {}, roleEmail: role, drafts: {} };
+
+  it("shows that person's own email, which is what their variables hold", async () => {
+    const display = await describeCampaignActivation(read, "c-1", null, binding, ["Ada"]);
+    expect(display.recipients).toEqual([
+      {
+        name: "Ada",
+        email: "ada@x.test",
+        firstEmail: { subject: "Ada, your compiler work", body: "Hi Ada,<br /><br />Just you." },
+      },
+    ]);
+    // Nobody on this card gets the role's email, so it is not shown.
+    expect(display).not.toHaveProperty("firstEmail");
+    expect(display.refusal).toBeUndefined();
+  });
+
+  it("shows the role's email for the people who keep it", async () => {
+    const display = await describeCampaignActivation(read, "c-1", null, binding);
+    expect(display.recipients.map((r) => r.firstEmail?.subject ?? null)).toEqual([
+      "Ada, your compiler work",
+      null,
+    ]);
+    expect(display.firstEmail).toEqual({
+      subject: "Founding role",
+      body: "<p>Hi {{firstName}},</p><p>Open to a chat?</p>",
+    });
+  });
+
+  it("shows a waiting person the email the send will add for them", async () => {
+    const display = await describeCampaignActivation(
+      async (tool) =>
+        tool === "native_instantly_get_campaign" ? { ...campaign, status: 1 } : { items: leads },
+      "c-1",
+      null,
+      {
+        ...binding,
+        staged: { zoe: { email: "zoe@x.test", first_name: "Zoe" } },
+        drafts: { "zoe@x.test": { subject: "Zoe, hello", body: "Hi Zoe" } },
+      },
+      ["zoe@x.test"],
+    );
+    expect(display.recipients).toEqual([
+      {
+        name: "Zoe",
+        email: "zoe@x.test",
+        firstEmail: { subject: "Zoe, hello", body: "Hi Zoe" },
+      },
+    ]);
+  });
+
+  it("refuses a card for someone whose variables hold no email", async () => {
+    const display = await describeCampaignActivation(
+      async (tool) =>
+        tool === "native_instantly_get_campaign"
+          ? campaign
+          : { items: [...leads, { id: "l3", email: "cy@x.test", first_name: "Cy" }] },
+      "c-1",
+      null,
+      binding,
+      ["cy@x.test"],
+    );
+    expect(display.refusal).toMatch(/No first email is saved for Cy/);
+    expect(display.recipients).toEqual([]);
   });
 });
