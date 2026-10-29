@@ -29,10 +29,6 @@ const payloadSchemas = {
     taskId: z.string().min(1),
     attempt: z.number().int().nonnegative().optional(),
   }),
-  "recruiting_grade.start": z.object({
-    threadId: z.string().min(1),
-    attempt: z.number().int().nonnegative().optional(),
-  }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -180,19 +176,6 @@ export function recruitingResearchPollJob(
     name: "recruiting_research.poll",
     payload,
     replaceKey: recruitingResearchPollJobKey(payload.taskId),
-    ...(availableAt ? { availableAt } : {}),
-  };
-}
-
-/** One pending grading start per conversation: each new search pushes it back instead of adding one. */
-export function recruitingGradeStartJob(
-  payload: BackgroundJobPayloads["recruiting_grade.start"],
-  availableAt?: Date,
-): BackgroundJob {
-  return {
-    name: "recruiting_grade.start",
-    payload,
-    replaceKey: `recruiting_grade.start:${payload.threadId}`,
     ...(availableAt ? { availableAt } : {}),
   };
 }

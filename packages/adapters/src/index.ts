@@ -119,7 +119,6 @@ export * from "./pipedream-connector.js";
 export * from "./private-endpoint.js";
 export * from "./railway-sandbox.js";
 export * from "./realtime.js";
-export { scheduleRecruitingGrading } from "./recruiting-grading.js";
 export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
 export {
   classifyRecruitingResearchResult,
