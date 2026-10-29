@@ -320,10 +320,13 @@ export type DeclineKind = "decline" | "defer" | "pick" | "text_question";
 export type Declined = { sentence: string; kind: DeclineKind };
 
 /** The first sentence of a reply that declines, defers or hands back a pick, else undefined. */
+/** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
+const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:)/i;
+
 export function declinedSentence(text: string): Declined | undefined {
   // A drafted email is the deliverable, not the reply's own words: its "Would you be open…?"
   // is no question to the user, so only the text before the first email is read.
-  const draft = text.search(/(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:)/i);
+  const draft = text.search(DRAFT_START);
   const own = draft >= 0 ? text.slice(0, draft) : text;
   const sentences = own
     .split(/(?<=[.!?。！？\n])/)
@@ -368,13 +371,18 @@ export function declineRetry(input: {
   worked?: boolean;
 }): DeclineRetry | undefined {
   const declined = declinedSentence(input.reply);
-  if (!declined) return undefined;
+  // A reply that shows a drafted email delivered the work; holding it back would lose the draft.
+  if (!declined || DRAFT_START.test(input.reply)) return undefined;
   const { sentence } = declined;
   const asked = (Object.keys(REQUEST_KINDS) as Capability[]).filter((kind) =>
     REQUEST_KINDS[kind].test(input.request),
   );
   const refusesAsked = asked.some((kind) => REQUEST_KINDS[kind].test(sentence));
-  if (input.worked && !(declined.kind === "decline" && refusesAsked)) return undefined;
+  // A send or booking ends on its card (planDeclineRetry never retries after one), so a decline
+  // without it refused the request whatever the sentence names.
+  const cardOwed = asked.includes("send") || asked.includes("schedule");
+  if (input.worked && !(declined.kind === "decline" && (refusesAsked || cardOwed)))
+    return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
     return { sentence, note: `${TEXT_QUESTION_NOTE} ("${quoted}")` };
