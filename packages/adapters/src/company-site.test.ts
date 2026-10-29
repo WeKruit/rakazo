@@ -90,6 +90,31 @@ describe("company site", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("keeps the index's logo as a small image when it has one", async () => {
+    const png = await sharpPng();
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      return url === "https://logos.example/esu.png"
+        ? new Response(png, { headers: { "content-type": "image/png" } })
+        : new Response("", { status: 404 });
+    });
+    const resolver = createCompanySiteResolver({
+      fetch,
+      resolveHostname: async () => [{ address: "203.0.113.10", family: 4 as const }],
+      searchOrganizations: async () => [
+        {
+          url: "https://www.esu.edu/",
+          title: "Example State University",
+          image: "https://logos.example/esu.png",
+        },
+      ],
+    });
+    const answer = await resolver.companySite("Example State University");
+    expect(answer.host).toBe("esu.edu");
+    expect(answer.icon).toMatch(/^data:image\/png;base64,/);
+    expect((await resolver.companySite("Example State University")).icon).toBe(answer.icon);
+  });
+
   it("ignores an indexed organization with another name and falls back to guessing", async () => {
     const fetch = vi.fn(async () => new Response("", { status: 404 }));
     const searchOrganizations = vi.fn(async () => [
@@ -100,3 +125,12 @@ describe("company site", () => {
     expect(fetch).toHaveBeenCalled();
   });
 });
+
+async function sharpPng() {
+  const { default: sharp } = await import("sharp");
+  return sharp({
+    create: { width: 8, height: 8, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 1 } },
+  })
+    .png()
+    .toBuffer();
+}

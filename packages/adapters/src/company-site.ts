@@ -1,9 +1,10 @@
 import { JSDOM } from "jsdom";
-import { BUSY, concurrencyLimit } from "./favicon.js";
+import { BUSY, concurrencyLimit, faviconDataUrl } from "./favicon.js";
 import type { ResolveHostname } from "./network-address.js";
 import { fetchSafeWebBytes } from "./web-ssrf.js";
 
 const PAGE_MAX_BYTES = 128 * 1024;
+const LOGO_MAX_BYTES = 256 * 1024;
 const FETCH_TIMEOUT_MS = 4_000;
 const LOOKUP_DEADLINE_MS = 10_000;
 const MAX_CONCURRENT = 6;
@@ -73,18 +74,22 @@ const GENERIC_WORDS = new Set([
 const PARKED =
   /\b(?:for sale|buy this domain|domain (?:is )?(?:for sale|parked|available)|parked|coming soon|under construction|godaddy|sedo|afternic|dan\.com|hugedomains)\b/i;
 
-/** `host` is the organization's own site host, or null when none could be confirmed. */
-export type CompanySiteAnswer = { host: string | null; retry?: true };
+/**
+ * `host` is the organization's own site host, or null when none could be confirmed. `icon` is its
+ * logo from the organization index as a small data URL, when the index has one.
+ */
+export type CompanySiteAnswer = { host: string | null; icon?: string; retry?: true };
+type Found = { host: string | null; icon?: string };
 
 export type CompanySiteResolver = {
   companySite(name: string): Promise<CompanySiteAnswer>;
 };
 
-/** Organizations matching a name, each with its own website and the name the index gives it. */
+/** Organizations matching a name: each one's own website, indexed name and logo image, if any. */
 export type OrganizationSearch = (
   name: string,
   signal: AbortSignal,
-) => Promise<{ url: string; title: string }[]>;
+) => Promise<{ url: string; title: string; image?: string }[]>;
 
 export type CompanySiteResolverOptions = {
   fetch?: typeof globalThis.fetch;
@@ -106,12 +111,12 @@ export function createCompanySiteResolver(
   options: CompanySiteResolverOptions = {},
 ): CompanySiteResolver {
   const now = options.now ?? Date.now;
-  const cache = new Map<string, { host: string | null; expiresAt: number }>();
+  const cache = new Map<string, Found & { expiresAt: number }>();
   const inFlight = new Map<string, Promise<CompanySiteAnswer>>();
   const limit = concurrencyLimit(MAX_CONCURRENT, MAX_WAITING, MAX_WAIT_MS);
-  const remember = (key: string, host: string | null) => {
+  const remember = (key: string, found: Found) => {
     cache.delete(key);
-    cache.set(key, { host, expiresAt: now() + (host ? FOUND_TTL_MS : MISSING_TTL_MS) });
+    cache.set(key, { ...found, expiresAt: now() + (found.host ? FOUND_TTL_MS : MISSING_TTL_MS) });
     while (cache.size > MAX_CACHED_NAMES) cache.delete(cache.keys().next().value!);
   };
   return {
@@ -120,17 +125,19 @@ export function createCompanySiteResolver(
       if (!tokens.length) return { host: null };
       const key = tokens.join(" ");
       const cached = cache.get(key);
-      if (cached && cached.expiresAt > now()) return { host: cached.host };
+      if (cached && cached.expiresAt > now())
+        return { host: cached.host, ...(cached.icon ? { icon: cached.icon } : {}) };
       const pending = inFlight.get(key);
       if (pending) return pending;
       const lookup = limit(() =>
         findCompanySite(tokens, options, AbortSignal.timeout(LOOKUP_DEADLINE_MS)).catch(() => null),
       )
-        .then((host): CompanySiteAnswer => {
+        .then((found): CompanySiteAnswer => {
           // Turned away by a full queue is not a miss: not remembered, and the client asks again.
-          if (host === BUSY) return { host: null, retry: true };
-          remember(key, host);
-          return { host };
+          if (found === BUSY) return { host: null, retry: true };
+          const answer = found ?? { host: null };
+          remember(key, answer);
+          return answer;
         })
         .finally(() => inFlight.delete(key));
       inFlight.set(key, lookup);
@@ -199,13 +206,17 @@ async function findCompanySite(
   tokens: readonly string[],
   options: CompanySiteResolverOptions,
   signal: AbortSignal,
-): Promise<string | null> {
+): Promise<Found> {
   const indexed = options.searchOrganizations
     ? await indexedSite(options.searchOrganizations, tokens, signal)
     : null;
-  if (indexed) return indexed;
+  if (indexed) {
+    // Some sites turn away the icon lookup, so the index's own logo is kept when it has one.
+    const icon = indexed.image ? await indexLogo(indexed.image, options, signal) : null;
+    return { host: indexed.host, ...(icon ? { icon } : {}) };
+  }
   for (const host of companySiteCandidates(tokens)) {
-    if (signal.aborted) return null;
+    if (signal.aborted) return { host: null };
     const page = await fetchSafeWebBytes(`https://${host}/`, {
       fetch: options.fetch,
       resolveHostname: options.resolveHostname,
@@ -221,9 +232,28 @@ async function findCompanySite(
     const names = pageNames(new TextDecoder().decode(page.body));
     if (!titleNamesCompany(names, tokens)) continue;
     // A redirect lands on the organization's canonical site (x.com to www.x.com, say).
-    return new URL(page.url).hostname.replace(/^www\./, "");
+    return { host: new URL(page.url).hostname.replace(/^www\./, "") };
   }
-  return null;
+  return { host: null };
+}
+
+/** The index's logo image as a small data URL; any failure leaves the site icon to the client. */
+async function indexLogo(
+  url: string,
+  options: CompanySiteResolverOptions,
+  signal: AbortSignal,
+): Promise<string | null> {
+  const image = await fetchSafeWebBytes(url, {
+    fetch: options.fetch,
+    resolveHostname: options.resolveHostname,
+    signal,
+    timeoutMs: FETCH_TIMEOUT_MS,
+    maxRedirects: 3,
+    allowedPorts: [443],
+    maxBytes: LOGO_MAX_BYTES,
+    headers: { accept: "image/*" },
+  }).catch(() => undefined);
+  return image ? faviconDataUrl(image.body).catch(() => null) : null;
 }
 
 /** Directories and profile sites that describe an organization but are not its own site. */
@@ -234,13 +264,13 @@ async function indexedSite(
   search: OrganizationSearch,
   tokens: readonly string[],
   signal: AbortSignal,
-): Promise<string | null> {
+): Promise<{ host: string; image?: string } | null> {
   if (tokens.length === 1 && GENERIC_WORDS.has(tokens[0]!)) return null;
   const results = await search(tokens.join(" "), signal).catch(() => []);
-  for (const { url, title } of results) {
+  for (const { url, title, image } of results) {
     const host = URL.canParse(url) ? new URL(url).hostname.replace(/^www\./, "") : "";
     if (!host || NOT_OWN_SITE.test(host)) continue;
-    if (sameName(title, tokens)) return host;
+    if (sameName(title, tokens)) return { host, ...(image ? { image } : {}) };
   }
   return null;
 }

@@ -14,13 +14,18 @@ describe("organization search", () => {
       {
         url: "https://www.example.com/",
         title: "Example | Home",
+        image: "https://logos.example/example.png",
         entities: [{ properties: { name: "Example Corp" } }],
       },
       { url: "https://other.example/", title: "Other" },
       { title: "No url" },
     ])}\n\n`;
     expect(organizationResults(body)).toEqual([
-      { url: "https://www.example.com/", title: "Example Corp" },
+      {
+        url: "https://www.example.com/",
+        title: "Example Corp",
+        image: "https://logos.example/example.png",
+      },
       { url: "https://other.example/", title: "Other" },
     ]);
   });
