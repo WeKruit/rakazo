@@ -203,6 +203,17 @@ describe("declineRetry", () => {
     expect(DECLINE_RETRY_NOTE).toContain("shows its own card");
   });
 
+  it("names calendar tools for a booking, not routine schedules", () => {
+    const retry = declineRetry({
+      reply: "I can't book this interview yet.",
+      request: "帮第一个人约下周三下午的面试",
+      tools: [{ name: "schedule_create" }, { name: "cal__main__create_booking" }],
+      teammates: [],
+    });
+    expect(retry?.note).toContain("cal__main__create_booking");
+    expect(retry?.note).not.toContain("schedule_create");
+  });
+
   it("names this bot's own tool first", () => {
     const retry = declineRetry({
       reply: replyThread,
