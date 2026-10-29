@@ -4589,7 +4589,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         );
         // Answering a teammate's mid-stage check-in stays quiet unless the user needs to know.
         const quietRun =
-          runAllowsSilentEmpty(run.trigger) || isStageCheckIn(run.trigger, turnBlocks, bot.id);
+          runAllowsSilentEmpty(run.trigger) ||
+          isStageCheckIn(
+            run.trigger,
+            // The check-in is a teammate's handoff message, not a user turn.
+            historyMessages.find((message) => message.id === run.sourceMessageId)?.blocks,
+            bot.id,
+          );
         const allowSilentEmptyRun = allowSilentPeerMessage || messagingChannelRun || quietRun;
         // Someone waits on this turn: its consequential work ends with a visible report.
         const turnReport = new TurnReportLedger(

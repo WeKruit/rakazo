@@ -297,6 +297,13 @@ const REQUEST_KINDS: Record<Capability, RegExp> = {
   draft: /\bdraft|草稿|写.{0,8}(?:邮件|email)/i,
   search: /\bfind\b|\bsearch|\bmore (?:people|candidates)|再找|找\d|找更多/i,
 };
+// "Do not send anything" or 先不要发 rules a send out; it is not a send request.
+const NEGATED =
+  /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|(?:不要|别|先不|不用)(?:发|约)/gi;
+
+function requests(kind: Capability, request: string): boolean {
+  return REQUEST_KINDS[kind].test(request.replace(NEGATED, " "));
+}
 // Tool operations (the last "__" segment) that do each kind of request.
 const TOOL_KINDS: Record<Capability, RegExp> = {
   send: /send|reply_to|activate_campaign|forward/,
@@ -380,7 +387,7 @@ const CARD_WORK = /\b(?:sen[dt]|e-?mail|draft|book|invit|interview|schedul)|发|
 export function retryReason(reply: string, request: string): Declined | undefined {
   const declined = declinedSentence(reply);
   if (declined) return declined;
-  if (!REQUEST_KINDS.send.test(request) && !REQUEST_KINDS.schedule.test(request)) return undefined;
+  if (!requests("send", request) && !requests("schedule", request)) return undefined;
   if (DRAFT_START.test(reply) || !CARD_WORK.test(reply)) return undefined;
   const sentence = reply
     .split(/(?<=[.!?。！？\n])/)
@@ -424,7 +431,7 @@ export function declineRetry(input: {
   if (!declined || (DRAFT_START.test(input.reply) && declined.keep === undefined)) return undefined;
   const { sentence } = declined;
   const asked = (Object.keys(REQUEST_KINDS) as Capability[]).filter((kind) =>
-    REQUEST_KINDS[kind].test(input.request),
+    requests(kind, input.request),
   );
   const refusesAsked = asked.some((kind) => REQUEST_KINDS[kind].test(sentence));
   // A send or booking ends on its card (planDeclineRetry never retries after one), so a decline

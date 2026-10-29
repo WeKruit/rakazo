@@ -97,6 +97,8 @@ async function runWithModel(
     savedRecruitingCandidates?: number;
     /** Starts the run from this thread message, which is added to the history. */
     sourceMessage?: HistoryMessage;
+    /** The model's final reply; defaults to "Done". */
+    finalText?: string;
   } = {},
 ) {
   const run = {
@@ -126,7 +128,7 @@ async function runWithModel(
       await onModelChange?.(switchModel.provider, switchModel.modelId);
     }
     for (const event of options.events ?? []) yield event;
-    yield { type: "done" as const, text: "Done" };
+    yield { type: "done" as const, text: options.finalText ?? "Done" };
   });
   const prisma = {
     // Early final replies on file-touching turns persist through one transaction on these rows.
@@ -323,6 +325,17 @@ describe("handed-in stage", () => {
     });
     expect(request.model.firstStepThinkingLevel).toBe("low");
     expect(request.prompt).toContain("Begin your first step with one short sentence");
+  });
+
+  it("posts nothing when the answer to a teammate's check-in is NO_RESPONSE", async () => {
+    const checkIn = handoff("bot-1");
+    checkIn.blocks[0] = { ...checkIn.blocks[0], report: "progress" } as never;
+    const { finalizeRun } = await runWithModel(TEXT_ONLY_MODEL, undefined, false, false, {
+      trigger: "follow_up",
+      sourceMessage: checkIn,
+      finalText: "NO_RESPONSE",
+    });
+    expect(JSON.stringify(finalizeRun.mock.calls)).not.toContain("NO_RESPONSE");
   });
 
   it("keeps full thinking for a handoff addressed to another bot", async () => {
