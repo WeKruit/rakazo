@@ -150,12 +150,16 @@ describe("declinedSentence", () => {
     "No emails were sent yet; the send card is waiting for you.",
     "Found emails for 4 of the first 5 people; Dana Li has none on file.",
     "Here are the ten for this round.",
-    "Which of these look closest to what you want?",
     "已为前5个人找到邮箱，其中1人没有找到。",
     "Booked Wednesday at 2 PM; the confirmation card is above.",
     "The send card is above; once you confirm, the five emails go out.",
-    "下周三约哪天下午比较方便？",
   ];
+  it.each(["Which of these look closest to what you want?", "下周三约哪天下午比较方便？"])(
+    "reads %s as a question for a card, not a refusal",
+    (reply) => {
+      expect(declinedSentence(reply)?.kind).toBe("text_question");
+    },
+  );
   it.each(reports)("leaves %s alone", (reply) => {
     expect(declinedSentence(reply)).toBeUndefined();
   });
@@ -189,6 +193,18 @@ describe("declineRetry", () => {
       teammates: [],
     });
     expect(retry?.note).toContain("instantly__mail__activate_campaign");
+  });
+
+  it("sends a clarifying question typed into the reply to a question card", () => {
+    const reply =
+      "The draft is a three-email sequence for 16 recipients.\n\nWhich do you mean?\n- Start it for all 16\n- Send a one-off email instead";
+    expect(declinedSentence(reply)?.kind).toBe("text_question");
+    const retry = declineRetry({ reply, request: "发一下", tools: [], teammates: [] });
+    expect(retry?.note).toContain("Ask it with ask_user");
+    // After real work, a closing question stands.
+    expect(
+      declineRetry({ reply, request: "发一下", tools: [], teammates: [], worked: true }),
+    ).toBeUndefined();
   });
 
   it("catches a past-tense refusal of a send", () => {

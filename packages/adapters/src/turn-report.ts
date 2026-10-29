@@ -316,7 +316,7 @@ const DEFER =
 const PICK =
   /\bwhich (?:\d+ |of (?:them|these|the \w+) |ones?\b|people|candidates?|person|emails?|interviews?)[^.!?\n]{0,60}\b(?:should I|do you want|would you like|to (?:send|email|contact|reach|draft|look up|book|schedule|process|handle))\b|^which (?:\d+|ones?|people|candidates?|person)\b[^.!?\n]{0,30}[?？]$|(?:(?:哪些|哪几)(?:个|位)?(?:人|候选人)|哪位|哪个(?:人|候选人)).{0,20}(?:发|联系|约|处理|查|写)|(?:发给|联系|约)(?:谁|哪些|哪几|哪位)/i;
 
-export type DeclineKind = "decline" | "defer" | "pick";
+export type DeclineKind = "decline" | "defer" | "pick" | "text_question";
 export type Declined = { sentence: string; kind: DeclineKind };
 
 /** The first sentence of a reply that declines, defers or hands back a pick, else undefined. */
@@ -330,7 +330,9 @@ export function declinedSentence(text: string): Declined | undefined {
     if (PICK.test(sentence)) return { sentence, kind: "pick" };
     if (DEFER.test(sentence)) return { sentence, kind: "defer" };
   }
-  return undefined;
+  // A clarifying question typed into the reply instead of a question card.
+  const question = sentences.find((sentence) => /[?？]$/.test(sentence));
+  return question ? { sentence: question, kind: "text_question" } : undefined;
 }
 
 export type Teammate = { id: string; name: string; about: string };
@@ -340,6 +342,10 @@ export type DeclineRetry = { sentence: string; note: string };
 /** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
 export const DECLINE_RETRY_NOTE =
   "Do not decline or defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what.";
+
+/** Model-facing: a clarifying question asked in plain text goes on a question card instead. */
+export const TEXT_QUESTION_NOTE =
+  "You asked the user in plain text. Ask it with ask_user instead: the question in one sentence, concrete options (the people or choices you listed) and a custom answer, without saying what you could not do or find. Your question was";
 
 /**
  * One retry for a final reply that declines, defers or hands back a pick. A refusal is retried
@@ -366,6 +372,8 @@ export function declineRetry(input: {
   const refusesAsked = asked.some((kind) => REQUEST_KINDS[kind].test(sentence));
   if (input.worked && !(declined.kind === "decline" && refusesAsked)) return undefined;
   const quoted = sentence.slice(0, 200);
+  if (declined.kind === "text_question")
+    return { sentence, note: `${TEXT_QUESTION_NOTE} ("${quoted}")` };
   const lead =
     declined.kind === "pick"
       ? `Your reply asked the user to choose ("${quoted}"). When the request names the people or a number, use those; otherwise ask that choice as one ask_user question with concrete options (such as the person just discussed or the first results).`
