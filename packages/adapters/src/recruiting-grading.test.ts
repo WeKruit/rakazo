@@ -2,6 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   GRADE_BATCH,
+  GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
   RECRUITING_GRADE_NONCE_PREFIX,
   startRecruitingGrading,
@@ -264,5 +265,19 @@ describe("gradingToolRefusal", () => {
       expect(gradingToolRefusal(name, args, save)).toBeUndefined();
     for (const [name, args] of [...never, ...starts])
       expect(gradingToolRefusal(name, args, save)).toMatch(/only reads/);
+  });
+
+  it("tells a grading turn to end once it has used its tool calls", () => {
+    expect(
+      gradingToolRefusal(
+        "mcp__research__get_rows",
+        { task_id: "t" },
+        save,
+        GRADE_TOOL_CALL_LIMIT - 1,
+      ),
+    ).toBeUndefined();
+    expect(
+      gradingToolRefusal("mcp__research__get_rows", { task_id: "t" }, save, GRADE_TOOL_CALL_LIMIT),
+    ).toMatch(/End the turn now/);
   });
 });

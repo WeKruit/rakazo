@@ -46,6 +46,10 @@ const GRADING_RESEARCH_OPERATIONS = new Set(["status", "rows", "save_results"]);
 /** The request turn only starts research; the turn its finish wakes reads and saves the grades. */
 const START_PROVIDER_TOOLS = new Set(["research", "credits"]);
 const SAVE_PROVIDER_TOOLS = new Set(["get_task", "get_rows"]);
+/** Tool calls one grading turn may make; a batch needs far fewer, so more means it is looping. */
+export const GRADE_TOOL_CALL_LIMIT = 60;
+/** Past this many calls a grading turn that keeps calling after being told to end is stopped. */
+export const GRADE_TOOL_CALL_STOP = 3 * GRADE_TOOL_CALL_LIMIT;
 /** The connector catalog that lists and runs tools beyond the directly loaded ones. */
 const CATALOG_READ_TOOLS = new Set(["connectors_search_tools", "connectors_load_tool"]);
 const CATALOG_EXECUTE_TOOL = "connectors_execute_tool";
@@ -86,7 +90,10 @@ export function gradingToolRefusal(
   name: string,
   args: Record<string, unknown>,
   clientNonce: string | null,
+  calls = 0,
 ): string | undefined {
+  if (calls >= GRADE_TOOL_CALL_LIMIT)
+    return "Not run: this grading turn has used all its tool calls. End the turn now with an empty reply; anything left is picked up later.";
   const start = Boolean(clientNonce?.startsWith(RECRUITING_GRADE_NONCE_PREFIX));
   const direct = /^mcp__.+__([^_].*)$/.exec(name)?.[1];
   const executed =
