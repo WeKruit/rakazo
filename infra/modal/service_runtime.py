@@ -1,9 +1,10 @@
 """Shared local process lifecycle; no Modal calls or resources are created here."""
 import contextlib
 import datetime
+import http.client
+import json
 import os
 import signal
-import socket
 import subprocess
 import threading
 import time
@@ -91,12 +92,20 @@ class ServiceRuntime:
                 if any(process.poll() is not None for process in self.processes):
                     raise RuntimeError("A native Rakazo service exited during startup")
                 try:
-                    with socket.create_connection(("127.0.0.1", port), timeout=1):
+                    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+                    try:
+                        connection.request("GET", "/ready", headers={"Host": urlsplit(origin).netloc})
+                        response = connection.getresponse()
+                        state = json.loads(response.read(16_384))
+                        if response.status != 200 or not isinstance(state, dict) or state.get("ok") is not True:
+                            raise ValueError("Service is not ready")
                         phase("ready.probe.ok", port=port)
                         break
-                except OSError:
+                    finally:
+                        connection.close()
+                except (OSError, http.client.HTTPException, ValueError):
                     if time.monotonic() >= deadline:
-                        raise TimeoutError(f"Native Rakazo port {port} did not become ready")
+                        raise TimeoutError(f"Native Rakazo /ready on port {port} did not become healthy")
                     time.sleep(0.5)
 
     def stop(self):

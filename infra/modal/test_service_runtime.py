@@ -17,16 +17,52 @@ class ServiceRuntimeTests(unittest.TestCase):
         for service, ports in (("api", [3100, 8000]), ("worker", [8001])):
             with self.subTest(service=service), patch("infra.modal.service_runtime.subprocess.Popen") as spawn, \
                  patch("infra.modal.service_runtime.threading.Thread"), \
-                 patch("infra.modal.service_runtime.socket.create_connection") as connect, \
+                 patch("infra.modal.service_runtime.http.client.HTTPConnection") as connect, \
                  patch("infra.modal.service_runtime.Path.write_text"), \
                  patch("infra.modal.service_runtime.subprocess.run") as migrate:
                 spawn.return_value.poll.return_value = None
+                connect.return_value.getresponse.return_value.status = 200
+                connect.return_value.getresponse.return_value.read.return_value = b'{"ok":true}'
                 self.runtime().start("https://synthetic.example.test", services=(service,), migrate=False,
                                      extra_env={"WORKER_HEALTH_PORT": "8001"})
                 self.assertEqual(spawn.call_count, 1)
                 self.assertEqual(spawn.call_args.kwargs["cwd"], f"/app/apps/{service}")
-                self.assertEqual([call.args[0][1] for call in connect.call_args_list], ports)
+                self.assertEqual([call.args[1] for call in connect.call_args_list], ports)
+                connect.return_value.request.assert_called_with(
+                    "GET", "/ready", headers={"Host": "synthetic.example.test"})
                 migrate.assert_not_called()
+
+    def test_open_port_does_not_admit_an_unready_service(self):
+        with patch("infra.modal.service_runtime.subprocess.Popen") as spawn, \
+             patch("infra.modal.service_runtime.threading.Thread"), \
+             patch("infra.modal.service_runtime.time.sleep"), \
+             patch("infra.modal.service_runtime.http.client.HTTPConnection") as connect:
+            spawn.return_value.poll.return_value = None
+            response = lambda status, body: SimpleNamespace(status=status, read=lambda limit: body)
+            connect.return_value.getresponse.side_effect = [
+                response(503, b'{"ok":false}'),
+                response(200, b'{"ok":false}'),
+                response(200, b'[]'),
+                response(200, b'not json'),
+                response(200, b'{"ok":true}'),
+                response(200, b'{"ok":true}'),
+            ]
+            self.runtime().start("https://synthetic.example.test", services=("api",), migrate=False)
+            self.assertEqual([call.args[1] for call in connect.call_args_list], [3100]*5 + [8000])
+            self.assertEqual(connect.return_value.close.call_count, 6)
+
+    def test_unready_service_times_out_instead_of_completing_startup(self):
+        now = [0]
+        with patch("infra.modal.service_runtime.subprocess.Popen") as spawn, \
+             patch("infra.modal.service_runtime.threading.Thread"), \
+             patch("infra.modal.service_runtime.time.monotonic", side_effect=lambda: now[0]), \
+             patch("infra.modal.service_runtime.time.sleep", side_effect=lambda _: now.__setitem__(0, 151)), \
+             patch("infra.modal.service_runtime.http.client.HTTPConnection") as connect:
+            spawn.return_value.poll.return_value = None
+            connect.return_value.getresponse.return_value.status = 503
+            connect.return_value.getresponse.return_value.read.return_value = b'{"ok":false}'
+            with self.assertRaisesRegex(TimeoutError, "/ready on port 3100"):
+                self.runtime().start("https://synthetic.example.test", services=("api",), migrate=False)
 
     def test_failed_migration_never_starts_children(self):
         with patch.dict("os.environ", {"DATABASE_URL": "postgres://synthetic@localhost/test"}), \
