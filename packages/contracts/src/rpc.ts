@@ -1328,11 +1328,16 @@ export const appContract = {
       .output(z.object({ icon: z.string().nullable(), retry: z.boolean().optional() })),
     /**
      * An organization's own website host, found from its name for its logo, or null when no site
-     * could be confirmed. `retry` means the server was too busy to look.
+     * could be confirmed; `icon` is its logo as a small data URL when one was found with it.
+     * `retry` means the server was too busy to look.
      */
-    companySite: oc
-      .input(z.object({ name: z.string().max(200) }))
-      .output(z.object({ host: z.string().nullable(), retry: z.boolean().optional() })),
+    companySite: oc.input(z.object({ name: z.string().max(200) })).output(
+      z.object({
+        host: z.string().nullable(),
+        icon: z.string().optional(),
+        retry: z.boolean().optional(),
+      }),
+    ),
   },
   runs: {
     list: oc

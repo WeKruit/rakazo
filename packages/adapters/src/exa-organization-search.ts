@@ -41,8 +41,10 @@ export function createExaOrganizationSearch(
   };
 }
 
-/** The `{url, title}` results in a tool-call response, sent as JSON or as one SSE message. */
-export function organizationResults(body: string): { url: string; title: string }[] {
+/** The `{url, title, image}` results in a tool-call response, sent as JSON or as one SSE message. */
+export function organizationResults(
+  body: string,
+): { url: string; title: string; image?: string }[] {
   const json = body.trimStart().startsWith("{")
     ? body
     : body
@@ -60,6 +62,8 @@ export function organizationResults(body: string): { url: string; title: string 
     const url = typeof result?.url === "string" ? result.url : "";
     const named = result?.entities?.[0]?.properties?.name;
     const title = typeof named === "string" && named ? named : String(result?.title ?? "");
-    return url && title ? [{ url, title }] : [];
+    const image =
+      typeof result?.image === "string" && result.image.startsWith("https://") ? result.image : "";
+    return url && title ? [{ url, title, ...(image ? { image } : {}) }] : [];
   });
 }
