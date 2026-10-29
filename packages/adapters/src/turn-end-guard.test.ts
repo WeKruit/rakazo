@@ -1105,6 +1105,40 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("redrafts a draft shown with template variables once", async () => {
+    const reply =
+      "Here is the sequence.\n\n### Email 1\n**Subject:** Role\n\nHi {{firstName}},\n\nA role.";
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    const retry = await planDeclineRetry(human, {
+      ...input,
+      reply,
+      request: "draft",
+      worked: true,
+    });
+    expect(retry?.note).toContain("written for a real person");
+    const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
+    expect(await planDeclineRetry(retried, { ...input, reply, request: "draft" })).toBeUndefined();
+    expect(
+      await planDeclineRetry(human, {
+        ...input,
+        reply: reply.replace("{{firstName}}", "Gin"),
+        request: "draft",
+        worked: true,
+      }),
+    ).toBeUndefined();
+  });
+
+  it("puts a question the retry still typed into its reply on a card", async () => {
+    const retried = { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) };
+    const reply =
+      "There's no booking to move. Which candidate should I arrange it for? I can use the first candidate, or you can name someone else.";
+    const card = await planDeclineRetry(retried, { ...input, reply, request: "发一下" });
+    expect(card).toMatchObject({
+      keep: "There's no booking to move.",
+      card: "Which candidate should I arrange it for? I can use the first candidate, or you can name someone else.",
+    });
+  });
+
   it("never retries the first ten, intake offers or an offer after real work", async () => {
     const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
     const offer = { ...input, reply: "Do you want me to include remote people?", request: "go" };

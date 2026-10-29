@@ -13,7 +13,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import type { DeclineRetry } from "./turn-report.js";
-import { declineRetry, retryReason } from "./turn-report.js";
+import { declineRetry, draftVariables, questionCard, retryReason } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
@@ -708,10 +708,11 @@ export async function planDeclineRetry(
     stage?: () => Promise<string | undefined>;
   },
 ): Promise<DeclineRetry | undefined> {
+  const variables = draftVariables(input.reply);
   const declined = input.request.trim() ? retryReason(input.reply, input.request) : undefined;
-  if (!declined || input.presentedRound) return undefined;
+  if (!(variables || declined) || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
-  if (declined.kind !== "decline" && input.worked) return undefined;
+  if (!variables && declined?.kind !== "decline" && input.worked) return undefined;
   const recent = await deps.prisma.message.findMany({
     where: {
       threadId: input.run.threadId,
@@ -724,7 +725,11 @@ export async function planDeclineRetry(
     take: 2,
     select: { clientNonce: true },
   });
-  if (countTrailingAutoContinues(recent) > 0) return undefined;
+  // Already retried: a question still typed into the reply goes on a card instead.
+  if (countTrailingAutoContinues(recent) > 0)
+    return declined && !variables ? questionCard(input.reply, declined) : undefined;
+  if (variables) return variables;
+  if (!declined) return undefined;
   const members = input.groupId
     ? await deps.prisma.chatGroupMember.findMany({
         where: {
