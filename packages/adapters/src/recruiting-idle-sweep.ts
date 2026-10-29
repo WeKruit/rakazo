@@ -57,7 +57,8 @@ export async function sweepIdleRecruitingRoles(deps: {
     if (!roleId) continue;
     try {
       const run = await deps.prisma.run.findFirst({
-        where: { threadId: thread.id },
+        // Quiet grading turns are not the conversation's last turn.
+        where: { threadId: thread.id, trigger: { not: "recruiting_grade" } },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
         select: {
           id: true,

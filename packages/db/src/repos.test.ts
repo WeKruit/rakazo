@@ -74,7 +74,7 @@ describe("createRepos.listBots", () => {
           thread: expect.objectContaining({
             include: expect.objectContaining({
               runs: expect.objectContaining({
-                where: { trigger: { notIn: ["bot_message", "tickets"] } },
+                where: { trigger: { notIn: ["bot_message", "tickets", "recruiting_grade"] } },
                 orderBy: [{ createdAt: "desc" }, { id: "desc" }],
                 take: 1,
                 select: { id: true, status: true },
@@ -120,7 +120,7 @@ describe("createRepos.listBots", () => {
 
     expect(bots.map((bot) => bot.preview)).toEqual(["Answer one", "Answer two"]);
     expect(prisma.run.findMany).toHaveBeenCalledExactlyOnceWith({
-      where: { id: { in: ["run-one", "run-two"] }, trigger: { in: ["bot_message", "tickets"] } },
+      where: { id: { in: ["run-one", "run-two"] }, trigger: { in: ["bot_message", "tickets", "recruiting_grade"] } },
       select: { id: true, trigger: true },
     });
   });
@@ -167,7 +167,7 @@ describe("createRepos.listBots", () => {
     expect(prisma.run.findMany).toHaveBeenNthCalledWith(2, {
       where: {
         id: { in: ["peer-old", "user-old"] },
-        trigger: { in: ["bot_message", "tickets"] },
+        trigger: { in: ["bot_message", "tickets", "recruiting_grade"] },
       },
       select: { id: true, trigger: true },
     });

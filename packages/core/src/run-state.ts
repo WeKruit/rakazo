@@ -20,15 +20,17 @@ const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set([
   "created",
   "tickets",
   "bot_message",
+  "recruiting_grade",
 ]);
 
 /**
  * Background triggers do internal work that must not leak into the chat: the
  * sidebar must not show them as activity and the bot transcript must not render
- * their steps/text. Ticket work reports through board comments and its status.
- * Existing ask and approval cards can still request user input.
+ * their steps/text. Ticket work reports through board comments and its status;
+ * recruiting grades appear in Results. Existing ask and approval cards can still
+ * request user input.
  */
-export const BACKGROUND_RUN_TRIGGERS = ["tickets"] as const;
+export const BACKGROUND_RUN_TRIGGERS = ["tickets", "recruiting_grade"] as const;
 const BACKGROUND_RUN_TRIGGER_SET = new Set<string>(BACKGROUND_RUN_TRIGGERS);
 
 export function isBackgroundRunTrigger(trigger: string | null | undefined): boolean {
@@ -45,6 +47,7 @@ export const AUTOMATION_RUN_TRIGGERS = [
   "webhook",
   "tickets",
   "recruiting_research",
+  "recruiting_grade",
   "cloud_agent",
 ] as const;
 const AUTOMATION_RUN_TRIGGER_SET = new Set<string>(AUTOMATION_RUN_TRIGGERS);
