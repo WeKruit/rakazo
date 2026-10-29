@@ -13014,7 +13014,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   return undefined;
                 })
               : undefined;
-          if (declineRetried?.keep !== undefined) {
+          if (declineRetried?.card !== undefined) {
+            // A retry still asked in text: its question goes on a card, answered like any card.
+            text = declineRetried.keep ?? "";
+            blocks = [
+              ...blocks.filter((block) => block.kind !== "text"),
+              ...(text ? [{ kind: "text" as const, text }] : []),
+              { kind: "ask" as const, text: declineRetried.card, status: "pending" as const },
+            ];
+          } else if (declineRetried?.keep !== undefined) {
             // The draft stays shown; only its closing question moves to the question card.
             text = declineRetried.keep;
             blocks = [...blocks.filter((block) => block.kind !== "text"), { kind: "text", text }];
@@ -13087,7 +13095,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
-          } else if (declineRetried) {
+          } else if (declineRetried && declineRetried.card === undefined) {
             retryRunId = await sendDeclineRetry(
               deps,
               { ...run, threadId: thread.id, userId: run.userId },

@@ -400,8 +400,35 @@ export function retryReason(reply: string, request: string): Declined | undefine
 
 export type Teammate = { id: string; name: string; about: string };
 
-/** `keep` is the part of the reply still shown, when the reply also delivered a draft. */
-export type DeclineRetry = { sentence: string; note: string; keep?: string };
+/**
+ * `keep` is the part of the reply still shown, when the reply also delivered a draft. `card` is a
+ * question the retry still typed into its reply: it goes on a question card instead.
+ */
+export type DeclineRetry = { sentence: string; note: string; keep?: string; card?: string };
+
+/** Model-facing: a draft shown in chat with {{variables}} is written again for a real person. */
+export const DRAFT_VARIABLES_NOTE =
+  "Your draft shows template variables. A draft in the chat is written for a real person: use the name and current title or company of the person it is for, else the role's first result from recruiting_candidates, and show the whole draft again. Never {{variables}}, placeholders or brackets in a draft; only a send uses them.";
+
+/** A drafted email shown with {{variables}} instead of a real person's details. */
+export function draftVariables(reply: string): DeclineRetry | undefined {
+  if (!DRAFT_START.test(reply)) return undefined;
+  const variable = reply.match(/\{\{\s*[\w.]+\s*\}\}/)?.[0];
+  return variable ? { sentence: variable, note: DRAFT_VARIABLES_NOTE } : undefined;
+}
+
+/**
+ * A question still typed into a reply after its retry: the question and what follows it go on a
+ * question card, the text before it stays. A refusal is not a question.
+ */
+export function questionCard(reply: string, declined: Declined): DeclineRetry | undefined {
+  if (declined.kind === "decline") return undefined;
+  const at = reply.indexOf(declined.sentence);
+  if (at < 0) return undefined;
+  const card = reply.slice(at).trim();
+  if (!/[?？]/.test(card)) return undefined;
+  return { sentence: declined.sentence, note: "", keep: reply.slice(0, at).trim(), card };
+}
 
 /** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
 export const DECLINE_RETRY_NOTE =
