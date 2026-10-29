@@ -1160,9 +1160,10 @@ describe("planDeclineRetry", () => {
         })
       )?.note,
     ).toBeDefined();
+    // After real work the offer stands, as a card instead of text.
     expect(
       await planDeclineRetry(human, { ...offer, worked: true, stage: async () => "scale" }),
-    ).toBeUndefined();
+    ).toMatchObject({ card: "Do you want me to include remote people?", note: "" });
     expect((await planDeclineRetry(human, { ...offer, stage: async () => "scale" }))?.note).toMatch(
       /^Your reply deferred the request/,
     );
