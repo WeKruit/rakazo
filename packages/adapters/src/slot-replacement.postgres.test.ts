@@ -1,5 +1,5 @@
-import { spawn } from "node:child_process";
 import type { ChildProcessByStdio } from "node:child_process";
+import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { createRequire } from "node:module";
 import type { Readable } from "node:stream";
@@ -13,9 +13,9 @@ import {
   setDesiredSessionGeneration,
 } from "@rakazo/db";
 import { Pool } from "pg";
-import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from "vitest";
-import { replaceWorkerSlot } from "./slot-replacement.js";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { SlotPlatform, SlotTarget } from "./slot-replacement.js";
+import { replaceWorkerSlot } from "./slot-replacement.js";
 
 const url = process.env.SESSION_ADMISSION_TEST_DATABASE_URL;
 const suite = url ? describe.sequential : describe.skip;

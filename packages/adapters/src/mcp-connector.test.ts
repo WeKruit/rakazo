@@ -1342,6 +1342,8 @@ function mcpFetch(
     calls?: string[];
     callError?: Error;
     callResult?: Record<string, unknown>;
+    /** tools/call never answers until the request is aborted. */
+    hang?: boolean;
   },
   expectedUrl = "https://mcp.example.test/mcp",
 ) {
@@ -1381,6 +1383,10 @@ function mcpFetch(
     if (message.method === "tools/call") {
       if (message.params?.name) state.calls?.push(message.params.name);
       if (state.callError) throw state.callError;
+      if (state.hang)
+        return new Promise<Response>((_, reject) =>
+          request.signal.addEventListener("abort", () => reject(request.signal.reason)),
+        );
       return Response.json({
         jsonrpc: "2.0",
         id: message.id,
@@ -1565,6 +1571,56 @@ describe("MCP connector session cache", () => {
       }
     },
   );
+
+  it("fails a read that never answers instead of holding the run", async () => {
+    const state = {
+      failNext: false,
+      initializations: 0,
+      calls: [] as string[],
+      hang: true,
+      tools: [{ name: "list_emails", inputSchema: { type: "object" } }],
+    };
+    vi.stubGlobal("fetch", mcpFetch(state));
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockImplementation(() => {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(new DOMException("timed out", "TimeoutError")), 10);
+      return controller.signal;
+    });
+    const connector = new McpConnector(
+      {
+        botMcpServer: {
+          findMany: vi.fn().mockResolvedValue([ASSIGNMENT]),
+          findFirst: vi.fn().mockResolvedValue(ASSIGNMENT),
+        },
+      } as never,
+      {} as never,
+      { network: TEST_NETWORK },
+    );
+    const context = {
+      spaceId: "w1",
+      userId: "u1",
+      botId: "bot-1",
+      signal: new AbortController().signal,
+    } as never;
+    try {
+      const tool = (await connector.discoverTools(context))[0]!;
+      const events = [];
+      for await (const event of connector.execute(
+        { tool: tool.name, args: {}, route: tool.route, executionId: "hung-read" },
+        context,
+      ))
+        events.push(event);
+      expect(events).toEqual([
+        expect.objectContaining({
+          type: "error",
+          message: expect.stringContaining("list_emails did not answer within 90 seconds"),
+        }),
+      ]);
+    } finally {
+      timeout.mockRestore();
+      await connector.close();
+    }
+  });
 
   it.each(["assignment", "authorization", "session", "cancellation"])(
     "keeps a pre-dispatch %s failure an ordinary error",

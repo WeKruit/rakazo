@@ -375,6 +375,10 @@ const FULLENRICH_MCP = "https://mcp.fullenrich.com/mcp";
 /** Longest wait for one Instantly read, so a provider that stops answering never holds a run. */
 const INSTANTLY_READ_MS = 60_000;
 const FIND_EMAILS = "native_find_emails";
+/** Longest wait for one read on a remote service, so one that stops answering never holds a run. */
+const REMOTE_READ_MS = 90_000;
+const REMOTE_READ =
+  /^(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview|whoami)(?:_|$)/;
 
 /**
  * The contact lookup tool for an assigned enrichment server: runs the providers one after another
@@ -1165,8 +1169,14 @@ export class McpConnector implements ConnectorProvider {
       const enrichmentDeadline = Date.now() + ENRICHMENT_WAIT_MS;
       for (let attempt = 0; ; attempt += 1) {
         context.signal.throwIfAborted();
+        // A read that never answers fails here instead of holding the run until its stall guard.
+        const readTimeout = REMOTE_READ.test(call.route.toolName)
+          ? AbortSignal.timeout(REMOTE_READ_MS)
+          : undefined;
         try {
-          result = await session.callTool(call.route.toolName, args, { signal: context.signal });
+          result = await session.callTool(call.route.toolName, args, {
+            signal: readTimeout ? AbortSignal.any([context.signal, readTimeout]) : context.signal,
+          });
           if (
             enrichmentResults &&
             enrichmentPending(result) &&
@@ -1177,6 +1187,10 @@ export class McpConnector implements ConnectorProvider {
           }
           if (!peopleSearch || !peopleSearchRateLimited(result)) break;
         } catch (error) {
+          if (readTimeout?.aborted && !context.signal.aborted)
+            throw new Error(
+              `${call.route.toolName} did not answer within ${REMOTE_READ_MS / 1000} seconds. Continue with the other tools, or tell the user this service is not answering.`,
+            );
           if (!peopleSearch || !(error instanceof SdkHttpError) || error.status !== 429)
             throw error;
         }

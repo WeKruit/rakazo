@@ -363,7 +363,7 @@ import { formatCurrentTimeInstruction } from "./current-time.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
 import {
   handoffToGroupBot,
-  isStageCheckIn,
+  isQuietStageReport,
   loadGroupContext,
   reportGroupStageOutcome,
 } from "./group-handoff.js";
@@ -4590,7 +4590,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // Answering a teammate's mid-stage check-in stays quiet unless the user needs to know.
         const quietRun =
           runAllowsSilentEmpty(run.trigger) ||
-          isStageCheckIn(
+          isQuietStageReport(
             run.trigger,
             // The check-in is a teammate's handoff message, not a user turn.
             historyMessages.find((message) => message.id === run.sourceMessageId)?.blocks,

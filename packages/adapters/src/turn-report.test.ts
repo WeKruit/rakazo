@@ -252,6 +252,9 @@ describe("declineRetry", () => {
         "I couldn’t stage the exact one-off email for approval: Aiyi is already in the role’s existing email sequence.",
       ),
     ).toBeDefined();
+    expect(
+      declinedSentence("I couldn’t check for an existing draft, so this is newly prepared here."),
+    ).toBeUndefined();
     // An honest shortfall is a report, not a refusal.
     expect(
       declinedSentence("I couldn't find anyone new in Austin, so the total is still 40."),

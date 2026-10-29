@@ -264,7 +264,7 @@ export async function reportGroupHandoffOutcome(
       if (botMessageHopExhausted(hop)) return undefined;
       const text =
         outcome.status === "completed"
-          ? "Finished the stage you handed me; my result is my last message above. Check it against what you asked for, then give the user the outcome or hand me a correction."
+          ? `Finished the stage you handed me; my result is my last message above, which the user already sees. If it does what you asked, reply exactly ${NO_RESPONSE}; otherwise hand me a correction, or tell the user only what it is missing. Never repeat it.`
           : outcome.status === "progress"
             ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
             : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
@@ -450,8 +450,8 @@ export async function reportStalledGroupStage(
   });
 }
 
-/** A delegator's turn that answers a teammate's mid-stage check-in may end silently. */
-export function isStageCheckIn(
+/** A delegator's turn that reads a teammate's check-in or finished stage may end silently. */
+export function isQuietStageReport(
   trigger: string,
   blocks: readonly MessageBlock[] | undefined,
   botId: string,
@@ -461,7 +461,9 @@ export function isStageCheckIn(
     Boolean(
       blocks?.some(
         (block) =>
-          block.kind === "handoff" && block.toBotId === botId && block.report === "progress",
+          block.kind === "handoff" &&
+          block.toBotId === botId &&
+          (block.report === "progress" || block.report === "completed"),
       ),
     )
   );
