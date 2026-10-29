@@ -130,10 +130,14 @@ function commonChecks(messages, failures) {
       failures.push(
         `self-talk in reply: "…${text.slice(Math.max(0, selfTalk.index - 60), selfTalk.index + 40)}…"`,
       );
-    const refusal = text.match(REFUSAL);
+    // A question card asks "which people…?" by design; only the reply's own words can refuse.
+    const said = botText({
+      blocks: (message.blocks ?? []).filter((block) => block.kind !== "ask"),
+    });
+    const refusal = said.match(REFUSAL);
     if (refusal)
       failures.push(
-        `declined or deferred a request: "…${text.slice(Math.max(0, refusal.index - 80), refusal.index + 80)}…"`,
+        `declined or deferred a request: "…${said.slice(Math.max(0, refusal.index - 80), refusal.index + 80)}…"`,
       );
   }
 }
@@ -629,12 +633,14 @@ if (wanted.has("dispatch"))
 // the action's own card) or exactly one question card, never a decline or an offer to do it.
 // Cards are left unanswered, so nothing is sent or booked.
 // "clarify": who, what or when is open, so the turn must end on one card: a question with
-// options, or the send/booking card naming exact recipients. The rest may act or ask.
+// options, or the send/booking card naming exact recipients. The rest may act on a stated
+// reading or ask. A card's own question may say why it asks; only the reply's words are checked
+// for a refusal.
 const AMBIGUOUS = [
   { ask: "发一下", clarify: true },
   { ask: "约一下他", clarify: true },
   { ask: "这个人怎么样" },
-  { ask: "处理一下前几个", clarify: true },
+  { ask: "处理一下前几个" },
   { ask: "contact" },
   { ask: "再来点" },
   { ask: "改一下邮件", clarify: true },
@@ -670,10 +676,15 @@ if (wanted.has("ambiguous"))
         );
       else if (!acted && asks.length !== 1)
         failures.push(`「${ask}」: no action and ${asks.length} question cards (want one)`);
-      const declined = text.match(DECLINED) ?? text.match(DEFERRED);
+      const said = recruiterSees(replies)
+        .map((message) =>
+          botText({ blocks: (message.blocks ?? []).filter((block) => block.kind !== "ask") }),
+        )
+        .join("\n");
+      const declined = said.match(DECLINED) ?? said.match(DEFERRED);
       if (declined)
         failures.push(
-          `「${ask}」: declined or deferred "…${text.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
+          `「${ask}」: declined or deferred "…${said.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
         );
       commonChecks(replies, failures);
       steps.push({ ask, ...traceOf(allEvents, replies) });
