@@ -26,6 +26,11 @@ msgstr "— 未报告"
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr "{0, plural, other {人才库中有 # 位候选人}}"
 
+#. placeholder {0}: step.peopleWithEmail
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{0, plural, one {# person with email} other {# people with email}}"
+msgstr "{0, plural, other {# 人有邮箱}}"
+
 #. placeholder {0}: file.name
 #: src/pages/shell/useShellMessages.ts
 msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
@@ -1188,6 +1193,10 @@ msgstr "拖放或粘贴图片"
 msgid "Due"
 msgstr "截止时间"
 
+#: src/components/RunTrace.tsx
+msgid "Duration not recorded"
+msgstr "未记录耗时"
+
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
@@ -1607,6 +1616,10 @@ msgstr "正在加载预览…"
 msgid "Loading roles…"
 msgstr "正在加载岗位…"
 
+#: src/components/RunTrace.tsx
+msgid "Loading trace…"
+msgstr "正在加载追踪…"
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/Auth.tsx
@@ -1890,6 +1903,10 @@ msgstr "未列出模型。"
 msgid "No notes yet."
 msgstr "还没有备注。"
 
+#: src/components/RunTrace.tsx
+msgid "No recorded calls"
+msgstr "没有记录的调用"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
 msgstr "未找到远程 MCP 服务器"
@@ -2116,6 +2133,7 @@ msgstr "请粘贴你的 API 密钥，然后重新测试。"
 msgid "Pause consideration"
 msgstr "暂停考虑"
 
+#: src/components/ToolActivityDisclosure.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
 msgstr "已暂停"
@@ -2549,6 +2567,10 @@ msgstr "例行任务"
 msgid "Run time must be in the future."
 msgstr "运行时间必须是将来的时间。"
 
+#: src/components/RunTrace.tsx
+msgid "Run trace"
+msgstr "运行追踪"
+
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "运行中"
@@ -2930,6 +2952,10 @@ msgstr "陈述"
 msgid "Status"
 msgstr "状态"
 
+#: src/components/ToolActivityDisclosure.tsx
+msgid "Step failed"
+msgstr "步骤失败"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Steps"
 msgstr "步骤"
@@ -3115,6 +3141,10 @@ msgstr "今天"
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
 msgstr "总工作年限"
+
+#: src/components/RunTrace.tsx
+msgid "Trace unavailable"
+msgstr "追踪不可用"
 
 #: src/components/call/CallCard.tsx
 msgid "Transcript"

@@ -76,7 +76,9 @@ function RunTraceContent({ runId }: { runId: string }) {
             const offset = Math.max(0, ((Date.parse(row.startedAt) - start) / (end - start)) * 100);
             const width =
               row.durationMs === null ? 0 : Math.max(0, (row.durationMs / (end - start)) * 100);
-            const detail = `${row.kind} · ${row.status} · ${row.durationMs === null ? "Duration not recorded" : formatToolActivityDuration(row.durationMs)} · ${row.tokens === null ? "Tokens not recorded" : `${row.tokens} tokens`} · ${row.costUsd === null ? "Cost not recorded" : `$${row.costUsd.toFixed(4)}`}`;
+            // Runs from before status was audited say nothing rather than "unknown".
+            const status = row.status === "unknown" ? null : row.status;
+            const detail = `${row.kind}${status ? ` · ${status}` : ""} · ${row.durationMs === null ? "Duration not recorded" : formatToolActivityDuration(row.durationMs)} · ${row.tokens === null ? "Tokens not recorded" : `${row.tokens} tokens`} · ${row.costUsd === null ? "Cost not recorded" : `$${row.costUsd.toFixed(4)}`}`;
             return (
               <li
                 key={row.id}
@@ -86,11 +88,13 @@ function RunTraceContent({ runId }: { runId: string }) {
               >
                 <div className="flex min-w-0 justify-between gap-2">
                   <span className="truncate font-mono">{row.label}</span>
-                  <span
-                    className={row.status === "failed" ? "text-warning" : "text-muted-foreground"}
-                  >
-                    {row.status}
-                  </span>
+                  {status ? (
+                    <span
+                      className={status === "failed" ? "text-warning" : "text-muted-foreground"}
+                    >
+                      {status}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="relative h-2 rounded bg-muted" aria-hidden>
                   <span

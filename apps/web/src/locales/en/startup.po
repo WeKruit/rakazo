@@ -26,6 +26,11 @@ msgstr "— Not reported"
 msgid "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 msgstr "{0, plural, =1 {# candidate in the pool} other {# candidates in the pool}}"
 
+#. placeholder {0}: step.peopleWithEmail
+#: src/components/ToolActivityDisclosure.tsx
+msgid "{0, plural, one {# person with email} other {# people with email}}"
+msgstr "{0, plural, one {# person with email} other {# people with email}}"
+
 #. placeholder {0}: file.name
 #: src/pages/shell/useShellMessages.ts
 msgid "{0} (max {ATTACHMENT_MAX_COUNT} attachments)"
@@ -1188,6 +1193,10 @@ msgstr "Drag, drop, or paste an image"
 msgid "Due"
 msgstr "Due"
 
+#: src/components/RunTrace.tsx
+msgid "Duration not recorded"
+msgstr "Duration not recorded"
+
 #: src/pages/recruiting/NotesTab.tsx
 #: src/pages/recruiting/TasksTab.tsx
 msgid "Edit"
@@ -1607,6 +1616,10 @@ msgstr "Loading preview…"
 msgid "Loading roles…"
 msgstr "Loading roles…"
 
+#: src/components/RunTrace.tsx
+msgid "Loading trace…"
+msgstr "Loading trace…"
+
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/pages/Auth.tsx
@@ -1890,6 +1903,10 @@ msgstr "No models listed."
 msgid "No notes yet."
 msgstr "No notes yet."
 
+#: src/components/RunTrace.tsx
+msgid "No recorded calls"
+msgstr "No recorded calls"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
 msgstr "No remote MCP servers found"
@@ -2116,6 +2133,7 @@ msgstr "Paste your API key, then test again."
 msgid "Pause consideration"
 msgstr "Pause consideration"
 
+#: src/components/ToolActivityDisclosure.tsx
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Paused"
 msgstr "Paused"
@@ -2549,6 +2567,10 @@ msgstr "Routine"
 msgid "Run time must be in the future."
 msgstr "Run time must be in the future."
 
+#: src/components/RunTrace.tsx
+msgid "Run trace"
+msgstr "Run trace"
+
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "running"
@@ -2930,6 +2952,10 @@ msgstr "Statement"
 msgid "Status"
 msgstr "Status"
 
+#: src/components/ToolActivityDisclosure.tsx
+msgid "Step failed"
+msgstr "Step failed"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Steps"
 msgstr "Steps"
@@ -3115,6 +3141,10 @@ msgstr "Today"
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
 msgstr "Total experience"
+
+#: src/components/RunTrace.tsx
+msgid "Trace unavailable"
+msgstr "Trace unavailable"
 
 #: src/components/call/CallCard.tsx
 msgid "Transcript"
