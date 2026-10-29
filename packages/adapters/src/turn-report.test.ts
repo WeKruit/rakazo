@@ -315,6 +315,24 @@ describe("declineRetry", () => {
     ).toBe("text_question");
   });
 
+  it("retries a send that ended without its card however the reply words it", () => {
+    const reply =
+      "I couldn’t find a saved email draft for Acery to send. I haven’t sent anything. Please provide or save the intended draft, and I can present it for approval.";
+    expect(declinedSentence(reply)).toBeUndefined();
+    const retry = declineRetry({
+      reply,
+      request: "send this email to them",
+      tools: [{ name: "activate_campaign" }],
+      teammates: [],
+      worked: true,
+    });
+    expect(retry?.note).toContain("the one written in this conversation");
+    // Not a send or booking request: the same words stand.
+    expect(
+      declineRetry({ reply, request: "这个人怎么样", tools: [], teammates: [] }),
+    ).toBeUndefined();
+  });
+
   it("retries a send that ended without its card, even after other work", () => {
     expect(
       declineRetry({

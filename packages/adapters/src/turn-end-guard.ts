@@ -13,7 +13,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import type { DeclineRetry } from "./turn-report.js";
-import { declinedSentence, declineRetry } from "./turn-report.js";
+import { declineRetry, retryReason } from "./turn-report.js";
 
 export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
 
@@ -705,7 +705,7 @@ export async function planDeclineRetry(
     stage?: () => Promise<string | undefined>;
   },
 ): Promise<DeclineRetry | undefined> {
-  const declined = input.request.trim() ? declinedSentence(input.reply) : undefined;
+  const declined = input.request.trim() ? retryReason(input.reply, input.request) : undefined;
   if (!declined || input.presentedRound) return undefined;
   if (input.blocks.some((block) => CARD_KINDS.has(block.kind))) return undefined;
   if (declined.kind !== "decline" && input.worked) return undefined;
