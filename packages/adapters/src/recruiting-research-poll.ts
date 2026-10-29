@@ -167,7 +167,18 @@ export async function trackDirectRecruitingResearch(
     ...(create ? {} : { providerTaskId: String(args.task_id ?? "") }),
   });
   const providerTaskId = observation.providerTaskId;
-  if (observation.deliveryState !== "accepted" || !providerTaskId) return null;
+  if (observation.deliveryState !== "accepted" || !providerTaskId) {
+    // Why the provider didn't take the request; the code is the provider's own error code.
+    getLogger().warn("recruiting.research.not_accepted", {
+      runId: context.runId,
+      tool: route.toolName,
+      deliveryState: observation.deliveryState,
+      refusalCode: observation.refusalCode ?? null,
+      isError: (result as { isError?: unknown } | null)?.isError === true,
+      bodyKeys: Object.keys(mcpObject(result) ?? {}).slice(0, 20),
+    });
+    return null;
+  }
   const scope = { spaceId: context.spaceId, userId: context.userId };
   const [server, run] = await Promise.all([
     deps.prisma.mcpServer.findFirst({
