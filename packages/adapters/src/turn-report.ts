@@ -81,6 +81,10 @@ function isContactLookup(result: unknown): boolean {
     .some((value) => value?.source === "local_contact_lookup");
 }
 
+/** Tool operations that only read, by their leading verb. */
+const READ_ACTION =
+  /^(?:native_[a-z]+_)?(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview)(?:_|$)/;
+
 /**
  * What a tool call did, from its name, arguments and (once it returned) its result; undefined
  * when it changed nothing a person needs to hear about. A failed call did nothing.
@@ -101,7 +105,14 @@ export function turnWork(
   const recruiting = RECRUITING_WORK[name];
   if (recruiting) return operation && READ_OPERATIONS.has(operation) ? undefined : recruiting;
   if (settled?.readOnly !== false) return undefined;
-  const action = (name.split("__").at(-1) ?? name).toLowerCase();
+  // A catalog call names its tool in `id` ("server:get_bookings"); many servers declare no
+  // read-only hint, so a get or list call is read by its name, never reported as a change.
+  const target =
+    name === "connectors_execute_tool" && typeof args.id === "string"
+      ? (args.id.split(":").at(-1) ?? name)
+      : name;
+  const action = (target.split("__").at(-1) ?? target).toLowerCase();
+  if (READ_ACTION.test(action)) return undefined;
   if (/draft|campaign|lead/.test(action)) return "draft";
   if (/book|calendar|event|schedul/.test(action)) return "scheduling";
   return "connected";
