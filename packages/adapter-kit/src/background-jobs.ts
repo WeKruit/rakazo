@@ -184,7 +184,10 @@ export function recruitingResearchPollJob(
   };
 }
 
-/** One pending grading start per conversation: each new search pushes it back instead of adding one. */
+/**
+ * One pending grading start per conversation. A new request keeps a start that is already
+ * waiting, so a page that reads the role often can't push it back forever.
+ */
 export function recruitingGradeStartJob(
   payload: BackgroundJobPayloads["recruiting_grade.start"],
   availableAt?: Date,
@@ -193,6 +196,7 @@ export function recruitingGradeStartJob(
     name: "recruiting_grade.start",
     payload,
     replaceKey: `recruiting_grade.start:${payload.threadId}`,
+    keepExisting: true,
     ...(availableAt ? { availableAt } : {}),
   };
 }

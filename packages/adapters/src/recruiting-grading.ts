@@ -109,9 +109,13 @@ export const NOT_GRADING_TASK = {
   },
 };
 
-export function recruitingGradePrompt(people: readonly { name: string; url: string }[]) {
+export function recruitingGradePrompt(
+  people: readonly { name: string; url: string }[],
+  service: { slug: string; serverId: string },
+) {
   return [
     `Have the research service grade these ${people.length} people who are already saved in Results for this role: a grade and a short reason for each against the role's requirements, saved to Results like its other results.`,
+    `Start new research for this with the research service's research tool: mcp__${service.slug}__research when it is listed, otherwise connectors_execute_tool with id "${service.serverId}:research". Put the request and the people below in its prompt. Don't reply on the role's earlier research.`,
     "Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything. Start the research and end the turn; the grades are saved when they come back.",
     "",
     ...people.map((person) => `- ${person.name}: ${person.url}`),
@@ -235,9 +239,10 @@ export async function startRecruitingGrading(
   if (!people.size) return skipped("nobody to grade");
   const grader = await researchTeammate(deps.prisma, thread);
   if (!grader) return skipped("no research teammate");
-  const prompt = recruitingGradePrompt([...people.values()]);
+  const prompt = recruitingGradePrompt([...people.values()], grader);
+  // A retry of the same people after a request that never started research is a new request.
   const batch = createHash("sha256")
-    .update([...people.keys()].join("\n"))
+    .update([String(requests.length), ...people.keys()].join("\n"))
     .digest("hex")
     .slice(0, 24);
   const clientNonce = `${RECRUITING_GRADE_NONCE_PREFIX}${thread.id}:${batch}`;
@@ -259,7 +264,7 @@ export async function startRecruitingGrading(
     const task = await tx.task.create({
       data: {
         spaceId: thread.spaceId,
-        botId: grader,
+        botId: grader.botId,
         threadId: thread.id,
         userId: thread.userId,
         prompt,
@@ -269,7 +274,7 @@ export async function startRecruitingGrading(
     const run = await tx.run.create({
       data: {
         spaceId: thread.spaceId,
-        botId: grader,
+        botId: grader.botId,
         threadId: thread.id,
         userId: thread.userId,
         taskId: task.id,
@@ -280,7 +285,7 @@ export async function startRecruitingGrading(
     });
     return run.id;
   });
-  if (!runId) return;
+  if (!runId) return skipped("already requested");
   getLogger().info("recruiting.grade.started", { runId, roleId: role.id, people: people.size });
   // The existing run reconciler recovers a queued run after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
@@ -292,7 +297,7 @@ export async function startRecruitingGrading(
 async function researchTeammate(
   prisma: PrismaClient,
   thread: { spaceId: string; userId: string; botId: string | null; groupId: string | null },
-): Promise<string | null> {
+): Promise<{ botId: string; slug: string; serverId: string } | null> {
   const members = thread.groupId
     ? (
         await prisma.chatGroupMember.findMany({
@@ -313,8 +318,11 @@ async function researchTeammate(
       server: { endpoint: RESEARCH_MCP, enabled: true },
       bot: { archivedAt: null },
     },
-    select: { botId: true },
+    select: { botId: true, serverId: true, server: { select: { slug: true } } },
   });
-  const ids = new Set(assigned.map((row) => row.botId));
-  return members.find((id) => ids.has(id)) ?? null;
+  for (const id of members) {
+    const row = assigned.find((candidate) => candidate.botId === id);
+    if (row) return { botId: row.botId, slug: row.server.slug, serverId: row.serverId };
+  }
+  return null;
 }

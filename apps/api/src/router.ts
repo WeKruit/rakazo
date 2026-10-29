@@ -3962,28 +3962,9 @@ export function createRouter(deps: RouterDeps) {
       readView: authed.recruiting.readView.handler(({ context, input }) =>
         readRecruitingView(deps, context.actor, input, context.stillAuthorized),
       ),
-      listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) => {
-        // Opening a role makes sure everyone in it gets the research service's grade.
-        void Promise.resolve()
-          .then(() =>
-            deps.prisma.thread.findFirst({
-              where: {
-                spaceId: context.actor.spaceId,
-                userId: context.actor.userId,
-                activeRecruitingRoleId: input.roleId,
-                // The role's conversation, not a handoff or task thread that also points at it.
-                OR: [{ groupId: { not: null } }, { botId: { not: null } }],
-              },
-              orderBy: { createdAt: "desc" },
-              select: { id: true },
-            }),
-          )
-          .then((thread) => thread && scheduleRecruitingGrading(deps.jobs, thread.id))
-          .catch((error) =>
-            getLogger().warn("recruiting grade schedule", { error: String(error) }),
-          );
-        return listRecruitingCandidates(deps, context.actor, input);
-      }),
+      listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
+        listRecruitingCandidates(deps, context.actor, input),
+      ),
       roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
         getRecruitingRoleCandidates(
           {
@@ -4063,9 +4044,15 @@ export function createRouter(deps: RouterDeps) {
         await notifyRecruitingChange(deps, context.actor, input.threadId);
         return saved;
       }),
-      getWorkspace: authed.recruiting.getWorkspace.handler(({ context, input }) =>
-        getRecruitingWorkspace(deps.prisma, context.actor, input),
-      ),
+      getWorkspace: authed.recruiting.getWorkspace.handler(async ({ context, input }) => {
+        const workspace = await getRecruitingWorkspace(deps.prisma, context.actor, input);
+        // Opening a role makes sure everyone in it gets the research service's grade.
+        if (workspace)
+          void scheduleRecruitingGrading(deps.jobs, input.threadId).catch((error) =>
+            getLogger().warn("recruiting grade schedule", { error: String(error) }),
+          );
+        return workspace;
+      }),
       reviseRole: authed.recruiting.reviseRole.handler(async ({ context, input }) => {
         const saved = await reviseRecruitingRole(deps.prisma, context.actor, input, {
           artifacts: deps.artifacts,
