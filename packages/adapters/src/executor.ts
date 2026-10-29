@@ -5177,6 +5177,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // real work — it must not be able to act on that reading (shell, computer,
         // scheduling, spawning another bot, ...) before the user has assigned any task.
         const tools = run.trigger === "created" ? [] : [...builtins, ...exposedConnectorTools];
+        if (run.trigger === "recruiting_grade")
+          getLogger().info("recruiting.grade.tools", {
+            runId: run.id,
+            directResearch: tools.some((tool) => /^mcp__.+__research$/.test(tool.name)),
+            catalog: tools.some((tool) => tool.name === "connectors_execute_tool"),
+            count: tools.length,
+          });
         const taskCatalogInstruction = tools.some((tool) => tool.name === "task_catalog")
           ? TASK_CATALOG_GUIDANCE
           : undefined;
@@ -5717,6 +5724,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           context.signal.throwIfAborted();
           if (run.trigger === "recruiting_grade") {
             const refusal = gradingToolRefusal(name, rawArgs);
+            getLogger().info("recruiting.grade.tool", {
+              runId: run.id,
+              name,
+              ...(name === "connectors_execute_tool" ? { id: String(rawArgs.id ?? "") } : {}),
+              ...(typeof rawArgs.operation === "string" ? { operation: rawArgs.operation } : {}),
+              refused: Boolean(refusal),
+            });
             if (refusal) return { error: refusal };
           }
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
