@@ -16,7 +16,12 @@ import {
   RecruitingCrmRoleCampaignsReadSchema,
   RecruitingCrmRoleMailReadSchema,
 } from "@rakazo/contracts";
-import { abortableDelay, boundDirectApprovalDetails, catalogApprovalDetails } from "@rakazo/core";
+import {
+  abortableDelay,
+  boundDirectApprovalDetails,
+  catalogApprovalDetails,
+  recruitingBotKey,
+} from "@rakazo/core";
 import { mcpObject, stableJsonValue } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
@@ -31,7 +36,11 @@ import { z } from "zod";
 import { catalogToolPrefix } from "./approval-effect.js";
 import { calendarEvidenceHash } from "./calendar-approval.js";
 import { readBoundedText } from "./connector-http.js";
-import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
+import {
+  providerRefusesConnection,
+  redactConnectorPayload,
+  sanitizeConnectorError,
+} from "./connector-safety.js";
 import { FindEmailsInput, findEmails } from "./contact-lookup.js";
 import { credentialDigest } from "./credential-digest.js";
 import { appendToolCompletionAudit } from "./executor.js";
@@ -55,6 +64,7 @@ import {
   executeLazyCatalogControl,
   isLazyCatalogControlRoute,
   lazyCatalogTools,
+  relatedTools,
   resolveCatalogCall,
 } from "./lazy-tool-catalog.js";
 import type { McpOAuthBroker, OAuthMaterial } from "./mcp-oauth.js";
@@ -525,6 +535,59 @@ function platformMcpCredential(server: Pick<McpServer, "secretId" | "transport" 
 /** Tools listed outside the lazy catalog even when an agent has many connected tools. */
 const directTools = new WeakSet<ConnectorTool>();
 
+/**
+ * Each recruiting agent's own work tools, listed outside the lazy catalog on whichever connection
+ * the bot is assigned, so a turn never searches for them. Matched by the tool's own name; the
+ * people search is already direct for every bot.
+ */
+export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
+  outreach: [
+    "ensure_role_campaign",
+    "add_shortlist_leads",
+    "activate_campaign",
+    "get_campaign",
+    "list_leads",
+    "get_email",
+    "reply_to_email",
+    "find_emails",
+  ],
+  scheduling: [
+    "get_event_types",
+    "get_availability",
+    "create_booking",
+    "reschedule_booking",
+    "cancel_booking",
+    "get_booking",
+  ],
+};
+const coreName = (tool: ConnectorTool) =>
+  (tool.route?.toolName ?? tool.name).replace(/^native_(?:instantly_)?/, "");
+const coreTools = (bot: { name?: string | null; spawnKey?: string | null } | undefined) =>
+  new Set(bot ? (CORE_TOOLS[recruitingBotKey(bot) ?? ""] ?? []) : []);
+
+/**
+ * The tools listed directly: one per name (the local integration before a remote tool of the
+ * same name), never more than DIRECT_TOOL_LIMIT.
+ */
+function directSet(tools: readonly ConnectorTool[]): Set<ConnectorTool> {
+  const direct = new Set<ConnectorTool>();
+  const named = new Set<string>();
+  const marked = tools
+    .filter((tool) => directTools.has(tool))
+    .toSorted(
+      (left, right) =>
+        Number(right.route?.toolName.startsWith("native_")) -
+        Number(left.route?.toolName.startsWith("native_")),
+    );
+  for (const tool of marked) {
+    if (direct.size >= DIRECT_TOOL_LIMIT) break;
+    if (named.has(coreName(tool))) continue;
+    named.add(coreName(tool));
+    direct.add(tool);
+  }
+  return direct;
+}
+
 export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
   "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
 
@@ -545,6 +608,14 @@ class PeopleSearchRateLimitError extends Error {
   constructor() {
     super("People search is rate-limited (HTTP 429); retry later.");
   }
+}
+
+/** The text a failed tool result gives, for classifying it. */
+function mcpErrorText(result: Awaited<ReturnType<McpSession["callTool"]>>): string {
+  return result.content
+    .map((part) => (part.type === "text" ? part.text : ""))
+    .join("\n")
+    .slice(0, 4_000);
 }
 
 function peopleSearchRateLimited(result: Awaited<ReturnType<McpSession["callTool"]>>): boolean {
@@ -616,10 +687,19 @@ export const DISCOVERY_REFRESH_OPERATION = "discovery.prewarm";
 export class McpConnector implements ConnectorProvider {
   private readonly sessions = new Map<string, SessionEntry>();
   private readonly connecting = new Map<string, PendingSession>();
-  /** Failed-discovery memo per sessionKey; `logged` keeps `discovery.skipped` to once per window. */
+  /**
+   * Failed-discovery memo per sessionKey; `logged` keeps `discovery.skipped` to once per window.
+   * `refused` marks a connection whose provider refused a call outright (access or setup): its
+   * tools are left out and its calls answered without the provider until the window ends.
+   */
   private readonly discoveryFailures = new Map<
     string,
-    { version: string; until: number; logged: boolean }
+    {
+      version: string;
+      until: number;
+      logged: boolean;
+      refused?: { serverId: string; slug: string };
+    }
   >();
   // Discovery runs more than once per run: once up front, then again on every lazy
   // catalog access. Each attempt needs its own executionId.
@@ -684,17 +764,17 @@ export class McpConnector implements ConnectorProvider {
   async discoverTools(context: AdapterContext): Promise<ConnectorTool[]> {
     const tools = await this.authorizedTools(context);
     if (tools.length <= DIRECT_TOOL_LIMIT) return tools;
-    // The built-in people search stays directly callable, so a calibration round needs no
-    // catalog search and load turns before its first search.
-    const direct = tools.filter((tool) => directTools.has(tool));
-    if (direct.length)
+    // The built-in people search and each agent's core work tools stay directly callable, so a
+    // calibration round or an outreach step needs no catalog search and load turns first.
+    const direct = directSet(tools);
+    if (direct.size)
       return [
-        ...direct,
+        ...tools.filter((tool) => direct.has(tool)),
         ...lazyCatalogTools(
           catalogToolPrefix("mcp"),
           "mcp",
           "MCP",
-          catalogEntries(tools.filter((tool) => !directTools.has(tool))),
+          catalogEntries(tools.filter((tool) => !direct.has(tool))),
         ),
       ];
     // The catalog wrappers must not be named `mcp_*`: Anthropic rejects Claude Code OAuth
@@ -722,14 +802,24 @@ export class McpConnector implements ConnectorProvider {
         userId: context.userId,
         server: { enabled: true },
       },
-      include: { server: true },
+      include: { server: true, bot: { select: { name: true, spawnKey: true } } },
     });
     const groups = await Promise.all(
       assignments.map(async (assignment): Promise<ConnectorTool[]> => {
+        const core = coreTools(assignment.bot);
+        const withCore = (tools: ConnectorTool[]) => {
+          for (const tool of tools) if (core.has(coreName(tool))) directTools.add(tool);
+          return tools;
+        };
         const startedAt = Date.now();
         const failureKey = this.sessionKey(assignment.server, context);
         // The prewarm retries a remembered failure; success then serves the next run.
-        if (context.operationId === DISCOVERY_REFRESH_OPERATION)
+        // A connection the provider refused stays out until its window ends: listing its tools
+        // succeeds, but calling them does not.
+        if (
+          context.operationId === DISCOVERY_REFRESH_OPERATION &&
+          !this.discoveryFailures.get(failureKey)?.refused
+        )
           this.discoveryFailures.delete(failureKey);
         const failed = this.discoveryFailures.get(failureKey);
         if (failed) {
@@ -744,7 +834,7 @@ export class McpConnector implements ConnectorProvider {
                 untilMs: failed.until,
               });
             }
-            return localInstantlyTools(assignment, []);
+            return withCore(localInstantlyTools(assignment, []));
           }
           this.discoveryFailures.delete(failureKey);
         }
@@ -774,10 +864,10 @@ export class McpConnector implements ConnectorProvider {
           const local = localTools(assignment, listed.tools);
           // Contact lookups go through find_emails, which never pays twice for one person.
           const lookup = local.some((tool) => tool.route?.toolName === FIND_EMAILS);
-          return [
+          return withCore([
             ...remoteTools.filter((tool) => !lookup || tool.route?.toolName !== "enrich_bulk"),
             ...local,
-          ];
+          ]);
         } catch (error) {
           // A single unavailable server must not hide tools from other connectors.
           getLogger().error(
@@ -802,7 +892,7 @@ export class McpConnector implements ConnectorProvider {
             material ? oauthMaterialSecrets(material) : [],
           );
           // The local mail tools call the REST API directly, so a remote outage keeps them.
-          return localInstantlyTools(assignment, []);
+          return withCore(localInstantlyTools(assignment, []));
         }
       }),
     );
@@ -860,7 +950,14 @@ export class McpConnector implements ConnectorProvider {
           (resolved) => this.execute(resolved, context),
         );
       } catch (error) {
-        yield { type: "error", message: sanitizeConnectorError(error) };
+        // A tool of a refused connection is no longer in the catalog; say why, not "unknown".
+        const refused = this.refusedCatalogTool(String(call.args.id ?? ""), context);
+        yield {
+          type: "error",
+          message: refused
+            ? await this.refusedMessage(refused.toolName, refused.serverId, context)
+            : sanitizeConnectorError(error),
+        };
       }
       return;
     }
@@ -878,6 +975,7 @@ export class McpConnector implements ConnectorProvider {
     let material: OAuthMaterial | undefined;
     let callStarted = false;
     let sessionKey: string | undefined;
+    let calledServer: McpServer | undefined;
     try {
       if (call.route.toolName === FIND_EMAILS) {
         yield* this.findContactEmails(call, context);
@@ -921,6 +1019,14 @@ export class McpConnector implements ConnectorProvider {
         };
         return;
       }
+      if (this.refusedConnection(assignment.server, context)) {
+        yield {
+          type: "error",
+          message: await this.refusedMessage(call.route.toolName, assignment.server.id, context),
+        };
+        return;
+      }
+      calledServer = assignment.server;
       const peopleSearch =
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
@@ -1146,6 +1252,14 @@ export class McpConnector implements ConnectorProvider {
             "Email does not belong to the requested role campaign and mailbox",
           );
       }
+      if (result.isError && providerRefusesConnection(mcpErrorText(result))) {
+        this.refuseConnection(assignment.server, context, call.route.toolName);
+        yield {
+          type: "error",
+          message: await this.refusedMessage(call.route.toolName, assignment.server.id, context),
+        };
+        return;
+      }
       const secrets = material ? oauthMaterialSecrets(material) : [];
       yield { type: "result", data: redactConnectorPayload(result, secrets) };
     } catch (error) {
@@ -1154,9 +1268,14 @@ export class McpConnector implements ConnectorProvider {
       const secrets = material ? oauthMaterialSecrets(material) : [];
       if (sessionKey && !(error instanceof PeopleSearchRateLimitError))
         await this.evict(sessionKey);
+      let message = sanitizeConnectorError(error, secrets);
+      if (calledServer && providerRefusesConnection(message)) {
+        this.refuseConnection(calledServer, context, call.route.toolName);
+        message = await this.refusedMessage(call.route.toolName, calledServer.id, context);
+      }
       yield {
         type: "error",
-        message: sanitizeConnectorError(error, secrets),
+        message,
         ...(callStarted && !(error instanceof PeopleSearchRateLimitError)
           ? { outcome: "uncertain" as const }
           : {}),
@@ -1939,6 +2058,62 @@ export class McpConnector implements ConnectorProvider {
       ms: Math.round(performance.now() - startedAt),
     });
     return listed;
+  }
+
+  private refusedConnection(server: McpServer, context: AdapterContext): boolean {
+    const entry = this.discoveryFailures.get(this.sessionKey(server, context));
+    return Boolean(
+      entry?.refused && entry.version === this.discoveryVersion(server) && Date.now() < entry.until,
+    );
+  }
+
+  /** The refused connection a catalog ID or name ("<server>:<tool>" or "mcp__<slug>__<tool>") is on. */
+  private refusedCatalogTool(id: string, context: AdapterContext) {
+    for (const [key, entry] of this.discoveryFailures) {
+      if (!entry.refused || Date.now() >= entry.until) continue;
+      const { serverId, slug } = entry.refused;
+      if (key !== this.sessionKey({ id: serverId } as McpServer, context)) continue;
+      if (id.startsWith(`${serverId}:`))
+        return { serverId, toolName: id.slice(serverId.length + 1) };
+      if (id.startsWith(`mcp__${slug}__`))
+        return { serverId, toolName: id.slice(`mcp__${slug}__`.length) };
+    }
+    return undefined;
+  }
+
+  /** Never permanent and never touches the credential: the window ends, or a reconnect clears it. */
+  private refuseConnection(server: McpServer, context: AdapterContext, toolName: string) {
+    getLogger().warn("mcp.connection_refused", {
+      server: server.slug,
+      tool: toolName,
+      untilMs: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+    });
+    this.discoveryFailures.set(this.sessionKey(server, context), {
+      version: this.discoveryVersion(server),
+      until: Date.now() + DISCOVERY_FAILURE_TTL_MS,
+      logged: false,
+      refused: { serverId: server.id, slug: server.slug },
+    });
+  }
+
+  /** For the agent: stop retrying, and which of its other assigned tools does this work. */
+  private async refusedMessage(toolName: string, serverId: string, context: AdapterContext) {
+    let others: ConnectorTool[] = [];
+    try {
+      others = (await this.authorizedTools(context)).filter(
+        (tool) => tool.route?.resourceId !== serverId,
+      );
+    } catch {}
+    const alternatives = relatedTools(others, toolName, (tool) => directTools.has(tool)).map(
+      (tool) => tool.name,
+    );
+    return [
+      "This connection can't be used right now: its provider refused access for this account (a setup, enrollment or permission problem), so retrying will not help, and its tools are left out for a while.",
+      alternatives.length
+        ? `Do this work with ${alternatives.join(", ")} instead.`
+        : "No other assigned tool does this work; carry on with the rest of the request.",
+      "Never name this connection or its provider to the recruiter.",
+    ].join(" ");
   }
 
   private discoveryVersion(server: McpServer): string {
