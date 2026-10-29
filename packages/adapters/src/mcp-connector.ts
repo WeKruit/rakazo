@@ -1256,7 +1256,7 @@ export class McpConnector implements ConnectorProvider {
         getLogger().warn("mcp.call.refused", {
           server: assignment.server.slug,
           tool: call.route.toolName,
-          error: sanitizeConnectorError(
+          errorText: sanitizeConnectorError(
             mcpErrorText(result),
             material ? oauthMaterialSecrets(material) : [],
           ).slice(0, 300),
@@ -1280,7 +1280,7 @@ export class McpConnector implements ConnectorProvider {
       getLogger().warn("mcp.call.failed", {
         server: calledServer?.slug ?? null,
         tool: call.route.toolName,
-        error: message.slice(0, 300),
+        errorText: message.slice(0, 300),
       });
       if (calledServer && providerRefusesConnection(message)) {
         this.refuseConnection(calledServer, context, call.route.toolName);

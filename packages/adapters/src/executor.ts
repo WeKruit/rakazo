@@ -11341,7 +11341,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                             : typeof result,
                       }
                     : {
-                        error: redactSecrets(
+                        errorText: redactSecrets(
                           typeof error === "string" ? error : JSON.stringify(error),
                           runSecrets,
                         ).slice(0, 300),
@@ -13228,7 +13228,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               MODEL_OUTAGE_RETRY,
             );
             if (released) {
-              getLogger().warn("run.model_outage.retry", { runId, error: message.slice(0, 200) });
+              getLogger().warn("run.model_outage.retry", {
+                runId,
+                errorText: message.slice(0, 200),
+              });
               await deps.prisma.attempt.update({
                 where: { id: attempt.id },
                 data: { status: "failed", error: MODEL_OUTAGE_RETRY, finishedAt: new Date() },
