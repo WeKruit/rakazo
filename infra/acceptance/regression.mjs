@@ -94,18 +94,19 @@ const botText = (message) =>
     .map((block) => block.text ?? block.question ?? "")
     .filter(Boolean)
     .join("\n");
-// What the reply itself says: card questions and a drafted email's body are left out, as the
-// server's decline check does (only text before the first email and its closing paragraph).
+// What the reply itself says for the refusal checks: card questions are left out, and a reply that
+// shows a draft delivered it (the server never retries one), so only its closing paragraph counts.
 const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:)/i;
 const ownWords = (message) => {
   const text = botText({ blocks: (message.blocks ?? []).filter((block) => block.kind !== "ask") });
   const draft = text.search(DRAFT_START);
   if (draft < 0) return text;
+  // A reply that shows the draft delivered it: only a closing question or refusal after it counts.
   const after = text
     .slice(draft)
     .trimEnd()
     .split(/\n\s*\n/);
-  return `${text.slice(0, draft)}\n${after.length > 1 ? after.at(-1) : ""}`;
+  return after.length > 1 ? (after.at(-1) ?? "") : "";
 };
 const recruiterSees = (messages) =>
   messages.filter((message) => message.role !== "user" && !message.internal);
