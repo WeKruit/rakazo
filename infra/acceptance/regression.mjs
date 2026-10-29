@@ -601,14 +601,16 @@ if (wanted.has("dispatch"))
 // Vague recruiter asks in the t1 chat: each gets a best-guess action (a tool call, a handoff, or
 // the action's own card) or exactly one question card, never a decline or an offer to do it.
 // Cards are left unanswered, so nothing is sent or booked.
+// "clarify": who, what or when is open, so the turn must end on one card: a question with
+// options, or the send/booking card naming exact recipients. The rest may act or ask.
 const AMBIGUOUS = [
-  "发一下",
-  "约一下他",
-  "这个人怎么样",
-  "处理一下前几个",
-  "contact",
-  "再来点",
-  "改一下邮件",
+  { ask: "发一下", clarify: true },
+  { ask: "约一下他", clarify: true },
+  { ask: "这个人怎么样" },
+  { ask: "处理一下前几个", clarify: true },
+  { ask: "contact" },
+  { ask: "再来点" },
+  { ask: "改一下邮件", clarify: true },
 ];
 if (wanted.has("ambiguous"))
   await stage("ambiguous", async (failures) => {
@@ -619,7 +621,7 @@ if (wanted.has("ambiguous"))
     if (!groupId) return failures.push("pass --ambiguous-group or run t1 first");
     const notes = [];
     const steps = [];
-    for (const ask of AMBIGUOUS) {
+    for (const { ask, clarify } of AMBIGUOUS) {
       const askedAt = new Date().toISOString();
       const { replies } = await say(groupId, ask, { quietMs: 45_000, limitMs: 6 * 60_000 });
       const events = (await readEvents(groupId).catch(() => [])).filter(
@@ -632,6 +634,10 @@ if (wanted.has("ambiguous"))
       const text = recruiterSees(replies).map(botText).join("\n");
       notes.push(`## ${ask}\ntools: ${events.length}, cards: ${asks.length}\n${text}`);
       if (!replies.length) failures.push(`「${ask}」: no reply`);
+      else if (clarify && asks.length !== 1)
+        failures.push(
+          `「${ask}」: unclear request ended on ${asks.length} cards (want one question)`,
+        );
       else if (!acted && asks.length !== 1)
         failures.push(`「${ask}」: no action and ${asks.length} question cards (want one)`);
       const declined = text.match(DECLINED) ?? text.match(DEFERRED);

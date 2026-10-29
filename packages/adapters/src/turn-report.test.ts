@@ -176,7 +176,8 @@ describe("declineRetry", () => {
     const retry = declineRetry({ reply: notReady, request: "send it", tools: [], teammates: [] });
     expect(retry?.note).toContain(DECLINE_RETRY_NOTE);
     expect(DECLINE_RETRY_NOTE).toContain("Do not decline or defer");
-    expect(DECLINE_RETRY_NOTE).toContain("ask one question with ask_user");
+    expect(DECLINE_RETRY_NOTE).toContain("ask one clear question with ask_user");
+    expect(DECLINE_RETRY_NOTE).toContain("the recipients, the email, the time");
     expect(DECLINE_RETRY_NOTE).toContain("shows its own card");
   });
 

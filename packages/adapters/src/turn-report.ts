@@ -339,7 +339,7 @@ export type DeclineRetry = { sentence: string; note: string };
 
 /** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
 export const DECLINE_RETRY_NOTE =
-  "Do not decline or defer. Take the most likely reading and do it now with your tools, or hand it to the teammate who can. If a detail that changes the result is missing, ask one question with ask_user, with concrete options. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what.";
+  "Do not decline or defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what.";
 
 /**
  * One retry for a final reply that declines, defers or hands back a pick. A refusal is retried
@@ -368,7 +368,7 @@ export function declineRetry(input: {
   const quoted = sentence.slice(0, 200);
   const lead =
     declined.kind === "pick"
-      ? `Your reply asked the user to choose ("${quoted}"). Choose yourself from the conversation: the people named, else the role's first results up to the number asked.`
+      ? `Your reply asked the user to choose ("${quoted}"). When the request names the people or a number, use those; otherwise ask that choice as one ask_user question with concrete options (such as the person just discussed or the first results).`
       : `Your reply ${declined.kind === "defer" ? "deferred" : "declined"} the request ("${quoted}").`;
   const own = asked.flatMap((kind) =>
     input.tools
