@@ -1,6 +1,6 @@
 import type { MessageBlock } from "@rakazo/contracts";
 import { CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE } from "@rakazo/contracts";
-import { ONCE_ROUTINE_CRON, RECRUITER_LANGUAGE } from "@rakazo/core";
+import { completeToolStep, ONCE_ROUTINE_CRON, RECRUITER_LANGUAGE } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -183,6 +183,53 @@ describe("tool completion audit", () => {
     });
     expect(payload).not.toHaveProperty("content");
     expect(payload).not.toHaveProperty("activeWindow");
+  });
+
+  it("updates durable step outcomes from the same safe completion metadata even if audit persistence fails", async () => {
+    const append = vi.fn().mockRejectedValue(new Error("database unavailable"));
+    let blocks: MessageBlock[] = [
+      { kind: "steps", steps: [{ label: "Connectors execute tool", count: 1 }] },
+    ];
+    const target = { spaceId: "space", threadId: "thread", botId: "bot", runId: "run" };
+    await appendToolCompletionAudit(
+      { events: { append } },
+      target,
+      {
+        name: "connectors_execute_tool",
+        executionId: "a",
+        durationMs: 1,
+        error: "private failure",
+      },
+      [],
+      (payload) => {
+        blocks = completeToolStep(blocks, payload);
+      },
+    );
+    expect(blocks).toEqual([
+      { kind: "steps", steps: [{ label: "Connectors execute tool", count: 1, status: "failed" }] },
+    ]);
+    blocks = [{ kind: "steps", steps: [{ label: "Connectors execute tool", count: 1 }] }];
+    await appendToolCompletionAudit(
+      { events: { append } },
+      target,
+      {
+        name: "connectors_execute_tool",
+        executionId: "b",
+        durationMs: 1,
+        result: { structuredContent: { source: "local_contact_lookup", summary: { found: 3 } } },
+      },
+      [],
+      (payload) => {
+        blocks = completeToolStep(blocks, payload);
+      },
+    );
+    expect(blocks).toEqual([
+      {
+        kind: "steps",
+        steps: [{ label: "Connectors execute tool", count: 1, peopleWithEmail: 3 }],
+      },
+    ]);
+    expect(JSON.stringify(blocks)).not.toContain("private");
   });
 
   it("marks only succeeded connector completions declared writable as writes", async () => {

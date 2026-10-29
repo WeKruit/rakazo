@@ -41,7 +41,7 @@ export function renderableMessageBlocks(
   return blocks.filter(
     (block) =>
       (showToolActivity ||
-        !["handoff", "bot_message_sent", "bot_message_received", "subagent", "child_bot"].includes(
+        !["handoff", "bot_message_sent", "bot_message_received", "child_bot"].includes(
           block.kind,
         )) &&
       (!isToolActivityBlock(block) || shouldRenderToolCard(block, showToolActivity)),

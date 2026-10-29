@@ -3,6 +3,7 @@ import {
   appendTextSegment,
   appendToolCallSegment,
   appendToolStep,
+  completeToolStep,
   containsSecret,
   createStreamingRedactor,
   endsSentence,
@@ -833,4 +834,69 @@ it("retains the internal wake marker in live projections", () => {
     },
   ]);
   expect(messages[0]).toMatchObject({ role: "system", internal: true });
+});
+
+describe("completeToolStep", () => {
+  it("splits repeated calls without marking other calls failed", () => {
+    expect(
+      completeToolStep([{ kind: "steps", steps: [{ label: "Web search", count: 2 }] }], {
+        name: "web_search",
+        outcome: "error",
+        error: "private error",
+      }),
+    ).toEqual([
+      {
+        kind: "steps",
+        steps: [
+          { label: "Web search", count: 1, status: "failed" },
+          { label: "Web search", count: 1 },
+        ],
+      },
+    ]);
+  });
+
+  it("uses only audited valid counts and preserves pauses", () => {
+    const blocks = [{ kind: "steps" as const, steps: [{ label: "Search", count: 1 }] }];
+    expect(
+      completeToolStep(blocks, { name: "search", outcome: "paused", lookup: { found: 10 } }),
+    ).toEqual([{ kind: "steps", steps: [{ label: "Search", count: 1, status: "paused" }] }]);
+    for (const found of [-1, 1.2, Infinity, "10"]) {
+      expect(
+        completeToolStep(blocks, { name: "search", outcome: "succeeded", lookup: { found } }),
+      ).toEqual(blocks);
+    }
+  });
+});
+
+it("projects an audited outcome from saved events", () => {
+  const events = [
+    { type: "agent.tool.called", payload: { name: "connectors_execute_tool" } },
+    {
+      type: "agent.tool.completed",
+      payload: { name: "connectors_execute_tool", outcome: "succeeded", lookup: { found: 0 } },
+    },
+  ].map((item, seq) => ({
+    ...item,
+    seq,
+    id: `e${seq}`,
+    threadId: "t",
+    runId: "r",
+    createdAt: "2026-01-01T00:00:00Z",
+  }));
+  expect(projectMessages(events)[0]?.blocks).toEqual([
+    { kind: "steps", steps: [{ label: "Connectors execute tool", count: 1, peopleWithEmail: 0 }] },
+  ]);
+});
+
+it("keeps runtime phase after flushing pending tool names", () => {
+  const blocks = reduceLiveMessageBlocks(
+    [{ kind: "progress", text: "Done.", pendingToolNames: ["read_file"] }],
+    { type: "progress", payload: { text: "Done.", phase: "retrying", activity: true } },
+  );
+  expect(blocks.at(-1)).toMatchObject({
+    kind: "progress",
+    text: "",
+    phase: "retrying",
+    activity: true,
+  });
 });

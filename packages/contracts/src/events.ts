@@ -420,7 +420,15 @@ export const MessageBlock = z.discriminatedUnion("kind", [
   }),
   z.object({
     kind: z.literal("steps"),
-    steps: z.array(z.object({ label: z.string(), count: z.number().int().positive() })),
+    steps: z.array(
+      z.object({
+        label: z.string(),
+        count: z.number().int().positive(),
+        status: z.enum(["failed", "paused"]).optional(),
+        /** Audited count of people with an email, never inferred from returned text. */
+        peopleWithEmail: z.number().int().nonnegative().optional(),
+      }),
+    ),
     durationMs: z.number().int().nonnegative().optional(),
   }),
   z.object({

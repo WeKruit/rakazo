@@ -1,6 +1,17 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openUserSettings, signup } from "./helpers";
+import { recruitingChatFixture } from "./fixtures/recruiting-chat";
+import { captureScreenshot, openUserSettings } from "./helpers";
+
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/auth/account-security", (route) =>
+    route.fulfill({ status: 404, body: "" }),
+  );
+  await page.route("**/rpc/approvalRules/list", (route) => route.fulfill({ json: { json: [] } }));
+  await page.route("**/rpc/autoReview/get", (route) =>
+    route.fulfill({ json: { json: { enabled: false } } }),
+  );
+});
 
 const fixture = "/e2e/fixtures/tool-activity.html";
 const REPLY_TEXT = "Tuesday at 2 pm is free.";
@@ -27,10 +38,10 @@ async function setToggle(page: Page, on: boolean) {
   await page.goto(`${fixture}?view=settings`);
   const settings = page.getByTestId("user-settings");
   await expect(settings).toBeVisible();
-  await settings.getByTestId("advanced-settings").locator("summary").click();
+  await settings.getByTestId("advanced-settings").locator(":scope > summary").click();
   const toggle = settings.getByTestId("tool-activity-toggle");
   await expect(toggle).toBeVisible();
-  await expect(settings.getByText("Show tool activity", { exact: true })).toBeVisible();
+  await expect(settings.getByText("Developer diagnostics", { exact: true })).toBeVisible();
   if (on) await expect(toggle).not.toBeChecked();
   else await expect(toggle).toBeChecked();
   await toggle.click();
@@ -90,7 +101,7 @@ test("the settings toggle hides and restores tool activity", async ({ page }, te
   await page.goto(`${fixture}?view=settings`);
   const settings = page.getByTestId("user-settings");
   await expect(settings).toBeVisible();
-  await settings.getByTestId("advanced-settings").locator("summary").click();
+  await settings.getByTestId("advanced-settings").locator(":scope > summary").click();
   const initialToggle = settings.getByTestId("tool-activity-toggle");
   await expect(initialToggle).toBeVisible();
   await expect(initialToggle).not.toBeChecked();
@@ -128,18 +139,11 @@ test("the chat transcript shows tool activity when turned on and hides it when t
 }, testInfo) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await seedToolActivityOn(page);
-  const stamp = Date.now();
-  await signup(page, `tool-activity-${stamp}@rakazo.test`, "password12", "Tool Activity");
-  await completeOnboarding(page);
-
-  // The scripted runtime answers this with one write_file call, then a short reply.
-  await page
-    .getByPlaceholder(/^Message /)
-    .fill("write a note called notes/tool-activity.txt that says fake e2e note");
-  await page.getByRole("button", { name: "Send" }).click();
+  await recruitingChatFixture(page, { developer: true });
+  await page.goto("/app/g/group-fixture");
 
   const transcript = page.getByTestId("transcript");
-  await expect(transcript.getByText("writing that into my home now.")).toBeVisible({
+  await expect(transcript.getByText("The saved criteria are ready for your review.")).toBeVisible({
     timeout: 30_000,
   });
   const card = transcript.getByTestId("tool-activity");
@@ -151,7 +155,7 @@ test("the chat transcript shows tool activity when turned on and hides it when t
   await captureScreenshot(page, testInfo, "shell-tool-activity-on");
 
   const settings = await openUserSettings(page);
-  await settings.getByTestId("advanced-settings").locator("summary").click();
+  await settings.getByTestId("advanced-settings").locator(":scope > summary").click();
   const toggle = settings.getByTestId("tool-activity-toggle");
   await expect(toggle).toBeChecked();
   await toggle.click();
@@ -159,12 +163,12 @@ test("the chat transcript shows tool activity when turned on and hides it when t
   await page.keyboard.press("Escape");
   await expect(settings).toBeHidden();
 
-  await expect(transcript.getByText("writing that into my home now.")).toBeVisible();
+  await expect(transcript.getByText("The saved criteria are ready for your review.")).toBeVisible();
   await expect(transcript.getByTestId("tool-activity")).toHaveCount(0);
   await captureScreenshot(page, testInfo, "shell-tool-activity-off");
 
   await page.reload();
   await expect(page.getByTestId("shell-root")).toHaveAttribute("data-ready", "true");
-  await expect(transcript.getByText("writing that into my home now.")).toBeVisible();
+  await expect(transcript.getByText("The saved criteria are ready for your review.")).toBeVisible();
   await expect(transcript.getByTestId("tool-activity")).toHaveCount(0);
 });

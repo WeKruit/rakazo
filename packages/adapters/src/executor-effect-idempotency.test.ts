@@ -1292,6 +1292,45 @@ describe("explicit artifact workspace writes", () => {
 });
 
 describe("tool audit ordering", () => {
+  it.each(["web_search", "message_user"])(
+    "persists a failed %s step when completion arrives before the yielded call",
+    async (name) => {
+      const f = fixture("durable-step-outcome");
+      const executionId = "fast-outcome";
+      f.runtimeRun.mockImplementation(async function* (request) {
+        yield { type: "text" as const, text: "Checking" };
+        const completed = Promise.resolve(
+          request.onToolCompleted?.({
+            name,
+            executionId,
+            durationMs: 1,
+            error: "private failure detail",
+          }),
+        );
+        yield { type: "tool" as const, name, args: {}, executionId };
+        await completed;
+        yield { type: "text" as const, text: " profiles." };
+        yield { type: "done" as const, text: "Checking profiles." };
+      });
+      await f.run();
+      const savedBlocks = f.finalizeRun.mock.calls.at(-1)?.[0].blocks;
+      expect(savedBlocks).toEqual(
+        expect.arrayContaining([
+          {
+            kind: "steps",
+            steps: [
+              {
+                label: name === "web_search" ? "Web search" : "Message user",
+                count: 1,
+                status: "failed",
+              },
+            ],
+          },
+        ]),
+      );
+      expect(JSON.stringify(savedBlocks)).not.toContain("private failure");
+    },
+  );
   it("appends agent.tool.called before agent.tool.completed for a tool that finishes while narration is pending", async () => {
     const f = fixture("tool-audit-order");
     const executionId = JSON.stringify(["pi-tool", "main", "fast-call"]);

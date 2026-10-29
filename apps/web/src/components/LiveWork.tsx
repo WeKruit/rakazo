@@ -3,6 +3,7 @@ import type { WorkActivity, WorkSession } from "@rakazo/core";
 import {
   formatWorkClock,
   formatWorkDuration,
+  workProgressLabel,
   workSessionElapsedMs,
   workSessionSteps,
 } from "@rakazo/core";
@@ -73,11 +74,15 @@ export function LiveWork({
 }) {
   const labels = useWorkActivityLabels();
   const steps = (showSteps ? workSessionSteps(session) : []).map((step) => ({
+    ...step,
     label: labels[step.activity],
-    count: step.count,
   }));
   if (live) {
-    const headline = session?.current ? `${labels[session.current]}…` : label;
+    const headline = session?.progress
+      ? workProgressLabel(session.progress)
+      : session?.current
+        ? `${labels[session.current]}…`
+        : label;
     return (
       <div data-testid="live-work" className="space-y-1">
         {steps.length ? <ToolSteps steps={steps} limit={LIVE_TOOL_STEP_WINDOW} /> : null}
@@ -85,7 +90,7 @@ export function LiveWork({
         <LoadingState
           label={headline}
           indicator={
-            <span aria-hidden className="flex items-center gap-2">
+            <span aria-hidden className="flex min-w-0 flex-wrap items-center gap-2">
               <Shimmer>{headline}</Shimmer>
               {detail ? (
                 <span data-testid="live-work-detail" className="text-[12px] text-muted-foreground">

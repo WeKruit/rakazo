@@ -1,8 +1,9 @@
 import { I18nProvider } from "@lingui/react";
 import type { ProductEvent, ThreadSnapshot } from "@rakazo/contracts";
 import type { WorkSession } from "@rakazo/core";
-import { observeWorkSession } from "@rakazo/core";
+import { observeWorkSession, specialistWorkLabel } from "@rakazo/core";
 import { createRoot } from "react-dom/client";
+import { CollaborationMarker } from "../../src/components/ai/CollaborationMarker";
 import { LiveWork } from "../../src/components/LiveWork";
 import { bootstrapI18n, i18n } from "../../src/lib/i18n";
 import { reduceThreadSnapshot } from "../../src/lib/thread-events";
@@ -41,12 +42,30 @@ const events: ProductEvent[] = [
   }),
   event(2, "run.started", 0, { trigger: "user" }),
   event(3, "agent.tool.called", 1, { name: "recruiting_role", executionId: "e1" }),
-  event(4, "agent.tool.completed", 2, { name: "recruiting_role", executionId: "e1" }),
+  event(4, "agent.tool.completed", 2, {
+    name: "recruiting_role",
+    executionId: "e1",
+    ...(params.has("outcomes") ? { outcome: "error" } : {}),
+  }),
   event(5, "agent.tool.called", 3, { name: "mcp__autumn__research", executionId: "e2" }),
-  event(6, "agent.tool.completed", 20, { name: "mcp__autumn__research", executionId: "e2" }),
+  event(6, "agent.tool.completed", 20, {
+    name: "mcp__autumn__research",
+    executionId: "e2",
+    ...(params.has("outcomes") ? { outcome: "succeeded", lookup: { found: 3 } } : {}),
+  }),
   event(7, "agent.tool.called", 21, { name: "recruiting_candidates", executionId: "e3" }),
   event(8, "agent.tool.completed", 30, { name: "recruiting_candidates", executionId: "e3" }),
   event(9, "agent.tool.called", 31, { name: "mcp__autumn__get_rows", executionId: "e4" }),
+  ...(params.get("state")
+    ? [
+        event(10, "thread.progress", 40, {
+          text: "",
+          activity: true,
+          phase: params.get("state"),
+          ...(params.get("state") === "thinking" ? { summary: "Reviewing the search" } : {}),
+        }),
+      ]
+    : []),
   ...(live
     ? []
     : [
@@ -100,6 +119,15 @@ function ThreadFixture() {
             </div>
           </div>
         )}
+        {params.has("specialist") ? (
+          <CollaborationMarker
+            ariaLabel={specialistWorkLabel(live ? "running" : "completed")}
+            label={specialistWorkLabel(live ? "running" : "completed")}
+            color="slate"
+            identity="specialist"
+            status={live ? "running" : "completed"}
+          />
+        ) : null}
         <LiveWork session={session} live={live} label="Working…" />
       </div>
     </main>

@@ -2,7 +2,7 @@ import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown, LinkifiedText } from "@rakazo/chat-ui/web-lazy";
 import type { AskAnswer, MessageReaction, ThreadMessage } from "@rakazo/contracts";
 import { canReactToThreadMessage, MESSAGE_REACTIONS } from "@rakazo/contracts";
-import { isPendingUserMessage, isToolActivityBlock } from "@rakazo/core";
+import { isPendingUserMessage, isToolActivityBlock, specialistWorkLabel } from "@rakazo/core";
 import { BotAvatar, Button, cn, resolvePersonaColorDef } from "@rakazo/ui-web";
 import { Copy, MoreHorizontal, Reply, Smile } from "lucide-react";
 import { memo, useMemo, useState } from "react";
@@ -421,6 +421,19 @@ export const MessageView = memo(function MessageView({
           );
         }
         if (block.kind === "subagent") {
+          if (!showToolActivity) {
+            const label = specialistWorkLabel(block.status);
+            return (
+              <CollaborationMarker
+                key={i}
+                ariaLabel={label}
+                label={label}
+                identity="specialist"
+                color={FALLBACK_BOT_COLOR}
+                status={block.status}
+              />
+            );
+          }
           const running = block.status === "running";
           const failed = block.status === "failed";
           return (

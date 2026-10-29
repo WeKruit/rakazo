@@ -2,6 +2,7 @@ import { I18nProvider } from "@lingui/react";
 import type { MessageBlock } from "@rakazo/contracts";
 import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
 import {
   StandaloneToolActivity,
   ToolOnlyNarration,
@@ -48,7 +49,9 @@ const botBlocks: MessageBlock[] = live
   : [stepsBlock, { kind: "text", text: REPLY_TEXT }];
 
 function BotMessage({ blocks }: { blocks: MessageBlock[] }) {
-  const showToolActivity = useSyncExternalStore(subscribeToolActivity, getToolActivityEnabled);
+  const showToolActivity = useSyncExternalStore(subscribeToolActivity, () =>
+    getToolActivityEnabled(true),
+  );
   const visible = renderableMessageBlocks(blocks, showToolActivity);
   if (visible.length === 0) return null;
   if (isToolOnlyNarration(blocks, showToolActivity)) {
@@ -109,6 +112,7 @@ function SettingsFixture() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <SettingsOverlay
+        isDeploymentOwner
         email="owner@example.test"
         name="Owner"
         avatarStyle="robot"
@@ -124,7 +128,7 @@ function SettingsFixture() {
 void bootstrapI18n("en").then(() => {
   createRoot(document.getElementById("root")!).render(
     <I18nProvider i18n={i18n}>
-      {view === "settings" ? <SettingsFixture /> : <ThreadFixture />}
+      <MemoryRouter>{view === "settings" ? <SettingsFixture /> : <ThreadFixture />}</MemoryRouter>
     </I18nProvider>,
   );
 });
