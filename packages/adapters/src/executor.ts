@@ -11327,6 +11327,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const [name, rawArgs, executionId] = call;
           const applied = applyToolNow(...call).then(
             (result) => {
+              if (run.trigger === "recruiting_grade") {
+                const error = toolResultError(result);
+                getLogger().info("recruiting.grade.tool_result", {
+                  runId: run.id,
+                  name,
+                  ok: error === undefined,
+                  ...(error === undefined
+                    ? {
+                        keys:
+                          result && typeof result === "object"
+                            ? Object.keys(result).slice(0, 12)
+                            : typeof result,
+                      }
+                    : {
+                        error: redactSecrets(
+                          typeof error === "string" ? error : JSON.stringify(error),
+                          runSecrets,
+                        ).slice(0, 300),
+                      }),
+                });
+              }
               turnReport.settle(executionId, {
                 ok: toolResultError(result) === undefined,
                 result,
