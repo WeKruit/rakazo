@@ -197,10 +197,10 @@ function scaleReportChecks(messages, failures, scale) {
     .filter((text) => text.trim());
   const last = texts.at(-1);
   if (!last) return failures.push("scale-out ended without a report");
-  // "154 people", "119 of 119", "Results now holds 119".
+  // "154 people", "119 of 119", "Results now holds 119", "bringing Results to 119".
   const counts = [
     ...last.matchAll(
-      /(\d{2,})\s*(?:more\s+|new\s+)?(?:people|candidates|profiles|人)|(\d{2,})\s+of\s+(?:the\s+)?\d{2,}|(?:holds|contains|has|at)\s+\**(\d{2,})/gi,
+      /(\d{2,})\s*(?:more\s+|new\s+)?(?:people|candidates|profiles|人)|(\d{2,})\s+of\s+(?:the\s+)?\d{2,}|(?:holds|contains|has|at|to|reach(?:es|ing)?|now|total(?: of)?)\s+\**(\d{2,})/gi,
     ),
   ].map((match) => Number(match[1] ?? match[2] ?? match[3]));
   const before = Number(scale.before ?? 0);
