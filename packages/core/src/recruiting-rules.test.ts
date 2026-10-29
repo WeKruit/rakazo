@@ -1007,7 +1007,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "an unclear request gets a best guess or one question",
     in: EVERY_BOT,
     phrase:
-      "When a request is unclear, act on the most likely reading or ask one question with options; never decline work you or a teammate can do.",
+      "When a request is clear enough, act; when who, what or when is unclear, ask one question with options. Never decline work you or a teammate can do.",
     why: "Agents refused vague asks, or asked the recruiter to pick what they could pick.",
   },
   {
