@@ -1150,6 +1150,16 @@ describe("planDeclineRetry", () => {
     const stage = vi.fn(async () => "intake");
     expect(await planDeclineRetry(human, { ...offer, stage })).toBeUndefined();
     expect(stage).toHaveBeenCalledOnce();
+    // A teammate handed the request asks on a card even during calibration.
+    expect(
+      (
+        await planDeclineRetry(human, {
+          ...offer,
+          handedIn: true,
+          stage: async () => "calibration_10",
+        })
+      )?.note,
+    ).toBeDefined();
     expect(
       await planDeclineRetry(human, { ...offer, worked: true, stage: async () => "scale" }),
     ).toBeUndefined();
