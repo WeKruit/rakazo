@@ -704,6 +704,8 @@ export async function planDeclineRetry(
     worked?: boolean;
     /** The turn showed or recorded the round's ten. */
     presentedRound?: boolean;
+    /** A teammate handed this turn the request. */
+    handedIn?: boolean;
     /** The role's playbook stage, read only when an offer or pick question needs it. */
     stage?: () => Promise<string | undefined>;
   },
@@ -754,7 +756,13 @@ export async function planDeclineRetry(
         orderBy: { createdAt: "asc" },
       })
     : [];
-  if (declined.kind !== "decline" && QUESTION_STAGES.has((await input.stage?.()) ?? ""))
+  // Intake and calibration questions are the coordinator's own playbook steps; a teammate
+  // handed one request asks its question on a card.
+  if (
+    declined.kind !== "decline" &&
+    !input.handedIn &&
+    QUESTION_STAGES.has((await input.stage?.()) ?? "")
+  )
     return undefined;
   return declineRetry({
     reply: input.reply,

@@ -12998,6 +12998,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   tools,
                   worked: turnReport.worked(),
                   presentedRound: turnReport.presentedRound(),
+                  handedIn: Boolean(handedIn),
                   stage: async () => {
                     const roleId = (
                       await deps.prisma.thread.findUnique({
