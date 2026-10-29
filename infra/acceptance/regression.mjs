@@ -526,7 +526,7 @@ async function readEvents(groupId) {
   return events;
 }
 const DECLINED =
-  /\b(?:I (?:can(?:no|['’])t|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
+  /\b(?:I (?:can(?:no|['’])t|(?:could(?:n['’]t| not)|was(?:n['’]t| not) able to)(?! (?:find|locate|reach))|am unable to|['’]m unable to|['’]m not able to|don['’]t have (?:access|a tool|the ability))|(?:that['’]s|this is|it['’]s) (?:outside|beyond) (?:my|what I)|not something I can)\b|我(?:无法|不能|没法|做不了)/i;
 // Offering the work back instead of doing it; the server retries these once, so one left in a
 // reply means the retry did not take.
 const DEFERRED =
