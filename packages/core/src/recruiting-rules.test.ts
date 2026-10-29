@@ -887,6 +887,19 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: '"Send this email to him" was refused because the campaign held 15 other unsent people.',
   },
   {
+    rule: "a one-person draft is sent as written",
+    in: "Outreach",
+    phrase:
+      "save it with ensure_role_campaign steps (that one email) and recipients (them), then activate_campaign with them: they get exactly it",
+    why: '"Send this email to them" was refused because the role\'s saved sequence was not the one-person draft shown.',
+  },
+  {
+    rule: "a one-person draft is sent as written (skill)",
+    in: "Review recruiting draft skill",
+    phrase: 'so "send it" sends exactly that email to them while everyone else keeps the role\'s',
+    why: '"Send this email to them" was refused because the role\'s saved sequence was not the one-person draft shown.',
+  },
+  {
     rule: "a send to named people goes only to them (Main)",
     in: "Main",
     phrase: "then activate_campaign with any people they named as recipients",

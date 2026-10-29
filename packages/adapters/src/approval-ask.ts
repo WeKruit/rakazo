@@ -241,6 +241,15 @@ function formatInstantlyActivation(display: InstantlyActivationDisplay) {
     ...shown.flatMap((r) => [
       `- ${r.name ? `${r.name} <${r.email}>` : r.email}${r.emailType ? ` (${r.emailType} email)` : ""}`,
       ...(r.personalization ? [`  Opening: ${r.personalization}`] : []),
+      ...(r.firstEmail
+        ? [
+            `  Subject: ${r.firstEmail.subject}`,
+            "  Body:",
+            ...htmlToPlainText(r.firstEmail.body)
+              .split("\n")
+              .map((line) => (line ? `  ${line}` : "")),
+          ]
+        : []),
     ]),
     ...(display.recipients.length > shown.length
       ? [`- and ${display.recipients.length - shown.length} more`]

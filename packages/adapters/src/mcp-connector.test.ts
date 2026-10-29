@@ -3585,6 +3585,16 @@ describe("local native Instantly campaign and lead tools", () => {
           if (index < 0) return new Response("{}", { status: 404 });
           return Response.json(state.campaignLeads.splice(index, 1)[0]);
         }
+        if (lead && request.method === "PATCH") {
+          const entry = state.campaignLeads.find((item) => item.id === lead[1]);
+          if (!entry) return new Response("{}", { status: 404 });
+          // Custom variables are kept in the lead's payload.
+          entry.payload = {
+            ...(entry.payload as object | undefined),
+            ...body.custom_variables,
+          };
+          return Response.json(entry);
+        }
         if (url.pathname === "/api/v2/leads/list" && body.campaign && !body.contacts)
           return Response.json({
             items:
@@ -4440,6 +4450,186 @@ describe("local native Instantly campaign and lead tools", () => {
       const events = await f.run("activate_campaign", { recipients: ["abe@x.test"] });
       expect((events[0] as { message: string }).message).toMatch(/Already in this campaign/);
       expect(sends(f)).toEqual([]);
+    });
+
+    describe("one person's own first email", () => {
+      const OWN = {
+        subject: "Abe, a founding search role",
+        body: "Hi Abe,\n\nYour ranking work at Acme stood out.",
+      };
+      const OWN_VARIABLES = {
+        rk_subject: OWN.subject,
+        rk_body: "Hi Abe,<br /><br />Your ranking work at Acme stood out.",
+      };
+      const TEMPLATE = { subject: "{{rk_subject}}", body: "<p>{{rk_body}}</p>" };
+      const patches = (f: ReturnType<typeof fixture>) =>
+        f.state.requests.filter((r) => r.method === "PATCH");
+      const saveForAbe = (f: ReturnType<typeof fixture>) =>
+        f.run("ensure_role_campaign", { steps: [OWN], recipients: ["Abe Stone"] });
+
+      it("saves it in that lead's variables and the role's email in everyone else's", async () => {
+        const { f, binding } = await roleWithSixteen();
+        f.state.campaign.sequences = [
+          {
+            steps: [
+              { delay: 0, variants: [{ subject: "Hi", body: "<p>Hi {{firstName}}</p>" }] },
+              { delay: 4, variants: [{ subject: "", body: "<p>Following up</p>" }] },
+            ],
+          },
+        ];
+        const out = f.result(await saveForAbe(f));
+        expect(out).toMatchObject({ ownEmailSavedFor: ["abe@x.test"] });
+        const writes = patches(f);
+        expect(writes[0]).toEqual({
+          method: "PATCH",
+          path: "/api/v2/leads/lead-abe",
+          body: { custom_variables: OWN_VARIABLES },
+        });
+        // Everyone else gets the role's email, its lead variables filled in for them.
+        expect(writes[1]).toEqual({
+          method: "PATCH",
+          path: "/api/v2/leads/lead-0",
+          body: { custom_variables: { rk_subject: "Hi", rk_body: "Hi P0" } },
+        });
+        // Only after every lead has its email does the first step read the variables.
+        expect(writes.at(-1)).toMatchObject({
+          path: `/api/v2/campaigns/${CAMPAIGN}`,
+          body: {
+            sequences: [
+              {
+                steps: [
+                  { delay: 0, variants: [TEMPLATE] },
+                  { delay: 4, variants: [{ subject: "", body: "<p>Following up</p>" }] },
+                ],
+              },
+            ],
+          },
+        });
+        expect(writes).toHaveLength(17);
+        expect(binding.result).toMatchObject({
+          roleEmail: { subject: "Hi", body: "<p>Hi {{firstName}}</p>" },
+          drafts: { "abe@x.test": OWN },
+        });
+        // The send is #481's named-recipient path: only Abe stays in the draft and gets it.
+        const sent = f.result(await f.run("activate_campaign", { recipients: ["Abe Stone"] }));
+        expect(sent).toMatchObject({ activated: true, recipients: ["abe@x.test"] });
+        expect(f.state.campaignLeads).toEqual([
+          expect.objectContaining({ email: "abe@x.test", payload: OWN_VARIABLES }),
+        ]);
+      });
+
+      it("keeps their own email when the role's email is saved again", async () => {
+        const { f } = await roleWithSixteen();
+        await saveForAbe(f);
+        f.state.requests.length = 0;
+        await f.run("ensure_role_campaign", {
+          steps: [{ subject: "Founding role", body: "Hi {{firstName}},\n\nNew copy" }],
+        });
+        expect(JSON.stringify(f.state.campaign.sequences)).toContain("{{rk_body}}");
+        const leadWrites = patches(f).filter((r) => r.path.startsWith("/api/v2/leads/"));
+        expect(leadWrites.map((r) => r.path)).not.toContain("/api/v2/leads/lead-abe");
+        expect(leadWrites[0]).toEqual({
+          method: "PATCH",
+          path: "/api/v2/leads/lead-0",
+          body: {
+            custom_variables: {
+              rk_subject: "Founding role",
+              rk_body: "Hi P0,<br /><br />New copy",
+            },
+          },
+        });
+        expect(f.state.campaignLeads[0]!.payload).toEqual(OWN_VARIABLES);
+      });
+
+      it("adds a person waiting for a sending campaign with exactly their own email", async () => {
+        const { f } = await roleWithSixteen();
+        await saveForAbe(f);
+        f.state.campaign.status = 1;
+        await f.run("add_shortlist_leads", {
+          candidates: [
+            { candidate_key: "zoe", email: "zoe@x.test", first_name: "Zoe" },
+            { candidate_key: "kai", email: "kai@x.test", first_name: "Kai" },
+          ],
+        });
+        const zoe = { subject: "Zoe, a founding role", body: "Hi Zoe,\n\nA note just for you." };
+        f.state.requests.length = 0;
+        f.result(await f.run("ensure_role_campaign", { steps: [zoe], recipients: ["zoe@x.test"] }));
+        // She is not in the sending campaign yet, so nothing is written there.
+        expect(patches(f)).toEqual([]);
+        await f.run("activate_campaign", { recipients: ["zoe@x.test"] });
+        await f.run("activate_campaign", { recipients: ["kai@x.test"] });
+        expect(sends(f).map((r) => (r.body as { leads: unknown[] }).leads)).toEqual([
+          [
+            {
+              email: "zoe@x.test",
+              first_name: "Zoe",
+              custom_variables: {
+                rk_subject: zoe.subject,
+                rk_body: "Hi Zoe,<br /><br />A note just for you.",
+              },
+            },
+          ],
+          // Kai has no email of his own, so he gets the role's.
+          [
+            {
+              email: "kai@x.test",
+              first_name: "Kai",
+              custom_variables: { rk_subject: "Hi", rk_body: "Hello" },
+            },
+          ],
+        ]);
+      });
+
+      it("never sends to someone with no first email in their variables", async () => {
+        const { f } = await roleWithSixteen();
+        delete f.state.campaign.sequences;
+        await saveForAbe(f);
+        const events = await f.run("activate_campaign", {});
+        expect((events[0] as { message: string }).message).toMatch(
+          /No first email is saved for P0, P1/,
+        );
+        expect(sends(f)).toEqual([]);
+      });
+
+      it("refuses to change the role's sequence once someone was emailed from it", async () => {
+        for (const emailed of [
+          (f: ReturnType<typeof fixture>) => {
+            f.state.campaign.status = 2;
+          },
+          (f: ReturnType<typeof fixture>) => {
+            f.state.campaignLeads[3]!.timestamp_last_contact = "2026-10-28T22:27:50.954Z";
+          },
+        ]) {
+          const { f, binding } = await roleWithSixteen();
+          emailed(f);
+          const before = JSON.stringify(binding.result);
+          const events = await saveForAbe(f);
+          expect((events[0] as { message: string }).message).toBe(
+            "Instantly native_instantly_ensure_role_campaign failed. Abe Stone's own email was not saved and nothing was sent: this role's emails have already gone out, and its first email cannot become one person's own without changing it for people already approved. Ask the recruiter one question: send Abe Stone the role's saved email instead, or keep this email unsent?",
+          );
+          expect(patches(f)).toEqual([]);
+          expect(JSON.stringify(binding.result)).toBe(before);
+        }
+      });
+
+      it("refuses an email with variables, more than one step, or a person not yet added", async () => {
+        const { f } = await roleWithSixteen();
+        const message = async (args: Record<string, unknown>) =>
+          ((await f.run("ensure_role_campaign", args))[0] as { message: string }).message;
+        expect(
+          await message({
+            steps: [{ subject: "Hi", body: "Hi {{firstName}}" }],
+            recipients: ["Abe"],
+          }),
+        ).toMatch(/without \{\{variables\}\}/);
+        expect(await message({ steps: [OWN, OWN], recipients: ["Abe Stone"] })).toMatch(
+          /exactly one step/,
+        );
+        expect(await message({ steps: [OWN], recipients: ["nobody@x.test"] })).toMatch(
+          /add_shortlist_leads/,
+        );
+        expect(patches(f)).toEqual([]);
+      });
     });
   });
 });

@@ -76,18 +76,14 @@ const RoleId = z
   .max(100)
   .optional()
   .describe("Recruiting role id; omit inside a role conversation (its linked role is used).");
+const Recipients = z.array(z.string().trim().min(1).max(254)).min(1).max(100).optional();
 const ActivateCampaignInput = z.strictObject({
   campaign_id: Uuid.optional().describe(
     "Omit inside a role conversation to activate the role's own campaign (created if needed).",
   ),
-  recipients: z
-    .array(z.string().trim().min(1).max(254))
-    .min(1)
-    .max(100)
-    .optional()
-    .describe(
-      "Only these people get the email: each one's email or name as added with add_shortlist_leads. Omit to send to everyone in the campaign.",
-    ),
+  recipients: Recipients.describe(
+    "Only these people get the email: each one's email or name as added with add_shortlist_leads. Omit to send to everyone in the campaign.",
+  ),
 });
 const EnsureRoleCampaignInput = z.strictObject({
   role_id: RoleId,
@@ -98,6 +94,9 @@ const EnsureRoleCampaignInput = z.strictObject({
   timezone: CampaignSetup.timezone,
   send_hours: CampaignSetup.send_hours.describe(
     "Change when emails may go out; an active campaign is paused for the change and needs activate_campaign again.",
+  ),
+  recipients: Recipients.describe(
+    "Save steps (one step: the first email written for them) as only these people's own email, each one's email or name as added with add_shortlist_leads; everyone else keeps the role's email.",
   ),
 });
 const AddShortlistLeadsInput = z.strictObject({
@@ -210,7 +209,7 @@ export const nativeInstantlyWrites = [
     "ensure_role_campaign",
     EnsureRoleCampaignInput,
     false,
-    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Pass send_hours any_time when the recruiter wants it sent now or outside weekday 9-5. Also returns candidate_key -> lead id mappings.",
+    "Returns the one Instantly campaign bound to a recruiting role, creating it (draft, stop-on-reply on, default mailbox) only if none exists. Idempotent; needs no arguments inside a role conversation. Pass steps to save the email sequence on a campaign it created: a draft that has sent nothing takes new copy in place of the old, a paused one only its first; other copy is kept and comes back as currentEmail. hasEmail says whether the campaign has an email to send. Pass send_hours any_time when the recruiter wants it sent now or outside weekday 9-5. Pass recipients with one step to save an email written for those people as their own first email: activate_campaign with them as recipients then sends exactly it. Also returns candidate_key -> lead id mappings.",
   ),
   tool(
     "add_shortlist_leads",
@@ -375,6 +374,75 @@ function firstEmail(campaign: Record<string, unknown> | undefined) {
     : null;
 }
 
+/**
+ * One-person first emails. The role campaign keeps its one sequence, but once a person has their
+ * own email its first step reads the lead's custom variables (POST /leads/add and PATCH
+ * /leads/{id} `custom_variables`, kept in the lead's `payload`; {{name}} works in a subject and a
+ * body). Each lead then holds its own first email, or the role's with its lead variables filled
+ * in here, so no variable value relies on another variable. Follow-ups stay the role's.
+ */
+const OWN_SUBJECT = "rk_subject";
+const OWN_BODY = "rk_body";
+const TEMPLATE_VARIANT = { subject: `{{${OWN_SUBJECT}}}`, body: `<p>{{${OWN_BODY}}}</p>` };
+type FirstEmail = { subject: string; body: string };
+const isTemplated = (campaign: Record<string, unknown> | undefined) =>
+  firstEmail(campaign)?.subject === TEMPLATE_VARIANT.subject;
+/** The body as one paragraph's content: the template keeps the value inside its paragraph. */
+const inlineHtml = (body: string) =>
+  bodyHtml(body)
+    .replace(/^<p>|<\/p>$/g, "")
+    .replaceAll("</p><p>", "<br /><br />");
+const emailVariables = (email: FirstEmail) => ({
+  [OWN_SUBJECT]: email.subject.replace(/&/g, "＆"),
+  [OWN_BODY]: inlineHtml(email.body),
+});
+const LEAD_VARIABLES: Record<
+  string,
+  "first_name" | "last_name" | "company_name" | "personalization"
+> = {
+  firstName: "first_name",
+  first_name: "first_name",
+  lastName: "last_name",
+  last_name: "last_name",
+  companyName: "company_name",
+  company_name: "company_name",
+  personalization: "personalization",
+};
+const VARIABLE = /\{\{\s*([^{}]*?)\s*\}\}/g;
+/** Refuses a role email whose variables cannot be filled in per person. */
+function requireFillable(email: FirstEmail) {
+  const unknown = [...`${email.subject} ${email.body}`.matchAll(VARIABLE)]
+    .map((match) => match[1]!)
+    .filter((name) => !LEAD_VARIABLES[name]);
+  if (unknown.length)
+    throw new Error(
+      `The role's first email uses {{${unknown[0]}}}; use only {{firstName}}, {{lastName}}, {{companyName}} and {{personalization}} in it, then save again.`,
+    );
+}
+const fillFor = (email: FirstEmail, person: Person): FirstEmail => {
+  const fill = (value: string) =>
+    value.replace(VARIABLE, (_, name: string) => {
+      const field = LEAD_VARIABLES[name];
+      return (field && text(person[field])) || "";
+    });
+  return { subject: fill(email.subject), body: fill(email.body) };
+};
+type Copy = Pick<RoleBinding, "roleEmail" | "drafts"> | null | undefined;
+/** The first email a person in a templated campaign gets: their own, else the role's. */
+function emailFor(binding: Copy, person: Person): FirstEmail | undefined {
+  const own = binding?.drafts?.[person.email.toLowerCase()];
+  if (own) return own;
+  return binding?.roleEmail ? fillFor(binding.roleEmail, person) : undefined;
+}
+const variablesOf = (binding: Copy, person: Person) => {
+  const email = emailFor(binding, person);
+  return email ? emailVariables(email) : undefined;
+};
+const variablesFor = (binding: Copy, person: Person) => {
+  const variables = variablesOf(binding, person);
+  return variables ? { custom_variables: variables } : {};
+};
+
 function campaignSchedule(hours: "weekdays_9_to_5" | "any_time", zone: string) {
   const anyTime = hours === "any_time";
   const pacific = PACIFIC.has(zone);
@@ -429,6 +497,10 @@ type RoleBinding = {
   created?: boolean;
   /** People added while the campaign was sending: not in it (not emailed) until a confirmed send. */
   staged?: Record<string, StagedLead>;
+  /** The role's first email once its campaign reads lead variables (see TEMPLATE_VARIANT). */
+  roleEmail?: FirstEmail;
+  /** Each person's own first email, by lowercased address. */
+  drafts?: Record<string, FirstEmail>;
 };
 type StagedLead = {
   email: string;
@@ -515,6 +587,8 @@ export type InstantlyActivationDisplay = {
     email: string;
     emailType?: "work" | "personal";
     personalization?: string;
+    /** This person's own first email, when it is not the role's. */
+    firstEmail?: FirstEmail;
   }[];
   /** null when the leads could not be read; the list itself is capped at 100. */
   recipientCount: number | null;
@@ -568,7 +642,13 @@ export async function readRoleCampaignBinding(
   return typeof binding?.campaignId === "string" ? (binding as RoleBinding) : null;
 }
 /** A campaign lead or a staged person, as one send would address them. */
-type Person = StagedLead & { id?: string };
+type Person = StagedLead & {
+  id?: string;
+  /** The first email this lead's variables hold (subject and body HTML), when it has them. */
+  saved?: Record<typeof OWN_SUBJECT | typeof OWN_BODY, string>;
+  /** The provider has emailed this lead (Lead.timestamp_last_contact). */
+  contacted?: boolean;
+};
 type SendPlan =
   /** Activate the campaign once `remove` (never-emailed people nobody named) are taken out. */
   | { send: "activate"; recipients: Person[]; remove: Person[] }
@@ -586,6 +666,9 @@ const label = (people: Person[]) =>
 function asPerson(lead: Record<string, unknown>): Person[] {
   if (typeof lead.email !== "string") return [];
   const fields = ["first_name", "last_name", "company_name", "personalization"] as const;
+  const payload = (lead.payload ?? {}) as Record<string, unknown>;
+  const subject = payload[OWN_SUBJECT];
+  const body = payload[OWN_BODY];
   return [
     {
       email: lead.email,
@@ -593,6 +676,10 @@ function asPerson(lead: Record<string, unknown>): Person[] {
       ...Object.fromEntries(
         fields.flatMap((key) => (text(lead[key]) ? [[key, text(lead[key])]] : [])),
       ),
+      ...(text(subject) && text(body)
+        ? { saved: { [OWN_SUBJECT]: String(subject), [OWN_BODY]: String(body) } }
+        : {}),
+      ...(lead.timestamp_last_contact ? { contacted: true } : {}),
     },
   ];
 }
@@ -616,7 +703,32 @@ function matchRecipient(people: Person[], wanted: string) {
  * Only a draft (never activated, so nobody in it was approved or emailed) may have unnamed people
  * taken out; a campaign that has run keeps everyone and is resumed only when nobody else is in it.
  */
-function planSend(status: unknown, leads: Person[], staged: Person[], wanted?: string[]): SendPlan {
+function planSend(
+  status: unknown,
+  leads: Person[],
+  staged: Person[],
+  wanted?: string[],
+  templated = false,
+  copy: Copy = null,
+): SendPlan {
+  const plan = planRecipients(status, leads, staged, wanted);
+  if ("refusal" in plan || !templated) return plan;
+  // A templated first email is in each person's variables: nobody goes out without one.
+  const blank = plan.recipients.filter((person) =>
+    leads.includes(person) ? !person.saved : !emailFor(copy, person),
+  );
+  return blank.length
+    ? {
+        refusal: `No first email is saved for ${label(blank)}, so nothing was sent. Save the role's email with ensure_role_campaign steps, or their own with steps and recipients, then call activate_campaign again.`,
+      }
+    : plan;
+}
+function planRecipients(
+  status: unknown,
+  leads: Person[],
+  staged: Person[],
+  wanted?: string[],
+): SendPlan {
   const pending =
     status === ACTIVE
       ? staged.filter((s) => !leads.some((l) => sameAddress(l.email, s.email)))
@@ -653,6 +765,15 @@ function planSend(status: unknown, leads: Person[], staged: Person[], wanted?: s
     : { send: "activate", recipients: chosen, remove: [] };
 }
 
+/** A lead as /leads/add takes it; a templated campaign also gets its first email's variables. */
+const newLead = (person: Person, copy: Copy | false) => ({
+  email: person.email,
+  ...(person.first_name ? { first_name: person.first_name } : {}),
+  ...(person.last_name ? { last_name: person.last_name } : {}),
+  ...(person.company_name ? { company_name: person.company_name } : {}),
+  ...(person.personalization ? { personalization: person.personalization } : {}),
+  ...(copy === false ? {} : variablesFor(copy, person)),
+});
 const stagedPeople = (binding: Pick<RoleBinding, "staged"> | null | undefined): Person[] =>
   Object.values(binding?.staged ?? {});
 
@@ -668,7 +789,7 @@ export async function describeCampaignActivation(
   ) => Promise<Record<string, unknown> | undefined>,
   campaignId: string,
   fallbackMailbox: string | null = null,
-  binding: Pick<RoleBinding, "leads" | "staged"> | null = null,
+  binding: Pick<RoleBinding, "leads" | "staged" | "roleEmail" | "drafts"> | null = null,
   wanted?: string[],
 ): Promise<InstantlyActivationDisplay> {
   const types = new Map(
@@ -684,21 +805,55 @@ export async function describeCampaignActivation(
   ]);
   const emails = Array.isArray(campaign?.email_list) ? campaign.email_list : [];
   const items = Array.isArray(leads?.items) ? (leads.items as Record<string, unknown>[]) : null;
+  const templated = isTemplated(campaign);
+  const people = (items ?? []).flatMap(asPerson);
   const plan =
     campaign && items
-      ? planSend(campaign.status, items.flatMap(asPerson), stagedPeople(binding), wanted)
+      ? planSend(campaign.status, people, stagedPeople(binding), wanted, templated, binding)
       : wanted
         ? { refusal: "This campaign could not be read, so nothing was sent; try again." }
-        : { send: "activate" as const, recipients: (items ?? []).flatMap(asPerson), remove: [] };
+        : { send: "activate" as const, recipients: people, remove: [] };
+  let roleCopyShown = false;
   const recipients = ("refusal" in plan ? [] : plan.recipients).map((person) => {
     const emailType = types.get(person.email.toLowerCase());
+    // A lead's own variables are what is sent; a person not yet added gets what the send adds.
+    const own = !templated
+      ? undefined
+      : people.includes(person)
+        ? person.saved
+        : variablesOf(binding, person);
+    const role = binding?.roleEmail && emailVariables(fillFor(binding.roleEmail, person));
+    const theirs =
+      own && (!role || own[OWN_SUBJECT] !== role[OWN_SUBJECT] || own[OWN_BODY] !== role[OWN_BODY])
+        ? { subject: own[OWN_SUBJECT], body: own[OWN_BODY] }
+        : undefined;
+    if (!theirs) roleCopyShown = true;
     return {
       name: fullName(person) || null,
       email: person.email,
       ...(emailType ? { emailType } : {}),
-      ...(person.personalization ? { personalization: person.personalization } : {}),
+      ...(person.personalization && !theirs ? { personalization: person.personalization } : {}),
+      ...(theirs ? { firstEmail: theirs } : {}),
     };
   });
+  // A templated campaign's own step is variables: the card shows the role's email instead, and
+  // only when someone on it gets that email.
+  const shownEmail = !campaign
+    ? {}
+    : !templated
+      ? { firstEmail: firstEmail(campaign) }
+      : binding?.roleEmail
+        ? roleCopyShown
+          ? {
+              firstEmail: {
+                subject: binding.roleEmail.subject,
+                body: bodyHtml(binding.roleEmail.body),
+              },
+            }
+          : {}
+        : recipients.length && !roleCopyShown
+          ? {}
+          : { firstEmail: null };
   return {
     ...("refusal" in plan ? { refusal: plan.refusal } : {}),
     campaignName: typeof campaign?.name === "string" ? campaign.name : null,
@@ -711,7 +866,7 @@ export async function describeCampaignActivation(
     recipientCount: items ? recipients.length : null,
     stopOnReply: typeof campaign?.stop_on_reply === "boolean" ? campaign.stop_on_reply : null,
     schedule: describeSchedule(campaign),
-    ...(campaign ? { firstEmail: firstEmail(campaign) } : {}),
+    ...shownEmail,
   };
 }
 
@@ -818,8 +973,10 @@ async function ensureRoleCampaign(
             (entry) => entry.campaign.id !== mappedId && (!campaign || entry.leads),
           );
     if (campaign && !better) {
+      if (input.recipients) return saveOwnEmail(prisma, rest, existing, campaign, input);
       const patched = campaign.stop_on_reply !== true;
       const current = firstEmail(campaign);
+      const templated = isTemplated(campaign);
       // Copy goes only onto a campaign this product created: a draft (nothing sent yet) takes
       // replacement copy, a paused one only its first; an active one keeps what is sending, and an
       // adopted one keeps the copy someone else wrote.
@@ -830,16 +987,39 @@ async function ensureRoleCampaign(
           (ENROLLABLE.has(campaign.status as number) && current === null));
       // The provider edits only draft or paused campaigns, so a live one is paused for new hours.
       const pausedForHours = Boolean(input.send_hours) && campaign.status === ACTIVE;
+      // A campaign that reads lead variables keeps doing so: the new role email goes into the
+      // variables of everyone without their own email.
+      if (writeSteps && templated) requireFillable(input.steps![0]!);
       if (pausedForHours) await rest("POST", `/campaigns/${mappedId}/pause`);
       if (patched || writeSteps || input.send_hours)
         await rest("PATCH", `/campaigns/${mappedId}`, {
           ...(patched ? { stop_on_reply: true } : {}),
-          ...(writeSteps ? { sequences: sequences(input.steps!) } : {}),
+          ...(writeSteps
+            ? {
+                sequences: templated
+                  ? withTemplate(sequences(input.steps!)[0]!.steps)
+                  : sequences(input.steps!),
+              }
+            : {}),
           ...(input.send_hours
             ? { campaign_schedule: campaignSchedule(input.send_hours, input.timezone) }
             : {}),
         });
       if (writeSteps) await requireSavedEmail(rest, mappedId);
+      if (writeSteps && templated) {
+        const { subject, body } = input.steps![0]!;
+        existing.binding = { ...existing.binding, roleEmail: { subject, body } };
+        await prisma.externalEffect.update({
+          where: { id: existing.effect.id },
+          data: { result: existing.binding as unknown as Prisma.InputJsonValue },
+        });
+        for (const lead of await allLeads(rest, mappedId))
+          if (lead.id && !existing.binding.drafts?.[lead.email.toLowerCase()])
+            await rest("PATCH", `/leads/${lead.id}`, {
+              custom_variables: variablesOf(existing.binding, lead),
+            });
+      }
+      const shown = templated ? (existing.binding.roleEmail ?? null) : current;
       return {
         ...existing.binding,
         created: false,
@@ -849,11 +1029,11 @@ async function ensureRoleCampaign(
         ...(pausedForHours
           ? { paused: "Paused to change the hours; call activate_campaign to resume sending" }
           : {}),
-        hasEmail: writeSteps || current !== null,
+        hasEmail: writeSteps || shown !== null,
         ...(writeSteps ? { next: SHOW_SAVED_STEPS } : {}),
         ...(input.steps && !writeSteps
           ? {
-              currentEmail: current,
+              currentEmail: shown,
               stepsNotSaved:
                 "This campaign was not created here or is sending; its email is not changed",
             }
@@ -868,6 +1048,10 @@ async function ensureRoleCampaign(
       to: better ? String(better.campaign.id) : null,
     });
   }
+  if (input.recipients)
+    throw new Error(
+      "Add these people with add_shortlist_leads first, then save their email again with recipients.",
+    );
   if (!context.runId) throw new IsolationError("A run is required to bind a role campaign");
   const eaccount =
     input.eaccount ??
@@ -901,6 +1085,142 @@ async function ensureRoleCampaign(
     adopted: Boolean(adopt),
     ...binding,
     ...(!adopt && input.steps ? { next: SHOW_SAVED_STEPS } : {}),
+  };
+}
+
+/** The live sequence's steps as a PATCH sends them back. */
+function liveSteps(campaign: Record<string, unknown>) {
+  const list = Array.isArray(campaign.sequences) ? campaign.sequences : [];
+  const steps = (list[0] as { steps?: unknown } | undefined)?.steps;
+  return (Array.isArray(steps) ? (steps as Record<string, unknown>[]) : []).map((step) => ({
+    type: "email",
+    delay: typeof step.delay === "number" ? step.delay : 0,
+    delay_unit: typeof step.delay_unit === "string" ? step.delay_unit : "days",
+    variants: (Array.isArray(step.variants)
+      ? (step.variants as Record<string, unknown>[])
+      : []
+    ).map((variant) => ({
+      subject: variant.subject,
+      body: variant.body,
+      ...(typeof variant.v_disabled === "boolean" ? { v_disabled: variant.v_disabled } : {}),
+    })),
+  }));
+}
+/** The sequence with its first step reading lead variables; later steps keep their copy. */
+function withTemplate(steps: { delay: unknown; delay_unit?: unknown; variants: unknown[] }[]) {
+  const [first, ...later] = steps;
+  return [
+    {
+      steps: [
+        {
+          type: "email",
+          delay: first?.delay ?? 0,
+          delay_unit: first?.delay_unit ?? "days",
+          variants: [TEMPLATE_VARIANT],
+        },
+        ...later,
+      ],
+    },
+  ];
+}
+
+const askAbout = (who: string, why: string) =>
+  `${who}'s own email was not saved and nothing was sent: ${why}. Ask the recruiter one question: send ${who} the role's saved email instead, or keep this email unsent?`;
+
+/**
+ * Saves one email as the first email of only the named people. A campaign whose sequence still
+ * holds the role's text switches to variables only while it is a draft nobody was emailed from,
+ * so nobody already approved or emailed gets different copy; a person already emailed, or in a
+ * campaign that is sending, keeps the email they have.
+ */
+async function saveOwnEmail(
+  prisma: PrismaClient,
+  rest: InstantlyRest,
+  existing: { effect: { id: string }; binding: RoleBinding },
+  campaign: Record<string, unknown>,
+  input: z.output<typeof EnsureRoleCampaignInput>,
+) {
+  const [own, ...more] = input.steps ?? [];
+  if (!own || more.length)
+    throw new Error(
+      "With recipients, pass exactly one step: the first email written for them, with its subject and full body.",
+    );
+  if (/\{\{/.test(`${own.subject} ${own.body}`))
+    throw new Error("Write their own email out in full, without {{variables}}, then save again.");
+  const { binding } = existing;
+  const leads = await allLeads(rest, binding.campaignId);
+  const waiting = stagedPeople(binding).filter(
+    (person) => !leads.some((lead) => sameAddress(lead.email, person.email)),
+  );
+  const chosen: Person[] = [];
+  const unmatched: string[] = [];
+  for (const entry of input.recipients!) {
+    const hit = matchRecipient([...leads, ...waiting], entry);
+    if (!hit) unmatched.push(entry);
+    else if (!chosen.includes(hit)) chosen.push(hit);
+  }
+  if (unmatched.length)
+    throw new Error(
+      `Not in this role's campaign, or more than one person matches: ${unmatched.join(", ")}. Add each person with add_shortlist_leads, then save their email again.`,
+    );
+  const who = label(chosen);
+  if (binding.created !== true)
+    throw new Error(askAbout(who, "this role's campaign was set up outside this product"));
+  const templated = isTemplated(campaign);
+  if (!templated && (campaign.status !== DRAFT || leads.some((lead) => lead.contacted)))
+    throw new Error(
+      askAbout(
+        who,
+        "this role's emails have already gone out, and its first email cannot become one person's own without changing it for people already approved",
+      ),
+    );
+  const emailed = chosen.filter(
+    (person) =>
+      leads.includes(person) &&
+      (person.contacted ||
+        campaign.status === ACTIVE ||
+        !ENROLLABLE.has(campaign.status as number)),
+  );
+  if (emailed.length)
+    throw new Error(
+      askAbout(label(emailed), "they are already getting this role's emails, which stay as sent"),
+    );
+  const next: RoleBinding = {
+    ...binding,
+    drafts: {
+      ...binding.drafts,
+      ...Object.fromEntries(
+        chosen.map((person) => [
+          person.email.toLowerCase(),
+          { subject: own.subject, body: own.body },
+        ]),
+      ),
+    },
+  };
+  const current = firstEmail(campaign);
+  if (!templated && current) {
+    requireFillable(current);
+    next.roleEmail = current;
+  }
+  // Variables before the sequence: if the switch then fails, the campaign keeps its own copy.
+  for (const lead of templated ? chosen.filter((person) => leads.includes(person)) : leads)
+    if (lead.id && emailFor(next, lead))
+      await rest("PATCH", `/leads/${lead.id}`, { custom_variables: variablesOf(next, lead) });
+  await prisma.externalEffect.update({
+    where: { id: existing.effect.id },
+    data: { result: next as unknown as Prisma.InputJsonValue },
+  });
+  if (!templated) {
+    await rest("PATCH", `/campaigns/${binding.campaignId}`, {
+      sequences: withTemplate(liveSteps(campaign)),
+    });
+    if (!isTemplated(await rest("GET", `/campaigns/${binding.campaignId}`)))
+      throw new Error("The mail service did not save the email, and nothing was sent; try again.");
+  }
+  return {
+    campaignId: binding.campaignId,
+    ownEmailSavedFor: chosen.map((person) => person.email),
+    next: "Saved as only their first email; everyone else keeps the role's email. To send it, call activate_campaign with them as recipients; its card shows this email for them.",
   };
 }
 
@@ -1093,9 +1413,9 @@ async function addShortlistLeads(
   const ready: string[] = [];
   let report: Record<string, unknown> | undefined;
   // Adding to a sending campaign would email them at once, so they wait for the send card.
-  const status = pending.length
-    ? (await rest("GET", `/campaigns/${binding.campaignId}`)).status
-    : undefined;
+  const live = pending.length ? await rest("GET", `/campaigns/${binding.campaignId}`) : undefined;
+  const status = live?.status;
+  const templated = isTemplated(live);
   if (status === ACTIVE)
     for (const { candidate_key, email, email_type, ...fields } of pending) {
       staged[candidate_key] = {
@@ -1110,13 +1430,7 @@ async function addShortlistLeads(
     report = await rest("POST", "/leads/add", {
       campaign_id: binding.campaignId,
       skip_if_in_workspace: false,
-      leads: pending.map(({ email, first_name, last_name, company_name, personalization }) => ({
-        email,
-        ...(first_name ? { first_name } : {}),
-        ...(last_name ? { last_name } : {}),
-        ...(company_name ? { company_name } : {}),
-        ...(personalization ? { personalization } : {}),
-      })),
+      leads: pending.map((candidate) => newLead(candidate, templated && binding)),
     });
     for (const created of (report.created_leads ?? []) as { index: number; id: string }[]) {
       const candidate = pending[created.index];
@@ -1213,7 +1527,15 @@ async function activateCampaign(
     );
   const bound = await bindingOfCampaign(prisma, context, serverId, campaignId);
   const leads = await allLeads(rest, campaignId);
-  const plan = planSend(campaign.status, leads, stagedPeople(bound?.binding), input.recipients);
+  const templated = isTemplated(campaign);
+  const plan = planSend(
+    campaign.status,
+    leads,
+    stagedPeople(bound?.binding),
+    input.recipients,
+    templated,
+    bound?.binding,
+  );
   if ("refusal" in plan) throw new Error(plan.refusal);
   const sendingMailbox = Array.isArray(campaign.email_list) ? campaign.email_list : [];
   const save = async (binding: RoleBinding) => {
@@ -1228,15 +1550,7 @@ async function activateCampaign(
     const report = await rest("POST", "/leads/add", {
       campaign_id: campaignId,
       skip_if_in_workspace: false,
-      leads: plan.recipients.map(
-        ({ email, first_name, last_name, company_name, personalization }) => ({
-          email,
-          ...(first_name ? { first_name } : {}),
-          ...(last_name ? { last_name } : {}),
-          ...(company_name ? { company_name } : {}),
-          ...(personalization ? { personalization } : {}),
-        }),
-      ),
+      leads: plan.recipients.map((person) => newLead(person, templated && bound?.binding)),
     });
     const sent: string[] = [];
     if (bound) {

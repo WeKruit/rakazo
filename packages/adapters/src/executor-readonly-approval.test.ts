@@ -1460,6 +1460,74 @@ describe("native Instantly activation card", () => {
     expect(card(f).detail).not.toContain("bob@x.test");
   });
 
+  it("shows the named person their own first email and nobody else", async () => {
+    const templated = {
+      ...connectorResults,
+      native_instantly_get_campaign: {
+        structuredContent: {
+          ...connectorResults.native_instantly_get_campaign.structuredContent,
+          result: {
+            ...connectorResults.native_instantly_get_campaign.structuredContent.result,
+            sequences: [
+              {
+                steps: [{ variants: [{ subject: "{{rk_subject}}", body: "<p>{{rk_body}}</p>" }] }],
+              },
+            ],
+          },
+        },
+      },
+      native_instantly_list_leads: {
+        structuredContent: {
+          source: "local_native_instantly_rest",
+          result: {
+            items: [
+              {
+                id: "l1",
+                email: "ada@x.test",
+                first_name: "Ada",
+                last_name: "Lovelace",
+                payload: {
+                  rk_subject: "Ada, your engine notes",
+                  rk_body: "Hi Ada,<br /><br />Your engine notes stood out.",
+                },
+              },
+              {
+                id: "l2",
+                email: "bob@x.test",
+                payload: { rk_subject: "Founding role", rk_body: "Hi there" },
+              },
+            ],
+          },
+        },
+      },
+    };
+    const f = fixture({
+      name: "instantly__demo__activate_campaign",
+      route,
+      connectorResults: templated,
+      inputSchema,
+    });
+    bindRole(f, { roleEmail: { subject: "Founding role", body: "Hi there" } });
+    f.setCalls([{ args: { recipients: ["Ada Lovelace"] }, executionId: "activate" }]);
+    await f.run();
+    expect(card(f).detail).toBe(
+      [
+        "Role: Founding Engineer",
+        "From: me@x.test",
+        "To (1):",
+        "- Ada Lovelace <ada@x.test>",
+        "  Subject: Ada, your engine notes",
+        "  Body:",
+        "  Hi Ada,",
+        "",
+        "  Your engine notes stood out.",
+        "Send time: Weekdays 09:00-17:00 UTC",
+        "",
+        "Confirm sending the first email to these recipients",
+      ].join("\n"),
+    );
+  });
+
   it("lists only the people waiting to be added to a campaign that is already sending", async () => {
     const f = fixture({
       name: "instantly__demo__activate_campaign",
