@@ -34,6 +34,8 @@ function fixture(options: {
   researched?: string[];
   gradesSaved?: boolean;
   researchBots?: string[];
+  /** Bots whose research assignment allows only reads of earlier research. */
+  readOnlyBots?: string[];
 }) {
   const runCreate = vi.fn(async () => ({ id: "grade-run" }));
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
@@ -76,11 +78,17 @@ function fixture(options: {
     },
     botMcpServer: {
       findMany: vi.fn(async () =>
-        (options.researchBots ?? ["sourcer"]).map((botId) => ({
-          botId,
-          serverId: "server-1",
-          server: { slug: "research" },
-        })),
+        [...(options.readOnlyBots ?? []), ...(options.researchBots ?? ["sourcer"])].map(
+          (botId) => ({
+            botId,
+            serverId: "server-1",
+            allowAllTools: false,
+            allowedTools: options.readOnlyBots?.includes(botId)
+              ? ["get_task", "get_rows"]
+              : ["research", "get_task", "get_rows"],
+            server: { slug: "research" },
+          }),
+        ),
       ),
     },
     $transaction: vi.fn(async (callback: (client: unknown) => Promise<unknown>) => callback(tx)),
@@ -193,6 +201,17 @@ describe("startRecruitingGrading", () => {
     const noTeammate = fixture({ found: [person("a")], researchBots: [] });
     await startRecruitingGrading(noTeammate.deps, { threadId: "thread" }, now);
     expect(noTeammate.runCreate).not.toHaveBeenCalled();
+  });
+
+  it("skips a teammate whose research service only allows reading earlier research", async () => {
+    const f = fixture({ found: [person("a")], readOnlyBots: ["main"] });
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ botId: "sourcer" }),
+    });
+    const readOnly = fixture({ found: [person("a")], readOnlyBots: ["main"], researchBots: [] });
+    await startRecruitingGrading(readOnly.deps, { threadId: "thread" }, now);
+    expect(readOnly.runCreate).not.toHaveBeenCalled();
   });
 });
 
