@@ -993,13 +993,11 @@ export { peopleTargetFrom, requestedPeopleTarget, shortQuestion };
  * The playbook stops a scale-out at the recruiter's target: once the role holds that many people,
  * handing a search on for a paid deep search only spends money nobody asked for.
  */
-async function searchTargetAlreadyMet(
+/** The recruiter's people target for the scale-out their latest message asked for, with the totals. */
+async function scaleTarget(
   prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
   threadId: string,
-  handoffMessage: string,
-): Promise<string | undefined> {
-  if (!/search|research|sourc|find|more (?:people|candidates)|深度|搜索|找/i.test(handoffMessage))
-    return undefined;
+): Promise<{ target: number; total: number } | undefined> {
   const thread = await prisma.thread.findUnique({
     where: { id: threadId },
     select: { activeRecruitingRoleId: true },
@@ -1024,9 +1022,19 @@ async function searchTargetAlreadyMet(
     prisma.recruitingCandidate.count({ where: { roleId: thread.activeRecruitingRoleId } }),
   ]);
   const target = peopleTargetFrom(said, before);
-  if (!target) return undefined;
-  if (total < target) return undefined;
-  return `Not handed off: Results already holds ${total} people, meeting the recruiter's target of ${target}. Do not run a deep search; tell the recruiter the total and offer the next step.`;
+  return target ? { target, total } : undefined;
+}
+
+async function searchTargetAlreadyMet(
+  prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
+  threadId: string,
+  handoffMessage: string,
+): Promise<string | undefined> {
+  if (!/search|research|sourc|find|more (?:people|candidates)|深度|搜索|找/i.test(handoffMessage))
+    return undefined;
+  const scale = await scaleTarget(prisma, threadId);
+  if (!scale || scale.total < scale.target) return undefined;
+  return `Not handed off: Results already holds ${scale.total} people, meeting the recruiter's target of ${scale.target}. Do not run a deep search; tell the recruiter the total and offer the next step.`;
 }
 
 /**
@@ -8842,13 +8850,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     await scheduleRecruitingGrading(deps.jobs, thread.id).catch((error) =>
                       getLogger().warn("recruiting grade schedule", { error: String(error) }),
                     );
-                  // The role's total, so a scale-out stops at its target without counting rows.
-                  const peopleInResults = await deps.prisma.recruitingCandidate.count({
-                    where: { roleId },
-                  });
+                  // The role's total, so a scale-out stops at its target without counting rows;
+                  // the progress line states it so a report never rounds up to the target.
+                  const [peopleInResults, scale] = await Promise.all([
+                    deps.prisma.recruitingCandidate.count({ where: { roleId } }),
+                    scaleTarget(deps.prisma, thread.id).catch(() => undefined),
+                  ]);
                   return {
                     savedToResults: true,
                     peopleInResults,
+                    ...(scale
+                      ? {
+                          progress:
+                            peopleInResults >= scale.target
+                              ? `${peopleInResults} people in Results; the target of ${scale.target} is met.`
+                              : `${peopleInResults} of the ${scale.target} target in Results; ${scale.target - peopleInResults} to go. Report this exact count.`,
+                        }
+                      : {}),
                     people,
                     expectedRoleRevision: role.revision,
                     next: RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
