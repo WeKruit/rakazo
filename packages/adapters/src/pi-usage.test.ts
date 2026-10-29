@@ -107,6 +107,7 @@ describe("Pi model stream timing", () => {
     sink = createTestSink();
     installLogger(createLogger({ service: "stream-check", sinks: [sink] }));
     vi.spyOn(performance, "now").mockImplementation(() => clock);
+    vi.spyOn(Date, "now").mockReturnValue(Date.UTC(2026, 0, 1));
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -181,6 +182,15 @@ describe("Pi model stream timing", () => {
     await consumer.next();
     expect(await stream.result()).toBe(message);
     expect(recordUsage).toHaveBeenCalledOnce();
+    expect(recordUsage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        timing: {
+          startedAt: "2026-01-01T00:00:00.000Z",
+          durationMs: 11,
+          outcome: "completed",
+        },
+      }),
+    );
     expect(push).toHaveBeenCalledOnce();
     const callId = push.mock.calls[0]![0].callId;
     expect(sink.events).toEqual([
@@ -281,6 +291,15 @@ describe("Pi model stream timing", () => {
       if (["throw", "iteratorThrow", "accountingError"].includes(failure))
         expect(result.errorMessage).toBe(error.message);
       expect(recordUsage).toHaveBeenCalledOnce();
+      expect(recordUsage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          timing: {
+            startedAt: "2026-01-01T00:00:00.000Z",
+            durationMs: 11,
+            outcome: failure === "accountingError" ? "completed" : "failed",
+          },
+        }),
+      );
       expect(push).toHaveBeenCalledOnce();
       expect(sink.events[1]).toMatchObject({
         message: "model.stream.timing",
@@ -343,6 +362,7 @@ describe("Pi model stream timing", () => {
 
   it("keeps simultaneous streams locally correlated", async () => {
     const upstreams = [createAssistantMessageEventStream(), createAssistantMessageEventStream()];
+    const pushes = [vi.fn(), vi.fn()];
     const streams = upstreams.map((upstream, index) => {
       clock = index * 10;
       return observedPiStream(
@@ -350,7 +370,7 @@ describe("Pi model stream timing", () => {
         { ...model, id: `fixture-${index}` },
         { messages: [] },
         undefined,
-        vi.fn(),
+        pushes[index]!,
       );
     });
     for (const index of [1, 0]) {
@@ -374,6 +394,10 @@ describe("Pi model stream timing", () => {
       { model: "fixture-0", firstStreamEventMs: 30, firstTextDeltaMs: 30, streamWallMs: 35 },
     ]);
     expect(new Set(summaries.map((event) => event.callId)).size).toBe(2);
+    expect(pushes.map((push) => push.mock.calls[0]?.[0])).toMatchObject([
+      { timing: { durationMs: 35, outcome: "completed" } },
+      { timing: { durationMs: 10, outcome: "completed" } },
+    ]);
     for (const summary of summaries)
       expect(
         sink.events.find(

@@ -5,6 +5,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   appendToolCompletionAudit,
+  appendUsageTimingAudit,
   createRunExecutor,
   createRunWorkspaceCheckpoint,
   dockerComputerToolInstruction,
@@ -107,6 +108,34 @@ describe("bot tool permissions", () => {
         disabledBuiltinTools: ["search_history", "read_history", "unknown"],
       }).map((tool) => tool.name),
     ).toEqual(baseline.filter((name) => name !== "search_history" && name !== "read_history"));
+  });
+});
+
+describe("model call timing audit", () => {
+  it("persists only measured metadata and never changes execution when diagnostics fail", async () => {
+    const append = vi.fn().mockRejectedValue(new Error("database unavailable"));
+    const target = { spaceId: "space", threadId: "thread", botId: "bot", runId: "run" };
+    const usage = {
+      type: "usage" as const,
+      provider: "fake",
+      model: "fixture",
+      callId: "call",
+      inputTokens: null,
+      outputTokens: null,
+      timing: { startedAt: "2026-01-01T00:00:00.000Z", durationMs: 12, outcome: "failed" as const },
+    };
+    await expect(
+      appendUsageTimingAudit({ events: { append } }, target, usage),
+    ).resolves.toBeUndefined();
+    expect(append).toHaveBeenCalledWith({
+      ...target,
+      type: "usage.recorded",
+      allowCancelledRun: true,
+      payload: { callId: "call", ...usage.timing },
+    });
+    append.mockClear();
+    await appendUsageTimingAudit({ events: { append } }, target, { ...usage, timing: undefined });
+    expect(append).not.toHaveBeenCalled();
   });
 });
 

@@ -1,5 +1,6 @@
 import { ORPCError } from "@orpc/server";
-import type { Actor, RunTrace } from "@rakazo/contracts";
+import type { Actor, RunTrace, UsageRecordedPayload } from "@rakazo/contracts";
+import { UsageRecordedPayloadSchema } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
 
 /** Read the same account-owned history the runtime writes; never another account's trace. */
@@ -37,6 +38,7 @@ export async function readRunTrace(
             "run.requeued",
             "thread.progress",
             "run.completed",
+            "usage.recorded",
           ],
         },
       },
@@ -52,11 +54,13 @@ export async function readRunTrace(
         model: true,
         createdAt: true,
         totalTokens: true,
+        callId: true,
         costUsd: true,
       },
     }),
   ]);
   const rows: RunTrace["rows"] = [];
+  const modelTimings = new Map<string, UsageRecordedPayload>();
   const tools = new Map<string, RunTrace["rows"][number]>();
   const subagents = new Map<string, RunTrace["rows"][number]>();
   for (const event of events) {
@@ -74,7 +78,10 @@ export async function readRunTrace(
       tokens: null,
       costUsd: null,
     };
-    if (event.type === "agent.tool.called") {
+    if (event.type === "usage.recorded") {
+      const timing = UsageRecordedPayloadSchema.safeParse(p);
+      if (timing.success) modelTimings.set(timing.data.callId, timing.data);
+    } else if (event.type === "agent.tool.called") {
       row.status = run.completedAt ? "unknown" : "running";
       if (typeof p.executionId === "string") tools.set(p.executionId, row);
       rows.push(row);
@@ -160,17 +167,19 @@ export async function readRunTrace(
       rows.push({ ...row, kind: "retry", label: "Retry" });
   }
   if (run.completedAt) for (const child of subagents.values()) child.status = "unknown";
-  for (const call of usage)
+  for (const call of usage) {
+    const timing = call.callId ? modelTimings.get(call.callId) : undefined;
     rows.push({
       id: call.id,
       kind: "model",
       label: `${call.provider} / ${call.model}`,
-      startedAt: call.createdAt.toISOString(),
-      durationMs: null,
-      status: "completed",
+      startedAt: timing?.startedAt ?? call.createdAt.toISOString(),
+      durationMs: timing?.durationMs ?? null,
+      status: timing?.outcome ?? "unknown",
       tokens: call.totalTokens,
       costUsd: call.costUsd,
     });
+  }
   rows.sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
   return {
     runId: run.id,

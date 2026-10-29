@@ -1292,6 +1292,51 @@ describe("explicit artifact workspace writes", () => {
 });
 
 describe("tool audit ordering", () => {
+  it.each(["answer", "subagent", "compaction"] as const)(
+    "persists %s timing through callback and unaccounted usage paths",
+    async (operationKind) => {
+      for (const viaCallback of [true, false]) {
+        const f = fixture("model-timing");
+        const createMany = vi.fn().mockResolvedValue({ count: 1 });
+        Object.assign(f.prisma, { usageRecord: { createMany } });
+        const usage = {
+          type: "usage" as const,
+          provider: "fixture",
+          model: "fixture",
+          callId: "model-call",
+          inputTokens: null,
+          outputTokens: null,
+          operationKind,
+          timing: {
+            startedAt: "2026-01-01T00:00:00.000Z",
+            durationMs: 15,
+            outcome: "failed" as const,
+          },
+        };
+        f.runtimeRun.mockImplementation(async function* (request) {
+          if (viaCallback) await request.onUsage?.(usage);
+          yield { ...usage, ...(viaCallback ? { accounted: true } : {}) };
+          yield { type: "done" as const, text: "Done." };
+        });
+        await f.run();
+        expect(createMany).toHaveBeenCalledOnce();
+        const audits = vi
+          .mocked(f.executorDeps.events.append)
+          .mock.calls.map(([event]) => event)
+          .filter((event) => event.type === "usage.recorded");
+        expect(audits).toEqual([
+          expect.objectContaining({
+            runId: f.runData.id,
+            payload: { callId: usage.callId, ...usage.timing },
+          }),
+        ]);
+        expect(createMany.mock.calls[0]?.[0].data[0]).toMatchObject({
+          inputTokens: null,
+          outputTokens: null,
+        });
+      }
+    },
+  );
   it.each(["web_search", "message_user"])(
     "persists a failed %s step when completion arrives before the yielded call",
     async (name) => {
@@ -1313,7 +1358,8 @@ describe("tool audit ordering", () => {
         yield { type: "done" as const, text: "Checking profiles." };
       });
       await f.run();
-      const savedBlocks = f.finalizeRun.mock.calls.at(-1)?.[0].blocks;
+      const finalized = f.finalizeRun.mock.calls.at(-1)?.[0];
+      const savedBlocks = finalized?.outcome === "completed" ? finalized.blocks : undefined;
       expect(savedBlocks).toEqual(
         expect.arrayContaining([
           {

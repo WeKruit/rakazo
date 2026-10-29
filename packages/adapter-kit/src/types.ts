@@ -4,6 +4,7 @@ import type {
   ConnectionCatalogItem,
   RecruitingPreferenceFeedbackInput,
   SandboxKind,
+  UsageRecordedPayload,
 } from "@rakazo/contracts";
 
 export interface AdapterContext {
@@ -646,6 +647,8 @@ export type AgentRuntimeEvent =
       type: "usage";
       /** Producer-side onUsage completed; consumers must not account it again. */
       accounted?: boolean;
+      /** Measured model stream time, excluding usage accounting and budget settlement. */
+      timing?: Omit<UsageRecordedPayload, "callId">;
       provider: string;
       model: string;
       callId?: string;

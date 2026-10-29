@@ -119,6 +119,15 @@ export const RunCompletedPayloadSchema = RunTimingSchema.extend({
 });
 export type RunCompletedPayload = z.infer<typeof RunCompletedPayloadSchema>;
 
+/** Per-model-call execution timing; usage amounts remain in the existing usage ledger. */
+export const UsageRecordedPayloadSchema = z.object({
+  callId: Id,
+  startedAt: IsoDate,
+  durationMs: z.number().nonnegative(),
+  outcome: z.enum(["completed", "failed"]),
+});
+export type UsageRecordedPayload = z.infer<typeof UsageRecordedPayloadSchema>;
+
 export const BotMessageIntent = z.enum(["request", "result", "question", "status", "fyi"]);
 export type BotMessageIntent = z.infer<typeof BotMessageIntent>;
 
