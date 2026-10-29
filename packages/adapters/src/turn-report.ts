@@ -369,6 +369,27 @@ export function declinedSentence(text: string): Declined | undefined {
     : undefined;
 }
 
+/** A reply that talks about the send or booking it was asked for. */
+const CARD_WORK = /\b(?:sen[dt]|e-?mail|draft|book|invit|interview|schedul)|发|约/i;
+
+/**
+ * Why a final reply gets the one retry: it declines, defers, picks or asks in text, or a send or
+ * booking request ended without its card while the reply talks about that work ("I haven't sent
+ * anything; please save the draft"), which leaves the request undone however it is worded.
+ */
+export function retryReason(reply: string, request: string): Declined | undefined {
+  const declined = declinedSentence(reply);
+  if (declined) return declined;
+  if (!REQUEST_KINDS.send.test(request) && !REQUEST_KINDS.schedule.test(request)) return undefined;
+  if (DRAFT_START.test(reply) || !CARD_WORK.test(reply)) return undefined;
+  const sentence = reply
+    .split(/(?<=[.!?。！？\n])/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .findLast((part) => CARD_WORK.test(part));
+  return sentence ? { sentence, kind: "decline" } : undefined;
+}
+
 export type Teammate = { id: string; name: string; about: string };
 
 /** `keep` is the part of the reply still shown, when the reply also delivered a draft. */
@@ -376,7 +397,7 @@ export type DeclineRetry = { sentence: string; note: string; keep?: string };
 
 /** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
 export const DECLINE_RETRY_NOTE =
-  "Do not decline or defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what.";
+  "Do not decline or defer. If who, what or when is unclear (for a send or booking: the recipients, the email, the time), ask one clear question with ask_user, with concrete options and a custom answer. Otherwise do it now with your tools, or hand it to the teammate who can; for a send, the email is the one written in this conversation, else the role's saved email. Anything that needs approval shows its own card when you call the tool; never ask for approval in text. If something is truly missing after that, say exactly what.";
 
 /** Model-facing: a clarifying question asked in plain text goes on a question card instead. */
 export const TEXT_QUESTION_NOTE =
@@ -398,7 +419,7 @@ export function declineRetry(input: {
   /** The turn did consequential work (see TurnReportLedger.worked). */
   worked?: boolean;
 }): DeclineRetry | undefined {
-  const declined = declinedSentence(input.reply);
+  const declined = retryReason(input.reply, input.request);
   // A reply that shows a drafted email delivered the work; holding it back would lose the draft.
   if (!declined || (DRAFT_START.test(input.reply) && declined.keep === undefined)) return undefined;
   const { sentence } = declined;
