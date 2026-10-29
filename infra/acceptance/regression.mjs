@@ -94,6 +94,19 @@ const botText = (message) =>
     .map((block) => block.text ?? block.question ?? "")
     .filter(Boolean)
     .join("\n");
+// What the reply itself says: card questions and a drafted email's body are left out, as the
+// server's decline check does (only text before the first email and its closing paragraph).
+const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:)/i;
+const ownWords = (message) => {
+  const text = botText({ blocks: (message.blocks ?? []).filter((block) => block.kind !== "ask") });
+  const draft = text.search(DRAFT_START);
+  if (draft < 0) return text;
+  const after = text
+    .slice(draft)
+    .trimEnd()
+    .split(/\n\s*\n/);
+  return `${text.slice(0, draft)}\n${after.length > 1 ? after.at(-1) : ""}`;
+};
 const recruiterSees = (messages) =>
   messages.filter((message) => message.role !== "user" && !message.internal);
 const cards = (messages) =>
@@ -131,9 +144,7 @@ function commonChecks(messages, failures) {
         `self-talk in reply: "…${text.slice(Math.max(0, selfTalk.index - 60), selfTalk.index + 40)}…"`,
       );
     // A question card asks "which people…?" by design; only the reply's own words can refuse.
-    const said = botText({
-      blocks: (message.blocks ?? []).filter((block) => block.kind !== "ask"),
-    });
+    const said = ownWords(message);
     const refusal = said.match(REFUSAL);
     if (refusal)
       failures.push(
@@ -609,10 +620,11 @@ if (wanted.has("dispatch"))
         failures.push(
           `${item.capability}: not handled by the member who can (${[...handlers].filter(Boolean).join(", ") || "nobody"})`,
         );
-      const declined = text.match(DECLINED);
+      const said = recruiterSees(replies).map(ownWords).join("\n");
+      const declined = said.match(DECLINED);
       if (declined)
         failures.push(
-          `${item.capability}: declined "…${text.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
+          `${item.capability}: declined "…${said.slice(Math.max(0, declined.index - 60), declined.index + 80)}…"`,
         );
       commonChecks(replies, failures);
       // Each step's tool calls, kept before the end-of-run archive makes the group unreadable.
@@ -676,11 +688,7 @@ if (wanted.has("ambiguous"))
         );
       else if (!acted && asks.length !== 1)
         failures.push(`「${ask}」: no action and ${asks.length} question cards (want one)`);
-      const said = recruiterSees(replies)
-        .map((message) =>
-          botText({ blocks: (message.blocks ?? []).filter((block) => block.kind !== "ask") }),
-        )
-        .join("\n");
+      const said = recruiterSees(replies).map(ownWords).join("\n");
       const declined = said.match(DECLINED) ?? said.match(DEFERRED);
       if (declined)
         failures.push(

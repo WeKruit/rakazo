@@ -317,15 +317,24 @@ const PICK =
   /\bwhich (?:\d+ |of (?:them|these|the \w+) |ones?\b|people|candidates?|person|emails?|interviews?)[^.!?\n]{0,60}\b(?:should I|do you want|would you like|to (?:send|email|contact|reach|draft|look up|book|schedule|process|handle))\b|^which (?:\d+|ones?|people|candidates?|person)\b[^.!?\n]{0,30}[?？]$|(?:(?:哪些|哪几)(?:个|位)?(?:人|候选人)|哪位|哪个(?:人|候选人)).{0,20}(?:发|联系|约|处理|查|写)|(?:发给|联系|约)(?:谁|哪些|哪几|哪位)/i;
 
 export type DeclineKind = "decline" | "defer" | "pick" | "text_question";
-export type Declined = { sentence: string; kind: DeclineKind };
+/** `keep` is the reply without the question, when the reply also delivered a draft. */
+export type Declined = { sentence: string; kind: DeclineKind; keep?: string };
 
-/** The first sentence of a reply that declines, defers or hands back a pick, else undefined. */
 /** Where a drafted email starts in a reply: an "Email N" heading or a Subject: line. */
 const DRAFT_START = /(?:^|\n)\s*(?:[#*_]+\s*)?(?:Email \d|Subject:)/i;
+/** A question to the user about the draft itself, after the draft (not the candidate's "open to a chat?"). */
+const ABOUT_DRAFT =
+  /\b(?:draft|emails?|change|edit|send|tweak|adjust|version|tone|shorter|longer)\b|改|发/i;
+/** A choice asked as an instruction instead of a question mark. */
+const ASKS_TO_CHOOSE =
+  /\b(?:please|just) (?:choose|pick|select|tell me|let me know)\b|请(?:选择|选|告诉我)/i;
+const asksUser = (sentence: string) => /[?？]$/.test(sentence) || ASKS_TO_CHOOSE.test(sentence);
 
+/** The first sentence of a reply that declines, defers or hands back a pick, else undefined. */
 export function declinedSentence(text: string): Declined | undefined {
   // A drafted email is the deliverable, not the reply's own words: its "Would you be open…?"
-  // is no question to the user, so only the text before the first email is read.
+  // is no question to the user, so only the text before the first email is read, and after it
+  // only a closing question about the draft.
   const draft = text.search(DRAFT_START);
   const own = draft >= 0 ? text.slice(0, draft) : text;
   const sentences = own
@@ -338,13 +347,21 @@ export function declinedSentence(text: string): Declined | undefined {
     if (DEFER.test(sentence)) return { sentence, kind: "defer" };
   }
   // A clarifying question typed into the reply instead of a question card.
-  const question = sentences.find((sentence) => /[?？]$/.test(sentence));
-  return question ? { sentence: question, kind: "text_question" } : undefined;
+  const question = sentences.find(asksUser);
+  if (question) return { sentence: question, kind: "text_question" };
+  if (draft < 0) return undefined;
+  const paragraphs = text.trimEnd().split(/\n\s*\n/);
+  const last = paragraphs.at(-1)?.trim() ?? "";
+  const asks = last.split(/(?<=[.!?。！？])\s*/).some((sentence) => asksUser(sentence.trim()));
+  return paragraphs.length > 1 && asks && ABOUT_DRAFT.test(last)
+    ? { sentence: last, kind: "text_question", keep: paragraphs.slice(0, -1).join("\n\n") }
+    : undefined;
 }
 
 export type Teammate = { id: string; name: string; about: string };
 
-export type DeclineRetry = { sentence: string; note: string };
+/** `keep` is the part of the reply still shown, when the reply also delivered a draft. */
+export type DeclineRetry = { sentence: string; note: string; keep?: string };
 
 /** Model-facing: the substance of every decline retry; tools or a teammate are named after it. */
 export const DECLINE_RETRY_NOTE =
@@ -372,7 +389,7 @@ export function declineRetry(input: {
 }): DeclineRetry | undefined {
   const declined = declinedSentence(input.reply);
   // A reply that shows a drafted email delivered the work; holding it back would lose the draft.
-  if (!declined || DRAFT_START.test(input.reply)) return undefined;
+  if (!declined || (DRAFT_START.test(input.reply) && declined.keep === undefined)) return undefined;
   const { sentence } = declined;
   const asked = (Object.keys(REQUEST_KINDS) as Capability[]).filter((kind) =>
     REQUEST_KINDS[kind].test(input.request),
@@ -385,7 +402,11 @@ export function declineRetry(input: {
     return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
-    return { sentence, note: `${TEXT_QUESTION_NOTE} ("${quoted}")` };
+    return {
+      sentence,
+      note: `${TEXT_QUESTION_NOTE} ("${quoted}")`,
+      ...(declined.keep === undefined ? {} : { keep: declined.keep }),
+    };
   const lead =
     declined.kind === "pick"
       ? `Your reply asked the user to choose ("${quoted}"). When the request names the people or a number, use those; otherwise ask that choice as one ask_user question with concrete options (such as the person just discussed or the first results).`

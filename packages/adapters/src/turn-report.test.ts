@@ -5,6 +5,7 @@ import {
   declineRetry,
   questionStatesWork,
   REPORT_BEFORE_ASK,
+  TEXT_QUESTION_NOTE,
   TurnReportLedger,
   turnReportText,
   turnWork,
@@ -278,6 +279,31 @@ describe("declineRetry", () => {
         teammates: [],
       }),
     ).toBeUndefined();
+  });
+
+  it("moves a closing question after a shown draft to a card, keeping the draft", () => {
+    const draft =
+      "Here is the saved draft.\n\nSubject: TikTok LIVE role\n\nHi Abe,\n\nWould you be open to a brief conversation?\n\nBest,\nRecruiting Team";
+    const retry = declineRetry({
+      reply: `${draft}\n\nWhat would you like changed? For example: shorter, or a different tone.`,
+      request: "改一下邮件",
+      tools: [],
+      teammates: [],
+    });
+    expect(retry?.note).toContain(TEXT_QUESTION_NOTE);
+    expect(retry?.keep).toBe(draft);
+    // The candidate's own question closing the draft is not one for the recruiter.
+    expect(declineRetry({ reply: draft, request: "改一下邮件", tools: [], teammates: [] })).toBe(
+      undefined,
+    );
+  });
+
+  it("reads a choice asked as an instruction as a question for a card", () => {
+    expect(
+      declinedSentence(
+        "“Arrange it” doesn’t specify which slot, so please choose a 30-minute time: 11:00, 11:30 or 12:00 p.m.",
+      )?.kind,
+    ).toBe("text_question");
   });
 
   it("retries a send that ended without its card, even after other work", () => {

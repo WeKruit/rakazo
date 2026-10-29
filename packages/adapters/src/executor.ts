@@ -12999,7 +12999,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   return undefined;
                 })
               : undefined;
-          if (declineRetried) {
+          if (declineRetried?.keep !== undefined) {
+            // The draft stays shown; only its closing question moves to the question card.
+            text = declineRetried.keep;
+            blocks = [...blocks.filter((block) => block.kind !== "text"), { kind: "text", text }];
+          } else if (declineRetried) {
             const work = turnReport.owedWithoutFinalReply();
             text = work.length ? await turnReportFor(work) : "";
             blocks = text ? [{ kind: "text", text }] : [];
