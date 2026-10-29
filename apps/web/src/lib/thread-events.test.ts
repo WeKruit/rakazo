@@ -1194,8 +1194,14 @@ describe("thread event reduction", () => {
           payload: { name: "read_file", outcome },
         }),
       );
+      const status =
+        outcome === "error"
+          ? { status: "failed" }
+          : outcome === "paused"
+            ? { status: "paused" }
+            : {};
       expect(next?.messages.find((item) => item.id === "progress:run-1")?.blocks).toEqual([
-        { kind: "steps", steps: [{ label: "Read file", count: 1 }] },
+        { kind: "steps", steps: [{ label: "Read file", count: 1, ...status }] },
       ]);
       expect(next?.messages.find((item) => item.id === "progress:other-run")).toEqual(
         initial.messages[1],
