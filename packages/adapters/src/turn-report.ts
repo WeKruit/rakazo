@@ -308,7 +308,8 @@ function requests(kind: Capability, request: string): boolean {
 const TOOL_KINDS: Record<Capability, RegExp> = {
   send: /send|reply_to|activate_campaign|forward/,
   contacts: /contact|enrich|lookup|find_emails/,
-  schedule: /booking|calendar|availability|schedul/,
+  // Calendar tools; schedule_* are routines, not interviews.
+  schedule: /booking|calendar|availability|event_type|^recruiting_scheduling$/,
   draft: /draft|recruiting_reply|role_campaign/,
   search: /web_search_advanced_exa|recruiting_research/,
 };
