@@ -222,13 +222,11 @@ export const DE_MESSAGES: Record<string, string> = {
   finished: "abgeschlossen",
   running: "läuft",
   subagent: "Subagent",
-  "{count} agents working": "{count} Agents arbeiten",
   "{from} messaged {to}": "{from} hat {to} geschrieben",
   "{name} (max {count} attachments)": "{name} (max. {count} Anhänge)",
   "{name} (over 10 MiB)": "{name} (über 10 MiB)",
   "{name} (permission denied)": "{name} (Zugriff verweigert)",
   "{name} (unsupported type)": "{name} (Dateityp nicht unterstützt)",
-  "{name} is working": "{name} arbeitet",
   // app/bot-settings.tsx
   Advanced: "Erweitert",
   Color: "Farbe",
@@ -793,4 +791,6 @@ export const DE_MESSAGES: Record<string, string> = {
   Instructions: "Anweisungen",
   Select: "Auswählen",
   "Source unavailable": "Quelle nicht verfügbar",
+  "Worked for {duration}": "Gearbeitet: {duration}",
+  "Step failed": "Schritt fehlgeschlagen",
 };

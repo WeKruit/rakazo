@@ -10,6 +10,13 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@lingui/react/macro", () => ({
   Plural: ({ value, one, other }: { value: number; one: string; other: string }) =>
     (value === 1 ? one : other).replace("#", String(value)),
+  useLingui: () => ({
+    t: (parts: TemplateStringsArray, ...values: unknown[]) =>
+      parts.reduce(
+        (text, part, index) => `${text}${index > 0 ? values[index - 1] : ""}${part}`,
+        "",
+      ),
+  }),
 }));
 
 import {

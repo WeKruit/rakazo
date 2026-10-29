@@ -6,7 +6,7 @@ import { MessageBlock, ProductEventType } from "./events.js";
 // Messages and events are stored forever and replayed into every later run. A change to their
 // shape must keep old rows readable: when this hash changes, check that rows written before the
 // change still parse (add them to OLD_ROWS), then update the hash.
-const GOLDEN = "f0fe893286abf84b9460c40555a0c726ec0b84785062b8fd336c50a775c811d1";
+const GOLDEN = "3b923c1ad24631db197f440a71592a1cc721c69459e0abf2217132958332f28f";
 
 const OLD_ROWS: unknown[] = [
   { kind: "text", text: "Found ten people for the role." },
@@ -22,6 +22,7 @@ const OLD_ROWS: unknown[] = [
   },
   { kind: "ask", text: "Remote or onsite?", status: "pending" },
   { kind: "ask", text: "Remote or onsite?", status: "answered", answer: "Remote" },
+  { kind: "steps", steps: [{ label: "Searching candidates", count: 2 }], durationMs: 4200 },
 ];
 
 describe("stored event shapes", () => {
