@@ -29,6 +29,15 @@ describe("turnWork", () => {
       "scheduling",
     );
     expect(turnWork("mcp__x__get_email", {}, { ok: true, readOnly: true })).toBeUndefined();
+    // A catalog read without a read-only hint is still a read, named by its id.
+    const wrote = { ok: true, readOnly: false } as const;
+    expect(turnWork("connectors_execute_tool", { id: "srv:get_bookings" }, wrote)).toBeUndefined();
+    expect(
+      turnWork("connectors_execute_tool", { id: "srv:native_instantly_list_emails" }, wrote),
+    ).toBeUndefined();
+    expect(turnWork("connectors_execute_tool", { id: "srv:create_booking" }, wrote)).toBe(
+      "scheduling",
+    );
     const lookup = { structuredContent: { source: "local_contact_lookup", summary: { found: 3 } } };
     expect(turnWork("contacts__find", {}, { ok: true, result: lookup, readOnly: true })).toBe(
       "contacts",
