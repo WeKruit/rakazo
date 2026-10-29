@@ -50,7 +50,6 @@ export type TurnEndGuardDeps = {
     recruitingCandidate: PrismaClient["recruitingCandidate"];
     recruitingCandidateOccurrence: Pick<PrismaClient["recruitingCandidateOccurrence"], "findMany">;
     recruitingResearchTask: PrismaClient["recruitingResearchTask"];
-    recruitingSavedProfile: Pick<PrismaClient["recruitingSavedProfile"], "count">;
     run: Pick<PrismaClient["run"], "findFirst">;
   };
   events: Pick<ExecutorDeps["events"], "sendUserMessage">;
@@ -282,11 +281,22 @@ async function handedInStage(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run
   return blocks.some((block) => block.kind === "handoff" && block.toBotId === run.botId);
 }
 
+/** Effects that move a role through its playbook: brief, searches, rounds, feedback, approvals. */
+const PLAYBOOK_EFFECTS = new Set([
+  "recruiting_role",
+  "recruiting_research",
+  "recruiting_feedback",
+  "recruiting_shortlist",
+  "recruiting_assess",
+  "recruiting_request_approval",
+]);
+
 /**
- * The recruiter asked to update people already saved (their work history, photo) and that was
- * done; the role's next step waits for the recruiter instead of starting on its own.
+ * Since the recruiter's last message the role did other work (looked up saved people's profiles,
+ * contacts) and nothing in its playbook. That answered what they asked; the role's next step
+ * waits for them instead of starting on its own, however the lookups turned out.
  */
-async function updatedProfilesOnly(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
+async function answeredOtherRequest(deps: TurnEndGuardDeps, run: TurnEndGuardInput["run"]) {
   const asked = await deps.prisma.message.findFirst({
     where: { threadId: run.threadId, role: "user" },
     orderBy: { seq: "desc" },
@@ -299,23 +309,14 @@ async function updatedProfilesOnly(deps: TurnEndGuardDeps, run: TurnEndGuardInpu
       run: { threadId: run.threadId },
       createdAt: { gt: asked.createdAt },
     },
-    select: { id: true },
+    select: { id: true, kind: true },
   });
-  if (!effects.length) return false;
-  const ids = effects.map((effect) => effect.id);
-  // New people saved means the turn searched; this is only about updating saved ones.
+  if (!effects.length || effects.some((effect) => PLAYBOOK_EFFECTS.has(effect.kind))) return false;
+  // A people search saves new people to the role: that is playbook work too.
   const pages = await deps.prisma.recruitingCandidatePage.count({
-    where: { effectId: { in: ids } },
+    where: { effectId: { in: effects.map((effect) => effect.id) } },
   });
-  if (pages) return false;
-  const saved = await deps.prisma.recruitingSavedProfile.count({
-    where: {
-      spaceId: run.spaceId,
-      sourceEffectId: { in: ids },
-      updatedAt: { gt: asked.createdAt },
-    },
-  });
-  return saved > 0;
+  return pages === 0;
 }
 
 /**
@@ -470,7 +471,7 @@ export async function guardRecruitingTurnEnd(
   // ends its turn; the role's next step stays with the coordinator, so only a promise is pushed.
   const handedIn = await handedInStage(deps, run);
   const nextStep =
-    handedIn || (playbook?.step && (await updatedProfilesOnly(deps, run)))
+    handedIn || (playbook?.step && (await answeredOtherRequest(deps, run)))
       ? undefined
       : (playbook?.step ?? undefined);
   if (!nextStep && !promise) return { action: "ended", classification };

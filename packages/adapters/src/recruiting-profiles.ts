@@ -611,13 +611,18 @@ export async function executeRecruitingProfilesTool(
     return { items };
   }
   const keys = input.operation === "save" ? [input.candidateKey] : input.candidateKeys;
-  if (keys.some((key) => !key.startsWith("linkedin:")))
+  // One person without a profile link must not lose everyone else's save.
+  if (input.operation === "save" && !input.candidateKey.startsWith("linkedin:"))
     throw new RecruitingProfileError(
       "This person has no LinkedIn profile on record, so there is nothing to look up.",
     );
   const calls = await listRunToolResults(prisma, actor, runId, 200);
   const items = [];
   for (const candidateKey of keys) {
+    if (!candidateKey.startsWith("linkedin:")) {
+      items.push({ candidateKey, saved: false, reason: "no LinkedIn profile on record" });
+      continue;
+    }
     const match = calls
       .map((call) => ({ call, found: profileFromLookup(call.result, call.endpoint, candidateKey) }))
       .find((entry) => entry.found);
