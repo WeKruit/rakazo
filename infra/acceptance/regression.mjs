@@ -221,7 +221,15 @@ async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, unt
       firstReply ??= Math.round((changed - sentAt) / 1000);
     }
     if (until?.(replies)) break;
-    if (!until && Date.now() - changed > quietMs && !(await working(groupId))) break;
+    if (!until && Date.now() - changed > quietMs && !(await working(groupId))) {
+      // A handed-in specialist can work for a while without posting: tool events count as activity.
+      const latest = Math.max(
+        0,
+        ...(await readEvents(groupId).catch(() => [])).map((event) => Date.parse(event.createdAt)),
+      );
+      if (Date.now() - latest < quietMs) continue;
+      break;
+    }
   }
   return { replies, firstReply, seconds: Math.round((Date.now() - sentAt) / 1000) };
 }
@@ -532,6 +540,24 @@ const DECLINED =
 const DEFERRED =
   /\b(?:do you want|would you like|want) me to\b|\bshall I\b|要不要我|是否需要我|需要你先/i;
 
+// What each step's messages and runs looked like, kept before the end-of-run archive: block kinds
+// and text lengths only, so a silent or hidden reply can be told apart from a cut-off run.
+const traceOf = (events, replies) => ({
+  events: events.filter((event) => /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type)),
+  messages: replies.map((message) => ({
+    id: message.id,
+    role: message.role,
+    botId: message.botId,
+    internal: Boolean(message.internal),
+    createdAt: message.createdAt,
+    blocks: (message.blocks ?? []).map((block) => ({
+      kind: block.kind,
+      text: (block.text ?? block.question ?? "").length,
+      ...(block.status ? { status: block.status } : {}),
+    })),
+  })),
+});
+
 if (wanted.has("dispatch"))
   await stage("dispatch", async (failures) => {
     const groupId =
@@ -602,24 +628,6 @@ if (wanted.has("dispatch"))
 // Vague recruiter asks in the t1 chat: each gets a best-guess action (a tool call, a handoff, or
 // the action's own card) or exactly one question card, never a decline or an offer to do it.
 // Cards are left unanswered, so nothing is sent or booked.
-// What each step's messages and runs looked like, kept before the end-of-run archive: block kinds
-// and text lengths only, so a silent or hidden reply can be told apart from a cut-off run.
-const traceOf = (events, replies) => ({
-  events: events.filter((event) => /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type)),
-  messages: replies.map((message) => ({
-    id: message.id,
-    role: message.role,
-    botId: message.botId,
-    internal: Boolean(message.internal),
-    createdAt: message.createdAt,
-    blocks: (message.blocks ?? []).map((block) => ({
-      kind: block.kind,
-      text: (block.text ?? block.question ?? "").length,
-      ...(block.status ? { status: block.status } : {}),
-    })),
-  })),
-});
-
 // "clarify": who, what or when is open, so the turn must end on one card: a question with
 // options, or the send/booking card naming exact recipients. The rest may act or ask.
 const AMBIGUOUS = [
