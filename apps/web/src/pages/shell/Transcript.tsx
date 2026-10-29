@@ -33,6 +33,10 @@ import { VoiceChatCard } from "../../components/call/VoiceChatCard";
 import { lazyPanel } from "../../components/ErrorBoundary";
 import { withFeatureMessages } from "../../lib/i18n";
 
+const RunTraceDisclosure = lazyPanel(() =>
+  withFeatureMessages(() => import("../../components/RunTrace")).then((m) => m.RunTraceDisclosure),
+);
+
 const LiveWork = lazyPanel(
   () => withFeatureMessages(() => import("../../components/LiveWork")).then((m) => m.LiveWork),
   ({ live, label }) =>
@@ -157,6 +161,12 @@ export const Transcript = memo(function Transcript({
       ]),
     [messages, answerableAskMessageIds],
   );
+  const traceAnchors = new Map<string, string>();
+  if (showToolActivity)
+    for (const message of reactionView.visibleMessages) {
+      if (message.role === "bot" && message.runId && messageHasVisibleBlocks(message.blocks, true))
+        traceAnchors.set(message.runId, message.id);
+    }
   const separatorIds = timeSeparatorIds(
     reactionView.visibleMessages.filter((message) =>
       messageHasVisibleBlocks(message.blocks, showToolActivity),
@@ -607,6 +617,9 @@ export const Transcript = memo(function Transcript({
                     </div>
                   ) : null}
                 </div>
+                {message.runId && traceAnchors.get(message.runId) === message.id ? (
+                  <RunTraceDisclosure runId={message.runId} enabled={showToolActivity} />
+                ) : null}
               </Fragment>
             );
           }}

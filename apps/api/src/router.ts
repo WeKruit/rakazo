@@ -349,6 +349,7 @@ import {
   saveRecruitingSchedulingPlan,
 } from "./recruiting-scheduling.js";
 import { listRoutineRuns } from "./routine-runs.js";
+import { readRunTrace } from "./run-trace.js";
 import { listSpaceRuns } from "./runs.js";
 import { addScreenProxyCapability } from "./screen-proxy.js";
 import { querySpaceSearch } from "./search.js";
@@ -6889,6 +6890,9 @@ export function createRouter(deps: RouterDeps) {
       ),
     },
     runs: {
+      trace: authed.runs.trace.handler(({ context, input }) =>
+        readRunTrace(deps.prisma, context.actor, input),
+      ),
       list: authed.runs.list.handler(async ({ context, input }) => ({
         runs: await listSpaceRuns(deps.prisma, context.actor, input.filter, input.offset ?? 0),
       })),
