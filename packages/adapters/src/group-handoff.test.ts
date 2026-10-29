@@ -182,6 +182,23 @@ describe("group handoff ownership", () => {
     expect(runCreate).not.toHaveBeenCalled();
   });
 
+  it("lets a run resumed by an answer hand off again under that answer's key", async () => {
+    const { deps, messageCreate } = harness([]);
+
+    await expect(
+      handoffToGroupBot(deps as never, run, "group-1", {
+        turnKey: "answer-2",
+        bot_id: "bot-b",
+        message: "The recruiter answered: contact them",
+      }),
+    ).resolves.toMatchObject({ ok: true, runId: "run-b" });
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ clientNonce: "group-handoff:run-a:answer-2" }),
+      }),
+    );
+  });
+
   it("rejects malformed source ancestry instead of restarting its hop count", async () => {
     const { deps, runCreate } = harness({ kind: "not-an-array" });
 

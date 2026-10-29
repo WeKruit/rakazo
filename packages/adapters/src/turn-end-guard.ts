@@ -658,6 +658,26 @@ export async function guardRecruitingRoleCreate(
 
 const CARD_KINDS = new Set(["ask", "approval", "mcp_approval", "connect", "app_connect", "choice"]);
 
+/**
+ * The request a turn answers: the person's message, or for a stage a teammate handed in, the
+ * handoff's brief (a returned stage report is not a request).
+ */
+export function turnRequestText(
+  message: { blocks: readonly MessageBlock[] } | undefined,
+  handoff: { blocks: readonly MessageBlock[] } | undefined,
+  botId: string,
+) {
+  if (message)
+    return message.blocks
+      .map((block) => ("text" in block && typeof block.text === "string" ? block.text : ""))
+      .join("\n");
+  return (handoff?.blocks ?? [])
+    .flatMap((block) =>
+      block.kind === "handoff" && block.toBotId === botId && !block.report ? [block.text] : [],
+    )
+    .join("\n");
+}
+
 /** Stages whose own questions and lists are the turn's deliverable: an offer there is not a deferral. */
 const QUESTION_STAGES = new Set(["intake", "calibration_10"]);
 
