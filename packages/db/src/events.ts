@@ -290,6 +290,11 @@ export interface SendUserMessageInput {
   createRun?: boolean;
   /** When true, start a new run even if the bot is already busy (team-chat delivery). */
   allowParallelRun?: boolean;
+  /**
+   * Server continuations of a finished turn: a run of this bot still waiting on an earlier card
+   * does not take the message (it would only see it once that card is answered), so a new run starts.
+   */
+  skipWaitingRuns?: boolean;
   /** Interject: interrupt the busy run's live model stream with this message. */
   interrupt?: boolean;
   /** Server-only: recheck and claim this saved event routine in the message transaction. */
@@ -609,7 +614,9 @@ export async function sendUserMessage(
                 threadId: input.threadId,
                 botId: input.botId,
                 status: {
-                  in: ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
+                  in: input.skipWaitingRuns
+                    ? ["running", "queued", "leased"]
+                    : ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
                 },
               },
               select: { id: true, taskId: true, trigger: true },

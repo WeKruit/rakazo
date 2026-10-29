@@ -83,7 +83,7 @@ function isContactLookup(result: unknown): boolean {
 
 /** Tool operations that only read, by their leading verb. */
 const READ_ACTION =
-  /^(?:native_[a-z]+_)?(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview)(?:_|$)/;
+  /^(?:native_[a-z]+_)?(?:(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview)(?:_|$)|whoami$|me$)/;
 
 /**
  * What a tool call did, from its name, arguments and (once it returned) its result; undefined
