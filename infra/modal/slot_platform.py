@@ -33,7 +33,7 @@ async def bind_container(client, args):
 
 def health(args):
     script="import json,urllib.request;print(json.dumps(json.load(urllib.request.urlopen('http://127.0.0.1:3101/drain',timeout=3))))"
-    value=json.loads(run(["container","exec",args.container_id,"python","-c",script]))
+    value=json.loads(run(["container","exec",args.container_id,"--","python","-c",script]))
     identity=value.get("identity",{})
     if identity.get("service") != args.slot or not identity.get("instanceId") or not identity.get("generation"):
         raise ValueError("worker health is not bound to the selected slot")
@@ -78,7 +78,7 @@ async def perform(args):
     info=await bind_container(client,args)
     if info.finished_at: raise ValueError("container finished before mutation")
     if args.action == "drain":
-        run(["container","exec",args.container_id,"python","-m","infra.modal.drain_worker","--port","3101","--timeout",str(args.timeout)])
+        run(["container","exec",args.container_id,"--","python","-m","infra.modal.drain_worker","--port","3101","--timeout",str(args.timeout)])
     else:
         if observed.get("state") != "drained" or observed.get("ok") is not True:
             raise ValueError("refusing to stop an undrained worker")

@@ -1,5 +1,44 @@
 # Rolling deploy with a writer lock (proposal, no PR yet)
 
+## Current decision: zero downtime requires the C5 storage and slot cutover
+
+The current acceptance target is **zero failed readiness and sign-in requests during
+a release**, not the shorter outage proposed below. Do not implement this writer-lock
+proposal as the default release path: it deliberately routes API requests to a
+container whose writer is not ready, and a lost lock is not a filesystem fence.
+
+Reuse the existing C5 implementation instead of building another coordinator:
+
+1. With explicit resource/Secret authorization, enable private object storage and
+   copy/read back existing artifacts and home snapshots. Preserve the original
+   Volume. Inventory `private/` and every remaining local dependency before removing
+   the mount; copying only artifacts is insufficient.
+2. Prepare the real stopped-writer driver for `activateHomeMigration`, then obtain
+   explicit authorization for the initial maintenance/cutover window and any schema
+   changes. That initial bootstrap is **not** a zero-downtime operation. Verify the
+   complete inventory before recording authority; never insert a synthetic receipt.
+3. Obtain authorization for the independently deployed worker slots. Reuse
+   `slot_services.py`, session admission and `replace-slot.ts`. Reserve actual
+   external session consumers within the existing 15-session ceiling. The normal
+   API-two/worker-two fleet consumes 12; API generation overlap can consume 14 before
+   the external reservation. Do not overlap API and worker replacements.
+4. Wire `release-cloud.sh` to the proven topology: validate the exact built revision,
+   preserve fleet-wide release ownership, admit the API only after HTTP `/ready`,
+   and replace worker slots serially after successful non-cancelling drain and
+   confirmed physical session release. Timeout postpones release. Do not silently
+   fall back to recreating the whole App.
+5. Run the actual cloud acceptance before changing the release default: sample
+   public `/ready` and `/sign-in` every second throughout cutover, retain all status
+   codes/timeouts and revisions, and verify the same background execution finishes
+   once while new work can proceed. Record observed session high-water and peer
+   readiness. Local tests do not establish this result.
+
+The legacy `release-cloud.sh` still uses recreate until this activation is complete.
+The historical estimates and implementation below are retained as rejected design
+context, not a claim of current production capability.
+
+## Historical shorter-outage proposal
+
 Status 2026-10-23 15:20 UTC. Outage per deploy is now 26 s, down from a 65 s median.
 PR #48 (live in 8aec3a5c) did that. What remains is the time to acquire the new
 container plus the old container's drain, because `--strategy recreate` with

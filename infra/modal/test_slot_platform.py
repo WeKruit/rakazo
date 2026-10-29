@@ -1,4 +1,5 @@
 import asyncio
+import json
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,9 +8,28 @@ import modal
 from modal_proto import api_pb2
 from infra.modal.slot_services import define_slot_apps
 from infra.modal.slot_platform import perform
+from infra.modal.slot_platform import health
 
 
 class SlotPlatformTests(unittest.TestCase):
+    def test_container_commands_parse_with_the_pinned_cli_without_cloud_access(self):
+        import click
+        from modal.cli.entry_point import entrypoint_cli
+        container = entrypoint_cli.get_command(click.Context(entrypoint_cli), "container")
+        command = container.get_command(click.Context(container), "exec")
+        commands = []
+        def parse(argv):
+            context = command.make_context("exec", argv[2:])
+            commands.append(context.params["command"])
+            return json.dumps({"ok": True, "state": "drained", "identity": {
+                "service": "worker-a", "instanceId": "instance-a", "generation": "a"*40}})
+        args, client = self.setup_case("drain")
+        with patch("infra.modal.slot_platform.run", side_effect=parse):
+            health(args)
+            self.invoke(args, client)
+        self.assertEqual(commands[0][:2], ("python", "-c"))
+        self.assertEqual(commands[1], ("python", "-m", "infra.modal.drain_worker", "--port", "3101", "--timeout", "5"))
+
     def setup_case(self, action="stop"):
         args=SimpleNamespace(action=action,app_id="ap-synthetic-a",app_name="synthetic-a",slot="worker-a",environment="synthetic",container_id="ta-synthetic-a",entry="synthetic.py::worker_a_app",generation="a"*40,expected_instance="instance-a",timeout=5)
         stub=SimpleNamespace(AppGetByDeploymentName=AsyncMock(return_value=api_pb2.AppGetByDeploymentNameResponse(app_id=args.app_id)),
