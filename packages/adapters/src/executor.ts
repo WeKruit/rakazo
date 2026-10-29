@@ -13082,16 +13082,20 @@ export function createRunExecutor(deps: ExecutorDeps) {
           if (!completed) return;
           logRunTiming("completed");
           let recruitingContinued = false;
+          let retryRunId: string | null = null;
           if (completed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
           } else if (declineRetried) {
-            await sendDeclineRetry(
+            retryRunId = await sendDeclineRetry(
               deps,
               { ...run, threadId: thread.id, userId: run.userId },
               declineRetried,
-            ).catch((error) => getLogger().error("run.decline retry", error));
+            ).catch((error) => {
+              getLogger().error("run.decline retry", error);
+              return null;
+            });
             recruitingContinued = true;
           } else if (
             !messagingChannelRun &&
@@ -13131,7 +13135,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ).catch((error) => getLogger().error("run.autocontinue guard", error));
             recruitingContinued = guard?.action === "continued";
           }
-          if (thread.groupId && !handedOff) {
+          // A declined turn's retry carries its stage on; that retry reports it.
+          if (thread.groupId && !handedOff && !retryRunId) {
             await reportGroupStageOutcome(deps, run, thread.groupId, {
               status: "completed",
             }).catch((error) => getLogger().error("group handoff report", error));

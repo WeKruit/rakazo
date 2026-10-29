@@ -14,6 +14,7 @@ import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { NO_RESPONSE } from "./silent-reply.js";
+import { declinedRunId } from "./turn-end-guard.js";
 
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -368,6 +369,32 @@ async function handedStage(
 }
 
 /**
+ * A retry of a declined handed-in turn finishes that turn's stage, so it reports as that turn;
+ * the declined turn itself sent no report.
+ */
+async function retriedStage(prisma: StageDeps["prisma"], turn: WorkerTurn) {
+  if (!turn.sourceMessageId) return turn;
+  const source = await prisma.message.findFirst({
+    where: { id: turn.sourceMessageId, threadId: turn.threadId },
+    select: { clientNonce: true },
+  });
+  const declined = declinedRunId(source?.clientNonce);
+  if (!declined) return turn;
+  const original = await prisma.run.findFirst({
+    where: { id: declined, threadId: turn.threadId, botId: turn.botId, userId: turn.userId },
+    select: {
+      id: true,
+      spaceId: true,
+      threadId: true,
+      botId: true,
+      userId: true,
+      sourceMessageId: true,
+    },
+  });
+  return original ?? turn;
+}
+
+/**
  * A worker's turn ended in a group. A handed-in turn that leaves its own research running at the
  * provider has not finished the stage, so its report waits. That research's wakes continue the
  * same stage: the first partial-results wake sends the one mid-stage check-in, and the turn that
@@ -383,7 +410,7 @@ export async function reportGroupStageOutcome(
   if (!wake && turn.trigger !== "follow_up") return undefined;
   const partial = wake && Boolean(turn.clientNonce?.includes(":rows:"));
   if (partial && outcome.status === "failed") return undefined;
-  const stage = wake ? await handedStage(deps.prisma, turn) : turn;
+  const stage = wake ? await handedStage(deps.prisma, turn) : await retriedStage(deps.prisma, turn);
   if (!stage) return undefined;
   if (outcome.status === "completed") {
     const thread = await deps.prisma.thread.findUnique({

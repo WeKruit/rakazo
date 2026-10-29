@@ -317,7 +317,7 @@ describe("long stage check-in", () => {
   });
   const inFlight = vi.mocked(recruitingResearchInFlight);
 
-  function stageHarness(existing?: { sourceRuns: [] }) {
+  function stageHarness(existing?: { sourceRuns: [] }, sourceNonce: string | null = null) {
     const h = harness([asked], existing);
     const stageLookup = vi.fn(async () => stage);
     Object.assign(h.deps.prisma, {
@@ -326,6 +326,7 @@ describe("long stage check-in", () => {
         findFirst: vi.fn(async () => ({ groupId: "group-1" })),
       },
       run: { findFirst: stageLookup },
+      message: { findFirst: vi.fn(async () => ({ clientNonce: sourceNonce })) },
     });
     return { ...h, stageLookup };
   }
@@ -335,6 +336,22 @@ describe("long stage check-in", () => {
       ([args]) => (args as { data: { clientNonce: string } }).data.clientNonce,
     );
   }
+
+  it("reports a declined turn's stage when its retry finishes", async () => {
+    inFlight.mockResolvedValueOnce(false);
+    const { deps, messageCreate, stageLookup } = stageHarness(
+      undefined,
+      "autocontinue:run-b:decline",
+    );
+    const retry = { ...handedIn, id: "retry-1", sourceMessageId: "retry-message" };
+    await expect(
+      reportGroupStageOutcome(deps as never, retry, "group-1", { status: "completed" }),
+    ).resolves.toEqual({ runId: "run-b" });
+    expect(stageLookup).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: "run-b" }) }),
+    );
+    expect(reported(messageCreate)).toEqual(["group-report:run-b"]);
+  });
 
   it("holds the report while the worker's own search is still running", async () => {
     inFlight.mockResolvedValueOnce(true);
