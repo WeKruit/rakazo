@@ -298,9 +298,10 @@ const REQUEST_KINDS: Record<Capability, RegExp> = {
   draft: /\bdraft|草稿|写.{0,8}(?:邮件|email)/i,
   search: /\bfind\b|\bsearch|\bmore (?:people|candidates)|再找|找\d|找更多/i,
 };
-// "Do not send anything" or 先不要发 rules a send out; it is not a send request.
+// "Do not send anything", "No emails will be sent", "before anything is sent" or 先不要发 rule a
+// send out; they are not a send request.
 const NEGATED =
-  /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|(?:不要|别|先不|不用)(?:发|约)/gi;
+  /\b(?:do not|don['’]t|never|without|not)\s+(?:\w+\s+){0,2}?(?:send(?:ing)?|book(?:ing)?|schedul\w*|email (?:it|this|them|him|her))\b|\b(?:no|nothing)\b(?:\s+\w+){0,4}?\s+(?:sent|send(?:ing)?)\b|\b(?:before|until)\s+(?:\w+\s+){0,3}?(?:send(?:ing)?|sent)\b|(?:不要|别|先不|不用|不)(?:发|约)/gi;
 
 function requests(kind: Capability, request: string): boolean {
   return REQUEST_KINDS[kind].test(request.replace(NEGATED, " "));

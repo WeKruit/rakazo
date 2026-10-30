@@ -22,6 +22,7 @@ import {
   callIdFromClientNonce,
   catalogApprovalDetails,
   isApprovalAskBlock,
+  isBackgroundRunTrigger,
   isConversationalRun,
   isSecretAskBlock,
   messagingChannelId,
@@ -633,11 +634,15 @@ export async function sendUserMessage(
                     : ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
                 },
               },
-              select: { id: true, taskId: true, trigger: true, clientNonce: true },
+              select: { id: true, taskId: true, status: true, trigger: true, clientNonce: true },
             })
           : [];
-      // Steer a conversational run when there is one; a routine, webhook, or intro turn only holds the queue.
-      const busy = activeRuns.find(takesMessages) ?? activeRuns[0] ?? null;
+      // Steer a conversational run when there is one; a routine, webhook, or intro turn only holds
+      // the queue. Background work that posts nothing to the chat (grading) never holds it.
+      const holding = activeRuns.filter(
+        (run) => !isBackgroundRunTrigger(run.trigger) || run.status === "waiting_input",
+      );
+      const busy = holding.find(takesMessages) ?? holding[0] ?? null;
       let task = null;
       let run = null;
       if (createRun && !busy) {

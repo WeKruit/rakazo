@@ -2339,6 +2339,88 @@ describe("sendThreadMessage", () => {
     );
   });
 
+  it("starts the recruiter's own turn beside background grading instead of waiting for it", async () => {
+    const tx = {
+      thread: {
+        update: vi
+          .fn()
+          .mockResolvedValueOnce({ nextMessageSeq: 2 })
+          .mockResolvedValue({ nextEventSeq: 3 }),
+      },
+      message: {
+        create: vi.fn().mockResolvedValue({
+          id: "msg-1",
+          threadId: "thread-1",
+          seq: 1,
+          role: "user",
+          blocks: [{ kind: "text", text: "find contacts" }],
+          botId: null,
+          replyToMessageId: null,
+          runId: null,
+          createdAt: new Date(),
+        }),
+        update: vi.fn(),
+      },
+      run: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "run-grade",
+            taskId: "task-grade",
+            status: "running",
+            trigger: "recruiting_grade",
+            clientNonce: "recruiting-grade:thread-1:1",
+          },
+        ]),
+        updateMany: vi.fn(),
+        findUnique: vi.fn(async () => ({
+          status: "queued",
+          startedAt: null,
+        })),
+        create: vi
+          .fn()
+          .mockResolvedValue({ id: "run-user", taskId: "task-user", status: "queued" }),
+      },
+      attempt: { updateMany: vi.fn() },
+      steeringMessage: { create: vi.fn() },
+      event: { create: vi.fn().mockResolvedValue({ seq: 2 }) },
+      task: { create: vi.fn().mockResolvedValue({ id: "task-user" }), updateMany: vi.fn() },
+    };
+    const prisma = {
+      message: { findUnique: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(async (callback: (client: typeof tx) => unknown) => callback(tx)),
+    } as unknown as PrismaClient;
+    const actor = { spaceId: "workspace-1", userId: "user-1" } as Actor;
+    const target = {
+      kind: "bot",
+      botId: "bot-1",
+      threadId: "thread-1",
+      bot: { computer: null },
+    } as ThreadTarget;
+    const enqueue = vi.fn().mockResolvedValue(undefined);
+
+    await expect(
+      sendThreadMessage(
+        {
+          prisma,
+          events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
+          jobs: { enqueue } as never,
+        },
+        actor,
+        target,
+        { text: "find contacts", clientNonce: "nonce-beside" },
+      ),
+    ).resolves.toMatchObject({ runId: "run-user" });
+    // Grading keeps going; the message starts its own turn instead of waiting as steering.
+    expect(tx.run.updateMany).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "cancelled" }) }),
+    );
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ trigger: "user", sourceMessageId: "msg-1" }),
+    });
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
+  });
+
   it("steers a waiting-takeover run instead of refusing the message", async () => {
     const tx = {
       thread: {
