@@ -36,8 +36,10 @@ const RECRUITING_SERVICES: RecruitingService[] = [
     name: "Autumn",
     description: "Platform recruiting research",
     endpoint: "https://api.autumn.ai/mcp",
-    bots: ["main", "sourcer"],
+    bots: ["main", "sourcer", "reviewer"],
     tools: ["credits", "research", "get_task", "get_rows", "reply", "stop_task"],
+    // The quality check only starts grading requests and reads their rows.
+    toolsByBot: { reviewer: ["credits", "research", "get_task", "get_rows"] },
   },
   {
     slug: "fullenrich",
