@@ -23,6 +23,7 @@ function handlers(): BackgroundJobHandlers {
     "recruiting_research.poll": vi.fn(async () => undefined),
     "recruiting_grade.start": vi.fn(async () => undefined),
     "recruiting_checkin.start": vi.fn(async () => undefined),
+    "recruiting_agent_run.wait": vi.fn(async () => undefined),
   };
 }
 

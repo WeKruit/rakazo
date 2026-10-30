@@ -21,6 +21,7 @@ import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import { startRecruitingCheckin } from "./recruiting-checkin.js";
 import { startRecruitingGrading } from "./recruiting-grading.js";
 import { pollRecruitingResearch } from "./recruiting-research-poll.js";
@@ -165,6 +166,9 @@ export function createBackgroundJobHandlers(deps: {
     },
     "recruiting_grade.start": async (payload) => {
       await startRecruitingGrading({ prisma: deps.prisma, jobs: deps.jobs }, payload);
+    },
+    "recruiting_agent_run.wait": async (payload) => {
+      await waitForRecruitingAgentRun({ prisma: deps.prisma, jobs: deps.jobs }, payload);
     },
     "recruiting_checkin.start": async (payload) => {
       await startRecruitingCheckin(

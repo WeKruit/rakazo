@@ -250,6 +250,10 @@ describe("startRecruitingGrading", () => {
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(promptOf(f)).toContain(`grade these ${GRADE_BATCH} people`);
     expect(promptOf(f)).not.toContain(`in/p${GRADE_BATCH}\n`);
+    // A full batch schedules the next one in place of the start that is running now.
+    expect(f.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "recruiting_grade.start", keepExisting: false }),
+    );
   });
 
   it("waits while a turn is working and checks again later", async () => {
@@ -261,6 +265,8 @@ describe("startRecruitingGrading", () => {
         name: "recruiting_grade.start",
         payload: { threadId: "thread", attempt: 3 },
         replaceKey: "recruiting_grade.start:thread",
+        // The running start holds this key until it ends; a kept job would end with it.
+        keepExisting: false,
       }),
     );
   });

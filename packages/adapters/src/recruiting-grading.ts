@@ -37,6 +37,14 @@ export async function scheduleRecruitingGrading(
   );
 }
 
+/**
+ * The grading start's own next check. It must replace, not keep, the pending start: the job
+ * that is running holds the same key until it ends, so a kept job would be dropped with it.
+ */
+function laterGradingStart(payload: { threadId: string; attempt?: number }, at: number) {
+  return { ...recruitingGradeStartJob(payload, new Date(at)), keepExisting: false };
+}
+
 /** Tools a grading turn may use: read the role's people, run the grading research, save its rows. */
 const GRADING_BUILTIN_TOOLS = new Set([
   "artifact_read",
@@ -227,10 +235,7 @@ export async function startRecruitingGrading(
   if (busy) {
     if (attempt + 1 < MAX_ATTEMPTS)
       await deps.jobs.enqueue(
-        recruitingGradeStartJob(
-          { threadId: thread.id, attempt: attempt + 1 },
-          new Date(now + BUSY_RETRY_MS),
-        ),
+        laterGradingStart({ threadId: thread.id, attempt: attempt + 1 }, now + BUSY_RETRY_MS),
       );
     return skipped("busy");
   }
@@ -403,12 +408,7 @@ export async function startRecruitingGrading(
   // The next batch starts once this request has reached the research service.
   if (people.size === GRADE_BATCH)
     await deps.jobs
-      .enqueue(
-        recruitingGradeStartJob(
-          { threadId: thread.id },
-          new Date(now + RECRUITING_GRADE_SETTLE_MS),
-        ),
-      )
+      .enqueue(laterGradingStart({ threadId: thread.id }, now + RECRUITING_GRADE_SETTLE_MS))
       .catch(() => undefined);
   // The existing run reconciler recovers a queued run after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
