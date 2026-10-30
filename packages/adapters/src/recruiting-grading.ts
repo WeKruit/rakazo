@@ -352,7 +352,8 @@ export async function startRecruitingGrading(
   if (!people.size) {
     // Only a round that just finished is reported, never one from before this change.
     const lastBatch = requests.find((request) => started(request.id));
-    if (lastBatch && now - lastBatch.createdAt.getTime() < IN_FLIGHT_MS)
+    // Grades still on their way would be missing from the report, so it waits for them.
+    if (lastBatch && !waiting.size && now - lastBatch.createdAt.getTime() < IN_FLIGHT_MS)
       await reportGradedRole(deps, thread, role.id, lastBatch);
     return skipped("nobody to grade");
   }
@@ -405,11 +406,11 @@ export async function startRecruitingGrading(
   });
   if (!runId) return skipped("already requested");
   getLogger().info("recruiting.grade.started", { runId, roleId: role.id, people: people.size });
-  // The next batch starts once this request has reached the research service.
-  if (people.size === GRADE_BATCH)
-    await deps.jobs
-      .enqueue(laterGradingStart({ threadId: thread.id }, now + RECRUITING_GRADE_SETTLE_MS))
-      .catch(() => undefined);
+  // The next batch starts once this request has reached the research service; after the last
+  // batch the same check finds nobody left and reports the ranked grades.
+  await deps.jobs
+    .enqueue(laterGradingStart({ threadId: thread.id }, now + RECRUITING_GRADE_SETTLE_MS))
+    .catch(() => undefined);
   // The existing run reconciler recovers a queued run after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
     getLogger().warn("recruiting grade start deferred to reconciliation");
