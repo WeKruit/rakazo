@@ -6043,13 +6043,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (typeof args.question === "string")
               args = { ...args, question: shortQuestion(args.question) };
           }
-          // The server's own repeat of a refused role save is not a new model call: it still runs.
-          if (handedOff && !executionId.includes(":repaired")) {
-            // Not a failure: the next member owns this work now, so nothing is retried.
-            return {
-              skipped: "Not run: this stage was handed off. End the turn without more tool calls.",
-            };
-          }
           if (disabledBuiltinTools.has(name)) {
             return { error: disabledToolError(name) };
           }

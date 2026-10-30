@@ -222,8 +222,8 @@ export async function handoffToGroupBot(
     botId: committed.botId,
     runId: committed.runId,
     note: input.report_back
-      ? "Handoff recorded. End this turn without narrating it; the result comes back to you when that stage ends, so you can check it before the user relies on it."
-      : "Handoff recorded. End this turn without narrating it; the next bot owns the next stage.",
+      ? "Handoff recorded. Do not narrate it or redo that work; the result comes back to you when that stage ends, so you can check it before the user relies on it."
+      : "Handoff recorded. Do not narrate it or redo that work; the next bot owns the next stage.",
   };
 }
 

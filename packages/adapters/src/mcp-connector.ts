@@ -598,7 +598,33 @@ export const PLATFORM_PEOPLE_SEARCH_ENDPOINT =
   "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa";
 
 let warnedKeylessPeopleSearch = false;
-const PEOPLE_SEARCH_RETRY_DELAYS_MS = [1_000, 2_000];
+/**
+ * Rate-limit backoff, as Workloop retries a provider's 429: 1 s doubling to at most 15 s, each
+ * wait varied by ±20% so parallel searches do not retry in step, within two minutes in all.
+ */
+const PEOPLE_SEARCH_RETRY_BASE_MS = 1_000;
+const PEOPLE_SEARCH_RETRY_CAP_MS = 15_000;
+const PEOPLE_SEARCH_RETRY_BUDGET_MS = 120_000;
+export function peopleSearchRetryDelay(attempt: number, random = Math.random): number {
+  const base = Math.min(PEOPLE_SEARCH_RETRY_CAP_MS, PEOPLE_SEARCH_RETRY_BASE_MS * 2 ** attempt);
+  return Math.round(base * (0.8 + 0.4 * random()));
+}
+/**
+ * The people search allows ten requests a second per key. Starts from this process are spaced
+ * so a wave of parallel searches stays under it instead of failing and retrying.
+ */
+const PEOPLE_SEARCH_SPACING_MS = 125;
+let peopleSearchNextStart = 0;
+/** Forget the spacing between searches; tests move the clock. */
+export function resetPeopleSearchSpacing(): void {
+  peopleSearchNextStart = 0;
+}
+async function peopleSearchTurn(signal: AbortSignal): Promise<void> {
+  const now = Date.now();
+  const start = Math.max(now, peopleSearchNextStart);
+  peopleSearchNextStart = start + PEOPLE_SEARCH_SPACING_MS;
+  if (start > now) await abortableDelay(start - now, signal);
+}
 
 // A contact lookup takes about a minute; wait for it here so the agent never stops on a
 // half-finished lookup. The final status is the record the Contacts view reads.
@@ -630,12 +656,13 @@ function peopleSearchRateLimited(result: Awaited<ReturnType<McpSession["callTool
   if (!result.isError) return false;
   const body = mcpObject(result);
   if (body?.status === 429 || body?.statusCode === 429) return true;
+  // The provider reports it as text, for example "web_search_advanced_exa error (429): Rate
+  // limit exceeded".
   return result.content.some(
     (part) =>
       part.type === "text" &&
-      /\bHTTP\s*429\b|\bstatus(?:\s+code)?\s*[:=]?\s*429\b|\b429\s*[:-]?\s*(?:too many requests|rate limit)|\bfree MCP rate limit\b/i.test(
-        part.text,
-      ),
+      (/\bfree MCP rate limit\b/i.test(part.text) ||
+        (/\b429\b/.test(part.text) && /rate limit|too many requests/i.test(part.text))),
   );
 }
 
@@ -1167,8 +1194,10 @@ export class McpConnector implements ConnectorProvider {
       callStarted = true;
       let result: Awaited<ReturnType<McpSession["callTool"]>>;
       const enrichmentDeadline = Date.now() + ENRICHMENT_WAIT_MS;
+      const retryDeadline = Date.now() + PEOPLE_SEARCH_RETRY_BUDGET_MS;
       for (let attempt = 0; ; attempt += 1) {
         context.signal.throwIfAborted();
+        if (peopleSearch) await peopleSearchTurn(context.signal);
         // A read that never answers fails here instead of holding the run until its stall guard.
         const readTimeout = REMOTE_READ.test(call.route.toolName)
           ? AbortSignal.timeout(REMOTE_READ_MS)
@@ -1195,7 +1224,8 @@ export class McpConnector implements ConnectorProvider {
             throw error;
         }
         context.signal.throwIfAborted();
-        const retryMs = PEOPLE_SEARCH_RETRY_DELAYS_MS[attempt];
+        const delay = peopleSearchRetryDelay(attempt);
+        const retryMs = Date.now() + delay <= retryDeadline ? delay : undefined;
         getLogger().warn("people_search.rate_limited", {
           attempt: attempt + 1,
           retryMs: retryMs ?? 0,

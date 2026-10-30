@@ -5,6 +5,7 @@ import {
   loadMcpCredentialRecord,
   McpConnector,
   PLATFORM_PEOPLE_SEARCH_ENDPOINT,
+  resetPeopleSearchSpacing,
 } from "./mcp-connector.js";
 
 vi.mock("./recruiting-research.js", async (actual) => ({
@@ -113,11 +114,15 @@ beforeEach(() => {
   vi.stubEnv("FULLENRICH_API_KEY", "fake-enrich-key");
   vi.useFakeTimers();
   vi.setSystemTime(0);
+  // No jitter, so each wait is exactly the backoff step.
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+  resetPeopleSearchSpacing();
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
 });
 
 describe("people search rate limits", () => {
@@ -187,6 +192,14 @@ describe("people search rate limits", () => {
 
   it.each([
     { content: [{ type: "text", text: "429 Too Many Requests" }] },
+    {
+      content: [
+        {
+          type: "text",
+          text: "web_search_advanced_exa error (429): Rate limit exceeded: 10 requests per second",
+        },
+      ],
+    },
     { content: [{ type: "text", text: "You have hit the free MCP rate limit" }] },
     { content: [{ type: "text", text: '{"status":429,"message":"slow down"}' }] },
     { content: [], structuredContent: { statusCode: 429 } },
@@ -203,17 +216,19 @@ describe("people search rate limits", () => {
   });
 
   it("reports exhausted rate limits as a definite error, with bounded retries and safe diagnostics", async () => {
-    const f = fixture([429, 429, 429]);
+    // 1, 2, 4 and 8 s, then 15 s steps, within two minutes: eleven retries, twelve calls.
+    const waits = [1_000, 2_000, 4_000, 8_000, ...Array(7).fill(15_000)];
+    const f = fixture(Array(waits.length + 1).fill(429));
     const previous = getLogger();
     const sink = createTestSink();
     installLogger(createLogger({ service: "people-search-test", sinks: [sink] }));
     try {
       const pending = f.read();
-      await vi.advanceTimersByTimeAsync(3_000);
+      await vi.advanceTimersByTimeAsync(120_000);
       expect(await pending).toEqual([
         { type: "error", message: "People search is rate-limited (HTTP 429); retry later." },
       ]);
-      expect(f.calls).toHaveLength(3);
+      expect(f.calls).toHaveLength(waits.length + 1);
       expect(
         sink.events.map(({ message, attempt, retryMs, exhausted }) => ({
           message,
@@ -222,9 +237,18 @@ describe("people search rate limits", () => {
           exhausted,
         })),
       ).toEqual([
-        { message: "people_search.rate_limited", attempt: 1, retryMs: 1_000, exhausted: false },
-        { message: "people_search.rate_limited", attempt: 2, retryMs: 2_000, exhausted: false },
-        { message: "people_search.rate_limited", attempt: 3, retryMs: 0, exhausted: true },
+        ...waits.map((retryMs, index) => ({
+          message: "people_search.rate_limited",
+          attempt: index + 1,
+          retryMs,
+          exhausted: false,
+        })),
+        {
+          message: "people_search.rate_limited",
+          attempt: waits.length + 1,
+          retryMs: 0,
+          exhausted: true,
+        },
         { message: "mcp.call.failed" },
       ]);
       expect(JSON.stringify(sink.events)).not.toContain("fake-search-key");
