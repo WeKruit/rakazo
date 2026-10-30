@@ -745,11 +745,9 @@ export async function planDeclineRetry(
     return !input.handedIn && QUESTION_STAGES.has((await input.stage?.()) ?? "")
       ? undefined
       : questionCard(input.reply, declined);
-  // Retried enough for this recruiter message: a question still typed into the reply goes on a
-  // card instead. A decline is retried up to the auto-continue limit, never accepted on the
-  // first stop; other kinds once.
-  const retries = declined?.kind === "decline" ? Math.max(1, autoContinueMax()) : 1;
-  if ((await recentContinues()) >= retries)
+  // Retried once for this recruiter message: a question still typed into the reply goes on a
+  // card instead. Work the server counts as unfinished is owedWork above, which keeps going.
+  if ((await recentContinues()) >= 1)
     return declined && !variables ? questionCard(input.reply, declined) : undefined;
   if (variables) return variables;
   if (!declined) return undefined;
