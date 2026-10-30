@@ -15,4 +15,5 @@ export const RUN_TRIGGERS = [
   "tickets",
   "recruiting_research",
   "recruiting_grade",
+  "recruiting_checkin",
 ] as const;

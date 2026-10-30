@@ -21,6 +21,7 @@ import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { startRecruitingCheckin } from "./recruiting-checkin.js";
 import { startRecruitingGrading } from "./recruiting-grading.js";
 import { pollRecruitingResearch } from "./recruiting-research-poll.js";
 import {
@@ -164,6 +165,12 @@ export function createBackgroundJobHandlers(deps: {
     },
     "recruiting_grade.start": async (payload) => {
       await startRecruitingGrading({ prisma: deps.prisma, jobs: deps.jobs }, payload);
+    },
+    "recruiting_checkin.start": async (payload) => {
+      await startRecruitingCheckin(
+        { prisma: deps.prisma, jobs: deps.jobs, connector: deps.connector },
+        payload,
+      );
     },
     "history.compact": async (payload) => {
       // New automatic summaries carry a validated origin; do not revive unattributed legacy work.

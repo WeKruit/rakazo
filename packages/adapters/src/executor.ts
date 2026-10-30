@@ -456,6 +456,7 @@ import {
   executeRecruitingCandidatesTool,
   retainRecruitingWebMaterial,
 } from "./recruiting-assessment.js";
+import { checkinToolRefusal, checkinTools } from "./recruiting-checkin.js";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
   loadRecruitingRunContext,
@@ -5214,7 +5215,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ? []
             : run.trigger === "recruiting_grade"
               ? gradingTools([...builtins, ...exposedConnectorTools], run.clientNonce)
-              : [...builtins, ...exposedConnectorTools];
+              : run.trigger === "recruiting_checkin"
+                ? checkinTools([...builtins, ...exposedConnectorTools])
+                : [...builtins, ...exposedConnectorTools];
         if (run.trigger === "recruiting_grade")
           getLogger().info("recruiting.grade.tools", {
             runId: run.id,
@@ -5793,6 +5796,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ...(typeof rawArgs.operation === "string" ? { operation: rawArgs.operation } : {}),
               refused: Boolean(refusal),
             });
+            if (refusal) return { error: refusal };
+          }
+          if (run.trigger === "recruiting_checkin") {
+            const refusal = checkinToolRefusal(name);
             if (refusal) return { error: refusal };
           }
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))

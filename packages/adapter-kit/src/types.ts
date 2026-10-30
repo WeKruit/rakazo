@@ -733,6 +733,8 @@ export interface BackgroundJobPayloads {
   "recruiting_research.poll": { taskId: string; attempt?: number };
   /** Hand a role conversation's newly found, ungraded people to the research service. */
   "recruiting_grade.start": { threadId: string; attempt?: number };
+  /** Look for new candidate replies on a role conversation and tell the recruiter about them. */
+  "recruiting_checkin.start": { threadId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;
