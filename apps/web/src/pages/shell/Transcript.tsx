@@ -1,7 +1,7 @@
 import { i18n } from "@lingui/core";
 import { useLingui } from "@lingui/react/macro";
 import type { AskAnswer, MessageReaction, ThreadMessage } from "@rakazo/contracts";
-import type { ThreadTailPhase, WorkTracker } from "@rakazo/core";
+import type { ThreadTailPhase, WorkEstimate, WorkTracker } from "@rakazo/core";
 import {
   EMPTY_WORK_TRACKER,
   formatMessageTime,
@@ -53,6 +53,10 @@ const LiveWork = lazyPanel(
     ) : undefined,
 );
 
+const BackgroundWork = lazyPanel(() =>
+  withFeatureMessages(() => import("../../components/LiveWork")).then((m) => m.BackgroundWork),
+);
+
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { quoteDraftForSelection } from "../../lib/quote-selection";
 import { isRunPhase, rosterWorkStatusLabel, threadTailLabel } from "../../lib/roster-status";
@@ -100,6 +104,7 @@ export const Transcript = memo(function Transcript({
   onSpeak,
   onOpenComputer,
   liveDetail,
+  workEstimate,
 }: {
   narrow: boolean;
   visible: boolean;
@@ -143,6 +148,8 @@ export const Transcript = memo(function Transcript({
   onOpenComputer: (botId?: string) => void;
   /** Business progress for the live work line, e.g. people added to Results. */
   liveDetail?: ReactNode;
+  /** Big or background work this conversation is waiting on. */
+  workEstimate?: WorkEstimate | null;
 }) {
   const { t } = useLingui();
   const [atEnd, setAtEnd] = useState(true);
@@ -663,6 +670,7 @@ export const Transcript = memo(function Transcript({
               detail={liveDetail}
               showSteps={!showToolActivity}
               stageKind={stageKind}
+              estimate={workEstimate}
             />
           ) : (
             <LoadingState
@@ -674,12 +682,17 @@ export const Transcript = memo(function Transcript({
               }
             />
           )
-        ) : workSession?.endedAt &&
-          !tailPhase &&
-          !showToolActivity &&
-          messages.at(-1)?.role !== "user" ? (
-          <LiveWork session={workSession} live={false} label="" stageKind={stageKind} />
-        ) : null}
+        ) : (
+          <>
+            {workSession?.endedAt &&
+            !tailPhase &&
+            !showToolActivity &&
+            messages.at(-1)?.role !== "user" ? (
+              <LiveWork session={workSession} live={false} label="" stageKind={stageKind} />
+            ) : null}
+            {workEstimate && !tailPhase ? <BackgroundWork estimate={workEstimate} /> : null}
+          </>
+        )}
       </div>
       {quoteDraft ? (
         <QuoteSelectionButton

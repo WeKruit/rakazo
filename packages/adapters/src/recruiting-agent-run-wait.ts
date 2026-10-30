@@ -5,6 +5,13 @@ import type { PrismaClient } from "@rakazo/db";
 import { RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { mcpObject } from "./recruiting-research.js";
+import {
+  countdownReportDue,
+  finishWorkEstimate,
+  markCountdownReported,
+  minutes,
+  readWorkEstimate,
+} from "./work-estimate.js";
 
 /**
  * A people-search agent run can keep working at the provider for hours, longer than any one
@@ -43,11 +50,17 @@ export function runningAgentRunId(result: unknown): string | undefined {
     : undefined;
 }
 
-export function recruitingAgentRunWaitPrompt(agentRunId: string): string {
+export function recruitingAgentRunWaitPrompt(
+  agentRunId: string,
+  countdown?: { estimateMs: number },
+): string {
+  const quiet = countdown
+    ? `The search's estimated ${minutes(countdown.estimateMs)} minutes are up and the recruiter's countdown has started over. Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, tell the recruiter in one line how many people the role has in Results now and that the search keeps going, about ${minutes(countdown.estimateMs)} more minutes; ask nothing.`
+    : `Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, end the turn with an empty reply: you are woken again later, and the recruiter hears nothing until it finishes.`;
   return [
     `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message; you are continuing your own work.`,
-    `Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, end the turn with an empty reply: you are woken again later, and the recruiter hears nothing until it finishes.`,
-    "When it has finished, say in one line how many new people were added and whether the role's target is met, then carry on with the stage as your instructions say: if the role is still short of its target, the next wave continues this run with previousRunId. Start no unrelated search.",
+    quiet,
+    "When it has finished, say in one line how many new people were added and whether the role's target is met; if it is short, say why in plain words, as the provider's own summary explains it. Then carry on with the stage as your instructions say: if the role is still short of its target, the next wave continues this run with previousRunId. Start no unrelated search.",
   ].join("\n");
 }
 
@@ -104,7 +117,10 @@ export async function waitForRecruitingAgentRun(
     (effect) => mcpObject(providerResult(effect.result))?.id === payload.agentRunId,
   );
   if (!latest) return skipped("no answer");
-  if (!runningAgentRunId(providerResult(latest.result))) return skipped("finished");
+  if (!runningAgentRunId(providerResult(latest.result))) {
+    await finishWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
+    return skipped("finished");
+  }
   // The recruiter's own conversation comes first: a wake waits while they are writing.
   const talking = await deps.prisma.message.findFirst({
     where: { threadId: thread.id, role: "user", createdAt: { gte: new Date(now - QUIET_MS) } },
@@ -119,6 +135,9 @@ export async function waitForRecruitingAgentRun(
   // One wake per provider answer: a wake that ends without asking again is the agent's choice.
   // A wake that gave way to the recruiter was cancelled before it finished, so it is retried.
   const answerNonce = `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${payload.agentRunId}:${latest.id}`;
+  // When the recruiter's countdown runs out, this wake reports progress instead of staying quiet.
+  const estimate = await readWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
+  const due = estimate?.estimateMs ? countdownReportDue(estimate, now) : null;
   const runId = await deps.prisma.$transaction(async (tx) => {
     // The thread row serializes this with other automated starts in the conversation.
     const locked = await tx.thread.updateMany({
@@ -146,7 +165,10 @@ export async function waitForRecruitingAgentRun(
         botId: payload.botId,
         threadId: thread.id,
         userId: thread.userId,
-        prompt: recruitingAgentRunWaitPrompt(payload.agentRunId),
+        prompt: recruitingAgentRunWaitPrompt(
+          payload.agentRunId,
+          due && estimate?.estimateMs ? { estimateMs: estimate.estimateMs } : undefined,
+        ),
         status: "queued",
       },
     });
@@ -172,6 +194,7 @@ export async function waitForRecruitingAgentRun(
     return skipped("busy");
   }
   if (!runId) return skipped("already woken");
+  if (due && estimate) await markCountdownReported(deps.prisma, estimate.id, due);
   getLogger().info("recruiting.agent_run_wait.woken", { ...payload, runId });
   // The existing run reconciler recovers a queued run after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
