@@ -685,6 +685,8 @@ function measureFirstTen(events, round) {
       e.type === "agent.tool.called" &&
       SEARCH_TOOL.test(e.payload?.name ?? "") &&
       !NOT_A_PEOPLE_SEARCH.test(e.payload.name) &&
+      // The agent run that fills the ten after the first picks is part of the round, not a re-search.
+      !e.payload.name.endsWith("__agent_run") &&
       afterAnswer(e),
   );
   const refusedSearches = modelSearchCalls.filter((e) =>
