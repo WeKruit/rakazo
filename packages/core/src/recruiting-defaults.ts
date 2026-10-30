@@ -64,7 +64,7 @@ export function recruitingBriefConfirmedNextStep(revision: number) {
  * Delivered through the role context, tool results and the playbook step, because accounts with
  * customized bots or skills keep their old instructions.
  */
-export const RECRUITING_ROUND_NEXT_STEP = `The ten are already listed in chat, each with its profile passage, the moment calibration_round records them: never list them again. Never ask a clarifying question after the ten. Your very next step saves the brief, with no text beside it: one recruiting_role update with the round's expectedRevision and brief.fields only, each with a short label in English as its key, filled from the JD and the recruiter's answers (origin jd or user_instruction, inferred for a range you propose): target titles, core duties, years of experience, every other must-have (past industry, past title, company type), location and work mode, language, pay, work authorization and exclusions, including people in their current role under six months; no role read, criteria or confirmation. The step after it is only one native question card (ask_user) offering the next step, with no text or other call beside it, in English, for example "Find 100 similar people", "Draft the outreach emails" and "Run another round" (the card already has a custom answer). Never end a round on a bare list or a generic "any feedback?".`;
+export const RECRUITING_ROUND_NEXT_STEP = `The ten are already listed in chat, each with its profile passage, the moment calibration_round records them: never list them again. Never ask a clarifying question after the ten. Your very next step saves the brief, with no text beside it: one recruiting_role update with the round's expectedRevision and brief.fields only, each with a short label in English as its key, filled from the JD and the recruiter's answers (origin jd or user_instruction, inferred for a range you propose): target titles, core duties, years of experience, every other must-have (past industry, past title, company type), location and work mode, language, pay, work authorization and exclusions, including people in their current role under six months; no role read, criteria or confirmation. The step after it is only one native question card (ask_user) offering the next step, with no text or other call beside it, in English, for example "Find 150 similar people", "Draft the outreach emails" and "Run another round" (the card already has a custom answer). Never end a round on a bare list or a generic "any feedback?".`;
 
 /**
  * The only card a turn shows after it records a round: clarifying questions come before the
@@ -72,8 +72,8 @@ export const RECRUITING_ROUND_NEXT_STEP = `The ten are already listed in chat, e
  */
 export function recruitingNextStepCard() {
   return {
-    text: "What's next? I'd find 100 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
-    options: ["Find 100 similar people", "Draft the outreach emails", "Run another round"],
+    text: "What's next? I'd find 150 similar people if these ten look right; otherwise tell me who is off and I'll run another round.",
+    options: ["Find 150 similar people", "Draft the outreach emails", "Run another round"],
   };
 }
 
