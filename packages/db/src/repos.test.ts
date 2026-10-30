@@ -120,7 +120,10 @@ describe("createRepos.listBots", () => {
 
     expect(bots.map((bot) => bot.preview)).toEqual(["Answer one", "Answer two"]);
     expect(prisma.run.findMany).toHaveBeenCalledExactlyOnceWith({
-      where: { id: { in: ["run-one", "run-two"] }, trigger: { in: ["bot_message", "tickets", "recruiting_grade"] } },
+      where: {
+        id: { in: ["run-one", "run-two"] },
+        trigger: { in: ["bot_message", "tickets", "recruiting_grade"] },
+      },
       select: { id: true, trigger: true },
     });
   });
