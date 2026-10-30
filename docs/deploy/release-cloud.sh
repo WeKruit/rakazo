@@ -4,7 +4,8 @@
 #   release-cloud.sh <SHA> check    # read-only: live revision, migration/infra diff, active-run gate
 #   release-cloud.sh <SHA> deploy   # check + unit tests (red blocks) + modal deploy --strategy recreate + readiness/revision proof
 #   release-cloud.sh <SHA> test     # unit tests only, no prod access; run while prod is busy so the deploy skips them
-#   release-cloud.sh main watch     # keep running: test each new origin/main head as it lands (run in the background)
+#   release-cloud.sh <SHA> prebuild # build the Modal image for SHA only, nothing deployed
+#   release-cloud.sh main watch     # keep running: test and prebuild each new origin/main head as it lands (background)
 #   RELEASE_ROLLBACK=1 ... deploy   # emergency rollback to a tested SHA: works while live /ready is broken, no gap wait
 #
 # Rules kept from the runbook: main only, one release at a time, recreate only, no new Modal
@@ -41,6 +42,20 @@ db_query() {
 ACTIVE_SQL="select r.id, r.status, b.name bot, g.name grp, r.\"updatedAt\" from runs r join bots b on b.id=r.\"botId\" join threads t on t.id=r.\"threadId\" left join chat_groups g on g.id=t.\"groupId\" where r.status not in ('completed','failed','cancelled','canceled','interrupted','waiting_input') and r.\"updatedAt\" > now() - interval '30 minutes' order by r.\"updatedAt\" desc"
 LEDGER_SQL="select count(*)::int n, max(migration_name) latest from _prisma_migrations where finished_at is not null and rolled_back_at is null"
 
+# Build the Modal image from an exact release folder, so a later deploy of the same folder reuses
+# the cached image instead of building it. Uses a short-lived app with no functions;
+# RELEASE_PREBUILD=0 turns it off.
+prebuild_image() {
+  (cd "$1" && python3 -c '
+import importlib.util, modal
+spec = importlib.util.spec_from_file_location("release_app", "infra/modal/app.py")
+release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
+builder = modal.App(release.APP_NAME + "-prebuild")
+with modal.enable_output(), builder.run():
+    release.image.build(builder)
+')
+}
+
 # Pre-test each new main head as soon as it lands, so a deploy finds its tests already done.
 # A head that failed is not retried here; deploy mode tests it again.
 if [ "$MODE" = watch ]; then
@@ -49,7 +64,9 @@ if [ "$MODE" = watch ]; then
     git -C "$REPO" fetch -q origin main || true
     head=$(git -C "$REPO" rev-parse origin/main)
     if [ ! -f "$WORK/tested/$head" ] && [ ! -f "$WORK/failed/$head" ]; then
+      [ "${RELEASE_PREBUILD:-1}" = 1 ] && [ ! -f "$WORK/prebuilt/$head" ] && bash "$0" "$head" prebuild &
       bash "$0" "$head" test || touch "$WORK/failed/$head"
+      wait
     fi
     sleep "${RELEASE_WATCH_INTERVAL:-30}"
   done
@@ -100,6 +117,13 @@ run_tests() {
   touch "$TESTED"; exec 8>&-
 }
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }
+if [ "$MODE" = prebuild ]; then
+  P="$WORK/prebuild/$SHA"; rm -rf "$P"; mkdir -p "$P" "$WORK/prebuilt"
+  git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$P"
+  echo "$SHA" > "$P/.wekruit-source-revision"
+  prebuild_image "$P" > "$WORK/prebuild-$SHORT.log" 2>&1 || { rm -rf "$P"; die "image prebuild failed for $SHORT (log: $WORK/prebuild-$SHORT.log)"; }
+  touch "$WORK/prebuilt/$SHA"; rm -rf "$P"; log "IMAGE PREBUILT $SHORT"; exit 0
+fi
 
 # 2) Live state and what changes.
 LIVE=$(live_revision)
@@ -121,19 +145,10 @@ mkdir -p "$WORK"; exec 9>"$WORK/.lock"; flock -n 9 || die "another release is ru
 DIR="$WORK/releases/$SHA"; rm -rf "$DIR"; mkdir -p "$DIR"
 git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$DIR"
 echo "$SHA" > "$DIR/.wekruit-source-revision"
-# Build the Modal image from this exact folder while the tests run, so the deploy
-# below reuses the cached image instead of building it. Uses a short-lived app with no functions;
-# RELEASE_PREBUILD=0 turns it off.
+# Build the image while the tests run, unless the watcher already built it for this commit.
 PREBUILD=""
-if [ "${RELEASE_PREBUILD:-1}" = 1 ]; then
-  (cd "$DIR" && python3 -c '
-import importlib.util, modal
-spec = importlib.util.spec_from_file_location("release_app", "infra/modal/app.py")
-release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
-builder = modal.App(release.APP_NAME + "-prebuild")
-with modal.enable_output(), builder.run():
-    release.image.build(builder)
-') > "$WORK/prebuild-$SHORT.log" 2>&1 &
+if [ "${RELEASE_PREBUILD:-1}" = 1 ] && [ ! -f "$WORK/prebuilt/$SHA" ]; then
+  prebuild_image "$DIR" > "$WORK/prebuild-$SHORT.log" 2>&1 &
   PREBUILD=$!; log "building image for $SHORT in the background"
 fi
 run_tests
@@ -145,7 +160,7 @@ while [ "$ACTIVE" != "[]" ] && [ "${RELEASE_ALLOW_ACTIVE:-}" != "$SHORT" ] && [ 
   log "waiting for gap, active: $([ "$ACTIVE" = unknown ] && echo unknown || echo "$ACTIVE" | grep -o '"status"' | wc -l)"
 done
 
-[ -z "$PREBUILD" ] || { wait "$PREBUILD" && log "image prebuilt" || log "image prebuild failed (log: $WORK/prebuild-$SHORT.log); deploy builds it"; }
+[ -z "$PREBUILD" ] || { wait "$PREBUILD" && mkdir -p "$WORK/prebuilt" && touch "$WORK/prebuilt/$SHA" && log "image prebuilt" || log "image prebuild failed (log: $WORK/prebuild-$SHORT.log); deploy builds it"; }
 
 # 5) Deploy, sampling public /health every 2 s to measure the outage window.
 ( while sleep 2; do printf '%s %s\n' "$(date +%s)" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$URL/health")"; done ) > "$WORK/health-$SHORT.log" &
