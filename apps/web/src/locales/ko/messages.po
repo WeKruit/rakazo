@@ -6149,7 +6149,7 @@ msgstr ""
 
 #: src/components/LiveWork.tsx
 msgid "Working…"
-msgstr ""
+msgstr "처리 중…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Years of experience"
