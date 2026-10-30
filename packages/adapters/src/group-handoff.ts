@@ -1,6 +1,11 @@
 import { runContinueJob } from "@rakazo/adapter-kit";
 import { MessageBlock } from "@rakazo/contracts";
-import { botMessageHopExhausted, nextBotMessageHop, renderGroupMembersContext } from "@rakazo/core";
+import {
+  botMessageHopExhausted,
+  nextBotMessageHop,
+  recruitingBotKey,
+  renderGroupMembersContext,
+} from "@rakazo/core";
 import {
   appendEventInTransaction,
   createThreadMessageInTransaction,
@@ -15,6 +20,9 @@ import type { ExecutorDeps } from "./executor.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { NO_RESPONSE } from "./silent-reply.js";
 import { declinedRunId } from "./turn-end-guard.js";
+
+export const NO_ROLE_HANDOFF =
+  "Not handed off: this conversation has no role yet, so the sourcing teammate has nowhere to save the people it finds. Save the role now with recruiting_role, quoting the recruiter's own words, then hand off again with the same brief.";
 
 export async function handoffToGroupBot(
   deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
@@ -53,7 +61,7 @@ export async function handoffToGroupBot(
           include: {
             members: {
               where: { bot: { archivedAt: null } },
-              include: { bot: { select: { id: true, name: true } } },
+              include: { bot: { select: { id: true, name: true, spawnKey: true } } },
               orderBy: { createdAt: "asc" },
             },
           },
@@ -103,8 +111,21 @@ export async function handoffToGroupBot(
       }
       if (!targetId) return { error: "handoff target bot is required" } as const;
       if (targetId === run.botId) return { error: "cannot hand off to yourself" } as const;
-      if (!group.members.some((member) => member.bot.id === targetId)) {
-        return { error: "handoff target is not a group member" } as const;
+      const target = group.members.find((member) => member.bot.id === targetId);
+      if (!target) return { error: "handoff target is not a group member" } as const;
+      // A search stage saves people into the conversation's role; without one the sourcing
+      // teammate has nowhere to put them, so the coordinator sets the role up first.
+      const source = group.members.find((member) => member.bot.id === run.botId);
+      if (
+        source &&
+        recruitingBotKey(source.bot) === "main" &&
+        recruitingBotKey(target.bot) === "sourcer"
+      ) {
+        const thread = await tx.thread.findUnique({
+          where: { id: run.threadId },
+          select: { activeRecruitingRoleId: true },
+        });
+        if (!thread?.activeRecruitingRoleId) return { error: NO_ROLE_HANDOFF } as const;
       }
 
       let sourceBlocks: MessageBlock[] = [];

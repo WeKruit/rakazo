@@ -4,8 +4,11 @@ import type { PrismaClient, ThreadEvents } from "@rakazo/db";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { deletePushToken, ExpoPushProvider, savePushToken } from "./expo-push.js";
 import { memoryPushTokens } from "./expo-push-fake.js";
+import { reportGroupHandoffOutcome } from "./group-handoff.js";
 import { createJobReconciler } from "./job-reconciler.js";
 import { reconcileStuckWork, STUCK_NOTICE_CLAIM_TTL_MS } from "./stuck-work.js";
+
+vi.mock("./group-handoff.js", () => ({ reportGroupHandoffOutcome: vi.fn(async () => undefined) }));
 
 const now = new Date("2026-09-28T16:00:00.000Z");
 afterEach(() => {
@@ -372,6 +375,30 @@ describe("reconcileStuckWork", () => {
         body: stuckWorkStatusMessage("queued"),
       }),
       expect.anything(),
+    );
+  });
+
+  it("reports a handed stage that stopped waiting back to the teammate that handed it", async () => {
+    const run = {
+      ...candidate("waiting_input", 25),
+      sourceMessageId: "handoff-1",
+      thread: { groupId: "group-1" },
+    };
+    const { jobs } = publisher();
+
+    await reconcileStuckWork({
+      prisma: expireClient(run) as unknown as PrismaClient,
+      jobs,
+      events: { notify: vi.fn(async () => undefined) } as unknown as ThreadEvents,
+      now,
+      batchSize: 100,
+    });
+
+    expect(reportGroupHandoffOutcome).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: run.id, sourceMessageId: "handoff-1" }),
+      "group-1",
+      { status: "failed", error: stuckWorkStatusMessage("waiting_input") },
     );
   });
 

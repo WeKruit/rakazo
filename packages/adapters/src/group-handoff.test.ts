@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   handoffToGroupBot,
   isQuietStageReport,
+  NO_ROLE_HANDOFF,
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
   reportStalledGroupStage,
@@ -24,6 +25,7 @@ const run = {
 function harness(
   sourceBlocks: unknown,
   existing?: { sourceRuns: { id: string; botId: string }[] },
+  crew?: { spawnKeys: Record<string, string>; activeRecruitingRoleId: string | null },
 ) {
   const runCreate = vi.fn(async () => ({ id: "run-b" }));
   const messageCreate = vi.fn(async () => ({ id: "message-1" }));
@@ -33,7 +35,7 @@ function harness(
       findFirst: vi.fn(async () => ({
         id: "group-1",
         members: ["bot-a", "bot-b", "bot-c"].map((id) => ({
-          bot: { id, name: id.toUpperCase() },
+          bot: { id, name: id.toUpperCase(), spawnKey: crew?.spawnKeys[id] ?? null },
         })),
       })),
       update: vi.fn(async () => ({ id: "group-1" })),
@@ -53,6 +55,9 @@ function harness(
       create: messageCreate,
     },
     thread: {
+      findUnique: vi.fn(async () => ({
+        activeRecruitingRoleId: crew ? crew.activeRecruitingRoleId : null,
+      })),
       update: vi.fn(async (args: { select: { nextMessageSeq?: boolean } }) =>
         args.select.nextMessageSeq ? { nextMessageSeq: 2 } : { nextEventSeq: 2 },
       ),
@@ -209,6 +214,41 @@ describe("group handoff ownership", () => {
       }),
     ).resolves.toEqual({ error: "cannot verify the group handoff chain" });
     expect(runCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("coordinator search handoff", () => {
+  const spawnKeys = { "bot-a": "recruiting:user-1:main", "bot-b": "recruiting:user-1:sourcer" };
+
+  it("sends the brief back to the coordinator when the conversation has no role", async () => {
+    const { deps, runCreate } = harness([{ kind: "text", text: "find them all" }], undefined, {
+      spawnKeys,
+      activeRecruitingRoleId: null,
+    });
+    await expect(
+      handoffToGroupBot(deps as never, run, "group-1", { bot_id: "bot-b", message: "Find all" }),
+    ).resolves.toEqual({ error: NO_ROLE_HANDOFF });
+    expect(runCreate).not.toHaveBeenCalled();
+  });
+
+  it("hands the search over once the role is saved", async () => {
+    const { deps } = harness([{ kind: "text", text: "find them all" }], undefined, {
+      spawnKeys,
+      activeRecruitingRoleId: "role-1",
+    });
+    await expect(
+      handoffToGroupBot(deps as never, run, "group-1", { bot_id: "bot-b", message: "Find all" }),
+    ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
+  });
+
+  it("leaves other teammates' handoffs alone", async () => {
+    const { deps } = harness([{ kind: "text", text: "draft it" }], undefined, {
+      spawnKeys: { "bot-a": "recruiting:user-1:main", "bot-b": "recruiting:user-1:outreach" },
+      activeRecruitingRoleId: null,
+    });
+    await expect(
+      handoffToGroupBot(deps as never, run, "group-1", { bot_id: "bot-b", message: "Draft" }),
+    ).resolves.toMatchObject({ ok: true, botId: "bot-b" });
   });
 });
 

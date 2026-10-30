@@ -1001,10 +1001,6 @@ export function nearCandidateKey(
 /** A question card holds 240 characters: leading context sentences go first, the question stays. */
 export { peopleTargetFrom, requestedPeopleTarget, shortQuestion };
 
-/**
- * The playbook stops a scale-out at the recruiter's target: once the role holds that many people,
- * handing a search on for a paid deep search only spends money nobody asked for.
- */
 /** The recruiter's people target for the scale-out their latest message asked for, with the totals. */
 async function scaleTarget(
   prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
@@ -1035,50 +1031,6 @@ async function scaleTarget(
   ]);
   const target = peopleTargetFrom(said, before);
   return target ? { target, total } : undefined;
-}
-
-async function searchTargetAlreadyMet(
-  prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
-  threadId: string,
-  handoffMessage: string,
-): Promise<string | undefined> {
-  if (!/search|research|sourc|find|more (?:people|candidates)|深度|搜索|找/i.test(handoffMessage))
-    return undefined;
-  const scale = await scaleTarget(prisma, threadId);
-  if (!scale || scale.total < scale.target) return undefined;
-  return `Not handed off: Results already holds ${scale.total} people, meeting the recruiter's target of ${scale.target}. Do not run a deep search; tell the recruiter the total and offer the next step.`;
-}
-
-/** The recruiter limited the scale-out to the quick people search. */
-const QUICK_SEARCH_ONLY =
-  /quick (?:people )?search only|only (?:the )?quick (?:people )?search|no deep(?:er)? (?:research|search)|只用快速|不要深度|不用深度/i;
-
-/**
- * A scale-out handoff while the people searches still add people, or after the recruiter limited
- * the search to them: the coordinator keeps searching (or reports) instead.
- */
-export async function scaleHandoffTooEarly(
-  prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
-  threadId: string,
-  searchTotals: readonly number[],
-): Promise<string | undefined> {
-  const scale = await scaleTarget(prisma, threadId);
-  if (!scale || scale.total >= scale.target) return undefined;
-  const latest = await prisma.message.findFirst({
-    where: { threadId, role: "user" },
-    orderBy: { seq: "desc" },
-    select: { blocks: true },
-  });
-  const said = ((latest?.blocks ?? []) as MessageBlock[])
-    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
-    .join("\n");
-  if (QUICK_SEARCH_ONLY.test(said))
-    return `Not handed off: the recruiter limited this to the quick people search. Keep running waves of four people searches until the target of ${scale.target} is met or a wave adds fewer than five new people; then report the exact count and end on the next-step card offering the deeper search.`;
-  // The last wave is the last four searches; the total before it is the one just ahead of them.
-  if (searchTotals.length < 5) return undefined;
-  const added = searchTotals.at(-1)! - searchTotals.at(-5)!;
-  if (added < 5) return undefined;
-  return `Not handed off: the last wave of people searches still added ${added} new people (${scale.total} of the ${scale.target} target in Results). Run another wave of four differently worded people searches now${scale.target > 200 ? " with numResults 100" : ""}, and keep going until the target is met or a wave adds fewer than five; hand off only the part still missing after that.`;
 }
 
 const ASK_DECLINES =
@@ -5556,8 +5508,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let peopleSearchesRun = 0;
         // The role's total after each people search this run, so a scale-out cannot hand off while
         // its searches are still adding people.
-        const searchTotals: number[] = [];
-        let earlyHandoffBounced = false;
         // People still to look up for a find_emails next_from_role request after this run's last batch.
         let contactLookupOwed: { target: number; remaining: number } | undefined;
         let askDeclineBounced = false;
@@ -9018,7 +8968,6 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     deps.prisma.recruitingCandidate.count({ where: { roleId } }),
                     scaleTarget(deps.prisma, thread.id).catch(() => undefined),
                   ]);
-                  searchTotals.push(peopleInResults);
                   return {
                     savedToResults: true,
                     peopleInResults,
@@ -11279,25 +11228,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({
                 error: "handoff_to_bot is only for group chats",
               });
-            const met = await searchTargetAlreadyMet(
-              deps.prisma,
-              thread.id,
-              String(args.message ?? ""),
-            );
-            if (met) return finish({ skipped: met });
-            if (!earlyHandoffBounced) {
-              const early = await scaleHandoffTooEarly(deps.prisma, thread.id, searchTotals);
-              if (early) {
-                earlyHandoffBounced = true;
-                return finish({ error: early });
-              }
-            }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
               confirm_name: args.confirm_name ? String(args.confirm_name) : undefined,
               message: String(args.message ?? ""),
-              report_back: args.report_back === true,
+              // The coordinator checks every stage it hands out, like a supervisor's job report.
+              report_back: args.report_back === true || recruitingBotKey(bot) === "main",
             });
             if ("ok" in result && result.ok) handedOff = true;
             return finish(result);
@@ -13485,6 +13422,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               "status",
               { forceUnread: true },
             ).catch((returnError) => getLogger().error("bot message failure return", returnError));
+          }
+          if (thread.groupId && !failed.continuationRunId) {
+            await reportGroupStageOutcome(deps, run, thread.groupId, {
+              status: "failed",
+              error: message,
+            }).catch((reportError) => getLogger().error("group handoff report", reportError));
           }
           if (runSendsFinishNotification(run.trigger) && !failed.continuationRunId) {
             await notifyRun(deps, run, {

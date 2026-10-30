@@ -9,12 +9,14 @@ import {
   stuckWorkAction,
   stuckWorkAgeMs,
   stuckWorkReminder,
+  stuckWorkStatusMessage,
   stuckWorkStoppedNotification,
 } from "@rakazo/core";
 import type { Prisma, PrismaClient, ThreadEvents } from "@rakazo/db";
 import { appendEventInTransaction, expireStuckRun, withTransactionRetry } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { ExpoPushProvider } from "./expo-push.js";
+import { reportGroupHandoffOutcome } from "./group-handoff.js";
 
 type StuckCursor = { at: Date; id: string };
 
@@ -27,6 +29,7 @@ type StuckCandidate = {
   botId: string;
   userId: string;
   taskId: string;
+  sourceMessageId: string | null;
   bot: { name: string; notifyOnFinish: boolean };
   thread: { groupId: string | null };
 };
@@ -81,6 +84,7 @@ export async function reconcileStuckWork(deps: {
       botId: true,
       userId: true,
       taskId: true,
+      sourceMessageId: true,
       bot: { select: { name: true, notifyOnFinish: true } },
       thread: { select: { groupId: true } },
     },
@@ -140,6 +144,7 @@ function readyStuckRun(
     botId: run.botId,
     userId: run.userId,
     taskId: run.taskId,
+    sourceMessageId: run.sourceMessageId ?? null,
     bot: run.bot,
     thread: run.thread,
   };
@@ -331,6 +336,15 @@ async function expireOne(
     await deps.jobs.enqueue(runContinueJob(expired.continuationRunId)).catch((error) => {
       getLogger().error("stuck work continuation", error);
     });
+  }
+  // A handed stage that stopped here still reports to the teammate that handed it over.
+  if (run.thread.groupId && deps.events) {
+    await reportGroupHandoffOutcome(
+      { prisma: deps.prisma, events: deps.events, jobs: deps.jobs },
+      run,
+      run.thread.groupId,
+      { status: "failed", error: stuckWorkStatusMessage(run.status) },
+    ).catch((error) => getLogger().error("stuck work stage report", error));
   }
   if (!deps.notifications || !noticesEnabled(run)) return;
   const stopped = stuckWorkStoppedNotification(run.status, run.bot.name);
