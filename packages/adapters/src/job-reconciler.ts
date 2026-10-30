@@ -8,7 +8,6 @@ import type { PoolClient } from "pg";
 import { returnBotMessageOutcome } from "./bot-messages.js";
 import { scheduleComputerControlExpiry } from "./computer-control.js";
 import { watchOpenStages } from "./group-handoff.js";
-import { RECRUITING_CHECKIN_INTERVAL_MS, sweepRecruitingCheckins } from "./recruiting-checkin.js";
 import { sweepIdleRecruitingRoles } from "./recruiting-idle-sweep.js";
 import { reconcileRecruitingQuestions } from "./recruiting-question-nudge.js";
 import { reconcileStuckWork } from "./stuck-work.js";
@@ -128,7 +127,6 @@ export function createJobReconciler(
   let controlCursor: ControlCursor | undefined;
   let controlScanDeadline: Date | undefined;
   let idleSweptAt = 0;
-  let checkinsSweptAt = 0;
   let stagesWatchedAt = 0;
 
   const reconcileOnce = async () => {
@@ -169,14 +167,6 @@ export function createJobReconciler(
           });
         } catch (error) {
           getLogger().error("recruiting idle sweep", error);
-        }
-      }
-      if (now.getTime() - checkinsSweptAt >= RECRUITING_CHECKIN_INTERVAL_MS) {
-        checkinsSweptAt = now.getTime();
-        try {
-          await sweepRecruitingCheckins({ prisma: deps.prisma, jobs: deps.jobs, now, batchSize });
-        } catch (error) {
-          getLogger().error("recruiting check-in sweep", error);
         }
       }
       if (deps.events && now.getTime() - stagesWatchedAt >= STAGE_WATCH_SCAN_MS) {
