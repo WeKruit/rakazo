@@ -14,6 +14,7 @@ import {
 import { mcpObject } from "@rakazo/core/node/approval-effect-key";
 import type { McpServer, PrismaClient } from "@rakazo/db";
 import { IsolationError, listRecruitingResearch, listRunToolResults } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import { readActorArtifact } from "./artifact-read.js";
 import type { ContactProvider, FoundEmail } from "./contact-lookup.js";
 import { NOT_GRADING_TASK } from "./recruiting-grading.js";
@@ -180,6 +181,8 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
     },
   },
 } as const;
+/** Most one people-search agent run (one wave) may spend, in US dollars. */
+export const AGENT_RUN_MAX_COST_USD = 10;
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
@@ -218,8 +221,25 @@ export async function prepareAgentRun(
         );
   }
   if (args.runId !== undefined) return args;
+  // Ultra refuses some group searches and runs past one call; auto finds the same people for less.
+  const effort = args.effort === "ultra" ? "auto" : args.effort;
+  const metered = effort === "auto";
+  const asked = Number(record(args.budget)?.maxCostDollars);
+  const { budget: _budget, ...rest } = args;
   const prepared: Record<string, unknown> = {
-    ...args,
+    ...rest,
+    ...(effort !== undefined ? { effort } : {}),
+    // The recruiter's spending limit for one wave; a lower limit the agent set still applies.
+    ...(metered
+      ? {
+          budget: {
+            maxCostDollars:
+              Number.isFinite(asked) && asked >= 1
+                ? Math.min(asked, AGENT_RUN_MAX_COST_USD)
+                : AGENT_RUN_MAX_COST_USD,
+          },
+        }
+      : {}),
     outputSchema: args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA,
   };
   const run = actor.runId
@@ -244,6 +264,53 @@ export async function prepareAgentRun(
   const input = record(args.input) ?? {};
   const given = Array.isArray(input.exclusion) ? input.exclusion : [];
   return { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } };
+}
+
+/**
+ * A finished people-search agent run reports what it cost in dollars; it goes in the usage ledger
+ * once per run (as that service's credits, one per dollar), however often the run is read.
+ * Accounting never fails the call it observes.
+ */
+export async function recordAgentRunCost(
+  prisma: Pick<PrismaClient, "usageRecord">,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "botId" | "runId">,
+  server: Pick<McpServer, "slug" | "transport" | "endpoint">,
+  toolName: string,
+  result: unknown,
+): Promise<void> {
+  if (
+    toolName !== "agent_run" ||
+    server.transport !== "streamable_http" ||
+    !server.endpoint ||
+    new URL(server.endpoint).host !== "mcp.exa.ai"
+  )
+    return;
+  const body = mcpObject(result);
+  const dollars = Number(record(body?.costDollars)?.total);
+  if (body?.status !== "completed" || typeof body.id !== "string" || !(dollars > 0)) return;
+  await prisma.usageRecord
+    .createMany({
+      data: [
+        {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          botId: actor.botId ?? null,
+          runId: actor.runId ?? null,
+          parentRunId: actor.runId ?? null,
+          provider: server.slug,
+          model: toolName,
+          unit: "credits",
+          quantity: dollars,
+          usageSource: "provider_receipt",
+          callId: `credits:${server.slug}:${body.id}`,
+          operationKind: "retrieval",
+        },
+      ],
+      skipDuplicates: true,
+    })
+    .catch((error: unknown) =>
+      getLogger().warn("agent run cost not recorded", { error: String(error) }),
+    );
 }
 
 /**

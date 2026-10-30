@@ -1,4 +1,5 @@
 import type { MessageBlock } from "@rakazo/contracts";
+import { recruitingBotKey } from "./recruiting-defaults.js";
 import { hideVendorNames } from "./vendor-names.js";
 
 /**
@@ -111,6 +112,8 @@ type WorkMessage = {
 
 type WorkRun = {
   id: string;
+  /** The member doing the run, so work handed to another member shows as its own stage. */
+  botId?: string;
   status: string;
   startedAt?: string | null;
   createdAt?: string | null;
@@ -163,8 +166,10 @@ export type WorkSession = {
   /** Server time of the last message the turn produced, once nothing is working. */
   endedAt: string | null;
   runIds: string[];
-  /** Steps from live rows that later messages cleared. */
-  earlier: WorkItem[];
+  /** The member behind each run, when known. */
+  runBots: Record<string, string>;
+  /** Per run: steps from live rows that later messages cleared, or from runs that finished. */
+  earlier: Record<string, WorkItem[]>;
   /** Latest live steps per run, to tell growth from a fresh row. */
   live: Record<string, WorkItem[]>;
   current: WorkActivity | null;
@@ -228,24 +233,21 @@ export function observeWorkSession(
         .filter((message) => message.runId && runIds.has(message.runId))
         .map((message) => message.createdAt),
     );
-    const completedRows = previous.runIds.flatMap((runId) => {
+    // Runs that finished earlier already moved their steps; settle the ones last seen working.
+    const earlier = { ...previous.earlier };
+    const lastLive = Object.keys(previous.live).at(-1);
+    for (const [runId, seen] of Object.entries(previous.live)) {
       const rows = thread.messages.filter((message) => message.runId === runId);
       const row =
         rows.find((message) => message.id === `progress:${runId}`) ??
         rows.filter((message) => message.blocks.some((block) => block.kind === "steps")).at(-1);
-      return row ? [runWorkSteps(row).done] : [];
-    });
-    const finished = completedRows.length
-      ? completedRows.flat()
-      : Object.values(previous.live).flat();
+      const inFlight = !row && previous.current && runId === lastLive ? [previous.current] : [];
+      addItems(earlier, runId, row ? runWorkSteps(row).done : [...seen, ...inFlight]);
+    }
     return {
       ...previous,
       endedAt: last && time(last) >= time(previous.startedAt) ? last : now,
-      earlier: [
-        ...previous.earlier,
-        ...finished,
-        ...(!completedRows.length && previous.current ? [previous.current] : []),
-      ],
+      earlier,
       live: {},
       current: null,
       progress: undefined,
@@ -273,13 +275,21 @@ export function observeWorkSession(
         time(startedAt) - time(previous.endedAt) <= WORK_SESSION_CONTINUE_MS));
   const base: WorkSession = continues
     ? { ...previous, endedAt: null }
-    : { startedAt, endedAt: null, runIds: [], earlier: [], live: {}, current: null };
-  const earlier = [...base.earlier];
+    : {
+        startedAt,
+        endedAt: null,
+        runIds: [],
+        runBots: {},
+        earlier: {},
+        live: {},
+        current: null,
+      };
+  const earlier = { ...base.earlier };
   const live: Record<string, WorkItem[]> = {};
   const workingIds = new Set(working.map((run) => run.id));
   // A member that finished while others work keeps its steps in the turn.
   for (const [runId, steps] of Object.entries(base.live))
-    if (!workingIds.has(runId)) earlier.push(...steps);
+    if (!workingIds.has(runId)) addItems(earlier, runId, steps);
   let current: WorkActivity | null = null;
   let currentSeq = -Infinity;
   let progress: WorkSession["progress"];
@@ -296,7 +306,7 @@ export function observeWorkSession(
       progressSeq = row?.seq ?? 0;
     }
     const seen = base.live[run.id] ?? [];
-    if (!isPrefix(seen, steps.done)) earlier.push(...seen);
+    if (!isPrefix(seen, steps.done)) addItems(earlier, run.id, seen);
     live[run.id] = steps.done;
     if (steps.current && (row?.seq ?? 0) >= currentSeq) {
       current = steps.current;
@@ -307,6 +317,10 @@ export function observeWorkSession(
     startedAt: base.startedAt,
     endedAt: null,
     runIds: [...new Set([...base.runIds, ...working.map((run) => run.id)])],
+    runBots: {
+      ...base.runBots,
+      ...Object.fromEntries(working.flatMap((run) => (run.botId ? [[run.id, run.botId]] : []))),
+    },
     earlier,
     live,
     current,
@@ -337,11 +351,87 @@ function sameSession(a: WorkSession, b: WorkSession): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function addItems(target: Record<string, WorkItem[]>, runId: string, items: readonly WorkItem[]) {
+  if (items.length) target[runId] = [...(target[runId] ?? []), ...items];
+}
+
+function runItems(session: WorkSession, runId: string): WorkItem[] {
+  return [...(session.earlier[runId] ?? []), ...(session.live[runId] ?? [])];
+}
+
 /** Finished steps in order, with consecutive repeats folded into a count. */
 export function workSessionSteps(session: WorkSession | null): WorkStep[] {
   if (!session) return [];
+  return foldSteps(session.runIds.flatMap((runId) => runItems(session, runId)));
+}
+
+/**
+ * Work the turn handed to another member, under one entry each. The member that started the
+ * turn keeps its own steps; a member that runs more than once stays one stage.
+ */
+export type WorkStage = { botId: string; running: boolean; steps: WorkStep[] };
+
+export function workSessionStages(session: WorkSession | null): {
+  own: WorkStep[];
+  stages: WorkStage[];
+} {
+  if (!session) return { own: [], stages: [] };
+  const lead = session.runBots[session.runIds[0] ?? ""];
+  const own: WorkItem[] = [];
+  const stages = new Map<string, { running: boolean; items: WorkItem[] }>();
+  for (const runId of session.runIds) {
+    const botId = session.runBots[runId];
+    if (!botId || botId === lead) {
+      own.push(...runItems(session, runId));
+      continue;
+    }
+    const stage = stages.get(botId) ?? { running: false, items: [] };
+    stage.items.push(...runItems(session, runId));
+    stage.running ||= runId in session.live;
+    stages.set(botId, stage);
+  }
+  return {
+    own: foldSteps(own),
+    stages: [...stages].map(([botId, stage]) => ({
+      botId,
+      running: stage.running,
+      steps: foldSteps(stage.items),
+    })),
+  };
+}
+
+/** What a handed-off stage is for, in closed words clients translate; never a member's name. */
+export type WorkStageKind = "sourcing" | "quality" | "outreach" | "scheduling" | "other";
+
+export function workStageKind(
+  bot: { name?: string | null; spawnKey?: string | null } | undefined,
+): WorkStageKind {
+  const key = bot ? recruitingBotKey(bot) : undefined;
+  return key === "sourcer"
+    ? "sourcing"
+    : key === "reviewer"
+      ? "quality"
+      : key === "outreach" || key === "scheduling"
+        ? key
+        : "other";
+}
+
+const STAGE_LABELS: Record<WorkStageKind, string> = {
+  sourcing: "Finding candidates",
+  quality: "Checking candidates",
+  outreach: "Preparing outreach",
+  scheduling: "Scheduling interviews",
+  other: "Delegated task",
+};
+
+/** Shared English copy for a stage entry; clients translate it. */
+export function workStageLabel(kind: WorkStageKind): string {
+  return STAGE_LABELS[kind];
+}
+
+function foldSteps(items: readonly WorkItem[]): WorkStep[] {
   const steps: WorkStep[] = [];
-  for (const item of [...session.earlier, ...Object.values(session.live).flat()]) {
+  for (const item of items) {
     const row = typeof item === "string" ? { activity: item } : item;
     const last = steps.at(-1);
     if (

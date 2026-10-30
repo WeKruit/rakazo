@@ -962,6 +962,10 @@ msgid "Checking candidate records"
 msgstr "Checking candidate records"
 
 #: src/components/LiveWork.tsx
+msgid "Checking candidates"
+msgstr "Checking candidates"
+
+#: src/components/LiveWork.tsx
 msgid "Checking connections"
 msgstr "Checking connections"
 
@@ -2056,6 +2060,10 @@ msgstr "Default scope"
 msgid "Degree"
 msgstr "Degree"
 
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr "Delegated task"
+
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
@@ -2204,6 +2212,7 @@ msgstr "Docker limits access to your computer for added security. Using {hostLab
 msgid "Does not match"
 msgstr "Does not match"
 
+#: src/components/LiveWork.tsx
 #: src/pages/ActivityList.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Done"
@@ -2521,6 +2530,10 @@ msgstr "Find models"
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find work history"
 msgstr "Find work history"
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr "Finding candidates"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4173,6 +4186,10 @@ msgstr "Prepared"
 msgid "Preparing a question"
 msgstr "Preparing a question"
 
+#: src/components/LiveWork.tsx
+msgid "Preparing outreach"
+msgstr "Preparing outreach"
+
 #: src/pages/Artifacts.tsx
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr "Preview isn't available for this file type — download it to view it."
@@ -5021,6 +5038,10 @@ msgstr "Scheduled"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Scheduling"
 msgstr "Scheduling"
+
+#: src/components/LiveWork.tsx
+msgid "Scheduling interviews"
+msgstr "Scheduling interviews"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Scopes"
@@ -6125,6 +6146,10 @@ msgstr "Workflow status"
 #: src/components/LiveWork.tsx
 msgid "Working on it"
 msgstr "Working on it"
+
+#: src/components/LiveWork.tsx
+msgid "Working…"
+msgstr "Working…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Years of experience"

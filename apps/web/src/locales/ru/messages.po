@@ -962,6 +962,10 @@ msgid "Checking candidate records"
 msgstr ""
 
 #: src/components/LiveWork.tsx
+msgid "Checking candidates"
+msgstr "Проверка кандидатов"
+
+#: src/components/LiveWork.tsx
 msgid "Checking connections"
 msgstr ""
 
@@ -2056,6 +2060,10 @@ msgstr "Область действия по умолчанию"
 msgid "Degree"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr "Поручённая задача"
+
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
@@ -2204,6 +2212,7 @@ msgstr "Docker ограничивает доступ к вашему компь�
 msgid "Does not match"
 msgstr ""
 
+#: src/components/LiveWork.tsx
 #: src/pages/ActivityList.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Done"
@@ -2521,6 +2530,10 @@ msgstr "Найти модели"
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find work history"
 msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr "Поиск кандидатов"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4173,6 +4186,10 @@ msgstr ""
 msgid "Preparing a question"
 msgstr ""
 
+#: src/components/LiveWork.tsx
+msgid "Preparing outreach"
+msgstr "Подготовка рассылки"
+
 #: src/pages/Artifacts.tsx
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr ""
@@ -5021,6 +5038,10 @@ msgstr ""
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Scheduling"
 msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Scheduling interviews"
+msgstr "Планирование собеседований"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Scopes"
@@ -6125,6 +6146,10 @@ msgstr ""
 #: src/components/LiveWork.tsx
 msgid "Working on it"
 msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Working…"
+msgstr "Выполняется…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Years of experience"

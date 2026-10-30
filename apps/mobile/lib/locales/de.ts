@@ -793,4 +793,9 @@ export const DE_MESSAGES: Record<string, string> = {
   "Source unavailable": "Quelle nicht verfügbar",
   "Worked for {duration}": "Gearbeitet: {duration}",
   "Step failed": "Schritt fehlgeschlagen",
+  "Finding candidates": "Kandidaten finden",
+  "Checking candidates": "Kandidaten prüfen",
+  "Preparing outreach": "Ansprache vorbereiten",
+  "Scheduling interviews": "Interviews planen",
+  "Delegated task": "Übertragene Aufgabe",
 };

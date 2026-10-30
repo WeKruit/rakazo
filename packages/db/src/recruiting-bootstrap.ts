@@ -77,7 +77,8 @@ export const RECRUITING_SERVICE_UNIT_PRICES_USD: Readonly<
 > = {
   autumn: { credits: 850 / 100_000, calls: 0 },
   fullenrich: { credits: 29 / 500, calls: 0 },
-  "people-search": { calls: 7 / 1000 },
+  // Agent runs report their own cost, recorded as one credit per dollar.
+  "people-search": { calls: 7 / 1000, credits: 1 },
   "recruiting-crm": { calls: 0 },
   // Flat subscriptions or free APIs: calls add no per-use cost.
   instantly: { calls: 0 },

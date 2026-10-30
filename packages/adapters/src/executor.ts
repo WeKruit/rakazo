@@ -8977,8 +8977,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     deps.prisma.recruitingCandidate.count({ where: { roleId } }),
                     scaleTarget(deps.prisma, thread.id).catch(() => undefined),
                   ]);
+                  // This search's own yield: how many it added, so a wave that adds few is seen.
+                  const added = (saved as { newPeople?: unknown }).newPeople;
                   return {
                     savedToResults: true,
+                    ...(typeof added === "number" && Array.isArray(rows)
+                      ? { newToResults: added, alreadyInResults: rows.length - added }
+                      : {}),
                     peopleInResults,
                     ...(scale
                       ? {

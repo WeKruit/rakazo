@@ -13,7 +13,10 @@ import {
   workActivityLabel,
   workProgressLabel,
   workSessionElapsedMs,
+  workSessionStages,
   workSessionSteps,
+  workStageKind,
+  workStageLabel,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import { reduceThreadEvent } from "./thread-reducer.js";
@@ -220,7 +223,8 @@ describe("observeWorkSession", () => {
       startedAt: at(0),
       endedAt: at(20),
       runIds: ["r1"],
-      earlier: ["role"],
+      runBots: {},
+      earlier: { r1: ["role"] },
       live: {},
       current: null,
     };
@@ -238,7 +242,7 @@ describe("observeWorkSession", () => {
       },
       at(23),
     );
-    expect(next).toMatchObject({ startedAt: at(22), runIds: ["r3"], earlier: [] });
+    expect(next).toMatchObject({ startedAt: at(22), runIds: ["r3"], earlier: {} });
     expect(observeWorkSession(null, { runs: [], messages: [] }, at(0))).toBeNull();
   });
 });
@@ -480,4 +484,86 @@ it("marks an interrupted call paused without changing completed steps during thi
     ev(5, "run.failed", { error: "private reason" }),
   ].reduce(reduceThreadEvent, called);
   expect(runWorkSteps(thinking.messages[0]).done).toEqual(["search"]);
+});
+
+describe("workSessionStages", () => {
+  const run = (id: string, botId: string, status = "running") => ({
+    id,
+    botId,
+    status,
+    startedAt: at(0),
+  });
+  const row = (runId: string, ...labels: string[]) => ({
+    id: `progress:${runId}`,
+    runId,
+    role: "bot",
+    createdAt: at(1),
+    blocks: [
+      { kind: "steps", steps: labels.map((label) => ({ label, count: 1 })) },
+    ] as MessageBlock[],
+  });
+
+  it("keeps the lead's steps apart from each member it handed work to", () => {
+    let session = observeWorkSession(
+      null,
+      { runs: [run("r1", "main")], messages: [row("r1", "Recruiting role", "Handoff to bot")] },
+      at(1),
+    );
+    // Main ends its turn after the handoff; the stage carries the turn on.
+    session = observeWorkSession(
+      session,
+      {
+        runs: [run("r2", "sourcer")],
+        messages: [
+          row("r1", "Recruiting role", "Handoff to bot"),
+          row("r2", "Recruiting research"),
+        ],
+      },
+      at(3),
+    );
+    expect(workSessionStages(session)).toEqual({
+      own: [
+        { activity: "role", count: 1 },
+        { activity: "specialist", count: 1 },
+      ],
+      stages: [{ botId: "sourcer", running: true, steps: [{ activity: "research", count: 1 }] }],
+    });
+    // A second run of the same member stays one stage; the lead's report run is its own work.
+    session = observeWorkSession(
+      session,
+      {
+        runs: [run("r3", "sourcer"), run("r4", "main")],
+        messages: [row("r2", "Recruiting research"), row("r3", "Recruiting candidates")],
+      },
+      at(5),
+    );
+    session = observeWorkSession(session, { runs: [], messages: [] }, at(9));
+    const { own, stages } = workSessionStages(session);
+    expect(own).toHaveLength(2);
+    expect(stages).toEqual([
+      {
+        botId: "sourcer",
+        running: false,
+        steps: [
+          { activity: "research", count: 1 },
+          { activity: "candidates", count: 1 },
+        ],
+      },
+    ]);
+    // The flat list still holds every step in run order.
+    expect(workSessionSteps(session).map((step) => step.activity)).toEqual([
+      "role",
+      "specialist",
+      "research",
+      "candidates",
+    ]);
+  });
+
+  it("names stages by what they are for, never by member", () => {
+    expect(workStageKind({ spawnKey: "recruiting:u1:sourcer", name: "Ana" })).toBe("sourcing");
+    expect(workStageKind({ name: "Reviewer" })).toBe("quality");
+    expect(workStageKind({ name: "Helper" })).toBe("other");
+    expect(workStageKind(undefined)).toBe("other");
+    expect(workStageLabel("sourcing")).toBe("Finding candidates");
+  });
 });

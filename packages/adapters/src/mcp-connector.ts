@@ -74,6 +74,7 @@ import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   lookedUpContacts,
   prepareAgentRun,
+  recordAgentRunCost,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   requireQuickSearchBeforeResearch,
@@ -1257,6 +1258,13 @@ export class McpConnector implements ConnectorProvider {
         session = await this.sessionFor(current.server, context);
         material = this.sessions.get(sessionKey)?.material;
       }
+      await recordAgentRunCost(
+        this.prisma,
+        context,
+        assignment.server,
+        call.route.toolName,
+        result,
+      );
       if (crmTarget) {
         await requireMcpToolAssignment(this.prisma, context, call.route, call.route.toolName);
         if (
