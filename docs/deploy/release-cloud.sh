@@ -121,10 +121,11 @@ mkdir -p "$WORK"; exec 9>"$WORK/.lock"; flock -n 9 || die "another release is ru
 DIR="$WORK/releases/$SHA"; rm -rf "$DIR"; mkdir -p "$DIR"
 git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$DIR"
 echo "$SHA" > "$DIR/.wekruit-source-revision"
-# RELEASE_PREBUILD=1: build the Modal image from this exact folder while the tests run, so the deploy
-# below reuses the cached image instead of building it. Uses a short-lived app with no functions.
+# Build the Modal image from this exact folder while the tests run, so the deploy
+# below reuses the cached image instead of building it. Uses a short-lived app with no functions;
+# RELEASE_PREBUILD=0 turns it off.
 PREBUILD=""
-if [ "${RELEASE_PREBUILD:-}" = 1 ]; then
+if [ "${RELEASE_PREBUILD:-1}" = 1 ]; then
   (cd "$DIR" && python3 -c '
 import importlib.util, modal
 spec = importlib.util.spec_from_file_location("release_app", "infra/modal/app.py")
