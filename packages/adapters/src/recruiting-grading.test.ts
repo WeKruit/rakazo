@@ -124,6 +124,29 @@ const promptOf = (f: ReturnType<typeof fixture>) =>
   (f.taskCreate.mock.calls[0] as unknown as [{ data: { prompt: string } }])[0].data.prompt;
 
 describe("startRecruitingGrading", () => {
+  it("sends a person again once when their request ended without their grade", async () => {
+    const f = fixture({
+      found: [person("expired"), person("waiting")],
+      requests: [
+        {
+          id: "recent-request",
+          createdAt: new Date(now - 40 * 60_000),
+          task: { prompt: "Grade these\n\n- waiting: https://x.test/in/waiting" },
+        },
+        {
+          id: "expired-request",
+          createdAt: new Date(now - 3 * 60 * 60_000),
+          task: { prompt: "Grade these\n\n- expired: https://x.test/in/expired" },
+        },
+      ],
+      researched: ["recent-request", "expired-request"],
+    });
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    const prompt = promptOf(f);
+    expect(prompt).toContain("- expired: https://x.test/in/expired");
+    expect(prompt).not.toContain("in/waiting");
+  });
+
   it("sends people without a research grade to the research teammate, skipping anyone sent before", async () => {
     const f = fixture({
       found: [person("new-a"), person("graded"), person("sent"), person("new-b"), person("new-a")],
@@ -135,12 +158,18 @@ describe("startRecruitingGrading", () => {
           task: { prompt: "Grade these\n\n- sent: https://x.test/in/sent" },
         },
         {
+          id: "older-request",
+          createdAt: new Date(now - 5 * 60 * 60_000),
+          task: { prompt: "Grade these\n\n- sent: https://x.test/in/sent" },
+        },
+        {
           id: "never-started",
           createdAt: new Date(now - 4 * 60 * 60_000),
           task: { prompt: "Grade these\n\n- new-b: https://x.test/in/new-b" },
         },
       ],
-      researched: ["old-request"],
+      // "sent" went out twice with no grade back, so it is not sent a third time.
+      researched: ["old-request", "older-request"],
     });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
     expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({

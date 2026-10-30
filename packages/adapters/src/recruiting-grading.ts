@@ -177,16 +177,18 @@ export function recruitingGradePrompt(
   ].join("\n");
 }
 
-/** The profile links an earlier grading request already sent, so nobody is sent twice. */
-function sentUrls(prompts: readonly string[]): Set<string> {
+/** The profile links one grading request sent. */
+function sentUrls(prompt: string): Set<string> {
   const urls = new Set<string>();
-  for (const prompt of prompts)
-    for (const line of prompt.split("\n")) {
-      const url = /^- .*: (https?:\/\/\S+)$/.exec(line)?.[1];
-      if (url) urls.add(url);
-    }
+  for (const line of prompt.split("\n")) {
+    const url = /^- .*: (https?:\/\/\S+)$/.exec(line)?.[1];
+    if (url) urls.add(url);
+  }
   return urls;
 }
+
+/** A person whose grade did not come back from two requests is not sent again. */
+const GRADE_SEND_LIMIT = 2;
 
 /**
  * Every person in a role gets the research service's grade, as people the research service finds
@@ -287,10 +289,34 @@ export async function startRecruitingGrading(
     );
     if (recent.length - done.length >= GRADE_IN_FLIGHT) return skipped("in flight");
   }
-  // People whose request never reached the research service are sent again.
-  const sent = sentUrls(
-    requests.filter((request) => started(request.id)).map((request) => request.task?.prompt ?? ""),
+  // People whose request never reached the research service are sent again. A person whose
+  // request finished (or expired) without their grade is sent once more; one still waiting is not.
+  const wakes = await deps.prisma.run.findMany({
+    where: { threadId: thread.id, clientNonce: { startsWith: RESEARCH_WAKE_PREFIX } },
+    select: { clientNonce: true },
+  });
+  const finished = (id: string) => {
+    const task = researchByRun.get(id);
+    return (
+      savedRuns.has(id) ||
+      (task !== undefined &&
+        wakes.some((run) => run.clientNonce?.startsWith(`${RESEARCH_WAKE_PREFIX}${task}:`)))
+    );
+  };
+  const waiting = new Set<string>();
+  const sends = new Map<string, number>();
+  for (const request of requests) {
+    if (!started(request.id)) continue;
+    const pending = !finished(request.id) && now - request.createdAt.getTime() < IN_FLIGHT_MS;
+    for (const url of sentUrls(request.task?.prompt ?? "")) {
+      if (pending) waiting.add(url);
+      sends.set(url, (sends.get(url) ?? 0) + 1);
+    }
+  }
+  const sent = new Set(
+    [...sends].flatMap(([url, count]) => (count >= GRADE_SEND_LIMIT ? [url] : [])),
   );
+  for (const url of waiting) sent.add(url);
   const [graded, found] = await Promise.all([
     // Rows the research service returned carry its grade, whatever it concluded.
     deps.prisma.recruitingCandidateOccurrence.findMany({
