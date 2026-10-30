@@ -1092,6 +1092,67 @@ describe("candidate reports from saved people-search pages", () => {
     expect(report).toBeDefined();
     await expect(read({ ...source, rowIndex: 5 })).rejects.toThrow();
   });
+
+  // 2026-10-30 19:23: grade pages from people-search agent runs showed a tier but no reasons.
+  it("reads a grading agent run page's row with its reasons", async () => {
+    const graded = {
+      name: "Ada Park",
+      linkedin_url: "https://www.linkedin.com/in/ada",
+      match_score: 91,
+      match_tier: "Strong",
+      fit_reasons: "Leads the USC Korean Student Association",
+      concerns: ["Graduation year unknown"],
+    };
+    const bytes = Buffer.from(
+      JSON.stringify({
+        request: [
+          "__rakazoCatalogTool",
+          "direct",
+          {
+            route: {
+              connectorId: "mcp",
+              resourceId: "people-search",
+              resourceRevision: 1,
+              toolName: "agent_run",
+            },
+            args: { query: "Grade", input: { data: [] } },
+          },
+        ],
+        providerResult: {
+          structuredContent: {
+            id: "agent_run_1",
+            status: "completed",
+            output: { structured: { rows: [graded] } },
+          },
+        },
+      }),
+    );
+    const hash = createHash("sha256").update(bytes).digest("hex");
+    const read = createRecruitingCandidateReportReader(
+      { prisma: {} as never, artifacts: {} as never },
+      { spaceId: "s", userId: "u", email: "", isDeploymentOwner: false },
+      "role-1",
+      {
+        artifacts: new Map([
+          ["grade-artifact", { row: { id: "grade-artifact", hash } as never, bytes }],
+        ]),
+      },
+    );
+    const { row, report } = await read({
+      providerTaskId: null,
+      taskId: null,
+      actionId: null,
+      roleRevisionId: "rev-3",
+      effectId: "save-2",
+      rowIndex: 0,
+      artifactRef: { artifactId: "grade-artifact", sha256: hash },
+      requestCursor: null,
+      outputId: null,
+      observedAt: "2026-10-30T19:18:16.000Z",
+    });
+    expect(row).toEqual(graded);
+    expect(JSON.stringify(report)).toContain("Leads the USC Korean Student Association");
+  });
 });
 
 describe("savedContactLookups", () => {

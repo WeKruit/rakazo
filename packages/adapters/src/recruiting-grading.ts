@@ -341,7 +341,13 @@ export async function startRecruitingGrading(
     skip.add(row.candidateKey);
     people.set(row.candidateKey, { name: row.name || row.linkedinUrl, url: row.linkedinUrl });
   }
-  if (!people.size) return skipped("nobody to grade");
+  if (!people.size) {
+    // Only a round that just finished is reported, never one from before this change.
+    const lastBatch = requests.find((request) => started(request.id));
+    if (lastBatch && now - lastBatch.createdAt.getTime() < IN_FLIGHT_MS)
+      await reportGradedRole(deps, thread, role.id, lastBatch);
+    return skipped("nobody to grade");
+  }
   const grader = await researchTeammate(deps.prisma, thread);
   if (!grader) return skipped("no research teammate");
   const prompt = recruitingGradePrompt([...people.values()], grader);
@@ -405,6 +411,86 @@ export async function startRecruitingGrading(
   // The existing run reconciler recovers a queued run after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
     getLogger().warn("recruiting grade start deferred to reconciliation");
+  });
+}
+
+/** Run nonce of the ranked report after a role's grading finishes; one per last grading batch. */
+export const RECRUITING_GRADE_REPORT_NONCE_PREFIX = "recruiting-grade-report:";
+/** Only a scaled-out role gets the ranked report; calibration rounds are reviewed person by person. */
+const GRADE_REPORT_MIN_PEOPLE = 100;
+const GRADE_REPORT_PROMPT = `Every person saved for this role now has a grade. Read them with recruiting_candidates list sort "score" (limit 100; follow nextCursor while there is one), then post one short message to the recruiter: how many people are Strong, Promising, Partial and Uncertain, then the ten with the highest scores, each as name, current role, score and tier, with one line from that person's fit reasons (read with recruiting_candidates sources). Report the grades as given; never grade, rank or judge anyone yourself. Do not search, grade, save or contact anyone, and ask no question. End the turn.`;
+
+/**
+ * When grading has nobody left to grade, the lead posts the role's people ranked by grade with
+ * their reasons, once per finished grading round, in the conversation the recruiter reads.
+ */
+async function reportGradedRole(
+  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
+  thread: {
+    id: string;
+    spaceId: string;
+    userId: string;
+    botId: string | null;
+    groupId: string | null;
+  },
+  roleId: string,
+  lastBatch: { id: string },
+): Promise<void> {
+  const people = await deps.prisma.recruitingCandidate.count({ where: { roleId } });
+  if (people < GRADE_REPORT_MIN_PEOPLE) return;
+  const lead = thread.groupId
+    ? (
+        await deps.prisma.chatGroupMember.findMany({
+          where: { groupId: thread.groupId },
+          orderBy: { createdAt: "asc" },
+          select: { botId: true, bot: { select: { name: true, spawnKey: true } } },
+        })
+      ).find((member) => member.bot && recruitingBotKey(member.bot) === "main")?.botId
+    : thread.botId;
+  if (!lead) return;
+  const clientNonce = `${RECRUITING_GRADE_REPORT_NONCE_PREFIX}${thread.id}:${lastBatch.id}`;
+  const runId = await deps.prisma.$transaction(async (tx) => {
+    const locked = await tx.thread.updateMany({
+      where: { id: thread.id, spaceId: thread.spaceId },
+      data: { nextEventSeq: { increment: 0 } },
+    });
+    if (!locked.count) return null;
+    const [existing, running] = await Promise.all([
+      tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
+      tx.run.findFirst({
+        where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
+        select: { id: true },
+      }),
+    ]);
+    if (existing || running) return null;
+    const task = await tx.task.create({
+      data: {
+        spaceId: thread.spaceId,
+        botId: lead,
+        threadId: thread.id,
+        userId: thread.userId,
+        prompt: GRADE_REPORT_PROMPT,
+        status: "queued",
+      },
+    });
+    const run = await tx.run.create({
+      data: {
+        spaceId: thread.spaceId,
+        botId: lead,
+        threadId: thread.id,
+        userId: thread.userId,
+        taskId: task.id,
+        status: "queued",
+        trigger: "recruiting_research" satisfies RunTrigger,
+        clientNonce,
+      },
+    });
+    return run.id;
+  });
+  if (!runId) return;
+  getLogger().info("recruiting.grade.report", { runId, roleId, people });
+  await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
+    getLogger().warn("recruiting grade report deferred to reconciliation");
   });
 }
 

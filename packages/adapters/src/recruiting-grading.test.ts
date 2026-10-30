@@ -7,6 +7,7 @@ import {
   gradingToolRefusal,
   gradingTools,
   RECRUITING_GRADE_NONCE_PREFIX,
+  RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   startRecruitingGrading,
 } from "./recruiting-grading.js";
 
@@ -124,6 +125,46 @@ const promptOf = (f: ReturnType<typeof fixture>) =>
   (f.taskCreate.mock.calls[0] as unknown as [{ data: { prompt: string } }])[0].data.prompt;
 
 describe("startRecruitingGrading", () => {
+  it("has the lead post the ranked grades once grading of a scaled-out role is done", async () => {
+    const f = fixture({
+      found: [person("graded")],
+      graded: ["linkedin:/in/graded"],
+      requests: [
+        {
+          id: "last-batch",
+          createdAt: new Date(now - 10 * 60_000),
+          task: { prompt: "Grade these\n\n- graded: https://x.test/in/graded" },
+        },
+      ],
+      researched: ["last-batch"],
+    });
+    const prisma = f.prisma as unknown as {
+      recruitingCandidate: { count: ReturnType<typeof vi.fn> };
+      chatGroupMember: { findMany: ReturnType<typeof vi.fn> };
+    };
+    prisma.recruitingCandidate = { count: vi.fn(async () => 150) };
+    prisma.chatGroupMember.findMany.mockResolvedValue([
+      { botId: "sourcer", bot: { name: "Sourcer", spawnKey: null } },
+      { botId: "lead", bot: { name: "Main", spawnKey: null } },
+    ]);
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({
+        botId: "lead",
+        trigger: "recruiting_research",
+        clientNonce: `${RECRUITING_GRADE_REPORT_NONCE_PREFIX}thread:last-batch`,
+      }),
+    });
+    expect(promptOf(f)).toContain('sort "score"');
+    // A calibration-sized role gets no report.
+    const small = fixture({ found: [], requests: [], researched: [] });
+    (small.prisma as unknown as typeof prisma).recruitingCandidate = {
+      count: vi.fn(async () => 150),
+    };
+    await startRecruitingGrading(small.deps, { threadId: "thread" }, now);
+    expect(small.runCreate).not.toHaveBeenCalled();
+  });
+
   it("sends a person again once when their request ended without their grade", async () => {
     const f = fixture({
       found: [person("expired"), person("waiting")],
