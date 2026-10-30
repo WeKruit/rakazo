@@ -60,6 +60,20 @@ const EVENT_BATCH_SIZE = 200;
  * pending so the pending filters (originTrigger null | "messaging") still match.
  */
 export const INTERRUPT_ORIGIN = "interrupt";
+/** Run nonce of a background follow-up on a people search that outlived its turn. */
+export const RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX = "recruiting-agent-run-wait:";
+
+/**
+ * Whether a run takes a person's new message into its turn. A background follow-up on a people
+ * search never does: the message waits for the person's own turn, which the follow-up gives
+ * way to.
+ */
+function takesMessages(run: { trigger: string | null; clientNonce?: string | null }): boolean {
+  return (
+    isConversationalRun(run.trigger) &&
+    !run.clientNonce?.startsWith(RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX)
+  );
+}
 const PUSH_CATCH_UP_MS = 30_000;
 const POLL_ONLY_CATCH_UP_MS = 400;
 /** Without push, each sidebar wake re-lists the roster, so poll no faster than the old client did. */
@@ -619,12 +633,11 @@ export async function sendUserMessage(
                     : ["running", "queued", "leased", "waiting_input", "waiting_takeover"],
                 },
               },
-              select: { id: true, taskId: true, trigger: true },
+              select: { id: true, taskId: true, trigger: true, clientNonce: true },
             })
           : [];
       // Steer a conversational run when there is one; a routine, webhook, or intro turn only holds the queue.
-      const busy =
-        activeRuns.find((run) => isConversationalRun(run.trigger)) ?? activeRuns[0] ?? null;
+      const busy = activeRuns.find(takesMessages) ?? activeRuns[0] ?? null;
       let task = null;
       let run = null;
       if (createRun && !busy) {
@@ -664,7 +677,7 @@ export async function sendUserMessage(
           await tx.message.update({ where: { id: message.id }, data: { runId: run.id } });
         }
       } else if (createRun && busy) {
-        const held = !isConversationalRun(busy.trigger);
+        const held = !takesMessages(busy);
         await tx.steeringMessage.create({
           data: {
             messageId: message.id,
@@ -743,10 +756,14 @@ export async function claimSteering(
         id: true,
         spaceId: true,
         trigger: true,
+        clientNonce: true,
         sourceMessage: { select: { blocks: true } },
       },
     });
     if (!run || run.trigger === "created") return [];
+    // A background search follow-up never takes the recruiter's message: it waits for the
+    // recruiter's own turn, which the follow-up gives way to.
+    const takesPending = takesMessages(run);
     const channelId =
       run.trigger === "messaging"
         ? messagingChannelId(run.sourceMessage?.blocks as MessageBlock[] | undefined)
@@ -764,9 +781,7 @@ export async function claimSteering(
         id: input.seenIds.length ? { notIn: input.seenIds } : undefined,
         // A routine or webhook turn only takes steering addressed to it; pending user messages
         // wait for the conversational continuation that starts once it finishes.
-        OR: isConversationalRun(run.trigger)
-          ? [pendingWhere, { runId: input.runId }]
-          : [{ runId: input.runId }],
+        OR: takesPending ? [pendingWhere, { runId: input.runId }] : [{ runId: input.runId }],
         message: {
           threadId: input.threadId,
           // Private follow-ups remain unclaimed for the existing private continuation.

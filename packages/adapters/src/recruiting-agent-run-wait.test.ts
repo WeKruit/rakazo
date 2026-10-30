@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
+  agentRunWaitTarget,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
   runningAgentRunId,
   waitForRecruitingAgentRun,
@@ -16,7 +17,7 @@ const answer = (id: string, status: string, runId = "agent_run_1") => ({
 function fixture(options: {
   answers: Array<ReturnType<typeof answer>>;
   busy?: boolean;
-  woken?: boolean;
+  woken?: boolean | "yielded";
   member?: boolean;
   talking?: boolean;
 }) {
@@ -25,14 +26,9 @@ function fixture(options: {
   const tx = {
     thread: { updateMany: vi.fn(async () => ({ count: 1 })) },
     run: {
-      findFirst: vi.fn(async (args: { where: { clientNonce?: string } }) =>
-        args.where.clientNonce
-          ? options.woken
-            ? { id: "earlier-wake" }
-            : null
-          : options.busy
-            ? { id: "busy" }
-            : null,
+      findFirst: vi.fn(async () => (options.busy ? { id: "busy" } : null)),
+      findMany: vi.fn(async () =>
+        options.woken ? [{ status: options.woken === "yielded" ? "cancelled" : "completed" }] : [],
       ),
       create: runCreate,
     },
@@ -128,6 +124,20 @@ describe("people-search agent runs that outlive their turn", () => {
     await waitForRecruitingAgentRun(test, payload, now);
     expect(test.runCreate).not.toHaveBeenCalled();
     expect(test.jobs.enqueue).not.toHaveBeenCalled();
+  });
+
+  it("wakes again after a wake gave way to the recruiter", async () => {
+    const test = fixture({ answers: [answer("newest", "running")], woken: "yielded" });
+    await waitForRecruitingAgentRun(test, payload, now);
+    expect(test.runCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        clientNonce: `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}agent_run_1:newest:1`,
+      }),
+    });
+    expect(
+      agentRunWaitTarget(`${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}agent_run_1:newest:1`),
+    ).toBe("agent_run_1");
+    expect(agentRunWaitTarget("recruiting-research-wake:task:x")).toBeUndefined();
   });
 
   it("leaves the run alone when its agent left the conversation", async () => {
