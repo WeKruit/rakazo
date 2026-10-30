@@ -55,7 +55,7 @@ const RECRUITING_SERVICES: RecruitingService[] = [
     description: "Platform people search for quick calibration rounds",
     endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
     bots: ["main", "sourcer", "outreach"],
-    tools: ["web_search_exa", "web_search_advanced_exa"],
+    tools: ["web_search_exa", "web_search_advanced_exa", "agent_run"],
     // Outreach searches the public web for a person's own posted email; only the advanced
     // people search saves results into the role's candidates.
     toolsByBot: { outreach: ["web_search_exa"] },
@@ -959,47 +959,72 @@ export async function ensureRecruitingWorkspace(
 export async function ensurePlatformServices(prisma: PrismaClient, actor: Actor): Promise<void> {
   for (const slug of ["people-search", "fullenrich"])
     await ensurePlatformService(prisma, actor, slug);
-  await ensureBookingChanges(prisma, actor);
+  await ensureAddedTools(prisma, actor);
 }
 
-const BOOKING_CHANGES = ["reschedule_booking", "cancel_booking"];
-
 /**
- * Scheduling can book on a connected Cal.com calendar, so it can also move or cancel those
- * bookings; each change still waits for the recruiter on its own card. Older connections were
- * granted booking alone. Additive: only a restricted grant that already books gains the two tools.
+ * Tools added to a default service after accounts were set up. Additive: only a restricted grant
+ * that already has the `requires` tool gains them; each send or booking change still waits for
+ * the recruiter on its own card.
  */
-async function ensureBookingChanges(prisma: PrismaClient, actor: Actor): Promise<void> {
+const ADDED_TOOLS: ReadonlyArray<{
+  roles: readonly string[];
+  endpoint: string;
+  requires: string;
+  add: readonly string[];
+}> = [
+  // Scheduling can book on a connected Cal.com calendar, so it can also move or cancel bookings.
+  {
+    roles: ["scheduling"],
+    endpoint: "https://mcp.cal.com/mcp",
+    requires: "create_booking",
+    add: ["reschedule_booking", "cancel_booking"],
+  },
+  // A scale-out wave is one people-search agent run.
+  {
+    roles: ["main", "sourcer"],
+    endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
+    requires: "web_search_advanced_exa",
+    add: ["agent_run"],
+  },
+];
+
+async function ensureAddedTools(prisma: PrismaClient, actor: Actor): Promise<void> {
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
-  const role = RECRUITING_DEFAULT_BOTS.find((item) => item.key === "scheduling");
-  if (!role) return;
-  const grants = await prisma.botMcpServer.findMany({
-    where: {
-      ...scope,
-      allowAllTools: false,
-      server: { ...scope, endpoint: "https://mcp.cal.com/mcp", enabled: true },
-      bot: {
-        ...scope,
-        archivedAt: null,
-        OR: [{ spawnKey: `recruiting:${actor.userId}:${role.key}` }, { name: role.name }],
-      },
-    },
-  });
-  for (const grant of grants) {
-    const tools = Array.isArray(grant.allowedTools)
-      ? grant.allowedTools.filter((tool): tool is string => typeof tool === "string")
-      : [];
-    const missing = BOOKING_CHANGES.filter((tool) => !tools.includes(tool));
-    if (!tools.includes("create_booking") || !missing.length) continue;
-    await prisma.botMcpServer.updateMany({
+  for (const added of ADDED_TOOLS) {
+    const bots = RECRUITING_DEFAULT_BOTS.filter((item) => added.roles.includes(item.key));
+    if (!bots.length) continue;
+    const grants = await prisma.botMcpServer.findMany({
       where: {
-        id: grant.id,
         ...scope,
         allowAllTools: false,
-        allowedTools: { equals: grant.allowedTools as Prisma.InputJsonValue },
+        server: { ...scope, endpoint: added.endpoint, enabled: true },
+        bot: {
+          ...scope,
+          archivedAt: null,
+          OR: bots.flatMap((role) => [
+            { spawnKey: `recruiting:${actor.userId}:${role.key}` },
+            { name: role.name },
+          ]),
+        },
       },
-      data: { allowedTools: [...tools, ...missing] },
     });
+    for (const grant of grants) {
+      const tools = Array.isArray(grant.allowedTools)
+        ? grant.allowedTools.filter((tool): tool is string => typeof tool === "string")
+        : [];
+      const missing = added.add.filter((tool) => !tools.includes(tool));
+      if (!tools.includes(added.requires) || !missing.length) continue;
+      await prisma.botMcpServer.updateMany({
+        where: {
+          id: grant.id,
+          ...scope,
+          allowAllTools: false,
+          allowedTools: { equals: grant.allowedTools as Prisma.InputJsonValue },
+        },
+        data: { allowedTools: [...tools, ...missing] },
+      });
+    }
   }
 }
 

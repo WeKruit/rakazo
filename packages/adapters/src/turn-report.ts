@@ -97,7 +97,8 @@ export function turnWork(
   if (settled && !settled.ok) return undefined;
   if (settled && isContactLookup(settled.result)) return "contacts";
   const operation = typeof args.operation === "string" ? args.operation : undefined;
-  if (name.endsWith("web_search_advanced_exa")) return "people_search";
+  if (name.endsWith("web_search_advanced_exa") || name.endsWith("__agent_run"))
+    return "people_search";
   if (name === "recruiting_research") {
     if (operation && READ_OPERATIONS.has(operation)) return undefined;
     return operation === "calibration_round" ? "round" : "people_saved";

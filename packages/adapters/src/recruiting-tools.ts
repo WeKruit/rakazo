@@ -787,7 +787,8 @@ export async function importRecruitingCandidateCsv(
 
 export class RecruitingPeopleSearchError extends Error {}
 
-const PEOPLE_SEARCH_PAGE_LIMIT = 100;
+/** One agent run can return up to 500 people; all of them reach Results on one page. */
+const PEOPLE_SEARCH_PAGE_LIMIT = 500;
 
 /** Idempotency prefix of the save the server makes the moment one people search returns. */
 export const PEOPLE_SEARCH_AUTOSAVE_KEY = "people-search-autosave:";

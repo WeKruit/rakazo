@@ -35,7 +35,7 @@ From the 10-30 benchmark (`/mnt/project-files/exa-bench-20261030/REPORT.md`, thr
 The three return mostly different people (overlap 4–53).
 
 - First look or calibration (10–20): quick search, four queries at once, because results must show in seconds.
-- Scale: one people-search agent run per wave, with the people already saved excluded; continue when a run stops short. The research service is an optional second source. Until the agent run is a product tool, scale uses quick-search waves, then the research service.
+- Scale: one people-search agent run (`agent_run` on the people-search connection, offered only when a key is configured) per wave. The connector adds a people output shape and the role's saved people as exclusions, refuses a `runId` or `previousRunId` this person did not start (the key is shared funding), and waits up to 14 minutes; a run still going returns its id to resume. Its people are saved to Results as they return, like a quick search. Continue when a run stops short. The research service is an optional second source.
 - Every big run is graded by Reviewer: 22–32% of agent-run people did not show every requirement on their profile.
 - A mode that worked for a role is kept in Main's bot memory.
 

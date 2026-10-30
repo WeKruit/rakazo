@@ -88,7 +88,7 @@ describe("ensurePlatformServices", () => {
           botId,
           serverId: "people-search",
           allowAllTools: false,
-          allowedTools: ["web_search_exa", "web_search_advanced_exa"],
+          allowedTools: ["web_search_exa", "web_search_advanced_exa", "agent_run"],
         }),
       ),
       skipDuplicates: true,
@@ -150,6 +150,30 @@ describe("ensurePlatformServices", () => {
     await ensurePlatformServices(none.prisma, actor);
     expect(none.tx.mcpServer.create).not.toHaveBeenCalled();
     expect(none.tx.botMcpServer.createMany).not.toHaveBeenCalled();
+  });
+
+  it("gives the people search's agent run to crews that already search", async () => {
+    const f = fixture({
+      grants: [
+        {
+          id: "searches",
+          allowAllTools: false,
+          allowedTools: ["web_search_exa", "web_search_advanced_exa"],
+        },
+        { id: "web", allowAllTools: false, allowedTools: ["web_search_exa"] },
+      ],
+    });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.botMcpServer.findMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        server: expect.objectContaining({ endpoint: SEARCH, enabled: true }),
+      }),
+    });
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledTimes(1);
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: "searches" }),
+      data: { allowedTools: ["web_search_exa", "web_search_advanced_exa", "agent_run"] },
+    });
   });
 
   it("lets Scheduling move and cancel bookings where it can already book", async () => {

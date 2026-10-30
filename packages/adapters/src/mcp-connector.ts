@@ -73,6 +73,7 @@ import { type McpRuntimeAuth, McpSession } from "./mcp-transport.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
 import {
   lookedUpContacts,
+  prepareAgentRun,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   requireQuickSearchBeforeResearch,
@@ -377,6 +378,11 @@ const INSTANTLY_READ_MS = 60_000;
 const FIND_EMAILS = "native_find_emails";
 /** Longest wait for one read on a remote service, so one that stops answering never holds a run. */
 const REMOTE_READ_MS = 90_000;
+/**
+ * A people-search agent run answers within its own call window (about 12.5 minutes) with the
+ * result or a run id to resume, so the call waits that long instead of the default minute.
+ */
+const AGENT_RUN_CALL_MS = 14 * 60_000;
 const REMOTE_READ =
   /^(?:get|list|search|read|fetch|lookup|query|count|describe|retrieve|preview|whoami)(?:_|$)/;
 
@@ -1063,7 +1069,7 @@ export class McpConnector implements ConnectorProvider {
       const peopleSearch =
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT &&
-        ["web_search_exa", "web_search_advanced_exa"].includes(call.route.toolName);
+        ["web_search_exa", "web_search_advanced_exa", "agent_run"].includes(call.route.toolName);
       const enrichmentResults =
         assignment.server.transport === "streamable_http" &&
         assignment.server.endpoint === "https://mcp.fullenrich.com/mcp" &&
@@ -1102,7 +1108,13 @@ export class McpConnector implements ConnectorProvider {
         ["get_email", "list_emails", "reply_to_email"].includes(call.route.toolName)
           ? await this.instantlyCampaignScope(context, assignment.server.id)
           : null;
-      let args = ownedArgs;
+      let args = await prepareAgentRun(
+        this.prisma,
+        context,
+        assignment.server,
+        call.route.toolName,
+        ownedArgs,
+      );
       if (emailScope && call.route.toolName === "list_emails") {
         const campaignId = scopedInstantlyCampaign(args, emailScope.campaignIds);
         const catalog = await session.listTools({ signal: context.signal });
@@ -1205,6 +1217,7 @@ export class McpConnector implements ConnectorProvider {
         try {
           result = await session.callTool(call.route.toolName, args, {
             signal: readTimeout ? AbortSignal.any([context.signal, readTimeout]) : context.signal,
+            ...(call.route.toolName === "agent_run" ? { timeoutMs: AGENT_RUN_CALL_MS } : {}),
           });
           if (
             enrichmentResults &&
@@ -2445,7 +2458,11 @@ export class McpConnector implements ConnectorProvider {
           ...(staticToken ? { Authorization: staticToken } : {}),
         };
         await session.connectRemote({
-          url: server.endpoint,
+          // The people-search agent run is paid per run, so it is offered only with a key.
+          url:
+            server.endpoint === PLATFORM_PEOPLE_SEARCH_ENDPOINT && plaintext !== undefined
+              ? `${server.endpoint},agent_run`
+              : server.endpoint,
           urlPolicy: {
             allowHttpLocalhost: localHttp,
             allowLocalHttpCredentials: localHttp,

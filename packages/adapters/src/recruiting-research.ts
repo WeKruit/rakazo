@@ -158,6 +158,94 @@ export async function requireQuickSearchBeforeResearch(
   );
 }
 
+/** Output shape a people-search agent run returns when the request names none. */
+export const AGENT_RUN_PEOPLE_SCHEMA = {
+  type: "object",
+  required: ["people"],
+  properties: {
+    people: {
+      type: "array",
+      maxItems: 500,
+      items: {
+        type: "object",
+        required: ["name", "linkedin_url", "evidence"],
+        properties: {
+          name: { type: "string" },
+          linkedin_url: { type: ["string", "null"], format: "uri" },
+          current_role: { type: ["string", "null"] },
+          location: { type: ["string", "null"] },
+          evidence: { type: "string" },
+        },
+      },
+    },
+  },
+} as const;
+/** Most saved people sent as one agent run's exclusion list. */
+const AGENT_RUN_EXCLUSION_LIMIT = 500;
+
+/**
+ * The people-search key is shared funding, not a shared run history: an agent run is resumed or
+ * continued only from a run this person started. A new run returns people by default and skips
+ * the people already in the conversation's role, so a wave never pays for someone twice.
+ */
+export async function prepareAgentRun(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId" | "runId">,
+  server: Pick<McpServer, "id" | "revision" | "transport" | "endpoint">,
+  toolName: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  if (
+    toolName !== "agent_run" ||
+    server.transport !== "streamable_http" ||
+    !server.endpoint ||
+    new URL(server.endpoint).host !== "mcp.exa.ai"
+  )
+    return args;
+  const named = (["runId", "previousRunId"] as const).filter((field) => args[field] !== undefined);
+  if (named.length) {
+    const owned = new Set<string>();
+    for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "agent_run")) {
+      const id = mcpObject(receipt.result)?.id;
+      if (typeof id === "string") owned.add(id);
+    }
+    for (const field of named)
+      if (!owned.has(String(args[field])))
+        throw new IsolationError(
+          owned.size
+            ? `No agent run with that ${field}. Your latest runs, newest first: ${[...owned].slice(0, 3).join(", ")}. Copy one unchanged, or start a new run with query.`
+            : "This agent run is not available in your workspace. Start a new run with query.",
+        );
+  }
+  if (args.runId !== undefined) return args;
+  const prepared: Record<string, unknown> = {
+    ...args,
+    outputSchema: args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA,
+  };
+  const run = actor.runId
+    ? await prisma.run.findFirst({
+        where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
+        select: { thread: { select: { activeRecruitingRoleId: true } } },
+      })
+    : null;
+  const roleId = run?.thread.activeRecruitingRoleId;
+  if (!roleId) return prepared;
+  const saved = await prisma.recruitingCandidate.findMany({
+    where: { roleId, role: { id: roleId, spaceId: actor.spaceId, userId: actor.userId } },
+    select: { candidateKey: true },
+    take: AGENT_RUN_EXCLUSION_LIMIT,
+  });
+  const exclusion = saved.flatMap(({ candidateKey }) =>
+    candidateKey.startsWith("linkedin:")
+      ? [{ linkedin_url: `https://www.linkedin.com${candidateKey.slice("linkedin:".length)}` }]
+      : [],
+  );
+  if (!exclusion.length) return prepared;
+  const input = record(args.input) ?? {};
+  const given = Array.isArray(input.exclusion) ? input.exclusion : [];
+  return { ...prepared, input: { ...input, exclusion: [...given, ...exclusion] } };
+}
+
 /**
  * Shared contact-enrichment funding does not share another person's job history. Returns the
  * arguments to send: enrichment_id "latest" reads this person's newest lookup, so a later turn

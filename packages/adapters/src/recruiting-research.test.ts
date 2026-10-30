@@ -3,13 +3,118 @@ import type { RecruitingSourceRef } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
+  AGENT_RUN_PEOPLE_SCHEMA,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
+  prepareAgentRun,
   projectRecruitingCandidateReport,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   savedContactLookups,
 } from "./recruiting-research.js";
+
+describe("people-search agent runs", () => {
+  const actor = { userId: "owner", spaceId: "space", runId: "run-1" };
+  const server = {
+    id: "people-search",
+    revision: 1,
+    transport: "streamable_http",
+    endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
+  };
+  const route = {
+    connectorId: "mcp",
+    resourceId: server.id,
+    resourceRevision: 1,
+    toolName: "agent_run",
+  };
+  const started = {
+    request: ["__rakazoCatalogTool", "direct", { route, args: { query: "Find people" } }],
+    result: {
+      content: [
+        { type: "text", text: JSON.stringify({ id: "agent_run_mine", status: "running" }) },
+      ],
+    },
+  };
+  function fixture(roleId: string | null = "role-1") {
+    return {
+      externalEffect: {
+        findMany: vi.fn(async ({ where }) =>
+          where.run.userId === actor.userId && where.spaceId === actor.spaceId ? [started] : [],
+        ),
+      },
+      run: {
+        findFirst: vi.fn(async () => ({ thread: { activeRecruitingRoleId: roleId } })),
+      },
+      recruitingCandidate: {
+        findMany: vi.fn(async () => [
+          { candidateKey: "linkedin:/in/saved-person" },
+          { candidateKey: "email:someone" },
+        ]),
+      },
+    };
+  }
+  const prepare = (db: ReturnType<typeof fixture>, args: Record<string, unknown>) =>
+    prepareAgentRun(db as never, actor, server, "agent_run", args);
+
+  it("resumes only a run this person started", async () => {
+    const db = fixture();
+    await expect(prepare(db, { runId: "agent_run_mine" })).resolves.toEqual({
+      runId: "agent_run_mine",
+    });
+    await expect(prepare(db, { runId: "agent_run_other" })).rejects.toThrow(/agent_run_mine/);
+    await expect(
+      prepare(db, { query: "More like these", previousRunId: "agent_run_other" }),
+    ).rejects.toThrow(/previousRunId/);
+    expect(db.externalEffect.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ run: { spaceId: "space", userId: "owner" } }),
+      }),
+    );
+  });
+
+  it("returns people and leaves out people already in the role", async () => {
+    const db = fixture();
+    await expect(
+      prepare(db, { query: "Find 50 people", input: { exclusion: [{ name: "Given" }] } }),
+    ).resolves.toEqual({
+      query: "Find 50 people",
+      outputSchema: AGENT_RUN_PEOPLE_SCHEMA,
+      input: {
+        exclusion: [
+          { name: "Given" },
+          { linkedin_url: "https://www.linkedin.com/in/saved-person" },
+        ],
+      },
+    });
+    expect(db.recruitingCandidate.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { roleId: "role-1", role: { id: "role-1", spaceId: "space", userId: "owner" } },
+      }),
+    );
+    const own = { type: "object" };
+    await expect(prepare(fixture(null), { query: "Find", outputSchema: own })).resolves.toEqual({
+      query: "Find",
+      outputSchema: own,
+    });
+  });
+
+  it("leaves other tools and services unchanged", async () => {
+    const db = fixture();
+    const args = { query: "x" };
+    await expect(prepareAgentRun(db as never, actor, server, "web_search_exa", args)).resolves.toBe(
+      args,
+    );
+    await expect(
+      prepareAgentRun(
+        db as never,
+        actor,
+        { ...server, endpoint: "https://mcp.example.com/mcp" },
+        "agent_run",
+        args,
+      ),
+    ).resolves.toBe(args);
+  });
+});
 
 describe("FullEnrich job ownership", () => {
   const actor = { userId: "owner", spaceId: "space" };
