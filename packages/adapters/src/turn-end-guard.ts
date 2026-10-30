@@ -23,8 +23,12 @@ export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
  */
 const GUARDED_TRIGGERS = new Set(["user", "follow_up", "recruiting_research", "bot_message"]);
 
-/** Continuations per recruiter message for a long task the server counts as unfinished. */
-export const LONG_TASK_RETRIES = 20;
+/**
+ * Continuations per recruiter message for a long task the server counts as unfinished. Each one
+ * follows a batch that looked up new people, so the task ends by itself; this only stops a loop.
+ * 4,000 people is 80 batches of 50.
+ */
+export const LONG_TASK_RETRIES = 200;
 
 /** RAKAZO_AUTOCONTINUE_MAX: auto-continues per human turn; 0 disables. Default 3. */
 export function autoContinueMax(env: NodeJS.ProcessEnv = process.env): number {

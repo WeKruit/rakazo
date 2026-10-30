@@ -1122,7 +1122,7 @@ describe("planDeclineRetry", () => {
       owedWork,
     };
     expect((await planDeclineRetry(retried(5), done))?.note).toBe(owedWork);
-    expect(await planDeclineRetry(retried(20), done)).toBeUndefined();
+    expect(await planDeclineRetry(retried(200), done)).toBeUndefined();
     expect(
       await planDeclineRetry(retried(1), {
         ...done,
