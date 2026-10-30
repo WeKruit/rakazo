@@ -270,6 +270,12 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "One search per step made the first round slow.",
   },
   {
+    rule: "rest of the ten from one agent run",
+    in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
+    phrase: 'one people-search agent run fills the rest: agent_run with effort "low"',
+    why: "Quick-search rows alone left many of the ten unverified; the recruiter wants the first two to four fast and the rest checked.",
+  },
+  {
     rule: "evidence highlights",
     in: "RECRUITING_CALIBRATION_QUICK_SEARCH",
     phrase: 'highlightsQuery "concrete evidence of: "',
