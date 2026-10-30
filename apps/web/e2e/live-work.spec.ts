@@ -34,6 +34,35 @@ test("a running turn shows its steps in plain words with a clock, then folds", a
   }
 });
 
+test("work handed to a teammate shows as one entry named for its purpose", async ({
+  page,
+}, testInfo) => {
+  for (const viewport of viewports) {
+    await page.setViewportSize(viewport);
+    await page.goto(`${fixture}?phase=live&stage=1`);
+    const live = page.getByTestId("live-work");
+    const stage = live.getByTestId("work-stage");
+    await expect(stage.locator("summary")).toContainText("Finding candidates");
+    await expect(stage).toHaveAttribute("data-running", "true");
+    await expect(stage).toContainText("Searching candidates");
+    await expect(stage).toContainText("Reviewing candidates");
+    await expect(live).toContainText("Reviewing the role");
+    await expect(page.locator("body")).not.toContainText(/autumn|mcp|recruiting_|sourcer|bot-2/i);
+    await captureScreenshot(page, testInfo, `work-stage-running-${viewport.name}`);
+
+    await page.goto(`${fixture}?phase=done&stage=1`);
+    const summary = page.getByTestId("work-summary");
+    await summary.locator("summary").first().click();
+    const done = summary.getByTestId("work-stage");
+    await expect(done).not.toHaveAttribute("data-running");
+    await expect(done.getByText("Reviewing candidates")).toBeHidden();
+    await done.locator("summary").click();
+    await expect(done.getByText("Reviewing candidates")).toBeVisible();
+    await expect(page.locator("body")).not.toContainText(/autumn|mcp|recruiting_|sourcer|bot-2/i);
+    await captureScreenshot(page, testInfo, `work-stage-done-${viewport.name}`);
+  }
+});
+
 test("specialist work stays compact and folds to a safe result", async ({ page }, testInfo) => {
   for (const viewport of viewports) {
     await page.setViewportSize(viewport);

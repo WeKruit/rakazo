@@ -1,11 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { WorkActivity, WorkSession } from "@rakazo/core";
+import type { WorkActivity, WorkSession, WorkStage, WorkStageKind, WorkStep } from "@rakazo/core";
 import {
   formatWorkClock,
   formatWorkDuration,
   workProgressLabel,
   workSessionElapsedMs,
-  workSessionSteps,
+  workSessionStages,
 } from "@rakazo/core";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
@@ -38,6 +38,85 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
   };
 }
 
+function useWorkStageLabels(): Record<WorkStageKind, string> {
+  const { t } = useLingui();
+  return {
+    sourcing: t`Finding candidates`,
+    quality: t`Checking candidates`,
+    outreach: t`Preparing outreach`,
+    scheduling: t`Scheduling interviews`,
+    other: t`Delegated task`,
+  };
+}
+
+type LabeledStep = WorkStep & { label: string };
+
+/**
+ * Work handed to a teammate, as one entry named for its purpose. It stays open with its
+ * latest steps while it runs and folds once it is done; the key swap resets `open`.
+ */
+function WorkStageEntry({
+  label,
+  running,
+  steps,
+}: {
+  label: string;
+  running: boolean;
+  steps: LabeledStep[];
+}) {
+  const { t } = useLingui();
+  const title = (
+    <>
+      <span
+        aria-hidden
+        className={`text-[12px] ${running ? "text-warning" : "text-success"}`}
+        style={{ animation: running ? "rkPulse 1.2s ease-in-out infinite" : undefined }}
+      >
+        {running ? "◷" : "✓"}
+      </span>
+      <span className="sr-only">{running ? t`Working…` : t`Done`}: </span>
+      <span dir="auto" className={`truncate ${running ? "text-foreground/75" : ""}`}>
+        {label}
+      </span>
+    </>
+  );
+  const row = "flex min-h-6 w-fit max-w-full items-center gap-2 py-0.5 pe-1.5 text-[13px]";
+  if (!steps.length)
+    return (
+      <div
+        data-testid="work-stage"
+        data-running={running || undefined}
+        className={`${row} ps-[22px] text-muted-foreground`}
+      >
+        {title}
+      </div>
+    );
+  return (
+    <details
+      key={running ? "running" : "done"}
+      open={running}
+      data-testid="work-stage"
+      data-running={running || undefined}
+      className="group/stage"
+    >
+      <summary
+        className={`${row} cursor-pointer list-none rounded-md text-muted-foreground outline-none hover:text-foreground/75 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background`}
+      >
+        <ChevronRight
+          aria-hidden
+          size={14}
+          strokeWidth={1.8}
+          className="shrink-0 transition-transform duration-150 group-open/stage:rotate-90 motion-reduce:transition-none"
+        />
+        {title}
+      </summary>
+      <div className="ms-[7px] mt-0.5 border-s border-border ps-3">
+        <ToolSteps steps={steps} limit={running ? LIVE_TOOL_STEP_WINDOW : undefined} />
+      </div>
+    </details>
+  );
+}
+
 /** Seconds since the turn began; only the clock re-renders. */
 function WorkClock({ session }: { session: WorkSession }) {
   const [now, setNow] = useState(() => Date.now());
@@ -62,6 +141,7 @@ export function LiveWork({
   label,
   detail,
   showSteps = true,
+  stageKind = () => "other",
 }: {
   session: WorkSession | null;
   live: boolean;
@@ -71,12 +151,27 @@ export function LiveWork({
   showSteps?: boolean;
   /** Business progress beside the headline, e.g. people added so far. */
   detail?: ReactNode;
+  /** What each handed-off stage is for, from the member doing it. */
+  stageKind?: (botId: string) => WorkStageKind;
 }) {
   const labels = useWorkActivityLabels();
-  const steps = (showSteps ? workSessionSteps(session) : []).map((step) => ({
-    ...step,
-    label: labels[step.activity],
-  }));
+  const stageLabels = useWorkStageLabels();
+  const labelSteps = (list: readonly WorkStep[]) =>
+    list.map((step) => ({ ...step, label: labels[step.activity] }));
+  const split = showSteps ? workSessionStages(session) : { own: [], stages: [] as WorkStage[] };
+  const steps = labelSteps(split.own);
+  const stages = split.stages.length ? (
+    <div className="space-y-0.5">
+      {split.stages.map((stage) => (
+        <WorkStageEntry
+          key={stage.botId}
+          label={stageLabels[stageKind(stage.botId)]}
+          running={stage.running}
+          steps={labelSteps(stage.steps)}
+        />
+      ))}
+    </div>
+  ) : null;
   if (live) {
     const headline = session?.progress
       ? workProgressLabel(session.progress)
@@ -86,6 +181,7 @@ export function LiveWork({
     return (
       <div data-testid="live-work" className="space-y-1">
         {steps.length ? <ToolSteps steps={steps} limit={LIVE_TOOL_STEP_WINDOW} /> : null}
+        {stages}
         {/* The status names the step; the ticking clock stays out of announcements. */}
         <LoadingState
           label={headline}
@@ -106,7 +202,7 @@ export function LiveWork({
   }
   if (!session?.endedAt) return null;
   const duration = formatWorkDuration(workSessionElapsedMs(session, Date.now()));
-  if (!steps.length)
+  if (!steps.length && !stages)
     return (
       <div data-testid="work-summary" className="text-[13px] text-muted-foreground">
         <Trans>Worked for {duration}</Trans>
@@ -124,7 +220,8 @@ export function LiveWork({
         <Trans>Worked for {duration}</Trans>
       </summary>
       <div className="ms-[7px] mt-0.5 border-s border-border ps-3">
-        <ToolSteps steps={steps} />
+        {steps.length ? <ToolSteps steps={steps} /> : null}
+        {stages}
       </div>
     </details>
   );

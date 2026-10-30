@@ -1,13 +1,14 @@
-import type { WorkSession } from "@rakazo/core";
+import type { WorkSession, WorkStageKind, WorkStep } from "@rakazo/core";
 import {
   formatWorkDuration,
   workActivityLabel,
   workProgressLabel,
   workSessionElapsedMs,
-  workSessionSteps,
+  workSessionStages,
+  workStageLabel,
 } from "@rakazo/core";
-import { useEffect } from "react";
-import { Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, Text, View } from "react-native";
 import type { SharedValue } from "react-native-reanimated";
 import Animated, {
   cancelAnimation,
@@ -53,6 +54,104 @@ function Dot({
   );
 }
 
+const LIVE_STEP_WINDOW = 6;
+
+function StepRows({ steps }: { steps: readonly WorkStep[] }) {
+  const tokens = useMobileTokens();
+  const { t } = useI18n();
+  return steps.map((step, index) => (
+    <Text key={index} style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+      <Text
+        accessibilityLabel={
+          step.status === "failed"
+            ? t("Step failed")
+            : step.status === "paused"
+              ? t("Paused")
+              : undefined
+        }
+        style={{ color: step.status ? tokens.warning : tokens.success }}
+      >
+        {step.status ? "! " : "✓ "}
+      </Text>
+      {t(workActivityLabel(step.activity))}
+      {step.count > 1 ? ` ×${step.count}` : ""}
+      {step.peopleWithEmail !== undefined
+        ? ` · ${t(step.peopleWithEmail === 1 ? "{count} person with email" : "{count} people with email", { count: step.peopleWithEmail })}`
+        : ""}
+    </Text>
+  ));
+}
+
+/** Work handed to a teammate: one row named for its purpose that opens to its own steps. */
+function StageRow({
+  label,
+  running,
+  steps,
+}: {
+  label: string;
+  running: boolean;
+  steps: readonly WorkStep[];
+}) {
+  const tokens = useMobileTokens();
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const status = running ? t("Working…") : t("Done");
+  return (
+    <View style={{ gap: 4 }}>
+      <Pressable
+        disabled={!steps.length}
+        onPress={() => setOpen((value) => !value)}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}, ${status}`}
+        accessibilityState={{ expanded: steps.length ? open : undefined }}
+        hitSlop={8}
+        style={{ flexDirection: "row", alignItems: "center", gap: 6, alignSelf: "flex-start" }}
+      >
+        <Text style={{ color: running ? tokens.warning : tokens.success, fontSize: 13 }}>
+          {running ? "◷" : "✓"}
+        </Text>
+        <Text style={{ color: running ? tokens.foreground : tokens.mutedForeground, fontSize: 13 }}>
+          {label}
+        </Text>
+        {steps.length ? (
+          <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>{open ? "▾" : "▸"}</Text>
+        ) : null}
+      </Pressable>
+      {open ? (
+        <View
+          style={{
+            marginLeft: 6,
+            paddingLeft: 12,
+            borderLeftWidth: 1,
+            borderLeftColor: tokens.border,
+            gap: 4,
+          }}
+        >
+          <StepRows steps={running ? steps.slice(-LIVE_STEP_WINDOW) : steps} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function Stages({
+  session,
+  stageKind,
+}: {
+  session: WorkSession | null;
+  stageKind: (botId: string) => WorkStageKind;
+}) {
+  const { t } = useI18n();
+  return workSessionStages(session).stages.map((stage) => (
+    <StageRow
+      key={stage.botId}
+      label={t(workStageLabel(stageKind(stage.botId)))}
+      running={stage.running}
+      steps={stage.steps}
+    />
+  ));
+}
+
 /**
  * A bot is working: dots pulsing in sequence, matching the web's shimmer moment.
  * `compact` is a single dot for list rows — decorative there, so the row's own
@@ -62,10 +161,13 @@ export function WorkingIndicator({
   compact = false,
   tint,
   session,
+  stageKind = () => "other",
 }: {
   compact?: boolean;
   tint?: string;
   session?: WorkSession | null;
+  /** What each handed-off stage is for, from the member doing it. */
+  stageKind?: (botId: string) => WorkStageKind;
 }) {
   const tokens = useMobileTokens();
   const { t } = useI18n();
@@ -103,38 +205,22 @@ export function WorkingIndicator({
   }
   if (session?.endedAt) {
     return (
-      <Text style={{ color: tokens.mutedForeground, fontSize: 13, marginTop: 8 }}>
-        {t("Worked for {duration}", {
-          duration: formatWorkDuration(workSessionElapsedMs(session, Date.now())),
-        })}
-      </Text>
+      <View style={{ gap: 4, marginTop: 8 }}>
+        <Text style={{ color: tokens.mutedForeground, fontSize: 13 }}>
+          {t("Worked for {duration}", {
+            duration: formatWorkDuration(workSessionElapsedMs(session, Date.now())),
+          })}
+        </Text>
+        <Stages session={session} stageKind={stageKind} />
+      </View>
     );
   }
   // ponytail: cap live rows like web; completed history remains in the shared session.
-  const steps = workSessionSteps(session ?? null).slice(-6);
+  const steps = workSessionStages(session ?? null).own.slice(-LIVE_STEP_WINDOW);
   return (
     <View style={{ flexShrink: 1, gap: 4 }}>
-      {steps.map((step, index) => (
-        <Text key={index} style={{ color: tokens.mutedForeground, fontSize: 13 }}>
-          <Text
-            accessibilityLabel={
-              step.status === "failed"
-                ? t("Step failed")
-                : step.status === "paused"
-                  ? t("Paused")
-                  : undefined
-            }
-            style={{ color: step.status ? tokens.warning : tokens.success }}
-          >
-            {step.status ? "! " : "✓ "}
-          </Text>
-          {t(workActivityLabel(step.activity))}
-          {step.count > 1 ? ` ×${step.count}` : ""}
-          {step.peopleWithEmail !== undefined
-            ? ` · ${t(step.peopleWithEmail === 1 ? "{count} person with email" : "{count} people with email", { count: step.peopleWithEmail })}`
-            : ""}
-        </Text>
-      ))}
+      <StepRows steps={steps} />
+      <Stages session={session ?? null} stageKind={stageKind} />
       <View
         accessibilityLabel={label}
         accessibilityRole="text"

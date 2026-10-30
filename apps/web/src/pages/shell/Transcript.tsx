@@ -11,6 +11,7 @@ import {
   projectMessageReactions,
   timeSeparatorIds,
   trackWork,
+  workStageKind,
 } from "@rakazo/core";
 import type { GroupAvatarMember } from "@rakazo/ui-web";
 import { cn } from "@rakazo/ui-web";
@@ -130,7 +131,9 @@ export const Transcript = memo(function Transcript({
   onJumpToMessage: (messageId: string) => void;
   onOpenPeerMessages: (peer: { peerBotId: string; peerBotName: string }) => void;
   memberName?: (botId: string | undefined) => string | undefined;
-  peerBot: (botId: string) => { name?: string; color: string; status?: string } | undefined;
+  peerBot: (
+    botId: string,
+  ) => { name?: string; spawnKey?: string | null; color: string; status?: string } | undefined;
   onRefresh: () => Promise<void>;
   onBotChanged: () => Promise<void>;
   onAddRoutine: (name: string, prompt: string) => void;
@@ -181,6 +184,7 @@ export const Transcript = memo(function Transcript({
     new Date(Date.now()).toISOString(),
   );
   const workSession = workTracker.current.session;
+  const stageKind = useCallback((botId: string) => workStageKind(peerBot(botId)), [peerBot]);
   const workingLabel =
     showToolActivity && isRunPhase(tailPhase) && workingBots.length
       ? workingBots
@@ -658,6 +662,7 @@ export const Transcript = memo(function Transcript({
               label={workingLabel}
               detail={liveDetail}
               showSteps={!showToolActivity}
+              stageKind={stageKind}
             />
           ) : (
             <LoadingState
@@ -673,7 +678,7 @@ export const Transcript = memo(function Transcript({
           !tailPhase &&
           !showToolActivity &&
           messages.at(-1)?.role !== "user" ? (
-          <LiveWork session={workSession} live={false} label="" />
+          <LiveWork session={workSession} live={false} label="" stageKind={stageKind} />
         ) : null}
       </div>
       {quoteDraft ? (

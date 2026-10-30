@@ -51,6 +51,7 @@ import {
   trackWork,
   userVisibleMessages,
   withLiveStreamingProgress,
+  workStageKind,
 } from "@rakazo/core";
 import * as Clipboard from "expo-clipboard";
 import {
@@ -721,6 +722,14 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   };
   const workSession = workTracker.current.tracker.session;
   const liveWorkSession = workSession?.endedAt ? null : workSession;
+  const stageKind = useCallback(
+    (stageBotId: string) =>
+      workStageKind(
+        mentionBots.find((bot) => bot.id === stageBotId) ??
+          snap?.members?.find((member) => member.botId === stageBotId),
+      ),
+    [mentionBots, snap?.members],
+  );
 
   const speakFinishedReply = useCallback(() => {
     if (!botId || inGroup || !currentBot) return;
@@ -2268,7 +2277,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           size={28}
           status={currentBotStatus}
         />
-        <WorkingIndicator session={liveWorkSession} />
+        <WorkingIndicator session={liveWorkSession} stageKind={stageKind} />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : inGroup && workingGroupBots.length > 0 ? (
@@ -2295,11 +2304,11 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
             </View>
           ))}
         </View>
-        <WorkingIndicator session={liveWorkSession} />
+        <WorkingIndicator session={liveWorkSession} stageKind={stageKind} />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : workSession?.endedAt && !working && visibleMessages.at(-1)?.role !== "user" ? (
-      <WorkingIndicator session={workSession} />
+      <WorkingIndicator session={workSession} stageKind={stageKind} />
     ) : null;
 
   const loadEarlierControl =
