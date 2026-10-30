@@ -1277,7 +1277,7 @@ async function crmData(
 }
 
 type CrmRoleMail = ReturnType<typeof RecruitingCrmRoleMailReadSchema.parse>["messages"][number];
-type CrmReadTarget = {
+export type CrmReadTarget = {
   mcpServerId: string;
   serverRevision: number;
   organizationId: string;
@@ -1340,7 +1340,7 @@ async function readCrmRoleCorrespondence(
   target: CrmReadTarget,
   context: AdapterContext,
   candidateId: string | null,
-  options: { stopAtReceived?: boolean; maxPages?: number } = {},
+  options: { stopAtReceived?: boolean; maxPages?: number; stopBefore?: string } = {},
 ) {
   const messages: CrmRoleMail[] = [];
   const seen = new Set<string>();
@@ -1376,6 +1376,14 @@ async function readCrmRoleCorrespondence(
       messages.push(message);
     }
     if (options.stopAtReceived && read.messages.some((message) => message.direction === "received"))
+      return { messages, complete: true };
+    // Newest first, so a page reaching past the window has read everything inside it.
+    if (
+      options.stopBefore &&
+      read.messages.some(
+        (message) => Date.parse(message.timestamp_email ?? "") < Date.parse(options.stopBefore!),
+      )
+    )
       return { messages, complete: true };
     offset = read.next_offset;
   }
@@ -1458,6 +1466,57 @@ export async function listRecruitingRoleReplies(
     total: people.length,
     people: people.slice(0, limit),
     ...(people.length > limit ? { truncated: true } : {}),
+  };
+}
+
+/** A received email on a role, with the sender's CRM name when the role's contacts list it. */
+export type RecruitingRoleReply = {
+  id: string;
+  crmCandidateId: string;
+  name: string | null;
+  email: string | null;
+  at: string;
+  from: string | null;
+  subject: string | null;
+  body: string | null;
+};
+
+/**
+ * Received emails on a role from `since` on, newest first, read from the role's stored
+ * correspondence (the Inbox source) without a model. At most `maxPages` pages; `complete`
+ * says whether the whole window was read. Names are read only when there is a reply to name.
+ */
+export async function readRecruitingRoleRepliesSince(
+  connector: Pick<ConnectorProvider, "execute">,
+  target: CrmReadTarget,
+  context: AdapterContext,
+  since: string,
+  maxPages = 4,
+): Promise<{ replies: RecruitingRoleReply[]; complete: boolean }> {
+  const read = await readCrmRoleCorrespondence(connector, target, context, null, {
+    maxPages,
+    stopBefore: since,
+  });
+  const received = read.messages.filter(
+    (message) =>
+      message.direction === "received" &&
+      Date.parse(message.timestamp_email ?? "") >= Date.parse(since),
+  );
+  if (!received.length) return { replies: [], complete: read.complete };
+  const contacts = await readCrmRoleContacts(connector, target, context);
+  const byId = new Map(contacts.map((row) => [row.candidate_id, row]));
+  return {
+    complete: read.complete,
+    replies: received.map((message) => ({
+      id: message.id,
+      crmCandidateId: message.candidate_id,
+      name: byId.get(message.candidate_id)?.full_name ?? null,
+      email: byId.get(message.candidate_id)?.email ?? null,
+      at: message.timestamp_email!,
+      from: message.from_address,
+      subject: message.subject,
+      body: message.body_text,
+    })),
   };
 }
 

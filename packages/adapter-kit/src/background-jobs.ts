@@ -33,6 +33,7 @@ const payloadSchemas = {
     threadId: z.string().min(1),
     attempt: z.number().int().nonnegative().optional(),
   }),
+  "recruiting_checkin.start": z.object({ threadId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -198,5 +199,17 @@ export function recruitingGradeStartJob(
     replaceKey: `recruiting_grade.start:${payload.threadId}`,
     keepExisting: true,
     ...(availableAt ? { availableAt } : {}),
+  };
+}
+
+/** One pending reply check-in per conversation. */
+export function recruitingCheckinStartJob(
+  payload: BackgroundJobPayloads["recruiting_checkin.start"],
+): BackgroundJob {
+  return {
+    name: "recruiting_checkin.start",
+    payload,
+    replaceKey: `recruiting_checkin.start:${payload.threadId}`,
+    keepExisting: true,
   };
 }

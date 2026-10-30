@@ -56,6 +56,7 @@ export * from "./recruiting-candidates.js";
 export * from "./recruiting-crm.js";
 export * from "./recruiting-defaults.js";
 export * from "./recruiting-playbook.js";
+export * from "./recruiting-reply-sorting.js";
 export * from "./remote-images.js";
 export * from "./response-bytes.js";
 export * from "./run-state.js";
