@@ -77,6 +77,8 @@ git -C "$REPO" fetch -q origin main
 SHA=$(git -C "$REPO" rev-parse --verify "$SHA_IN^{commit}") || die "unknown SHA $SHA_IN"
 git -C "$REPO" merge-base --is-ancestor "$SHA" origin/main || die "$SHA is not on origin/main"
 SHORT=${SHA:0:8}
+# Keep the whole timestamped run on disk; wrappers often show only the tail.
+case "$MODE" in check|deploy) mkdir -p "$WORK"; exec > >(tee -a "$WORK/release-$SHORT.log") 2>&1 ;; esac
 # Unit tests run in one persistent checkout ($WORK/testtree) so node_modules, the Prisma client
 # and vitest's cache survive between releases; install is a near no-op while the lockfile is unchanged.
 # A commit is tested once: its code (everything outside docs/) matching an already tested commit
@@ -134,7 +136,7 @@ N=$(containers); log "containers running: $N"
 [ "$N" = 1 ] || die "expected exactly 1 container (another deploy may be in progress)"
 
 # 3) Active-run gate: recreate kills in-flight runs. waiting_input cards survive recreate.
-ACTIVE=$(db_query "$ACTIVE_SQL") || ACTIVE="unknown"
+log "checking active runs"; ACTIVE=$(db_query "$ACTIVE_SQL") || ACTIVE="unknown"
 log "active runs (30 min): $ACTIVE"
 LEDGER_BEFORE=$(db_query "$LEDGER_SQL") || LEDGER_BEFORE="unknown (db query failed)"
 log "ledger before: $LEDGER_BEFORE"
