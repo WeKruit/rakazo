@@ -17,6 +17,8 @@ export const RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX = "recruiting-agent-run-wait
 export const RECRUITING_AGENT_RUN_WAIT_MS = 60_000;
 /** Runs nobody has collected after this long since they started are left alone. */
 const MAX_WAIT_MS = 12 * 60 * 60_000;
+/** A wake waits until the recruiter has not written for this long. */
+const QUIET_MS = 5 * 60_000;
 const BUSY_STATUSES = ["queued", "leased", "running"];
 const STILL_RUNNING = new Set(["running", "pending", "queued", "in_progress"]);
 
@@ -34,7 +36,7 @@ export function runningAgentRunId(result: unknown): string | undefined {
 export function recruitingAgentRunWaitPrompt(agentRunId: string): string {
   return [
     `Your people-search agent run ${agentRunId} is still working at the provider. Nobody asked for this message; you are continuing your own work.`,
-    `Call agent_run with runId "${agentRunId}" to collect it, and call it again while it still reports running. The people it returns are saved to Results automatically.`,
+    `Call agent_run with runId "${agentRunId}" once to collect it. The people it returns are saved to Results automatically. If it still reports running, end the turn with an empty reply: you are woken again later, and the recruiter hears nothing until it finishes.`,
     "When it has finished, say in one line how many new people were added and whether the role's target is met, then carry on with the stage as your instructions say: if the role is still short of its target, the next wave continues this run with previousRunId. Start no unrelated search.",
   ].join("\n");
 }
@@ -93,6 +95,17 @@ export async function waitForRecruitingAgentRun(
   );
   if (!latest) return skipped("no answer");
   if (!runningAgentRunId(providerResult(latest.result))) return skipped("finished");
+  // The recruiter's own conversation comes first: a wake waits while they are writing.
+  const talking = await deps.prisma.message.findFirst({
+    where: { threadId: thread.id, role: "user", createdAt: { gte: new Date(now - QUIET_MS) } },
+    select: { id: true },
+  });
+  if (talking) {
+    await deps.jobs.enqueue(
+      recruitingAgentRunWaitJob(payload, new Date(now + RECRUITING_AGENT_RUN_WAIT_MS)),
+    );
+    return skipped("recruiter active");
+  }
   // One wake per provider answer: a wake that ends without asking again is the agent's choice.
   const clientNonce = `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${payload.agentRunId}:${latest.id}`;
   const runId = await deps.prisma.$transaction(async (tx) => {
