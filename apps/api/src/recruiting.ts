@@ -3977,6 +3977,43 @@ export async function mergeRoleCandidates(
 }
 
 /** `recruiting.roleCandidates`: existing Autumn list + existing CRM candidates read, merged. */
+const CRM_PAGE = 50;
+const CRM_PAGE_READS = 4;
+
+/**
+ * Reads every page of an offset-paged list. The first page gives the total; full pages then load
+ * `concurrency` at a time. A source that returns short pages is followed page by page instead.
+ */
+export async function readOffsetPages<
+  Page extends { items: readonly unknown[]; total: number; nextOffset: number | null },
+>(read: (offset: number) => Promise<Page>, pageSize: number, concurrency: number) {
+  const first = await read(0);
+  const pages = [first];
+  if (first.nextOffset === null) return pages;
+  if (first.items.length < pageSize) {
+    for (let offset: number | null = first.nextOffset; offset !== null; ) {
+      const page = await read(offset);
+      pages.push(page);
+      offset = page.nextOffset;
+    }
+    return pages;
+  }
+  const offsets: number[] = [];
+  for (let offset = first.nextOffset; offset < first.total; offset += pageSize)
+    offsets.push(offset);
+  const rest = new Array<Page>(offsets.length);
+  let next = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, offsets.length) }, async () => {
+      while (next < offsets.length) {
+        const index = next++;
+        rest[index] = await read(offsets[index]!);
+      }
+    }),
+  );
+  return [...pages, ...rest];
+}
+
 export async function getRecruitingRoleCandidates(
   deps: RecruitingReadDeps & Omit<RecruitingCrmReadDeps, "prisma">,
   actor: Actor,
@@ -4014,26 +4051,36 @@ export async function getRecruitingRoleCandidates(
     async crm(binding) {
       const rows: RoleCandidatesCrmRow[] = [];
       try {
-        // Read the role's people live from the CRM, so replies and status are current.
-        for (let offset: number | null = 0; offset !== null; ) {
-          const page: RecruitingCrmDataOutput = await getRecruitingCrmData(deps, actor, target, {
-            operation: "candidates",
-            serverId: binding.mcpServerId,
-            serverRevision: binding.serverRevision,
-            organizationId: binding.organizationId,
-            crmRoleId: binding.crmRoleId,
-            limit: 50,
-            offset,
-          });
-          if (page.operation !== "candidates") throw new IsolationError();
-          for (const item of page.items)
+        // Read the role's people live from the CRM, so replies and status are current. Each page
+        // is a fully authorized read; pages after the first load a few at a time.
+        const pages = await readOffsetPages(
+          async (offset) => {
+            const page: RecruitingCrmDataOutput = await getRecruitingCrmData(deps, actor, target, {
+              operation: "candidates",
+              serverId: binding.mcpServerId,
+              serverRevision: binding.serverRevision,
+              organizationId: binding.organizationId,
+              crmRoleId: binding.crmRoleId,
+              limit: CRM_PAGE,
+              offset,
+            });
+            if (page.operation !== "candidates") throw new IsolationError();
+            return page;
+          },
+          CRM_PAGE,
+          CRM_PAGE_READS,
+        );
+        const seen = new Set<string>();
+        for (const page of pages)
+          for (const item of page.items) {
+            if (seen.has(item.candidateId)) continue;
+            seen.add(item.candidateId);
             rows.push({
               ...item,
               serverId: page.source.serverId,
               organizationId: page.source.organizationId,
             });
-          offset = page.nextOffset;
-        }
+          }
       } catch (error) {
         // Never substitute stored data when current source authorization cannot be verified.
         if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
