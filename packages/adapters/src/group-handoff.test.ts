@@ -7,6 +7,7 @@ import {
   reportGroupHandoffOutcome,
   reportGroupStageOutcome,
   reportStalledGroupStage,
+  watchOpenStages,
 } from "./group-handoff.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 
@@ -526,5 +527,99 @@ describe("long stage check-in", () => {
       isQuietStageReport("follow_up", [{ ...checkIn[0], report: "failed" }] as never, "bot-a"),
     ).toBe(false);
     expect(isQuietStageReport("user", checkIn as never, "bot-a")).toBe(false);
+  });
+});
+
+describe("open stage watch", () => {
+  const now = new Date("2026-10-30T12:00:00.000Z");
+  const asked = {
+    kind: "handoff",
+    fromBotId: "bot-a",
+    toBotId: "bot-b",
+    text: "Find everyone in the group.",
+    hop: 1,
+    reportBack: true,
+  };
+  const stage = (status: string, minutes: number, blocks: unknown[] = [asked]) => ({
+    id: `run-${status}`,
+    spaceId: "workspace-1",
+    threadId: "thread-1",
+    botId: "bot-b",
+    userId: "user-1",
+    status,
+    createdAt: new Date(now.getTime() - minutes * 60_000),
+    sourceMessageId: "handoff-1",
+    sourceMessage: { blocks },
+    thread: { groupId: "group-1", activeRecruitingRoleId: "role-1" },
+  });
+
+  function watchHarness(
+    runs: unknown[],
+    options: { reported?: string[]; handedOn?: string[]; busy?: number } = {},
+  ) {
+    const base = harness([asked]);
+    const prisma = base.deps.prisma as unknown as Record<string, unknown>;
+    prisma.run = {
+      findMany: vi.fn(async () => runs),
+      count: vi.fn(async () => options.busy ?? 0),
+    };
+    prisma.message = {
+      findMany: vi.fn(async (args: { where: { runId?: unknown } }) =>
+        args.where.runId
+          ? (options.handedOn ?? []).map((runId) => ({ runId }))
+          : (options.reported ?? []).map((clientNonce) => ({ clientNonce })),
+      ),
+    };
+    prisma.recruitingCandidate = { count: vi.fn(async () => 42) };
+    return base;
+  }
+
+  it("checks in once per ten minutes with how the stage stands", async () => {
+    const { deps, messageCreate } = watchHarness([stage("running", 23)]);
+    await expect(watchOpenStages(deps as never, now, 100)).resolves.toBe(1);
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientNonce: "group-checkin:run-running:2",
+          blocks: [
+            expect.objectContaining({
+              toBotId: "bot-a",
+              report: "progress",
+              text: expect.stringContaining(
+                "handed me 23 minutes ago is still running; the role's Results hold 42 people.",
+              ),
+            }),
+          ],
+        }),
+      }),
+    );
+  });
+
+  it("follows a finished turn only while its research still runs", async () => {
+    const idle = watchHarness([stage("completed", 41)]);
+    await expect(watchOpenStages(idle.deps as never, now, 100)).resolves.toBe(0);
+    vi.mocked(recruitingResearchInFlight).mockResolvedValueOnce(true as never);
+    const { deps, messageCreate } = watchHarness([stage("completed", 41)]);
+    await watchOpenStages(deps as never, now, 100);
+    expect(messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ clientNonce: "group-checkin:run-completed:4" }),
+      }),
+    );
+  });
+
+  it("skips reported stages, stages nobody asked back, and a busy coordinator", async () => {
+    const reported = watchHarness([stage("completed", 30)], {
+      reported: ["group-report:run-completed"],
+    });
+    await expect(watchOpenStages(reported.deps as never, now, 100)).resolves.toBe(0);
+    const unasked = watchHarness([stage("running", 30, [{ ...asked, reportBack: undefined }])]);
+    await expect(watchOpenStages(unasked.deps as never, now, 100)).resolves.toBe(0);
+    const handedOn = watchHarness([stage("running", 30)], { handedOn: ["run-running"] });
+    await expect(watchOpenStages(handedOn.deps as never, now, 100)).resolves.toBe(0);
+    const busy = watchHarness([stage("running", 30)], { busy: 1 });
+    await expect(watchOpenStages(busy.deps as never, now, 100)).resolves.toBe(0);
+    for (const { messageCreate } of [reported, unasked, handedOn, busy])
+      expect(messageCreate).not.toHaveBeenCalled();
   });
 });

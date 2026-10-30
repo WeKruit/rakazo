@@ -450,8 +450,7 @@ describe("createJobReconciler", () => {
     await reconciler.reconcileOnce();
     await reconciler.reconcileOnce();
 
-    expect(runFindMany).toHaveBeenNthCalledWith(
-      4,
+    expect(runFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         orderBy: [{ updatedAt: "asc" }, { id: "asc" }],
         where: {

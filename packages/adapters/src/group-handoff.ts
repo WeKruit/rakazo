@@ -244,11 +244,21 @@ export async function reportGroupHandoffOutcome(
     sourceMessageId: string | null;
   },
   groupId: string,
-  outcome: { status: "completed" | "failed" | "progress"; error?: string },
+  outcome: {
+    status: "completed" | "failed" | "progress";
+    error?: string;
+    /** A periodic check-in: its ten-minute slot and what the stage looks like now. */
+    watch?: { slot: number; state: string };
+  },
 ): Promise<{ runId: string } | undefined> {
   if (!run.sourceMessageId) return undefined;
   const finalKey = `group-report:${run.id}`;
-  const deliveryKey = outcome.status === "progress" ? `group-checkin:${run.id}` : finalKey;
+  const deliveryKey =
+    outcome.status !== "progress"
+      ? finalKey
+      : outcome.watch
+        ? `group-checkin:${run.id}:${outcome.watch.slot}`
+        : `group-checkin:${run.id}`;
   const committed = await withTransactionRetry(() =>
     deps.prisma.$transaction(async (tx) => {
       try {
@@ -286,9 +296,11 @@ export async function reportGroupHandoffOutcome(
       const text =
         outcome.status === "completed"
           ? `Finished the stage you handed me; my result is my last message above, which the user already sees. If it does what you asked, reply exactly ${NO_RESPONSE}; otherwise hand me a correction, or tell the user only what it is missing. Never repeat it.`
-          : outcome.status === "progress"
-            ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
-            : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
+          : outcome.watch
+            ? `Check-in: ${outcome.watch.state} If this drifts from what you asked for or looks stuck, hand me a correction now. Tell the user only if something changed that they need to know; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
+            : outcome.status === "progress"
+              ? `Check-in: the stage you handed me is still running, and the first results are saved above. If they drift from what you asked for, hand me a correction now. Tell the user only if something changed that they need to know or the work looks stuck; otherwise reply exactly ${NO_RESPONSE}. The final result comes back to you when the stage ends.`
+              : `Could not finish the stage you handed me: ${(outcome.error ?? "the run failed").slice(0, 300)}. Decide the next step and tell the user what happened.`;
       const message = await createThreadMessageInTransaction(tx, {
         threadId: run.threadId,
         role: "bot",
@@ -543,4 +555,129 @@ export async function loadGroupContext(
     })),
     self,
   );
+}
+
+/** How often an open handed stage checks in with the teammate that handed it over. */
+export const STAGE_WATCH_MS = 10 * 60_000;
+/** Stages older than this are left to the stuck-work and research-stall reports. */
+const STAGE_WATCH_WINDOW_MS = 24 * 60 * 60_000;
+
+/**
+ * The coordinator's watch over the stages it handed out, like a supervisor checking each open
+ * job every ten minutes: every stage asked to report back that has not reported yet gets one
+ * check-in per ten-minute slot, saying how it stands. A stage waiting on the user's answer is
+ * skipped, and so is a slot while the coordinator is already busy in that conversation.
+ */
+export async function watchOpenStages(
+  deps: StageDeps,
+  now: Date,
+  batchSize: number,
+): Promise<number> {
+  const runs = await deps.prisma.run.findMany({
+    where: {
+      trigger: "follow_up",
+      status: { in: ["queued", "leased", "running", "completed"] },
+      sourceMessageId: { not: null },
+      createdAt: {
+        gte: new Date(now.getTime() - STAGE_WATCH_WINDOW_MS),
+        lte: new Date(now.getTime() - STAGE_WATCH_MS),
+      },
+      thread: { groupId: { not: null } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: batchSize,
+    select: {
+      id: true,
+      spaceId: true,
+      threadId: true,
+      botId: true,
+      userId: true,
+      status: true,
+      createdAt: true,
+      sourceMessageId: true,
+      sourceMessage: { select: { blocks: true } },
+      thread: { select: { groupId: true, activeRecruitingRoleId: true } },
+    },
+  });
+  const stages = runs.flatMap((run) => {
+    const parsed = MessageBlock.array().safeParse(run.sourceMessage?.blocks ?? []);
+    const asked = parsed.success
+      ? parsed.data.find(
+          (block): block is Extract<MessageBlock, { kind: "handoff" }> =>
+            block.kind === "handoff" && block.toBotId === run.botId && block.reportBack === true,
+        )
+      : undefined;
+    return asked && run.thread.groupId ? [{ run, asked, groupId: run.thread.groupId }] : [];
+  });
+  if (!stages.length) return 0;
+  const reported = new Set(
+    (
+      await deps.prisma.message.findMany({
+        where: {
+          threadId: { in: [...new Set(stages.map(({ run }) => run.threadId))] },
+          clientNonce: { in: stages.map(({ run }) => `group-report:${run.id}`) },
+        },
+        select: { clientNonce: true },
+      })
+    ).map((message) => message.clientNonce),
+  );
+  // A stage that handed its work on has ended; the next member's stage carries it.
+  for (const message of await deps.prisma.message.findMany({
+    where: {
+      runId: { in: stages.map(({ run }) => run.id) },
+      clientNonce: { startsWith: "group-handoff:" },
+    },
+    select: { runId: true },
+  }))
+    if (message.runId) reported.add(`group-report:${message.runId}`);
+  let sent = 0;
+  for (const { run, asked, groupId } of stages) {
+    if (reported.has(`group-report:${run.id}`)) continue;
+    // A finished turn is an open stage only while its own research still runs at the provider.
+    if (
+      run.status === "completed" &&
+      !(
+        run.thread.activeRecruitingRoleId &&
+        (await recruitingResearchInFlight(
+          deps.prisma,
+          run.thread.activeRecruitingRoleId,
+          now.getTime(),
+          { botId: run.botId, threadId: run.threadId },
+        ))
+      )
+    )
+      continue;
+    const busy = await deps.prisma.run.count({
+      where: {
+        threadId: run.threadId,
+        botId: asked.fromBotId,
+        status: { in: ["queued", "leased", "running"] },
+      },
+    });
+    if (busy) continue;
+    const minutes = Math.floor((now.getTime() - run.createdAt.getTime()) / 60_000);
+    const people = run.thread.activeRecruitingRoleId
+      ? await deps.prisma.recruitingCandidate.count({
+          where: { roleId: run.thread.activeRecruitingRoleId },
+        })
+      : undefined;
+    const doing =
+      run.status === "completed"
+        ? "is waiting for its research results"
+        : run.status === "queued"
+          ? "has not started yet"
+          : "is still running";
+    const state = `the stage you handed me ${minutes} minutes ago ${doing}${
+      people === undefined ? "." : `; the role's Results hold ${people} people.`
+    }`;
+    const report = await reportGroupHandoffOutcome(deps, run, groupId, {
+      status: "progress",
+      watch: { slot: Math.floor(minutes / (STAGE_WATCH_MS / 60_000)), state },
+    }).catch((error) => {
+      getLogger().error("stage watch report", error);
+      return undefined;
+    });
+    if (report) sent += 1;
+  }
+  return sent;
 }
