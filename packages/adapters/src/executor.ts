@@ -748,6 +748,8 @@ async function savedRoleCandidateKeys(
   });
 }
 
+/** People listed back from one search saved as it returned; the rest are in Results. */
+const AUTOSAVED_PEOPLE_SHOWN = 100;
 /** How a failed feedback save opens, so the agent never reports it as recorded. */
 const FEEDBACK_NOT_SAVED =
   "Not recorded: nothing was saved, so never tell the recruiter it was recorded. Fix the call and call recruiting_feedback again.";
@@ -8889,7 +8891,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
               // Only the people search fills Results; a plain web search finds pages, not people.
-              route.toolName !== "web_search_advanced_exa" ||
+              (route.toolName !== "web_search_advanced_exa" && route.toolName !== "agent_run") ||
               // A search by one person's profile link is a profile lookup, not new people.
               linkedinPersonKey(connectorCall.args?.query) ||
               (returned !== null && typeof returned === "object" && "error" in returned)
@@ -8949,8 +8951,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   // Compact rows keep a 25-person search inside one tool result, so the pick
                   // never needs a follow-up read of the clipped output.
                   const rows = (saved as { candidateRows?: unknown }).candidateRows;
+                  // An agent run can return hundreds; the rest stay in Results, not in context.
                   const people = Array.isArray(rows)
-                    ? rows.map((row: Record<string, unknown>) => ({
+                    ? rows.slice(0, AUTOSAVED_PEOPLE_SHOWN).map((row: Record<string, unknown>) => ({
                         ...row,
                         snippet:
                           typeof row.snippet === "string" ? row.snippet.slice(0, 160) : row.snippet,
@@ -8979,6 +8982,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                         }
                       : {}),
                     people,
+                    ...(Array.isArray(rows) && rows.length > AUTOSAVED_PEOPLE_SHOWN
+                      ? { notShownHere: rows.length - AUTOSAVED_PEOPLE_SHOWN }
+                      : {}),
                     expectedRoleRevision: role.revision,
                     next: RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
                   };

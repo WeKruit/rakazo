@@ -202,6 +202,46 @@ describe("executeRecruitingProfilesTool", () => {
 });
 
 describe("peopleFromSearch", () => {
+  it("reads the people a finished agent run returned", () => {
+    const body = {
+      success: true,
+      id: "agent_run_1",
+      status: "completed",
+      output: {
+        text: "Found two.",
+        structured: {
+          people: [
+            {
+              name: "Ada Example",
+              linkedin_url: "https://linkedin.com/in/ada-example?trk=x",
+              current_role: "Payments Engineer, Acme",
+              location: "New York, NY",
+              evidence: "Built the ledger service in Go.",
+            },
+            { name: "No Link", linkedin_url: null, evidence: "n/a" },
+          ],
+        },
+      },
+    };
+    const result = { content: [{ type: "text", text: JSON.stringify(body) }] };
+    expect(peopleFromSearch(result, PLATFORM_SEARCH)).toEqual([
+      {
+        name: "Ada Example",
+        linkedin_url: "https://www.linkedin.com/in/ada-example",
+        current_title: "Payments Engineer, Acme",
+        location: "New York, NY",
+        snippet: "Built the ledger service in Go.",
+      },
+    ]);
+    const running = { id: "agent_run_1", status: "running", outputReady: false };
+    expect(
+      peopleFromSearch(
+        { content: [{ type: "text", text: JSON.stringify(running) }] },
+        PLATFORM_SEARCH,
+      ),
+    ).toEqual([]);
+  });
+
   it("reads people from JSON previews, nested records and markdown tables", () => {
     const json = {
       structuredContent: {

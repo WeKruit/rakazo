@@ -493,6 +493,32 @@ function peopleFromListing(text: string): Record_[] {
 }
 
 /** People in a JSON search response ({results:[{url, entities:[{properties}]}]}). */
+/**
+ * People in a finished agent run's structured output: every listed person with a name and a
+ * profile link, the run's evidence kept as the passage shown with them.
+ */
+function peopleFromAgentRun(parsed: unknown): Record_[] {
+  const structured = (parsed as { output?: { structured?: unknown } } | null)?.output?.structured;
+  if (!structured || typeof structured !== "object") return [];
+  return Object.values(structured as Record_).flatMap((list) =>
+    Array.isArray(list)
+      ? list.flatMap((item: Record_) =>
+          item && typeof item === "object" && typeof item.name === "string"
+            ? [
+                {
+                  full_name: item.name,
+                  linkedin_url: item.linkedin_url,
+                  job_title: typeof item.current_role === "string" ? item.current_role : null,
+                  location: typeof item.location === "string" ? item.location : null,
+                  snippet: typeof item.evidence === "string" ? snippetOf(item.evidence) : undefined,
+                },
+              ]
+            : [],
+        )
+      : [],
+  );
+}
+
 function peopleFromResults(body: string): Record_[] {
   let parsed: unknown;
   try {
@@ -501,7 +527,7 @@ function peopleFromResults(body: string): Record_[] {
     return [];
   }
   const results = (parsed as { results?: unknown }).results;
-  if (!Array.isArray(results)) return [];
+  if (!Array.isArray(results)) return peopleFromAgentRun(parsed);
   return results.flatMap((item: Record_) => {
     const entity = Array.isArray(item?.entities) ? (item.entities[0] as Record_) : undefined;
     const person = (entity?.properties ?? {}) as {

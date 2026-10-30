@@ -10,7 +10,7 @@ import {
 
 vi.mock("./recruiting-research.js", async (actual) => ({
   ...(await actual<typeof import("./recruiting-research.js")>()),
-  requireFullEnrichJobOwnership: async () => undefined,
+  requireFullEnrichJobOwnership: async (...[, , , , args]: unknown[]) => args,
 }));
 
 const success = { content: [{ type: "text", text: '{"results":[]}' }] };
@@ -47,12 +47,14 @@ function fixture(
   };
   const findFirst = vi.fn(async () => assignment as typeof assignment | null);
   const calls: Array<{ at: number; name: string; args: unknown }> = [];
+  const urls: string[] = [];
   const controller = new AbortController();
   const connector = new McpConnector({ botMcpServer: { findFirst } } as never, {} as never, {
     network: {
       resolveHostname: async () => [{ address: "203.0.113.10", family: 4 }],
       fetch: async (input, init) => {
         const request = input instanceof Request ? input : new Request(input, init);
+        urls.push(request.url);
         if (request.method !== "POST") return new Response(null, { status: 405 });
         const message = JSON.parse(await request.text());
         if (message.method === "initialize")
@@ -106,7 +108,7 @@ function fixture(
       events.push(event);
     return events;
   };
-  return { calls, read, connector, controller, findFirst };
+  return { calls, urls, read, connector, controller, findFirst };
 }
 
 beforeEach(() => {
@@ -389,5 +391,28 @@ describe("contact lookup results", () => {
     } finally {
       await f.connector.close();
     }
+  });
+});
+
+describe("people search agent runs", () => {
+  it("offers the agent run only with a key and sends it a new people request", async () => {
+    const f = fixture([], { toolName: "agent_run" });
+    const reading = f.read();
+    await vi.advanceTimersByTimeAsync(1_000);
+    const events = await reading;
+    expect(events.at(-1)?.type).toBe("result");
+    expect(new URL(f.urls[0]!).searchParams.get("tools")).toBe(
+      "web_search_exa,web_search_advanced_exa,agent_run",
+    );
+    expect(f.calls[0]).toMatchObject({
+      name: "agent_run",
+      args: { query: "test role", outputSchema: { required: ["people"] } },
+    });
+    vi.stubEnv("EXA_API_KEY", "");
+    const keyless = fixture([]);
+    await keyless.read();
+    expect(new URL(keyless.urls[0]!).searchParams.get("tools")).toBe(
+      "web_search_exa,web_search_advanced_exa",
+    );
   });
 });
