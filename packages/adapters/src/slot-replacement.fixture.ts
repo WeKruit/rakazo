@@ -60,13 +60,14 @@ const server = createServer((_req, res) => {
   res.end(JSON.stringify({ ok: true, state, identity, ticks }));
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-console.log(
-  JSON.stringify({
+// One JSON line on stdout is the handshake the parent test reads.
+process.stdout.write(
+  `${JSON.stringify({
     pid: process.pid,
     port: (server.address() as { port: number }).port,
     identity,
     applicationName: admission.sessionApplicationName,
-  }),
+  })}\n`,
 );
 let draining: Promise<void> | undefined;
 function drain() {

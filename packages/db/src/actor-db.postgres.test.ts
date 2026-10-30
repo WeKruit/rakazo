@@ -1,7 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { actorPreferenceRlsTables, actorRlsTables, createActorDb, withDatabaseActor } from "./actor-db.js";
+import {
+  actorPreferenceRlsTables,
+  actorRlsTables,
+  createActorDb,
+  withDatabaseActor,
+} from "./actor-db.js";
 import { createDb } from "./client.js";
 import { createSpaceForMember } from "./spaces.js";
 
@@ -446,7 +451,9 @@ suite("first-batch RLS with a real restricted role", () => {
           where: { userId: actors[0]!.userId, spaceId: actors[1]!.spaceId },
         }),
       ).toBe(1);
-      for (const table of actorRlsTables.filter((name) => !actorPreferenceRlsTables.some((preference) => preference === name))) {
+      for (const table of actorRlsTables.filter(
+        (name) => !actorPreferenceRlsTables.some((preference) => preference === name),
+      )) {
         const result = await withDatabaseActor(
           { userId: actors[0]!.userId, spaceId: actors[1]!.spaceId },
           async () => ({
@@ -468,7 +475,9 @@ suite("first-batch RLS with a real restricted role", () => {
       expect(await admin.prisma.spaceMember.count({ where: { userId: membership.userId } })).toBe(
         0,
       );
-      for (const table of actorRlsTables.filter((name) => !actorPreferenceRlsTables.some((preference) => preference === name))) {
+      for (const table of actorRlsTables.filter(
+        (name) => !actorPreferenceRlsTables.some((preference) => preference === name),
+      )) {
         expect(
           await run(0, () => restricted.prisma.$queryRawUnsafe(`SELECT * FROM "${table}"`)),
           table,
@@ -479,7 +488,9 @@ suite("first-batch RLS with a real restricted role", () => {
     }
   });
   it("covers every first-batch table with nonempty own reads, zero foreign rows and allowed own writes", async () => {
-    for (const table of actorRlsTables.filter((name) => !actorPreferenceRlsTables.some((preference) => preference === name))) {
+    for (const table of actorRlsTables.filter(
+      (name) => !actorPreferenceRlsTables.some((preference) => preference === name),
+    )) {
       for (const index of [0, 1]) {
         const rows = await run(index, () =>
           restricted.prisma.$queryRawUnsafe<Record<string, unknown>[]>(`SELECT * FROM "${table}"`),
@@ -836,11 +847,7 @@ suite("first-batch RLS with a real restricted role", () => {
   it.each(actorPreferenceRlsTables)(
     "isolates nonempty %s preferences and preserves system access",
     async (table) => {
-      const insert = async (
-        db: typeof admin.prisma,
-        userId: string,
-        spaceId: string,
-      ) => {
+      const insert = async (db: typeof admin.prisma, userId: string, spaceId: string) => {
         if (table === "ai_data_consents")
           return db.aiDataConsent.create({
             data: { userId, spaceId, recipientKey: "synthetic", version: "1" },
@@ -862,9 +869,9 @@ suite("first-batch RLS with a real restricted role", () => {
         return db.notificationPreference.create({ data: { userId, spaceId } });
       };
       const read = () =>
-        restricted.prisma.$queryRawUnsafe<
-          Array<{ userId: string; spaceId: string }>
-        >(`SELECT * FROM "${table}"`);
+        restricted.prisma.$queryRawUnsafe<Array<{ userId: string; spaceId: string }>>(
+          `SELECT * FROM "${table}"`,
+        );
       // Seed both owners before any isolated read: foreign data must really exist.
       for (const actor of actors) await insert(admin.prisma, actor.userId, actor.spaceId);
       for (const [index, actor] of actors.entries()) {
@@ -873,9 +880,7 @@ suite("first-batch RLS with a real restricted role", () => {
         expect(rows[0]).toMatchObject(actor);
         expect(
           await run(index, () =>
-            restricted.prisma.$executeRawUnsafe(
-              `UPDATE "${table}" SET "userId"="userId"`,
-            ),
+            restricted.prisma.$executeRawUnsafe(`UPDATE "${table}" SET "userId"="userId"`),
           ),
         ).toBe(1);
         expect(
@@ -887,9 +892,7 @@ suite("first-batch RLS with a real restricted role", () => {
           ),
         ).toBe(0);
         await expect(
-          run(index, () =>
-            insert(restricted.prisma, actors[1 - index]!.userId, actor.spaceId),
-          ),
+          run(index, () => insert(restricted.prisma, actors[1 - index]!.userId, actor.spaceId)),
         ).rejects.toThrow(/row-level security/);
         await expect(
           run(index, () =>
@@ -931,18 +934,19 @@ suite("first-batch RLS with a real restricted role", () => {
       await admin.prisma.member.delete({ where: { id: membership.id } });
       try {
         expect(await run(0, read)).toEqual([]);
-        expect(await run(0, () => restricted.prisma.$executeRawUnsafe(`UPDATE "${table}" SET "userId"="userId"`))).toBe(0);
-        expect(await run(0, () => restricted.prisma.$executeRawUnsafe(`DELETE FROM "${table}"`))).toBe(0);
-        await expect(
-          run(0, () =>
-            insert(restricted.prisma, actors[0]!.userId, actors[0]!.spaceId),
+        expect(
+          await run(0, () =>
+            restricted.prisma.$executeRawUnsafe(`UPDATE "${table}" SET "userId"="userId"`),
           ),
+        ).toBe(0);
+        expect(
+          await run(0, () => restricted.prisma.$executeRawUnsafe(`DELETE FROM "${table}"`)),
+        ).toBe(0);
+        await expect(
+          run(0, () => insert(restricted.prisma, actors[0]!.userId, actors[0]!.spaceId)),
         ).rejects.toThrow(/row-level security/);
         // These two lack a composite membership FK: rows remain, but RLS revokes access.
-        if (
-          table === "notification_preferences" ||
-          table === "action_auto_review_preferences"
-        ) {
+        if (table === "notification_preferences" || table === "action_auto_review_preferences") {
           const rows = await admin.prisma.$queryRawUnsafe<unknown[]>(
             `SELECT * FROM "${table}" WHERE "userId"=$1`,
             actors[0]!.userId,
@@ -958,9 +962,7 @@ suite("first-batch RLS with a real restricted role", () => {
         actors[0]!.userId,
         actors[0]!.spaceId,
       );
-      await run(0, () =>
-        insert(restricted.prisma, actors[0]!.userId, actors[0]!.spaceId),
-      );
+      await run(0, () => insert(restricted.prisma, actors[0]!.userId, actors[0]!.spaceId));
       expect(await run(0, read)).toHaveLength(1);
     },
   );
@@ -968,12 +970,24 @@ suite("first-batch RLS with a real restricted role", () => {
     for (const input of [
       { userId: actors[0]!.userId, currentSpaceId: actors[1]!.spaceId },
       { userId: "forged-user", currentSpaceId: actors[0]!.spaceId },
-    ]) await expect(createSpaceForMember(admin.prisma, { ...input, name: "Denied" })).rejects.toThrow("Resource not found");
-    const membership = await admin.prisma.member.findUniqueOrThrow({ where: { id: actors[0]!.userId } });
+    ])
+      await expect(
+        createSpaceForMember(admin.prisma, { ...input, name: "Denied" }),
+      ).rejects.toThrow("Resource not found");
+    const membership = await admin.prisma.member.findUniqueOrThrow({
+      where: { id: actors[0]!.userId },
+    });
     await admin.prisma.member.delete({ where: { id: membership.id } });
     try {
-      await expect(createSpaceForMember(admin.prisma, { userId: actors[0]!.userId, currentSpaceId: actors[0]!.spaceId, name: "Revoked" })).rejects.toThrow("Resource not found");
-    } finally { await admin.prisma.member.create({ data: membership }); }
+      await expect(
+        createSpaceForMember(admin.prisma, {
+          userId: actors[0]!.userId,
+          currentSpaceId: actors[0]!.spaceId,
+          name: "Revoked",
+        }),
+      ).rejects.toThrow("Resource not found");
+    } finally {
+      await admin.prisma.member.create({ data: membership });
+    }
   });
-
 });

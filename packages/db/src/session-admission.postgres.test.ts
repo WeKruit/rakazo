@@ -4,20 +4,20 @@ import { Client, Pool } from "pg";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { createActorDb, withDatabaseActor } from "./actor-db.js";
 import { createDb } from "./client.js";
+import type {
+  QuiescedSessionSlotDriver,
+  StoppedSessionInstanceDriver,
+} from "./session-admission.js";
 import {
-  beginSessionAdmissionShutdown,
   acquireSessionReplacement,
-  releaseSessionReplacement,
+  beginSessionAdmissionShutdown,
   configureSessionAdmissionBudget,
   listSessionAdmissions,
   registerSessionConnection,
   releaseSessionAdmission,
+  releaseSessionReplacement,
   reserveSessionAdmission,
   setDesiredSessionGeneration,
-} from "./session-admission.js";
-import type {
-  QuiescedSessionSlotDriver,
-  StoppedSessionInstanceDriver,
 } from "./session-admission.js";
 
 const url = process.env.SESSION_ADMISSION_TEST_DATABASE_URL;

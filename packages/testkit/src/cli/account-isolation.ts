@@ -7,8 +7,8 @@ import { execSync, spawn } from "node:child_process";
 import { mkdtemp } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import type { PrismaClient } from "@rakazo/db";
+import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import type { createApp as CreateApp } from "../../../../apps/api/src/app.ts";
 
 const port = Number(process.env.API_PORT ?? 3191);
@@ -168,15 +168,53 @@ async function seedAccount(email: string, password: string, prisma: PrismaClient
   // credentials are inert records only: no provider login or inference is requested.
   const user = await prisma.user.findUniqueOrThrow({ where: { email } });
   const source = await prisma.spaceMember.findFirstOrThrow({ where: { userId: user.id } });
-  const model = await prisma.userModelCredential.create({ data: { userId: user.id, provider: "synthetic", label: "Fixture", secretId: "synthetic-unused" } });
-  const voice = await prisma.userVoiceCredential.create({ data: { userId: user.id, provider: "synthetic", secretId: "synthetic-unused" } });
-  await prisma.spaceModelPreference.create({ data: { userId: user.id, spaceId: source.spaceId, credentialId: model.id, modelId: "synthetic", isDefault: true } });
-  await prisma.spaceVoicePreference.create({ data: { userId: user.id, spaceId: source.spaceId, credentialId: voice.id, voiceId: "synthetic", isDefault: true } });
-  const created = await rpc("spaces/create", { name: "Synthetic copied preferences", userId: "forged-user", currentSpaceId: "forged-source", organizationId: "forged-org" });
+  const model = await prisma.userModelCredential.create({
+    data: {
+      userId: user.id,
+      provider: "synthetic",
+      label: "Fixture",
+      secretId: "synthetic-unused",
+    },
+  });
+  const voice = await prisma.userVoiceCredential.create({
+    data: { userId: user.id, provider: "synthetic", secretId: "synthetic-unused" },
+  });
+  await prisma.spaceModelPreference.create({
+    data: {
+      userId: user.id,
+      spaceId: source.spaceId,
+      credentialId: model.id,
+      modelId: "synthetic",
+      isDefault: true,
+    },
+  });
+  await prisma.spaceVoicePreference.create({
+    data: {
+      userId: user.id,
+      spaceId: source.spaceId,
+      credentialId: voice.id,
+      voiceId: "synthetic",
+      isDefault: true,
+    },
+  });
+  const created = await rpc("spaces/create", {
+    name: "Synthetic copied preferences",
+    userId: "forged-user",
+    currentSpaceId: "forged-source",
+    organizationId: "forged-org",
+  });
   const target = await prisma.space.findUniqueOrThrow({ where: { id: String(created.id) } });
-  if (target.organizationId !== source.organizationId || target.createdByUserId !== user.id) throw new Error("Space RPC accepted forged authority");
+  if (target.organizationId !== source.organizationId || target.createdByUserId !== user.id)
+    throw new Error("Space RPC accepted forged authority");
   const scope = { spaceId: target.id, userId: user.id };
-  if (await prisma.notificationPreference.count({ where: scope }) !== 1 ||
-      await prisma.spaceModelPreference.count({ where: { ...scope, credentialId: model.id, modelId: "synthetic", isDefault: true } }) !== 1 ||
-      await prisma.spaceVoicePreference.count({ where: { ...scope, credentialId: voice.id, voiceId: "synthetic", isDefault: true } }) !== 1) throw new Error("Space RPC did not preserve personal defaults");
+  if (
+    (await prisma.notificationPreference.count({ where: scope })) !== 1 ||
+    (await prisma.spaceModelPreference.count({
+      where: { ...scope, credentialId: model.id, modelId: "synthetic", isDefault: true },
+    })) !== 1 ||
+    (await prisma.spaceVoicePreference.count({
+      where: { ...scope, credentialId: voice.id, voiceId: "synthetic", isDefault: true },
+    })) !== 1
+  )
+    throw new Error("Space RPC did not preserve personal defaults");
 }
