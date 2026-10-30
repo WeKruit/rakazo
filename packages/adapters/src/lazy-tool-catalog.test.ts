@@ -330,10 +330,37 @@ describe("lazy tool catalog", () => {
     );
     expect(loadCatalogEntry(entries, { id: "srv-gmail:send" }).tool.name).toBe("mcp__gmail__send");
     expect(loadCatalogEntry(entries, { id: returnedName }).tool.name).toBe("mcp__gmail__send");
-    expect(() => loadCatalogEntry(entries, { id: `${names.group}.${returnedName}` })).toThrow(
-      /unknown/i,
+    // Hand-built spellings of the same tool resolve when they name only one tool.
+    for (const id of [`${names.group}.${returnedName}`, "gmail:send", "gmail__send"])
+      expect(loadCatalogEntry(entries, { id }).tool.name).toBe("mcp__gmail__send");
+    expect(() => loadCatalogEntry(entries, { id: "missing" })).toThrow(
+      /No tool "missing".*call it directly.*srv-gmail:send/,
     );
-    expect(() => loadCatalogEntry(entries, { id: "missing" })).toThrow(/unknown/i);
+  });
+
+  it("matches a local integration's name with or without its native prefix", () => {
+    const entries = catalogEntries([
+      {
+        name: "mcp__fullenrich__find_emails",
+        description: "Find emails",
+        inputSchema: { type: "object", properties: {} },
+        route: {
+          connectorId: "mcp",
+          resourceId: "srv-enrich",
+          toolName: "native_find_emails",
+          catalogGroup: "fullenrich",
+        },
+      },
+    ]);
+    for (const id of ["fullenrich.find_emails", "mcp__fullenrich__native_find_emails"])
+      expect(loadCatalogEntry(entries, { id }).tool.name).toBe("mcp__fullenrich__find_emails");
+  });
+
+  it("lists the source's exact IDs when a reference names no tool", () => {
+    const entries = catalogEntries(multiGroupTools());
+    expect(() => loadCatalogEntry(entries, { id: "srv-hubspot:delete_deal" })).toThrow(
+      /srv-hubspot:list_contacts, srv-hubspot:get_deal\.$/,
+    );
   });
 
   it("does not execute args when JSON Schema is unsupported", async () => {
@@ -385,7 +412,7 @@ describe("lazy tool catalog", () => {
         },
         entries,
       ),
-    ).toThrow(/unknown/i);
+    ).toThrow(/No tool "missing"/);
     expect(() =>
       resolveCatalogCall(
         {

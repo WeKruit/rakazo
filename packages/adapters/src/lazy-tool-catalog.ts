@@ -236,9 +236,45 @@ export function loadCatalogEntry(
     assertSchemaSize(byShort[0]!);
     return byShort[0]!;
   }
+  // A reference built from the source and the tool's name in another spelling ("source.tool",
+  // "source:tool", "mcp__source__tool", "<server id>:tool") names the same tool when only one
+  // tool in that source, or in the whole catalog, has that name.
+  const { group, name } = splitToolReference(id);
+  // Local integrations prefix their names with native_; a reference with or without it matches.
+  const core = (value: string) => value.replace(/^native_(?:instantly_)?/, "");
+  const exact = entries.filter((candidate) => catalogShortName(candidate) === name);
+  const named = exact.length
+    ? exact
+    : entries.filter((candidate) => core(catalogShortName(candidate)) === core(name));
+  const inGroup = group ? named.filter((candidate) => candidate.group === group) : [];
+  const match = inGroup.length === 1 ? inGroup[0] : named.length === 1 ? named[0] : undefined;
+  if (match) {
+    assertSchemaSize(match);
+    return match;
+  }
+  const known = entries
+    .filter((candidate) => !group || candidate.group === group || candidate.id.startsWith(group))
+    .map((candidate) => candidate.id);
+  const listed = (known.length ? known : entries.map((candidate) => candidate.id)).slice(0, 30);
   throw new Error(
-    "Unknown tool ID or name in this bot's current catalog. A lookup miss is not evidence that the account is unauthorized. Search again with group and query, then copy a returned ID or name unchanged; do not construct group.name.",
+    `No tool "${id.slice(0, 120)}" in this bot's catalog. If it is one of your directly listed tools, call it directly instead. Otherwise use one of these exact IDs: ${listed.join(", ") || "none"}.`,
   );
+}
+
+/** The source and tool name a hand-built reference names, in any of the common spellings. */
+function splitToolReference(id: string): { group?: string; name: string } {
+  const trimmed = id.trim().replace(/^mcp__/, "");
+  const parts = trimmed.split(/__|:|\./).filter(Boolean);
+  if (parts.length < 2) return { name: decodeName(trimmed) };
+  return { group: parts[0], name: decodeName(parts.at(-1)!) };
+}
+
+function decodeName(name: string): string {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }
 
 function assertSchemaSize(entry: CatalogEntry): void {
