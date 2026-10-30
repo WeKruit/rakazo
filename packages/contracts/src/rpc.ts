@@ -786,6 +786,17 @@ export const appContract = {
       ]),
     ),
 
+    /** The big search or contact lookup this conversation is waiting on, with its estimate. */
+    workEstimate: oc.input(threadTarget).output(
+      z
+        .strictObject({
+          kind: z.enum(["search", "emails"]),
+          people: z.number().int().nonnegative(),
+          startedAt: z.string(),
+          estimateMs: z.number().int().positive().nullable(),
+        })
+        .nullable(),
+    ),
     roleCandidates: oc
       .input(threadTarget.safeExtend(RecruitingRoleCandidatesInputFields))
       .output(RecruitingRoleCandidatesOutputSchema),

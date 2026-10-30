@@ -70,6 +70,11 @@ msgstr "{0} default"
 msgid "{0} handling"
 msgstr "{0} handling"
 
+#. placeholder {0}: formatWorkClock(left)
+#: src/components/LiveWork.tsx
+msgid "{0} left"
+msgstr "{0} left"
+
 #. placeholder {0}: plan.calendar.lengthInMinutes
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "{0} minutes"
@@ -110,6 +115,10 @@ msgstr "{days}d ago"
 #: src/pages/ActivityList.tsx
 msgid "{hours}h ago"
 msgstr "{hours}h ago"
+
+#: src/components/LiveWork.tsx
+msgid "{minutes, plural, one {This one takes longer, about # minute. You can keep chatting or come back later.} other {This one takes longer, about # minutes. You can keep chatting or come back later.}}"
+msgstr "{minutes, plural, one {This one takes longer, about # minute. You can keep chatting or come back later.} other {This one takes longer, about # minutes. You can keep chatting or come back later.}}"
 
 #: src/pages/ActivityList.tsx
 msgid "{minutes}m ago"
@@ -2531,9 +2540,18 @@ msgstr "Find models"
 msgid "Find work history"
 msgstr "Find work history"
 
+#. placeholder {0}: estimate.people
+#: src/components/LiveWork.tsx
+msgid "Finding about {0} people"
+msgstr "Finding about {0} people"
+
 #: src/components/LiveWork.tsx
 msgid "Finding candidates"
 msgstr "Finding candidates"
+
+#: src/components/LiveWork.tsx
+msgid "Finding people"
+msgstr "Finding people"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3102,6 +3120,10 @@ msgstr "Location not returned"
 #: src/pages/Paywall.tsx
 msgid "Log out"
 msgstr "Log out"
+
+#: src/components/LiveWork.tsx
+msgid "Looking up emails"
+msgstr "Looking up emails"
 
 #: src/components/AskCard.tsx
 msgid "Looks good, start searching"

@@ -64,6 +64,7 @@ import {
   createFaviconResolver,
   createTicket,
   createVoiceProvider,
+  currentWorkEstimate,
   defaultCatalogModelId,
   deletePushToken,
   deploymentAutoReviewDefault,
@@ -3966,6 +3967,13 @@ export function createRouter(deps: RouterDeps) {
       listCandidates: authed.recruiting.listCandidates.handler(({ context, input }) =>
         listRecruitingCandidates(deps, context.actor, input),
       ),
+      workEstimate: authed.recruiting.workEstimate.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        return currentWorkEstimate(deps.prisma, {
+          spaceId: context.actor.spaceId,
+          threadId: target.threadId,
+        });
+      }),
       roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
         getRecruitingRoleCandidates(
           {

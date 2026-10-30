@@ -70,6 +70,11 @@ msgstr "{0} 默认"
 msgid "{0} handling"
 msgstr "{0} 处理"
 
+#. placeholder {0}: formatWorkClock(left)
+#: src/components/LiveWork.tsx
+msgid "{0} left"
+msgstr "剩余 {0}"
+
 #. placeholder {0}: plan.calendar.lengthInMinutes
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "{0} minutes"
@@ -110,6 +115,10 @@ msgstr "{days} 天前"
 #: src/pages/ActivityList.tsx
 msgid "{hours}h ago"
 msgstr "{hours} 小时前"
+
+#: src/components/LiveWork.tsx
+msgid "{minutes, plural, one {This one takes longer, about # minute. You can keep chatting or come back later.} other {This one takes longer, about # minutes. You can keep chatting or come back later.}}"
+msgstr "{minutes, plural, other {这次要久一些，大约 # 分钟。你可以继续聊，也可以晚点回来看。}}"
 
 #: src/pages/ActivityList.tsx
 msgid "{minutes}m ago"
@@ -2531,9 +2540,18 @@ msgstr "查找模型"
 msgid "Find work history"
 msgstr "查找工作经历"
 
+#. placeholder {0}: estimate.people
+#: src/components/LiveWork.tsx
+msgid "Finding about {0} people"
+msgstr "正在找约 {0} 人"
+
 #: src/components/LiveWork.tsx
 msgid "Finding candidates"
 msgstr "寻找候选人"
+
+#: src/components/LiveWork.tsx
+msgid "Finding people"
+msgstr "正在找人"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -3102,6 +3120,10 @@ msgstr "未返回地点"
 #: src/pages/Paywall.tsx
 msgid "Log out"
 msgstr "退出登录"
+
+#: src/components/LiveWork.tsx
+msgid "Looking up emails"
+msgstr "正在查找邮箱"
 
 #: src/components/AskCard.tsx
 msgid "Looks good, start searching"

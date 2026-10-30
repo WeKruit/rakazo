@@ -21,7 +21,7 @@ vi.mock("@lingui/react/macro", () => ({
     (value === 1 ? one : other).replace("#", String(value)),
 }));
 
-import { LiveWork } from "./LiveWork";
+import { BackgroundWork, LiveWork } from "./LiveWork";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -188,4 +188,39 @@ it("puts each handed-off stage under one entry named for its purpose", () => {
   expect(container.querySelector('[data-testid="work-summary"]')?.textContent).toContain(
     "Finding candidates",
   );
+});
+
+it("counts a big background search down and starts over if it runs past", () => {
+  const estimate = {
+    kind: "search" as const,
+    people: 500,
+    startedAt: new Date(T0).toISOString(),
+    estimateMs: 17 * 60_000,
+  };
+  act(() => root.render(<BackgroundWork estimate={estimate} />));
+  const clock = container.querySelector('[data-testid="work-countdown"]');
+  expect(clock?.getAttribute("data-counting")).toBe("down");
+  // 42 s in: 16:18 of 17:00 left.
+  expect(clock?.textContent).toBe("16:18 left");
+  expect(container.textContent).toContain("Finding about 500 people");
+  expect(container.querySelector('[data-testid="work-countdown-note"]')?.textContent).toContain(
+    "about 17 minutes",
+  );
+  act(() => vi.advanceTimersByTime(17 * 60_000));
+  expect(container.querySelector('[data-testid="work-countdown"]')?.textContent).toBe("16:18 left");
+});
+
+it("counts a small background search up without a note", () => {
+  const estimate = {
+    kind: "search" as const,
+    people: 30,
+    startedAt: new Date(T0).toISOString(),
+    estimateMs: null,
+  };
+  act(() => root.render(<BackgroundWork estimate={estimate} />));
+  const clock = container.querySelector('[data-testid="work-countdown"]');
+  expect(clock?.getAttribute("data-counting")).toBe("up");
+  expect(clock?.textContent).toBe("0:42");
+  expect(container.textContent).toContain("Finding people");
+  expect(container.querySelector('[data-testid="work-countdown-note"]')).toBeNull();
 });
