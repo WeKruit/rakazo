@@ -522,6 +522,8 @@ export async function createApp(
     deploymentModelConfigured: env.deploymentModelConfigured,
     dataDir: env.dataDir,
     notifications,
+    email,
+    webOrigin: env.webOrigin,
     jobs,
     events,
     onTicketChange: ticketChanges,
@@ -559,6 +561,7 @@ export async function createApp(
         jobs,
         events,
         notifications,
+        completionEmail: Boolean(email),
         reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
         reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
       })

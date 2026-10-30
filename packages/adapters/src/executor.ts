@@ -24,6 +24,7 @@ import type {
   SandboxProvider,
   SecretStore,
   SemanticMemoryProvider,
+  TransactionalEmailProvider,
   WebProvider,
 } from "@rakazo/adapter-kit";
 import {
@@ -326,6 +327,12 @@ import { executeCloudAgentTool } from "./cloud-agent-service.js";
 import { validCloudAgentArgs } from "./cloud-agent-tools.js";
 import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
 import { cloudflareGatewayProviderEnv } from "./cloudflare-ai-gateway.js";
+import {
+  COMPLETION_EMAIL_TOOL,
+  completionEmailTool,
+  recordCompletionEmailChoice,
+  sendCompletionEmailIfDone,
+} from "./completion-email.js";
 import type { PluginConnectionRow } from "./composio-connector.js";
 import {
   collectLogIds,
@@ -3438,6 +3445,10 @@ export interface ExecutorDeps {
   deploymentModelConfigured?: boolean;
   dataDir?: string;
   notifications?: NotificationProvider;
+  /** Account email; when present, agents can offer to email the recruiter when long work ends. */
+  email?: TransactionalEmailProvider;
+  /** Web app origin for links in those emails. */
+  webOrigin?: string;
   jobs: JobPublisher;
   /** Publishes board-change signals and wakes ticket owners; absent disables both. */
   onTicketChange?: TicketChangeNotifier;
@@ -5135,6 +5146,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
             voiceCall,
             disabledBuiltinTools: bot.disabledBuiltinTools,
           }),
+          ...(deps.email && !messagingChannelRun && !disabledBuiltinTools.has(COMPLETION_EMAIL_TOOL)
+            ? [completionEmailTool]
+            : []),
           // Cross-owner agent connections only exist for chat-linked bots.
           ...(hasMessagingIdentity && !isBackgroundRunTrigger(run.trigger)
             ? agentConnectionTools.filter((tool) => !disabledBuiltinTools.has(tool.name))
@@ -11073,6 +11087,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
             }
             return spawned;
           }
+          if (name === COMPLETION_EMAIL_TOOL) {
+            return finish(
+              await recordCompletionEmailChoice(
+                deps.prisma,
+                { ...run, id: runId, threadId: thread.id },
+                args,
+              ),
+            );
+          }
           if (name === "update_bot") {
             const parsed = parseUpdateBotPatch(args, bot.name);
             if ("error" in parsed) return finish(parsed);
@@ -12772,6 +12795,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 botId: bot.id,
                 threadId: thread.id,
               });
+              await sendCompletionEmailIfDone(
+                deps,
+                { ...run, id: runId, threadId: thread.id },
+                { text: safeText, groupId: thread.groupId, continuing: false, question: true },
+              );
               return;
             } else if (event.type === "takeover") {
               // The catalog filter only hides tools; a runtime can still emit a takeover.
@@ -13340,6 +13368,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
               threadId: thread.id,
             });
           }
+          await sendCompletionEmailIfDone(
+            deps,
+            { ...run, id: runId, threadId: thread.id },
+            {
+              text,
+              groupId: thread.groupId,
+              continuing: handedOff || Boolean(completed.continuationRunId) || recruitingContinued,
+            },
+          );
           // Last, and never fatal: the run is already finalized, so a failure here must not reach
           // the catch block below, where a second finalizeRun would match no rows and silently
           // skip the completion notification.

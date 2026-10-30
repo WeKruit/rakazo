@@ -16,6 +16,7 @@ import {
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import { COMPLETION_EMAIL_OFFER, completionEmailAnswered } from "./completion-email.js";
 import type { ExecutorDeps } from "./executor.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import { NO_RESPONSE } from "./silent-reply.js";
@@ -569,7 +570,7 @@ const STAGE_WATCH_WINDOW_MS = 24 * 60 * 60_000;
  * skipped, and so is a slot while the coordinator is already busy in that conversation.
  */
 export async function watchOpenStages(
-  deps: StageDeps,
+  deps: StageDeps & { completionEmail?: boolean },
   now: Date,
   batchSize: number,
 ): Promise<number> {
@@ -667,12 +668,18 @@ export async function watchOpenStages(
         : run.status === "queued"
           ? "has not started yet"
           : "is still running";
+    const slot = Math.floor(minutes / (STAGE_WATCH_MS / 60_000));
+    // The first check-in of a long stage is where the recruiter is offered an email at the end.
+    const offerEmail =
+      deps.completionEmail &&
+      slot === 1 &&
+      !(await completionEmailAnswered(deps.prisma, run).catch(() => true));
     const state = `the stage you handed me ${minutes} minutes ago ${doing}${
       people === undefined ? "." : `; the role's Results hold ${people} people.`
-    }`;
+    }${offerEmail ? ` ${COMPLETION_EMAIL_OFFER}` : ""}`;
     const report = await reportGroupHandoffOutcome(deps, run, groupId, {
       status: "progress",
-      watch: { slot: Math.floor(minutes / (STAGE_WATCH_MS / 60_000)), state },
+      watch: { slot, state },
     }).catch((error) => {
       getLogger().error("stage watch report", error);
       return undefined;

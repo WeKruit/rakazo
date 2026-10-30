@@ -55,6 +55,7 @@ import {
   resolvePiSessionRoot,
   resolveSandboxProvider,
   ScriptedAgentRuntime,
+  SmtpEmailProvider,
   SpaceMemoryProviderResolver,
   sandboxProviderOptionsFromEnv,
   startJobQueueReporter,
@@ -268,6 +269,10 @@ async function main() {
   const notifications = new ExpoPushProvider(prisma, (sessionId) =>
     pushSessionExpiresAt(prisma, sessionId),
   );
+  // Account email from the same settings the API uses, for "email me when this finishes".
+  const email = process.env.SMTP_URL
+    ? new SmtpEmailProvider({ url: process.env.SMTP_URL, from: process.env.EMAIL_FROM ?? "" })
+    : undefined;
   const executor = createRunExecutor({
     prisma,
     runtime,
@@ -303,6 +308,8 @@ async function main() {
     deploymentModelConfigured,
     dataDir,
     notifications,
+    email,
+    webOrigin: process.env.WEB_ORIGIN ?? "http://127.0.0.1:5173",
     jobs,
     events,
     onTicketChange: ticketChanges,
@@ -357,6 +364,7 @@ async function main() {
     jobs,
     events,
     notifications,
+    completionEmail: Boolean(email),
     leadership: createPostgresReconciliationLeadership(sessionPool),
     reconcileCloudAgents: () => reconcileCloudAgents({ prisma, jobs, cloudAgent }),
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),

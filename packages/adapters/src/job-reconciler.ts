@@ -109,6 +109,8 @@ export function createJobReconciler(
     jobs: JobPublisher;
     events?: ThreadEvents;
     notifications?: NotificationProvider;
+    /** Account email is configured, so long stages may offer an email when they finish. */
+    completionEmail?: boolean;
     leadership?: ReconciliationLeadership;
     reconcileComputerUpdates?: () => Promise<void>;
     reconcileCloudAgents?: () => Promise<void>;
@@ -181,7 +183,12 @@ export function createJobReconciler(
         stagesWatchedAt = now.getTime();
         try {
           await watchOpenStages(
-            { prisma: deps.prisma, jobs: deps.jobs, events: deps.events },
+            {
+              prisma: deps.prisma,
+              jobs: deps.jobs,
+              events: deps.events,
+              completionEmail: deps.completionEmail,
+            },
             now,
             batchSize,
           );
