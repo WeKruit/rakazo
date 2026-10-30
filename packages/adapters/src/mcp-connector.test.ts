@@ -2196,6 +2196,8 @@ describe("MCP connector session cache", () => {
   });
 
   it("keeps the built-in people search direct when the rest moves to the catalog", async () => {
+    // Keyless, so the connection asks for the search tools only and not the paid agent run.
+    vi.stubEnv("EXA_API_KEY", "");
     const state = {
       failNext: false,
       initializations: 0,
@@ -2246,6 +2248,7 @@ describe("MCP connector session cache", () => {
       "connectors_execute_tool",
     ]);
     await connector.close();
+    vi.unstubAllEnvs();
   });
 
   it("keeps each agent's core work tools direct when the rest moves to the catalog", async () => {

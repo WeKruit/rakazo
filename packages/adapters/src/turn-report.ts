@@ -442,10 +442,10 @@ export const TEXT_QUESTION_NOTE =
   "You asked the user in plain text. Ask it with ask_user instead: the question in one sentence, concrete options (the people or choices you listed) and a custom answer, without saying what you could not do or find. Your question was";
 
 /**
- * One retry for a final reply that declines, defers or hands back a pick. A refusal is retried
- * when the turn did nothing, or when it refuses the kind of work the person asked for (a refused
- * aside inside a report of done work stands). An offer or a pick question is retried only when
- * the turn did nothing: after real work, "want me to keep going?" is a fair next step. The note
+ * One retry for a final reply that declines, defers or hands back a pick, when the turn did
+ * nothing, or when a send or booking ended without its card. After other work the reply stands:
+ * a handed stage reports back and is checked against its brief, and "want me to keep going?" is
+ * a fair next step. The note
  * names the tools or teammate for the asked kind of work when there are any. Undefined keeps
  * the reply.
  */
@@ -464,12 +464,10 @@ export function declineRetry(input: {
   const asked = (Object.keys(REQUEST_KINDS) as Capability[]).filter((kind) =>
     requests(kind, input.request),
   );
-  const refusesAsked = asked.some((kind) => REQUEST_KINDS[kind].test(sentence));
-  // A send or booking ends on its card (planDeclineRetry never retries after one), so a decline
-  // without it refused the request whatever the sentence names.
+  // A turn that did work reports it, and the coordinator checks it against the brief. Only a send
+  // or booking that ended without its card is retried, since no card means nothing was asked.
   const cardOwed = asked.includes("send") || asked.includes("schedule");
-  if (input.worked && !(declined.kind === "decline" && (refusesAsked || cardOwed)))
-    return undefined;
+  if (input.worked && !(declined.kind === "decline" && cardOwed)) return undefined;
   const quoted = sentence.slice(0, 200);
   if (declined.kind === "text_question")
     return {
