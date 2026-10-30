@@ -2849,9 +2849,7 @@ describe("MCP connector session cache", () => {
         },
         context,
       ),
-    ).rejects.toThrow(
-      /Unknown tool ID or name in this bot's current catalog\..*Search again with group and query/,
-    );
+    ).rejects.toThrow(/No tool ".*" in this bot's catalog\..*use one of these exact IDs/);
     await expect(
       connector.resolveCall(
         {
