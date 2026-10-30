@@ -196,6 +196,19 @@ else
     [ "$code" = 200 ] || rollback "custom domain $p returned $code"
   done
 fi
+# Contact lookup and the send card on a fresh first ten (about 5 minutes; the card is never
+# answered, so nothing is sent). Needs the private JD fixtures in RELEASE_CASES and the test account
+# in RAKAZO_EMAIL/RAKAZO_PASSWORD; a red result rolls the release back. Skipped on a rollback.
+if [ -n "${RELEASE_CASES:-}" ] && [ -f "$DIR/infra/acceptance/regression.mjs" ] \
+  && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
+  RAKAZO_URL="$URL" RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" \
+    node "$DIR/infra/acceptance/regression.mjs" --only contacts --cases "$RELEASE_CASES" \
+      --out "$WORK/contacts-$SHORT" > "$WORK/contacts-$SHORT.log" 2>&1 \
+    || { tail -8 "$WORK/contacts-$SHORT.log"; rollback "contacts check failed (log: $WORK/contacts-$SHORT.log)"; }
+  log "contacts ok"
+else
+  log "contacts check skipped (set RELEASE_CASES and the test account to run it)"
+fi
 for _ in $(seq 1 40); do [ "$(containers)" = 1 ] && break; sleep 3; done
 [ "$(containers)" = 1 ] || die "more than one container after deploy"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")" = 200 ] || die "/health not 200"

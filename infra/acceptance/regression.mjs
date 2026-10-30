@@ -9,7 +9,8 @@
 //     node infra/acceptance/regression.mjs [--suite gate|full] [--cases <dir>] [--only a,b] [--out <dir>]
 //   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50
 //                  (which must end with a report stating the new count), pasted English JD
-//                  (needs <cases>/t3.txt)
+//                  (needs <cases>/t3.txt), contacts (找contact twice and send-20 on a fresh first
+//                  ten of <cases>/t1.pdf, ending on the unanswered send card)
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
 //                  coordinator in the t1 chat, or --dispatch-group <id>), ambiguous (vague asks
@@ -52,11 +53,17 @@ const log = (text) =>
 let cookie = "";
 async function signIn() {
   if (!EMAIL) return;
-  const response = await fetch(`${BASE}/api/auth/sign-in/email`, {
-    method: "POST",
-    headers: { "content-type": "application/json", origin: ORIGIN },
-    body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
-  });
+  let response;
+  // Sign-in is rate limited; right after a deploy the smoke check may have used the allowance.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    response = await fetch(`${BASE}/api/auth/sign-in/email`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: ORIGIN },
+      body: JSON.stringify({ email: EMAIL, password: PASSWORD }),
+    });
+    if (response.status !== 429) break;
+    await sleep(60_000);
+  }
   if (!response.ok) throw new Error(`sign-in ${response.status}`);
   cookie = (response.headers.getSetCookie?.() ?? []).map((line) => line.split(";")[0]).join("; ");
 }
@@ -271,6 +278,43 @@ async function settled(groupId, { quietMs = 20_000, limitMs = 3 * 60_000 } = {})
   return messages;
 }
 
+// A contact lookup reply reports how many people have an address, not only that it is checking.
+const CONTACT_REPORT =
+  /(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)[^.\n]{0,80}\d|\d[^.\n]{0,80}(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)/i;
+/** 找contact, 找contact again and 发20个人的先 in a role chat with saved people. Never answers the card. */
+async function contactsAndSend(groupId, failures) {
+  const contacts = await say(groupId, "找contact");
+  if (!contacts.replies.length) failures.push("「找contact」 got no reply");
+  else if (!CONTACT_REPORT.test(recruiterSees(contacts.replies).map(botText).join("\n")))
+    failures.push("「找contact」 reply does not say who has an email");
+  const askedAgain = new Date().toISOString();
+  const again = await say(groupId, "找contact");
+  // A repeat shows the contacts already found first, then continues to the next people.
+  if (again.firstReply === null || again.firstReply > 60)
+    failures.push(
+      `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
+    );
+  else if (!CONTACT_REPORT.test(recruiterSees(again.replies).map(botText).join("\n")))
+    failures.push("repeat 「找contact」 reply does not say who has an email");
+  // Everyone was looked up a moment ago, so the repeat may not pay a source for anyone again.
+  const paid = (await readEvents(groupId).catch(() => []))
+    .filter(
+      (event) =>
+        event.type === "agent.tool.completed" &&
+        event.createdAt > askedAgain &&
+        event.payload?.lookup,
+    )
+    .reduce((sum, event) => sum + Number(event.payload.lookup.paid_lookups ?? 0), 0);
+  if (paid) failures.push(`repeat 「找contact」 paid ${paid} source lookup(s) again`);
+  // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
+  const send = await say(groupId, "发20个人的先", {
+    until: (replies) => replies.some(sendCard),
+    limitMs: 8 * 60_000,
+  });
+  if (!send.replies.some(sendCard))
+    failures.push("「发20个人的先」 did not end on a send confirmation card");
+}
+
 const results = [];
 async function stage(name, body) {
   const failures = [];
@@ -307,7 +351,7 @@ const wanted = new Set(
           "t5",
           "expired",
         ]
-      : ["smoke", "first10", "progress", "t3"]),
+      : ["smoke", "first10", "progress", "t3", "contacts"]),
 );
 
 if (wanted.has("smoke"))
@@ -423,6 +467,31 @@ if (wanted.has("first10-long"))
     if (code !== 0) failures.push("first10 (long JD) did not pass; see first10-long/summary.md");
   });
 
+// The contact and send steps of t1 on a fresh first ten, short enough for every release: the
+// first ten of the attached JD, then 找contact twice and 发20个人的先 up to the send card.
+if (wanted.has("contacts"))
+  await stage("contacts", async (failures) => {
+    const pdf = CASES && path.join(CASES, "t1.pdf");
+    if (!pdf || !fs.existsSync(pdf)) return failures.push("missing <cases>/t1.pdf");
+    const code = await run("contacts", "recruiting-latency.mjs", [
+      "--jd-file",
+      pdf,
+      "--skip-scale",
+      "--keep",
+      "--out",
+      path.join(OUT, "contacts.json"),
+    ]);
+    if (code !== 0) return failures.push("first ten did not pass; see contacts.log");
+    const groupId = reportOf("contacts").groupId;
+    await settled(groupId);
+    await contactsAndSend(groupId, failures);
+    const transcript = (await messagesOf(groupId))
+      .map((message) => `[${message.role}] ${botText(message)}`)
+      .join("\n\n");
+    fs.writeFileSync(path.join(OUT, "contacts-chat.txt"), `${transcript}\n`);
+    commonChecks(await messagesOf(groupId), failures);
+  });
+
 if (wanted.has("t1"))
   await stage("t1", async (failures) => {
     const pdf = CASES && path.join(CASES, "t1.pdf");
@@ -460,21 +529,7 @@ if (wanted.has("t1"))
     if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
       failures.push("campaign draft is not three emails shown in chat");
     if (!/^\s*[-*•]\s/m.test(drafted)) failures.push("job duties in the draft are not bullets");
-    const contacts = await say(groupId, "找contact");
-    if (!contacts.replies.length) failures.push("「找contact」 got no reply");
-    const again = await say(groupId, "找contact");
-    // A repeat shows the contacts already found first, then continues to the next people.
-    if (again.firstReply === null || again.firstReply > 60)
-      failures.push(
-        `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
-      );
-    // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
-    const send = await say(groupId, "发20个人的先", {
-      until: (replies) => replies.some(sendCard),
-      limitMs: 8 * 60_000,
-    });
-    if (!send.replies.some(sendCard))
-      failures.push("「发20个人的先」 did not end on a send confirmation card");
+    await contactsAndSend(groupId, failures);
     const transcript = (await messagesOf(groupId))
       .map((message) => `[${message.role}] ${botText(message)}`)
       .join("\n\n");
@@ -795,7 +850,7 @@ const summary = [
 fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
 log(summary);
 // The copies this run made leave the sidebar now that their checks are done.
-for (const name of ["progress", "t3", "t1"]) {
+for (const name of ["progress", "t3", "contacts", "t1"]) {
   if (!fs.existsSync(path.join(OUT, `${name}.json`))) continue;
   const { groupId } = reportOf(name);
   if (groupId) await rpc("groups/archive", { groupId }).catch((error) => log(error.message));
