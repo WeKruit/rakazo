@@ -39,6 +39,7 @@ const payloadSchemas = {
     botId: z.string().min(1),
     agentRunId: z.string().min(1),
   }),
+  "thread.reply_check": z.object({ threadId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -228,6 +229,19 @@ export function recruitingAgentRunWaitJob(
     name: "recruiting_agent_run.wait",
     payload,
     replaceKey: `recruiting_agent_run.wait:${payload.agentRunId}`,
+    availableAt,
+  };
+}
+
+/** One pending reply check per conversation; each turn that ends pushes it back. */
+export function threadReplyCheckJob(
+  payload: BackgroundJobPayloads["thread.reply_check"],
+  availableAt: Date,
+): BackgroundJob {
+  return {
+    name: "thread.reply_check",
+    payload,
+    replaceKey: `thread.reply_check:${payload.threadId}`,
     availableAt,
   };
 }
