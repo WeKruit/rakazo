@@ -3,11 +3,13 @@ import type { RecruitingSourceRef } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
+  AGENT_RUN_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
   prepareAgentRun,
   projectRecruitingCandidateReport,
+  recordAgentRunCost,
   requireAutumnTaskOwnership,
   requireFullEnrichJobOwnership,
   savedContactLookups,
@@ -95,6 +97,64 @@ describe("people-search agent runs", () => {
     await expect(prepare(fixture(null), { query: "Find", outputSchema: own })).resolves.toEqual({
       query: "Find",
       outputSchema: own,
+    });
+  });
+
+  it("caps one wave at ten dollars and runs ultra as auto", async () => {
+    const db = fixture(null);
+    await expect(prepare(db, { query: "Find", effort: "auto" })).resolves.toMatchObject({
+      effort: "auto",
+      budget: { maxCostDollars: AGENT_RUN_MAX_COST_USD },
+    });
+    await expect(
+      prepare(db, { query: "Find", effort: "ultra", budget: { maxCostDollars: 50 } }),
+    ).resolves.toMatchObject({ effort: "auto", budget: { maxCostDollars: 10 } });
+    await expect(
+      prepare(db, { query: "Find", effort: "auto", budget: { maxCostDollars: 3 } }),
+    ).resolves.toMatchObject({ budget: { maxCostDollars: 3 } });
+    // Fixed-price efforts take no budget; one the agent sent anyway is dropped.
+    const low = await prepare(db, { query: "Find", effort: "low", budget: { maxCostDollars: 3 } });
+    expect(low).not.toHaveProperty("budget");
+  });
+
+  it("records a finished run's cost once, by run", async () => {
+    const createMany = vi.fn(async () => ({ count: 1 }));
+    const db = { usageRecord: { createMany } };
+    const done = (status: string) => ({
+      content: [
+        {
+          type: "text",
+          text: JSON.stringify({ id: "agent_run_1", status, costDollars: { total: 0.21 } }),
+        },
+      ],
+    });
+    const exa = { ...server, slug: "people-search" };
+    await recordAgentRunCost(
+      db as never,
+      { ...actor, botId: "bot", runId: "run" },
+      exa,
+      "agent_run",
+      done("running"),
+    );
+    expect(createMany).not.toHaveBeenCalled();
+    await recordAgentRunCost(
+      db as never,
+      { ...actor, botId: "bot", runId: "run" },
+      exa,
+      "agent_run",
+      done("completed"),
+    );
+    expect(createMany).toHaveBeenCalledExactlyOnceWith({
+      data: [
+        expect.objectContaining({
+          provider: "people-search",
+          unit: "credits",
+          quantity: 0.21,
+          callId: "credits:people-search:agent_run_1",
+          runId: "run",
+        }),
+      ],
+      skipDuplicates: true,
     });
   });
 
