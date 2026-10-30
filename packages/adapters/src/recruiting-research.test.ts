@@ -6,6 +6,7 @@ import {
   AGENT_RUN_GRADE_SCHEMA,
   AGENT_RUN_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
+  AGENT_RUN_ULTRA_MAX_COST_USD,
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,
   prepareAgentRun,
@@ -113,6 +114,20 @@ describe("people-search agent runs", () => {
     await expect(
       prepare(db, { query: "Find", effort: "auto", budget: { maxCostDollars: 3 } }),
     ).resolves.toMatchObject({ budget: { maxCostDollars: 3 } });
+    // A wave of a thousand or more may run ultra, up to thirty dollars and 2000 people.
+    const big = await prepare(db, {
+      query: "Find 5,000 current USC students",
+      effort: "ultra",
+      budget: { maxCostDollars: 50 },
+    });
+    expect(big).toMatchObject({
+      effort: "ultra",
+      budget: { maxCostDollars: AGENT_RUN_ULTRA_MAX_COST_USD },
+      outputSchema: { properties: { people: { maxItems: 2000 } } },
+    });
+    await expect(
+      prepare(db, { query: "Find 1000 people", effort: "ultra" }),
+    ).resolves.toMatchObject({ effort: "ultra", budget: { maxCostDollars: 30 } });
     // Fixed-price efforts take no budget; one the agent sent anyway is dropped.
     const low = await prepare(db, { query: "Find", effort: "low", budget: { maxCostDollars: 3 } });
     expect(low).not.toHaveProperty("budget");

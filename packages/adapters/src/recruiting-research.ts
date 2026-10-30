@@ -238,6 +238,19 @@ export const AGENT_RUN_GRADE_SCHEMA = {
 } as const;
 /** Most one people-search agent run (one wave) may spend, in US dollars. */
 export const AGENT_RUN_MAX_COST_USD = 10;
+/** Most one ultra run may spend; ultra is only for waves that ask for a thousand people or more. */
+export const AGENT_RUN_ULTRA_MAX_COST_USD = 30;
+/** People an ultra wave may return; a smaller wave stays within the default schema's 500. */
+const AGENT_RUN_ULTRA_MAX_PEOPLE = 2000;
+
+/** The largest people count a query names ("1,000", "5000"), or 0. */
+function askedPeople(query: unknown): number {
+  if (typeof query !== "string") return 0;
+  let most = 0;
+  for (const match of query.matchAll(/\b\d{1,3}(?:,\d{3})+\b|\b\d{1,6}\b/g))
+    most = Math.max(most, Number(match[0].replaceAll(",", "")));
+  return most;
+}
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
@@ -278,9 +291,12 @@ export async function prepareAgentRun(
   if (args.runId !== undefined) return args;
   const toGrade = record(args.input)?.data;
   const grading = Array.isArray(toGrade) && toGrade.length > 0;
-  // Ultra refuses some group searches and runs past one call; auto finds the same people for less.
-  const effort = args.effort === "ultra" ? "auto" : args.effort;
-  const metered = effort === "auto";
+  // Ultra is for a wave of a thousand people or more (the recruiter's rule); smaller waves and
+  // grading use auto, which finds the same people for less.
+  const ultra = args.effort === "ultra" && !grading && askedPeople(args.query) >= 1000;
+  const effort = args.effort === "ultra" && !ultra ? "auto" : args.effort;
+  const metered = effort === "auto" || ultra;
+  const cap = ultra ? AGENT_RUN_ULTRA_MAX_COST_USD : AGENT_RUN_MAX_COST_USD;
   const asked = Number(record(args.budget)?.maxCostDollars);
   const { budget: _budget, ...rest } = args;
   const prepared: Record<string, unknown> = {
@@ -290,15 +306,25 @@ export async function prepareAgentRun(
     ...(metered
       ? {
           budget: {
-            maxCostDollars:
-              Number.isFinite(asked) && asked >= 1
-                ? Math.min(asked, AGENT_RUN_MAX_COST_USD)
-                : AGENT_RUN_MAX_COST_USD,
+            maxCostDollars: Number.isFinite(asked) && asked >= 1 ? Math.min(asked, cap) : cap,
           },
         }
       : {}),
     // A grading run always returns the research row format; an agent's own schema would drop it.
-    outputSchema: grading ? AGENT_RUN_GRADE_SCHEMA : (args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA),
+    outputSchema: grading
+      ? AGENT_RUN_GRADE_SCHEMA
+      : (args.outputSchema ??
+        (ultra
+          ? {
+              ...AGENT_RUN_PEOPLE_SCHEMA,
+              properties: {
+                people: {
+                  ...AGENT_RUN_PEOPLE_SCHEMA.properties.people,
+                  maxItems: AGENT_RUN_ULTRA_MAX_PEOPLE,
+                },
+              },
+            }
+          : AGENT_RUN_PEOPLE_SCHEMA)),
   };
   // People given to grade are already saved; leaving them out would leave nothing to grade.
   if (grading) return prepared;
