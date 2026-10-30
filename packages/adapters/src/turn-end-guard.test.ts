@@ -1091,21 +1091,18 @@ describe("planDeclineRetry", () => {
     tools: [{ name: "recruiting_role" }],
   };
 
-  it("retries a decline up to the auto-continue limit, handing it to the teammate who can", async () => {
+  it("retries a decline once per human message, handing it to the teammate who can", async () => {
     const retry = await planDeclineRetry(
       { prisma: prisma([{ clientNonce: "send:human" }]) },
       input,
     );
     expect(retry?.note).toContain("bot_id bot-o");
-    const retried = (times: number) => ({
-      prisma: prisma(
-        Array.from({ length: times }, (_, index) => ({
-          clientNonce: `autocontinue:run-${index}:decline`,
-        })),
+    expect(
+      await planDeclineRetry(
+        { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) },
+        input,
       ),
-    });
-    expect((await planDeclineRetry(retried(2), input))?.note).toContain("bot_id bot-o");
-    expect(await planDeclineRetry(retried(3), input)).toBeUndefined();
+    ).toBeUndefined();
   });
 
   it("keeps a long task going while the server counts work left, until a card or the limit", async () => {
