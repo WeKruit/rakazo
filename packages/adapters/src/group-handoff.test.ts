@@ -595,6 +595,48 @@ describe("open stage watch", () => {
     );
   });
 
+  it("offers an email at a long stage's first check-in until the recruiter answers", async () => {
+    const offered = (answered: boolean, minutes: number) => {
+      const watched = watchHarness([stage("running", minutes)]);
+      (watched.deps.prisma as unknown as Record<string, unknown>).externalEffect = {
+        findFirst: vi.fn(async () => (answered ? { id: "effect-1" } : null)),
+      };
+      return watched;
+    };
+    const first = offered(false, 12);
+    await watchOpenStages({ ...first.deps, completionEmail: true } as never, now, 100);
+    expect(first.messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blocks: [
+            expect.objectContaining({
+              text: expect.stringContaining("Want an email when this finishes?"),
+            }),
+          ],
+        }),
+      }),
+    );
+    for (const watched of [offered(true, 12), offered(false, 23)]) {
+      await watchOpenStages({ ...watched.deps, completionEmail: true } as never, now, 100);
+      expect(watched.messageCreate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            blocks: [expect.objectContaining({ text: expect.not.stringContaining("an email") })],
+          }),
+        }),
+      );
+    }
+    const unconfigured = offered(false, 12);
+    await watchOpenStages(unconfigured.deps as never, now, 100);
+    expect(unconfigured.messageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          blocks: [expect.objectContaining({ text: expect.not.stringContaining("an email") })],
+        }),
+      }),
+    );
+  });
+
   it("follows a finished turn only while its research still runs", async () => {
     const idle = watchHarness([stage("completed", 41)]);
     await expect(watchOpenStages(idle.deps as never, now, 100)).resolves.toBe(0);
