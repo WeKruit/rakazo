@@ -737,6 +737,8 @@ export interface BackgroundJobPayloads {
   "recruiting_checkin.start": { threadId: string };
   /** Bring a people-search agent run that outlived its turn back to the agent that started it. */
   "recruiting_agent_run.wait": { threadId: string; botId: string; agentRunId: string };
+  /** After a conversation goes quiet, make sure the person's newest message got a reply. */
+  "thread.reply_check": { threadId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

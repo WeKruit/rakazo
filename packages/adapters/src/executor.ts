@@ -529,6 +529,7 @@ import {
 } from "./recruiting-tools.js";
 import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
+import { scheduleReplyCheck } from "./reply-check.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
 import { requestConnection } from "./request-connection.js";
 import { nextRoleContactBatch } from "./role-contact-batch.js";
@@ -13279,6 +13280,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // Every message a person writes gets a reply: once the conversation goes quiet, check
+          // that its newest message was answered.
+          await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>
+            getLogger().error("reply check enqueue", error),
+          );
           let recruitingContinued = false;
           let retryRunId: string | null = null;
           if (completed.continuationRunId) {
