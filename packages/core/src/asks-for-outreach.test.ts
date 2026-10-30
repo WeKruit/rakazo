@@ -26,10 +26,12 @@ describe("asksForOutreach", () => {
 });
 
 describe("recruitingBotKey", () => {
-  it("knows a teammate by spawn key, or by name when an older crew has none", () => {
+  it("knows a teammate by spawn key, or by name on an older crew", () => {
     expect(recruitingBotKey({ name: "Main", spawnKey: "recruiting:u1:main" })).toBe("main");
     expect(recruitingBotKey({ name: "Outreach", spawnKey: null })).toBe("outreach");
-    expect(recruitingBotKey({ name: "Outreach", spawnKey: "onboarding:first" })).toBeUndefined();
+    // An older crew's lead keeps its onboarding key.
+    expect(recruitingBotKey({ name: "Main", spawnKey: "onboarding:first" })).toBe("main");
+    expect(recruitingBotKey({ name: "Outreach", spawnKey: "recruiting:u1:main" })).toBe("main");
     expect(recruitingBotKey({ name: "Writer", spawnKey: null })).toBeUndefined();
   });
 });

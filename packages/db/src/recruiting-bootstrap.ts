@@ -302,10 +302,12 @@ async function savePreset(
 
 /** Crews set up before the managed preset get the same defaults as new accounts. */
 const LEGACY_PRESET_VERSION = "legacy";
+/** Catalog roles newer than the crews set up before the managed preset. */
+const LEGACY_ADDED_ROLES: readonly string[] = ["reviewer"];
 const TURN_IN_FLIGHT_STATUSES = ["queued", "leased", "running"] as const;
 const LEGACY_BOT_FIELDS = ["title", "description", "instructions"] as const;
 const legacyDigest = (firstPartyMcpUrl?: string) =>
-  digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS]);
+  digest([catalogDigest(firstPartyMcpUrl), RECRUITING_DEFAULT_SKILLS, LEGACY_ADDED_ROLES]);
 
 /**
  * Adopt a crew set up before the managed preset (bots named after the default roles, with Main
@@ -318,7 +320,7 @@ async function adoptLegacyCrew(
   tx: Prisma.TransactionClient,
   actor: Actor,
   installed: CapabilityInstall | null,
-  options: { firstPartyMcpUrl?: string },
+  options: { sandboxKind: string; firstPartyMcpUrl?: string },
 ): Promise<{ botId: string; groupId: string } | null> {
   const scope = { spaceId: actor.spaceId, userId: actor.userId };
   const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
@@ -363,6 +365,72 @@ async function adoptLegacyCrew(
   // most recruiters always have a card open somewhere, and their crew never got new defaults.
   if (await tx.run.count({ where: { ...scope, status: { in: [...TURN_IN_FLIGHT_STATUSES] } } }))
     return result;
+  const prior =
+    installed?.config && typeof installed.config === "object" && !Array.isArray(installed.config)
+      ? installed.config
+      : undefined;
+  // Roles added to the catalog after these crews were set up join once; a deleted one stays gone.
+  const added = Array.isArray(prior?.added)
+    ? prior.added.filter((key): key is string => typeof key === "string")
+    : [];
+  const members = await tx.chatGroupMember.count({ where: { groupId: group.id } });
+  const newRoles = RECRUITING_DEFAULT_BOTS.filter(
+    (role) =>
+      LEGACY_ADDED_ROLES.includes(role.key) &&
+      !added.includes(role.key) &&
+      !crew.some((item) => item.role.key === role.key),
+  ).slice(0, Math.max(0, GROUP_MEMBER_MAX - members));
+  if (newRoles.length && resolveMaxComputersPerUser() > 0) {
+    // The same quota lock the managed upgrade takes before creating bot rows.
+    const [quota] = await tx.$queryRaw<Array<{ acquired: boolean }>>`
+      SELECT pg_try_advisory_xact_lock(hashtextextended(${actor.userId}, 1)) AS acquired
+    `;
+    if (!quota?.acquired) return result;
+  }
+  for (const role of newRoles) {
+    const bot = await createBotInTransaction(
+      tx,
+      actor,
+      {
+        name: role.name,
+        title: role.title,
+        description: role.description,
+        instructions: role.instructions,
+        color: BOT_COLORS[(bots.length + crew.length) % BOT_COLORS.length] ?? BOT_COLORS[0],
+        notifyOnFinish: true,
+        disabledBuiltinTools: [...RECRUITING_DISABLED_BUILTIN_TOOLS],
+      },
+      await recruitingComputerKind(tx, options.sandboxKind),
+    );
+    await tx.chatGroupMember.createMany({
+      data: [{ groupId: group.id, botId: bot.id }],
+      skipDuplicates: true,
+    });
+    for (const service of recruitingServices(options.firstPartyMcpUrl)) {
+      if (!service.bots.includes(role.key)) continue;
+      const server = servers.find(
+        (item) =>
+          item.slug === service.slug &&
+          item.endpoint === service.endpoint &&
+          item.assignments.some((assignment) => assignment.botId === main.id),
+      );
+      if (server)
+        await tx.botMcpServer.createMany({
+          data: [
+            {
+              ...scope,
+              botId: bot.id,
+              serverId: server.id,
+              allowAllTools: false,
+              allowedTools: service.toolsByBot?.[role.key] ?? service.tools,
+            },
+          ],
+          skipDuplicates: true,
+        });
+    }
+    crew.push({ role, bot });
+    added.push(role.key);
+  }
   for (const { role, bot } of crew) {
     const data: Record<string, string | string[]> = Object.fromEntries(
       LEGACY_BOT_FIELDS.filter((field) => bot[field] !== role[field]).map((field) => [
@@ -387,11 +455,8 @@ async function adoptLegacyCrew(
   await tx.agentSkill.deleteMany({
     where: { ...scope, source: "user", name: { in: names, mode: "insensitive" } },
   });
-  const prior =
-    installed?.config && typeof installed.config === "object" && !Array.isArray(installed.config)
-      ? installed.config.routines
-      : undefined;
-  const routines = validRoutines(prior) && prior ? { ...prior } : {};
+  const priorRoutines = prior?.routines;
+  const routines = validRoutines(priorRoutines) && priorRoutines ? { ...priorRoutines } : {};
   await ensureMemoryTidyRoutines(
     tx,
     actor,
@@ -401,7 +466,7 @@ async function adoptLegacyCrew(
   const record = {
     version: LEGACY_PRESET_VERSION,
     digest: target,
-    config: { legacy: true, routines },
+    config: { legacy: true, routines, added },
   };
   if (installed) await tx.capabilityInstall.updateMany({ where: presetWhere(actor), data: record });
   else
