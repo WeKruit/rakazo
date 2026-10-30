@@ -4,6 +4,7 @@
 #   release-cloud.sh <SHA> check    # read-only: live revision, migration/infra diff, active-run gate
 #   release-cloud.sh <SHA> deploy   # check + unit tests (red blocks) + modal deploy --strategy recreate + readiness/revision proof
 #   release-cloud.sh <SHA> test     # unit tests only, no prod access; run while prod is busy so the deploy skips them
+#   release-cloud.sh main watch     # keep running: test each new origin/main head as it lands (run in the background)
 #   RELEASE_ROLLBACK=1 ... deploy   # emergency rollback to a tested SHA: works while live /ready is broken, no gap wait
 #
 # Rules kept from the runbook: main only, one release at a time, recreate only, no new Modal
@@ -40,27 +41,63 @@ db_query() {
 ACTIVE_SQL="select r.id, r.status, b.name bot, g.name grp, r.\"updatedAt\" from runs r join bots b on b.id=r.\"botId\" join threads t on t.id=r.\"threadId\" left join chat_groups g on g.id=t.\"groupId\" where r.status not in ('completed','failed','cancelled','canceled','interrupted','waiting_input') and r.\"updatedAt\" > now() - interval '30 minutes' order by r.\"updatedAt\" desc"
 LEDGER_SQL="select count(*)::int n, max(migration_name) latest from _prisma_migrations where finished_at is not null and rolled_back_at is null"
 
+# Pre-test each new main head as soon as it lands, so a deploy finds its tests already done.
+# A head that failed is not retried here; deploy mode tests it again.
+if [ "$MODE" = watch ]; then
+  mkdir -p "$WORK/failed"
+  while :; do
+    git -C "$REPO" fetch -q origin main || true
+    head=$(git -C "$REPO" rev-parse origin/main)
+    if [ ! -f "$WORK/tested/$head" ] && [ ! -f "$WORK/failed/$head" ]; then
+      bash "$0" "$head" test || touch "$WORK/failed/$head"
+    fi
+    sleep "${RELEASE_WATCH_INTERVAL:-30}"
+  done
+fi
+
 # 1) Resolve the SHA on main.
 git -C "$REPO" fetch -q origin main
 SHA=$(git -C "$REPO" rev-parse --verify "$SHA_IN^{commit}") || die "unknown SHA $SHA_IN"
 git -C "$REPO" merge-base --is-ancestor "$SHA" origin/main || die "$SHA is not on origin/main"
 SHORT=${SHA:0:8}
+# Unit tests run in one persistent checkout ($WORK/testtree) so node_modules, the Prisma client
+# and vitest's cache survive between releases; install is a near no-op while the lockfile is unchanged.
+# A commit is tested once: its code (everything outside docs/) matching an already tested commit
+# reuses that result, and a commit whose only changes since a tested ancestor are JS/TS modules runs
+# just the tests that import them (vitest --changed; package.json and vitest config changes still run
+# everything). RELEASE_FULL_TESTS=1 always runs the whole suite. One test run at a time; a second
+# caller for the same commit waits and reuses the result.
+TREE="$WORK/testtree"
+code_same() { git -C "$REPO" diff --quiet "$1" "$2" -- . ':(exclude)docs'; }
+module_only() { ! git -C "$REPO" diff --name-only "$1" "$2" -- . ':(exclude)docs' | grep -qvE '\.(ts|tsx|mts|cts|js|mjs|cjs|jsx)$'; }
 run_tests() {
-# Red tests block the deploy (CI stays off). Same tests as the server ships: packages, api, worker, web.
-# A SHA that already passed here is not tested again.
-local TESTED="$WORK/tested/$SHA"
-if [ ! -f "$TESTED" ]; then
-  local TDIR="$WORK/test/$SHA"; rm -rf "$TDIR"; mkdir -p "$TDIR" "$WORK/tested"
-  git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$TDIR"
-  log "testing $SHORT (install + unit tests, ~7 min)"
-  ( cd "$TDIR" \
-    && pnpm install --frozen-lockfile --store-dir "$WORK/pnpm-store" --config.engine-strict=false >"$WORK/test-$SHORT.log" 2>&1 \
-    && (cd packages/db && npx prisma generate) >>"$WORK/test-$SHORT.log" 2>&1 \
-    && pnpm exec vitest run packages apps/api apps/worker apps/web >>"$WORK/test-$SHORT.log" 2>&1 ) \
-    || { grep -E "FAIL|Tests  " "$WORK/test-$SHORT.log" | head -20 >&2; die "unit tests failed for $SHORT (log: $WORK/test-$SHORT.log)"; }
-  grep -E "Tests  " "$WORK/test-$SHORT.log" | tail -1
-  touch "$TESTED"; rm -rf "$TDIR"
-fi
+  local TESTED="$WORK/tested/$SHA" LOG="$WORK/test-$SHORT.log" prev base="" scope
+  mkdir -p "$WORK/tested"
+  [ -f "$TESTED" ] && return 0
+  exec 8>"$WORK/.test-lock"; flock 8
+  [ -f "$TESTED" ] && { exec 8>&-; return 0; }
+  for prev in $(ls -t "$WORK/tested" | head -40); do
+    git -C "$REPO" cat-file -e "$prev^{commit}" 2>/dev/null || continue
+    if code_same "$prev" "$SHA"; then log "code of $SHORT matches tested ${prev:0:8}; tests not rerun"; touch "$TESTED"; exec 8>&-; return 0; fi
+    # Nearest tested ancestor, for the affected-only run.
+    if [ -z "$base" ] && git -C "$REPO" merge-base --is-ancestor "$prev" "$SHA"; then base=$prev; fi
+  done
+  [ -n "$base" ] && [ "${RELEASE_FULL_TESTS:-}" != 1 ] && module_only "$base" "$SHA" || base=""
+  [ -d "$TREE/.git" ] || git clone -q --no-checkout "$REPO" "$TREE"
+  git -C "$TREE" fetch -q "$REPO" +refs/remotes/origin/main:refs/remotes/origin/main
+  git -C "$TREE" checkout -q -f --detach "$SHA"
+  git -C "$TREE" clean -qfdx -e node_modules -e packages/db/src/generated
+  scope=${base:+"tests affected since tested ${base:0:8}"}
+  log "testing $SHORT (${scope:-full suite})"
+  local prisma_key; prisma_key=$(cat "$TREE/packages/db/prisma/schema.prisma" "$TREE/pnpm-lock.yaml" | sha256sum | cut -c1-16)
+  ( cd "$TREE" \
+    && pnpm install --frozen-lockfile --prefer-offline --store-dir "$WORK/pnpm-store" --config.engine-strict=false >"$LOG" 2>&1 \
+    && { [ "$(cat packages/db/src/generated/.key 2>/dev/null)" = "$prisma_key" ] \
+         || { (cd packages/db && npx prisma generate) && echo "$prisma_key" > packages/db/src/generated/.key; }; } >>"$LOG" 2>&1 \
+    && pnpm exec vitest run ${base:+--changed "$base" --passWithNoTests} packages apps/api apps/worker apps/web >>"$LOG" 2>&1 ) \
+    || { grep -E "FAIL|Tests  " "$LOG" | head -20 >&2; exec 8>&-; die "unit tests failed for $SHORT (log: $LOG)"; }
+  grep -E "Tests  |No test files" "$LOG" | tail -1
+  touch "$TESTED"; exec 8>&-
 }
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }
 
@@ -79,6 +116,25 @@ LEDGER_BEFORE=$(db_query "$LEDGER_SQL") || LEDGER_BEFORE="unknown (db query fail
 log "ledger before: $LEDGER_BEFORE"
 [ "$MODE" = check ] && { log "CHECK DONE $SHORT (nothing deployed)"; exit 0; }
 [ "$MODE" = deploy ] || die "mode must be check, test or deploy"
+# 4) One release at a time on this machine; exact-SHA archive with the revision marker.
+mkdir -p "$WORK"; exec 9>"$WORK/.lock"; flock -n 9 || die "another release is running here"
+DIR="$WORK/releases/$SHA"; rm -rf "$DIR"; mkdir -p "$DIR"
+git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$DIR"
+echo "$SHA" > "$DIR/.wekruit-source-revision"
+# RELEASE_PREBUILD=1: build the Modal image from this exact folder while the tests run, so the deploy
+# below reuses the cached image instead of building it. Uses a short-lived app with no functions.
+PREBUILD=""
+if [ "${RELEASE_PREBUILD:-}" = 1 ]; then
+  (cd "$DIR" && python3 -c '
+import importlib.util, modal
+spec = importlib.util.spec_from_file_location("release_app", "infra/modal/app.py")
+release = importlib.util.module_from_spec(spec); spec.loader.exec_module(release)
+builder = modal.App(release.APP_NAME + "-prebuild")
+with modal.enable_output(), builder.run():
+    release.image.build(builder)
+') > "$WORK/prebuild-$SHORT.log" 2>&1 &
+  PREBUILD=$!; log "building image for $SHORT in the background"
+fi
 run_tests
 # Wait for a gap with no running work (waiting_input is excluded above); give up after RELEASE_GAP_WAIT s.
 gap_deadline=$(( $(date +%s) + ${RELEASE_GAP_WAIT:-1800} ))
@@ -88,11 +144,7 @@ while [ "$ACTIVE" != "[]" ] && [ "${RELEASE_ALLOW_ACTIVE:-}" != "$SHORT" ] && [ 
   log "waiting for gap, active: $([ "$ACTIVE" = unknown ] && echo unknown || echo "$ACTIVE" | grep -o '"status"' | wc -l)"
 done
 
-# 4) One release at a time on this machine; exact-SHA archive with the revision marker.
-mkdir -p "$WORK"; exec 9>"$WORK/.lock"; flock -n 9 || die "another release is running here"
-DIR="$WORK/releases/$SHA"; rm -rf "$DIR"; mkdir -p "$DIR"
-git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$DIR"
-echo "$SHA" > "$DIR/.wekruit-source-revision"
+[ -z "$PREBUILD" ] || { wait "$PREBUILD" && log "image prebuilt" || log "image prebuild failed (log: $WORK/prebuild-$SHORT.log); deploy builds it"; }
 
 # 5) Deploy, sampling public /health every 2 s to measure the outage window.
 ( while sleep 2; do printf '%s %s\n' "$(date +%s)" "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "$URL/health")"; done ) > "$WORK/health-$SHORT.log" &
