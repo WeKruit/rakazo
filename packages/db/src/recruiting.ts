@@ -8132,6 +8132,15 @@ function candidateIndexQuery(
         ) rank_pages)`
         : Prisma.sql`${rankDomainPageId}::text`
     }${displayScope?.sourceEffectId === undefined ? Prisma.sql`)` : Prisma.empty} AS "pageId"
+  ), grade_pages AS MATERIALIZED (
+    -- Grading batches answer one grade schema on 0–100 against the same requirements, so while
+    -- the newest scored result is one of them, their scores compare across batches like one
+    -- result. Read once per role, never per row.
+    SELECT page."effectId" FROM "recruiting_candidate_pages" page
+    JOIN "external_effects" e ON e."id" = page."effectId"
+    JOIN "runs" r ON r."id" = e."runId"
+    WHERE page."roleId" = ${roleId} ${sourceScope}
+      AND starts_with(r."clientNonce", ${RECRUITING_GRADE_NONCE_PREFIX})
   ), rank_scope AS MATERIALIZED (
     -- Scores are shown on 0–100. A saved result whose plain scores all fit 0–10 (or 0–1 with a
     -- fraction) was answered on that scale; this converts units only and never rescores.
@@ -8141,7 +8150,8 @@ function candidateIndexQuery(
       FROM "recruiting_candidate_occurrences" scored
       CROSS JOIN LATERAL (SELECT ${scoreCellPart(Prisma.sql`scored."matchFields"`, "plain")} AS v) plain
       WHERE scored."pageId" = rank_page."pageId" AND plain.v IS NOT NULL
-    ), 1) AS "scoreScale"
+    ), 1) AS "scoreScale",
+      rank_page."pageId" IN (SELECT "effectId" FROM grade_pages) AS "gradeScope"
     FROM rank_page
   ),`
       : Prisma.empty
@@ -8224,12 +8234,7 @@ function candidateIndexQuery(
         -- saved page per row here cost ~20 s on a 134-candidate role and expired the transaction.
         CROSS JOIN LATERAL (SELECT COALESCE(o."matchFields", '{}'::jsonb) AS value) returned
         CROSS JOIN rank_scope
-        -- Grading batches answer one grade schema on 0–100 against the same requirements, so
-        -- their scores compare across batches like one result.
-        CROSS JOIN LATERAL (SELECT EXISTS (
-          SELECT 1 FROM "external_effects" e JOIN "runs" r ON r."id" = e."runId"
-          WHERE e."id" = page."effectId"
-            AND starts_with(r."clientNonce", ${RECRUITING_GRADE_NONCE_PREFIX})) AS yes) grading
+        CROSS JOIN LATERAL (SELECT page."effectId" IN (SELECT "effectId" FROM grade_pages) AS yes) grading
         CROSS JOIN LATERAL (VALUES
           ('rank', ${rankCell},
             (rank_scope."pageId" IS NULL OR page."effectId" = rank_scope."pageId") AND
@@ -8241,9 +8246,7 @@ function candidateIndexQuery(
             ELSE returned.value -> 'score' END,
             (returned.value ? 'match_score' OR returned.value ? 'score') AND
             ((rank_scope."pageId" IS NOT NULL AND page."effectId" = rank_scope."pageId") OR
-              (grading.yes AND EXISTS (SELECT 1 FROM "external_effects" e JOIN "runs" r
-                ON r."id" = e."runId" WHERE e."id" = rank_scope."pageId"
-                  AND starts_with(r."clientNonce", ${RECRUITING_GRADE_NONCE_PREFIX})))))
+              (rank_scope."gradeScope" AND grading.yes)))
         ) source(kind, cell, present)
         CROSS JOIN LATERAL (SELECT CASE WHEN jsonb_typeof(source.cell) = 'object' AND source.cell ? 'value'
           THEN source.cell->'value' ELSE source.cell END AS "value") match
