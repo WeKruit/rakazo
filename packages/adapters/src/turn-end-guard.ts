@@ -23,6 +23,9 @@ export const AUTOCONTINUE_NONCE_PREFIX = "autocontinue:";
  */
 const GUARDED_TRIGGERS = new Set(["user", "follow_up", "recruiting_research", "bot_message"]);
 
+/** Continuations per recruiter message for a long task the server counts as unfinished. */
+export const LONG_TASK_RETRIES = 20;
+
 /** RAKAZO_AUTOCONTINUE_MAX: auto-continues per human turn; 0 disables. Default 3. */
 export function autoContinueMax(env: NodeJS.ProcessEnv = process.env): number {
   const raw = Number(env.RAKAZO_AUTOCONTINUE_MAX ?? 3);
@@ -708,8 +711,31 @@ export async function planDeclineRetry(
     handedIn?: boolean;
     /** The role's playbook stage, read only when an offer or pick question needs it. */
     stage?: () => Promise<string | undefined>;
+    /** Work the turn left unfinished by the server's own count (e.g. people still to look up). */
+    owedWork?: string;
   },
 ): Promise<DeclineRetry | undefined> {
+  const recentContinues = async () =>
+    countTrailingAutoContinues(
+      await deps.prisma.message.findMany({
+        where: {
+          threadId: input.run.threadId,
+          OR: [
+            { role: "user" },
+            { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
+          ],
+        },
+        orderBy: { seq: "desc" },
+        take: LONG_TASK_RETRIES + 1,
+        select: { clientNonce: true },
+      }),
+    );
+  // A long task the server knows is unfinished keeps going whatever the reply said, until it is
+  // done; only a question card (a real decision for the recruiter) stops it.
+  if (input.owedWork && !input.blocks.some((block) => CARD_KINDS.has(block.kind)))
+    return (await recentContinues()) < LONG_TASK_RETRIES
+      ? { sentence: "", note: input.owedWork }
+      : undefined;
   const variables = draftVariables(input.reply);
   const declined = input.request.trim() ? retryReason(input.reply, input.request) : undefined;
   if (!(variables || declined) || input.presentedRound) return undefined;
@@ -719,20 +745,11 @@ export async function planDeclineRetry(
     return !input.handedIn && QUESTION_STAGES.has((await input.stage?.()) ?? "")
       ? undefined
       : questionCard(input.reply, declined);
-  const recent = await deps.prisma.message.findMany({
-    where: {
-      threadId: input.run.threadId,
-      OR: [
-        { role: "user" },
-        { role: "system", clientNonce: { startsWith: AUTOCONTINUE_NONCE_PREFIX } },
-      ],
-    },
-    orderBy: { seq: "desc" },
-    take: 2,
-    select: { clientNonce: true },
-  });
-  // Already retried: a question still typed into the reply goes on a card instead.
-  if (countTrailingAutoContinues(recent) > 0)
+  // Retried enough for this recruiter message: a question still typed into the reply goes on a
+  // card instead. A decline is retried up to the auto-continue limit, never accepted on the
+  // first stop; other kinds once.
+  const retries = declined?.kind === "decline" ? Math.max(1, autoContinueMax()) : 1;
+  if ((await recentContinues()) >= retries)
     return declined && !variables ? questionCard(input.reply, declined) : undefined;
   if (variables) return variables;
   if (!declined) return undefined;

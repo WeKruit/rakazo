@@ -12,7 +12,12 @@ export const FindEmailsInput = z.strictObject({
       }),
     )
     .min(1)
-    .max(500),
+    .max(500)
+    .optional(),
+  /** The first N people of the conversation's role in Results order; the server picks the batch. */
+  next_from_role: z.number().int().min(1).max(5000).optional(),
+  /** Set by the server with next_from_role: people still to look up after this batch. */
+  remaining_after: z.number().int().nonnegative().optional(),
   /** Search again people a source already found nothing for; only when the recruiter asks. */
   recheck: z.boolean().optional(),
 });
@@ -143,8 +148,9 @@ export async function findEmails(
   options: ContactLookupOptions,
 ): Promise<FindEmailsResult> {
   const sleep = options.sleep ?? defaultSleep;
-  const later = input.people.slice(LOOKUP_BATCH);
-  const people: Array<PersonContacts & { key: string | null; company?: string }> = input.people
+  const asked = input.people ?? [];
+  const later = asked.slice(LOOKUP_BATCH);
+  const people: Array<PersonContacts & { key: string | null; company?: string }> = asked
     .slice(0, LOOKUP_BATCH)
     .map((person) => ({
       name: person.name,
@@ -232,12 +238,17 @@ export async function findEmails(
             lookup.detail !== SEARCHED_BEFORE,
         ),
       ).length,
-      ...(later.length
+      ...(input.remaining_after
         ? {
-            not_looked_up: later.length,
-            next_step: `Looked up the first ${LOOKUP_BATCH}. Call again with the other ${later.length} people, starting with ${later[0]!.name}.`,
+            not_looked_up: input.remaining_after,
+            next_step: `${input.remaining_after} of the first ${input.next_from_role} people are still to look up. Call find_emails again with next_from_role ${input.next_from_role} right away, and keep calling until none are left; do not stop, ask or report a final count before that.`,
           }
-        : {}),
+        : later.length
+          ? {
+              not_looked_up: later.length,
+              next_step: `Looked up the first ${LOOKUP_BATCH}. Call again with the other ${later.length} people, starting with ${later[0]!.name}.`,
+            }
+          : {}),
     },
   };
 }
