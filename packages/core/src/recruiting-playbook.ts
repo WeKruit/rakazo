@@ -323,7 +323,7 @@ export type RecruitingPlaybookStep = {
 
 const CALIBRATION_TARGET = 10;
 const NEXT_STEP_CARD =
-  'After the list is shown, use one question card (ask_user) to offer the next step, for example "Find 100 similar people", "Draft the outreach emails" or "Run another round". ';
+  'After the list is shown, use one question card (ask_user) to offer the next step, for example "Find 150 similar people", "Draft the outreach emails" or "Run another round". ';
 const ONLY_OWN_LIST =
   "If the recruiter said not to look outside and to use only their own list, do not search: use only the imported people, state the actual count, and do not pad to 10.";
 

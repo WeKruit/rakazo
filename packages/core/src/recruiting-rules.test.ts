@@ -484,7 +484,7 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
   {
     rule: "the next step offers to find similar people",
     in: "RECRUITING_ROUND_NEXT_STEP",
-    phrase: '"Find 100 similar people"',
+    phrase: '"Find 150 similar people"',
     why: "Rounds ended with no recommended next step.",
   },
   {
