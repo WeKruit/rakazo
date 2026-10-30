@@ -1,6 +1,13 @@
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import {
+
+const listRecruitingCandidates = vi.fn();
+vi.mock("@rakazo/db", async (original) => ({
+  ...(await original<typeof import("@rakazo/db")>()),
+  listRecruitingCandidates: (...args: unknown[]) => listRecruitingCandidates(...args),
+}));
+
+const {
   GRADE_BATCH,
   GRADE_IN_FLIGHT,
   GRADE_TOOL_CALL_LIMIT,
@@ -9,7 +16,7 @@ import {
   RECRUITING_GRADE_NONCE_PREFIX,
   RECRUITING_GRADE_REPORT_NONCE_PREFIX,
   startRecruitingGrading,
-} from "./recruiting-grading.js";
+} = await import("./recruiting-grading.js");
 
 const now = Date.parse("2026-10-29T01:00:00Z");
 const role = { id: "role", userId: "user", archivedAt: null };
@@ -153,7 +160,26 @@ describe("startRecruitingGrading", () => {
       { botId: "sourcer", bot: { name: "Sourcer", spawnKey: null } },
       { botId: "lead", bot: { name: "Main", spawnKey: null } },
     ]);
+    const graded = (key: string, score: number | null, tier: string) => ({
+      candidateKey: `linkedin:/in/${key}`,
+      name: `Person ${key}`,
+      title: "Chair",
+      company: "USC APASA",
+      match: { rank: null, score, tier },
+    });
+    listRecruitingCandidates
+      .mockResolvedValueOnce({
+        items: [graded("a", 98, "Strong"), graded("b", 40, "Partial")],
+        nextCursor: "next",
+      })
+      .mockResolvedValueOnce({ items: [graded("c", null, "Uncertain")], nextCursor: null });
     await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    // The server counts every page; the lead relays the counts and the order as given.
+    expect(promptOf(f)).toContain("Strong 1, Promising 0, Partial 1, Uncertain 1");
+    expect(promptOf(f)).toContain(
+      "1. Person a, Chair at USC APASA: score 98, Strong (candidateKey linkedin:/in/a)",
+    );
+    expect(promptOf(f)).not.toContain("Person c,");
     expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
       data: expect.objectContaining({
         botId: "lead",
@@ -161,7 +187,6 @@ describe("startRecruitingGrading", () => {
         clientNonce: `${RECRUITING_GRADE_REPORT_NONCE_PREFIX}thread:last-batch`,
       }),
     });
-    expect(promptOf(f)).toContain('sort "score"');
     // Grades still on their way would be missing, so the report waits for them.
     const early = fixture({
       found: [person("graded")],

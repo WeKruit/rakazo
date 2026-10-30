@@ -6619,6 +6619,40 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     expect(byName.sortAvailability).toMatchObject({ rank: true, score: true });
   });
 
+  it("score-sorts people across a role's grading batches", async () => {
+    const { f, prepared } = await mappedResearchFixture();
+    const row = (key: string, score: number) => ({
+      ...canonicalCandidateRow(`Graded ${key}`, `https://www.linkedin.com/in/graded-${key}`),
+      match_score: score,
+      match_tier: score >= 80 ? "Strong" : "Partial",
+    });
+    await recordCandidatePage(f, prepared, "grade-1", [row("a", 90), row("b", 40)], {
+      observedAt: new Date("2026-10-17T00:00:00Z"),
+      cursor: "grade-1",
+    });
+    await recordCandidatePage(f, prepared, "grade-2", [row("c", 60)], {
+      observedAt: new Date("2026-10-18T00:00:00Z"),
+      cursor: "grade-2",
+    });
+    const list = () =>
+      recruiting.listRecruitingCandidates(prisma, actor, { roleId: f.role.role.id, sort: "score" });
+    // Two ordinary results: scores compare only within the newest one.
+    expect((await list()).items.map((item) => [item.candidateKey, item.match?.score])).toEqual([
+      ["linkedin:/in/graded-c", 60],
+      ["linkedin:/in/graded-a", null],
+      ["linkedin:/in/graded-b", null],
+    ]);
+    await prisma.run.update({
+      where: { id: f.run.id },
+      data: { clientNonce: `${recruiting.RECRUITING_GRADE_NONCE_PREFIX}${f.thread.id}:batch` },
+    });
+    expect((await list()).items.map((item) => [item.candidateKey, item.match?.score])).toEqual([
+      ["linkedin:/in/graded-a", 90],
+      ["linkedin:/in/graded-c", 60],
+      ["linkedin:/in/graded-b", 40],
+    ]);
+  });
+
   it("shows a result answered on 0–10 on the 0–100 scale", async () => {
     const { f, prepared } = await mappedResearchFixture();
     const row = (key: string, match: Prisma.InputJsonObject) => ({
