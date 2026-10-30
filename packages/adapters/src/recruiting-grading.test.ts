@@ -2,6 +2,7 @@ import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
 import {
   GRADE_BATCH,
+  GRADE_IN_FLIGHT,
   GRADE_TOOL_CALL_LIMIT,
   gradingToolRefusal,
   gradingTools,
@@ -170,19 +171,26 @@ describe("startRecruitingGrading", () => {
     );
   });
 
-  it("waits for the previous batch's grades before sending the next", async () => {
-    const request = { id: "request", createdAt: new Date(now - 60_000), task: { prompt: "" } };
-    const waiting = fixture({ found: [person("a")], requests: [request], researched: ["request"] });
-    await startRecruitingGrading(waiting.deps, { threadId: "thread" }, now);
-    expect(waiting.runCreate).not.toHaveBeenCalled();
-    const saved = fixture({
+  it("keeps a few batches in flight and waits when all of them are", async () => {
+    const requests = Array.from({ length: GRADE_IN_FLIGHT }, (_, index) => ({
+      id: `request-${index}`,
+      createdAt: new Date(now - 60_000 * (index + 1)),
+      task: { prompt: "" },
+    }));
+    const full = fixture({
       found: [person("a")],
-      requests: [request],
-      researched: ["request"],
-      gradesSaved: true,
+      requests,
+      researched: requests.map((request) => request.id),
     });
-    await startRecruitingGrading(saved.deps, { threadId: "thread" }, now);
-    expect(saved.runCreate).toHaveBeenCalledOnce();
+    await startRecruitingGrading(full.deps, { threadId: "thread" }, now);
+    expect(full.runCreate).not.toHaveBeenCalled();
+    const room = fixture({
+      found: [person("a")],
+      requests: requests.slice(1),
+      researched: requests.slice(1).map((request) => request.id),
+    });
+    await startRecruitingGrading(room.deps, { threadId: "thread" }, now);
+    expect(room.runCreate).toHaveBeenCalledOnce();
   });
 
   it("holds the next batch for a while after a request that never started research", async () => {

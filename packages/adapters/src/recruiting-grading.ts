@@ -15,6 +15,8 @@ const BUSY_RETRY_MS = 30_000;
 const MAX_ATTEMPTS = 120;
 /** People per grading request. */
 export const GRADE_BATCH = 50;
+/** Grading requests the research service works on at once for one conversation. */
+export const GRADE_IN_FLIGHT = 4;
 /** A grading request whose grades never came back stops holding up the next batch after this. */
 const IN_FLIGHT_MS = 2 * 60 * 60_000;
 /** After a grading request that never started research, the next batch waits this long. */
@@ -233,22 +235,32 @@ export async function startRecruitingGrading(
       })
     : [];
   const researchByRun = new Map(research.map((task) => [task.createdByRunId, task.id]));
-  // One batch at a time: the wake that saves a batch's grades schedules the next one. A request
-  // that never started research holds the next batch for half an hour, so a failing grading turn
-  // can't repeat every few minutes.
+  // Up to GRADE_IN_FLIGHT batches at once, since one batch takes the research service about half
+  // an hour; the wake that saves a batch's grades schedules the next one. A request that never
+  // started research holds the next batch for half an hour, so a failing grading turn can't
+  // repeat every few minutes.
   const latest = requests[0];
   const latestAge = latest ? now - latest.createdAt.getTime() : Number.POSITIVE_INFINITY;
-  const latestResearch = latest && researchByRun.get(latest.id);
-  if (!latestResearch && latestAge < NOT_STARTED_HOLD_MS) return skipped("hold");
-  if (latestResearch && latestAge < IN_FLIGHT_MS) {
-    const saved = await deps.prisma.run.findFirst({
+  if (latest && !researchByRun.has(latest.id) && latestAge < NOT_STARTED_HOLD_MS)
+    return skipped("hold");
+  const recent = requests.flatMap((request) => {
+    const task = researchByRun.get(request.id);
+    return task && now - request.createdAt.getTime() < IN_FLIGHT_MS ? [task] : [];
+  });
+  if (recent.length >= GRADE_IN_FLIGHT) {
+    const saved = await deps.prisma.run.findMany({
       where: {
         threadId: thread.id,
-        clientNonce: { startsWith: `${RESEARCH_WAKE_PREFIX}${latestResearch}:` },
+        OR: recent.map((task) => ({
+          clientNonce: { startsWith: `${RESEARCH_WAKE_PREFIX}${task}:` },
+        })),
       },
-      select: { id: true },
+      select: { clientNonce: true },
     });
-    if (!saved) return skipped("in flight");
+    const done = recent.filter((task) =>
+      saved.some((run) => run.clientNonce?.startsWith(`${RESEARCH_WAKE_PREFIX}${task}:`)),
+    );
+    if (recent.length - done.length >= GRADE_IN_FLIGHT) return skipped("in flight");
   }
   // People whose request never reached the research service are sent again.
   const sent = sentUrls(
@@ -331,6 +343,16 @@ export async function startRecruitingGrading(
   });
   if (!runId) return skipped("already requested");
   getLogger().info("recruiting.grade.started", { runId, roleId: role.id, people: people.size });
+  // The next batch starts once this request has reached the research service.
+  if (people.size === GRADE_BATCH)
+    await deps.jobs
+      .enqueue(
+        recruitingGradeStartJob(
+          { threadId: thread.id },
+          new Date(now + RECRUITING_GRADE_SETTLE_MS),
+        ),
+      )
+      .catch(() => undefined);
   // The existing run reconciler recovers a queued run after an enqueue failure.
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
     getLogger().warn("recruiting grade start deferred to reconciliation");
