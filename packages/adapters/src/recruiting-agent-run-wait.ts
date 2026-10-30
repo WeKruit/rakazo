@@ -2,6 +2,7 @@ import type { BackgroundJobPayloads, JobPublisher } from "@rakazo/adapter-kit";
 import { recruitingAgentRunWaitJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import type { PrismaClient } from "@rakazo/db";
+import { RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { mcpObject } from "./recruiting-research.js";
 
@@ -12,15 +13,24 @@ import { mcpObject } from "./recruiting-research.js";
  * orchestrator: each wake is one ordinary run whose own agent_run call either collects the
  * people (saved to Results as usual) or, still running, schedules the next wake.
  */
-export const RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX = "recruiting-agent-run-wait:";
+export { RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX };
 /** A turn that is still open may collect the run itself, so the first wake waits a minute. */
 export const RECRUITING_AGENT_RUN_WAIT_MS = 60_000;
 /** Runs nobody has collected after this long since they started are left alone. */
 const MAX_WAIT_MS = 12 * 60 * 60_000;
 /** A wake waits until the recruiter has not written for this long. */
 const QUIET_MS = 5 * 60_000;
+/** Wakes for one provider answer that may give way to the recruiter before the next is skipped. */
+const MAX_YIELDS = 20;
 const BUSY_STATUSES = ["queued", "leased", "running"];
 const STILL_RUNNING = new Set(["running", "pending", "queued", "in_progress"]);
+
+/** The agent run a wake was started for, read back from its run nonce. */
+export function agentRunWaitTarget(clientNonce: string | null): string | undefined {
+  if (!clientNonce?.startsWith(RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX)) return undefined;
+  const id = clientNonce.slice(RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX.length).split(":")[0];
+  return id?.startsWith("agent_run_") ? id : undefined;
+}
 
 /** The agent run a provider result describes while it is still working, if it is one. */
 export function runningAgentRunId(result: unknown): string | undefined {
@@ -107,7 +117,8 @@ export async function waitForRecruitingAgentRun(
     return skipped("recruiter active");
   }
   // One wake per provider answer: a wake that ends without asking again is the agent's choice.
-  const clientNonce = `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${payload.agentRunId}:${latest.id}`;
+  // A wake that gave way to the recruiter was cancelled before it finished, so it is retried.
+  const answerNonce = `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${payload.agentRunId}:${latest.id}`;
   const runId = await deps.prisma.$transaction(async (tx) => {
     // The thread row serializes this with other automated starts in the conversation.
     const locked = await tx.thread.updateMany({
@@ -115,15 +126,20 @@ export async function waitForRecruitingAgentRun(
       data: { nextEventSeq: { increment: 0 } },
     });
     if (!locked.count) return null;
-    const [existing, running] = await Promise.all([
-      tx.run.findFirst({ where: { spaceId: thread.spaceId, clientNonce }, select: { id: true } }),
+    const [earlier, running] = await Promise.all([
+      tx.run.findMany({
+        where: { spaceId: thread.spaceId, clientNonce: { startsWith: answerNonce } },
+        select: { status: true },
+      }),
       tx.run.findFirst({
         where: { threadId: thread.id, status: { in: BUSY_STATUSES } },
         select: { id: true },
       }),
     ]);
-    if (existing) return null;
+    if (earlier.some((run) => run.status !== "cancelled") || earlier.length >= MAX_YIELDS)
+      return null;
     if (running) return "busy";
+    const clientNonce = earlier.length ? `${answerNonce}:${earlier.length}` : answerNonce;
     const task = await tx.task.create({
       data: {
         spaceId: thread.spaceId,

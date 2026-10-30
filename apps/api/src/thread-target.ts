@@ -1,7 +1,12 @@
 import { ORPCError } from "@orpc/server";
 import type { JobPublisher, SandboxProvider } from "@rakazo/adapter-kit";
-import { runContinueJob } from "@rakazo/adapter-kit";
-import { cancelComputerRunWork, screenLeaseIdForRun, toComputerRef } from "@rakazo/adapters";
+import { recruitingAgentRunWaitJob, runContinueJob } from "@rakazo/adapter-kit";
+import {
+  agentRunWaitTarget,
+  cancelComputerRunWork,
+  screenLeaseIdForRun,
+  toComputerRef,
+} from "@rakazo/adapters";
 import type {
   Actor,
   GroupMember,
@@ -35,6 +40,7 @@ import type { Prisma, PrismaClient, QueuedMessageChange, ThreadEvents } from "@r
 import {
   answerWaitingRunWithTextInTransaction,
   appendEventInTransaction,
+  cancelRunsInTransaction,
   createGroupRepos,
   createRepos,
   createThreadMessageInTransaction,
@@ -187,6 +193,45 @@ async function declineConnectionAsks(
       }))
     )
       run.status = "queued";
+}
+
+type YieldedWake = { threadId: string; botId: string; agentRunId: string };
+
+/**
+ * The recruiter's message comes first, as an interject does: a background follow-up on a
+ * still-running people search in this conversation stops at once and never takes the
+ * message. The search keeps running at the provider; its follow-up is scheduled again.
+ */
+async function yieldBackgroundWakes<
+  Run extends { id: string; taskId: string; botId?: string; clientNonce?: string | null },
+>(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  threadId: string,
+  live: Run[],
+  yielded: YieldedWake[],
+  botId?: string,
+): Promise<Run[]> {
+  const wakes = live.filter((run) => agentRunWaitTarget(run.clientNonce ?? null));
+  if (!wakes.length) return live;
+  await cancelRunsInTransaction(tx, wakes, new Date());
+  for (const wake of wakes) {
+    const wakeBotId = wake.botId ?? botId!;
+    await appendEventInTransaction(tx, {
+      spaceId: actor.spaceId,
+      threadId,
+      botId: wakeBotId,
+      type: "run.cancelled",
+      runId: wake.id,
+      payload: { reason: "yielded" },
+    });
+    yielded.push({
+      threadId,
+      botId: wakeBotId,
+      agentRunId: agentRunWaitTarget(wake.clientNonce ?? null)!,
+    });
+  }
+  return live.filter((run) => !wakes.includes(run));
 }
 
 function steersUserMessage(run: { status: string; trigger?: string | null }) {
@@ -783,9 +828,11 @@ export async function sendThreadMessage(
     throw new ORPCError("BAD_REQUEST", { message: "replyQuote requires replyToMessageId." });
   }
 
+  const yielded: YieldedWake[] = [];
   const commit = () =>
     deps.prisma.$transaction(
       async (tx) => {
+        yielded.length = 0;
         const assertCorrespondenceScope = async () => {
           if (!input.correspondenceReference) return;
           // The native message counter already locks this thread. A role switch cannot race this check.
@@ -877,14 +924,22 @@ export async function sendThreadMessage(
             clientNonce: input.clientNonce,
           });
           await assertCorrespondenceScope();
-          const activeRuns = await tx.run.findMany({
+          const live = await tx.run.findMany({
             where: {
               threadId: target.threadId,
               botId: target.botId,
               status: { in: [...ACTIVE_RUN_STATUSES] },
             },
-            select: { id: true, taskId: true, status: true, trigger: true },
+            select: { id: true, taskId: true, status: true, trigger: true, clientNonce: true },
           });
+          const activeRuns = await yieldBackgroundWakes(
+            tx,
+            actor,
+            target.threadId,
+            live,
+            yielded,
+            target.botId,
+          );
           await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
           if (waitingRuns.length && !activeRuns.some(steersUserMessage)) {
@@ -1105,14 +1160,22 @@ export async function sendThreadMessage(
           await answerStatusQuestion(tx, actor, target.threadId, busy.botId, busy, input.text);
           return { message, runs: [busy], eventSeq: asked.seq };
         }
-        const activeRuns = await tx.run.findMany({
+        const live = await tx.run.findMany({
           where: {
             threadId: target.threadId,
             botId: { in: targetBotIds },
             status: { in: [...ACTIVE_RUN_STATUSES] },
           },
-          select: { id: true, taskId: true, botId: true, status: true, trigger: true },
+          select: {
+            id: true,
+            taskId: true,
+            botId: true,
+            status: true,
+            trigger: true,
+            clientNonce: true,
+          },
         });
+        const activeRuns = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
         await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
         const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
@@ -1266,6 +1329,12 @@ export async function sendThreadMessage(
       getLogger().error("thread send realtime notification", error);
     }),
     enqueueRunsNeedingContinue(deps.jobs, committed.runs),
+    // A search follow-up that gave way picks the search up again once the recruiter is done.
+    ...yielded.map((wake) =>
+      deps.jobs
+        .enqueue(recruitingAgentRunWaitJob(wake, new Date(Date.now() + 60_000)))
+        .catch((error) => getLogger().error("search follow-up reschedule", error)),
+    ),
   ]);
   if (releaseTakeover) {
     for (const run of committed.runs) {

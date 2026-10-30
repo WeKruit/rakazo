@@ -119,6 +119,10 @@ export * from "./pipedream-connector.js";
 export * from "./private-endpoint.js";
 export * from "./railway-sandbox.js";
 export * from "./realtime.js";
+export {
+  agentRunWaitTarget,
+  RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
+} from "./recruiting-agent-run-wait.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
 export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
 export {
