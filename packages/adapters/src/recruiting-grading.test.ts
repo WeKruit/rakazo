@@ -39,6 +39,8 @@ function fixture(options: {
   researchBots?: string[];
   /** Bots whose research assignment allows only reads of earlier research. */
   readOnlyBots?: string[];
+  /** Bots whose people-search assignment allows agent runs. */
+  agentRunBots?: string[];
 }) {
   const runCreate = vi.fn(async () => ({ id: "grade-run" }));
   const taskCreate = vi.fn(async () => ({ id: "grade-task" }));
@@ -81,19 +83,31 @@ function fixture(options: {
     },
     botMcpServer: {
       findMany: vi.fn(async () =>
-        [...(options.readOnlyBots ?? []), ...(options.researchBots ?? ["sourcer"])].map(
-          (botId) => ({
+        [...(options.readOnlyBots ?? []), ...(options.researchBots ?? ["sourcer"])]
+          .map((botId) => ({
             botId,
             serverId: "server-1",
             allowAllTools: false,
             allowedTools: options.readOnlyBots?.includes(botId)
               ? ["get_task", "get_rows"]
               : ["research", "get_task", "get_rows"],
-            server: { slug: "research" },
-          }),
-        ),
+            server: { slug: "research", endpoint: "https://api.autumn.ai/mcp" },
+          }))
+          .concat(
+            (options.agentRunBots ?? []).map((botId) => ({
+              botId,
+              serverId: "server-2",
+              allowAllTools: false,
+              allowedTools: ["agent_run"],
+              server: {
+                slug: "people-search",
+                endpoint: "https://mcp.exa.ai/mcp?tools=web_search_exa,web_search_advanced_exa",
+              },
+            })),
+          ),
       ),
     },
+    externalEffect: { findMany: vi.fn(async () => []) },
     $transaction: vi.fn(async (callback: (client: unknown) => Promise<unknown>) => callback(tx)),
   };
   const enqueue = vi.fn(async () => undefined);
@@ -148,6 +162,16 @@ describe("startRecruitingGrading", () => {
     expect(f.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ name: "run.continue", payload: { runId: "grade-run" } }),
     );
+  });
+
+  it("grades with a people-search agent run when a teammate may start one", async () => {
+    const f = fixture({ found: [person("a")], agentRunBots: ["main"] });
+    await startRecruitingGrading(f.deps, { threadId: "thread" }, now);
+    expect(f.runCreate).toHaveBeenCalledExactlyOnceWith({
+      data: expect.objectContaining({ botId: "main" }),
+    });
+    expect(promptOf(f)).toContain('connectors_execute_tool with id "server-2:agent_run"');
+    expect(promptOf(f)).toContain("save_results with providerTaskId set to the run's id");
   });
 
   it("sends at most one batch, newest first", async () => {
@@ -252,10 +276,11 @@ describe("gradingToolRefusal", () => {
     ["connectors_load_tool", { id: "server-1:research" }],
     // One status read after starting is harmless.
     ["mcp__research__get_task", { task_id: "t" }],
+    // An agent run's grades are saved in the turn that ran it.
+    ["recruiting_research", { operation: "save_results" }],
   ] as const;
   const reads = [
     ["mcp__research__get_rows", { task_id: "t" }],
-    ["recruiting_research", { operation: "save_results" }],
     ["connectors_execute_tool", { id: "mcp__research__get_rows", arguments: { task_id: "t" } }],
   ] as const;
   const starts = [
@@ -263,11 +288,20 @@ describe("gradingToolRefusal", () => {
     ["connectors_execute_tool", { id: "server-1:research", arguments: { prompt: "grade" } }],
   ] as const;
 
+  it("lets the request turn grade with an agent run and save it", () => {
+    expect(
+      gradingToolRefusal("mcp__people-search__agent_run", { query: "Grade" }, start),
+    ).toBeUndefined();
+    expect(
+      gradingToolRefusal("recruiting_research", { operation: "save_results" }, start),
+    ).toBeUndefined();
+  });
+
   it("lets the request turn only start the research, then end", () => {
     for (const [name, args] of [...either, ...starts])
       expect(gradingToolRefusal(name, args, start)).toBeUndefined();
     for (const [name, args] of [...never, ...reads])
-      expect(gradingToolRefusal(name, args, start)).toMatch(/end the turn/);
+      expect(gradingToolRefusal(name, args, start)).toMatch(/end the turn/i);
   });
 
   it("lets the turn the research's finish wakes only read and save its rows", () => {
@@ -312,6 +346,7 @@ describe("gradingTools", () => {
   it("gives the request turn only what starting the grading needs", () => {
     expect(names(`${RECRUITING_GRADE_NONCE_PREFIX}thread:batch`)).toEqual([
       "recruiting_candidates",
+      "recruiting_research",
       "mcp__research__research",
       "mcp__research__get_task",
     ]);
@@ -330,6 +365,11 @@ describe("gradingTools", () => {
     const catalog = all.filter((tool) => !tool.name.startsWith("mcp__research__"));
     expect(
       gradingTools(catalog, `${RECRUITING_GRADE_NONCE_PREFIX}thread:batch`).map((t) => t.name),
-    ).toEqual(["recruiting_candidates", "connectors_search_tools", "connectors_execute_tool"]);
+    ).toEqual([
+      "recruiting_candidates",
+      "recruiting_research",
+      "connectors_search_tools",
+      "connectors_execute_tool",
+    ]);
   });
 });

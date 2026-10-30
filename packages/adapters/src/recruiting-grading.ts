@@ -22,6 +22,7 @@ const IN_FLIGHT_MS = 2 * 60 * 60_000;
 /** After a grading request that never started research, the next batch waits this long. */
 const NOT_STARTED_HOLD_MS = 30 * 60_000;
 const RESEARCH_MCP = "https://api.autumn.ai/mcp";
+const PEOPLE_SEARCH_MCP = "https://mcp.exa.ai/";
 const RESEARCH_WAKE_PREFIX = "recruiting-research-wake:";
 const BUSY_STATUSES = ["queued", "leased", "running"];
 
@@ -47,7 +48,8 @@ const GRADING_BUILTIN_TOOLS = new Set([
 ]);
 const GRADING_RESEARCH_OPERATIONS = new Set(["status", "rows", "save_results"]);
 /** The request turn only starts research; the turn its finish wakes reads and saves the grades. */
-const START_PROVIDER_TOOLS = new Set(["research", "credits"]);
+// A people-search agent run grades the batch within the turn; a research request finishes later.
+const START_PROVIDER_TOOLS = new Set(["research", "credits", "agent_run"]);
 /** A status read after starting is harmless, so the request turn may make one. */
 const START_READ_TOOLS = new Set(["get_task"]);
 const SAVE_PROVIDER_TOOLS = new Set(["get_task", "get_rows"]);
@@ -84,7 +86,7 @@ export function gradingTools<T extends { name: string }>(
   return tools.filter(
     (tool) =>
       GRADING_BUILTIN_TOOLS.has(tool.name) ||
-      (!start && tool.name === "recruiting_research") ||
+      tool.name === "recruiting_research" ||
       provider(tool.name) ||
       (!direct && (CATALOG_READ_TOOLS.has(tool.name) || tool.name === CATALOG_EXECUTE_TOOL)),
   );
@@ -130,14 +132,12 @@ export function gradingToolRefusal(
   const allowed =
     GRADING_BUILTIN_TOOLS.has(name) ||
     CATALOG_READ_TOOLS.has(name) ||
-    (!start &&
-      name === "recruiting_research" &&
-      GRADING_RESEARCH_OPERATIONS.has(String(args.operation))) ||
+    (name === "recruiting_research" && GRADING_RESEARCH_OPERATIONS.has(String(args.operation))) ||
     (direct !== undefined && gradingProviderCall(direct, args, start)) ||
     (executed !== undefined && gradingProviderCall(executed, record(args.arguments), start));
   if (allowed) return undefined;
   return start
-    ? "Not run: this turn only starts the grading research. Once it has started, the grades are read and saved automatically when it finishes, so end the turn with an empty reply."
+    ? "Not run: this turn only grades the batch: the people-search agent run, then recruiting_research save_results with its run id (or the research request, whose grades are saved when it finishes). End the turn with an empty reply."
     : "Not run: this turn only reads the grading research's rows and saves them with recruiting_research save_results; nothing else.";
 }
 
@@ -157,14 +157,23 @@ export const NOT_GRADING_TASK = {
 
 export function recruitingGradePrompt(
   people: readonly { name: string; url: string }[],
-  service: { slug: string; serverId: string },
+  service: { slug: string; serverId: string; tool: "agent_run" | "research" },
 ) {
+  const list = people.map((person) => `- ${person.name}: ${person.url}`);
+  if (service.tool === "agent_run")
+    return [
+      `Grade these ${people.length} people who are already saved in Results for this role, against the role's requirements.`,
+      `Call the people-search agent run once: mcp__${service.slug}__agent_run when it is listed, otherwise connectors_execute_tool with id "${service.serverId}:agent_run". Pass effort "auto", input.data with one {name, linkedin_url} per person below, and a query that names the role and lists every hard requirement and every preference by name, asking for each person: match_score 0 to 100, match_tier A, B or C, fit_reasons naming the evidence, concerns, and requirements_assessment with each requirement as met, not_met or unknown and the profile text that shows it. A requirement the public profile does not show is unknown, never met; never judge ethnicity, race or background from a name or photo. The server adds the output format.`,
+      "While it reports running, call it again with its runId. When it has finished, call recruiting_research save_results with providerTaskId set to the run's id, then end the turn with an empty reply. Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything.",
+      "",
+      ...list,
+    ].join("\n");
   return [
     `Have the research service grade these ${people.length} people who are already saved in Results for this role: a grade and a short reason for each against the role's requirements, saved to Results like its other results.`,
     `Start new research for this with the research service's research tool: mcp__${service.slug}__research when it is listed, otherwise connectors_execute_tool with id "${service.serverId}:research". Put the request and the people below in its prompt. Don't reply on the role's earlier research.`,
     "Grading only: don't look for anyone new, don't contact anyone and don't ask the recruiter anything. Start the research and end the turn; the grades are saved when they come back.",
     "",
-    ...people.map((person) => `- ${person.name}: ${person.url}`),
+    ...list,
   ].join("\n");
 }
 
@@ -235,14 +244,30 @@ export async function startRecruitingGrading(
       })
     : [];
   const researchByRun = new Map(research.map((task) => [task.createdByRunId, task.id]));
+  // A request graded by an agent run saved its grades in its own turn.
+  const savedRuns = new Set(
+    requests.length
+      ? (
+          await deps.prisma.externalEffect.findMany({
+            where: {
+              runId: { in: requests.map((request) => request.id) },
+              kind: "recruiting_research",
+              status: "completed",
+              request: { path: ["operation"], equals: "save_results" },
+            },
+            select: { runId: true },
+          })
+        ).map((effect) => effect.runId)
+      : [],
+  );
+  const started = (id: string) => researchByRun.has(id) || savedRuns.has(id);
   // Up to GRADE_IN_FLIGHT batches at once, since one batch takes the research service about half
   // an hour; the wake that saves a batch's grades schedules the next one. A request that never
   // started research holds the next batch for half an hour, so a failing grading turn can't
   // repeat every few minutes.
   const latest = requests[0];
   const latestAge = latest ? now - latest.createdAt.getTime() : Number.POSITIVE_INFINITY;
-  if (latest && !researchByRun.has(latest.id) && latestAge < NOT_STARTED_HOLD_MS)
-    return skipped("hold");
+  if (latest && !started(latest.id) && latestAge < NOT_STARTED_HOLD_MS) return skipped("hold");
   const recent = requests.flatMap((request) => {
     const task = researchByRun.get(request.id);
     return task && now - request.createdAt.getTime() < IN_FLIGHT_MS ? [task] : [];
@@ -264,9 +289,7 @@ export async function startRecruitingGrading(
   }
   // People whose request never reached the research service are sent again.
   const sent = sentUrls(
-    requests
-      .filter((request) => researchByRun.has(request.id))
-      .map((request) => request.task?.prompt ?? ""),
+    requests.filter((request) => started(request.id)).map((request) => request.task?.prompt ?? ""),
   );
   const [graded, found] = await Promise.all([
     // Rows the research service returned carry its grade, whatever it concluded.
@@ -366,7 +389,12 @@ export async function startRecruitingGrading(
 async function researchTeammate(
   prisma: PrismaClient,
   thread: { spaceId: string; userId: string; botId: string | null; groupId: string | null },
-): Promise<{ botId: string; slug: string; serverId: string } | null> {
+): Promise<{
+  botId: string;
+  slug: string;
+  serverId: string;
+  tool: "agent_run" | "research";
+} | null> {
   // The quality-check teammate takes grading first; any research teammate otherwise.
   const members = thread.groupId
     ? (
@@ -391,7 +419,10 @@ async function researchTeammate(
       spaceId: thread.spaceId,
       userId: thread.userId,
       botId: { in: members },
-      server: { endpoint: RESEARCH_MCP, enabled: true },
+      server: {
+        enabled: true,
+        OR: [{ endpoint: RESEARCH_MCP }, { endpoint: { startsWith: PEOPLE_SEARCH_MCP } }],
+      },
       bot: { archivedAt: null },
     },
     select: {
@@ -399,17 +430,21 @@ async function researchTeammate(
       serverId: true,
       allowAllTools: true,
       allowedTools: true,
-      server: { select: { slug: true } },
+      server: { select: { slug: true, endpoint: true } },
     },
   });
-  for (const id of members) {
-    const row = assigned.find(
-      (candidate) =>
-        candidate.botId === id &&
-        (candidate.allowAllTools ||
-          (candidate.allowedTools as unknown[] | null)?.includes("research")),
-    );
-    if (row) return { botId: row.botId, slug: row.server.slug, serverId: row.serverId };
-  }
+  // A people-search agent run grades a batch in about two minutes; research takes half an hour.
+  for (const tool of ["agent_run", "research"] as const)
+    for (const id of members) {
+      const row = assigned.find(
+        (candidate) =>
+          candidate.botId === id &&
+          (tool === "agent_run"
+            ? candidate.server.endpoint?.startsWith(PEOPLE_SEARCH_MCP)
+            : candidate.server.endpoint === RESEARCH_MCP) &&
+          (candidate.allowAllTools || (candidate.allowedTools as unknown[] | null)?.includes(tool)),
+      );
+      if (row) return { botId: row.botId, slug: row.server.slug, serverId: row.serverId, tool };
+    }
   return null;
 }

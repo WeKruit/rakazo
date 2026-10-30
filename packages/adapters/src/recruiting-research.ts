@@ -181,6 +181,52 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
     },
   },
 } as const;
+/**
+ * A grading run's rows: one per person given in input.data, with the score, tier, reasons and
+ * each requirement's met / not_met / unknown and the profile text that shows it. The row keys are
+ * the ones a research page uses, so Results shows the grade and its reasoning the same way.
+ */
+export const AGENT_RUN_GRADE_SCHEMA = {
+  type: "object",
+  required: ["rows"],
+  properties: {
+    rows: {
+      type: "array",
+      maxItems: 100,
+      items: {
+        type: "object",
+        required: [
+          "name",
+          "linkedin_url",
+          "match_score",
+          "match_tier",
+          "fit_reasons",
+          "requirements_assessment",
+        ],
+        properties: {
+          name: { type: "string" },
+          linkedin_url: { type: "string" },
+          match_score: { type: "integer", minimum: 0, maximum: 100 },
+          match_tier: { type: "string", enum: ["A", "B", "C"] },
+          fit_reasons: { type: "string" },
+          concerns: { type: ["string", "null"] },
+          requirements_assessment: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["requirement", "status", "evidence"],
+              properties: {
+                requirement: { type: "string" },
+                status: { type: "string", enum: ["met", "not_met", "unknown"] },
+                evidence: { type: ["string", "null"] },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+} as const;
 /** Most one people-search agent run (one wave) may spend, in US dollars. */
 export const AGENT_RUN_MAX_COST_USD = 10;
 /** Most saved people sent as one agent run's exclusion list. */
@@ -221,6 +267,8 @@ export async function prepareAgentRun(
         );
   }
   if (args.runId !== undefined) return args;
+  const toGrade = record(args.input)?.data;
+  const grading = Array.isArray(toGrade) && toGrade.length > 0;
   // Ultra refuses some group searches and runs past one call; auto finds the same people for less.
   const effort = args.effort === "ultra" ? "auto" : args.effort;
   const metered = effort === "auto";
@@ -240,8 +288,10 @@ export async function prepareAgentRun(
           },
         }
       : {}),
-    outputSchema: args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA,
+    outputSchema: args.outputSchema ?? (grading ? AGENT_RUN_GRADE_SCHEMA : AGENT_RUN_PEOPLE_SCHEMA),
   };
+  // People given to grade are already saved; leaving them out would leave nothing to grade.
+  if (grading) return prepared;
   const run = actor.runId
     ? await prisma.run.findFirst({
         where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
@@ -479,6 +529,18 @@ export function classifyRecruitingResearchResult(
   };
   const body = mcpObject(raw);
   if (!body) return observation;
+  // A finished people-search agent run that graded people: its structured rows are the page.
+  if (options.operation === "rows" && options.providerTaskId?.startsWith("agent_run_")) {
+    const rows = record(record(body.output)?.structured)?.rows;
+    if (body.id !== options.providerTaskId || body.status !== "completed" || !Array.isArray(rows))
+      return observation;
+    observation.observedProviderState = "completed";
+    observation.done = true;
+    observation.rows = rows;
+    observation.nextCursor = null;
+    observation.deliveryState = "accepted";
+    return observation;
+  }
   if (body.task_id != null && !nonblank(body.task_id)) return observation;
   const taskId = nonblank(body.task_id) ? body.task_id : null;
   if (options.providerTaskId && taskId && options.providerTaskId !== taskId) return observation;

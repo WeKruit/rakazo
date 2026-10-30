@@ -8895,6 +8895,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
             if (
               !applied ||
               !deps.artifacts ||
+              // A grading run's agent run grades people already in Results; it adds no one.
+              run.trigger === "recruiting_grade" ||
               route?.connectorId !== "mcp" ||
               !route.resourceId ||
               // Only the people search fills Results; a plain web search finds pages, not people.
