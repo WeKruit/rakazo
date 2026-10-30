@@ -6933,6 +6933,22 @@ async function indexRecruitingCandidateRows(
 
 type NativeCandidateSaveInput = Extract<RecruitingResearchToolInput, { operation: "save_results" }>;
 
+/** The JSON body of an agent run tool result: structured content, else its first JSON text. */
+function agentRunBody(result: unknown): { id?: unknown; status?: unknown } | undefined {
+  const value = result as { structuredContent?: unknown; content?: unknown } | null;
+  if (value?.structuredContent && typeof value.structuredContent === "object")
+    return value.structuredContent as { id?: unknown; status?: unknown };
+  for (const block of Array.isArray(value?.content) ? value.content : []) {
+    if (block?.type !== "text" || typeof block.text !== "string") continue;
+    try {
+      const parsed = JSON.parse(block.text) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed))
+        return parsed as { id?: unknown; status?: unknown };
+    } catch {}
+  }
+  return undefined;
+}
+
 async function nativeCandidatePage(
   tx: Tx,
   actor: Actor,
@@ -6950,6 +6966,59 @@ async function nativeCandidatePage(
   const role = await requireRole(tx, actor, thread.activeRecruitingRoleId, true, thread);
   if (!role.currentRevisionId || role.revision !== input.expectedRoleRevision)
     throw new RecruitingConflictError();
+  // A people-search agent run that graded people is saved like a research page: its run id
+  // names the finished call in this run, and its structured rows are the page.
+  if (input.providerTaskId.startsWith("agent_run_")) {
+    const calls = await tx.externalEffect.findMany({
+      where: {
+        spaceId: actor.spaceId,
+        runId,
+        status: "completed",
+        request: { path: ["0"], equals: "__rakazoCatalogTool" },
+        OR: [
+          { request: { path: ["2", "route", "toolName"], equals: "agent_run" } },
+          { request: { path: ["3", "toolName"], equals: "agent_run" } },
+        ],
+      },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    });
+    for (const effect of calls) {
+      if (effect.runId !== run.id || effect.spaceId !== actor.spaceId) continue;
+      const body = agentRunBody(effect.result);
+      if (body?.id !== input.providerTaskId || body.status !== "completed") continue;
+      const request = effect.request as unknown[];
+      const route = (
+        request[1] === "direct" ? (request[2] as { route?: unknown })?.route : request[3]
+      ) as { resourceId?: unknown; resourceRevision?: unknown } | null;
+      if (typeof route?.resourceId !== "string" || typeof route.resourceRevision !== "number")
+        continue;
+      if (input.mcpServerId !== undefined && route.resourceId !== input.mcpServerId) continue;
+      await requireResearchAdoption(
+        tx,
+        actor,
+        run,
+        { id: role.id, currentRevisionId: role.currentRevisionId },
+        undefined,
+        effect.createdAt,
+        { run, thread },
+      );
+      return {
+        role,
+        effect,
+        call: {
+          route: {
+            connectorId: "mcp" as const,
+            resourceId: route.resourceId,
+            resourceRevision: route.resourceRevision,
+            toolName: "get_rows" as ResearchReadTool,
+          },
+          args: { task_id: input.providerTaskId } as Prisma.InputJsonObject,
+        },
+        snapshot: { request: effect.request, providerResult: effect.result },
+      };
+    }
+    throw new IsolationError();
+  }
   // ponytail: filter the native JSON receipt; keep the full parser and provenance checks below.
   const effects = await tx.externalEffect.findMany({
     where: {
@@ -7872,9 +7941,12 @@ const savedProviderBody = Prisma.sql`COALESCE(effect."result"->'structuredConten
   WHERE block->>'type' = 'text' AND block->>'text' IS JSON OBJECT LIMIT 1
 ))`;
 // Occurrence `o`'s own saved row inside `body`; {} when the row is absent or not an object.
+// A people-search agent run's rows sit in its structured output.
 const savedProviderRow = (body: Prisma.Sql) =>
   Prisma.sql`CASE WHEN jsonb_typeof(${body}->'rows'->o."rowIndex") = 'object'
-    THEN ${body}->'rows'->o."rowIndex" ELSE '{}'::jsonb END`;
+    THEN ${body}->'rows'->o."rowIndex"
+    WHEN jsonb_typeof(${body}#>'{output,structured,rows}'->o."rowIndex") = 'object'
+    THEN ${body}#>'{output,structured,rows}'->o."rowIndex" ELSE '{}'::jsonb END`;
 const candidateMatchKeys = [
   "updated_rank",
   "overall_rank",

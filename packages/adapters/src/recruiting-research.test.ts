@@ -3,6 +3,7 @@ import type { RecruitingSourceRef } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { LoadedRecruitingRunContext } from "./recruiting-context.js";
 import {
+  AGENT_RUN_GRADE_SCHEMA,
   AGENT_RUN_MAX_COST_USD,
   AGENT_RUN_PEOPLE_SCHEMA,
   classifyRecruitingResearchResult,
@@ -115,6 +116,35 @@ describe("people-search agent runs", () => {
     // Fixed-price efforts take no budget; one the agent sent anyway is dropped.
     const low = await prepare(db, { query: "Find", effort: "low", budget: { maxCostDollars: 3 } });
     expect(low).not.toHaveProperty("budget");
+  });
+
+  it("grades given people with the grade format and leaves them in", async () => {
+    const db = fixture();
+    const people = [{ name: "Saved", linkedin_url: "https://www.linkedin.com/in/saved-person" }];
+    await expect(
+      prepare(db, { query: "Grade", effort: "auto", input: { data: people } }),
+    ).resolves.toEqual({
+      query: "Grade",
+      effort: "auto",
+      budget: { maxCostDollars: AGENT_RUN_MAX_COST_USD },
+      input: { data: people },
+      outputSchema: AGENT_RUN_GRADE_SCHEMA,
+    });
+    expect(db.recruitingCandidate.findMany).not.toHaveBeenCalled();
+  });
+
+  it("reads a finished grading run's rows as a page", () => {
+    const rows = [{ name: "A", linkedin_url: "https://www.linkedin.com/in/a", match_score: 80 }];
+    const result = (status: string, id = "agent_run_1") => ({
+      content: [
+        { type: "text", text: JSON.stringify({ id, status, output: { structured: { rows } } }) },
+      ],
+    });
+    const read = (raw: unknown) =>
+      classifyRecruitingResearchResult(raw, { operation: "rows", providerTaskId: "agent_run_1" });
+    expect(read(result("completed"))).toMatchObject({ rows, deliveryState: "accepted" });
+    expect(read(result("running")).rows).toBeUndefined();
+    expect(read(result("completed", "agent_run_2")).rows).toBeUndefined();
   });
 
   it("records a finished run's cost once, by run", async () => {
