@@ -471,6 +471,7 @@ import {
   GRADE_TOOL_CALL_STOP,
   GRADING_REPLY_GUIDANCE,
   gradingToolRefusal,
+  gradingTools,
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import {
@@ -5206,7 +5207,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The intro turn confirms how a bot read its own role before anyone hands it
         // real work — it must not be able to act on that reading (shell, computer,
         // scheduling, spawning another bot, ...) before the user has assigned any task.
-        const tools = run.trigger === "created" ? [] : [...builtins, ...exposedConnectorTools];
+        const tools =
+          run.trigger === "created"
+            ? []
+            : run.trigger === "recruiting_grade"
+              ? gradingTools([...builtins, ...exposedConnectorTools], run.clientNonce)
+              : [...builtins, ...exposedConnectorTools];
         if (run.trigger === "recruiting_grade")
           getLogger().info("recruiting.grade.tools", {
             runId: run.id,

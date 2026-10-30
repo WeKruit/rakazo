@@ -191,7 +191,8 @@ describe("resolveRecruitingContact", () => {
   });
 
   it("tells agents to resolve through role records and never guess an email", () => {
-    for (const bot of RECRUITING_DEFAULT_BOTS)
+    // The quality check never talks about people by name, so it carries no contact rules.
+    for (const bot of RECRUITING_DEFAULT_BOTS.filter((role) => role.key !== "reviewer"))
       expect(bot.instructions).toContain(
         "Resolve a person named in chat through the role's contacts and saved pool first",
       );

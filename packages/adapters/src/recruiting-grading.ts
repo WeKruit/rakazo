@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { JobPublisher } from "@rakazo/adapter-kit";
 import { recruitingGradeStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
+import { recruitingBotKey } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
@@ -45,6 +46,8 @@ const GRADING_BUILTIN_TOOLS = new Set([
 const GRADING_RESEARCH_OPERATIONS = new Set(["status", "rows", "save_results"]);
 /** The request turn only starts research; the turn its finish wakes reads and saves the grades. */
 const START_PROVIDER_TOOLS = new Set(["research", "credits"]);
+/** A status read after starting is harmless, so the request turn may make one. */
+const START_READ_TOOLS = new Set(["get_task"]);
 const SAVE_PROVIDER_TOOLS = new Set(["get_task", "get_rows"]);
 /** Tool calls one grading turn may make; a batch needs far fewer, so more means it is looping. */
 export const GRADE_TOOL_CALL_LIMIT = 60;
@@ -57,8 +60,32 @@ const CATALOG_EXECUTE_TOOL = "connectors_execute_tool";
 /** A research provider call this grading turn may make. */
 function gradingProviderCall(tool: string, args: Record<string, unknown>, start: boolean): boolean {
   return start
-    ? START_PROVIDER_TOOLS.has(tool) && args.task_id === undefined
+    ? (START_PROVIDER_TOOLS.has(tool) && args.task_id === undefined) || START_READ_TOOLS.has(tool)
     : SAVE_PROVIDER_TOOLS.has(tool);
+}
+
+/**
+ * The tools a grading turn is given, like a named agent's fixed tool list: only what its step
+ * can use, so it never reaches for a search, a connection or a role change. The connector
+ * catalog stays only when the research service is not loaded directly.
+ */
+export function gradingTools<T extends { name: string }>(
+  tools: readonly T[],
+  clientNonce: string | null,
+): T[] {
+  const start = Boolean(clientNonce?.startsWith(RECRUITING_GRADE_NONCE_PREFIX));
+  const provider = (name: string) => {
+    const tool = /^mcp__.+__([^_].*)$/.exec(name)?.[1];
+    return tool !== undefined && gradingProviderCall(tool, {}, start);
+  };
+  const direct = tools.some((tool) => provider(tool.name));
+  return tools.filter(
+    (tool) =>
+      GRADING_BUILTIN_TOOLS.has(tool.name) ||
+      (!start && tool.name === "recruiting_research") ||
+      provider(tool.name) ||
+      (!direct && (CATALOG_READ_TOOLS.has(tool.name) || tool.name === CATALOG_EXECUTE_TOOL)),
+  );
 }
 
 /** The provider tool name in a direct name (`mcp__server__tool`) or a catalog id (`server:tool`). */
@@ -318,14 +345,21 @@ async function researchTeammate(
   prisma: PrismaClient,
   thread: { spaceId: string; userId: string; botId: string | null; groupId: string | null },
 ): Promise<{ botId: string; slug: string; serverId: string } | null> {
+  // The quality-check teammate takes grading first; any research teammate otherwise.
   const members = thread.groupId
     ? (
         await prisma.chatGroupMember.findMany({
           where: { groupId: thread.groupId },
           orderBy: { createdAt: "asc" },
-          select: { botId: true },
+          select: { botId: true, bot: { select: { name: true, spawnKey: true } } },
         })
-      ).map((member) => member.botId)
+      )
+        .map((member, index) => ({
+          id: member.botId,
+          rank: member.bot && recruitingBotKey(member.bot) === "reviewer" ? -1 : index,
+        }))
+        .sort((a, b) => a.rank - b.rank)
+        .map((member) => member.id)
     : thread.botId
       ? [thread.botId]
       : [];
