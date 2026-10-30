@@ -735,6 +735,8 @@ export interface BackgroundJobPayloads {
   "recruiting_grade.start": { threadId: string; attempt?: number };
   /** Look for new candidate replies on a role conversation and tell the recruiter about them. */
   "recruiting_checkin.start": { threadId: string };
+  /** Bring a people-search agent run that outlived its turn back to the agent that started it. */
+  "recruiting_agent_run.wait": { threadId: string; botId: string; agentRunId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

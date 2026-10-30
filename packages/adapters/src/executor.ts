@@ -30,6 +30,7 @@ import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
   MEMORY_REVISION_CONFLICT_ERROR,
+  recruitingAgentRunWaitJob,
   routineJobKey,
   routineWakeupJob,
   runContinueJob,
@@ -451,6 +452,7 @@ import {
   searchChartCatalog,
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
+import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
   executeRecruitingCandidatesTool,
@@ -11415,6 +11417,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
               return finish({ ...body, background: RECRUITING_RESEARCH_DIRECT_NOTICE });
             }
             const finished = await finish(result);
+            // A people search still working when its call window closes is collected later by
+            // the same agent, even after this turn ends.
+            const stillRunning =
+              connectorCall.route?.toolName === "agent_run" && run.trigger !== "recruiting_grade"
+                ? runningAgentRunId(finished)
+                : undefined;
+            if (stillRunning)
+              await deps.jobs
+                .enqueue(
+                  recruitingAgentRunWaitJob(
+                    { threadId: thread.id, botId: bot.id, agentRunId: stillRunning },
+                    new Date(Date.now() + RECRUITING_AGENT_RUN_WAIT_MS),
+                  ),
+                )
+                .catch((error) => {
+                  getLogger().warn("agent run follow-up not scheduled", { error: String(error) });
+                });
             // The save sits between the search and the model's pick, so its cost is logged apart.
             const saveStartedAt = performance.now();
             const saved = await savePeopleSearchAsItReturns(finished);

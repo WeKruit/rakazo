@@ -34,6 +34,11 @@ const payloadSchemas = {
     attempt: z.number().int().nonnegative().optional(),
   }),
   "recruiting_checkin.start": z.object({ threadId: z.string().min(1) }),
+  "recruiting_agent_run.wait": z.object({
+    threadId: z.string().min(1),
+    botId: z.string().min(1),
+    agentRunId: z.string().min(1),
+  }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -211,5 +216,18 @@ export function recruitingCheckinStartJob(
     payload,
     replaceKey: `recruiting_checkin.start:${payload.threadId}`,
     keepExisting: true,
+  };
+}
+
+/** One pending follow-up per people-search agent run; a newer check replaces a waiting one. */
+export function recruitingAgentRunWaitJob(
+  payload: BackgroundJobPayloads["recruiting_agent_run.wait"],
+  availableAt: Date,
+): BackgroundJob {
+  return {
+    name: "recruiting_agent_run.wait",
+    payload,
+    replaceKey: `recruiting_agent_run.wait:${payload.agentRunId}`,
+    availableAt,
   };
 }
