@@ -6153,11 +6153,47 @@ function researchReadPayload(event: ResearchReadEvent): RecruitingReadPayload {
   return parsed.data.payload as RecruitingReadPayload;
 }
 
+/** True for a saved people-search agent run page; its run id lives in the result, not the request. */
+function agentRunPageRequest(request: unknown): boolean {
+  if (!Array.isArray(request) || request[0] !== "__rakazoCatalogTool") return false;
+  const route = (
+    request[1] === "direct" ? (request[2] as { route?: unknown } | null)?.route : request[3]
+  ) as { toolName?: unknown } | null | undefined;
+  return route?.toolName === "agent_run";
+}
+
 function researchReadRequest(
   request: Prisma.JsonValue | Prisma.InputJsonValue,
   task?: ResearchTaskRow,
   toolName?: ResearchReadTool,
+  /** The finished body of a saved agent run page, which names the run the page is read as. */
+  agentRun?: { id?: unknown; status?: unknown },
 ) {
+  if (!task && toolName !== "get_task" && agentRunPageRequest(request)) {
+    const parts = request as unknown[];
+    const routed = (
+      parts[1] === "direct" ? (parts[2] as { route?: unknown } | null)?.route : parts[3]
+    ) as { resourceId?: unknown; resourceRevision?: unknown } | null | undefined;
+    if (
+      typeof agentRun?.id !== "string" ||
+      !agentRun.id.startsWith("agent_run_") ||
+      agentRun.status !== "completed" ||
+      typeof routed?.resourceId !== "string" ||
+      typeof routed.resourceRevision !== "number" ||
+      !Number.isSafeInteger(routed.resourceRevision)
+    )
+      throw new IsolationError();
+    return {
+      toolName: "get_rows" as ResearchReadTool,
+      args: { task_id: agentRun.id } as Prisma.InputJsonObject,
+      route: {
+        connectorId: "mcp" as const,
+        resourceId: routed.resourceId,
+        resourceRevision: routed.resourceRevision,
+        toolName: "get_rows" as ResearchReadTool,
+      },
+    };
+  }
   if (!Array.isArray(request) || request[0] !== "__rakazoCatalogTool") throw new IsolationError();
   const payload = request[2] as {
     route?: unknown;
@@ -6730,7 +6766,12 @@ export async function listRecruitingResearch(
         await candidatePageArtifacts(tx, actor, pages, false, afterRead);
         for (const page of pages) {
           // CSV imports and people searches are unassessed lists, not provider observations.
-          if (unassessedPageRequest(page.effect.request)) continue;
+          // Agent run pages are grades, not a research task an agent continues.
+          if (
+            unassessedPageRequest(page.effect.request) ||
+            agentRunPageRequest(page.effect.request)
+          )
+            continue;
           if (paged && accepted++ < input.offset!) continue;
           const call = researchReadRequest(page.effect.request, undefined, "get_rows");
           observations.push(
@@ -6803,7 +6844,12 @@ async function indexRecruitingCandidateRows(
       )
     : [];
   if (sourceRows.length) {
-    const call = researchReadRequest(effect.request, undefined, "get_rows");
+    const call = researchReadRequest(
+      effect.request,
+      undefined,
+      "get_rows",
+      agentRunBody(effect.result),
+    );
     // ponytail: compare this authorized read view in SQL; persist row fingerprints
     // only if its growing page history outgrows this scoped scan. Caller holds the role lock.
     const reused = await tx.$queryRaw<Array<{ rowIndex: number; candidateKey: string }>>(
@@ -7850,7 +7896,14 @@ async function candidatePageArtifacts(
       artifacts.set(page.effectId, artifact);
       continue;
     }
-    const call = researchReadRequest(effect.request, undefined, "get_rows");
+    const call = researchReadRequest(
+      effect.request,
+      undefined,
+      "get_rows",
+      agentRunPageRequest(effect.request) && effect.resultJson !== null
+        ? agentRunBody(JSON.parse(effect.resultJson))
+        : undefined,
+    );
     const saved = byEvent.get(effect.id) ?? [];
     if (saved.length !== 1) throw new IsolationError();
     const event = saved[0]!;
@@ -10535,9 +10588,10 @@ function candidateSourceReference(
   rowIndex: number,
 ) {
   return {
-    providerTaskId: unassessedPageRequest(page.effect.request)
-      ? null
-      : researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id,
+    providerTaskId:
+      unassessedPageRequest(page.effect.request) || agentRunPageRequest(page.effect.request)
+        ? null
+        : researchReadRequest(page.effect.request, undefined, "get_rows").args.task_id,
     taskId: page.taskId,
     actionId: page.actionId,
     roleRevisionId: page.roleRevisionId,
