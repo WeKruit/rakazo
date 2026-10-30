@@ -285,6 +285,15 @@ describe("startRecruitingGrading", () => {
     });
     await startRecruitingGrading(room.deps, { threadId: "thread" }, now);
     expect(room.runCreate).toHaveBeenCalledOnce();
+    // An agent run grades within its own turn; research requests still out never hold it.
+    const agentRun = fixture({
+      found: [person("a")],
+      requests,
+      researched: requests.map((request) => request.id),
+      agentRunBots: ["sourcer"],
+    });
+    await startRecruitingGrading(agentRun.deps, { threadId: "thread" }, now);
+    expect(agentRun.runCreate).toHaveBeenCalledOnce();
   });
 
   it("holds the next batch for a while after a request that never started research", async () => {

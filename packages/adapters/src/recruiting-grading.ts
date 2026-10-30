@@ -274,7 +274,10 @@ export async function startRecruitingGrading(
     const task = researchByRun.get(request.id);
     return task && now - request.createdAt.getTime() < IN_FLIGHT_MS ? [task] : [];
   });
-  if (recent.length >= GRADE_IN_FLIGHT) {
+  // An agent run grades its batch within its own turn, so earlier research requests that are
+  // still out never hold it up.
+  const grader = await researchTeammate(deps.prisma, thread);
+  if (grader?.tool !== "agent_run" && recent.length >= GRADE_IN_FLIGHT) {
     const saved = await deps.prisma.run.findMany({
       where: {
         threadId: thread.id,
@@ -348,7 +351,6 @@ export async function startRecruitingGrading(
       await reportGradedRole(deps, thread, role.id, lastBatch);
     return skipped("nobody to grade");
   }
-  const grader = await researchTeammate(deps.prisma, thread);
   if (!grader) return skipped("no research teammate");
   const prompt = recruitingGradePrompt([...people.values()], grader);
   // A retry of the same people after a request that never started research is a new request.
