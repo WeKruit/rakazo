@@ -37,6 +37,7 @@ function fixture(options: {
   /** Request run ids that started research. */
   researched?: string[];
   gradesSaved?: boolean;
+  wakes?: string[];
   researchBots?: string[];
   /** Bots whose research assignment allows only reads of earlier research. */
   readOnlyBots?: string[];
@@ -62,7 +63,11 @@ function fixture(options: {
             ? { id: "wake" }
             : null,
       ),
-      findMany: vi.fn(async () => options.requests ?? []),
+      findMany: vi.fn(async ({ where }: { where: { clientNonce?: { startsWith?: string } } }) =>
+        where.clientNonce?.startsWith === "recruiting-research-wake:"
+          ? (options.wakes ?? []).map((clientNonce) => ({ clientNonce }))
+          : (options.requests ?? []),
+      ),
     },
     recruitingResearchTask: {
       findMany: vi.fn(async () =>
@@ -137,6 +142,7 @@ describe("startRecruitingGrading", () => {
         },
       ],
       researched: ["last-batch"],
+      wakes: ["recruiting-research-wake:research-last-batch:done"],
     });
     const prisma = f.prisma as unknown as {
       recruitingCandidate: { count: ReturnType<typeof vi.fn> };
@@ -156,6 +162,24 @@ describe("startRecruitingGrading", () => {
       }),
     });
     expect(promptOf(f)).toContain('sort "score"');
+    // Grades still on their way would be missing, so the report waits for them.
+    const early = fixture({
+      found: [person("graded")],
+      graded: ["linkedin:/in/graded"],
+      requests: [
+        {
+          id: "last-batch",
+          createdAt: new Date(now - 10 * 60_000),
+          task: { prompt: "Grade these\n\n- graded: https://x.test/in/graded" },
+        },
+      ],
+      researched: ["last-batch"],
+    });
+    (early.prisma as unknown as typeof prisma).recruitingCandidate = {
+      count: vi.fn(async () => 150),
+    };
+    await startRecruitingGrading(early.deps, { threadId: "thread" }, now);
+    expect(early.runCreate).not.toHaveBeenCalled();
     // A calibration-sized role gets no report.
     const small = fixture({ found: [], requests: [], researched: [] });
     (small.prisma as unknown as typeof prisma).recruitingCandidate = {
@@ -242,6 +266,10 @@ describe("startRecruitingGrading", () => {
     });
     expect(promptOf(f)).toContain('connectors_execute_tool with id "server-2:agent_run"');
     expect(promptOf(f)).toContain("save_results with providerTaskId set to the run's id");
+    // Even a short last batch checks again, which finds nobody left and reports.
+    expect(f.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "recruiting_grade.start", keepExisting: false }),
+    );
   });
 
   it("sends at most one batch, newest first", async () => {
