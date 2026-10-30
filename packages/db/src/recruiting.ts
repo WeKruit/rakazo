@@ -5699,6 +5699,12 @@ export function recruitingResearchSnapshot(task: ResearchTaskRow, action: Resear
   };
 }
 
+/** A teammate handoff's message key: one per run, or one per answered card the run resumed from. */
+function isGroupHandoffNonce(clientNonce: string | null, runId: string) {
+  const key = `group-handoff:${runId}`;
+  return clientNonce === key || Boolean(clientNonce?.startsWith(`${key}:`));
+}
+
 async function requireResearchHandoff(
   tx: Tx,
   actor: Actor,
@@ -5722,7 +5728,7 @@ async function requireResearchHandoff(
     source.externalTranscriptFor ||
     !source.botId ||
     !source.runId ||
-    source.clientNonce !== `group-handoff:${source.runId}` ||
+    !isGroupHandoffNonce(source.clientNonce, source.runId) ||
     block?.kind !== "handoff" ||
     block.fromBotId !== source.botId ||
     block.toBotId !== run.botId ||

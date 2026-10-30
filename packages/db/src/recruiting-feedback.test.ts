@@ -428,6 +428,16 @@ describe("native recruiting feedback records", () => {
     });
     expect(result.source.id).not.toContain("handoff");
   });
+  it("accepts a handoff made by a run resumed from an answered card", async () => {
+    const f = handoffFixture();
+    f.handoff.clientNonce = "group-handoff:sender-run:answer-1";
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, f.input);
+    expect(result.source.anchor).toMatchObject({ messageId: f.source.id });
+    f.handoff.clientNonce = "group-handoff:other-run:answer-1";
+    await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+      IsolationError,
+    );
+  });
   it.each(["event", "cancelled", "membership", "order", "bot-quote"] as const)(
     "rejects invalid native feedback handoff %s",
     async (boundary) => {
