@@ -1144,20 +1144,53 @@ describe("crews set up before the recruiting preset", () => {
       return { count: 1 };
     });
     (f.tx.chatGroup as unknown as { count: unknown }).count = vi.fn(async () => 0);
-    return { ...f, skills };
+    Object.assign(f.tx.chatGroupMember, {
+      count: vi.fn(async () => roleGroup.members.length),
+      createMany: vi.fn(async ({ data }: { data: Array<{ botId: string }> }) => {
+        roleGroup.members.push(...data.map((row) => ({ botId: row.botId })));
+        return { count: data.length };
+      }),
+    });
+    return { ...f, skills, roleGroup };
   }
 
   it("returns the existing crew instead of failing, and brings it to the defaults", async () => {
     const f = legacy();
     const result = await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
     expect(result).toEqual({ botId: "old-main", groupId: "old-role" });
-    expect(native.bot).not.toHaveBeenCalled();
+    // Only the role added after these crews were set up joins, with its research tools.
+    expect(native.bot.mock.calls.map(([, , input]) => input.name)).toEqual(["Reviewer"]);
+    const reviewer = f.bots.find((bot) => bot.name === "Reviewer")!;
+    expect(f.roleGroup.members).toContainEqual({ botId: reviewer.id });
+    expect(f.tx.botMcpServer.createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          botId: reviewer.id,
+          serverId: "old-autumn",
+          allowedTools: ["credits", "research", "get_task", "get_rows"],
+        }),
+      ],
+      skipDuplicates: true,
+    });
     const main = f.bots.find((bot) => bot.id === "old-main")!;
     expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
     expect(main.name).toBe("Main");
     expect(main.disabledBuiltinTools).toContain("request_secret");
     expect(f.skills.map((skill) => skill.name)).toEqual(["My own notes"]);
-    expect(f.presets[0]).toMatchObject({ version: "legacy", config: { legacy: true } });
+    expect(f.presets[0]).toMatchObject({
+      version: "legacy",
+      config: { legacy: true, added: ["reviewer"] },
+    });
+  });
+
+  it("adds a new role once and never brings a deleted one back", async () => {
+    const f = legacy();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    const reviewer = f.bots.find((bot) => bot.name === "Reviewer")!;
+    reviewer.archivedAt = new Date();
+    f.presets[0]!.digest = "older catalog";
+    await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
+    expect(native.bot).toHaveBeenCalledTimes(1);
   });
 
   it("is idempotent and applies later default changes", async () => {
@@ -1214,11 +1247,12 @@ describe("crews set up before the recruiting preset", () => {
       "old-sourcer",
       "old-outreach",
       "old-scheduling",
+      f.bots.find((bot) => bot.name === "Reviewer")!.id,
     ]);
     f.routines.splice(1, 1);
     f.presets[0]!.digest = "older catalog";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(f.routines).toHaveLength(3);
+    expect(f.routines).toHaveLength(4);
     expect(f.presets[0]!.config).toMatchObject({
       legacy: true,
       routines: { sourcer: "routine-1" },

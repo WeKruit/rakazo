@@ -230,8 +230,12 @@ export function recruitingBotKey(bot: {
   name?: string | null;
   spawnKey?: string | null;
 }): (typeof RECRUITING_DEFAULT_BOTS)[number]["key"] | undefined {
+  // Crews set up before the managed preset are known by name; their lead's onboarding key is not
+  // a role key.
   return RECRUITING_DEFAULT_BOTS.find((role) =>
-    bot.spawnKey ? bot.spawnKey.endsWith(`:${role.key}`) : bot.name === role.name,
+    bot.spawnKey?.startsWith("recruiting:")
+      ? bot.spawnKey.endsWith(`:${role.key}`)
+      : bot.name === role.name,
   )?.key;
 }
 
