@@ -1,4 +1,5 @@
 import type { PrismaClient } from "@rakazo/db";
+import { createDb, Prisma } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RecruitingRoleReply } from "./recruiting-tools.js";
 
@@ -242,5 +243,28 @@ describe("sweepRecruitingCheckins", () => {
         payload: { threadId: "source" },
       }),
     );
+  });
+});
+
+describe("check-in queries", () => {
+  it("are valid for the real schema", async () => {
+    // Nothing listens on port 1: a valid query fails only on the connection, never on its shape.
+    const { prisma, pool } = createDb("postgres://user:pass@127.0.0.1:1/db");
+    try {
+      const jobs = { enqueue: vi.fn(async () => undefined) };
+      const error = await sweepRecruitingCheckins({
+        prisma,
+        jobs,
+        now: new Date(now),
+        batchSize: 1,
+      }).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeDefined();
+      expect(error).not.toBeInstanceOf(Prisma.PrismaClientValidationError);
+    } finally {
+      await pool.end();
+    }
   });
 });

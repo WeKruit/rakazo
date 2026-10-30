@@ -47,7 +47,7 @@ export async function sweepRecruitingCheckins(deps: {
       },
       runs: { some: { updatedAt: { gte: new Date(deps.now.getTime() - ACTIVE_WITHIN_MS) } } },
     },
-    orderBy: [{ updatedAt: "desc" }, { id: "asc" }],
+    orderBy: [{ createdAt: "desc" }, { id: "asc" }],
     take: deps.batchSize,
     select: { id: true, activeRecruitingRole: { select: { sourceThreadId: true } } },
   });
