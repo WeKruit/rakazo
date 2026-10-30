@@ -18,6 +18,7 @@ function fixture(options: {
   busy?: boolean;
   woken?: boolean;
   member?: boolean;
+  talking?: boolean;
 }) {
   const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "wake" }));
   const taskCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "task" }));
@@ -51,6 +52,7 @@ function fixture(options: {
       findFirst: vi.fn(async () => (options.member === false ? null : { botId: "sourcer" })),
     },
     externalEffect: { findMany: vi.fn(async () => options.answers) },
+    message: { findFirst: vi.fn(async () => (options.talking ? { id: "message" } : null)) },
     $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
   };
   const jobs = { enqueue: vi.fn(async () => undefined) };
@@ -75,7 +77,11 @@ describe("people-search agent runs that outlive their turn", () => {
       }),
     });
     expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain(
-      'Call agent_run with runId "agent_run_1"',
+      'Call agent_run with runId "agent_run_1" once',
+    );
+    // A run still going ends the wake quietly instead of holding the conversation.
+    expect(test.taskCreate.mock.calls[0]?.[0].data.prompt).toContain(
+      "end the turn with an empty reply",
     );
     expect(test.jobs.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ name: "run.continue" }),
@@ -105,6 +111,15 @@ describe("people-search agent runs that outlive their turn", () => {
         replaceKey: "recruiting_agent_run.wait:agent_run_1",
         availableAt: new Date(now + 60_000),
       }),
+    );
+  });
+
+  it("waits while the recruiter is writing in the conversation", async () => {
+    const test = fixture({ answers: [answer("newest", "running")], talking: true });
+    await waitForRecruitingAgentRun(test, payload, now);
+    expect(test.runCreate).not.toHaveBeenCalled();
+    expect(test.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "recruiting_agent_run.wait" }),
     );
   });
 
