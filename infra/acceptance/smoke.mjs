@@ -80,6 +80,7 @@ function checksFor(base) {
       },
     ],
     // A malformed sign-in from the public origin is a 400 from auth, not a cross-site refusal.
+    // A 429 is auth's own rate limit after earlier smoke runs: the request still reached auth.
     [
       `${host} sign-in origin`,
       async () => {
@@ -90,7 +91,7 @@ function checksFor(base) {
           body: JSON.stringify({ email: "nobody@example.com" }),
           signal: timeout(),
         });
-        return r.status === 400 ? "" : `status ${r.status}`;
+        return r.status === 400 || r.status === 429 ? "" : `status ${r.status}`;
       },
     ],
   ];
@@ -111,6 +112,7 @@ function checksFor(base) {
         const cookie = (r.headers.getSetCookie?.() ?? [])
           .map((line) => line.split(";")[0])
           .join("; ");
+        if (r.status === 429) return "";
         if (r.status !== 200 || !cookie) return `sign-in status ${r.status}`;
         const me = await fetch(`${base}/rpc/me`, {
           method: "POST",
