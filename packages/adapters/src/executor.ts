@@ -486,7 +486,7 @@ import {
   RecruitingProfileError,
 } from "./recruiting-profiles.js";
 import { prepareRecruitingReply, runRecruitingReplyPreflight } from "./recruiting-reply.js";
-import { mcpObject } from "./recruiting-research.js";
+import { lookedUpContacts, mcpObject } from "./recruiting-research.js";
 import {
   RECRUITING_RESEARCH_DIRECT_NOTICE,
   trackDirectRecruitingResearch,
@@ -520,6 +520,7 @@ import type { RemoteTransportDependencies } from "./remote-mcp.js";
 import { assertSafeRemoteUrl } from "./remote-mcp.js";
 import { loadReplyContext, messageToAgentHistoryText } from "./reply-context.js";
 import { requestConnection } from "./request-connection.js";
+import { nextRoleContactBatch } from "./role-contact-batch.js";
 import { lazyRunComputer } from "./run-computer.js";
 import { createRunContextWatch, readRunContextSnapshot } from "./run-context-notice.js";
 import {
@@ -5556,6 +5557,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // its searches are still adding people.
         const searchTotals: number[] = [];
         let earlyHandoffBounced = false;
+        // People still to look up for a find_emails next_from_role request after this run's last batch.
+        let contactLookupOwed: { target: number; remaining: number } | undefined;
         let askDeclineBounced = false;
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
@@ -5892,6 +5895,44 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : name === "recruiting_role"
                 ? normalizeRecruitingRoleArgs(rawArgs, new Date().toISOString())
                 : rawArgs;
+          // A lookup for the first N people of the role: the server picks the next batch in Results
+          // order, so the agent never pages the list or decides the order itself.
+          if (name.endsWith("__find_emails") && typeof args.next_from_role === "number") {
+            const roleId = thread.activeRecruitingRoleId;
+            if (!roleId)
+              return {
+                error:
+                  "next_from_role works in a role conversation. Pass the people (name, LinkedIn URL, company) instead.",
+              };
+            const actor = { spaceId: run.spaceId, userId: run.userId };
+            const target = args.next_from_role;
+            const batch = await nextRoleContactBatch(
+              deps.prisma,
+              actor,
+              roleId,
+              target,
+              await lookedUpContacts(deps.prisma, actor),
+            );
+            contactLookupOwed = batch.remaining
+              ? { target, remaining: batch.remaining }
+              : undefined;
+            if (!batch.people.length)
+              return {
+                summary: {
+                  looked_up: 0,
+                  already_looked_up: batch.alreadyLookedUp,
+                  without_linkedin: batch.withoutProfile,
+                  next_step: `Every one of the first ${target} people with a LinkedIn link is looked up. Report the counts from recruiting_candidates or the earlier results now.`,
+                },
+              };
+            const { next_from_role: _next, people: _people, ...rest } = args;
+            args = {
+              ...rest,
+              people: batch.people,
+              next_from_role: target,
+              remaining_after: batch.remaining,
+            };
+          }
           if (
             name === "recruiting_role" &&
             args.operation === "update" &&
@@ -13112,6 +13153,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   worked: turnReport.worked(),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
+                  ...(contactLookupOwed
+                    ? {
+                        owedWork: `Continue the contact lookup: ${contactLookupOwed.remaining} of the first ${contactLookupOwed.target} people are still to look up. Call find_emails with next_from_role ${contactLookupOwed.target} again now and keep calling until none are left, then report how many have an email. Do not stop, decline or ask before that.`,
+                      }
+                    : {}),
                   stage: async () => {
                     const roleId = (
                       await deps.prisma.thread.findUnique({

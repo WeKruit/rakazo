@@ -1091,17 +1091,46 @@ describe("planDeclineRetry", () => {
     tools: [{ name: "recruiting_role" }],
   };
 
-  it("retries a decline once per human message, handing it to the teammate who can", async () => {
+  it("retries a decline up to the auto-continue limit, handing it to the teammate who can", async () => {
     const retry = await planDeclineRetry(
       { prisma: prisma([{ clientNonce: "send:human" }]) },
       input,
     );
     expect(retry?.note).toContain("bot_id bot-o");
-    expect(
-      await planDeclineRetry(
-        { prisma: prisma([{ clientNonce: "autocontinue:run-1:decline" }]) },
-        input,
+    const retried = (times: number) => ({
+      prisma: prisma(
+        Array.from({ length: times }, (_, index) => ({
+          clientNonce: `autocontinue:run-${index}:decline`,
+        })),
       ),
+    });
+    expect((await planDeclineRetry(retried(2), input))?.note).toContain("bot_id bot-o");
+    expect(await planDeclineRetry(retried(3), input)).toBeUndefined();
+  });
+
+  it("keeps a long task going while the server counts work left, until a card or the limit", async () => {
+    const retried = (times: number) => ({
+      prisma: prisma(
+        Array.from({ length: times }, (_, index) => ({
+          clientNonce: `autocontinue:run-${index}:decline`,
+        })),
+      ),
+    });
+    const owedWork =
+      "Continue the contact lookup: 448 of the first 500 people are still to look up.";
+    const done = {
+      ...input,
+      reply: "Looked up 52 people; 49 have an email.",
+      worked: true,
+      owedWork,
+    };
+    expect((await planDeclineRetry(retried(5), done))?.note).toBe(owedWork);
+    expect(await planDeclineRetry(retried(20), done)).toBeUndefined();
+    expect(
+      await planDeclineRetry(retried(1), {
+        ...done,
+        blocks: [{ kind: "ask", text: "Which list?", status: "pending" }],
+      }),
     ).toBeUndefined();
   });
 
