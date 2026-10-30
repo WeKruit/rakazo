@@ -282,7 +282,8 @@ async function settled(groupId, { quietMs = 20_000, limitMs = 3 * 60_000 } = {})
 const CONTACT_REPORT =
   /(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)[^.\n]{0,80}\d|\d[^.\n]{0,80}(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)/i;
 /** 找contact, 找contact again and 发20个人的先 in a role chat with saved people. Never answers the card. */
-async function contactsAndSend(groupId, failures) {
+async function contactsAndSend(groupId, failures, name) {
+  const startedAt = new Date().toISOString();
   const contacts = await say(groupId, "找contact");
   if (!contacts.replies.length) failures.push("「找contact」 got no reply");
   else if (!CONTACT_REPORT.test(recruiterSees(contacts.replies).map(botText).join("\n")))
@@ -313,6 +314,12 @@ async function contactsAndSend(groupId, failures) {
   });
   if (!send.replies.some(sendCard))
     failures.push("「发20个人的先」 did not end on a send confirmation card");
+  // Tool calls and runs of these steps, kept before the end-of-run archive makes the chat unreadable.
+  const events = (await readEvents(groupId).catch(() => [])).filter(
+    (event) =>
+      event.createdAt > startedAt && /^(?:agent\.tool\.|run\.|thread\.message\.)/.test(event.type),
+  );
+  fs.writeFileSync(path.join(OUT, `${name}-contacts.events.json`), JSON.stringify(events, null, 1));
 }
 
 const results = [];
@@ -484,7 +491,7 @@ if (wanted.has("contacts"))
     if (code !== 0) return failures.push("first ten did not pass; see contacts.log");
     const groupId = reportOf("contacts").groupId;
     await settled(groupId);
-    await contactsAndSend(groupId, failures);
+    await contactsAndSend(groupId, failures, "contacts");
     const transcript = (await messagesOf(groupId))
       .map((message) => `[${message.role}] ${botText(message)}`)
       .join("\n\n");
@@ -529,7 +536,7 @@ if (wanted.has("t1"))
     if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
       failures.push("campaign draft is not three emails shown in chat");
     if (!/^\s*[-*•]\s/m.test(drafted)) failures.push("job duties in the draft are not bullets");
-    await contactsAndSend(groupId, failures);
+    await contactsAndSend(groupId, failures, "t1");
     const transcript = (await messagesOf(groupId))
       .map((message) => `[${message.role}] ${botText(message)}`)
       .join("\n\n");

@@ -158,6 +158,11 @@ async function signIn() {
   const password = process.env.RAKAZO_PASSWORD;
   if (!email || !password) fail("Set RAKAZO_EMAIL and RAKAZO_PASSWORD, or RAKAZO_TOKEN");
   let result = await auth("sign-in/email", { email, password });
+  // Sign-in is rate limited; a release's smoke check or the previous case may have used it up.
+  for (let attempt = 0; result.status === 429 && attempt < 3; attempt += 1) {
+    await sleep(60_000);
+    result = await auth("sign-in/email", { email, password });
+  }
   if (result.status === 401 && flag("--signup")) {
     // First run for a dedicated test account. Signup policy (allowlist, mailbox proof) still applies.
     const created = await auth("sign-up/email", { email, password, name: "Latency test" });
