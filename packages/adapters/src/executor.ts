@@ -607,7 +607,12 @@ import {
 } from "./turn-end-guard.js";
 import { chooseTurnModel } from "./turn-model.js";
 import type { TurnWork } from "./turn-report.js";
-import { questionStatesWork, TurnReportLedger, turnReportText } from "./turn-report.js";
+import {
+  declinedSentence,
+  questionStatesWork,
+  TurnReportLedger,
+  turnReportText,
+} from "./turn-report.js";
 import {
   botMessageOutcomeFromMidTurn,
   clampUserProgressMessage,
@@ -1041,6 +1046,41 @@ async function searchTargetAlreadyMet(
   if (!scale || scale.total < scale.target) return undefined;
   return `Not handed off: Results already holds ${scale.total} people, meeting the recruiter's target of ${scale.target}. Do not run a deep search; tell the recruiter the total and offer the next step.`;
 }
+
+/** The recruiter limited the scale-out to the quick people search. */
+const QUICK_SEARCH_ONLY =
+  /quick (?:people )?search only|only (?:the )?quick (?:people )?search|no deep(?:er)? (?:research|search)|只用快速|不要深度|不用深度/i;
+
+/**
+ * A scale-out handoff while the people searches still add people, or after the recruiter limited
+ * the search to them: the coordinator keeps searching (or reports) instead.
+ */
+export async function scaleHandoffTooEarly(
+  prisma: Pick<PrismaClient, "thread" | "message" | "recruitingCandidate">,
+  threadId: string,
+  searchTotals: readonly number[],
+): Promise<string | undefined> {
+  const scale = await scaleTarget(prisma, threadId);
+  if (!scale || scale.total >= scale.target) return undefined;
+  const latest = await prisma.message.findFirst({
+    where: { threadId, role: "user" },
+    orderBy: { seq: "desc" },
+    select: { blocks: true },
+  });
+  const said = ((latest?.blocks ?? []) as MessageBlock[])
+    .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+    .join("\n");
+  if (QUICK_SEARCH_ONLY.test(said))
+    return `Not handed off: the recruiter limited this to the quick people search. Keep running waves of four people searches until the target of ${scale.target} is met or a wave adds fewer than five new people; then report the exact count and end on the next-step card offering the deeper search.`;
+  // The last wave is the last four searches; the total before it is the one just ahead of them.
+  if (searchTotals.length < 5) return undefined;
+  const added = searchTotals.at(-1)! - searchTotals.at(-5)!;
+  if (added < 5) return undefined;
+  return `Not handed off: the last wave of people searches still added ${added} new people (${scale.total} of the ${scale.target} target in Results). Run another wave of four differently worded people searches now${scale.target > 200 ? " with numResults 100" : ""}, and keep going until the target is met or a wave adds fewer than five; hand off only the part still missing after that.`;
+}
+
+const ASK_DECLINES =
+  "Not asked: this question refuses the recruiter's request. Never decline a clear request. A search scoped by what people state on their own profiles (a group, association, language, school or place) is an ordinary filter: do the work as asked, without inferring anything from names or photos, and ask only a real decision the recruiter must make.";
 
 /**
  * A handed-in stage used to stay silent for 20-200 s while the specialist read context and ran
@@ -5512,6 +5552,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let firstPicksShown = false;
         // People searches this run sent, so a short round can ask once two sets came back short.
         let peopleSearchesRun = 0;
+        // The role's total after each people search this run, so a scale-out cannot hand off while
+        // its searches are still adding people.
+        const searchTotals: number[] = [];
+        let earlyHandoffBounced = false;
+        let askDeclineBounced = false;
         // A recruiter question written in Chinese without the recruiter asking for it goes back once.
         let askLanguageBounced = false;
         let emptySearchesBounced = false;
@@ -8931,6 +8976,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     deps.prisma.recruitingCandidate.count({ where: { roleId } }),
                     scaleTarget(deps.prisma, thread.id).catch(() => undefined),
                   ]);
+                  searchTotals.push(peopleInResults);
                   return {
                     savedToResults: true,
                     peopleInResults,
@@ -11197,6 +11243,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               String(args.message ?? ""),
             );
             if (met) return finish({ skipped: met });
+            if (!earlyHandoffBounced) {
+              const early = await scaleHandoffTooEarly(deps.prisma, thread.id, searchTotals);
+              if (early) {
+                earlyHandoffBounced = true;
+                return finish({ error: early });
+              }
+            }
             const result = await handoffToGroupBot(deps, run, thread.groupId, {
               turnKey: nativeSources?.currentAnswer?.id,
               bot_id: args.bot_id ? String(args.bot_id) : undefined,
@@ -12267,6 +12320,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               onToolCallDelta: streamRoundPicks,
               beforeAsk: async (question, plannedSearches) => {
                 if (handedOff) return { instead: ASK_AFTER_HANDOFF };
+                if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
+                  askDeclineBounced = true;
+                  return { instead: ASK_DECLINES };
+                }
                 await briefSaving;
                 await turnReport.caughtUpToAsk();
                 // A run that recorded a round asks the next-step choice, which is asked anew each round,
