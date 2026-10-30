@@ -593,6 +593,7 @@ import {
   listBoardTickets,
   updateTicket,
 } from "./ticket-tools.js";
+import { createToolFixMemory, withKnownFix } from "./tool-fixes.js";
 import { advanceToolCallLoopGuard, loopGuardStopText } from "./tool-loop.js";
 import { textContentArg } from "./tool-text.js";
 import {
@@ -11474,10 +11475,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // A role save still running when a question card pauses the turn would lose its lease and be
         // refused; the card waits for it instead.
         const savesInFlight = new Set<Promise<unknown>>();
+        const toolFixes = createToolFixMemory({
+          memory: deps.memory,
+          context,
+          botId: bot.id,
+          runId,
+          threadId: thread.id,
+        });
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
           const [name, rawArgs, executionId] = call;
           const applied = applyToolNow(...call).then(
-            (result) => {
+            async (result) => {
               if (run.trigger === "recruiting_grade") {
                 const error = toolResultError(result);
                 getLogger().info("recruiting.grade.tool_result", {
@@ -11499,15 +11507,34 @@ export function createRunExecutor(deps: ExecutorDeps) {
                       }),
                 });
               }
+              const failure = toolResultError(result);
               turnReport.settle(executionId, {
-                ok: toolResultError(result) === undefined,
+                ok: failure === undefined,
                 result,
                 readOnly: connectorReadOnly.get(executionId),
               });
-              return result;
+              if (failure === undefined) {
+                await toolFixes.succeeded(name, rawArgs);
+                return result;
+              }
+              const errorText = redactSecrets(
+                typeof failure === "string" ? failure : JSON.stringify(failure),
+                runSecrets,
+              );
+              const note = await toolFixes.failed(name, rawArgs, errorText);
+              return note ? withKnownFix(result, note) : result;
             },
-            (error: unknown) => {
+            async (error: unknown) => {
               turnReport.settle(executionId, { ok: false });
+              // Only plain errors carry a message meant for the model; typed ones are control flow.
+              if (error instanceof Error && error.constructor === Error) {
+                const note = await toolFixes.failed(
+                  name,
+                  rawArgs,
+                  redactSecrets(error.message, runSecrets),
+                );
+                if (note) error.message = `${error.message}\n\n${note}`;
+              }
               throw error;
             },
           );
