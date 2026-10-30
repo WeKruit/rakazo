@@ -291,6 +291,10 @@ describe("startRecruitingGrading", () => {
     });
     expect(promptOf(f)).toContain('connectors_execute_tool with id "server-2:agent_run"');
     expect(promptOf(f)).toContain("save_results with providerTaskId set to the run's id");
+    // A job opening is graded on fit for the job, not on one listed condition.
+    expect(promptOf(f)).toContain(
+      "current role, experience and seniority against the job description",
+    );
     // Even a short last batch checks again, which finds nobody left and reports.
     expect(f.enqueue).toHaveBeenCalledWith(
       expect.objectContaining({ name: "recruiting_grade.start", keepExisting: false }),
