@@ -499,6 +499,31 @@ describe("Pi connector tool dispatch", () => {
     );
   });
 
+  it("shortens an over-long question option instead of failing the card", async () => {
+    fakeAgentState.mode = "empty";
+    for await (const _event of new PiAgentRuntime().run(
+      {
+        botId: "b",
+        threadId: "t",
+        runId: "r",
+        prompt: "ask",
+        history: [],
+        instructions: "Ask",
+        tools: [builtinAgentTools.find((tool) => tool.name === "ask_user")!],
+        model: { provider: "test", id: "dispatch-test-model" },
+        executeTool: vi.fn(async () => ({ ok: true })),
+      },
+      { signal: new AbortController().signal },
+    )) {
+      /* Exhaust the runtime. */
+    }
+    const ask = fakeAgentState.tools.find((tool) => tool.name === "ask_user")!;
+    const long = `Remote in the US only, ${"with strong evidence of leading teams ".repeat(3)}`;
+    const prepared = ask.prepareArguments!({ question: "Where?", options: [long, "Onsite"] });
+    expect(prepared.options).toEqual([`${long.slice(0, 79).trimEnd()}…`, "Onsite"]);
+    expect((prepared.options as string[])[0]!.length).toBeLessThanOrEqual(80);
+  });
+
   it("injects durable steering at Pi's next safe turn boundary", async () => {
     fakeAgentState.mode = "empty";
     let claimCount = 0;

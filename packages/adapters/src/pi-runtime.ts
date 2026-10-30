@@ -1631,7 +1631,13 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
         return { reason: String(raw.reason ?? "I need you on the screen.") };
       }
       if (tool.name === "ask_user") {
-        const options = Array.isArray(raw.options) ? raw.options.map(String) : raw.options;
+        // An over-long option keeps its start instead of failing the card (80 characters).
+        const options = Array.isArray(raw.options)
+          ? raw.options.map((option) => {
+              const text = String(option).trim();
+              return text.length > 80 ? `${text.slice(0, 79).trimEnd()}…` : text;
+            })
+          : raw.options;
         return {
           // An over-long question loses its leading sentences instead of failing the card.
           question: shortQuestion(String(raw.question ?? "What should I use?")),
