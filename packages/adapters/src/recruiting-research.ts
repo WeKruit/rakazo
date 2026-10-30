@@ -701,10 +701,16 @@ export function createRecruitingCandidateReportReader(
           const direct = boundDirectApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
           const catalog = catalogApprovalDetails(snapshot?.request, "__rakazoCatalogTool");
           const route = direct?.route ?? catalog?.route;
-          const args = direct?.args ?? catalog?.args.arguments;
+          // A grading agent run's page is read by the run id in its own result.
+          const agentRun =
+            route?.toolName === "agent_run" ? mcpObject(snapshot.providerResult) : null;
+          const args =
+            agentRun && typeof agentRun.id === "string"
+              ? { task_id: agentRun.id }
+              : (direct?.args ?? catalog?.args.arguments);
           if (
             route?.connectorId !== "mcp" ||
-            route.toolName !== "get_rows" ||
+            (route.toolName !== "get_rows" && !agentRun) ||
             !args ||
             typeof args !== "object" ||
             Array.isArray(args) ||
