@@ -131,6 +131,17 @@ describe("people-search agent runs", () => {
       outputSchema: AGENT_RUN_GRADE_SCHEMA,
     });
     expect(db.recruitingCandidate.findMany).not.toHaveBeenCalled();
+    // The agent's own schema would drop the reasons and tier Results shows.
+    const own = { type: "object", properties: { score: { type: "number" } } };
+    await expect(
+      prepare(db, { query: "Grade", input: { data: people }, outputSchema: own }),
+    ).resolves.toMatchObject({ outputSchema: AGENT_RUN_GRADE_SCHEMA });
+    expect(AGENT_RUN_GRADE_SCHEMA.properties.rows.items.properties.match_tier.enum).toEqual([
+      "Strong",
+      "Promising",
+      "Partial",
+      "Uncertain",
+    ]);
   });
 
   it("reads a finished grading run's rows as a page", () => {

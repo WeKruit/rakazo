@@ -182,9 +182,9 @@ export const AGENT_RUN_PEOPLE_SCHEMA = {
   },
 } as const;
 /**
- * A grading run's rows: one per person given in input.data, with the score, tier, reasons and
- * each requirement's met / not_met / unknown and the profile text that shows it. The row keys are
- * the ones a research page uses, so Results shows the grade and its reasoning the same way.
+ * A grading run's rows: one per person given in input.data, in the research service's own row
+ * format (canonical person columns, match_score 0–100, match_tier Strong / Promising / Partial /
+ * Uncertain, fit_reasons, concerns, requirements_assessment), so Results reads them unchanged.
  */
 export const AGENT_RUN_GRADE_SCHEMA = {
   type: "object",
@@ -198,18 +198,27 @@ export const AGENT_RUN_GRADE_SCHEMA = {
         required: [
           "name",
           "linkedin_url",
+          "current_title",
+          "current_company",
+          "location",
+          "evidence_urls",
           "match_score",
           "match_tier",
           "fit_reasons",
+          "concerns",
           "requirements_assessment",
         ],
         properties: {
           name: { type: "string" },
           linkedin_url: { type: "string" },
+          current_title: { type: ["string", "null"] },
+          current_company: { type: ["string", "null"] },
+          location: { type: ["string", "null"] },
+          evidence_urls: { type: ["array", "null"], items: { type: "string" } },
           match_score: { type: "integer", minimum: 0, maximum: 100 },
-          match_tier: { type: "string", enum: ["A", "B", "C"] },
+          match_tier: { type: "string", enum: ["Strong", "Promising", "Partial", "Uncertain"] },
           fit_reasons: { type: "string" },
-          concerns: { type: ["string", "null"] },
+          concerns: { type: "array", items: { type: "string" } },
           requirements_assessment: {
             type: "array",
             items: {
@@ -288,7 +297,8 @@ export async function prepareAgentRun(
           },
         }
       : {}),
-    outputSchema: args.outputSchema ?? (grading ? AGENT_RUN_GRADE_SCHEMA : AGENT_RUN_PEOPLE_SCHEMA),
+    // A grading run always returns the research row format; an agent's own schema would drop it.
+    outputSchema: grading ? AGENT_RUN_GRADE_SCHEMA : (args.outputSchema ?? AGENT_RUN_PEOPLE_SCHEMA),
   };
   // People given to grade are already saved; leaving them out would leave nothing to grade.
   if (grading) return prepared;
