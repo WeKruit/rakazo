@@ -114,6 +114,18 @@ describe("findEmails", () => {
     expect(calls).toEqual(["POST app.fullenrich.com/api/v1/contact/enrich/bulk"]);
   });
 
+  it("does not count a source with no credits as a paid lookup", async () => {
+    const { fetch } = provider({
+      "https://app.fullenrich.com/": () => new Response("{}", { status: 402 }),
+      "https://api.leadmagic.io/": () => new Response("{}", { status: 402 }),
+    });
+    const result = await findEmails(
+      { people: people.slice(2) },
+      { ...options, fetch, keys: { fullenrich: "k1", leadmagic: "k3" } },
+    );
+    expect(result.summary).toEqual({ looked_up: 1, found: 0, verified: 0, paid_lookups: 0 });
+  });
+
   it("never charges a source again for someone it already found nothing for", async () => {
     const searched = new Map([
       ["linkedin:/in/bo-sample", new Set(["fullenrich", "contactout", "leadmagic"] as const)],

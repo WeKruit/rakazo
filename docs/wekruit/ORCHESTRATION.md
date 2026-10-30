@@ -24,11 +24,19 @@ Defaults live in `packages/core/src/recruiting-defaults.ts` and reach every acco
 
 ## Search mode per step
 
-From the 10-30 benchmark (`/mnt/project-files/exa-bench-20261030/REPORT.md`): the quick people search returns many more qualified people in seconds but only 30–72% qualify raw; the research service returns fewer, 69–92% qualified, almost entirely different people in 5–7 minutes.
+From the 10-30 benchmark (`/mnt/project-files/exa-bench-20261030/REPORT.md`, three roles, same judge):
 
-- First look or calibration (10–20): quick search, four queries at once.
-- Scale: quick-search waves, then the research service for the rest.
-- Hard or technical role: read Reviewer's grades before calling the target met.
+| Mode | First 20 | One big run | Qualified |
+|---|---|---|---|
+| Quick people search | 1–3 s for 100 | many waves | 30–72% raw |
+| People-search agent run (one call) | 40 s–3.5 min, about $0.10–0.50 | 107–500 people in 2–23 min, $0.21–9.77 | 90–95% small, 68–78% big |
+| Research service | 25 per task in 5–7 min | not measured at 500 | 69–92% |
+
+The three return mostly different people (overlap 4–53).
+
+- First look or calibration (10–20): quick search, four queries at once, because results must show in seconds.
+- Scale: one people-search agent run per wave, with the people already saved excluded; continue when a run stops short. The research service is an optional second source. Until the agent run is a product tool, scale uses quick-search waves, then the research service.
+- Every big run is graded by Reviewer: 22–32% of agent-run people did not show every requirement on their profile.
 - A mode that worked for a role is kept in Main's bot memory.
 
 ## Limits that end loops

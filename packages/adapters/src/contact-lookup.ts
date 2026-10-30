@@ -230,11 +230,12 @@ export async function findEmails(
         ).length;
         return skipped ? { already_looked_up: skipped } : {};
       })(),
+      // Only a source that answered (or accepted the job) charged; no credits or a refusal did not.
       paid_lookups: people.filter((person) =>
         person.lookups.some(
           (lookup) =>
             lookup.provider !== "saved" &&
-            lookup.outcome !== "skipped" &&
+            ["found", "not_found", "pending"].includes(lookup.outcome) &&
             lookup.detail !== SEARCHED_BEFORE,
         ),
       ).length,
