@@ -7848,7 +7848,10 @@ function readCandidateCursor(cursor: string | undefined, scope: string): Candida
       throw new Error();
     return value;
   } catch {
-    throw new RecruitingConflictError();
+    // Not a revision conflict: the cursor came from a list with other filters, or the pool moved.
+    throw new RecruitingConflictError(
+      "This cursor belongs to a different list (other query or filters). Call again without cursor to start from the first page with these filters.",
+    );
   }
 }
 function writeCandidateCursor(scope: string, value: string, key: string): string {
