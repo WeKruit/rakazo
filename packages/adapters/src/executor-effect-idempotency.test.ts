@@ -5749,3 +5749,72 @@ describe("integration hunks: shell scope, external-text refusal, interject, memo
     });
   });
 });
+
+describe("remembered tool fixes", () => {
+  it("learns the change that fixed a failed call and hands it to the next run's same error", async () => {
+    const saved: Array<{ path: string; content: string; scope: string; botId?: string }> = [];
+    const first = fixture("run-fix-1");
+    first.memoryCommit.mockImplementation((async (request: (typeof saved)[number]) => {
+      saved.push(request);
+      return { path: request.path, revision: 1 };
+    }) as never);
+    let failNext = true;
+    (first.web.search as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (!failNext) return [];
+      failNext = false;
+      throw new Error("Page token 8812 cannot be combined with a new filter");
+    });
+    first.setCalls([
+      { name: "web_search", args: { query: "usc alumni", mode: "strict" }, executionId: "a" },
+      { name: "web_search", args: { query: "usc alumni" }, executionId: "b" },
+    ]);
+    await first.run();
+    expect(first.results[0]).toMatchObject({ error: expect.stringContaining("Page token") });
+    expect(first.results[0]).not.toHaveProperty("knownFix");
+    const fixes = saved.find((request) => request.path === "tool-fixes.md");
+    expect(fixes).toMatchObject({ scope: "bot", botId: first.runData.botId });
+    expect(fixes?.content).toContain("`web_search` failed with");
+    expect(fixes?.content).toContain("worked after: removed `mode`");
+
+    const second = fixture("run-fix-2");
+    second.memoryRead.mockImplementation(async (request: { scope: string; path?: string }) => ({
+      documents:
+        request.scope === "bot" && request.path === "tool-fixes.md"
+          ? [{ id: "doc-1", path: "tool-fixes.md", content: fixes!.content, revision: 1 }]
+          : [],
+    }));
+    (second.web.search as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      throw new Error("Page token 9145 cannot be combined with a new filter");
+    });
+    second.setCalls([
+      { name: "web_search", args: { query: "usc", mode: "strict" }, executionId: "c" },
+    ]);
+    await second.run();
+    expect(second.results[0]).toMatchObject({
+      error: expect.stringContaining("Page token 9145"),
+      knownFix: expect.stringContaining("What worked then: removed `mode`"),
+    });
+  });
+
+  it("keeps the tool result unchanged when memory cannot be read or saved", async () => {
+    const f = fixture("run-fix-3");
+    f.memoryRead.mockImplementation(async (request: { scope: string; path?: string }) => {
+      if (request.path === "tool-fixes.md") throw new Error("database unavailable");
+      return { documents: [] };
+    });
+    f.memoryCommit.mockRejectedValue(new Error("database unavailable"));
+    let failNext = true;
+    (f.web.search as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      if (!failNext) return [];
+      failNext = false;
+      throw new Error("Search provider timed out");
+    });
+    f.setCalls([
+      { name: "web_search", args: { query: "usc" }, executionId: "d" },
+      { name: "web_search", args: { query: "usc" }, executionId: "e" },
+    ]);
+    await f.run();
+    expect(f.results[0]).toEqual({ error: "Search provider timed out" });
+    expect(f.results[1]).toEqual({ results: [] });
+  });
+});
