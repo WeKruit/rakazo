@@ -19,6 +19,9 @@ import {
 import type { ZodError } from "zod";
 import { peopleTargetFrom } from "./people-target.js";
 
+/** People to reach when the recruiter accepts a round without naming a number. */
+const DEFAULT_SCALE_TARGET = 150;
+
 export class RecruitingFeedbackValidationError extends Error {
   constructor(message: string) {
     super(message);
@@ -160,7 +163,9 @@ export async function executeRecruitingFeedback(
     const inResults = await deps.prisma.recruitingCandidate.count({
       where: { roleId: feedback.roleId },
     });
-    const target = peopleTargetFrom(feedback.intent.quote, inResults) ?? Math.max(100, inResults);
+    const target =
+      peopleTargetFrom(feedback.intent.quote, inResults) ??
+      Math.max(DEFAULT_SCALE_TARGET, inResults);
     return {
       ...result,
       status: approved.already ? "already_recorded" : "recorded",
