@@ -796,4 +796,9 @@ export const RU_MESSAGES: Record<string, string> = {
   "Source unavailable": "Источник недоступен",
   "Worked for {duration}": "Работа заняла {duration}",
   "Step failed": "Шаг не выполнен",
+  "Finding candidates": "Поиск кандидатов",
+  "Checking candidates": "Проверка кандидатов",
+  "Preparing outreach": "Подготовка рассылки",
+  "Scheduling interviews": "Планирование собеседований",
+  "Delegated task": "Поручённая задача",
 };

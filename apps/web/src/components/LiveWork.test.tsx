@@ -134,3 +134,58 @@ it("shows business progress beside the step in flight", () => {
   );
   expect(container.textContent).toContain("Searching candidates…");
 });
+
+it("puts each handed-off stage under one entry named for its purpose", () => {
+  const sourcerRow = {
+    id: "progress:r2",
+    runId: "r2",
+    seq: 6,
+    role: "bot",
+    blocks: [
+      { kind: "steps", steps: [{ label: "Recruiting research", count: 2 }] },
+    ] as MessageBlock[],
+  };
+  let session = observeWorkSession(
+    null,
+    {
+      runs: [{ id: "r1", botId: "main", status: "running", startedAt: at(0) }],
+      messages: [liveRow],
+    },
+    at(10),
+  );
+  session = observeWorkSession(
+    session,
+    {
+      runs: [{ id: "r2", botId: "bot-7", status: "running", startedAt: at(11) }],
+      messages: [liveRow, sourcerRow],
+    },
+    at(12),
+  );
+  act(() =>
+    root.render(
+      <LiveWork
+        session={session}
+        live
+        label="Working…"
+        stageKind={(botId) => (botId === "bot-7" ? "sourcing" : "other")}
+      />,
+    ),
+  );
+  const stage = container.querySelector<HTMLDetailsElement>('[data-testid="work-stage"]');
+  expect(stage?.open).toBe(true);
+  expect(stage?.dataset.running).toBe("true");
+  expect(stage?.querySelector("summary")?.textContent).toContain("Finding candidates");
+  expect(stage?.textContent).toContain("Searching candidates ×2");
+  expect(container.textContent).not.toContain("bot-7");
+
+  session = observeWorkSession(session, { runs: [], messages: [liveRow, sourcerRow] }, at(40));
+  act(() =>
+    root.render(<LiveWork session={session} live={false} label="" stageKind={() => "sourcing"} />),
+  );
+  const done = container.querySelector<HTMLDetailsElement>('[data-testid="work-stage"]');
+  expect(done?.open).toBe(false);
+  expect(done?.dataset.running).toBeUndefined();
+  expect(container.querySelector('[data-testid="work-summary"]')?.textContent).toContain(
+    "Finding candidates",
+  );
+});

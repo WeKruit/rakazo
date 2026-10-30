@@ -962,6 +962,10 @@ msgid "Checking candidate records"
 msgstr "正在查看候选人记录"
 
 #: src/components/LiveWork.tsx
+msgid "Checking candidates"
+msgstr "核查候选人"
+
+#: src/components/LiveWork.tsx
 msgid "Checking connections"
 msgstr "正在检查连接"
 
@@ -2056,6 +2060,10 @@ msgstr "默认范围"
 msgid "Degree"
 msgstr "学位"
 
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr "分派的任务"
+
 #: src/pages/Artifacts.tsx
 #: src/pages/BotContextMenu.tsx
 #: src/pages/KnowledgeSection.tsx
@@ -2204,6 +2212,7 @@ msgstr "Docker 限制对你电脑的访问，以提高安全性。使用{hostLab
 msgid "Does not match"
 msgstr "不符合"
 
+#: src/components/LiveWork.tsx
 #: src/pages/ActivityList.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Done"
@@ -2521,6 +2530,10 @@ msgstr "查找模型"
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Find work history"
 msgstr "查找工作经历"
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr "寻找候选人"
 
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
@@ -4173,6 +4186,10 @@ msgstr "已准备"
 msgid "Preparing a question"
 msgstr "正在准备问题"
 
+#: src/components/LiveWork.tsx
+msgid "Preparing outreach"
+msgstr "准备联系邮件"
+
 #: src/pages/Artifacts.tsx
 msgid "Preview isn't available for this file type — download it to view it."
 msgstr "这种文件类型无法预览，请下载后查看。"
@@ -5021,6 +5038,10 @@ msgstr "已安排"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Scheduling"
 msgstr "面试排期"
+
+#: src/components/LiveWork.tsx
+msgid "Scheduling interviews"
+msgstr "安排面试"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Scopes"
@@ -6125,6 +6146,10 @@ msgstr "流程状态"
 #: src/components/LiveWork.tsx
 msgid "Working on it"
 msgstr "正在处理"
+
+#: src/components/LiveWork.tsx
+msgid "Working…"
+msgstr "处理中…"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Years of experience"

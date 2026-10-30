@@ -771,4 +771,9 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Source unavailable": "无法获取来源",
   "Worked for {duration}": "用时 {duration}",
   "Step failed": "步骤失败",
+  "Finding candidates": "寻找候选人",
+  "Checking candidates": "核查候选人",
+  "Preparing outreach": "准备联系邮件",
+  "Scheduling interviews": "安排面试",
+  "Delegated task": "分派的任务",
 };
