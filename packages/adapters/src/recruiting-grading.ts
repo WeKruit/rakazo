@@ -4,10 +4,10 @@ import { recruitingGradeStartJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import { recruitingBotKey } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
+import { listRecruitingCandidates, RECRUITING_GRADE_NONCE_PREFIX } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 
-/** Nonce prefix of the run that hands a conversation's newly found people to the research service. */
-export const RECRUITING_GRADE_NONCE_PREFIX = "recruiting-grade:";
+export { RECRUITING_GRADE_NONCE_PREFIX };
 /** Newly saved searches settle this long before grading starts, so one request covers them. */
 export const RECRUITING_GRADE_SETTLE_MS = 30_000;
 /** A busy conversation is checked again this often, for at most this many tries (about 1 hour). */
@@ -421,7 +421,57 @@ export async function startRecruitingGrading(
 export const RECRUITING_GRADE_REPORT_NONCE_PREFIX = "recruiting-grade-report:";
 /** Only a scaled-out role gets the ranked report; calibration rounds are reviewed person by person. */
 const GRADE_REPORT_MIN_PEOPLE = 100;
-const GRADE_REPORT_PROMPT = `Every person saved for this role now has a grade. Read them with recruiting_candidates list sort "score" (limit 100; follow nextCursor while there is one), then post one short message to the recruiter: how many people are Strong, Promising, Partial and Uncertain, then the ten with the highest scores, each as name, current role, score and tier, with one line from that person's fit reasons (read with recruiting_candidates sources). Report the grades as given; never grade, rank or judge anyone yourself. Do not search, grade, save or contact anyone, and ask no question. End the turn.`;
+const TIERS = ["Strong", "Promising", "Partial", "Uncertain"] as const;
+const REPORT_TOP = 10;
+
+/**
+ * The role's grades as Results shows them, read by the server so the message counts every
+ * person: a model paging through hundreds of rows miscounts.
+ */
+async function gradedSummary(
+  prisma: PrismaClient,
+  thread: { spaceId: string; userId: string },
+  roleId: string,
+): Promise<{ counts: Map<string, number>; top: string[] }> {
+  const actor = {
+    spaceId: thread.spaceId,
+    userId: thread.userId,
+    email: "",
+    isDeploymentOwner: false,
+  };
+  const counts = new Map<string, number>(TIERS.map((tier) => [tier, 0]));
+  const top: string[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await listRecruitingCandidates(prisma, actor, {
+      roleId,
+      sort: "score",
+      limit: 200,
+      ...(cursor ? { cursor } : {}),
+    });
+    for (const item of page.items) {
+      const tier = item.match?.tier;
+      if (tier) counts.set(tier, (counts.get(tier) ?? 0) + 1);
+      if (top.length < REPORT_TOP && typeof item.match?.score === "number") {
+        const role = [item.title, item.company].filter(Boolean).join(" at ");
+        top.push(
+          `${top.length + 1}. ${item.name ?? item.linkedinUrl ?? item.candidateKey}${role ? `, ${role}` : ""}: score ${item.match.score}${tier ? `, ${tier}` : ""} (candidateKey ${item.candidateKey})`,
+        );
+      }
+    }
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
+  return { counts, top };
+}
+
+export function gradeReportPrompt(summary: { counts: Map<string, number>; top: string[] }) {
+  return [
+    `Every person saved for this role now has a grade. As saved in Results: ${TIERS.map((tier) => `${tier} ${summary.counts.get(tier) ?? 0}`).join(", ")}. The highest scores:`,
+    ...summary.top,
+    "",
+    "Read each of these people's fit reasons with recruiting_candidates sources (by candidateKey), then post one short message to the recruiter: the counts above exactly as given, then these people in this order, each as name, current role, score and tier with one line from their fit reasons. Report the grades as given; never grade, rank, recount or judge anyone yourself. Do not search, grade, save or contact anyone, and ask no question. End the turn.",
+  ].join("\n");
+}
 
 /**
  * When grading has nobody left to grade, the lead posts the role's people ranked by grade with
@@ -452,6 +502,12 @@ async function reportGradedRole(
     : thread.botId;
   if (!lead) return;
   const clientNonce = `${RECRUITING_GRADE_REPORT_NONCE_PREFIX}${thread.id}:${lastBatch.id}`;
+  const reported = await deps.prisma.run.findFirst({
+    where: { spaceId: thread.spaceId, clientNonce },
+    select: { id: true },
+  });
+  if (reported) return;
+  const prompt = gradeReportPrompt(await gradedSummary(deps.prisma, thread, roleId));
   const runId = await deps.prisma.$transaction(async (tx) => {
     const locked = await tx.thread.updateMany({
       where: { id: thread.id, spaceId: thread.spaceId },
@@ -472,7 +528,7 @@ async function reportGradedRole(
         botId: lead,
         threadId: thread.id,
         userId: thread.userId,
-        prompt: GRADE_REPORT_PROMPT,
+        prompt,
         status: "queued",
       },
     });

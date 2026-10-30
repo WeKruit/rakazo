@@ -136,10 +136,12 @@ describe("candidate listing and shortlist boundaries", () => {
     const statement = f.tx.$queryRaw.mock.calls[0]![0] as { sql: string };
     // Match fields come only from the stored occurrence column: no saved-page parse and no
     // correlated external_effects subquery per row, even for legacy NULL rows (prod 500, 24 s).
+    // Grading pages are read once per role, not per row.
+    expect(statement.sql).not.toContain('e."id" = o.');
+    expect(statement.sql).not.toContain('e."id" = page."effectId" AND');
     expect(statement.sql).not.toContain("match_rows");
     expect(statement.sql).not.toContain("WITH ORDINALITY");
     expect(statement.sql).toContain(`COALESCE(o."matchFields", '{}'::jsonb)`);
-    expect(statement.sql).not.toContain("external_effects");
     expect(statement.sql).not.toContain("structuredContent");
     expect(statement.sql).not.toContain("matchBackfill");
     expect(statement.sql).toContain("totals LEFT JOIN candidate_page ON true");
@@ -749,7 +751,7 @@ describe("candidate listing and shortlist boundaries", () => {
           );
           // Scores read on 0–100: explicit fractions convert, plain numbers use the result's scale.
           expect(numericScore).toContain("SELECT round(LEAST(100, GREATEST(0, s.v)))");
-          expect(numericScore).toContain('* rank_scope."scoreScale"');
+          expect(numericScore).toContain('ELSE rank_scope."scoreScale" END');
           expect(firstQuery.sql).toContain("WHEN max(plain.v) <= 10 THEN 10 ELSE 1 END");
           // Numeric strings ("45") count as provider numbers; "Unknown" does not.
           expect(firstQuery.values).toContain(
