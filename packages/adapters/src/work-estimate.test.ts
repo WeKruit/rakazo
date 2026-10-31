@@ -40,12 +40,12 @@ describe("countdowns for big work", () => {
       mcp({ id: "agent_run_1", status: "running" }),
       { query: "Find 500 more USC alumni" },
     );
-    expect(note).toContain("about 17 minutes");
+    expect(note).toContain("about 10 minutes");
     expect(note).toContain("email_when_done");
     expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
       kind: "work_estimate",
       idempotencyKey: "work_estimate:agent_run_1",
-      request: { kind: "search", people: 500, estimateMs: 17 * 60_000 },
+      request: { kind: "search", people: 500, estimateMs: 10 * 60_000 },
     });
   });
 

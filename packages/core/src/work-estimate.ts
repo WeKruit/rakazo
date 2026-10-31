@@ -20,19 +20,19 @@ export const WORK_COUNTDOWN_MIN_PEOPLE = 100;
 /** People to assume when a search names no count: the scale step's default target. */
 export const WORK_DEFAULT_PEOPLE = 100;
 const MINUTE = 60_000;
-const MIN_ESTIMATE_MS = 5 * MINUTE;
-/** Workloop's longest wait; past it the agent reports and the countdown starts over. */
-const MAX_ESTIMATE_MS = 30 * MINUTE;
+/** Countdown lengths, like Workloop's wait timeouts: the estimate rounds up to the next one. */
+const STEPS_MIN = [2, 5, 10, 15, 20, 25, 30];
 /**
- * Measured on live roles: a 300-person wave took 4–10 minutes, ultra waves about 20, and 500
- * contact lookups 25 minutes. Rounded up so a countdown rarely runs out before the work does.
+ * Measured on live roles: 100 people arrived in about 2 minutes, a 300-person wave in 4–10, and
+ * 500 contact lookups took 25 minutes.
  */
-const MS_PER_PERSON: Record<WorkEstimateKind, number> = { search: 2_000, emails: 3_000 };
+const MS_PER_PERSON: Record<WorkEstimateKind, number> = { search: 1_200, emails: 3_000 };
 
 export function estimateWorkMs(kind: WorkEstimateKind, people: number): number | null {
   if (!Number.isFinite(people) || people < WORK_COUNTDOWN_MIN_PEOPLE) return null;
-  const ms = Math.min(MAX_ESTIMATE_MS, Math.max(MIN_ESTIMATE_MS, people * MS_PER_PERSON[kind]));
-  return Math.ceil(ms / MINUTE) * MINUTE;
+  const minutes = (people * MS_PER_PERSON[kind]) / MINUTE;
+  const step = STEPS_MIN.find((value) => value >= minutes) ?? STEPS_MIN[STEPS_MIN.length - 1];
+  return (step ?? 30) * MINUTE;
 }
 
 /** Whole countdowns that have run out since the work started. */
