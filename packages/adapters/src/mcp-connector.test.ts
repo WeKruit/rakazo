@@ -1645,7 +1645,7 @@ describe("MCP connector session cache", () => {
     try {
       const tool = (await connector.discoverTools(contextWith(new AbortController().signal)))[0]!;
       const caller = new AbortController();
-      const events = [];
+      const events: unknown[] = [];
       const cancelled = (async () => {
         for await (const event of connector.execute(
           { tool: tool.name, args: {}, route: tool.route, executionId: "cancelled" },
@@ -1659,7 +1659,7 @@ describe("MCP connector session cache", () => {
       await cancelled;
       expect(events).toMatchObject([{ type: "error" }]);
       state.hang = false;
-      const next = [];
+      const next: unknown[] = [];
       for await (const event of connector.execute(
         { tool: tool.name, args: {}, route: tool.route, executionId: "next" },
         contextWith(new AbortController().signal),
