@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import type { AdapterContext, ArtifactStore } from "@rakazo/adapter-kit";
+import type { AdapterContext, ArtifactStore, MemoryCommitRequest } from "@rakazo/adapter-kit";
 import type {
   Actor,
   CreateRecruitingRoleInput,
@@ -341,6 +341,46 @@ describePostgres("recruiting domain (PostgreSQL)", () => {
     const context = { ...f.context, sourceMessageId: f.message.id, effectRequest: input };
     return { ...f, input, context, reader };
   }
+
+  it("admits group notes only for the run's own group conversation", async () => {
+    const f = await assessmentFixture("Group notes fixture");
+    await prisma.thread.update({
+      where: { id: f.thread.id },
+      data: { activeRecruitingRoleId: f.role.id },
+    });
+    const other = await prisma.chatGroup.create({
+      data: { spaceId, userId, name: "Other room", members: { create: { botId } } },
+    });
+    const authorize = (groupId: string, extra: Partial<MemoryCommitRequest> = {}) =>
+      prisma.$transaction((tx) =>
+        recruiting.authorizeRecruitingMemoryCommit(
+          tx,
+          {
+            scope: "group",
+            groupId,
+            path: "NOTES.md",
+            content: "Sourcer owns outreach",
+            expectedRevision: 0,
+            sourceRunId: f.run.id,
+            sourceThreadId: f.thread.id,
+            ...extra,
+          },
+          {
+            operationId: "group-notes",
+            traceId: "group-notes",
+            spaceId,
+            userId,
+            botId,
+            runId: f.run.id,
+            signal: new AbortController().signal,
+          },
+          null,
+        ),
+      );
+    await expect(authorize(f.group.id)).resolves.toBeUndefined();
+    await expect(authorize(other.id)).rejects.toThrow(IsolationError);
+    await expect(authorize(f.group.id, { botId })).rejects.toThrow(IsolationError);
+  });
 
   it.each(["create", "revise"] as const)(
     "atomically recovers native role %s after commit ACK loss without overriding newer human state",

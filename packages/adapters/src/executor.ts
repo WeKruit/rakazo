@@ -4702,8 +4702,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           "memoryContext",
           messagingChannelRun
             ? Promise.resolve({ text: undefined, documents: [] })
-            : loadAgentMemoryContext(deps.memory, bot.id, context, undefined, (text) =>
-                redactSecrets(text, runSecrets),
+            : loadAgentMemoryContext(
+                deps.memory,
+                bot.id,
+                context,
+                undefined,
+                (text) => redactSecrets(text, runSecrets),
+                thread.groupId,
               ),
         );
         // What the frozen prompt was built from, read beside the setup loads; later turn
@@ -4832,6 +4837,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context,
             undefined,
             (text) => redactSecrets(text, runSecrets),
+            thread.groupId,
           );
         };
         const adoptRecruitingContext = async (
@@ -10157,15 +10163,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return deliverRecruitingRoleResult(result, args.operation === "read");
           }
           if (name === "read_memory") {
-            if (args.scope !== "bot" && args.scope !== "user") {
-              return finish({ error: "scope must be bot or user" });
+            if (args.scope !== "bot" && args.scope !== "user" && args.scope !== "group") {
+              return finish({ error: "scope must be bot, user or group" });
+            }
+            if (args.scope === "group" && !thread.groupId) {
+              return finish({ error: "Group memory exists only in a group conversation." });
             }
             if (typeof args.path !== "string" || !args.path.trim()) {
               return finish({ error: "path is required" });
             }
             const path = args.path.trim();
             const snapshot = await deps.memory.read(
-              { scope: args.scope, botId: args.scope === "bot" ? bot.id : undefined, path },
+              {
+                scope: args.scope,
+                botId: args.scope === "bot" ? bot.id : undefined,
+                groupId: args.scope === "group" ? (thread.groupId ?? undefined) : undefined,
+                path,
+              },
               context,
             );
             const document = snapshot.documents[0];
@@ -10176,18 +10190,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
               revision: document?.revision ?? 0,
             });
           }
-          if (name === "remember" || name === "save_shared_memory") {
-            const shared = name === "save_shared_memory";
+          if (
+            name === "remember" ||
+            name === "save_shared_memory" ||
+            name === "save_group_memory"
+          ) {
+            const shared = name !== "remember";
+            const groupId =
+              name === "save_group_memory" ? (thread.groupId ?? undefined) : undefined;
+            if (name === "save_group_memory" && !groupId)
+              return finish({ error: "Group memory exists only in a group conversation." });
             const invalid =
               (shared ? sharedMemorySaveError(args) : undefined) ?? nativeMemorySaveError(args);
             if (invalid) return finish({ error: invalid });
             const path = typeof args.path === "string" ? args.path.trim() : "MEMORY.md";
-            const scope = shared ? "user" : "bot";
+            const scope = groupId ? "group" : shared ? "user" : "bot";
             const botId = shared ? undefined : bot.id;
             let content = args.content as string;
             if (args.edit !== undefined) {
               // Partial edit: merge into the loaded document; commit still checks expectedRevision.
-              const current = await deps.memory.read({ scope, botId, path }, context);
+              const current = await deps.memory.read({ scope, botId, groupId, path }, context);
               const merged = applyMemoryEdit(
                 current.documents[0]?.content ?? "",
                 args.edit as { find: string; replace: string },
@@ -10208,6 +10230,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 {
                   scope,
                   ...(botId ? { botId } : {}),
+                  ...(groupId ? { groupId } : {}),
                   path,
                   content,
                   expectedRevision: args.expectedRevision as number,
@@ -10221,7 +10244,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               const message = error instanceof Error ? error.message : "Could not save memory";
               if (message !== MEMORY_REVISION_CONFLICT_ERROR) throw error;
-              const current = await deps.memory.read({ scope, botId, path }, context);
+              const current = await deps.memory.read({ scope, botId, groupId, path }, context);
               return finish({
                 error: message,
                 currentRevision: current.documents[0]?.revision ?? 0,
@@ -14162,6 +14185,7 @@ export function selectBuiltinToolsForRun(options: {
           "recruiting_crm_import",
           "read_memory",
           "save_shared_memory",
+          "save_group_memory",
           "save_memory",
           "recall_memory",
           "forget_memory",

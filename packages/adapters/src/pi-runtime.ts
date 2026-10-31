@@ -1166,6 +1166,7 @@ export function describeToolActivity(toolName: string, args: unknown): string {
   if (toolName === "create_space") return `Creating space: ${detail(record.name)}`;
   if (toolName === "remember") return "Saving a note to memory";
   if (toolName === "save_shared_memory") return `Saving shared memory: ${detail(record.path)}`;
+  if (toolName === "save_group_memory") return `Saving group notes: ${detail(record.path)}`;
   if (toolName === "web_search") return `Searching the web: ${detail(record.query)}`;
   if (toolName === "web_fetch") return `Reading page: ${detail(redactActivityUrl(record.url))}`;
   if (toolName === "skill_read") return `Reading skill: ${detail(record.name)}`;

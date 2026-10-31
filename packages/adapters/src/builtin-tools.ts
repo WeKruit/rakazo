@@ -665,11 +665,11 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "read_memory",
     description:
-      "Read a native Markdown memory document and its revision before preparing a full replacement. User scope is shared across this user's bots in this Space.",
+      "Read a native Markdown memory document and its revision before preparing a full replacement. User scope is shared across this user's bots in this Space; group scope is shared by the assistants in this group conversation.",
     inputSchema: {
       type: "object",
       properties: {
-        scope: { type: "string", enum: ["bot", "user"] },
+        scope: { type: "string", enum: ["bot", "user", "group"] },
         path: { type: "string" },
       },
       required: ["scope", "path"],
@@ -809,6 +809,27 @@ export const builtinAgentTools: ConnectorTool[] = [
           required: ["find", "replace"],
         },
         recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
+      },
+      required: ["path", "expectedRevision"],
+    },
+  },
+  {
+    name: "save_group_memory",
+    description:
+      "Save a note shared by the assistants in this group conversation, such as who is doing what, open questions and decisions made here. Other conversations do not see it. Read it with read_memory scope group first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}. Recruiting preferences belong in recruiting_feedback, not here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Document name, for example NOTES.md." },
+        content: { type: "string", description: "The document's complete new content." },
+        expectedRevision: { type: "integer", minimum: 0 },
+        edit: {
+          type: "object",
+          description:
+            "Partial edit: replace the single exact occurrence of find with replace. Mutually exclusive with content.",
+          properties: { find: { type: "string", minLength: 1 }, replace: { type: "string" } },
+          required: ["find", "replace"],
+        },
       },
       required: ["path", "expectedRevision"],
     },

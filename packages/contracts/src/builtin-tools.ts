@@ -33,6 +33,7 @@ export const BUILTIN_TOOL_NAMES = [
   "remember",
   "read_memory",
   "save_shared_memory",
+  "save_group_memory",
   "recruiting_role",
   "recruiting_assess",
   "recruiting_candidates",

@@ -39,7 +39,7 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
 ): T[] {
   return tools.filter(
     (tool) =>
-      (groupId || tool.name !== "handoff_to_bot") &&
+      (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
       // In a group the room is the shared surface: hand the stage to a member
       // rather than starting a private thread off to one side.
       (!groupId || tool.name !== "message_bot"),

@@ -20,6 +20,7 @@ const SKIPPED = new Set([
   "read_memory",
   "save_memory",
   "save_shared_memory",
+  "save_group_memory",
   "remember",
 ]);
 

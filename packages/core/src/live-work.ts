@@ -42,6 +42,7 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   remember: "memory",
   save_memory: "memory",
   save_shared_memory: "memory",
+  save_group_memory: "memory",
   mcp_list_tools: "connections",
   mcp_search: "connections",
   mcp_execute_tool: "connected_action",
