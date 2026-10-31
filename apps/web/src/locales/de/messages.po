@@ -6368,3 +6368,19 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr "Beendet"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr "Abstimmen"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr "Endet in {time}"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr "Deine Stimme konnte nicht gespeichert werden"

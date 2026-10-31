@@ -112,13 +112,13 @@ export function buildApprovalAskBlock(
   const preference = parsedPreference.success ? parsedPreference.data : undefined;
   const nativeMemory =
     args.recruitingFeedback === undefined &&
-    ["remember", "save_shared_memory"].includes(toolName) &&
+    ["remember", "save_shared_memory", "save_group_memory"].includes(toolName) &&
     !nativeMemorySaveError(args) &&
-    (toolName !== "save_shared_memory" || !sharedMemorySaveError(args));
+    (toolName === "remember" || !sharedMemorySaveError(args));
   const summary = preference
     ? `${{ add: "saving", replace: "updating", revoke: "removing" }[preference.operation]} a recruiting preference`
     : nativeMemory
-      ? `saving ${toolName === "save_shared_memory" ? "shared" : "private"} memory`
+      ? `saving ${{ save_shared_memory: "shared", save_group_memory: "group" }[toolName] ?? "private"} memory`
       : describeApprovalAction(toolName, args, redactSecrets(toolName, secrets));
   const detail = options?.instantlyActivation
     ? formatInstantlyActivation(options.instantlyActivation)
@@ -454,7 +454,7 @@ function formatApprovalDetail(
   if (nativeMemory) {
     lines.push(
       `Memory note: ${typeof args.path === "string" ? args.path.trim() : "MEMORY.md"}`,
-      `Applies to: ${toolName === "save_shared_memory" ? "your bots in this space" : "this bot"}`,
+      `Applies to: ${{ save_shared_memory: "your bots in this space", save_group_memory: "the assistants in this group" }[toolName] ?? "this bot"}`,
       args.edit !== undefined
         ? `Replace:\n${(args.edit as { find: string }).find}\n\nWith:\n${(args.edit as { replace: string }).replace}`
         : `Content:\n${args.content}`,

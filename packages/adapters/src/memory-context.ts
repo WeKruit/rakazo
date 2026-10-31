@@ -1,17 +1,22 @@
 import { createHash } from "node:crypto";
-import type { AdapterContext, MemorySnapshot, MemoryStore } from "@rakazo/adapter-kit";
+import type {
+  AdapterContext,
+  MemoryDocumentScope,
+  MemorySnapshot,
+  MemoryStore,
+} from "@rakazo/adapter-kit";
 
 const MAX_AGENT_MEMORY_BYTES = 32 * 1024;
 const MEMORY_CUT_NOTICE_MAX_BYTES = 1024;
 const MEMORY_CUT_NOTICE = "\n\nCut for space; read with read_memory when relevant.";
 
 type ScopedMemoryDocument = MemorySnapshot["documents"][number] & {
-  scope: "bot" | "user";
+  scope: MemoryDocumentScope;
 };
 
 export type LoadedMemoryDocument = {
   id: string;
-  scope: "bot" | "user";
+  scope: MemoryDocumentScope;
   path: string;
   revision: number;
   /** Hash of the stored version before redaction or truncation. */
@@ -31,14 +36,18 @@ export async function loadAgentMemoryContext(
   context: AdapterContext,
   maxBytes = MAX_AGENT_MEMORY_BYTES,
   redact: (value: string) => string = (value) => value,
+  /** The run's group conversation, whose shared notes every member reads. */
+  groupId?: string | null,
 ): Promise<LoadedAgentMemoryContext> {
-  const [botMemory, userMemory] = await Promise.all([
+  const [botMemory, userMemory, groupMemory] = await Promise.all([
     memory.read({ scope: "bot", botId }, context),
     memory.read({ scope: "user" }, context),
+    groupId ? memory.read({ scope: "group", groupId }, context) : { documents: [] },
   ]);
   const documents: ScopedMemoryDocument[] = [
     ...botMemory.documents.map((document) => ({ ...document, scope: "bot" as const })),
     ...userMemory.documents.map((document) => ({ ...document, scope: "user" as const })),
+    ...groupMemory.documents.map((document) => ({ ...document, scope: "group" as const })),
   ];
 
   documents.sort(

@@ -41,6 +41,32 @@ describe("agent memory context", () => {
     ]);
   });
 
+  it("adds the group conversation's shared notes only when the run is in a group", async () => {
+    const read = vi.fn(async ({ scope }: { scope: "bot" | "user" | "group" }) =>
+      snapshot(
+        scope === "group"
+          ? [document("room", "NOTES.md", "Sourcer owns outreach", 1, "2026-08-16T12:00:00.000Z")]
+          : [],
+      ),
+    );
+
+    const direct = await loadAgentMemoryContext(storeWith(read), "bot-1", context);
+    expect(direct.text).toBeUndefined();
+    expect(read).toHaveBeenCalledTimes(2);
+
+    const group = await loadAgentMemoryContext(
+      storeWith(read),
+      "bot-1",
+      context,
+      undefined,
+      undefined,
+      "group-1",
+    );
+    expect(read).toHaveBeenCalledWith({ scope: "group", groupId: "group-1" }, context);
+    expect(group.text).toContain("## group: NOTES.md (revision 1, updated 2026-08-16)");
+    expect(group.documents).toMatchObject([{ id: "room", scope: "group" }]);
+  });
+
   it("caps the complete memory block without splitting UTF-8 characters", async () => {
     const read = vi.fn(async ({ scope }: { scope: "bot" | "user" }) =>
       snapshot(

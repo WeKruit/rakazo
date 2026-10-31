@@ -6368,3 +6368,19 @@ msgstr ""
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr "Завершено"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr "Голосовать"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr "Закроется через {time}"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr "Не удалось учесть ваш голос"

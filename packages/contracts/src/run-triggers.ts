@@ -17,4 +17,5 @@ export const RUN_TRIGGERS = [
   "recruiting_research",
   "recruiting_grade",
   "recruiting_checkin",
+  "poll",
 ] as const;

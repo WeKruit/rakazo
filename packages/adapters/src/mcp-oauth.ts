@@ -55,6 +55,44 @@ export type OAuthMaterial = {
   oauth?: OAuthState;
 };
 
+/**
+ * Deployment OAuth clients for MCP servers whose authorization server has no dynamic client
+ * registration, as JSON keyed by MCP endpoint in MCP_OAUTH_CLIENTS:
+ * {"https://host/mcp": {"clientId": "...", "clientSecret": "...", "scopes": ["..."]}}.
+ * Each account still authorizes as itself; only the client is shared. A client the user
+ * configured themselves is kept.
+ */
+export function deploymentOAuthClient(
+  endpoint: string,
+  previous: OAuthState | undefined,
+  raw = process.env.MCP_OAUTH_CLIENTS,
+): McpOAuthConfig | undefined {
+  if (!raw?.trim()) return undefined;
+  let address: string;
+  let clients: unknown;
+  try {
+    const url = new URL(endpoint);
+    address = `${url.origin}${url.pathname.replace(/\/$/, "")}`;
+    clients = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  if (!clients || typeof clients !== "object" || Array.isArray(clients)) return undefined;
+  const entry = Object.entries(clients).find(([key]) => {
+    try {
+      const url = new URL(key);
+      return `${url.origin}${url.pathname.replace(/\/$/, "")}` === address;
+    } catch {
+      return false;
+    }
+  })?.[1];
+  const parsed = McpOAuthConfigInput.safeParse(entry);
+  if (!parsed.success) return undefined;
+  const own = previous?.preRegistered ? previous.clientInformation?.client_id : undefined;
+  if (own && own !== parsed.data.clientId) return undefined;
+  return parsed.data;
+}
+
 /** Values that must never appear in model-visible tool results or errors. */
 export function oauthMaterialSecrets(material: OAuthMaterial): string[] {
   const values: string[] = [];
@@ -775,8 +813,10 @@ export class McpOAuthBroker {
     const sessionId = randomUUID();
     const context = { spaceId: input.spaceId, userId: input.userId };
     const loaded = await this.loadMaterial(server, context);
-    if (input.oauth) {
-      const config = McpOAuthConfigInput.parse(input.oauth);
+    const oauthConfig =
+      input.oauth ?? deploymentOAuthClient(server.endpoint, loaded.material.oauth);
+    if (oauthConfig) {
+      const config = McpOAuthConfigInput.parse(oauthConfig);
       const previous = loaded.material.oauth ?? {};
       const sameClient = previous.clientInformation?.client_id === config.clientId;
       const clientInformation = {

@@ -384,6 +384,51 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: AskUserInputJsonSchema,
   },
   {
+    name: "create_poll",
+    description:
+      "Put a quick question or vote to the conversation without stopping your work. The card shows the options, a live count and a countdown; you keep working, and when it closes (at the deadline, or as soon as everyone it waits for has voted) you are woken in this conversation with the result. Use it for a preference you can proceed without, or to let the person and the other assistants here vote; use ask_user instead when you cannot continue without the answer. Ask in ordinary business language with two to six short options. To have teammates vote, set includeTeam and tell them about it with message_bot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: { type: "string", minLength: 1, maxLength: 300 },
+        options: {
+          type: "array",
+          items: { type: "string", minLength: 1, maxLength: 80 },
+          minItems: 2,
+          maxItems: 6,
+        },
+        multiple: { type: "boolean", description: "Allow more than one choice per voter." },
+        closesInMinutes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1440,
+          description: "How long voting stays open. Default 5.",
+        },
+        includeTeam: {
+          type: "boolean",
+          description:
+            "Also wait for the other assistants in this group conversation before closing early.",
+        },
+      },
+      required: ["question", "options"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "vote_poll",
+    description:
+      "Vote on an open poll another assistant posted in this conversation. Pass the poll id from its message and the option labels you choose. Returns the current count.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pollId: { type: "string", minLength: 1 },
+        options: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+      },
+      required: ["pollId", "options"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "request_connection",
     description:
       "When a task needs a service (e.g. HubSpot, Gmail, Instantly, Cal.com) or MCP integration that is not connected to you, show a Connect card and wait; the task resumes after the user connects. Pass serverId for a known server, or provider with the service name when there is none. Use instead of asking the user to open settings.",
@@ -507,6 +552,79 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "render_view",
+    description:
+      "Show records in the chat as a native view the person can read at a glance: a table, a board grouped into lanes by one column (e.g. candidates by stage), or a row of metric cards. Pass the rows you already have; this does not save or change any record. Use render_plot for charts and ask_user for forms.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", maxLength: 120 },
+        layout: { type: "string", enum: ["table", "board", "metrics"] },
+        columns: {
+          type: "array",
+          maxItems: 12,
+          items: {
+            type: "object",
+            properties: { key: { type: "string" }, label: { type: "string" } },
+            required: ["key", "label"],
+          },
+          description: "Table and board: the fields to show, in order.",
+        },
+        rows: {
+          type: "array",
+          maxItems: 500,
+          items: { type: "object" },
+          description: "Table and board: one object per record, keyed by column key.",
+        },
+        groupBy: {
+          type: "string",
+          description: "Board: the column key whose values are the lanes.",
+        },
+        metrics: {
+          type: "array",
+          maxItems: 8,
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+              value: { type: "string" },
+              detail: { type: "string" },
+            },
+            required: ["label", "value"],
+          },
+        },
+      },
+      required: ["layout"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "canvas_write",
+    description:
+      "Create or rewrite a small interactive app (a canvas) in this conversation: one self-contained HTML document with inline CSS and JavaScript. It runs in a sandbox with no network and no access to the product, so put the data it needs inline. The app can keep its own data: window.rakazo.state holds what it saved last and window.rakazo.save(data) saves JSON (up to 64 KB), which you read back with canvas_read. Pass canvasId to rewrite an existing canvas in place; omit it to create one. Use it when the person asks for a tool, tracker, checklist, calculator or other interactive page, not for plain answers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        canvasId: { type: "string" },
+        title: { type: "string", minLength: 1, maxLength: 120 },
+        html: { type: "string", minLength: 1 },
+      },
+      required: ["title", "html"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "canvas_read",
+    description:
+      "Read a canvas in this conversation: its title, revision and the data its app saved.",
+    inputSchema: {
+      type: "object",
+      properties: { canvasId: { type: "string", minLength: 1 } },
+      required: ["canvasId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "add_mcp_server",
     description:
       "Connect an MCP tool server to this Space when the user asks you to add one and provides the details (URL or command, optional token/headers/env). The server is created immediately and assigned to you. If it needs browser OAuth authorization, an approval card appears in the chat for the user to complete — tell them to click Authorize. Do not invent endpoints; only use details the user provided.",
@@ -559,11 +677,11 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "read_memory",
     description:
-      "Read a native Markdown memory document and its revision before preparing a full replacement. User scope is shared across this user's bots in this Space.",
+      "Read a native Markdown memory document and its revision before preparing a full replacement. User scope is shared across this user's bots in this Space; group scope is shared by the assistants in this group conversation.",
     inputSchema: {
       type: "object",
       properties: {
-        scope: { type: "string", enum: ["bot", "user"] },
+        scope: { type: "string", enum: ["bot", "user", "group"] },
         path: { type: "string" },
       },
       required: ["scope", "path"],
@@ -704,6 +822,27 @@ export const builtinAgentTools: ConnectorTool[] = [
           required: ["find", "replace"],
         },
         recruitingFeedback: z.toJSONSchema(RecruitingPreferenceFeedbackSchema, { io: "input" }),
+      },
+      required: ["path", "expectedRevision"],
+    },
+  },
+  {
+    name: "save_group_memory",
+    description:
+      "Save a note shared by the assistants in this group conversation, such as who is doing what, open questions and decisions made here. Other conversations do not see it. Read it with read_memory scope group first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}. Recruiting preferences belong in recruiting_feedback, not here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Document name, for example NOTES.md." },
+        content: { type: "string", description: "The document's complete new content." },
+        expectedRevision: { type: "integer", minimum: 0 },
+        edit: {
+          type: "object",
+          description:
+            "Partial edit: replace the single exact occurrence of find with replace. Mutually exclusive with content.",
+          properties: { find: { type: "string", minLength: 1 }, replace: { type: "string" } },
+          required: ["find", "replace"],
+        },
       },
       required: ["path", "expectedRevision"],
     },
@@ -1204,7 +1343,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "run_subagent",
     description:
-      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. By default the call waits for the result; set background to keep working while it runs. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
+      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. By default the call waits for the result; set background to keep working while it runs. A turn may start up to 32 helpers, at most 8 working at once. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
     inputSchema: {
       type: "object",
       properties: {

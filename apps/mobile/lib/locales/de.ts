@@ -839,4 +839,8 @@ export const DE_MESSAGES: Record<string, string> = {
   "Preparing outreach": "Ansprache vorbereiten",
   "Scheduling interviews": "Interviews planen",
   "Delegated task": "Übertragene Aufgabe",
+  Closed: "Beendet",
+  Vote: "Abstimmen",
+  "Closes in {time}": "Endet in {time}",
+  "Could not record your vote": "Deine Stimme konnte nicht gespeichert werden",
 };
