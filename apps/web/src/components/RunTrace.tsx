@@ -88,6 +88,11 @@ function RunTraceContent({ runId }: { runId: string }) {
               >
                 <div className="flex min-w-0 justify-between gap-2">
                   <span className="truncate font-mono">{row.label}</span>
+                  {row.thinkingMs !== undefined ? (
+                    <span className="shrink-0 text-muted-foreground">
+                      <Trans>Thought for {formatToolActivityDuration(row.thinkingMs)}</Trans>
+                    </span>
+                  ) : null}
                   {status ? (
                     <span
                       className={status === "failed" ? "text-warning" : "text-muted-foreground"}

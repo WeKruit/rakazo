@@ -263,6 +263,7 @@ import {
   selectSpaceVoicePreference,
   summarizeInternalUsageCosts,
   summarizeUsageCosts,
+  summarizeWorkMetrics,
   toBoardDto,
   toTicketCommentDto,
   toTicketDto,
@@ -7050,6 +7051,11 @@ export function createRouter(deps: RouterDeps) {
         return summarizeInternalUsageCosts(deps.prisma, {
           priceTokens: estimateCatalogTokenCostUsd,
         });
+      }),
+      workMetrics: authed.usage.workMetrics.handler(async ({ context }) => {
+        if (!(await seesOperatorSpend(deps.prisma, context.actor.userId)))
+          throw new ORPCError("FORBIDDEN");
+        return summarizeWorkMetrics(deps.prisma);
       }),
     },
     export: {

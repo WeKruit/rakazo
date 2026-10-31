@@ -631,6 +631,7 @@ export class PiAgentRuntime implements AgentRuntime {
         let lastThinkingAt = Number.NEGATIVE_INFINITY;
         // Reasoning summary of the current thinking stretch; reset per assistant message.
         let thinkingText = "";
+        let thinkingSince: string | undefined;
         const toolNames = tools.map((tool) => tool.name);
         agent.subscribe(async (event) => {
           auditUndispatchedToolFailure(event, host, tools);
@@ -654,6 +655,7 @@ export class PiAgentRuntime implements AgentRuntime {
           if (event.type === "message_start" && event.message.role === "assistant") {
             currentMessageStreamed = "";
             thinkingText = "";
+            thinkingSince = undefined;
             modelStreaming = true;
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
@@ -672,6 +674,7 @@ export class PiAgentRuntime implements AgentRuntime {
             // summary (Codex emits one), else the last tool's intent; never raw reasoning.
             thinkingText += event.assistantMessageEvent.delta;
             const now = Date.now();
+            thinkingSince ??= new Date(now).toISOString();
             if (now - lastThinkingAt >= THINKING_PROGRESS_INTERVAL_MS) {
               lastThinkingAt = now;
               const thought =
@@ -689,6 +692,7 @@ export class PiAgentRuntime implements AgentRuntime {
                   : thinkingSummary(lastToolName),
                 ...(thought ? { thought } : {}),
                 at: new Date(now).toISOString(),
+                thinkingSince,
               });
             }
           }

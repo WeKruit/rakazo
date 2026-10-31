@@ -107,6 +107,7 @@ export const THREAD_PROGRESS_THOUGHT_MAX_CHARS = 200;
 /** thread.progress payload: run timing plus one user-safe thinking line on phase "thinking". */
 export const ThreadProgressPayloadSchema = RunTimingSchema.extend({
   thought: z.string().max(THREAD_PROGRESS_THOUGHT_MAX_CHARS).optional(),
+  thinkingSince: IsoDate.optional(),
 });
 export type ThreadProgressPayload = z.infer<typeof ThreadProgressPayloadSchema>;
 
@@ -125,6 +126,8 @@ export const UsageRecordedPayloadSchema = z.object({
   startedAt: IsoDate,
   durationMs: z.number().nonnegative(),
   outcome: z.enum(["completed", "failed"]),
+  /** Time from the first to the last reasoning token, when the model streamed any. */
+  thinkingMs: z.number().nonnegative().optional(),
 });
 export type UsageRecordedPayload = z.infer<typeof UsageRecordedPayloadSchema>;
 
@@ -531,6 +534,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     /** User-safe label for the thinking phase; never raw reasoning. */
     summary: z.string().max(80).optional(),
     at: z.string().optional(),
+    /** When the current thinking stretch began; drives the developer view's thinking clock. */
+    thinkingSince: IsoDate.optional(),
   }),
   z.object({
     kind: z.literal("steps"),
@@ -819,7 +824,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 4;
+export const EVENT_FORMAT_VERSION = 5;
 
 export const ProductEventSchema = z
   .object({

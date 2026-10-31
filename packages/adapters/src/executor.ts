@@ -13368,6 +13368,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ...(event.summary ? { summary: visible(event.summary) } : {}),
                   ...(event.thought ? { thought: visible(event.thought) } : {}),
                   ...(event.at ? { at: event.at } : {}),
+                  ...(event.thinkingSince ? { thinkingSince: event.thinkingSince } : {}),
                 },
               });
             } else if (event.type === "ask") {

@@ -999,6 +999,60 @@ export const InternalUsageCostsSchema = z.object({
 });
 export type InternalUsageCosts = z.infer<typeof InternalUsageCostsSchema>;
 
+/** Two-sided latency summary in milliseconds; null when nothing was measured. */
+const LatencySchema = z.object({
+  count: z.number().int().nonnegative(),
+  p50Ms: z.number().nonnegative().nullable(),
+  p95Ms: z.number().nonnegative().nullable(),
+});
+const RatioSchema = z.object({
+  count: z.number().int().nonnegative(),
+  of: z.number().int().nonnegative(),
+});
+/** All-account work quality metrics for operators. Every field is counted from stored records. */
+export const WorkMetricsSchema = z.object({
+  windowDays: z.number().int().positive(),
+  since: z.string(),
+  /** Tasks whose runs all completed: no failure, no person stop, no manual retry. */
+  unrescuedWeeks: z.array(
+    z.object({ week: z.string(), unrescued: z.number().int(), tasks: z.number().int() }),
+  ),
+  completion: z.object({
+    completed: z.number().int(),
+    failed: z.number().int(),
+    cancelled: z.number().int(),
+    stoppedByPerson: z.number().int(),
+    reasons: z.array(z.object({ status: z.string(), reason: z.string(), count: z.number().int() })),
+  }),
+  longTasks: z.object({
+    runDuration: LatencySchema,
+    taskDuration: LatencySchema,
+    compactions: z.number().int(),
+    runsCompacted: z.number().int(),
+    resumed: RatioSchema,
+  }),
+  experience: z.object({
+    firstReply: LatencySchema,
+    interject: LatencySchema,
+    unansweredInputs: z.number().int(),
+    inputs: z.number().int(),
+  }),
+  memory: z.object({ correctedAfterCompaction: RatioSchema }),
+  collaboration: z.object({
+    handoffs: z.number().int(),
+    teammateTurns: z.number().int(),
+    replied: z.number().int(),
+    silent: z.number().int(),
+  }),
+  automation: z.object({
+    fired: z.number().int(),
+    skipped: z.number().int(),
+    completed: z.number().int(),
+    failed: z.number().int(),
+  }),
+});
+export type WorkMetrics = z.infer<typeof WorkMetricsSchema>;
+
 export const COMPUTER_UPDATE_STAGES = [
   "preparing",
   "saving",

@@ -74,6 +74,8 @@ export const RunTraceSchema = z.object({
       status: z.enum(["running", "completed", "failed", "paused", "unknown"]),
       tokens: z.number().int().nonnegative().nullable(),
       costUsd: z.number().nonnegative().nullable(),
+      /** Model rows: how long the model reasoned before answering. */
+      thinkingMs: z.number().nonnegative().optional(),
     }),
   ),
 });
