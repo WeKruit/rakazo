@@ -113,6 +113,41 @@ describePostgres("organization logos (PostgreSQL)", () => {
     await again.companySite(recent);
     expect(recheck.mock.calls.map(([name]) => name)).toEqual([old]);
 
+    // A name another worker claimed moments ago is skipped; a claim left unfinished for longer
+    // than the claim window is taken over. Neither logs a duplicate-key error.
+    const busy = `busy claim ${suffix}`.toLowerCase().replace(/-/g, " ");
+    const stale = `stale claim ${suffix}`.toLowerCase().replace(/-/g, " ");
+    await prisma.organizationLogo.createMany({
+      data: [
+        { key: busy, checkedAt: new Date(), checkAgainAt: new Date(0) },
+        { key: stale, checkedAt: new Date(Date.now() - 20 * 60_000), checkAgainAt: new Date(0) },
+      ],
+    });
+    await prisma.recruitingSavedProfile.updateMany({
+      where: { spaceId, personKey: "linkedin:logo-person" },
+      data: {
+        profile: {
+          experience: [{ company_name: club }, { company_name: busy }, { company_name: stale }],
+          education: [{ school_name: school }],
+        },
+      },
+    });
+    const claimed = vi.fn(async (name: string) => [
+      { url: "https://example.org/", title: name, image: "" },
+    ]);
+    await fillOrganizationLogos(
+      prisma,
+      createCompanySiteResolver({
+        store,
+        searchOrganizations: claimed,
+        fetch: vi.fn(async () => new Response("", { status: 404 })),
+      }),
+      { maxLookups: 50_000, paceMs: 0 },
+    );
+    const claimedNames = claimed.mock.calls.map(([name]) => name);
+    expect(claimedNames).toContain(stale);
+    expect(claimedNames).not.toContain(busy);
+
     const afterDeploy = vi.fn();
     const fresh = createCompanySiteResolver({ store, searchOrganizations: afterDeploy });
     await expect(fresh.companySite(club)).resolves.toEqual({ host: null, icon: ICON });

@@ -62,19 +62,18 @@ const UNCHECKED = new Date(0);
  * Takes a name for this worker; false when another worker is already looking it up. An old miss
  * is taken too, and becomes an unfinished claim until the lookup saves its answer.
  */
-async function claim(prisma: Pick<PrismaClient, "organizationLogo" | "$executeRaw">, key: string) {
-  const created = await prisma.organizationLogo
-    .create({ data: { key, checkAgainAt: UNCHECKED } })
-    .then(() => true)
-    .catch(() => false);
-  if (created) return true;
+async function claim(prisma: Pick<PrismaClient, "$executeRaw">, key: string) {
+  // One statement: a failed INSERT used to log a duplicate-key error in Postgres for every name
+  // already saved, which made up most of the database's error log.
   const taken = await prisma.$executeRaw`
-    UPDATE organization_logos
+    INSERT INTO organization_logos AS l (key, "checkedAt", "checkAgainAt")
+    VALUES (${key}, now() AT TIME ZONE 'UTC', 'epoch'::timestamp)
+    ON CONFLICT (key) DO UPDATE
        SET "checkedAt" = now() AT TIME ZONE 'UTC', "checkAgainAt" = 'epoch'::timestamp
-     WHERE key = ${key} AND host IS NULL AND icon IS NULL
-       AND (("checkAgainAt" = 'epoch'::timestamp
-              AND "checkedAt" < now() AT TIME ZONE 'UTC' - make_interval(secs => ${CLAIM_MS / 1000}))
-            OR "checkAgainAt" - "checkedAt" > make_interval(secs => ${OLD_MISS_MS / 1000}))`;
+     WHERE l.host IS NULL AND l.icon IS NULL
+       AND ((l."checkAgainAt" = 'epoch'::timestamp
+              AND l."checkedAt" < now() AT TIME ZONE 'UTC' - make_interval(secs => ${CLAIM_MS / 1000}))
+            OR l."checkAgainAt" - l."checkedAt" > make_interval(secs => ${OLD_MISS_MS / 1000}))`;
   return taken === 1;
 }
 const CONCURRENCY = 2;
