@@ -160,3 +160,15 @@ describe("authErrorMessage", () => {
     expect(authErrorMessage(undefined, authCopy)).toBe(authCopy.fallback);
   });
 });
+
+import { runRecoveryAction } from "./user-error.js";
+
+it("reconnects a missing model instead of retrying the same missing credential", () => {
+  for (const reason of [
+    "Connect a model in Settings before running bots.",
+    "Model connection changed. Connect it again.",
+    "Model connection is no longer available. Connect it again.",
+  ])
+    expect(runRecoveryAction(reason)).toBe("model_connection");
+  expect(runRecoveryAction("The server timed out.")).toBe("retry");
+});

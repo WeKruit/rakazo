@@ -88,6 +88,7 @@ import {
   TaughtSkillSchema,
   TeachRecordingEventSchema,
   ThinkingLevelSchema,
+  ThreadBackgroundTaskSchema,
   ThreadMessagePageSchema,
   ThreadSnapshotSchema,
   UpdateAgentSkillInput,
@@ -234,6 +235,7 @@ export const RecruitingQuestionSchema = z.strictObject({
   messageId: Id,
   askIndex: z.number().int().nonnegative(),
   block: AskBlockSchema,
+  expiresAt: z.string().nullable(),
   runStatus: RunStatus,
   isCurrent: z.boolean(),
   canAnswer: z.boolean(),
@@ -271,6 +273,8 @@ const threadSendInput = threadTarget
     recruitingContext: RecruitingChatContextSchema.optional(),
     artifactIds: z.array(Id).max(ATTACHMENT_MAX_COUNT).optional(),
     addressing: z.enum(["coordinator", "mentions"]).optional(),
+    /** Steer the current reply, or wait until it has finished speaking. */
+    queueMode: z.enum(["steer", "follow_up"]).optional(),
     /** Bare bot ids (legacy) or typed mention chips from the composer. */
     mentions: z
       .array(z.union([Id, structuredMentionTarget]))
@@ -283,6 +287,13 @@ const threadSendInput = threadTarget
     interrupt: z.boolean().optional(),
   })
   .superRefine((input, ctx) => {
+    if (input.queueMode === "follow_up" && input.interrupt) {
+      ctx.addIssue({
+        code: "custom",
+        message: "A follow-up cannot interrupt the current reply",
+        path: ["interrupt"],
+      });
+    }
     if (input.addressing && !input.groupId) {
       ctx.addIssue({
         code: "custom",
@@ -599,7 +610,21 @@ export const appContract = {
       )
       .output(z.object({ ok: z.literal(true) })),
     stop: oc
-      .input(threadTarget.safeExtend({ runId: Id.optional() }))
+      .input(
+        threadTarget.safeExtend({
+          runId: Id.optional(),
+          scope: z.enum(["turn", "all"]).default("turn"),
+        }),
+      )
+      .output(z.object({ ok: z.literal(true) })),
+    backgroundTasks: oc.input(threadTarget).output(z.array(ThreadBackgroundTaskSchema)),
+    cancelTask: oc
+      .input(
+        threadTarget.safeExtend({
+          id: Id,
+          kind: z.enum(["research", "cloud_agent", "run", "agent_run"]),
+        }),
+      )
       .output(z.object({ ok: z.literal(true) })),
     followUp: oc
       .input(
@@ -1326,6 +1351,10 @@ export const appContract = {
     bot: oc.input(botId).output(ExportManifestSchema),
   },
   notifications: {
+    desktopActivity: oc.output(z.object({ ok: z.literal(true) })),
+    claimBrowser: oc
+      .input(z.object({ threadId: Id, eventId: Id }))
+      .output(z.object({ allowed: z.boolean(), reserved: z.boolean() })),
     registerPush: oc
       // No whitespace: the token store keeps the registering session on the next line.
       .input(z.object({ token: z.string().min(8).max(512).regex(/^\S+$/) }))

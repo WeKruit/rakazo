@@ -8,6 +8,13 @@ export const STUCK_WORK_NOTIFY_AFTER_MS = 4 * 60 * 60 * 1000;
  *  the reminder for someone to answer before the thread is freed. */
 export const STUCK_WORK_EXPIRE_AFTER_MS = 24 * 60 * 60 * 1000;
 
+/** The reconciler expires the current waiting episode, not the age of its card. */
+export function stuckWorkExpiresAt(status: string, updatedAt: string | undefined): string | null {
+  if (status !== "waiting_input" || !updatedAt) return null;
+  const at = Date.parse(updatedAt);
+  return Number.isFinite(at) ? new Date(at + STUCK_WORK_EXPIRE_AFTER_MS).toISOString() : null;
+}
+
 /** Marker on a thread.meta event so a reminder is sent once per waiting episode. */
 export const STUCK_WORK_NOTICE = "stuck";
 
@@ -54,11 +61,11 @@ export function stuckWorkExpiredNonce(runId: string): string {
 export function stuckWorkStatusMessage(status: StuckWorkStatus): string {
   switch (status) {
     case "queued":
-      return "Stopped. This stayed queued without starting.";
+      return "Stopped before starting. Try again.";
     case "waiting_input":
-      return "Stopped. This was still waiting for an answer.";
+      return "The answer wait expired. Reply to continue.";
     case "waiting_takeover":
-      return "Stopped. This was still waiting for you on the screen.";
+      return "The screen wait expired. Open the screen and try again.";
   }
 }
 

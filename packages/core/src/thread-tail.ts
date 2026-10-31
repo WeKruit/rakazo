@@ -17,13 +17,16 @@ export type ThreadTailPhase =
   | "background";
 
 export function threadTailPhase(
-  thread: Pick<LiveThread, "run" | "activeRuns" | "messages"> | null,
+  thread: Pick<LiveThread, "run" | "activeRuns" | "messages" | "queuedMessageIds"> | null,
   options: { sending?: boolean } = {},
 ): ThreadTailPhase | null {
   if (!thread) return options.sending ? "starting" : null;
   const runs = thread.activeRuns ?? (thread.run ? [thread.run] : []);
   const statuses = new Set(runs.map((run) => run.status));
   const last = thread.messages.at(-1);
+  // A new message gets feedback even while an older run reconnects or waits on a card.
+  if (options.sending || hasPendingUserMessage(thread)) return "starting";
+  if (thread.queuedMessageIds?.length) return "queued";
   const liveTail = (runId: string) =>
     thread.messages.find((message) => message.id === `progress:${runId}`)?.blocks.at(-1);
   const runningPhase = (phase: "compacting" | "retrying") =>
@@ -33,9 +36,6 @@ export function threadTailPhase(
     });
   if (runningPhase("retrying")) return "retrying";
   if (runningPhase("compacting")) return "compacting";
-  // The user just answered or asked something; that outranks the earlier pause.
-  if (options.sending || hasPendingUserMessage(thread))
-    return statuses.has("running") ? "working" : "starting";
   // Any member still working keeps the thread visibly busy; a pause shows once work stops.
   if (statuses.has("running")) return "working";
   // An open ask card already is the prompt; repeating it adds nothing.

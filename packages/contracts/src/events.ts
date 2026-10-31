@@ -421,6 +421,15 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     /** Provider-generated tool status rather than assistant-authored narration. */
     activity: z.literal(true).optional(),
     pendingToolNames: z.array(z.string()).optional(),
+    pendingToolCalls: z
+      .array(
+        z.object({
+          name: z.string(),
+          executionId: z.string().optional(),
+          startedAt: IsoDate.optional(),
+        }),
+      )
+      .optional(),
     /** Set while the runtime compacts context; cleared by the next progress update. */
     phase: z.enum(["compacting", "thinking", "retrying"]).optional(),
     /** User-safe label for the thinking phase; never raw reasoning. */
@@ -436,6 +445,9 @@ export const MessageBlock = z.discriminatedUnion("kind", [
         status: z.enum(["failed", "paused"]).optional(),
         /** Audited count of people with an email, never inferred from returned text. */
         peopleWithEmail: z.number().int().nonnegative().optional(),
+        executionId: z.string().optional(),
+        startedAt: IsoDate.optional(),
+        durationMs: z.number().int().nonnegative().optional(),
       }),
     ),
     durationMs: z.number().int().nonnegative().optional(),

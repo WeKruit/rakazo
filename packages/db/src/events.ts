@@ -61,6 +61,8 @@ const EVENT_BATCH_SIZE = 200;
  * pending so the pending filters (originTrigger null | "messaging") still match.
  */
 export const INTERRUPT_ORIGIN = "interrupt";
+/** Unread input reserved for the next turn, released by the existing continuation path. */
+export const FOLLOW_UP_ORIGIN = "follow_up";
 /** Run nonce of a background follow-up on a people search that outlived its turn. */
 export const RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX = "recruiting-agent-run-wait:";
 
@@ -312,6 +314,7 @@ export interface SendUserMessageInput {
   skipWaitingRuns?: boolean;
   /** Interject: interrupt the busy run's live model stream with this message. */
   interrupt?: boolean;
+  queueMode?: "steer" | "follow_up";
   /** Server-only: recheck and claim this saved event routine in the message transaction. */
   routineEvent?: {
     routineId: string;
@@ -694,9 +697,11 @@ export async function sendUserMessage(
             runId: held ? null : busy.id,
             ...(held && input.trigger === "messaging"
               ? { originTrigger: "messaging" }
-              : !held && input.interrupt
-                ? { originTrigger: INTERRUPT_ORIGIN }
-                : {}),
+              : input.queueMode === "follow_up"
+                ? { originTrigger: FOLLOW_UP_ORIGIN }
+                : !held && input.interrupt
+                  ? { originTrigger: INTERRUPT_ORIGIN }
+                  : {}),
             ...(input.modelPin
               ? {
                   modelProvider: input.modelPin.modelProvider,
@@ -785,6 +790,7 @@ export async function claimSteering(
     const steering = await tx.steeringMessage.findMany({
       where: {
         botId: input.botId,
+        AND: [{ OR: [{ originTrigger: null }, { originTrigger: { not: FOLLOW_UP_ORIGIN } }] }],
         id: input.seenIds.length ? { notIn: input.seenIds } : undefined,
         // A routine or webhook turn only takes steering addressed to it; pending user messages
         // wait for the conversational continuation that starts once it finishes.
@@ -1318,7 +1324,12 @@ export async function answerPausedAskWithSteering(
   return prisma.$transaction(async (tx: Prisma.TransactionClient) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${input.threadId} FOR UPDATE`;
     const rows = await tx.steeringMessage.findMany({
-      where: { runId: input.runId, botId: input.botId, claimedAt: null },
+      where: {
+        runId: input.runId,
+        botId: input.botId,
+        claimedAt: null,
+        OR: [{ originTrigger: null }, { originTrigger: { not: FOLLOW_UP_ORIGIN } }],
+      },
       include: { message: { select: { id: true, role: true, threadId: true, blocks: true } } },
       orderBy: [{ message: { seq: "asc" } }, { id: "asc" }],
     });
@@ -1437,6 +1448,7 @@ export async function pauseRunForInput(
       ? await prepareRecruitingQuestionInTransaction(tx, input)
       : undefined;
     if (question?.kind === "completed") return { threadId: input.threadId, seq: question.eventSeq };
+    const waitAt = new Date();
     const paused = await tx.run.updateMany({
       where: {
         id: input.runId,
@@ -1452,6 +1464,7 @@ export async function pauseRunForInput(
       },
       data: {
         status: "waiting_input",
+        updatedAt: waitAt,
         leaseOwner: null,
         leaseExpiresAt: null,
         ...(input.offeredActions?.length
@@ -1468,7 +1481,7 @@ export async function pauseRunForInput(
         fence: input.leaseFence,
         status: "running",
       },
-      data: { status: "waiting_input", finishedAt: new Date() },
+      data: { status: "waiting_input", finishedAt: waitAt },
     });
     if (attempt.count !== 1) throw new Error("Active run attempt was not available to pause");
 
@@ -1499,7 +1512,10 @@ export async function pauseRunForInput(
       botId: input.botId,
       type: "run.waiting_input",
       runId: input.runId,
-      payload: input.modelRetries ? { modelRetries: input.modelRetries } : {},
+      payload: {
+        updatedAt: waitAt.toISOString(),
+        ...(input.modelRetries ? { modelRetries: input.modelRetries } : {}),
+      },
     });
     if (question?.kind === "new" && message)
       waitingEvent = await commitRecruitingQuestionInTransaction(tx, input, question, message);
@@ -1983,6 +1999,7 @@ export async function createPendingSteeringRun(
     where: {
       threadId: input.threadId,
       botId: input.botId,
+      trigger: { not: "tool_background" },
       status: { in: ["queued", "leased", "running", "waiting_input", "waiting_takeover"] },
     },
     select: { id: true },
@@ -2028,7 +2045,7 @@ export async function createPendingSteeringRun(
   });
   await tx.steeringMessage.updateMany({
     where: { id: { in: batch.map((item) => item.id) }, runId: null },
-    data: { runId: run.id, claimedAt: null },
+    data: { runId: run.id, claimedAt: null, ...(origin === "app" ? { originTrigger: null } : {}) },
   });
   return run.id;
 }

@@ -9,6 +9,7 @@ import type {
   MessageBlock,
   MessageReaction,
   Routine,
+  ThreadBackgroundTask,
 } from "@rakazo/contracts";
 import {
   canReactToThreadMessage,
@@ -44,8 +45,11 @@ import {
   replyAttachment,
   resolveComposerSendPlan,
   resolvePersonaColorDef,
+  runRecoveryAction,
   selectedAskActionLabel,
   specialistWorkLabel,
+  stuckWorkExpiresAt,
+  threadTailPhase,
   threadWindowMessages,
   timeSeparatorIds,
   trackWork,
@@ -102,6 +106,7 @@ import { useReducedMotion } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AppConnectCard } from "../components/AppConnectCard";
 import { AskActions } from "../components/AskActions";
+import { AskDeadline } from "../components/ask-deadline";
 import { BotAvatar } from "../components/bot-avatar";
 import { ChoiceCard } from "../components/ChoiceCard";
 import { ComputerCard } from "../components/ComputerCard";
@@ -121,6 +126,7 @@ import { NativeSwitch } from "../components/native-switch";
 import { NativeSymbol } from "../components/native-symbol";
 import { ReplyDismissButton } from "../components/reply-dismiss-button";
 import { ReplyLine } from "../components/reply-line";
+import { StageTranscript } from "../components/StageTranscript";
 import { SelectTextSheet } from "../components/select-text-sheet";
 import { trailingHeaderOptions } from "../components/sheet-header";
 import type { ThreadComposerHandle } from "../components/thread-composer";
@@ -605,6 +611,13 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const [quoteTarget, setQuoteTarget] = useState<MobileMessage | null>(null);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const backgroundTasks = snap?.backgroundTasks ?? [];
+  const [openStage, setOpenStage] = useState<{
+    botId: string;
+    runIds: string[];
+    sourceRunIds: string[];
+  } | null>(null);
+  useEffect(() => setOpenStage(null), [threadKey]);
   const preparingSend = useRef(false);
   const feedback = useThreadFeedback(threadKey, newClientNonce);
   const { error, setError } = feedback;
@@ -716,6 +729,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       {
         runs: snap?.activeRuns ?? (snap?.run ? [snap.run] : []),
         messages: snap?.messages ?? [],
+        backgroundWork: snap?.backgroundWork,
       },
       new Date(Date.now()).toISOString(),
     ),
@@ -1678,6 +1692,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     let attempt: SendAttempt;
     try {
       attempt = feedback.sendAttempt({
+        queueMode: submitted.queueMode,
         originThreadKey: originThreadKey!,
         displayText: submitted.promptText,
         replyPreview: replyQuote ?? (replyTarget ? previewMessageText(replyTarget) : null),
@@ -1705,6 +1720,49 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     performScroll(scrollBehavior.current.jumpToLatest());
     publishThreadScrollState(scrollBehavior.current.state());
     await deliver(attempt);
+  }
+
+  async function retryFailedReply() {
+    if (readOnly || sending || preparingSend.current || (!botId && !groupId)) return;
+    if (snapRef.current?.run?.status !== "failed") return;
+    if (
+      snapRef.current?.run?.error &&
+      runRecoveryAction(snapRef.current.run.error) === "model_connection"
+    ) {
+      router.push("/(settings)/models");
+      return;
+    }
+    const initialBotTarget = botId;
+    const initialGroupTarget = groupId;
+    const failedRunId = snapRef.current?.run?.id;
+    preparingSend.current = true;
+    try {
+      await prepareUnsentSends();
+      if (
+        !isCurrentTarget(initialBotTarget, initialGroupTarget) ||
+        snapRef.current?.run?.id !== failedRunId ||
+        snapRef.current.run.status !== "failed"
+      )
+        return;
+      const attempt = feedback.sendAttempt({
+        originThreadKey: threadKey!,
+        displayText: "Try again",
+        queueMode: "steer",
+        replyPreview: null,
+        initialBotTarget,
+        botTarget: initialBotTarget,
+        groupTarget: initialGroupTarget,
+        reroutedToGroup: false,
+        plan: resolveComposerSendPlan({ text: "Try again", mentions: [], hasAttachments: false }),
+        attachments: [],
+        replyQuote: null,
+      });
+      await deliver(attempt);
+    } catch (error) {
+      Alert.alert(t("Failed to send message"), errorText(error));
+    } finally {
+      preparingSend.current = false;
+    }
   }
 
   async function deliver(attempt: SendAttempt, force = false) {
@@ -1759,7 +1817,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     }
   }, [snap, threadKey]);
 
-  async function stop() {
+  async function stop(scope: "turn" | "all" = "turn") {
     if (readOnly) return;
     const targetBotId = botId;
     const targetGroupId = groupId;
@@ -1768,7 +1826,7 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     try {
       await rpc(
         "threads/stop",
-        targetGroupId ? { groupId: targetGroupId } : { botId: targetBotId! },
+        targetGroupId ? { groupId: targetGroupId, scope } : { botId: targetBotId!, scope },
       );
     } catch (err) {
       if (isCurrentTarget(targetBotId, targetGroupId)) {
@@ -1784,6 +1842,20 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         const detail = errorText(err, t("Failed to refresh"));
         setError(t("Work stopped, but the thread could not refresh: {detail}", { detail }));
       }
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function cancelBackgroundTask(task: ThreadBackgroundTask) {
+    const target = groupId ? { groupId } : botId ? { botId } : null;
+    if (!target || readOnly || sending) return;
+    setSending(true);
+    try {
+      await rpc("threads/cancelTask", { ...target, id: task.id, kind: task.kind });
+      await refresh();
+    } catch (err) {
+      Alert.alert(t("Could not cancel task"), errorText(err, t("Try again.")));
     } finally {
       setSending(false);
     }
@@ -1977,8 +2049,15 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   }
 
   const answerableAskIds = answerableAskMessageIds(snap);
+  const runErrorNeedsReconnect = Boolean(
+    snap?.run?.error && runRecoveryAction(snap.run.error) === "model_connection",
+  );
   const runError =
-    snap?.run?.status === "failed" && snap.run.error ? t("Something went wrong. Try again.") : null;
+    snap?.run?.status === "failed" && snap.run.error
+      ? runErrorNeedsReconnect
+        ? t("Reconnect your model to continue.")
+        : t("The reply stopped. Try again.")
+      : null;
   const separatorIds = useMemo(() => timeSeparatorIds(visibleMessages), [visibleMessages]);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2197,6 +2276,12 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           readOnly={readOnly}
           onCall={onCall}
           canAnswer={!readOnly && answerableAskIds.includes(message.id)}
+          askExpiresAt={(() => {
+            const run = (snap?.activeRuns ?? (snap?.run ? [snap.run] : [])).find(
+              (run) => run.id === message.runId,
+            );
+            return run ? stuckWorkExpiresAt(run.status, run.updatedAt) : null;
+          })()}
           highlighted={highlightedMessageId === message.id}
           separator={separatorIds.has(message.id)}
           replyAuthor={replyAuthor}
@@ -2258,8 +2343,36 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
     [headerHeight, readOnly, insets.bottom],
   );
 
+  const feedbackPhase = threadTailPhase(snap, { sending });
+  const openWorkStage = (stageBotId: string) => {
+    if (!workSession) return;
+    setOpenStage({
+      botId: stageBotId,
+      runIds: workSession.runIds.filter((id) => workSession.runBots[id] === stageBotId),
+      sourceRunIds: workSession.runIds,
+    });
+  };
+  const cancelWorkStage = async (stageBotId: string) => {
+    if (readOnly || sending || !artifactTarget) return;
+    setSending(true);
+    try {
+      for (const id of Object.keys(workSession?.live ?? {})) {
+        if (workSession?.runBots[id] === stageBotId)
+          await rpc("threads/stop", { ...artifactTarget, runId: id });
+      }
+      await refresh();
+    } catch (err) {
+      Alert.alert(t("Could not cancel task"), errorText(err, t("Try again.")));
+    } finally {
+      setSending(false);
+    }
+  };
   const workingFooter =
-    !inGroup && currentBot && isWorkingStatus(currentBotStatus) && !hasLiveProgress ? (
+    sending || feedbackPhase === "queued" || feedbackPhase === "starting" ? (
+      <View style={{ minHeight: 40, marginTop: 12 }}>
+        <WorkingIndicator label={feedbackPhase === "queued" ? t("Queued") : t("Thinking…")} />
+      </View>
+    ) : !inGroup && currentBot && isWorkingStatus(currentBotStatus) && !hasLiveProgress ? (
       <View
         accessibilityLabel={t("Working…")}
         accessibilityRole="text"
@@ -2277,7 +2390,12 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           size={28}
           status={currentBotStatus}
         />
-        <WorkingIndicator session={liveWorkSession} stageKind={stageKind} />
+        <WorkingIndicator
+          session={liveWorkSession}
+          stageKind={stageKind}
+          onOpenStage={openWorkStage}
+          onCancelStage={(id) => void cancelWorkStage(id)}
+        />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : inGroup && workingGroupBots.length > 0 ? (
@@ -2304,11 +2422,16 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
             </View>
           ))}
         </View>
-        <WorkingIndicator session={liveWorkSession} stageKind={stageKind} />
+        <WorkingIndicator
+          session={liveWorkSession}
+          stageKind={stageKind}
+          onOpenStage={openWorkStage}
+          onCancelStage={(id) => void cancelWorkStage(id)}
+        />
         {liveWorkSession ? <WorkClock session={liveWorkSession} /> : null}
       </View>
     ) : workSession?.endedAt && !working && visibleMessages.at(-1)?.role !== "user" ? (
-      <WorkingIndicator session={workSession} stageKind={stageKind} />
+      <WorkingIndicator session={workSession} stageKind={stageKind} onOpenStage={openWorkStage} />
     ) : null;
 
   const loadEarlierControl =
@@ -2350,9 +2473,21 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
         </Text>
       ) : null}
       {runError ? (
-        <Text style={{ color: tokens.destructive, marginTop: error ? 12 : headerHeight + 28 }}>
-          {runError}
-        </Text>
+        <View style={{ marginTop: error ? 12 : headerHeight + 28, gap: 8 }}>
+          <Text accessibilityRole="alert" style={{ color: tokens.destructive }}>
+            {runError}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={sending || readOnly}
+            onPress={() => void retryFailedReply()}
+            style={{ minHeight: 44, justifyContent: "center", alignSelf: "flex-start" }}
+          >
+            <Text style={{ color: tokens.foreground }}>
+              {runErrorNeedsReconnect ? t("Reconnect") : t("Try again")}
+            </Text>
+          </Pressable>
+        </View>
       ) : null}
       {/* The floor keeps a tall suggestion list from sliding under the transparent header. */}
       <View style={{ flex: 1, minHeight: headerHeight, position: "relative" }}>
@@ -2659,10 +2794,22 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
           attachFrom={attachFrom}
           send={send}
           stop={stop}
+          stopAll={() => stop("all")}
+          backgroundTasks={backgroundTasks}
+          cancelTask={cancelBackgroundTask}
           startVoiceCall={startVoiceCall}
           onSlashAction={runSlashAction}
         />
       </View>
+      {openStage && artifactTarget ? (
+        <StageTranscript
+          target={artifactTarget}
+          stage={openStage}
+          liveMessages={snap?.messages ?? []}
+          renderMessage={renderMessageRow}
+          onClose={() => setOpenStage(null)}
+        />
+      ) : null}
       <Modal
         visible={botActionsOpen}
         transparent
@@ -2907,6 +3054,7 @@ type MessageRowProps = {
   readOnly: boolean;
   onCall: boolean;
   canAnswer: boolean;
+  askExpiresAt?: string | null;
   highlighted: boolean;
   separator: boolean;
   replyAuthor: string;
@@ -2933,6 +3081,7 @@ const MessageRow = memo(function MessageRow({
   readOnly,
   onCall,
   canAnswer,
+  askExpiresAt,
   highlighted,
   separator,
   replyAuthor,
@@ -3145,6 +3294,7 @@ const MessageRow = memo(function MessageRow({
                 bots={bots}
                 members={members}
                 canAnswer={canAnswer}
+                askExpiresAt={askExpiresAt}
                 onAnswer={actions.answer}
                 onOpenBot={actions.openBot}
                 onOpenComputer={actions.openComputer}
@@ -3199,6 +3349,7 @@ const MessageBubble = memo(function MessageBubble({
   message,
   members,
   canAnswer,
+  askExpiresAt,
   onAnswer,
   onOpenBot,
   onOpenComputer,
@@ -3214,6 +3365,7 @@ const MessageBubble = memo(function MessageBubble({
   message: MobileMessage;
   members?: MobileSnapshot["members"];
   canAnswer: boolean;
+  askExpiresAt?: string | null;
   onAnswer: (message: MobileMessage, answer: AskAnswer, username?: string) => Promise<void>;
   onOpenBot: (botId: string, name: string) => void;
   onOpenComputer: (botId: string, name: string) => void;
@@ -3357,6 +3509,7 @@ const MessageBubble = memo(function MessageBubble({
           ask={ask}
           actionProps={actionProps}
           canAnswer={canAnswer}
+          askExpiresAt={askExpiresAt}
           onAnswer={(answer, username) => onAnswer(message, answer, username)}
         />
         {appConnectBlocks.map((block, index) => (
@@ -3581,6 +3734,9 @@ const MessageBubble = memo(function MessageBubble({
             >
               {askBlock.text}
             </Text>
+          ) : null}
+          {canAnswer && askBlock.status !== "answered" && askExpiresAt ? (
+            <AskDeadline expiresAt={askExpiresAt} />
           ) : null}
           {askBlock.detail ? (
             <Text
@@ -3833,11 +3989,13 @@ function MessageTextCard({
 function AskBlock({
   ask,
   canAnswer,
+  askExpiresAt,
   onAnswer,
   actionProps,
 }: {
   ask: Extract<MobileMessage["blocks"][number], { kind: "ask" }>;
   canAnswer: boolean;
+  askExpiresAt?: string | null;
   onAnswer: (answer: AskAnswer, username?: string) => Promise<void>;
   actionProps: MessageActionProps;
 }) {
@@ -3920,6 +4078,7 @@ function AskBlock({
       >
         {ask.text}
       </Text>
+      {canAnswer && !answered && askExpiresAt ? <AskDeadline expiresAt={askExpiresAt} /> : null}
       {secretInput && ask.credential ? (
         <Text style={{ color: tokens.mutedForeground, fontSize: 13.5 }}>
           {secretDestinationLabel(ask.credential)}

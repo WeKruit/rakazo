@@ -291,6 +291,21 @@ describe("createThreadMessage", () => {
 });
 
 describe("run history isolation", () => {
+  it("keeps a follow-up out of model history until the continuation releases it", async () => {
+    const findMany = vi.fn().mockResolvedValue([]);
+    await loadRunHistoryMessages(
+      { message: { findMany } } as never,
+      { id: "run", threadId: "thread" },
+      10,
+    );
+    expect(findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          steeringMessages: { none: { originTrigger: "follow_up" } },
+        }),
+      }),
+    );
+  });
   it("only reads the run's own thread, so two users' threads never merge", async () => {
     const table = [
       { id: "m-a", threadId: "thread-a", role: "user", seq: 1 },

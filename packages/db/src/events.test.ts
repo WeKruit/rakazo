@@ -21,6 +21,7 @@ import {
   clearThread,
   completedRunBlocks,
   completedRunSummary,
+  createPendingSteeringRun,
   declineConnectionAskInTransaction,
   discardAnsweredSteering,
   finalizeComputerControlRelease,
@@ -1611,6 +1612,10 @@ describe("pauseRunForInput", () => {
     expect(f.tx.event.create.mock.calls.map(([input]) => input.data.type)).toEqual([
       "run.waiting_input",
     ]);
+    const waitAt = f.tx.run.updateMany.mock.calls[0]![0].data.updatedAt as Date;
+    expect(f.tx.event.create.mock.calls[0]![0].data.payload).toMatchObject({
+      updatedAt: waitAt.toISOString(),
+    });
   });
   it.each([
     "space",
@@ -1665,10 +1670,12 @@ describe("pauseRunForInput", () => {
       },
       message: { create: vi.fn().mockResolvedValue({ id: "message-1" }) },
       event: {
-        create: vi.fn(async ({ data }: { data: { seq: number; type: string } }) => ({
-          ...event(data.seq),
-          type: data.type,
-        })),
+        create: vi.fn(
+          async ({ data }: { data: { seq: number; type: string; payload: unknown } }) => ({
+            ...event(data.seq),
+            type: data.type,
+          }),
+        ),
         deleteMany: vi.fn().mockResolvedValue({ count: 1 }),
         findFirst: vi.fn().mockResolvedValue(null),
       },
@@ -1706,13 +1713,22 @@ describe("pauseRunForInput", () => {
     expect(tx.run.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ status: "running", leaseFence: 3 }),
-        data: { status: "waiting_input", leaseOwner: null, leaseExpiresAt: null },
+        data: {
+          status: "waiting_input",
+          updatedAt: expect.any(Date),
+          leaseOwner: null,
+          leaseExpiresAt: null,
+        },
       }),
     );
     expect(tx.event.create.mock.calls.map(([input]) => input.data.type)).toEqual([
       "thread.message.created",
       "run.waiting_input",
     ]);
+    const waitAt = tx.run.updateMany.mock.calls[0]![0].data.updatedAt as Date;
+    expect(tx.event.create.mock.calls[1]![0].data.payload).toMatchObject({
+      updatedAt: waitAt.toISOString(),
+    });
     expect(publish).toHaveBeenCalledWith("thread:thread-1", JSON.stringify({ cursor: 8 }));
   });
 
@@ -1785,6 +1801,7 @@ describe("pauseRunForInput", () => {
       expect.objectContaining({
         data: {
           status: "waiting_input",
+          updatedAt: expect.any(Date),
           leaseOwner: null,
           leaseExpiresAt: null,
           checkpoint: JSON.stringify({
@@ -4324,6 +4341,92 @@ describe("sendUserMessage", () => {
 });
 
 describe("claimSteering", () => {
+  it("keeps follow-up input unread until the old turn ends, then activates it in message order", async () => {
+    let active = true;
+    let originTrigger: string | null = "follow_up";
+    let runId: string | null = "old-run";
+    const tx = {
+      $queryRaw: vi.fn(),
+      run: {
+        findFirst: vi.fn(async ({ where }: { where: { id?: string } }) =>
+          where.id
+            ? { id: where.id, spaceId: "space", trigger: "user" }
+            : active
+              ? { id: "old-run" }
+              : null,
+        ),
+        findUnique: vi.fn().mockResolvedValue({ status: "running", startedAt: null }),
+        create: vi.fn(async () => {
+          active = true;
+          return { id: "next-run" };
+        }),
+      },
+      task: { create: vi.fn().mockResolvedValue({ id: "task" }) },
+      thread: {
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ nextMessageSeq: 3 }),
+        update: vi.fn().mockResolvedValue({ nextEventSeq: 1 }),
+      },
+      event: { create: vi.fn() },
+      steeringMessage: {
+        findMany: vi.fn(async ({ where }: { where: { AND?: unknown; runId?: null } }) => {
+          if (where.AND) {
+            expect(where.AND).toEqual([
+              { OR: [{ originTrigger: null }, { originTrigger: { not: "follow_up" } }] },
+            ]);
+            if (originTrigger === "follow_up") return [];
+          }
+          return [
+            {
+              id: "row",
+              messageId: "message",
+              userId: "user",
+              originTrigger,
+              message: { id: "message", seq: 2, blocks: [{ kind: "text", text: "Next task" }] },
+            },
+          ];
+        }),
+        updateMany: vi.fn(async ({ data }: { data: { runId: string; originTrigger?: null } }) => {
+          runId = data.runId;
+          if (data.originTrigger === null) originTrigger = null;
+          return { count: 1 };
+        }),
+      },
+    };
+    const prisma = { $transaction: async (fn: (tx: unknown) => unknown) => fn(tx) } as never;
+    const claim = (runId: string) =>
+      claimSteering(prisma, {
+        threadId: "thread",
+        botId: "bot",
+        runId,
+        leaseOwner: "worker",
+        leaseFence: 1,
+        seenIds: [],
+      });
+    expect(await claim("old-run")).toEqual([]);
+    expect(
+      await createPendingSteeringRun(tx as never, {
+        threadId: "thread",
+        botId: "bot",
+        spaceId: "space",
+      }),
+    ).toBeNull();
+    // finalizeRun releases unclaimed rows after its final reply and run.completed event.
+    active = false;
+    runId = null;
+    expect(
+      await createPendingSteeringRun(tx as never, {
+        threadId: "thread",
+        botId: "bot",
+        spaceId: "space",
+      }),
+    ).toBe("next-run");
+    expect(runId).toBe("next-run");
+    expect(originTrigger).toBeNull();
+    expect((await claim("next-run")).map((row) => row.text)).toEqual(["Next task"]);
+    expect(tx.steeringMessage.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ orderBy: [{ message: { seq: "asc" } }, { id: "asc" }] }),
+    );
+  });
   it("claims pending messages for the fenced run in message order", async () => {
     const tx = {
       $queryRaw: vi.fn(),
@@ -5175,71 +5278,103 @@ describe("appendEventsInTransaction", () => {
     expect(await appendEventsInTransaction(tx as never, [])).toEqual([]);
   });
 
-  it("finalizes a completed run with one event reservation and one insert", async () => {
-    const { tx, calls } = countingTx();
-    const full = {
-      ...tx,
-      $queryRaw: vi.fn(async () => []),
-      run: {
-        ...tx.run,
-        findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
-        findFirst: vi.fn(async () => null),
-        updateMany: vi.fn(async () => ({ count: 1 })),
-      },
-      attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      task: { updateMany: vi.fn(async () => ({ count: 1 })) },
-      thread: {
-        update: vi.fn(async ({ data }: { data: Record<string, { increment: number }> }) => {
-          calls.push(data.nextEventSeq ? "thread.update:event" : "thread.update:message");
-          return { nextMessageSeq: 2, nextEventSeq: 5 + (data.nextEventSeq?.increment ?? 0) };
-        }),
-      },
-      event: { ...tx.event, deleteMany: vi.fn(async () => ({ count: 0 })) },
-      message: {
-        findFirst: vi.fn(async () => null),
-        create: vi.fn(async ({ data }: { data: object }) => ({ ...data, id: "message-1" })),
-      },
-      steeringMessage: {
-        findMany: vi.fn(async () => []),
-        deleteMany: vi.fn(async () => ({ count: 0 })),
-        updateMany: vi.fn(async () => ({ count: 0 })),
-      },
-      bot: { update: vi.fn(async () => ({})) },
-    };
-    const prisma = {
-      $transaction: vi.fn(async (callback: (client: typeof full) => unknown) => callback(full)),
-    } as unknown as PrismaClient;
-    const publish = vi.fn(async () => undefined);
-    await expect(
-      finalizeRun(
-        prisma,
-        {
-          spaceId: "space-1",
-          threadId: "thread-1",
-          botId: "bot-1",
-          runId: "run-1",
-          taskId: "task-1",
-          attemptId: "attempt-1",
-          leaseOwner: "worker-1",
-          leaseFence: 1,
-          outcome: "completed",
-          blocks: [{ kind: "text", text: "done" }],
+  it.each([false, true])(
+    "finalizes the reply before activating next-turn input (%s)",
+    async (followUp) => {
+      const { tx, calls } = countingTx();
+      const full = {
+        ...tx,
+        $queryRaw: vi.fn(async () => []),
+        run: {
+          ...tx.run,
+          findUniqueOrThrow: vi.fn(async () => ({ sourceMessage: null })),
+          findFirst: vi.fn(async () => null),
+          updateMany: vi.fn(async () => ({ count: 1 })),
+          create: vi.fn(async () => {
+            calls.push("next-run");
+            return { id: "next-run" };
+          }),
         },
-        { publish } as never,
-      ),
-    ).resolves.toEqual({ continuationRunId: null });
-    expect(calls.filter((name) => name.startsWith("thread.update:event"))).toHaveLength(1);
-    expect(calls.filter((name) => name === "event.createMany")).toHaveLength(1);
-    expect(calls.filter((name) => name === "event.create")).toHaveLength(0);
-    const inserted = full.event.createMany.mock.calls[0]?.[0] as unknown as {
-      data: Array<{ type: string }>;
-    };
-    expect(inserted.data.map((row) => row.type)).toEqual([
-      "thread.message.created",
-      "run.completed",
-    ]);
-    expect(publish).toHaveBeenCalledWith(expect.any(String), JSON.stringify({ cursor: 6 }));
-  });
+        attempt: { updateMany: vi.fn(async () => ({ count: 1 })) },
+        task: {
+          updateMany: vi.fn(async () => ({ count: 1 })),
+          create: vi.fn(async () => ({ id: "next-task" })),
+        },
+        thread: {
+          update: vi.fn(async ({ data }: { data: Record<string, { increment: number }> }) => {
+            calls.push(data.nextEventSeq ? "thread.update:event" : "thread.update:message");
+            return { nextMessageSeq: 2, nextEventSeq: 5 + (data.nextEventSeq?.increment ?? 0) };
+          }),
+        },
+        event: { ...tx.event, deleteMany: vi.fn(async () => ({ count: 0 })) },
+        message: {
+          findFirst: vi.fn(async () => null),
+          create: vi.fn(async ({ data }: { data: object }) => ({ ...data, id: "message-1" })),
+        },
+        steeringMessage: {
+          findMany: vi.fn(async () =>
+            followUp
+              ? [
+                  {
+                    id: "delayed-row",
+                    userId: "user",
+                    originTrigger: "follow_up",
+                    message: {
+                      id: "delayed-message",
+                      seq: 9,
+                      blocks: [{ kind: "text", text: "Next task" }],
+                    },
+                  },
+                ]
+              : [],
+          ),
+          deleteMany: vi.fn(async () => ({ count: 0 })),
+          updateMany: vi.fn(async () => ({ count: 0 })),
+        },
+        bot: { update: vi.fn(async () => ({})) },
+      };
+      const prisma = {
+        $transaction: vi.fn(async (callback: (client: typeof full) => unknown) => callback(full)),
+      } as unknown as PrismaClient;
+      const publish = vi.fn(async () => undefined);
+      await expect(
+        finalizeRun(
+          prisma,
+          {
+            spaceId: "space-1",
+            threadId: "thread-1",
+            botId: "bot-1",
+            runId: "run-1",
+            taskId: "task-1",
+            attemptId: "attempt-1",
+            leaseOwner: "worker-1",
+            leaseFence: 1,
+            outcome: "completed",
+            blocks: [{ kind: "text", text: "done" }],
+          },
+          { publish } as never,
+        ),
+      ).resolves.toEqual({ continuationRunId: followUp ? "next-run" : null });
+      expect(calls.filter((name) => name.startsWith("thread.update:event"))).toHaveLength(1);
+      expect(calls.filter((name) => name === "event.createMany")).toHaveLength(1);
+      expect(calls.filter((name) => name === "event.create")).toHaveLength(0);
+      const inserted = full.event.createMany.mock.calls[0]?.[0] as unknown as {
+        data: Array<{ type: string }>;
+      };
+      expect(inserted.data.map((row) => row.type)).toEqual([
+        "thread.message.created",
+        "run.completed",
+      ]);
+      if (followUp) {
+        expect(calls.indexOf("next-run")).toBeGreaterThan(calls.indexOf("event.createMany"));
+        expect(full.steeringMessage.updateMany).toHaveBeenCalledWith({
+          where: { id: { in: ["delayed-row"] }, runId: null },
+          data: { runId: "next-run", claimedAt: null, originTrigger: null },
+        });
+      }
+      expect(publish).toHaveBeenCalledWith(expect.any(String), JSON.stringify({ cursor: 6 }));
+    },
+  );
 });
 
 describe("sidebar signal", () => {

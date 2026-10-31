@@ -26,6 +26,7 @@ describe("run triggers", () => {
           startedAt: null,
           completedAt: null,
           createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
         }).trigger,
       ).toBe(trigger);
       expect(
@@ -63,6 +64,7 @@ describe("run triggers", () => {
       startedAt: "2026-01-01T00:00:00.000Z",
       completedAt: "2026-01-01T00:01:00.000Z",
       createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
     };
     const snapshot = {
       groupId: "group-1",

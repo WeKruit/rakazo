@@ -160,6 +160,8 @@ export function loadRunHistoryMessages(
   return prisma.message.findMany({
     where: {
       threadId: run.threadId,
+      // Persisted follow-ups enter model history only after the current reply finishes.
+      steeringMessages: { none: { originTrigger: "follow_up" } },
       ...(channelId
         ? {
             OR: [

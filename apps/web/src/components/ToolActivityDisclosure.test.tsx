@@ -24,6 +24,7 @@ import {
   StandaloneToolActivity,
   ToolActivityDisclosure,
   ToolOnlyNarration,
+  ToolStepElapsed,
   ToolSteps,
 } from "./ToolActivityDisclosure";
 
@@ -141,6 +142,40 @@ describe("ToolActivityDisclosure", () => {
 });
 
 describe("ToolSteps", () => {
+  it("keeps each completed tool's own receipt duration", () => {
+    const html = renderToStaticMarkup(
+      <ToolSteps
+        steps={[
+          { label: "Reading a page", count: 1, durationMs: 2500 },
+          { label: "Reading a page", count: 1, durationMs: 12_000 },
+        ]}
+      />,
+    );
+    expect(html).toContain("2.5s");
+    expect(html).toContain("12s");
+    expect(html.match(/tool-step-elapsed/g)).toHaveLength(2);
+  });
+
+  it("ticks only an executing step and freezes at its receipt duration", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-01-01T00:00:02Z"));
+    const container = document.createElement("div");
+    const root = createRoot(container);
+    try {
+      flushSync(() => root.render(<ToolStepElapsed startedAt="2026-01-01T00:00:00Z" live />));
+      expect(container.textContent).toBe("0:02");
+      flushSync(() => vi.advanceTimersByTime(3000));
+      expect(container.textContent).toBe("0:05");
+      flushSync(() =>
+        root.render(<ToolStepElapsed startedAt="2026-01-01T00:00:00Z" durationMs={4700} />),
+      );
+      flushSync(() => vi.advanceTimersByTime(10_000));
+      expect(container.textContent).toBe("4.7s");
+    } finally {
+      flushSync(() => root.unmount());
+      vi.useRealTimers();
+    }
+  });
   it("lists only the last steps and counts the earlier ones when limited", () => {
     const steps = stepsOf(LIVE_TOOL_STEP_WINDOW + 3);
     const html = renderToStaticMarkup(

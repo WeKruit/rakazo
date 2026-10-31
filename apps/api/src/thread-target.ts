@@ -4,6 +4,7 @@ import { recruitingAgentRunWaitJob, runContinueJob } from "@rakazo/adapter-kit";
 import {
   agentRunWaitTarget,
   cancelComputerRunWork,
+  recruitingResearchWakeNonce,
   screenLeaseIdForRun,
   toComputerRef,
 } from "@rakazo/adapters";
@@ -16,12 +17,14 @@ import type {
   RecruitingCorrespondenceReference,
   ReplyPreview,
   RunStatus,
+  ThreadBackgroundTask,
   ThreadMessagePage,
   ThreadSnapshot,
 } from "@rakazo/contracts";
 import { GROUP_MEMBER_MIN, MessageBlock as MessageBlockSchema } from "@rakazo/contracts";
 import {
   ACTIVE_RUN_STATUSES,
+  AUTOMATION_RUN_TRIGGERS,
   BACKGROUND_RUN_TRIGGERS,
   callIdFromClientNonce,
   isActive,
@@ -37,7 +40,7 @@ import {
   workActivityForTool,
 } from "@rakazo/core";
 import { deriveMessageQuote, messageReplyPreview } from "@rakazo/core/message-quote";
-import type { Prisma, PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db";
+import type { PrismaClient, QueuedMessageChange, ThreadEvents } from "@rakazo/db";
 import {
   answerWaitingRunWithTextInTransaction,
   appendEventInTransaction,
@@ -50,7 +53,11 @@ import {
   IsolationError,
   loadQueuedMessageIds,
   lockOwnedGroup,
+  Prisma,
   QueuedMessageError,
+  RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
+  STOPPED_TURN,
+  threadStopRunWhere,
   touchGroupUpdatedAt,
   updateQueuedMessage,
 } from "@rakazo/db";
@@ -64,6 +71,7 @@ import {
 import { resolveBusyBotName, toComputerStatus } from "./computer-status.js";
 import { withSerializableRetry } from "./serializable-retry.js";
 import { includeWaitingAskMessages, loadMessagePage } from "./thread-message-pages.js";
+import { loadBackgroundWorkTiming } from "./thread-work-timing.js";
 
 export type ThreadTarget =
   | {
@@ -524,39 +532,47 @@ export async function threadSnapshot(
       deps.prisma.$transaction(
         async (tx) => {
           await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
-          const [messagePage, last, waitingRun, busyOrFailed, queuedMessageIds] = await Promise.all(
-            [
-              loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
-              tx.event.findFirst({
-                where: { threadId: target.threadId },
-                orderBy: { seq: "desc" },
-                select: { seq: true },
-              }),
-              // Waiting asks win over a concurrent busy run, including peer bot_message
-              // and ticket runs. Busy ticket work stays off the transcript below.
-              tx.run.findFirst({
-                where: {
-                  botId: target.botId,
-                  threadId: target.threadId,
-                  status: { in: ["waiting_input", "waiting_takeover"] },
-                },
-                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-              }),
-              tx.run.findFirst({
-                where: {
-                  botId: target.botId,
-                  threadId: target.threadId,
-                  // Hide peer bot_message and background ticket busy/failed noise; waiting is handled above.
-                  trigger: { notIn: ["bot_message", ...BACKGROUND_RUN_TRIGGERS] },
-                  status: { in: [...ACTIVE_RUN_STATUSES, "failed"] },
-                },
-                // The id tiebreak keeps ordering deterministic under equal
-                // timestamps, matching the supersession probe below.
-                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-              }),
-              loadQueuedMessageIds(tx, target.threadId),
-            ],
-          );
+          const [
+            messagePage,
+            last,
+            waitingRun,
+            busyOrFailed,
+            queuedMessageIds,
+            backgroundWork,
+            backgroundTasks,
+          ] = await Promise.all([
+            loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
+            tx.event.findFirst({
+              where: { threadId: target.threadId },
+              orderBy: { seq: "desc" },
+              select: { seq: true },
+            }),
+            // Waiting asks win over a concurrent busy run, including peer bot_message
+            // and ticket runs. Busy ticket work stays off the transcript below.
+            tx.run.findFirst({
+              where: {
+                botId: target.botId,
+                threadId: target.threadId,
+                status: { in: ["waiting_input", "waiting_takeover"] },
+              },
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            }),
+            tx.run.findFirst({
+              where: {
+                botId: target.botId,
+                threadId: target.threadId,
+                // Hide peer bot_message and background ticket busy/failed noise; waiting is handled above.
+                trigger: { notIn: ["bot_message", ...BACKGROUND_RUN_TRIGGERS] },
+                status: { in: [...ACTIVE_RUN_STATUSES, "failed"] },
+              },
+              // The id tiebreak keeps ordering deterministic under equal
+              // timestamps, matching the supersession probe below.
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+            }),
+            loadQueuedMessageIds(tx, target.threadId),
+            loadBackgroundWorkTiming(tx, target.threadId),
+            listThreadBackgroundTasks(tx, target),
+          ]);
           const run = waitingRun ?? busyOrFailed;
           // A failed run is only the thread's word while it is still the newest
           // terminal run; otherwise a stale failure would resurface in the
@@ -609,6 +625,8 @@ export async function threadSnapshot(
             run: currentRun,
             liveEvents,
             queuedMessageIds,
+            backgroundWork,
+            backgroundTasks,
           };
         },
         { timeout: 15_000, maxWait: 5_000 },
@@ -622,6 +640,8 @@ export async function threadSnapshot(
       olderCursor: core.messagePage.olderCursor,
       ...core.window,
       queuedMessageIds: core.queuedMessageIds,
+      ...(core.backgroundWork.length ? { backgroundWork: core.backgroundWork } : {}),
+      backgroundTasks: core.backgroundTasks,
       run: core.run ? mapRun(core.run) : null,
       computer: toComputerStatus(target.botId, target.bot.computer, busyBotName),
     };
@@ -630,7 +650,15 @@ export async function threadSnapshot(
   const core = await deps.prisma.$transaction(
     async (tx) => {
       await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR SHARE`;
-      const [messagePage, last, activeRuns, recentTerminals, queuedMessageIds] = await Promise.all([
+      const [
+        messagePage,
+        last,
+        activeRuns,
+        recentTerminals,
+        queuedMessageIds,
+        backgroundWork,
+        backgroundTasks,
+      ] = await Promise.all([
         loadMessagePage(tx, target.threadId, undefined, THREAD_SNAPSHOT_PAGE_SIZE),
         tx.event.findFirst({
           where: { threadId: target.threadId },
@@ -662,6 +690,8 @@ export async function threadSnapshot(
           take: 50,
         }),
         loadQueuedMessageIds(tx, target.threadId),
+        loadBackgroundWorkTiming(tx, target.threadId),
+        listThreadBackgroundTasks(tx, target),
       ]);
       const liveEvents =
         activeRuns.length > 0
@@ -690,6 +720,8 @@ export async function threadSnapshot(
         terminalRun: pickLatestTerminalRun(recentTerminals),
         liveEvents,
         queuedMessageIds,
+        backgroundWork,
+        backgroundTasks,
       };
     },
     { timeout: 15_000, maxWait: 5_000 },
@@ -705,6 +737,8 @@ export async function threadSnapshot(
     olderCursor: core.messagePage.olderCursor,
     ...core.window,
     queuedMessageIds: core.queuedMessageIds,
+    ...(core.backgroundWork.length ? { backgroundWork: core.backgroundWork } : {}),
+    backgroundTasks: core.backgroundTasks,
     // Match the live reducer: a failed latest terminal stays in run even while siblings are
     // still active or start late. A newer completed/cancelled terminal clears it.
     run:
@@ -780,6 +814,7 @@ function mapRun(run: {
   startedAt: Date | null;
   completedAt: Date | null;
   createdAt: Date;
+  updatedAt: Date;
 }) {
   return {
     id: run.id,
@@ -799,6 +834,7 @@ function mapRun(run: {
     startedAt: run.startedAt?.toISOString() ?? null,
     completedAt: run.completedAt?.toISOString() ?? null,
     createdAt: run.createdAt.toISOString(),
+    updatedAt: run.updatedAt.toISOString(),
   };
 }
 
@@ -816,6 +852,7 @@ export async function sendThreadMessage(
     recruitingContext?: RecruitingChatContext;
     artifactIds?: string[];
     addressing?: "coordinator" | "mentions";
+    queueMode?: "steer" | "follow_up";
     mentions?: MentionTargetInput[];
     replyToMessageId?: string;
     replyQuote?: string;
@@ -952,9 +989,14 @@ export async function sendThreadMessage(
             yielded,
             target.botId,
           );
-          await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
+          if (input.queueMode !== "follow_up")
+            await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
-          if (waitingRuns.length && !activeRuns.some(steersUserMessage)) {
+          if (
+            input.queueMode !== "follow_up" &&
+            waitingRuns.length &&
+            !activeRuns.some(steersUserMessage)
+          ) {
             const answerText = input.text;
             if (!answerText?.trim()) {
               throw new ORPCError("CONFLICT", {
@@ -1011,14 +1053,16 @@ export async function sendThreadMessage(
           const active = activeRuns.find(steersUserMessage) ?? activeRuns[0];
           if (active) {
             const steers = steersUserMessage(active);
-            const queued = !(await answerStatusQuestion(
-              tx,
-              actor,
-              target.threadId,
-              target.botId,
-              active,
-              input.text,
-            ));
+            const queued =
+              input.queueMode === "follow_up" ||
+              !(await answerStatusQuestion(
+                tx,
+                actor,
+                target.threadId,
+                target.botId,
+                active,
+                input.text,
+              ));
             if (queued)
               await tx.steeringMessage.create({
                 data: {
@@ -1026,7 +1070,11 @@ export async function sendThreadMessage(
                   botId: target.botId,
                   userId: actor.userId,
                   runId: steers ? active.id : null,
-                  ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
+                  ...(input.queueMode === "follow_up"
+                    ? { originTrigger: "follow_up" }
+                    : steers && input.interrupt
+                      ? { originTrigger: "interrupt" }
+                      : {}),
                 },
               });
             await tx.message.update({ where: { id: message.id }, data: { runId: active.id } });
@@ -1138,19 +1186,20 @@ export async function sendThreadMessage(
         });
         await assertCorrespondenceScope();
         // In a crew the work may be running on any teammate, not only the one addressed.
-        const busy = isStatusQuestion(input.text)
-          ? (
-              await tx.run.findMany({
-                where: {
-                  threadId: target.threadId,
-                  botId: { in: memberBotIds },
-                  status: "running",
-                },
-                orderBy: { createdAt: "desc" },
-                select: { id: true, taskId: true, botId: true, status: true, trigger: true },
-              })
-            ).find((run) => run.status === "running" && steersUserMessage(run))
-          : undefined;
+        const busy =
+          input.queueMode !== "follow_up" && isStatusQuestion(input.text)
+            ? (
+                await tx.run.findMany({
+                  where: {
+                    threadId: target.threadId,
+                    botId: { in: memberBotIds },
+                    status: "running",
+                  },
+                  orderBy: { createdAt: "desc" },
+                  select: { id: true, taskId: true, botId: true, status: true, trigger: true },
+                })
+              ).find((run) => run.status === "running" && steersUserMessage(run))
+            : undefined;
         if (busy) {
           await touchGroupUpdatedAt(tx, target.groupId);
           const asked = await appendEventInTransaction(tx, {
@@ -1188,7 +1237,8 @@ export async function sendThreadMessage(
           },
         });
         const activeRuns = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
-        await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
+        if (input.queueMode !== "follow_up")
+          await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
         const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
         const conversationalBotIds = new Set(
@@ -1197,6 +1247,10 @@ export async function sendThreadMessage(
         for (const run of activeRuns) {
           if (run.status === "waiting_input") {
             if (conversationalBotIds.has(run.botId)) continue;
+            if (input.queueMode === "follow_up") {
+              activeByBotId.set(run.botId, run);
+              continue;
+            }
             const answerText = input.text;
             if (!answerText?.trim()) {
               throw new ORPCError("CONFLICT", {
@@ -1245,6 +1299,7 @@ export async function sendThreadMessage(
           if (active) {
             const steers = steersUserMessage(active);
             if (
+              input.queueMode === "follow_up" ||
               !(await answerStatusQuestion(tx, actor, target.threadId, botId, active, input.text))
             ) {
               steeredCount += 1;
@@ -1254,7 +1309,11 @@ export async function sendThreadMessage(
                   botId,
                   userId: actor.userId,
                   runId: steers ? active.id : null,
-                  ...(steers && input.interrupt ? { originTrigger: "interrupt" } : {}),
+                  ...(input.queueMode === "follow_up"
+                    ? { originTrigger: "follow_up" }
+                    : steers && input.interrupt
+                      ? { originTrigger: "interrupt" }
+                      : {}),
                 },
               });
             }
@@ -1441,6 +1500,151 @@ export async function reactToThreadMessage(
   });
 }
 
+function backgroundRunWhere(scope: {
+  spaceId: string;
+  userId: string;
+  threadId: string;
+}): Prisma.RunWhereInput {
+  return {
+    ...scope,
+    status: { in: [...ACTIVE_RUN_STATUSES] },
+    OR: [
+      { trigger: { in: [...AUTOMATION_RUN_TRIGGERS] } },
+      { sourceMessage: { is: { blocks: { array_contains: [{ kind: "handoff" }] } } } },
+    ],
+  };
+}
+
+/** The target is already authorized; every joined record must still share its thread owner. */
+export async function listThreadBackgroundTasks(
+  prisma: Pick<PrismaClient, "$queryRaw">,
+  target: ThreadTarget,
+): Promise<ThreadBackgroundTask[]> {
+  return prisma.$queryRaw<ThreadBackgroundTask[]>`
+    WITH owned AS (
+      SELECT id, "spaceId", "userId" FROM threads WHERE id = ${target.threadId}
+    )
+    SELECT q.id, 'research' AS kind, 'running' AS status
+    FROM recruiting_research_tasks q
+    JOIN runs r ON r.id = q."createdByRunId"
+    JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
+    JOIN recruiting_roles rr ON rr.id = q."roleId" AND rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"
+    WHERE q.state = 'active'
+    UNION ALL
+    SELECT c.id, 'cloud_agent' AS kind, CASE WHEN c."cancelRequested" THEN 'cancelling' ELSE 'running' END AS status
+    FROM cloud_agents c
+    JOIN owned o ON c."threadId" = o.id AND c."spaceId" = o."spaceId" AND c."userId" = o."userId"
+    WHERE c.status = 'running'
+    UNION ALL
+    SELECT r.id, 'run' AS kind, 'running' AS status
+    FROM runs r
+    JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
+    LEFT JOIN messages m ON m.id = r."sourceMessageId"
+    WHERE r.status IN (${Prisma.join([...ACTIVE_RUN_STATUSES])})
+      AND (r.trigger IN (${Prisma.join([...AUTOMATION_RUN_TRIGGERS])})
+        OR m.blocks @> '[{"kind":"handoff"}]'::jsonb)
+    UNION ALL
+    SELECT e.id, 'agent_run' AS kind, 'running' AS status
+    FROM external_effects e
+    JOIN runs r ON r.id = e."runId"
+    JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
+    WHERE e."spaceId" = o."spaceId" AND e.kind = 'work_estimate' AND e.status = 'running'
+      AND starts_with(e."idempotencyKey", 'work_estimate:agent_run_')
+    ORDER BY kind, id
+  `;
+}
+
+export async function cancelThreadBackgroundTask(
+  prisma: PrismaClient,
+  actor: Actor,
+  target: ThreadTarget,
+  task: { kind: "research" | "cloud_agent" | "agent_run" | "run"; id: string },
+) {
+  const scope = { spaceId: actor.spaceId, userId: actor.userId, threadId: target.threadId };
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR UPDATE`;
+    if (task.kind === "run") {
+      const owned = await tx.run.findFirst({
+        where: { ...backgroundRunWhere(scope), id: task.id },
+        select: { id: true },
+      });
+      if (!owned) throw new IsolationError();
+      return [owned.id];
+    }
+    if (task.kind === "agent_run") {
+      const owned = await tx.externalEffect.findFirst({
+        where: {
+          id: task.id,
+          kind: "work_estimate",
+          idempotencyKey: { startsWith: "work_estimate:agent_run_" },
+          spaceId: actor.spaceId,
+          run: scope,
+        },
+        select: { id: true, idempotencyKey: true },
+      });
+      if (!owned) throw new IsolationError();
+      await tx.externalEffect.updateMany({
+        where: {
+          id: task.id,
+          kind: "work_estimate",
+          status: "running",
+          idempotencyKey: { startsWith: "work_estimate:agent_run_" },
+          spaceId: actor.spaceId,
+          run: scope,
+        },
+        data: { status: "cancelled" },
+      });
+      const ref = owned.idempotencyKey.slice("work_estimate:".length);
+      const wakes = await tx.run.findMany({
+        where: {
+          ...scope,
+          status: { in: [...ACTIVE_RUN_STATUSES] },
+          clientNonce: { startsWith: `${RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX}${ref}:` },
+        },
+        select: { id: true },
+      });
+      return wakes.map((wake) => wake.id);
+    }
+    if (task.kind === "research") {
+      const owned = await tx.recruitingResearchTask.findFirst({
+        where: { id: task.id, createdByRun: scope },
+        select: { id: true, providerTaskId: true },
+      });
+      if (!owned) throw new IsolationError();
+      // ponytail: research exposes no cancel operation; close native updates. Add remote
+      // cancellation here when the existing provider interface supports it.
+      await tx.recruitingResearchTask.updateMany({
+        where: { id: task.id, state: "active", createdByRun: scope },
+        data: { state: "closed" },
+      });
+      if (!owned.providerTaskId) return [];
+      const nonce = recruitingResearchWakeNonce(owned.id, owned.providerTaskId);
+      const wakes = await tx.run.findMany({
+        where: {
+          ...scope,
+          status: { in: [...ACTIVE_RUN_STATUSES] },
+          OR: [{ clientNonce: nonce }, { clientNonce: { startsWith: `${nonce}:` } }],
+        },
+        select: { id: true },
+      });
+      return wakes.map((wake) => wake.id);
+    } else {
+      const owned = await tx.cloudAgent.findFirst({
+        where: { id: task.id, ...scope },
+        select: { id: true },
+      });
+      if (!owned) throw new IsolationError();
+      // Reuse the cloud-agent outbox: its reconciler asks the provider to cancel and only
+      // records cancellation once the provider confirms it.
+      await tx.cloudAgent.updateMany({
+        where: { id: task.id, ...scope, status: "running" },
+        data: { cancelRequested: true, version: { increment: 1 }, nextPollAt: new Date() },
+      });
+      return [];
+    }
+  });
+}
+
 export async function stopThreadRuns(
   deps: {
     prisma: PrismaClient;
@@ -1450,20 +1654,40 @@ export async function stopThreadRuns(
   actor: Actor,
   target: ThreadTarget,
   runId?: string,
+  scope: "turn" | "all" = "turn",
 ) {
   const { runIds, computers, leases, eventSeq } = await deps.prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR UPDATE`;
     const cancelled = await tx.run.updateManyAndReturn({
-      where: {
-        threadId: target.threadId,
-        ...(runId !== undefined ? { id: runId } : {}),
-        status: { in: [...ACTIVE_RUN_STATUSES] },
+      where: threadStopRunWhere(target.threadId, runId, scope),
+      data: {
+        status: "cancelled",
+        completedAt: new Date(),
+        error: runId === undefined && scope === "turn" ? STOPPED_TURN : null,
       },
-      data: { status: "cancelled", completedAt: new Date() },
-      select: { id: true, botId: true },
+      select: { id: true, botId: true, taskId: true },
     });
+    await cancelRunsInTransaction(tx, cancelled, new Date());
     const ids = cancelled.map((run) => run.id);
-    if (runId === undefined) {
+    if (runId === undefined && scope === "all") {
+      // Clear delivery intent, never the original human messages in the transcript.
+      await tx.steeringMessage.deleteMany({
+        where: { userId: actor.userId, message: { threadId: target.threadId } },
+      });
+      await tx.externalEffect.updateMany({
+        where: {
+          kind: "work_estimate",
+          status: "running",
+          spaceId: actor.spaceId,
+          run: { threadId: target.threadId, userId: actor.userId },
+        },
+        data: { status: "cancelled" },
+      });
+      // A provider reply still arriving for an earlier stopped turn must not re-arm research.
+      await tx.run.updateMany({
+        where: { threadId: target.threadId, status: "cancelled", error: STOPPED_TURN },
+        data: { error: null },
+      });
       // Stopping the conversation also ends what would wake it later. Research the provider is
       // still running is closed here, so its poll ignores the completion; a later reply on the
       // same research reopens it. Pending one-shot reminders are disarmed, not deleted.
@@ -1479,8 +1703,17 @@ export async function stopThreadRuns(
         },
         data: { active: false, nextRunAt: null },
       });
+      await tx.cloudAgent.updateMany({
+        where: {
+          threadId: target.threadId,
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          status: "running",
+        },
+        data: { cancelRequested: true, version: { increment: 1 }, nextPollAt: new Date() },
+      });
     }
-    if (ids.length) {
+    if (ids.length && !(runId === undefined && scope === "all")) {
       // Steering the stopped run already claimed went into its context and ends with it.
       // Unclaimed rows (steered but not yet read, or a queued continuation's input) survive
       // as pending input: the next run in this thread claims them. Stop cancels the run,

@@ -1,9 +1,9 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ChatMarkdown } from "@rakazo/chat-ui/web-lazy";
 import type { ThreadMessage } from "@rakazo/contracts";
+import { loadThreadHistory } from "@rakazo/core";
 import { BotAvatar, Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import { useEffect, useMemo, useState } from "react";
-import { loadPeerHistory } from "../lib/peer-history";
 import { peerConversations } from "../lib/peer-messages";
 import { rpc } from "../lib/rpc";
 
@@ -44,7 +44,7 @@ export function PeerMessagesOverlay({
     setHistoryReady(false);
     setHistoryFailed(false);
     setMessages([]);
-    void loadPeerHistory({
+    void loadThreadHistory({
       signal: abort.signal,
       loadPage: (before, signal) =>
         rpc.threads.messages({ botId, before, includePeerRuns: true }, { signal }),

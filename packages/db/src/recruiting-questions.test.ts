@@ -57,6 +57,7 @@ function fixture(count = 4, answered = false) {
     bot: actor,
     status: answered ? "completed" : "waiting_input",
     sourceMessageId: null,
+    updatedAt: new Date("2026-10-30T12:00:00.000Z"),
   }));
   const requests = runs.map(() => ({
     operation: "ask",

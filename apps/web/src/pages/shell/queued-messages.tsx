@@ -52,7 +52,7 @@ export function QueuedMessages({
       setEditing(null);
     });
   return (
-    <ul aria-label={t`Queued messages`} className="mb-2 flex flex-col gap-1">
+    <ul aria-label={t`Queued messages`} aria-live="polite" className="mb-2 flex flex-col gap-1">
       {messages.map((message) => {
         const text = queuedText(message.blocks);
         const busy = busyId === message.id;
@@ -105,6 +105,9 @@ export function QueuedMessages({
               </form>
             ) : (
               <>
+                <span className="text-xs text-muted-foreground">
+                  <Trans>Queued</Trans>
+                </span>
                 <span className="min-w-0 flex-1 truncate text-muted-foreground" dir="auto">
                   {text || t`Attachment`}
                 </span>

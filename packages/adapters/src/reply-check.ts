@@ -2,6 +2,7 @@ import type { BackgroundJobPayloads, JobPublisher } from "@rakazo/adapter-kit";
 import { runContinueJob, threadReplyCheckJob } from "@rakazo/adapter-kit";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import { STOPPED_TURN } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { AUTOCONTINUE_NONCE_PREFIX } from "./turn-end-guard.js";
 
@@ -12,8 +13,6 @@ import { AUTOCONTINUE_NONCE_PREFIX } from "./turn-end-guard.js";
  * agent's call; this only makes sure the person is not left without one.
  */
 export const REPLY_CHECK_DELAY_MS = 5_000;
-/** The error a person's Stop of one turn leaves on it (kept in step with cancel-runs). */
-const STOPPED_TURN_ERROR = "turn_stopped";
 /** Older unanswered messages are left alone: the person has moved on. */
 const MAX_AGE_MS = 60 * 60_000;
 /**
@@ -98,7 +97,7 @@ export async function checkThreadReplied(
   // A person's Stop leaves no error or "turn_stopped"; a stuck turn the server cancelled carries
   // another error and is still answered.
   const stopped = (run: { status: string; error: string | null } | null | undefined) =>
-    run?.status === "cancelled" && (!run.error || run.error === STOPPED_TURN_ERROR);
+    run?.status === "cancelled" && (!run.error || run.error === STOPPED_TURN);
   if (stopped(source) || latest.steeringMessages.some((row) => stopped(row.run)))
     return skipped("stopped");
   const busy = await deps.prisma.run.findFirst({

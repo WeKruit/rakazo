@@ -32,6 +32,19 @@ import {
 } from "./index.js";
 
 describe("contracts", () => {
+  it("accepts steering and next-turn input, never a follow-up that also interrupts", () => {
+    const schema = appContract.threads.send["~orpc"].inputSchema!;
+    for (const queueMode of ["steer", "follow_up"] as const) {
+      expect(schema.parse({ botId: "bot", text: "Continue", queueMode }).queueMode).toBe(queueMode);
+    }
+    expect(schema.safeParse({ botId: "bot", text: "Continue", queueMode: "later" }).success).toBe(
+      false,
+    );
+    expect(
+      schema.safeParse({ botId: "bot", text: "Continue", queueMode: "follow_up", interrupt: true })
+        .success,
+    ).toBe(false);
+  });
   it("accepts an explicit group addressing mode without changing direct bot sends", () => {
     const schema = appContract.threads.send["~orpc"].inputSchema!;
     for (const addressing of ["coordinator", "mentions"] as const) {
@@ -114,8 +127,9 @@ describe("contracts", () => {
     expect(schema.parse({ groupId: "group-1", runId: "run-1" })).toEqual({
       groupId: "group-1",
       runId: "run-1",
+      scope: "turn",
     });
-    expect(schema.parse({ botId: "bot-1" })).toEqual({ botId: "bot-1" });
+    expect(schema.parse({ botId: "bot-1" })).toEqual({ botId: "bot-1", scope: "turn" });
     expect(schema.safeParse({ runId: "run-1" }).success).toBe(false);
     expect(schema.safeParse({ groupId: "group-1", runId: "" }).success).toBe(false);
   });
@@ -640,6 +654,7 @@ describe("contracts", () => {
       startedAt: "2026-08-26T00:00:00.000Z",
       completedAt: null,
       createdAt: "2026-08-26T00:00:00.000Z",
+      updatedAt: "2026-08-26T00:00:00.000Z",
     };
 
     expect(RunSchema.safeParse(run).success).toBe(true);

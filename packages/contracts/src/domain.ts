@@ -1031,6 +1031,7 @@ export const RunSchema = z.object({
   startedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
   createdAt: z.string(),
+  updatedAt: z.string(),
 });
 export type Run = z.infer<typeof RunSchema>;
 
@@ -1042,12 +1043,31 @@ export const ThreadMessagePageSchema = z.object({
 });
 export type ThreadMessagePage = z.infer<typeof ThreadMessagePageSchema>;
 
+/** Server-observed background interval; these are not provider timestamps or an ETA. */
+export const BackgroundWorkTimingSchema = z.object({
+  runId: Id,
+  botId: Id,
+  startedAt: IsoDate,
+  endedAt: IsoDate.nullable(),
+  turnStartedAt: IsoDate.nullable(),
+});
+export type BackgroundWorkTiming = z.infer<typeof BackgroundWorkTimingSchema>;
+
+export const ThreadBackgroundTaskSchema = z.object({
+  id: Id,
+  kind: z.enum(["research", "cloud_agent", "run", "agent_run"]),
+  status: z.enum(["running", "cancelling"]),
+});
+export type ThreadBackgroundTask = z.infer<typeof ThreadBackgroundTaskSchema>;
+
 export const ThreadSnapshotSchema = z.object({
   threadId: Id,
   cursor: z.number().int().min(-1),
   messages: z.array(ThreadMessageSchema),
   /** User messages a working reply has not read yet, oldest first; editable until it does. */
   queuedMessageIds: z.array(Id).optional(),
+  backgroundWork: z.array(BackgroundWorkTimingSchema).optional(),
+  backgroundTasks: z.array(ThreadBackgroundTaskSchema).optional(),
   olderCursor: z.number().int().nonnegative().nullable(),
   /** Oldest seq of the latest-message window (excludes merged waiting cards); null when empty. */
   messagesCursor: z.number().int().nonnegative().nullable().optional(),

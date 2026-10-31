@@ -52,12 +52,42 @@ vi.mock("react-native", () => {
   };
 });
 vi.mock("@expo/ui/community/menu", () => ({
-  MenuView: ({ children }: { children?: ReactNode }) => children,
+  MenuView: ({
+    children,
+    actions,
+    onPressAction,
+  }: {
+    children?: ReactNode;
+    actions: Array<{ id: string; title: string; attributes?: { disabled?: boolean } }>;
+    onPressAction?: (event: { nativeEvent: { event: string } }) => void;
+  }) =>
+    createElement(
+      "div",
+      null,
+      children,
+      actions.map((action) =>
+        createElement(
+          "button",
+          {
+            type: "button",
+            key: action.id,
+            "aria-label": action.title,
+            disabled: action.attributes?.disabled,
+            onClick: () => onPressAction?.({ nativeEvent: { event: action.id } }),
+          },
+          action.title,
+        ),
+      ),
+    ),
 }));
 vi.mock("../components/glass-surface", () => ({
   GlassSurface: ({ children }: { children?: ReactNode }) => children,
 }));
 vi.mock("../components/native-symbol", () => ({ NativeSymbol: () => null }));
+vi.mock("../components/native-action-button", () => ({
+  NativeActionButton: ({ label, onPress }: { label: string; onPress: () => void }) =>
+    createElement("button", { type: "button", "aria-label": label, onClick: onPress }, label),
+}));
 vi.mock("./native", () => ({ useMobileTokens: () => ({}), useResolvedAppearance: () => "light" }));
 vi.mock("./i18n", () => ({ useI18n: () => ({ t: (text: string) => text }) }));
 
@@ -137,6 +167,21 @@ describe("thread composer isolation", () => {
     expect(props.send).toHaveBeenCalledOnce();
   });
 
+  it("captures the native follow-up mode with the draft, and keeps it across send updates", () => {
+    render({ working: true });
+    type("Next task");
+    expect(composer.current!.snapshot().queueMode).toBe("steer");
+    press("Steer");
+    expect(composer.current!.snapshot()).toMatchObject({
+      promptText: "Next task",
+      queueMode: "follow_up",
+    });
+    render({ working: false, sending: true });
+    expect(composer.current!.snapshot().queueMode).toBe("follow_up");
+    press("Follow up");
+    expect(composer.current!.snapshot().queueMode).toBe("steer");
+  });
+
   it("preserves draft across reply, attachment, and sending updates and resets on thread switch", () => {
     type("Draft");
     render({
@@ -201,4 +246,50 @@ describe("thread composer isolation", () => {
     press("Call");
     expect(props.startVoiceCall).toHaveBeenCalledOnce();
   });
+});
+
+it("keeps Stop, Stop everything and each background-task action distinct on mobile", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const stop = vi.fn(async () => {});
+  const stopAll = vi.fn(async () => {});
+  const cancelTask = vi.fn(async () => {});
+  const task = { id: "research-1", kind: "research" as const, status: "running" as const };
+  try {
+    await act(async () =>
+      root.render(
+        <ThreadComposer
+          {...props}
+          ref={createRef()}
+          working
+          stop={stop}
+          stopAll={stopAll}
+          backgroundTasks={[task]}
+          cancelTask={cancelTask}
+        />,
+      ),
+    );
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Stop"]')!.click(),
+    );
+    expect(stop).toHaveBeenCalledOnce();
+    expect(stopAll).not.toHaveBeenCalled();
+    expect(cancelTask).not.toHaveBeenCalled();
+    await act(async () =>
+      container.querySelector<HTMLButtonElement>('button[aria-label="Stop everything"]')!.click(),
+    );
+    expect(stopAll).toHaveBeenCalledOnce();
+    await act(async () =>
+      container
+        .querySelector<HTMLButtonElement>('button[aria-label="Stop research updates"]')!
+        .click(),
+    );
+    expect(cancelTask).toHaveBeenCalledExactlyOnceWith(task);
+  } finally {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  }
 });

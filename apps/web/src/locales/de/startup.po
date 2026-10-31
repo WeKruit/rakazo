@@ -3380,3 +3380,19 @@ msgstr "Deine E-Mail-Adresse"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "Dein Name"
+
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr "Übertragene Aufgabe"
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr "Kandidaten finden"
+
+#: src/pages/ActivityList.tsx
+msgid "Queued"
+msgstr "In Warteschlange"
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""

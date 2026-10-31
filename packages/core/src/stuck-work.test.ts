@@ -5,6 +5,7 @@ import {
   STUCK_WORK_EXPIRE_AFTER_MS,
   STUCK_WORK_NOTIFY_AFTER_MS,
   stuckWorkAction,
+  stuckWorkExpiresAt,
   stuckWorkReminder,
   stuckWorkStatusMessage,
   stuckWorkStatusMessages,
@@ -12,6 +13,13 @@ import {
 } from "./stuck-work.js";
 
 describe("stuck work age", () => {
+  it("derives card deadlines from the waiting episode, never the message or run start", () => {
+    expect(stuckWorkExpiresAt("waiting_input", "2026-10-30T12:00:00.000Z")).toBe(
+      "2026-10-31T12:00:00.000Z",
+    );
+    expect(stuckWorkExpiresAt("running", "2026-10-30T12:00:00.000Z")).toBeNull();
+    expect(stuckWorkExpiresAt("waiting_input", "invalid")).toBeNull();
+  });
   it("keeps the reminder well before the cancellation", () => {
     expect(STUCK_WORK_EXPIRE_AFTER_MS).toBeGreaterThan(STUCK_WORK_NOTIFY_AFTER_MS);
   });
@@ -54,6 +62,12 @@ describe("stuck work age", () => {
       title: "Ada still needs you",
     });
     expect(stuckWorkReminder("queued", "Ada").kind).toBe("help");
+  });
+
+  it("tells the person how to resume every expired scope", () => {
+    expect(stuckWorkStatusMessage("queued")).toMatch(/try again/i);
+    expect(stuckWorkStatusMessage("waiting_input")).toMatch(/reply.*continue/i);
+    expect(stuckWorkStatusMessage("waiting_takeover")).toMatch(/open.*screen.*try again/i);
   });
 });
 

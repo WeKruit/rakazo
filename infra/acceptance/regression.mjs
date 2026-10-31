@@ -28,6 +28,24 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertFollowUpDelivery, replyAfterInput } from "./follow-up.mjs";
+import { checkNotificationPolicy } from "./notification-policy.mjs";
+import { checkReviewerGrading } from "./reviewer-grading.mjs";
+import { assertSlowToolPromotion } from "./slow-tool.mjs";
+import { checkBackgroundTiming, checkToolTiming } from "./tool-timing.mjs";
+import {
+  checkCardsAfterReconnect,
+  checkFailureRecoveryUi,
+  checkStageTranscript,
+  sendWithImmediateFeedback,
+  withConversationPage,
+} from "./workloop-browser.mjs";
+import {
+  assertCancelOneTask,
+  assertStopEverything,
+  assertStopKeepsBackground,
+  assertTestCopy,
+} from "./workloop-task-controls.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -219,6 +237,7 @@ const sendCard = (message) =>
 
 /** Sends one recruiter message and waits until the crew settles. Never answers a card. */
 async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
+  await assertTestCopy(rpc, groupId);
   const before = new Set((await messagesOf(groupId)).map((message) => message.id));
   const busy = await working(groupId);
   const sentAt = Date.now();
@@ -300,6 +319,7 @@ const wanted = new Set(
     (SUITE === "full"
       ? [
           "smoke",
+          "isolation",
           "first10",
           "progress",
           "t3",
@@ -311,7 +331,7 @@ const wanted = new Set(
           "t5",
           "expired",
         ]
-      : ["smoke", "first10", "progress", "t3", "cards"]),
+      : ["smoke", "isolation", "first10", "progress", "t3", "cards"]),
 );
 
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
@@ -353,6 +373,15 @@ try {
       if (code !== 0) failures.push("smoke did not pass; see smoke.log");
     });
 
+  if (wanted.has("isolation"))
+    await stage("isolation", async (failures) => {
+      const code = await run("isolation", "account-isolation.mjs", [
+        "--out",
+        path.join(OUT, "isolation.json"),
+      ]);
+      if (code !== 0) failures.push("account isolation did not pass; see isolation.log");
+    });
+
   if (wanted.has("first10"))
     await stage("first10", async (failures) => {
       const code = await run("first10", "first10-suite.mjs", [
@@ -376,6 +405,7 @@ try {
         "--keep",
       ]);
       let asked = false;
+      let stoppedCurrent = false;
       let exit;
       finding.then((code) => {
         exit = code;
@@ -389,7 +419,16 @@ try {
         } catch {
           continue;
         }
-        if (asked || !report?.groupId || !report.milestones?.scale_sent) continue;
+        if (!report?.groupId || !report.milestones?.scale_sent) continue;
+        if (
+          asked &&
+          !stoppedCurrent &&
+          (await rpc("threads/backgroundTasks", { groupId: report.groupId })).length
+        ) {
+          await assertStopKeepsBackground(rpc, report.groupId);
+          stoppedCurrent = true;
+        }
+        if (asked) continue;
         if (!(await working(report.groupId))) continue;
         asked = true;
         const before = new Set((await messagesOf(report.groupId)).map((message) => message.id));
@@ -416,6 +455,8 @@ try {
           failures.push(`progress answer took ${seconds.toFixed(1)} s (limit 3)`);
       }
       if (!asked) failures.push("the search finished before a progress question could be sent");
+      if (!stoppedCurrent)
+        failures.push("Stop mid-search was not exercised against running background work");
       if (exit !== 0)
         failures.push("find-50 did not pass after the progress question; see progress.log");
       const report = reportOf("progress");
@@ -423,6 +464,16 @@ try {
         const messages = await settled(report.groupId);
         commonChecks(messages, failures);
         scaleReportChecks(messages, failures, report.milestones?.scale_sent);
+        checkToolTiming(messages);
+        checkBackgroundTiming(await rpc("threads/get", { groupId: report.groupId }));
+        const grading = await checkReviewerGrading(rpc, report.groupId, readEvents);
+        fs.writeFileSync(path.join(OUT, "progress-reviewer.json"), JSON.stringify(grading));
+        const events = await readEvents(report.groupId);
+        const event = events.find(
+          (event) => event.type === "thread.message.created" && event.payload?.role === "bot",
+        );
+        if (!event) failures.push("notification regression needs a real bot reply event");
+        else await checkNotificationPolicy(rpc, { threadId: event.threadId, eventId: event.id });
       }
     });
 
@@ -497,14 +548,100 @@ try {
       if ((drafted.match(/subject:/gi)?.length ?? 0) < 3)
         failures.push("campaign draft is not three emails shown in chat");
       if (!/^\s*[-*•]\s/m.test(drafted)) failures.push("job duties in the draft are not bullets");
-      const contacts = await say(groupId, "找contact");
-      if (!contacts.replies.length) failures.push("「找contact」 got no reply");
-      const again = await say(groupId, "找contact");
-      // A repeat shows the contacts already found first, then continues to the next people.
-      if (again.firstReply === null || again.firstReply > 60)
-        failures.push(
-          `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
-        );
+      await withConversationPage(
+        { rpc, origin: ORIGIN, cookie, token: TOKEN, groupId },
+        async (page) => {
+          const lookup = await rpc("threads/send", {
+            groupId,
+            addressing: "coordinator",
+            text: "找contact",
+          });
+          const lookupMessage = (await messagesOf(groupId)).find(
+            (message) => message.role === "user" && message.seq === lookup.seq,
+          );
+          if (!lookupMessage) throw new Error("lookup source message was not persisted");
+          const toolWaitAt = Date.now();
+          let activePromotion;
+          while (!activePromotion && Date.now() - toolWaitAt < 45_000) {
+            const events = await readEvents(groupId, {
+              limitMs: Math.min(15_000, 45_000 - (Date.now() - toolWaitAt)),
+            });
+            const source = events.find(
+              (event) =>
+                event.type === "thread.message.created" &&
+                event.payload?.role === "user" &&
+                event.payload?.messageId === lookupMessage.id,
+            );
+            if (!source) throw new Error("lookup source event was not persisted");
+            // Include native delegated peers, but never an old tool from before this lookup.
+            activePromotion = events.find(
+              (event) =>
+                event.type === "run.started" &&
+                event.seq > source.seq &&
+                event.payload?.backgrounded === true &&
+                event.payload?.trigger === "tool_background" &&
+                events.some(
+                  (called) =>
+                    called.type === "agent.tool.called" &&
+                    called.seq > source.seq &&
+                    called.runId === event.runId &&
+                    called.payload?.executionId === event.payload.executionId,
+                ) &&
+                !events.some(
+                  (done) =>
+                    done.type === "agent.tool.completed" &&
+                    done.runId === event.runId &&
+                    done.payload?.executionId === event.payload.executionId,
+                ),
+            );
+            if (!activePromotion)
+              await sleep(Math.max(0, Math.min(500, 45_000 - (Date.now() - toolWaitAt))));
+          }
+          if (!activePromotion)
+            throw new Error(
+              "slow-tool regression was not exercised: no new promoted lookup tool remained active before the repeat",
+            );
+          const repeated = await sendWithImmediateFeedback(page, "找contact");
+          const snapshot = await rpc("threads/get", { groupId });
+          const previous = (snapshot.activeRuns ?? []).find((run) =>
+            ["user", "follow_up", "resume"].includes(run.trigger),
+          );
+          if (!previous)
+            throw new Error("follow_up regression needs the person's current reply still running");
+          const followText = "等当前回复说完，再用一句话总结本次联系人查找结果；不要再搜索或查找。";
+          const follow = await sendWithImmediateFeedback(page, followText, {
+            queueMode: "follow_up",
+          });
+          let firstReply = null;
+          while (Date.now() - repeated.startedAt < 60_000 && firstReply === null) {
+            const events = await readEvents(groupId);
+            const reply = replyAfterInput(events, await messagesOf(groupId), repeated.receipt.seq);
+            if (reply && Date.parse(reply.createdAt) - repeated.startedAt < 60_000)
+              firstReply = Math.max(0, Date.parse(reply.createdAt) - repeated.startedAt);
+            else await sleep(500);
+          }
+          if (firstReply === null)
+            throw new Error("repeat 找contact received no visible reply within 60 seconds");
+          fs.writeFileSync(
+            path.join(OUT, "t1-feedback.json"),
+            JSON.stringify({ feedbackMs: repeated.feedbackMs, firstReplyMs: firstReply }),
+          );
+          await settled(groupId);
+          const delayed = (await messagesOf(groupId)).find(
+            (message) => message.role === "user" && message.seq === follow.receipt.seq,
+          );
+          if (!delayed) throw new Error("follow_up message was not persisted");
+          const completedEvents = await readEvents(groupId);
+          assertFollowUpDelivery(completedEvents, delayed.id, follow.receipt.runId);
+          const repeatedMessage = (await messagesOf(groupId)).find(
+            (message) => message.role === "user" && message.seq === repeated.receipt.seq,
+          );
+          if (!repeatedMessage) throw new Error("repeat contact message was not persisted");
+          const promotion = assertSlowToolPromotion(completedEvents, repeatedMessage.id);
+          fs.writeFileSync(path.join(OUT, "t1-slow-tool.json"), JSON.stringify(promotion));
+          await page.screenshot({ path: path.join(OUT, "t1-busy-feedback.png"), fullPage: true });
+        },
+      );
       // The lookup and sequence save can pause long enough to look idle, so wait for the card itself.
       const send = await say(groupId, "发20个人的先", {
         until: (replies) => replies.some(sendCard),
@@ -512,11 +649,32 @@ try {
       });
       if (!send.replies.some(sendCard))
         failures.push("「发20个人的先」 did not end on a send confirmation card");
+      await withConversationPage(
+        { rpc, origin: ORIGIN, cookie, token: TOKEN, groupId },
+        async (page) => {
+          await checkCardsAfterReconnect(rpc, page, groupId);
+          await checkStageTranscript(page);
+          const recovery = await checkFailureRecoveryUi(page, { rpc, groupId });
+          fs.writeFileSync(path.join(OUT, "t1-recovery.json"), JSON.stringify(recovery));
+          await page.screenshot({ path: path.join(OUT, "t1-card-deadlines.png"), fullPage: true });
+        },
+      );
       const transcript = (await messagesOf(groupId))
         .map((message) => `[${message.role}] ${botText(message)}`)
         .join("\n\n");
       fs.writeFileSync(path.join(OUT, "t1-chat.txt"), `${transcript}\n`);
       commonChecks(await messagesOf(groupId), failures);
+      const pendingTasks = await rpc("threads/backgroundTasks", { groupId });
+      const approvalRunId = send.replies.find(sendCard)?.runId;
+      const approvalTask = pendingTasks.find(
+        (task) => task.kind === "run" && task.id === approvalRunId,
+      );
+      if (!approvalTask)
+        failures.push(
+          "per-task cancellation was not exercised: the unanswered approval has no active native teammate task",
+        );
+      else await assertCancelOneTask(rpc, groupId, approvalTask.id);
+      await assertStopEverything(rpc, groupId);
     });
 
   // Each ask names a specialist capability; the coordinator must get it done by the member who has
@@ -544,8 +702,10 @@ try {
     { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
   ];
   /** Every event of a thread so far, from the replay of its event stream. */
-  async function readEvents(groupId) {
+  async function readEvents(groupId, { limitMs = 15_000 } = {}) {
     const controller = new AbortController();
+    // A busy stream must not keep replay open beyond a latency assertion's budget.
+    const replayLimit = setTimeout(() => controller.abort(), limitMs);
     let idle = setTimeout(() => controller.abort(), 15_000);
     const events = [];
     try {
@@ -586,6 +746,7 @@ try {
       if (error.name !== "AbortError") throw error;
     } finally {
       clearTimeout(idle);
+      clearTimeout(replayLimit);
     }
     return events;
   }
@@ -746,7 +907,6 @@ try {
       fs.writeFileSync(path.join(OUT, "ambiguous.events.json"), JSON.stringify(steps, null, 1));
     });
 
-  // Every card clicked in the real web app, so no one has to answer them by hand after a release.
   if (wanted.has("cards"))
     await stage("cards", async (failures) => {
       const file = CASES && path.join(CASES, "cards.json");

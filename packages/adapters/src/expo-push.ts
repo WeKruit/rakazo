@@ -5,6 +5,7 @@ import type {
   NotificationProvider,
 } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
+import { claimConversationNotification } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { combineSignals } from "./connector-safety.js";
 import { readBodyCapped, withAbort } from "./web-ssrf.js";
@@ -170,6 +171,16 @@ export class ExpoPushProvider implements NotificationProvider {
   async deliver(message: NotificationMessage, context: AdapterContext): Promise<ExpoPushDelivery> {
     const token = await this.deliverableToken(context.userId);
     if (!token) return "undeliverable";
+    const claim = await claimConversationNotification(this.prisma, {
+      spaceId: context.spaceId,
+      userId: context.userId,
+      threadId: message.threadId,
+      channel: "mobile",
+      runId: context.runId,
+      kind: message.kind,
+    });
+    if (!claim) return "suppressed";
+    if ((await this.deliverableToken(context.userId)) !== token) return "undeliverable";
     const signal = combineSignals(context.signal, AbortSignal.timeout(EXPO_PUSH_TIMEOUT_MS));
     let response: Response;
     try {
@@ -179,7 +190,6 @@ export class ExpoPushProvider implements NotificationProvider {
         body: JSON.stringify({
           to: token,
           title: message.title,
-          body: message.body,
           collapseId: message.threadId,
           tag: message.threadId,
           data: expoPushData(message, context.spaceId, randomUUID()),
@@ -229,7 +239,7 @@ export class ExpoPushProvider implements NotificationProvider {
   }
 }
 
-export type ExpoPushDelivery = "delivered" | "undeliverable";
+export type ExpoPushDelivery = "delivered" | "undeliverable" | "suppressed";
 
 async function readExpoPushBody(response: Response, signal: AbortSignal): Promise<unknown> {
   const declared = Number(response.headers.get("content-length") ?? 0);
