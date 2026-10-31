@@ -102,7 +102,9 @@ export function ContactsTab(
     : list.total;
   const unmatched = filter
     ? []
-    : lookups.filter((contact) => !rows.some((row) => lookupsFor(row).includes(contact)));
+    : lookups.filter(
+        (contact) => !contact.imported && !rows.some((row) => lookupsFor(row).includes(contact)),
+      );
   const failures = [
     list.autumn?.failed ? (
       <RetryNotice key="autumn" onRetry={list.autumn.retry}>

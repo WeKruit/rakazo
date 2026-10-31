@@ -272,3 +272,34 @@ it("does not attribute scheduling to the future message sender/date", () => {
   });
   expect(items[0]).toMatchObject({ kind: "scheduled", actor: null, at: null });
 });
+
+it("uses the recorded candidate identity for imported mail even when its address is absent from headers", () => {
+  const source = {
+    id: "original",
+    providerMessageId: "provider-original",
+    imported: true,
+    candidateKey: "person-a",
+    direction: "received",
+    sender: "alias@example.test",
+    recipients: ["team@example.test"],
+    subject: "Original reply",
+    date: "2026-01-02T00:00:00Z",
+  };
+  const items = buildActivity({
+    candidateKey: "person-a",
+    email: "person@example.test",
+    saved: [
+      source,
+      {
+        ...source,
+        id: "foreign",
+        providerMessageId: "foreign",
+        candidateKey: "person-b",
+        sender: "person@example.test",
+      },
+    ] as never,
+  });
+  expect(items).toEqual([
+    expect.objectContaining({ id: "saved:original", kind: "received", subject: "Original reply" }),
+  ]);
+});

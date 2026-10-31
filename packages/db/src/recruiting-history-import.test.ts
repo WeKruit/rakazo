@@ -88,7 +88,7 @@ describe("imported recruiting correspondence", () => {
     };
     f.result.contacts.push(contact as never);
     const saved = await readRecruitingImportedCorrespondence(f.prisma, actor, scope);
-    expect(saved?.contacts).toEqual([contact]);
+    expect(saved?.contacts).toEqual([{ ...contact, imported: true }]);
   });
 
   it("does not expose another account's historical records", async () => {

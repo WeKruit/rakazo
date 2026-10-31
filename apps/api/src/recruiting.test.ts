@@ -5971,6 +5971,24 @@ describe("live CRM browser reads", () => {
     await expect(page({ limit: 51 })).rejects.toThrow();
     await expect(page({ cursor: "01" })).rejects.toThrow();
   });
+  it("shares one request's CRM memberships across its reads", async () => {
+    const f = browserFixture();
+    const crmMemberships = new Map();
+    const read = () =>
+      api.getRecruitingCrmData({ ...f.deps, crmMemberships }, actor, target, {
+        operation: "candidates",
+        serverId: "crm",
+        serverRevision: 3,
+        organizationId: org,
+        crmRoleId: roleId,
+        limit: 1,
+      });
+    await read();
+    await read();
+    const tools = f.execute.mock.calls.map(([call]) => call.route!.toolName);
+    expect(tools.filter((tool) => tool === "list_crm_memberships")).toHaveLength(1);
+    expect(tools.filter((tool) => tool === "list_crm_candidates")).toHaveLength(2);
+  });
   it("reads every candidate page of a role while checking the role binding once", async () => {
     const f = browserFixture();
     const row = f.results.list_crm_candidates.rows[0]!;

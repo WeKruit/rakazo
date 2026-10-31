@@ -1,6 +1,7 @@
 import type { Actor } from "@rakazo/contracts";
 import { describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
+import { withLatestThreadRows } from "./latest-rows.test-support.js";
 import { createRepos } from "./repos.js";
 import { IsolationError } from "./scope.js";
 
@@ -43,7 +44,7 @@ function reposFor(memoryScope: string | null) {
       findMany: vi.fn(async () => []),
     },
   };
-  return createRepos(prisma as unknown as PrismaClient);
+  return createRepos(withLatestThreadRows(prisma));
 }
 
 describe("createRepos.listBots", () => {
@@ -54,7 +55,7 @@ describe("createRepos.listBots", () => {
         thread: { ...baseBot.thread, runs: [{ id: "run-failed", status: "failed" }] },
       },
     ]);
-    const repos = createRepos({ bot: { findMany } } as unknown as PrismaClient);
+    const repos = createRepos(withLatestThreadRows({ bot: { findMany } }));
 
     const failed = await repos.listBots(actor);
     expect(failed[0]).toMatchObject({ status: "idle", runErrorId: "run-failed" });
@@ -68,21 +69,9 @@ describe("createRepos.listBots", () => {
     const recovered = await repos.listBots(actor);
     expect(recovered[0]).toMatchObject({ status: "idle", runErrorId: null });
 
+    // The thread's runs are read per thread with LIMIT 1, never through a nested include.
     expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        include: expect.objectContaining({
-          thread: expect.objectContaining({
-            include: expect.objectContaining({
-              runs: expect.objectContaining({
-                where: { trigger: { notIn: ["bot_message", "tickets", "recruiting_grade"] } },
-                orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-                take: 1,
-                select: { id: true, status: true },
-              }),
-            }),
-          }),
-        }),
-      }),
+      expect.objectContaining({ include: expect.objectContaining({ thread: true }) }),
     );
   });
 
@@ -116,11 +105,14 @@ describe("createRepos.listBots", () => {
       run: { findMany: vi.fn(async () => []) },
     };
 
-    const bots = await createRepos(prisma as unknown as PrismaClient).listBots(actor);
+    const bots = await createRepos(withLatestThreadRows(prisma)).listBots(actor);
 
     expect(bots.map((bot) => bot.preview)).toEqual(["Answer one", "Answer two"]);
     expect(prisma.run.findMany).toHaveBeenCalledExactlyOnceWith({
-      where: { id: { in: ["run-one", "run-two"] }, trigger: { in: ["bot_message", "tickets", "recruiting_grade"] } },
+      where: {
+        id: { in: ["run-one", "run-two"] },
+        trigger: { in: ["bot_message", "tickets", "recruiting_grade"] },
+      },
       select: { id: true, trigger: true },
     });
   });
@@ -160,7 +152,7 @@ describe("createRepos.listBots", () => {
       },
     };
 
-    const bots = await createRepos(prisma as unknown as PrismaClient).listBots(actor);
+    const bots = await createRepos(withLatestThreadRows(prisma)).listBots(actor);
 
     expect(bots[0]?.preview).toBe("Visible answer");
     expect(prisma.run.findMany).toHaveBeenCalledTimes(2);
@@ -210,19 +202,12 @@ describe("createRepos.listBots", () => {
       },
     };
 
-    await expect(createRepos(prisma as unknown as PrismaClient).listBots(actor)).resolves.toEqual([
+    await expect(createRepos(withLatestThreadRows(prisma)).listBots(actor)).resolves.toEqual([
       expect.objectContaining({ preview: "Visible answer" }),
     ]);
+    // The preview window is read per thread with LIMIT 16, never through a nested include.
     expect(findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        include: expect.objectContaining({
-          thread: {
-            include: expect.objectContaining({
-              messages: { orderBy: { seq: "desc" }, take: 16 },
-            }),
-          },
-        }),
-      }),
+      expect.objectContaining({ include: expect.objectContaining({ thread: true }) }),
     );
   });
 
@@ -253,7 +238,7 @@ describe("createRepos.listBots", () => {
       },
     };
 
-    await expect(createRepos(prisma as unknown as PrismaClient).listBots(actor)).resolves.toEqual([
+    await expect(createRepos(withLatestThreadRows(prisma)).listBots(actor)).resolves.toEqual([
       expect.objectContaining({ preview: "Visible answer" }),
     ]);
   });
@@ -288,7 +273,7 @@ describe("createRepos.listBots", () => {
       },
     };
 
-    await expect(createRepos(prisma as unknown as PrismaClient).listBots(actor)).resolves.toEqual([
+    await expect(createRepos(withLatestThreadRows(prisma)).listBots(actor)).resolves.toEqual([
       expect.objectContaining({ preview: "Older visible answer" }),
     ]);
     expect(messageFindMany).toHaveBeenCalledWith({
@@ -331,7 +316,7 @@ describe("createRepos.listBots", () => {
       },
     };
 
-    await expect(createRepos(prisma as unknown as PrismaClient).listBots(actor)).resolves.toEqual([
+    await expect(createRepos(withLatestThreadRows(prisma)).listBots(actor)).resolves.toEqual([
       expect.objectContaining({ preview: "Fourth-window answer" }),
     ]);
     expect(messageFindMany).toHaveBeenCalledTimes(4);
@@ -353,6 +338,7 @@ describe("createRepos.listSpaceBotsForSpaces", () => {
         updatedAt: new Date("2026-08-20T00:00:00.000Z"),
         parentBotId: null,
         thread: {
+          id: "thread-2",
           unread: true,
           messages: [{ blocks: [{ kind: "text", text: "Waiting for a reply" }] }],
           runs: [{ id: "run-failed", status: "failed" }],
@@ -360,7 +346,7 @@ describe("createRepos.listSpaceBotsForSpaces", () => {
         runs: [{ status: "running" }],
       },
     ]);
-    const repos = createRepos({ bot: { findMany } } as unknown as PrismaClient);
+    const repos = createRepos(withLatestThreadRows({ bot: { findMany } }));
 
     await expect(repos.listSpaceBotsForSpaces(actor, ["ws-2"])).resolves.toEqual([
       {

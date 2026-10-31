@@ -88,7 +88,11 @@ const render = (extra: Partial<Parameters<typeof InterviewTab>[0]> = {}) =>
 
 it("renders the actual calendar from the existing interview read and preserves candidate filtering", async () => {
   await render({ candidateId: "candidate", candidateEmail: "candidate@example.test" });
-  expect(correspondence).toHaveBeenCalledWith({ groupId: "group-1", view: "interview" });
+  expect(correspondence).toHaveBeenCalledWith({
+    limit: 200,
+    groupId: "group-1",
+    view: "interview",
+  });
   expect(element.querySelector('[data-testid="interview-calendar"]')).not.toBeNull();
   expect(element.querySelector('[data-event-id="candidate-event"]')).not.toBeNull();
   expect(element.querySelector('[data-event-id="other-event"]')).toBeNull();

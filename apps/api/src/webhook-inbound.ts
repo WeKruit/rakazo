@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { JobPublisher, SecretStore } from "@rakazo/adapter-kit";
 import { runContinueJob, SecretStoreUnavailableError } from "@rakazo/adapter-kit";
 import { inboundRoutineModelPin } from "@rakazo/adapters";
+import { evaluateRoutineCondition } from "@rakazo/core";
 import type { PrismaClient, SendUserMessageInput } from "@rakazo/db";
 import { automationRateLimited, IsolationError } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -248,6 +249,21 @@ export async function loadWebhookTarget(
     threadId: bot.thread.id,
     expected,
   };
+}
+
+/**
+ * Routines whose condition is true for this event. A routine without one always matches, and an
+ * invalid saved condition matches too, so its run (and the error) stays visible.
+ */
+export function routinesMatchingEvent<T extends { condition?: string | null }>(
+  routines: T[],
+  variables: Record<string, unknown>,
+): T[] {
+  return routines.filter((routine) => {
+    if (!routine.condition) return true;
+    const result = evaluateRoutineCondition(routine.condition, variables);
+    return !result.ok || result.value;
+  });
 }
 
 /** Idempotency key shared by messaging wakes and TeamChat duplicate-skip lookups. */

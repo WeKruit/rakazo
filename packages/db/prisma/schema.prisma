@@ -841,6 +841,18 @@ model Routine {
   modelProvider  String?
   modelId        String?
   thinkingLevel  String?
+  /// "new" starts each scheduled run without thread history; "reuse" continues the thread.
+  sessionMode    String    @default("new")
+  /// Expression over the trigger that must be true for the routine to wake its model.
+  condition      String?
+  /// Command run on the bot's computer before the model; empty output ends the run quietly.
+  probeCommand   String?
+  /// Record changes that fire the routine, e.g. "recruiting_role".
+  recordTrigger  String?
+  /// Offered to the other members of the Space; each one runs their own copy.
+  shared         Boolean   @default(false)
+  /// The shared routine this copy follows; edits to the original reach the copy.
+  sharedFromId   String?
   lastRunAt      DateTime?
   nextRunAt      DateTime?
   createdAt      DateTime  @default(now())
@@ -849,6 +861,9 @@ model Routine {
 
   @@index([active, nextRunAt])
   @@index([spaceId, botId])
+  @@index([spaceId, shared])
+  @@index([sharedFromId])
+  @@index([recordTrigger])
   @@map("routines")
 }
 

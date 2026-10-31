@@ -60,7 +60,8 @@ export async function readRecruitingImportedCorrespondence(
         throw new Error("Imported mail has live provider authority");
       emails.set(email.id, { ...email, imported: true });
     }
-    for (const contact of saved.contacts) contacts.set(contact.candidateKey, contact);
+    for (const contact of saved.contacts)
+      contacts.set(contact.candidateKey, { ...contact, imported: true });
     for (const event of saved.events) events.set(event.id, event);
     for (const item of saved.history ?? []) history.set(item.id, item);
     if (!checkedAt || saved.importedAt > checkedAt) checkedAt = saved.importedAt;

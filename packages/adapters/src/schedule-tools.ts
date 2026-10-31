@@ -10,10 +10,12 @@ import {
   MIN_ROUTINE_INTERVAL_MINUTES,
   nextCronDate,
   nextCronDateAcrossStrict,
+  nextRoutineWakeAt,
   ONCE_ROUTINE_CRON,
+  routineConditionError,
   routineIntervalError,
 } from "@rakazo/core";
-import type { PrismaClient, ThreadEvents } from "@rakazo/db";
+import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
 import { IsolationError, Prisma, scoped } from "@rakazo/db";
 
 export { isOneShotRoutineCron, ONCE_ROUTINE_CRON };
@@ -492,11 +494,25 @@ export async function updateRoutine(
         });
       await options.assertModel({ modelProvider, modelId, thinkingLevel });
     }
-    if (crons.length === 0 && !webhookEnabled && !githubEnabled && !messageProvider) {
+    const recordTrigger =
+      input.recordTrigger === undefined ? existing.recordTrigger : input.recordTrigger;
+    if (
+      crons.length === 0 &&
+      !webhookEnabled &&
+      !githubEnabled &&
+      !messageProvider &&
+      !recordTrigger
+    ) {
       throw new RoutineUpdateError("BAD_REQUEST", {
-        message: "Add a schedule, webhook, GitHub, or message trigger",
+        message: "Add a schedule, webhook, GitHub, message or record trigger",
       });
     }
+    const optionError = routineOptionError({ ...input, crons, recordTrigger });
+    if (optionError) throw new RoutineUpdateError("BAD_REQUEST", { message: optionError });
+    if (input.shared !== undefined && existing.sharedFromId)
+      throw new RoutineUpdateError("BAD_REQUEST", {
+        message: "A copy of a shared routine can't be shared again.",
+      });
     const intervalError =
       input.crons !== undefined
         ? routineIntervalError(crons, input.timezone ?? existing.timezone)
@@ -549,14 +565,20 @@ export async function updateRoutine(
         message: "A run time is only for one-shots that have not run yet.",
       });
     }
+    const recordTriggerChanged = recordTrigger !== existing.recordTrigger;
     const nextRunAt = !active
       ? null
-      : crons.length === 0
-        ? null
-        : isOneShotRoutineCrons(crons)
-          ? (armedOneShotAt ?? existing.nextRunAt)
-          : (recalculatedNextRunAt ?? existing.nextRunAt);
-    const changesSchedule = activeChanged || scheduleChanged || armedOneShotAt !== null;
+      : recordTrigger
+        ? recordTriggerChanged || !existing.nextRunAt
+          ? nextRoutineWakeAt({ crons, timezone, recordTrigger }, new Date())
+          : existing.nextRunAt
+        : crons.length === 0
+          ? null
+          : isOneShotRoutineCrons(crons)
+            ? (armedOneShotAt ?? existing.nextRunAt)
+            : (recalculatedNextRunAt ?? existing.nextRunAt);
+    const changesSchedule =
+      activeChanged || scheduleChanged || armedOneShotAt !== null || recordTriggerChanged;
     // Re-check the parent in the write itself so an archive that lands after the read wins.
     // Model patches must also match the snapshot used to resolve omitted model fields.
     const row = await client.routine
@@ -599,6 +621,11 @@ export async function updateRoutine(
           webhookEnabled: input.webhookEnabled,
           githubEnabled: input.githubEnabled,
           messageProvider: input.messageProvider,
+          sessionMode: input.sessionMode,
+          condition: input.condition === undefined ? undefined : input.condition || null,
+          probeCommand: input.probeCommand === undefined ? undefined : input.probeCommand || null,
+          recordTrigger: input.recordTrigger,
+          shared: input.shared,
           ...(touchesModel ? { modelProvider, modelId, thinkingLevel } : {}),
           ...(changesSchedule ? { nextRunAt } : {}),
         },
@@ -664,7 +691,64 @@ export async function updateRoutine(
     }
   }
 
+  if (row.shared) await syncSharedRoutineCopies(deps, row);
   return row;
+}
+
+/** Checks for the optional routine settings shared by create and update. */
+export function routineOptionError(input: {
+  condition?: string | null;
+  crons?: string[];
+  recordTrigger?: string | null;
+}): string | undefined {
+  if (input.recordTrigger && input.crons?.length)
+    return "A record trigger can't be combined with a schedule.";
+  if (input.condition) {
+    const error = routineConditionError(input.condition);
+    if (error) return `Condition: ${error}`;
+  }
+  return undefined;
+}
+
+/**
+ * A shared routine's copies follow its instructions, schedule and options; each copy keeps its
+ * own owner, bot, thread, model, notify and active state, and runs as that member.
+ */
+export async function syncSharedRoutineCopies(
+  deps: Pick<ScheduleToolDeps, "prisma" | "jobs">,
+  original: Routine,
+) {
+  const copies = await deps.prisma.routine.findMany({
+    where: { sharedFromId: original.id, spaceId: original.spaceId },
+  });
+  for (const copy of copies) {
+    const scheduleChanged =
+      JSON.stringify(copy.crons) !== JSON.stringify(original.crons) ||
+      copy.timezone !== original.timezone;
+    const nextRunAt =
+      copy.active && original.crons.length > 0 && !isOneShotRoutineCrons(original.crons)
+        ? scheduleChanged || !copy.nextRunAt
+          ? nextRoutineDate(original.crons, original.timezone)
+          : copy.nextRunAt
+        : null;
+    const updated = await deps.prisma.routine.update({
+      where: { id: copy.id },
+      data: {
+        name: original.name,
+        prompt: original.prompt,
+        crons: original.crons,
+        timezone: original.timezone,
+        sessionMode: original.sessionMode,
+        condition: original.condition,
+        probeCommand: original.probeCommand,
+        recordTrigger: original.recordTrigger,
+        nextRunAt,
+      },
+    });
+    if (updated.active && updated.nextRunAt)
+      await deps.jobs.enqueue(routineWakeupJob(updated.id, updated.nextRunAt));
+    else await deps.jobs.cancel(routineJobKey(updated.id));
+  }
 }
 
 export async function updateScheduleFromTool(

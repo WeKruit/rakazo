@@ -794,11 +794,13 @@ export function createRecruitingCandidateReportReader(
             : undefined;
         if (
           snapshot?.version === 1 &&
-          (snapshot.kind === "people_search" || snapshot.kind === "csv_import") &&
+          (snapshot.kind === "people_search" ||
+            snapshot.kind === "csv_import" ||
+            snapshot.kind === "reviewer_grades") &&
           Array.isArray(snapshot.rows)
         ) {
-          // A people search or CSV import page keeps its rows in its own receipt; there is no
-          // research task behind it.
+          // A people search, CSV import or quality-check grading page keeps its rows in its own
+          // receipt; there is no research task behind it.
           observation = {
             deliveryState: "accepted",
             outputId: null,

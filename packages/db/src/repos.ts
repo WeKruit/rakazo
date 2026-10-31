@@ -7,7 +7,12 @@ import { ensureComputerRecord, parseComputerMode } from "./computers.js";
 import { createThreadMessageInTransaction } from "./messages.js";
 import { BotSectionNameConflictError, IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
-import { activeRunSelection, latestBotRunSelection, previewFromBlocks } from "./thread-listing.js";
+import {
+  activeRunSelection,
+  latestThreadBotRuns,
+  latestThreadMessages,
+  previewFromBlocks,
+} from "./thread-listing.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 /** Newest messages loaded for sidebar preview; enough to skip a short peer-run tail. */
@@ -258,21 +263,16 @@ export function createRepos(prisma: PrismaClient) {
         sectionId: true,
         updatedAt: true,
         parentBotId: true,
-        thread: {
-          select: {
-            unread: true,
-            messages: {
-              orderBy: { seq: "desc" },
-              take: 1,
-              select: { blocks: true },
-            },
-            runs: latestBotRunSelection,
-          },
-        },
+        thread: { select: { id: true, unread: true } },
         runs: activeRunSelection,
       },
       orderBy: [{ pinned: "desc" }, { position: "asc" }, { createdAt: "asc" }, { id: "asc" }],
     });
+    const threadIds = bots.flatMap((bot) => (bot.thread ? [bot.thread.id] : []));
+    const [latestMessages, latestRuns] = await Promise.all([
+      latestThreadMessages(prisma, threadIds, { take: 1 }),
+      latestThreadBotRuns(prisma, threadIds),
+    ]);
     return bots.map((bot) => {
       if (!bot.thread) throw new IsolationError("Bot is missing its thread");
       return {
@@ -286,9 +286,9 @@ export function createRepos(prisma: PrismaClient) {
         sectionId: bot.sectionId,
         unread: bot.thread.unread,
         parentBotId: bot.parentBotId,
-        preview: previewFromBlocks(bot.thread.messages[0]?.blocks),
+        preview: previewFromBlocks(latestMessages.get(bot.thread.id)?.[0]?.blocks),
         status: bot.runs[0]?.status ?? "idle",
-        runErrorId: rosterRunErrorId(bot.thread.runs[0], bot.runs[0]),
+        runErrorId: rosterRunErrorId(latestRuns.get(bot.thread.id), bot.runs[0]),
         updatedAt: bot.updatedAt.toISOString(),
       };
     });
@@ -415,12 +415,7 @@ export function createRepos(prisma: PrismaClient) {
           archivedAt: options.archived ? { not: null } : null,
         },
         include: {
-          thread: {
-            include: {
-              messages: { orderBy: { seq: "desc" }, take: SIDEBAR_PREVIEW_MESSAGE_WINDOW },
-              runs: latestBotRunSelection,
-            },
-          },
+          thread: true,
           runs: activeRunSelection,
           computer: { select: { scope: true } },
         },
@@ -429,10 +424,15 @@ export function createRepos(prisma: PrismaClient) {
           ? {}
           : { take: Math.min(200, Math.max(1, options.limit)), skip: options.offset ?? 0 }),
       });
+      const threadIds = bots.flatMap((bot) => (bot.thread ? [bot.thread.id] : []));
+      const [latestMessages, latestRuns] = await Promise.all([
+        latestThreadMessages(prisma, threadIds, { take: SIDEBAR_PREVIEW_MESSAGE_WINDOW }),
+        latestThreadBotRuns(prisma, threadIds),
+      ]);
       const candidateRunIds = [
         ...new Set(
           bots.flatMap((bot) =>
-            (bot.thread?.messages ?? []).flatMap((message) =>
+            (latestMessages.get(bot.thread?.id ?? "") ?? []).flatMap((message) =>
               message.runId ? [message.runId] : [],
             ),
           ),
@@ -460,7 +460,8 @@ export function createRepos(prisma: PrismaClient) {
       await classifyRunIds(candidateRunIds);
       return Promise.all(
         bots.map(async (bot) => {
-          let messages = bot.thread?.messages ?? [];
+          let messages: Array<{ seq: number; blocks: unknown; runId: string | null }> =
+            latestMessages.get(bot.thread?.id ?? "") ?? [];
           let preview = "";
           for (let attempt = 0; attempt < 5; attempt++) {
             const windowRunIds = [
@@ -496,7 +497,7 @@ export function createRepos(prisma: PrismaClient) {
             bot,
             preview,
             bot.runs[0]?.status ?? "idle",
-            rosterRunErrorId(bot.thread?.runs[0], bot.runs[0]),
+            rosterRunErrorId(bot.thread ? latestRuns.get(bot.thread.id) : undefined, bot.runs[0]),
           );
         }),
       );

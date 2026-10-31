@@ -23,6 +23,38 @@ const pendingSites = new Map<string, Promise<Site>>();
 const NO_SITE: Site = { host: null };
 
 const SITE_ATTEMPTS = 5;
+const SITE_BATCH = 50;
+let queuedSites: Array<{
+  name: string;
+  resolve: (answer: SiteAnswer) => void;
+  reject: (error: unknown) => void;
+}> = [];
+
+type SiteAnswer = { host: string | null; icon?: string; retry?: boolean };
+
+/** A results page's logos are asked for together, one request instead of one per company. */
+function askCompanySite(name: string): Promise<SiteAnswer> {
+  return new Promise((resolve, reject) => {
+    if (queuedSites.length === 0)
+      setTimeout(() => {
+        const batch = queuedSites;
+        queuedSites = [];
+        for (let start = 0; start < batch.length; start += SITE_BATCH) {
+          const part = batch.slice(start, start + SITE_BATCH);
+          // A missing client fails this batch like a failed request, never the timer itself.
+          Promise.resolve()
+            .then(() => rpc.links.companySites({ names: part.map((entry) => entry.name) }))
+            .then(({ sites }) => {
+              for (const [index, entry] of part.entries()) entry.resolve(sites[index]!);
+            })
+            .catch((error: unknown) => {
+              for (const entry of part) entry.reject(error);
+            });
+        }
+      }, 20);
+    queuedSites.push({ name, resolve, reject });
+  });
+}
 
 function lookupCompanySite(name: string, attempt = 0): Promise<Site> {
   const key = name.trim().toLowerCase();
@@ -32,7 +64,7 @@ function lookupCompanySite(name: string, attempt = 0): Promise<Site> {
   // A logo is decoration: any failure, even a missing client, leaves the initials. A busy
   // server is not a miss, so it is asked again later and never remembered as one.
   const lookup = Promise.resolve()
-    .then(() => rpc.links.companySite({ name: name.trim().slice(0, 200) }))
+    .then(() => askCompanySite(name.trim().slice(0, 200)))
     .then(async ({ host, icon, retry }) => {
       pendingSites.delete(key);
       if (!retry) {

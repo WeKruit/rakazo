@@ -1,6 +1,10 @@
 import type { JobPublisher } from "@rakazo/adapter-kit";
 import { routineJobKey, routineWakeupJob } from "@rakazo/adapter-kit";
-import { isOneShotRoutineCrons, nextCronDateAcross } from "@rakazo/core";
+import {
+  evaluateRoutineCondition,
+  nextRoutineWakeAt,
+  scheduleConditionVariables,
+} from "@rakazo/core";
 import type { PrismaClient, Routine, ThreadEvents } from "@rakazo/db";
 import { createThreadMessage } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -82,28 +86,46 @@ export async function skipRoutineWithoutNewActivity(
   const routine = await deps.prisma.routine.findUnique({ where: { id: payload.routineId } });
   if (!routine?.active || routine.nextRunAt?.getTime() !== scheduledAt.getTime()) return false;
   const precondition = parseRoutinePrecondition(routine.prompt);
-  if (!precondition) return false;
+  if (!precondition && !routine.condition && !routine.recordTrigger) return false;
   const bot = await deps.prisma.bot.findUnique({
     where: { id: routine.botId },
     select: { archivedAt: true, thread: { select: { id: true } } },
   });
   if (!bot || bot.archivedAt) return false;
   const threadId = routine.threadId ?? bot.thread?.id;
-  if (await routinePreconditionMet(deps.prisma, routine, precondition, threadId)) return false;
-  const nextRunAt = isOneShotRoutineCrons(routine.crons)
-    ? null
-    : nextCronDateAcross(
-        routine.crons,
-        new Date(Math.max(Date.now(), scheduledAt.getTime())),
-        routine.timezone,
-      );
+  // An invalid saved condition wakes the model so the routine's failure is visible, not silent.
+  const conditionHolds = routine.condition
+    ? evaluateRoutineCondition(
+        routine.condition,
+        scheduleConditionVariables(scheduledAt, routine.timezone),
+      )
+    : { ok: true as const, value: true };
+  // A record check with no change is routine polling, not a skipped occurrence worth noting.
+  const recordUnchanged = routine.recordTrigger
+    ? !(await routineRecordChanged(deps.prisma, routine))
+    : false;
+  const reason = recordUnchanged
+    ? "no_record_change"
+    : !conditionHolds.ok || conditionHolds.value
+      ? null
+      : "condition_false";
+  if (
+    !reason &&
+    (!precondition || (await routinePreconditionMet(deps.prisma, routine, precondition, threadId)))
+  )
+    return false;
+  const nextRunAt = nextRoutineWakeAt(
+    routine,
+    new Date(Math.max(Date.now(), scheduledAt.getTime())),
+  );
+  const keepsActive = Boolean(nextRunAt) || routine.crons.length === 0;
   const claimed = await deps.prisma.routine.updateMany({
     where: { id: routine.id, active: true, nextRunAt: scheduledAt },
-    data: { nextRunAt, ...(nextRunAt ? {} : { active: false }) },
+    data: { nextRunAt, ...(keepsActive ? {} : { active: false }) },
   });
   // A lost claim means another worker took this occurrence; it decides, not us.
   if (claimed.count !== 1) return true;
-  if (threadId) {
+  if (threadId && !recordUnchanged) {
     try {
       await deps.events.append({
         spaceId: routine.spaceId,
@@ -114,8 +136,8 @@ export async function skipRoutineWithoutNewActivity(
           routineId: routine.id,
           scheduledFor: payload.scheduledFor,
           skipped: true,
-          reason: "no_new_activity",
-          precondition,
+          reason: reason ?? "no_new_activity",
+          ...(precondition ? { precondition } : {}),
         },
       });
     } catch (error) {
@@ -125,6 +147,33 @@ export async function skipRoutineWithoutNewActivity(
   if (nextRunAt) await deps.jobs.enqueue(routineWakeupJob(routine.id, nextRunAt));
   else await deps.jobs.cancel(routineJobKey(routine.id)).catch(() => undefined);
   return true;
+}
+
+/**
+ * Whether the record a routine watches changed since it last ran (or since it was created): a
+ * role edit for "recruiting_role", newly saved people for "recruiting_candidate".
+ */
+export async function routineRecordChanged(
+  prisma: PrismaClient,
+  routine: Pick<Routine, "spaceId" | "userId" | "recordTrigger" | "lastRunAt" | "createdAt">,
+): Promise<boolean> {
+  const since = routine.lastRunAt ?? routine.createdAt;
+  const role = { spaceId: routine.spaceId, userId: routine.userId };
+  if (routine.recordTrigger === "recruiting_role")
+    return (
+      (await prisma.recruitingRoleRevision.count({
+        where: { createdAt: { gt: since }, role },
+        take: 1,
+      })) > 0
+    );
+  if (routine.recordTrigger === "recruiting_candidate")
+    return (
+      (await prisma.recruitingCandidatePage.count({
+        where: { observedAt: { gt: since }, role, rowCount: { gt: 0 } },
+        take: 1,
+      })) > 0
+    );
+  return false;
 }
 
 export const ROUTINE_FAILURE_PAUSE_THRESHOLD = 5;

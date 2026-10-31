@@ -8,6 +8,7 @@ import {
   formatWebhookPrompt,
   loadWebhookTarget,
   parseWebhookPayload,
+  routinesMatchingEvent,
   WEBHOOK_MAX_BODY_BYTES,
   type WebhookDeps,
   type WebhookSecretCache,
@@ -87,6 +88,7 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
         modelProvider: true,
         modelId: true,
         thinkingLevel: true,
+        condition: true,
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -101,7 +103,7 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
     return c.json(
       await deliverWebhookEvent(deps, target, {
         prompt: eventPrompt,
-        routines: webhookRoutines,
+        routines: routinesMatchingEvent(webhookRoutines, { source: "webhook", event: payload }),
         source: "webhook",
         idempotencyKey,
       }),

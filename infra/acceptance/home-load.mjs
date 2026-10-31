@@ -4,7 +4,7 @@
 //
 //   RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… [RAKAZO_SESSION_FILE=…] \
 //   node infra/acceptance/home-load.mjs [--shell-ms 6000] [--roles-ms 10000] [--overview-ms 15000] \
-//     [--view-ms 15000]
+//     [--view-ms 15000] [--view-complete-ms 45000]
 //
 // Measures, from navigation start: the greeting (page shell), the sidebar's role list, and the
 // first Overview numbers. Then opens Contacts, Sequence, Inbox and Interview for all roles, the
@@ -32,23 +32,20 @@ const budgets = {
   roles: option("--roles-ms", 10_000),
   overview: option("--overview-ms", 15_000),
 };
+// A nav page shows each role as it arrives: the first roles must show within --view-ms, and
+// every role on the page must finish within --view-complete-ms.
 const viewBudget = option("--view-ms", 15_000);
+const completeBudget = option("--view-complete-ms", 45_000);
 const views = ["contacts", "sequence", "inbox", "interview"];
-const origin = (
-  process.env.RAKAZO_ORIGIN ??
-  process.env.RAKAZO_URL ??
-  ""
-).replace(/\/$/, "");
+const origin = (process.env.RAKAZO_ORIGIN ?? process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
 const { RAKAZO_EMAIL: email, RAKAZO_PASSWORD: password } = process.env;
 if (
   !origin ||
   !email ||
   !password ||
-  [...Object.values(budgets), viewBudget].some((ms) => !(ms > 0))
+  [...Object.values(budgets), viewBudget, completeBudget].some((ms) => !(ms > 0))
 ) {
-  console.error(
-    "Usage: RAKAZO_ORIGIN=… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… node home-load.mjs",
-  );
+  console.error("Usage: RAKAZO_ORIGIN=… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… node home-load.mjs");
   process.exit(2);
 }
 
@@ -75,14 +72,11 @@ try {
     // Auth's limit clears within a minute; one wait keeps a busy release from skipping the check.
     for (const wait of [0, 60_000]) {
       await new Promise((resolve) => setTimeout(resolve, wait));
-      const signIn = await context.request.post(
-        `${origin}/api/auth/sign-in/email`,
-        {
-          headers: { origin },
-          data: { email, password },
-          failOnStatusCode: false,
-        },
-      );
+      const signIn = await context.request.post(`${origin}/api/auth/sign-in/email`, {
+        headers: { origin },
+        data: { email, password },
+        failOnStatusCode: false,
+      });
       status = signIn.status();
       if (status !== 429) break;
     }
@@ -107,21 +101,16 @@ try {
       .then(() => Date.now() - start)
       .catch(() => null);
   const [shell, roles, overview] = await Promise.all([
-    mark(() =>
-      /^Hello\b/.test(document.querySelector("h1")?.textContent?.trim() ?? ""),
-    ),
+    mark(() => /^Hello\b/.test(document.querySelector("h1")?.textContent?.trim() ?? "")),
     mark(
       () =>
-        document.querySelector(
-          'nav[aria-label="Role conversations"] button',
-        ) !== null && !document.body.innerText.includes("Loading roles"),
+        document.querySelector('nav[aria-label="Role conversations"] button') !== null &&
+        !document.body.innerText.includes("Loading roles"),
     ),
     mark(
       () =>
         document.querySelector('[aria-label="Outreach funnel"]') !== null ||
-        /No saved overview|Could not load your overview/.test(
-          document.body.innerText,
-        ),
+        /No saved overview|Could not load your overview/.test(document.body.innerText),
     ),
   ]);
   const overviewFailed = await page
@@ -147,40 +136,46 @@ try {
     await page.goto(`${origin}/app?view=${view}&role=all`, {
       waitUntil: "commit",
     });
-    const ms = await page
-      .waitForFunction(
-        () => {
-          const main = document.querySelector(
-            '[data-testid="account-recruiting-view"]',
-          );
-          return (
-            main !== null &&
-            main.querySelector('[role="status"]') === null &&
-            document.querySelector(
-              'nav[aria-label="Role conversations"] button',
-            ) !== null &&
-            !document.body.innerText.includes("Loading roles")
-          );
-        },
-        null,
-        { timeout: viewBudget, polling: 100 },
-      )
-      .then(() => Date.now() - opened)
-      .catch(() => null);
+    const until = (complete, timeout) =>
+      page
+        .waitForFunction(
+          (complete) => {
+            const main = document.querySelector('[data-testid="account-recruiting-view"]');
+            if (
+              main === null ||
+              document.querySelector('nav[aria-label="Role conversations"] button') === null ||
+              document.body.innerText.includes("Loading roles")
+            )
+              return false;
+            const loading = [...main.querySelectorAll('[role="status"]')];
+            if (complete) return loading.length === 0;
+            // Shown: no page-level loading, and a role (or the empty state) is on screen.
+            return (
+              loading.every((node) => node.closest('[aria-busy="true"]')) &&
+              (main.querySelector("section[aria-label]:not([aria-busy])") !== null ||
+                main.querySelectorAll("section[aria-label]").length === 0)
+            );
+          },
+          complete,
+          { timeout, polling: 100 },
+        )
+        .then(() => Date.now() - opened)
+        .catch(() => null);
+    const ms = await until(false, viewBudget);
+    const done = ms === null ? null : await until(true, Math.max(1, completeBudget - ms));
     const broken = await page
       .getByTestId("account-recruiting-view")
       .getByText(/^Could not (load|read)/)
       .first()
       .isVisible()
       .catch(() => false);
-    const ok = ms !== null && !broken;
+    const ok = ms !== null && done !== null && !broken;
     failed ||= !ok;
     console.log(
-      `${ok ? "PASS" : "FAIL"} ${view} ${ms === null ? "never finished loading" : `${ms} ms`}${broken ? ", shows a load error" : ""} (budget ${viewBudget} ms)`,
+      `${ok ? "PASS" : "FAIL"} ${view} ${ms === null ? "never showed" : `shown ${ms} ms`}${ms !== null ? (done === null ? ", roles never finished loading" : `, all roles ${done} ms`) : ""}${broken ? ", shows a load error" : ""} (budget ${viewBudget} ms, all roles ${completeBudget} ms)`,
     );
   }
-  if (errors.length)
-    console.log(`server errors: ${[...new Set(errors)].join(", ")}`);
+  if (errors.length) console.log(`server errors: ${[...new Set(errors)].join(", ")}`);
   process.exitCode = homeFailed ? 1 : failed ? 4 : 0;
 } finally {
   await browser.close();

@@ -15,7 +15,12 @@ import { appendEventInTransaction } from "./events.js";
 import { getRecruitingGroupCrmReferences, recruitingCrmConversationId } from "./recruiting.js";
 import { IsolationError } from "./scope.js";
 import { lockSpaceForContentCreation } from "./spaces.js";
-import { activeRunSelection, activeRunStatuses, previewFromBlocks } from "./thread-listing.js";
+import {
+  activeRunSelection,
+  activeRunStatuses,
+  latestThreadMessages,
+  previewFromBlocks,
+} from "./thread-listing.js";
 import { withTransactionRetry } from "./transaction-retry.js";
 
 type GroupRecord = {
@@ -31,7 +36,6 @@ type GroupRecord = {
   thread: {
     id: string;
     unread: boolean;
-    messages: Array<{ blocks: unknown }>;
     runs?: Array<{ id: string }>;
   } | null;
   members: Array<{
@@ -49,8 +53,8 @@ type SpaceGroupRecord = Pick<
   "id" | "spaceId" | "name" | "pinned" | "sectionId" | "updatedAt" | "members"
 > & {
   thread: {
+    id: string;
     unread: boolean;
-    messages: Array<{ blocks: unknown }>;
   } | null;
 };
 
@@ -63,9 +67,9 @@ function mapGroupMembers(members: GroupRecord["members"]): GroupMember[] {
   }));
 }
 
-function mapGroup(group: GroupRecord): Group {
+function mapGroup(group: GroupRecord, previews: LatestPreviews): Group {
   if (!group.thread) throw new IsolationError("Group is missing its thread");
-  const preview = previewFromBlocks(group.thread.messages[0]?.blocks);
+  const preview = previewFromBlocks(previews.get(group.thread.id)?.[0]?.blocks);
   return {
     id: group.id,
     spaceId: group.spaceId,
@@ -83,7 +87,7 @@ function mapGroup(group: GroupRecord): Group {
   };
 }
 
-function mapSpaceGroup(group: SpaceGroupRecord): SpaceGroup {
+function mapSpaceGroup(group: SpaceGroupRecord, previews: LatestPreviews): SpaceGroup {
   if (!group.thread) throw new IsolationError("Group is missing its thread");
   return {
     id: group.id,
@@ -92,7 +96,7 @@ function mapSpaceGroup(group: SpaceGroupRecord): SpaceGroup {
     pinned: group.pinned,
     sectionId: group.sectionId,
     members: mapGroupMembers(group.members),
-    preview: previewFromBlocks(group.thread.messages[0]?.blocks),
+    preview: previewFromBlocks(previews.get(group.thread.id)?.[0]?.blocks),
     unread: group.thread.unread,
     updatedAt: group.updatedAt.toISOString(),
   };
@@ -147,14 +151,23 @@ function memberRowsInOrder(groupId: string, botIds: string[], base = Date.now())
 
 const groupMemberOrder = [{ createdAt: "asc" as const }, { botId: "asc" as const }];
 
-const visibleMessageWhere = {
-  OR: [{ clientNonce: null }, { NOT: { clientNonce: { startsWith: "autocontinue:" } } }],
-};
+type LatestPreviews = Awaited<ReturnType<typeof latestThreadMessages>>;
+
+/** Each group's newest message that is not an automatic continuation, for its preview line. */
+function groupPreviews(
+  db: Parameters<typeof latestThreadMessages>[0],
+  groups: ReadonlyArray<{ thread: { id: string } | null }>,
+) {
+  return latestThreadMessages(
+    db,
+    groups.flatMap((group) => (group.thread ? [group.thread.id] : [])),
+    { take: 1, hideAutocontinue: true },
+  );
+}
 
 const groupInclude = {
   thread: {
     include: {
-      messages: { where: visibleMessageWhere, orderBy: { seq: "desc" as const }, take: 1 },
       // A run paused on the user's answer or approval in this conversation.
       runs: { where: { status: "waiting_input" }, select: { id: true } },
     },
@@ -322,7 +335,8 @@ export function createGroupRepos(prisma: PrismaClient) {
     const reference = (await getRecruitingGroupCrmReferences(prisma, actor, [group.id])).get(
       group.id,
     );
-    return { ...mapGroup(group), ...(reference ? { crmRoleReference: reference } : {}) };
+    const previews = await groupPreviews(prisma, [group]);
+    return { ...mapGroup(group, previews), ...(reference ? { crmRoleReference: reference } : {}) };
   }
   async function listSpaceGroupsForSpaces(
     actor: Actor,
@@ -345,23 +359,15 @@ export function createGroupRepos(prisma: PrismaClient) {
         sectionId: true,
         updatedAt: true,
         thread: {
-          select: {
-            unread: true,
-            messages: {
-              where: visibleMessageWhere,
-              orderBy: { seq: "desc" },
-              take: 1,
-              select: { blocks: true },
-            },
-          },
+          select: { id: true, unread: true },
         },
         members: groupInclude.members,
       },
       orderBy: [{ pinned: "desc" }, { updatedAt: "desc" }, { id: "asc" }],
     });
-    return groups
-      .filter((group) => hasMinimumActiveMembers(group.members))
-      .map((group) => mapSpaceGroup(group));
+    const shown = groups.filter((group) => hasMinimumActiveMembers(group.members));
+    const previews = await groupPreviews(prisma, shown);
+    return shown.map((group) => mapSpaceGroup(group, previews));
   }
 
   return {
@@ -384,9 +390,16 @@ export function createGroupRepos(prisma: PrismaClient) {
       const waitingRunIds = groups.flatMap(
         (group) => group.thread?.runs.map((run) => run.id) ?? [],
       );
+      // messages has no runId index; the waiting threads' ids keep this on (threadId, seq).
+      const waitingThreadIds = groups.flatMap((group) =>
+        group.thread?.runs.length ? [group.thread.id] : [],
+      );
+      const shown = groups.filter((group) => hasMinimumActiveMembers(group.members));
+      const previews = await groupPreviews(prisma, shown);
       const pendingCards = waitingRunIds.length
         ? await prisma.message.findMany({
             where: {
+              threadId: { in: waitingThreadIds },
               runId: { in: waitingRunIds },
               role: "bot",
               thread: { spaceId: actor.spaceId, userId: actor.userId },
@@ -400,20 +413,18 @@ export function createGroupRepos(prisma: PrismaClient) {
         actor,
         groups.map((group) => group.id),
       );
-      return groups
-        .filter((group) => hasMinimumActiveMembers(group.members))
-        .map((group) => ({
-          ...mapGroup(group as GroupRecord),
-          attention: pendingCards
-            .filter((card) => card.threadId === group.thread?.id)
-            .map((card) => pendingInputAttention(card.blocks))
-            .reduce<"approval" | "question" | null>(
-              (kind, next) =>
-                kind === "approval" || next === "approval" ? "approval" : (next ?? kind),
-              null,
-            ),
-          ...(references.has(group.id) ? { crmRoleReference: references.get(group.id)! } : {}),
-        }));
+      return shown.map((group) => ({
+        ...mapGroup(group as GroupRecord, previews),
+        attention: pendingCards
+          .filter((card) => card.threadId === group.thread?.id)
+          .map((card) => pendingInputAttention(card.blocks))
+          .reduce<"approval" | "question" | null>(
+            (kind, next) =>
+              kind === "approval" || next === "approval" ? "approval" : (next ?? kind),
+            null,
+          ),
+        ...(references.has(group.id) ? { crmRoleReference: references.get(group.id)! } : {}),
+      }));
     },
 
     listSpaceGroupsForSpaces,
@@ -459,7 +470,7 @@ export function createGroupRepos(prisma: PrismaClient) {
         }),
       );
       return {
-        ...mapGroup(created as GroupRecord),
+        ...mapGroup(created as GroupRecord, new Map()),
         ...(input.crmRoleReference ? { crmRoleReference: input.crmRoleReference } : {}),
       };
     },

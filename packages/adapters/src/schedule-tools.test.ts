@@ -740,3 +740,18 @@ describe("schedule tool persistence", () => {
     );
   });
 });
+
+describe("routine options", () => {
+  it("rejects a record trigger with a schedule and an unreadable condition", () => {
+    expect(scheduleTools.routineOptionError({ crons: ["0 9 * * *"] })).toBeUndefined();
+    expect(
+      scheduleTools.routineOptionError({ crons: ["0 9 * * *"], recordTrigger: "recruiting_role" }),
+    ).toMatch(/can't be combined/);
+    expect(scheduleTools.routineOptionError({ condition: 'event.action == "opened"' })).toBe(
+      undefined,
+    );
+    expect(scheduleTools.routineOptionError({ condition: "event.action ==" })).toMatch(
+      /^Condition: /,
+    );
+  });
+});

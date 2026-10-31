@@ -407,6 +407,12 @@ export function routineModelIssues(
   }
 }
 
+export const RoutineSessionModeSchema = z.enum(["new", "reuse"]);
+export type RoutineSessionMode = z.infer<typeof RoutineSessionModeSchema>;
+/** Record kinds whose changes can fire a routine. */
+export const RoutineRecordTriggerSchema = z.enum(["recruiting_role", "recruiting_candidate"]);
+export type RoutineRecordTrigger = z.infer<typeof RoutineRecordTriggerSchema>;
+
 export const RoutineSchema = z.object({
   id: Id,
   botId: Id,
@@ -429,11 +435,39 @@ export const RoutineSchema = z.object({
   modelProvider: z.string().nullable(),
   modelId: z.string().nullable(),
   thinkingLevel: ThinkingLevelSchema.nullable(),
+  /** "new" (default) starts scheduled runs fresh; "reuse" continues the thread's session. */
+  sessionMode: RoutineSessionModeSchema.optional(),
+  condition: z.string().nullable().optional(),
+  probeCommand: z.string().nullable().optional(),
+  recordTrigger: RoutineRecordTriggerSchema.nullable().optional(),
+  shared: z.boolean().optional(),
+  sharedFromId: Id.nullable().optional(),
   lastRunAt: z.string().nullable(),
   nextRunAt: z.string().nullable(),
   createdAt: z.string(),
 });
 export type Routine = z.infer<typeof RoutineSchema>;
+
+export const SharedRoutineSchema = z.object({
+  id: Id,
+  name: z.string(),
+  prompt: z.string(),
+  crons: z.array(z.string()),
+  timezone: z.string(),
+  recordTrigger: RoutineRecordTriggerSchema.nullable(),
+  ownerName: z.string(),
+  added: z.boolean(),
+});
+export type SharedRoutine = z.infer<typeof SharedRoutineSchema>;
+
+/** Optional routine settings that both create and update accept. */
+const RoutineOptionFields = {
+  sessionMode: RoutineSessionModeSchema.optional(),
+  condition: z.string().trim().max(2_000).nullable().optional(),
+  probeCommand: z.string().trim().max(4_000).nullable().optional(),
+  recordTrigger: RoutineRecordTriggerSchema.nullable().optional(),
+  shared: z.boolean().optional(),
+};
 
 export const CreateRoutineInput = z
   .object({
@@ -457,6 +491,7 @@ export const CreateRoutineInput = z
     modelProvider: z.string().trim().min(1).max(80).nullable().default(null),
     modelId: z.string().trim().min(1).max(200).nullable().default(null),
     thinkingLevel: ThinkingLevelSchema.nullable().default(null),
+    ...RoutineOptionFields,
   })
   .superRefine((value, ctx) => {
     routineModelIssues(value, ctx);
@@ -464,11 +499,12 @@ export const CreateRoutineInput = z
       value.crons.length === 0 &&
       !value.webhookEnabled &&
       !value.githubEnabled &&
-      !value.messageProvider
+      !value.messageProvider &&
+      !value.recordTrigger
     ) {
       ctx.addIssue({
         code: "custom",
-        message: "Add a schedule, webhook, GitHub, or message trigger",
+        message: "Add a schedule, webhook, GitHub, message or record trigger",
         path: ["crons"],
       });
     }
@@ -497,6 +533,7 @@ const RoutineUpdateFields = z.object({
   thinkingLevel: ThinkingLevelSchema.nullable().optional(),
   /** ISO datetime to arm a never-run one-shot. */
   runAt: IsoDate.optional(),
+  ...RoutineOptionFields,
 });
 export const UpdateRoutineInput = RoutineUpdateFields.superRefine((value, ctx) => {
   if (
@@ -504,11 +541,12 @@ export const UpdateRoutineInput = RoutineUpdateFields.superRefine((value, ctx) =
     value.crons.length === 0 &&
     value.webhookEnabled === false &&
     value.githubEnabled === false &&
-    value.messageProvider === null
+    value.messageProvider === null &&
+    value.recordTrigger === null
   ) {
     ctx.addIssue({
       code: "custom",
-      message: "Add a schedule, webhook, GitHub, or message trigger",
+      message: "Add a schedule, webhook, GitHub, message or record trigger",
       path: ["crons"],
     });
   }
