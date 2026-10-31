@@ -114,6 +114,13 @@ export function isVendorUrl(url: string): boolean {
     return false;
   }
   const host = parsed.hostname.toLowerCase();
+  // Original email threads and campaign pages are business records the recruiter can revisit.
+  if (
+    parsed.protocol === "https:" &&
+    host === "app.instantly.ai" &&
+    (parsed.pathname === "/app/unibox" || parsed.pathname.startsWith("/app/campaign/"))
+  )
+    return false;
   // Shared file storage names the provider in the path (path-style buckets).
   const where = CLOUD_STORAGE.test(host) ? `${host}${parsed.pathname.toLowerCase()}` : host;
   return HIDDEN_VENDORS.some((vendor) => vendor.hosts.some((fragment) => where.includes(fragment)));

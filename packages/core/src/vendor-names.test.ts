@@ -39,6 +39,22 @@ describe("hideVendorNames", () => {
     expect(hideVendorNames("source: https://files.autumn.ai/x.csv")).toBe("source: ");
   });
 
+  it("keeps original email thread and campaign links clickable", () => {
+    for (const url of [
+      "https://app.instantly.ai/app/unibox?thread_search=thread%3Aexample&selected_wks=example",
+      "https://app.instantly.ai/app/campaign/example/analytics",
+    ]) {
+      expect(isVendorUrl(url)).toBe(false);
+      expect(hideVendorNames(`[Original email](${url})`)).toBe(`[Original email](${url})`);
+    }
+    for (const url of [
+      "https://api.instantly.ai/api/v2/emails",
+      "https://app.instantly.ai/app/settings",
+      "https://app.instantly.ai.evil.test/app/unibox",
+    ])
+      expect(isVendorUrl(url)).toBe(true);
+  });
+
   it("returns text without a provider unchanged", () => {
     const text = "  indented\ncode  block with 2  spaces ";
     expect(hideVendorNames(text)).toBe(text);
