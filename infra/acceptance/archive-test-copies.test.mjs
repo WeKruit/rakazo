@@ -10,7 +10,11 @@ const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), "archive-
 const old = new Date(Date.now() - 3 * 3_600_000).toISOString();
 
 /** A fake product: copies to sweep, and archives that fail for the ids in `refuse`. */
-async function serve(groups, refuse = new Set(), { messages = [], activeRuns = [] } = {}) {
+async function serve(
+  groups,
+  refuse = new Set(),
+  { messages = [], activeRuns = [], stopsUntilQuiet = 1 } = {},
+) {
   const live = new Map(groups.map((group) => [group.id, group]));
   const answers = [];
   const stopped = [];
@@ -27,7 +31,12 @@ async function serve(groups, refuse = new Set(), { messages = [], activeRuns = [
       };
       if (request.url === "/rpc/groups/page")
         return reply(200, { items: [...live.values()], nextOffset: null });
-      if (request.url === "/rpc/threads/get") return reply(200, { activeRuns });
+      // A stopped chat can queue a follow-up, so it is quiet only after `stopsUntilQuiet` stops.
+      if (request.url === "/rpc/threads/get")
+        return reply(200, {
+          activeRuns:
+            stopped.filter((id) => id === json.groupId).length >= stopsUntilQuiet ? [] : activeRuns,
+        });
       if (request.url === "/rpc/threads/messages") return reply(200, { messages });
       if (request.url === "/rpc/threads/answer") {
         answers.push(json);
@@ -51,7 +60,13 @@ async function serve(groups, refuse = new Set(), { messages = [], activeRuns = [
 
 function sweep(url, extra = []) {
   const child = spawn(process.execPath, [SCRIPT, "--idle-hours", "2", ...extra], {
-    env: { ...process.env, RAKAZO_URL: url, RAKAZO_TOKEN: "test", RAKAZO_EMAIL: "" },
+    env: {
+      ...process.env,
+      RAKAZO_URL: url,
+      RAKAZO_TOKEN: "test",
+      RAKAZO_EMAIL: "",
+      RAKAZO_SETTLE_MS: "0",
+    },
     stdio: "ignore",
   });
   return new Promise((resolve) => child.on("exit", resolve));
@@ -130,6 +145,19 @@ test("--stop stops a working copy and archives it; without it the copy is skippe
     assert.deepEqual(fake.stopped, []);
     assert.equal(await sweep(fake.url, ["--stop"]), 0);
     assert.deepEqual(fake.stopped, ["copy_old"]);
+    assert.equal(fake.live.size, 0);
+  } finally {
+    fake.server.close();
+  }
+});
+
+test("--stop stops again when stopping queued a follow-up, and archives once quiet", async () => {
+  const activeRuns = [{ id: "report_run", status: "queued" }];
+  const own = [{ id: "copy_old", name: "测试副本 · 旧", updatedAt: old }];
+  const fake = await serve(own, new Set(), { activeRuns, stopsUntilQuiet: 2 });
+  try {
+    assert.equal(await sweep(fake.url, ["--stop"]), 0);
+    assert.deepEqual(fake.stopped, ["copy_old", "copy_old"]);
     assert.equal(fake.live.size, 0);
   } finally {
     fake.server.close();

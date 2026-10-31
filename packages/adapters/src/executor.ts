@@ -14423,6 +14423,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
           );
         }
+        // A thread, role or member that is gone (an archived chat) never comes back on a retry,
+        // so the turn ends instead of staying queued and retried forever.
+        if (!retryForever && leaseValid && setupError instanceof IsolationError) {
+          await deps.events.finalizeRun({
+            spaceId: run.spaceId,
+            threadId: run.threadId,
+            botId: run.botId,
+            runId,
+            taskId: run.taskId,
+            attemptId: attempt.id,
+            leaseOwner: workerId,
+            leaseFence: fence,
+            outcome: "failed",
+            error: "This conversation is no longer available.",
+          });
+          return;
+        }
         // A computer that keeps failing to start will not fix itself on the next retry: end the
         // turn with the reset button instead of leaving it queued until the stuck-work reaper.
         if (
