@@ -6029,6 +6029,33 @@ describe("live CRM browser reads", () => {
     for (const tool of ["list_crm_memberships", "list_crm_roles", "get_crm_role"])
       expect(tools.filter((name) => name === tool)).toHaveLength(1);
   });
+  it.each([
+    ["a broken connection", true, 2],
+    ["a provider error", false, 1],
+  ])("retries a CRM page read once only after %s", async (_name, broken, calls) => {
+    const f = browserFixture();
+    const original = f.execute.getMockImplementation()!;
+    let failures = 0;
+    f.execute.mockImplementation(async function* (call, context) {
+      if (call.route?.toolName === "list_crm_memberships" && failures++ === 0) {
+        yield {
+          type: "error" as const,
+          message: "Connection closed",
+          ...(broken ? { outcome: "uncertain" as const } : {}),
+        };
+        return;
+      }
+      yield* original(call, context);
+    });
+    const read = api.getRecruitingCrmData(f.deps, actor, target, { operation: "memberships" });
+    if (broken)
+      await expect(read).resolves.toMatchObject({
+        sources: [{ serverId: "crm", status: "ready" }],
+      });
+    else await read.catch(() => undefined);
+    const tools = f.execute.mock.calls.map(([call]) => call.route!.toolName);
+    expect(tools.filter((tool) => tool === "list_crm_memberships")).toHaveLength(calls);
+  });
   it("discovers only assigned first-party sources and returns actual stored correspondence identities", async () => {
     const f = browserFixture();
     expect(
