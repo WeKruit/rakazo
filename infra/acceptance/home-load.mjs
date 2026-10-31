@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 // Release check: the signed-in Home opens within its time budget, in a real browser.
 //
-//   RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
+//   RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… [RAKAZO_SESSION_FILE=…] \
 //   node infra/acceptance/home-load.mjs [--shell-ms 6000] [--roles-ms 10000] [--overview-ms 15000]
 //
 // Measures, from navigation start: the greeting (page shell), the sidebar's role list, and the
 // first Overview numbers. Run it on an account with many roles; that is where Home got slow.
 // Exit 0 = within budget, 1 = too slow or broken, 2 = usage, 3 = could not sign in (auth's
 // rate limit after recent sign-ins; not a product failure). Read-only; secrets are never printed.
+// RAKAZO_SESSION_FILE keeps the signed-in session between runs (keep it outside the repo), so
+// releases reuse one sign-in instead of tripping auth's rate limit.
 
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 
 // The release machine provides Playwright globally (NODE_PATH), which only require() searches.
@@ -33,15 +36,40 @@ if (!origin || !email || !password || Object.values(budgets).some((ms) => !(ms >
 
 const browser = await chromium.launch();
 try {
-  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-  const signIn = await context.request.post(`${origin}/api/auth/sign-in/email`, {
-    headers: { origin },
-    data: { email, password },
-    failOnStatusCode: false,
-  });
-  if (signIn.status() !== 200) {
-    console.log(`SKIP sign-in status ${signIn.status()}`);
-    process.exit(3);
+  const sessionFile = process.env.RAKAZO_SESSION_FILE;
+  const viewport = { width: 1440, height: 900 };
+  const signedIn = async (context) =>
+    (
+      await context.request.post(`${origin}/rpc/me`, {
+        headers: { "content-type": "application/json", origin },
+        data: "{}",
+        failOnStatusCode: false,
+      })
+    ).status() === 200;
+  let context =
+    sessionFile && existsSync(sessionFile)
+      ? await browser.newContext({ viewport, storageState: sessionFile })
+      : undefined;
+  if (!context || !(await signedIn(context))) {
+    await context?.close();
+    context = await browser.newContext({ viewport });
+    let status = 0;
+    // Auth's limit clears within a minute; one wait keeps a busy release from skipping the check.
+    for (const wait of [0, 60_000]) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      const signIn = await context.request.post(`${origin}/api/auth/sign-in/email`, {
+        headers: { origin },
+        data: { email, password },
+        failOnStatusCode: false,
+      });
+      status = signIn.status();
+      if (status !== 429) break;
+    }
+    if (status !== 200) {
+      console.log(`SKIP sign-in status ${status}`);
+      process.exit(3);
+    }
+    if (sessionFile) await context.storageState({ path: sessionFile });
   }
   const page = await context.newPage();
   const errors = [];

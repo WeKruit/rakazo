@@ -195,7 +195,7 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
   if [ -f "$DIR/infra/acceptance/home-load.mjs" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; then
     home=1
     for attempt in 1 2; do
-      RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" \
+      RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
         node "$DIR/infra/acceptance/home-load.mjs" > "$WORK/home-$SHORT.log" 2>&1 && home=0 || home=$?
       [ "$home" = 1 ] || break
       sleep 10
