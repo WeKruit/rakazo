@@ -40,6 +40,18 @@ const payloadSchemas = {
     agentRunId: z.string().min(1),
   }),
   "thread.reply_check": z.object({ threadId: z.string().min(1) }),
+  "notification.retry": z.object({
+    runId: z.string().min(1),
+    message: z.object({
+      kind: z.enum(["completion", "failure", "help", "takeover"]),
+      title: z.string(),
+      body: z.string(),
+      botId: z.string().min(1),
+      threadId: z.string().min(1),
+      groupId: z.string().min(1).optional(),
+    }),
+  }),
+  "poll.close": z.object({ messageId: z.string().min(1), pollId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -243,5 +255,34 @@ export function threadReplyCheckJob(
     payload,
     replaceKey: `thread.reply_check:${payload.threadId}`,
     availableAt,
+  };
+}
+
+/** Retries one run notification a few times; a newer one of the same kind replaces it. */
+export const NOTIFICATION_RETRY_ATTEMPTS = 5;
+
+export function notificationRetryJob(
+  payload: BackgroundJobPayloads["notification.retry"],
+  availableAt: Date,
+): BackgroundJob {
+  return {
+    name: "notification.retry",
+    payload,
+    replaceKey: `notification.retry:${payload.runId}:${payload.message.kind}`,
+    availableAt,
+    maxAttempts: NOTIFICATION_RETRY_ATTEMPTS,
+  };
+}
+
+/** One pending close per poll; an early close replaces the deadline job. */
+export function pollCloseJob(
+  payload: BackgroundJobPayloads["poll.close"],
+  availableAt?: Date,
+): BackgroundJob {
+  return {
+    name: "poll.close",
+    payload,
+    replaceKey: `poll.close:${payload.pollId}`,
+    ...(availableAt ? { availableAt } : {}),
   };
 }

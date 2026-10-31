@@ -3296,7 +3296,7 @@ describe("Pi runtime interject", () => {
     expect(continued[1]).toMatchObject({ role: "user" });
     expect(JSON.stringify(continued[1])).toContain("Stop, use the other file");
     expect(events.map((event) => event.type)).not.toContain("error");
-    expect(events.at(-1)).toEqual({ type: "done", text: "Partial answer\n\nSwitched." });
+    expect(events.at(-1)).toEqual({ type: "done", text: "Partial answer\n\n---\n\nSwitched." });
     expect(providerState.agent!.state.errorMessage).toBeUndefined();
   });
 

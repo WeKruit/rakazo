@@ -24,6 +24,7 @@ export type WorkActivity =
   | "crm"
   | "question"
   | "specialist"
+  | "waiting"
   | "working";
 
 const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
@@ -42,6 +43,7 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   remember: "memory",
   save_memory: "memory",
   save_shared_memory: "memory",
+  save_group_memory: "memory",
   mcp_list_tools: "connections",
   mcp_search: "connections",
   mcp_execute_tool: "connected_action",
@@ -58,6 +60,7 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_request_approval: "question",
   ask_user: "question",
   run_subagent: "specialist",
+  wait_for_work: "waiting",
   message_bot: "specialist",
   handoff_to_bot: "specialist",
   message_agent: "specialist",
@@ -597,6 +600,47 @@ export function workSessionStages(session: WorkSession | null): {
   };
 }
 
+/** One stage's place on the turn's timeline, as fractions of the turn so far (0..1). */
+export type WorkTimelineRow = {
+  botId: string;
+  running: boolean;
+  start: number;
+  end: number;
+  durationMs: number;
+};
+
+/**
+ * Where each handed-off stage ran within the turn, from its timed steps, for a Gantt-style
+ * view of parallel work. A stage with no timed step is left out; a running one reaches now.
+ */
+export function workTimeline(
+  session: WorkSession | null,
+  now: number,
+): { totalMs: number; rows: WorkTimelineRow[] } {
+  if (!session) return { totalMs: 0, rows: [] };
+  const origin = time(session.startedAt);
+  const totalMs = Math.max(1, workSessionElapsedMs(session, now));
+  const rows: WorkTimelineRow[] = [];
+  for (const stage of workSessionStages(session).stages) {
+    const timed = stage.steps.filter((step) => step.startedAt);
+    if (!timed.length) continue;
+    const first = Math.min(...timed.map((step) => time(step.startedAt!)));
+    const last = stage.running
+      ? origin + totalMs
+      : Math.max(...timed.map((step) => time(step.startedAt!) + (step.durationMs ?? 0)));
+    const clamp = (value: number) => Math.min(1, Math.max(0, (value - origin) / totalMs));
+    const start = clamp(first);
+    rows.push({
+      botId: stage.botId,
+      running: stage.running,
+      start,
+      end: Math.max(start, clamp(last)),
+      durationMs: Math.max(0, last - first),
+    });
+  }
+  return { totalMs, rows };
+}
+
 /** What a handed-off stage is for, in closed words clients translate; never a member's name. */
 export type WorkStageKind = "sourcing" | "quality" | "outreach" | "scheduling" | "other";
 
@@ -709,6 +753,7 @@ const STATUS_LABELS: Record<WorkActivity, string> = {
   crm: "checking candidate records",
   question: "preparing a question",
   specialist: "asking a specialist",
+  waiting: "waiting for background work",
   working: "working on it",
 };
 

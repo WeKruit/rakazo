@@ -222,3 +222,13 @@ export async function claimConversationNotification(
     return event.id;
   });
 }
+
+/** Give back a claim whose push was never delivered, so a retry may send it. */
+export async function releaseConversationNotification(
+  prisma: Pick<PrismaClient, "event">,
+  claimId: string,
+): Promise<void> {
+  await prisma.event.deleteMany({
+    where: { id: claimId, type: "thread.meta", payload: { path: ["notice"], equals: PUSH_CLAIM } },
+  });
+}

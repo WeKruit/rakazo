@@ -14,7 +14,11 @@ import {
   RecruitingRoleToolInputSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule } from "@rakazo/core";
-import { boundDirectApprovalRequest, RecruitingAssessmentValidationError } from "@rakazo/core";
+import {
+  boundDirectApprovalRequest,
+  COMPUTER_START_FAILED,
+  RecruitingAssessmentValidationError,
+} from "@rakazo/core";
 import {
   legacyScopedToolEffectIdempotencyKey,
   toolEffectIdempotencyKey,
@@ -39,7 +43,11 @@ import { runAutoReviewJudge } from "./auto-review.js";
 import type * as BotSecretsModule from "./bot-secrets.js";
 import { shellCommandEnvironment } from "./bot-secrets.js";
 import type * as ComputerLifecycleModule from "./computer-lifecycle.js";
-import { acquireComputerExecutionLease, ComputerBusyError } from "./computer-lifecycle.js";
+import {
+  acquireComputerExecutionLease,
+  ComputerBusyError,
+  provisionComputer,
+} from "./computer-lifecycle.js";
 import type * as ComputerWorkspaceModule from "./computer-workspace.js";
 import {
   continuedCandidateKey,
@@ -111,7 +119,7 @@ vi.mock("./recruiting-feedback.js", async (importOriginal) => ({
 vi.mock("./computer-lifecycle.js", async (importOriginal) => ({
   ...(await importOriginal<typeof ComputerLifecycleModule>()),
   acquireComputerExecutionLease: vi.fn(async () => null),
-  provisionComputer: async () => ({ id: "computer-1", kind: "desktop" }),
+  provisionComputer: vi.fn(async () => ({ id: "computer-1", kind: "desktop" })),
 }));
 
 /** System prompt plus the required run-context history entry; volatile context rides in history now. */
@@ -999,6 +1007,53 @@ describe("worker shutdown recovery", () => {
     expect(f.results).toEqual([{ uncertain: true }]);
     expect(f.memoryCommit).not.toHaveBeenCalled();
     expect(f.effects).toEqual(before);
+  });
+});
+
+describe("questions after the person moved on", () => {
+  it("does not ask when a newer message is already answered by another reply", async () => {
+    const f = fixture("ask-after-newer-message");
+    Object.assign(f.runData, { createdAt: new Date(0) });
+    const findFirst = vi.mocked(f.prisma.message.findFirst);
+    findFirst.mockImplementation((async (query?: { where?: { OR?: unknown } }) =>
+      query?.where?.OR
+        ? { blocks: [{ kind: "text", text: "找 100 个类似的人" }] }
+        : null) as unknown as typeof findFirst);
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    const request = f.runtimeRun.mock.calls[0]?.[0] as AgentRunRequest;
+    const answer = await request.beforeAsk?.("What would you like to do next?", undefined);
+    expect(answer).toEqual({
+      instead: expect.stringContaining("找 100 个类似的人"),
+    });
+  });
+});
+
+describe("computer that will not start", () => {
+  it("fails the turn with the reset-the-computer notice instead of the provider error", async () => {
+    const f = fixture("computer-start-failed");
+    f.setCalls([
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
+    ]);
+    // Two earlier starts already failed; the third ends the turn instead of queueing it again.
+    Object.assign(f.prisma.attempt, { count: vi.fn(async () => 2) });
+    vi.mocked(provisionComputer).mockRejectedValueOnce(new Error("provider exploded"));
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    expect(f.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "failed", error: COMPUTER_START_FAILED }),
+    );
+  });
+
+  it("retries an early failed start instead of ending the turn", async () => {
+    const f = fixture("computer-start-retry");
+    f.setCalls([
+      { name: "write_file", args: { path: "notes.txt", content: "x" }, executionId: "w" },
+    ]);
+    Object.assign(f.prisma.attempt, { count: vi.fn(async () => 0) });
+    vi.mocked(provisionComputer).mockRejectedValueOnce(new Error("provider exploded"));
+    await expect(f.executor.continueRun(f.runData.id, "worker-1")).rejects.toThrow(
+      "Run setup failed; retrying",
+    );
+    expect(f.finalizeRun).not.toHaveBeenCalled();
   });
 });
 

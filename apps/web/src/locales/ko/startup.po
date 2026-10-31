@@ -178,6 +178,10 @@ msgstr "@{0}"
 msgid "≥ Observed in loaded records"
 msgstr ""
 
+#: src/components/background-task-time.ts
+msgid "About {minutes} min left"
+msgstr ""
+
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
 msgstr ""
@@ -286,8 +290,8 @@ msgid "All of"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "All roles"
-msgstr ""
+#~ msgid "All roles"
+#~ msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All rounds"
@@ -435,6 +439,10 @@ msgstr ""
 msgid "Base URL"
 msgstr "서버 주소"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Bcc"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Bearer token"
 msgstr "Bearer 토큰"
@@ -579,6 +587,10 @@ msgstr ""
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Cards"
 msgstr "카드"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Cc"
+msgstr ""
 
 #: src/pages/shell/Composer.tsx
 msgid "Chat Settings"
@@ -812,6 +824,7 @@ msgid "Contacts"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/ShellMessage.tsx
 msgid "Continue"
 msgstr "계속"
 
@@ -1005,6 +1018,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Could not reset password"
 msgstr "비밀번호를 재설정할 수 없습니다"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not reset the computer."
+msgstr ""
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not run routine"
@@ -1555,6 +1572,18 @@ msgstr "조작 끝내기"
 msgid "Image upload area"
 msgstr "이미지 업로드 영역"
 
+#: src/lib/relative-time.ts
+msgid "in {hours}h"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "in {minutes}m"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "in a minute"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
@@ -1653,6 +1682,10 @@ msgstr "답장한 메시지로 이동: {excerpt}"
 #: src/lib/relative-time.ts
 msgid "just now"
 msgstr "방금"
+
+#: src/components/background-task-time.ts
+msgid "Just started"
+msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Key work"
@@ -1761,8 +1794,8 @@ msgid "Low"
 msgstr "낮음"
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Main"
-msgstr ""
+#~ msgid "Main"
+#~ msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1943,6 +1976,10 @@ msgstr ""
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "New Role"
 msgstr ""
+
+#: src/pages/routine-next-run.ts
+#~ msgid "Next {when}"
+#~ msgstr ""
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
@@ -2567,6 +2604,7 @@ msgid "Reset"
 msgstr "재설정"
 
 #: src/components/ComputerMaintenanceActions.tsx
+#: src/pages/shell/ShellConversation.tsx
 msgid "Reset computer"
 msgstr "컴퓨터 재설정"
 
@@ -2674,6 +2712,10 @@ msgstr ""
 msgid "Role stage"
 msgstr ""
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role teams"
+msgstr "역할별 팀"
+
 #. placeholder {0}: candidate.roleVersion
 #: src/pages/shell/Composer.tsx
 msgid "Role version: {0}"
@@ -2721,6 +2763,10 @@ msgstr ""
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "실행 중"
+
+#: src/components/background-task-time.ts
+msgid "Running {minutes} min"
+msgstr ""
 
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Salary range"
@@ -3224,6 +3270,10 @@ msgstr "테스트 중…"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "The API did not come back. Refresh this page."
 msgstr "API가 다시 작동하지 않습니다. 이 페이지를 새로 고침하세요."
+
+#: src/pages/shell/useShellController.tsx
+msgid "The computer could not start. Reset it to continue."
+msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."

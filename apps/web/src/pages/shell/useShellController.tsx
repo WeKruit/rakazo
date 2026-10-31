@@ -820,13 +820,20 @@ export function useShellController() {
   const runErrorNeedsReconnect = Boolean(
     runError && runRecoveryAction(runError) === "model_connection",
   );
+  /** The agent whose computer would not start, offered a fresh computer instead of a retry. */
+  const runErrorComputerBotId =
+    runError && runRecoveryAction(runError) === "computer"
+      ? (activeSnapshot?.run?.botId ?? null)
+      : null;
   const displayedRunError =
     !sendError && runError
       ? showToolActivity
         ? runError
         : runErrorNeedsReconnect
           ? t`Reconnect your model to continue.`
-          : t`The reply stopped. Try again.`
+          : runErrorComputerBotId
+            ? t`The computer could not start. Reset it to continue.`
+            : t`The reply stopped. Try again.`
       : null;
   const displayedRunErrorId = displayedRunError ? (activeSnapshot?.run?.id ?? null) : null;
   const handleRunErrorPresented = useCallback((runId: string) => {
@@ -1469,6 +1476,7 @@ export function useShellController() {
     displayedRunError,
     displayedRunErrorId,
     runErrorNeedsReconnect,
+    runErrorComputerBotId,
     handleRunErrorPresented,
     resolveTranscriptBot,
     workingBots,

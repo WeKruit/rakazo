@@ -18,6 +18,7 @@ import {
   workStageKind,
   workStageLabel,
   workStageMessages,
+  workTimeline,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import { reduceThreadEvent } from "./thread-reducer.js";
@@ -771,4 +772,26 @@ describe("workSessionStages", () => {
     expect(workStageKind(undefined)).toBe("other");
     expect(workStageLabel("sourcing")).toBe("Finding candidates");
   });
+});
+
+it("places each teammate's stage on the turn's timeline and keeps a running one open to now", () => {
+  const session = {
+    startedAt: at(0),
+    endedAt: null,
+    runIds: ["lead", "source", "review"],
+    runBots: { lead: "main", source: "sourcer", review: "reviewer" },
+    earlier: {
+      source: [{ activity: "research" as const, startedAt: at(10), durationMs: 40_000 }],
+    },
+    live: {
+      review: [{ activity: "candidates" as const, startedAt: at(30) }],
+    },
+    current: null,
+  };
+  const { rows } = workTimeline(session, T0 + 100_000);
+  expect(rows).toEqual([
+    { botId: "sourcer", running: false, start: 0.1, end: 0.5, durationMs: 40_000 },
+    { botId: "reviewer", running: true, start: 0.3, end: 1, durationMs: 70_000 },
+  ]);
+  expect(workTimeline(null, T0).rows).toEqual([]);
 });

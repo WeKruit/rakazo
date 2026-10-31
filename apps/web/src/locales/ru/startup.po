@@ -178,6 +178,10 @@ msgstr "@{0}"
 msgid "≥ Observed in loaded records"
 msgstr ""
 
+#: src/components/background-task-time.ts
+msgid "About {minutes} min left"
+msgstr ""
+
 #: src/pages/shell/bot-picker.tsx
 msgid "About groups"
 msgstr "О группах"
@@ -286,8 +290,8 @@ msgid "All of"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "All roles"
-msgstr ""
+#~ msgid "All roles"
+#~ msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All rounds"
@@ -435,6 +439,10 @@ msgstr ""
 msgid "Base URL"
 msgstr "Базовый URL"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Bcc"
+msgstr ""
+
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Bearer token"
 msgstr "Bearer-токен"
@@ -579,6 +587,10 @@ msgstr ""
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Cards"
 msgstr "Карточки"
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "Cc"
+msgstr ""
 
 #: src/pages/shell/Composer.tsx
 msgid "Chat Settings"
@@ -812,6 +824,7 @@ msgid "Contacts"
 msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
+#: src/pages/ShellMessage.tsx
 msgid "Continue"
 msgstr "Продолжить"
 
@@ -1005,6 +1018,10 @@ msgstr ""
 #: src/pages/Auth.tsx
 msgid "Could not reset password"
 msgstr "Не удалось сбросить пароль"
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Could not reset the computer."
+msgstr ""
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Could not run routine"
@@ -1555,6 +1572,18 @@ msgstr "Готово"
 msgid "Image upload area"
 msgstr "Область загрузки изображения"
 
+#: src/lib/relative-time.ts
+msgid "in {hours}h"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "in {minutes}m"
+msgstr ""
+
+#: src/lib/relative-time.ts
+msgid "in a minute"
+msgstr ""
+
 #: src/lib/ticket-status.ts
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "In progress"
@@ -1653,6 +1682,10 @@ msgstr "Перейти к исходному сообщению: {excerpt}"
 #: src/lib/relative-time.ts
 msgid "just now"
 msgstr "только что"
+
+#: src/components/background-task-time.ts
+msgid "Just started"
+msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 msgid "Key work"
@@ -1761,8 +1794,8 @@ msgid "Low"
 msgstr "Низкий"
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Main"
-msgstr ""
+#~ msgid "Main"
+#~ msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1943,6 +1976,10 @@ msgstr ""
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "New Role"
 msgstr ""
+
+#: src/pages/routine-next-run.ts
+#~ msgid "Next {when}"
+#~ msgstr ""
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
@@ -2567,6 +2604,7 @@ msgid "Reset"
 msgstr "Сбросить"
 
 #: src/components/ComputerMaintenanceActions.tsx
+#: src/pages/shell/ShellConversation.tsx
 msgid "Reset computer"
 msgstr "Сбросить компьютер"
 
@@ -2674,6 +2712,10 @@ msgstr ""
 msgid "Role stage"
 msgstr ""
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role teams"
+msgstr "Команды по ролям"
+
 #. placeholder {0}: candidate.roleVersion
 #: src/pages/shell/Composer.tsx
 msgid "Role version: {0}"
@@ -2721,6 +2763,10 @@ msgstr ""
 #: src/components/CloudAgentCard.tsx
 msgid "running"
 msgstr "выполняется"
+
+#: src/components/background-task-time.ts
+msgid "Running {minutes} min"
+msgstr ""
 
 #: src/pages/recruiting/useRecruitingWorkspace.ts
 msgid "Salary range"
@@ -3224,6 +3270,10 @@ msgstr "Проверка…"
 #: src/components/SoftwareUpdateSection.tsx
 msgid "The API did not come back. Refresh this page."
 msgstr "API не вернулся. Обновите эту страницу."
+
+#: src/pages/shell/useShellController.tsx
+msgid "The computer could not start. Reset it to continue."
+msgstr ""
 
 #: src/lib/model-connection-preflight.ts
 msgid "The connection timed out."

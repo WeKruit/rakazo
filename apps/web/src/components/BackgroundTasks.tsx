@@ -4,6 +4,7 @@ import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo
 import { useEffect, useState } from "react";
 import type { ArtifactTarget } from "../lib/artifact-open";
 import { rpc } from "../lib/rpc";
+import { backgroundTaskTime } from "./background-task-time";
 
 export function BackgroundTasks({
   target,
@@ -67,31 +68,37 @@ export function BackgroundTasks({
           </p>
         ) : (
           <ul className="space-y-2">
-            {tasks.map((task) => (
-              <li key={task.id} className="flex items-center justify-between gap-3">
-                <span>
-                  {task.kind === "research" || task.kind === "agent_run"
-                    ? t`Finding candidates`
-                    : task.kind === "run"
-                      ? t`Background task`
-                      : t`Delegated task`}
-                </span>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={busy !== null || task.status === "cancelling"}
-                  onClick={() => void cancel(task)}
-                >
-                  {task.status === "cancelling"
-                    ? t`Cancelling…`
-                    : task.kind === "agent_run"
-                      ? t`Stop following`
-                      : task.kind === "research"
-                        ? t`Stop updates`
-                        : t`Cancel task`}
-                </Button>
-              </li>
-            ))}
+            {tasks.map((task) => {
+              const time = backgroundTaskTime(task);
+              return (
+                <li key={task.id} className="flex items-center justify-between gap-3">
+                  <span className="flex min-w-0 flex-col">
+                    <span>
+                      {task.kind === "research" || task.kind === "agent_run"
+                        ? t`Finding candidates`
+                        : task.kind === "run"
+                          ? t`Background task`
+                          : t`Delegated task`}
+                    </span>
+                    {time ? <span className="text-muted-foreground text-xs">{time}</span> : null}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={busy !== null || task.status === "cancelling"}
+                    onClick={() => void cancel(task)}
+                  >
+                    {task.status === "cancelling"
+                      ? t`Cancelling…`
+                      : task.kind === "agent_run"
+                        ? t`Stop following`
+                        : task.kind === "research"
+                          ? t`Stop updates`
+                          : t`Cancel task`}
+                  </Button>
+                </li>
+              );
+            })}
           </ul>
         )}
         <DialogClose aria-label={t`Close`} render={<Button variant="ghost" size="sm" />}>

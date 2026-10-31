@@ -236,9 +236,15 @@ msgstr ""
 
 #: src/pages/ModelBackupsSettings.tsx
 #: src/pages/PluginsOverlay.tsx
+#: src/pages/RoutineList.tsx
 #: src/pages/ScratchpadSection.tsx
 msgid "Add"
 msgstr "जोड़ें"
+
+#. placeholder {0}: offer.name
+#: src/pages/RoutineList.tsx
+msgid "Add {0}"
+msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Add {name} to shortlist"
@@ -253,8 +259,8 @@ msgid "Add a name and prompt."
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
-msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-msgstr ""
+#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
+#~ msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
@@ -263,6 +269,10 @@ msgstr "सर्वर का नाम दर्ज करें।"
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a stdio command."
 msgstr "एक stdio कमांड दर्ज करें।"
+
+#: src/pages/RoutineEditor.tsx
+msgid "Add a trigger to run this routine."
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Add an HTTPS server URL."
@@ -977,6 +987,10 @@ msgstr ""
 msgid "Check availability in role chat"
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "Check command"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Check inbox"
 msgstr ""
@@ -1099,6 +1113,7 @@ msgstr ""
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Close"
 msgstr "बंद करें"
 
@@ -1148,6 +1163,14 @@ msgstr "उपयोगकर्ता सेटिंग्स बंद कर
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Close voice settings"
 msgstr "आवाज़ सेटिंग्स बंद करें"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Code"
@@ -1450,6 +1473,10 @@ msgstr "जारी रखें"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Continue in Background"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Continue the conversation each run"
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
@@ -1804,6 +1831,10 @@ msgstr ""
 msgid "Could not read this sequence."
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr ""
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "हटाया नहीं जा सका"
@@ -1843,6 +1874,7 @@ msgstr "कनेक्शन रद्द नहीं किया जा स�
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Could not save"
 msgstr "सहेजा नहीं जा सका"
 
@@ -3260,8 +3292,8 @@ msgid "Mailbox not recorded"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Main"
-msgstr ""
+#~ msgid "Main"
+#~ msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -3475,6 +3507,10 @@ msgstr "मासिक"
 msgid "More"
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "More options"
+msgstr ""
+
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "More results may be available. This is not the complete mailbox or calendar."
 msgstr ""
@@ -3588,6 +3624,10 @@ msgstr ""
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Next"
+msgstr ""
+
+#: src/pages/RoutineList.tsx
+msgid "Next {next}"
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx
@@ -3976,6 +4016,10 @@ msgstr "अभी तक कुछ याद नहीं किया गया
 msgid "Notifications"
 msgstr "सूचनाएं"
 
+#: src/pages/RoutineEditor.tsx
+msgid "Notify when done"
+msgstr ""
+
 #: src/pages/ActivityList.tsx
 msgid "Now"
 msgstr "अभी"
@@ -4053,6 +4097,10 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Only recent saved records are shown. Earlier plans may be missing."
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Only run when"
 msgstr ""
 
 #: src/pages/ScratchpadSection.tsx
@@ -4657,6 +4705,10 @@ msgstr ""
 
 #: src/pages/RoutineEditor.tsx
 msgid "Remove message trigger"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+msgid "Remove record trigger"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx
@@ -5492,10 +5544,18 @@ msgstr "सेटअप सहायता"
 msgid "Share the role requirements in the conversation to build this brief."
 msgstr ""
 
+#: src/pages/RoutineEditor.tsx
+msgid "Share with my team"
+msgstr ""
+
 #: src/pages/MemorySettingsOverlay.tsx
 #: src/pages/shell/bot-panel.tsx
 msgid "Shared"
 msgstr "साझा"
+
+#: src/pages/RoutineList.tsx
+msgid "Shared by your team"
+msgstr ""
 
 #: src/pages/shell/dialogs.tsx
 msgid "Shared chat with 2-6 bots. They all reply in the same thread."
@@ -6066,6 +6126,7 @@ msgstr "अपना उत्तर लिखें"
 msgid "Unassigned"
 msgstr "असाइन नहीं किया गया"
 
+#: src/pages/KnowledgeSection.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Unavailable"
 msgstr ""
@@ -6266,6 +6327,14 @@ msgstr ""
 msgid "Voice"
 msgstr "आवाज़"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Waiting for background work"
+msgstr ""
+
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Waiting for resume"
 msgstr ""
@@ -6314,7 +6383,17 @@ msgstr "यह बॉट किस लिए है"
 
 #: src/pages/RoutineEditor.tsx
 #: src/pages/RoutineList.tsx
+msgid "When a role changes"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
 msgid "When a webhook fires"
+msgstr ""
+
+#: src/pages/RoutineEditor.tsx
+#: src/pages/RoutineList.tsx
+msgid "When people are saved"
 msgstr ""
 
 #: src/pages/RoutineEditor.tsx

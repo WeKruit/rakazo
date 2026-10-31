@@ -113,6 +113,7 @@ export const Transcript = memo(function Transcript({
   onRefresh,
   onBotChanged,
   onAddRoutine,
+  onContinue,
   voiceReady,
   speakingMessageId,
   onSpeak,
@@ -159,6 +160,8 @@ export const Transcript = memo(function Transcript({
   onRefresh: () => Promise<void>;
   onBotChanged: () => Promise<void>;
   onAddRoutine: (name: string, prompt: string) => void;
+  /** Continues work a stop ended; offered on the stop line while it is the newest message. */
+  onContinue?: () => void;
   voiceReady: boolean;
   speakingMessageId: string | null;
   onSpeak: (message: ThreadMessage) => void;
@@ -607,6 +610,11 @@ export const Transcript = memo(function Transcript({
                         onSpeak={() => onSpeak(message)}
                         onOpenComputer={onOpenComputer}
                         showToolActivity={showToolActivity}
+                        onContinue={
+                          message.id === reactionView.visibleMessages.at(-1)?.id
+                            ? onContinue
+                            : undefined
+                        }
                       />
                       {peerReceipt ? null : (
                         <MessageHoverActions

@@ -185,6 +185,35 @@ function reference(row: HistoryRow, query = "", maxLength = 800, textOffset = 0)
   };
 }
 
+/**
+ * Tells the agent, in the result itself, whether the history holds evidence for the query, so
+ * "not found" never depends on the prompt alone.
+ */
+function answerability(
+  query: string,
+  input: HistorySearchInput,
+  found: number,
+  someWordsOnly = false,
+): { answerability: "found" | "partial" | "none"; missingEvidence?: string } {
+  if (found && !someWordsOnly) return { answerability: "found" };
+  const range = [
+    input.after ? `from ${input.after}` : "",
+    input.before ? `before ${input.before}` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const where = `${input.scope === "mine" ? "the user's other conversations" : "this conversation"}${range ? ` ${range}` : ""}`;
+  if (found)
+    return {
+      answerability: "partial",
+      missingEvidence: `No message in ${where} has every word of "${query}"; these only share some words. Read them before relying on one.`,
+    };
+  return {
+    answerability: "none",
+    missingEvidence: `No message in ${where} matches "${query}". Do not answer from memory: say it is not in the history, or search again with one distinctive keyword${input.scope === "mine" ? "" : ' or scope "mine"'}.`,
+  };
+}
+
 /** Other conversations of the same user: title, short snippet and a read_history reference. */
 async function searchMine(
   prisma: PrismaClient,
@@ -243,6 +272,7 @@ async function searchMine(
     query,
     scope: "mine" as const,
     ...(anyWord ? { match: "some_words_ranked" as const } : {}),
+    ...answerability(query, input, page.length, anyWord),
     coverage: {
       scope: "requested_query_and_range" as const,
       status: last || anyWord ? ("partial" as const) : ("exhausted" as const),
@@ -356,6 +386,7 @@ async function searchConversation(
       scope: "requested_query_and_range" as const,
       status: nextBeforeSeq === null ? ("exhausted" as const) : ("partial" as const),
     },
+    ...answerability(query, input, page.length),
     messages: page.map((row) => reference(row, query)),
     nextBeforeSeq,
     nextSearch:

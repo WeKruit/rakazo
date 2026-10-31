@@ -23,7 +23,7 @@ import { startCall } from "../../lib/call-session";
 import { desktopBridge } from "../../lib/desktop";
 import { withFeatureMessages } from "../../lib/i18n";
 import { clampWidth } from "../../lib/pane-width";
-import { selectedSpaceId } from "../../lib/rpc";
+import { rpc, selectedSpaceId } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
 
 const CalibrationRoundCard = lazyPanel(() =>
@@ -73,6 +73,7 @@ const NO_ITEMS: never[] = [];
 
 /** What the Try again button sends after a failed run; the bot picks up from the history. */
 const RETRY_TEXT = "Try again";
+const CONTINUE_TEXT = "Continue where you left off.";
 
 export function ShellConversation({
   model,
@@ -210,6 +211,7 @@ export function ShellConversation({
     displayedRunError,
     displayedRunErrorId,
     runErrorNeedsReconnect,
+    runErrorComputerBotId,
     handleRunErrorPresented,
     transcriptMessages,
     queuedMessages,
@@ -842,6 +844,9 @@ export function ShellConversation({
                   onRefresh={refreshActiveThread}
                   onBotChanged={refreshBots}
                   onAddRoutine={addSkillRoutine}
+                  onContinue={() =>
+                    void sendFromComposer(CONTINUE_TEXT, [], crypto.randomUUID(), "steer", true)
+                  }
                   voiceReady={Boolean(voiceStatus?.ready)}
                   speakingMessageId={speakingMessageId}
                   onSpeak={speakMessage}
@@ -946,9 +951,26 @@ export function ShellConversation({
                       openSettings("models");
                       return;
                     }
+                    if (runErrorComputerBotId) {
+                      void rpc.computer
+                        .reset({ botId: runErrorComputerBotId })
+                        .then(() =>
+                          sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), "steer", true),
+                        )
+                        .catch((error: unknown) =>
+                          setSendError(errorText(error, t`Could not reset the computer.`)),
+                        );
+                      return;
+                    }
                     void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), "steer", true);
                   }}
-                  retryLabel={runErrorNeedsReconnect ? t`Reconnect` : undefined}
+                  retryLabel={
+                    runErrorNeedsReconnect
+                      ? t`Reconnect`
+                      : runErrorComputerBotId
+                        ? t`Reset computer`
+                        : undefined
+                  }
                   sending={sending}
                   fileInputRef={fileInputRef}
                   onAttachmentPick={

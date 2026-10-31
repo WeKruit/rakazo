@@ -14,6 +14,7 @@ import {
   workProgressLabel,
   workSessionElapsedMs,
   workSessionStages,
+  workTimeline,
 } from "@rakazo/core";
 import { Button } from "@rakazo/ui-web";
 import { ChevronRight } from "lucide-react";
@@ -43,6 +44,7 @@ function useWorkActivityLabels(): Record<WorkActivity, string> {
     crm: t`Checking candidate records`,
     question: t`Preparing a question`,
     specialist: t`Asking a specialist`,
+    waiting: t`Waiting for background work`,
     working: t`Working on it`,
   };
 }
@@ -161,6 +163,46 @@ function WorkStageEntry({
         {actions}
       </div>
     </details>
+  );
+}
+
+/**
+ * When teammates worked side by side, where each one's part fell within the turn: a small
+ * Gantt view so parallel and waiting work reads at a glance. Hidden for a single stage.
+ */
+function WorkTimeline({
+  session,
+  labelFor,
+}: {
+  session: WorkSession;
+  labelFor: (botId: string) => string;
+}) {
+  const now = useNow();
+  const { rows } = workTimeline(session, now);
+  if (rows.length < 2) return null;
+  return (
+    <ul data-testid="work-timeline" className="mt-1 grid w-full max-w-md gap-1">
+      {rows.map((row) => (
+        <li key={row.botId} className="flex items-center gap-2 text-[12px] text-muted-foreground">
+          <span dir="auto" className="w-32 shrink-0 truncate">
+            {labelFor(row.botId)}
+          </span>
+          <span className="relative h-1.5 flex-1 rounded-full bg-muted">
+            <span
+              aria-hidden
+              className={`absolute inset-y-0 rounded-full ${row.running ? "bg-warning" : "bg-foreground/40"}`}
+              style={{
+                left: `${row.start * 100}%`,
+                width: `max(4px, ${(row.end - row.start) * 100}%)`,
+              }}
+            />
+          </span>
+          <span className="w-14 shrink-0 text-end font-mono tabular-nums">
+            {formatWorkDuration(row.durationMs)}
+          </span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -292,6 +334,9 @@ export function LiveWork({
           onCancel={onCancelStage ? () => onCancelStage(stage.botId) : undefined}
         />
       ))}
+      {session ? (
+        <WorkTimeline session={session} labelFor={(botId) => stageLabels[stageKind(botId)]} />
+      ) : null}
     </div>
   ) : null;
   if (live) {

@@ -1,7 +1,7 @@
 import { MenuView } from "@expo/ui/community/menu";
 import type { RunActivityRow, SearchHit, SpaceBot, SpaceGroup } from "@rakazo/contracts";
 import { normalizeCreateBotProfile } from "@rakazo/contracts";
-import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
+import { ACTIVE_RUN_STATUSES, RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { botColors } from "@rakazo/ui-tokens";
 import { Redirect, useFocusEffect, useNavigation, useRouter } from "expo-router";
 import type { ReactNode } from "react";
@@ -897,7 +897,7 @@ function Home() {
               <View style={{ paddingHorizontal: 16, gap: 8, paddingBottom: 16 }}>
                 {groups.find((group) => group.id.startsWith("recruiting-global-")) ? (
                   <NativeActionButton
-                    label={t("Main")}
+                    label={RECRUITING_GLOBAL_AGENT_NAME}
                     prominence="secondary"
                     onPress={() => {
                       const main = groups.find((group) =>

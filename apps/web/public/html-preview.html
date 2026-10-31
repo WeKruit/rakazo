@@ -6,7 +6,10 @@
 <script>
   // A separate document so the app's strict CSP does not apply to previewed HTML.
   addEventListener("message", (event) => {
-    if (event.source === parent && typeof event.data === "string")
-      document.getElementById("preview").srcdoc = event.data;
+    const preview = document.getElementById("preview");
+    if (event.source === parent && typeof event.data === "string") preview.srcdoc = event.data;
+    // A canvas app saves only its own data; the app checks it came from this frame.
+    else if (event.source === preview.contentWindow && event.data?.type === "rakazo.canvas.save")
+      parent.postMessage({ type: "rakazo.canvas.save", state: event.data.state }, "*");
   });
 </script>

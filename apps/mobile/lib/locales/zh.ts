@@ -29,6 +29,8 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Stop everything": "停止所有任务",
   "Stop following": "停止跟进",
   "Task transcript": "任务记录",
+  "The computer could not start. Reset it to continue.": "电脑无法启动。请重置后继续。",
+  "Could not reset the computer.": "无法重置电脑。",
   "The reply stopped. Try again.": "回复已中断，请重试。",
   "Thinking…": "正在思考…",
   "Work actions": "任务操作",
@@ -816,4 +818,8 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Preparing outreach": "准备联系邮件",
   "Scheduling interviews": "安排面试",
   "Delegated task": "分派的任务",
+  Closed: "已结束",
+  Vote: "投票",
+  "Closes in {time}": "{time} 后结束",
+  "Could not record your vote": "无法记录你的投票",
 };

@@ -135,6 +135,7 @@ const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "remember",
   "save_memory",
   "save_shared_memory",
+  "save_group_memory",
   "write_file",
   "browser_snapshot",
   "cloud_agent_status",
@@ -148,6 +149,7 @@ const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "request_takeover",
   "run_subagent",
   "task_catalog",
+  "wait_for_work",
   "schedule_list",
   "scratchpad_list",
   "skill_read",
@@ -321,6 +323,7 @@ const EXTERNAL_TEXT_BUILTIN_TOOLS = new Set([
 const DURABLE_MEMORY_TOOLS = new Set([
   "remember",
   "save_shared_memory",
+  "save_group_memory",
   "save_memory",
   "skill_create",
   "skill_update",

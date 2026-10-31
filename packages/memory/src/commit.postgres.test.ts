@@ -800,4 +800,25 @@ describePostgres("memory commits (PostgreSQL)", () => {
       { revision: 2, content: "" },
     ]);
   });
+  it("keeps group notes inside their own group conversation", async () => {
+    const save = (groupId: string | undefined, content: string) =>
+      store.commit(
+        { scope: "group", groupId, path: "NOTES.md", content, expectedRevision: 0 },
+        context,
+      );
+    await save("memory-group-a", "room a");
+    await save("memory-group-b", "room b");
+    await expect(save(undefined, "nowhere")).rejects.toThrow("group conversation");
+
+    const roomA = await store.read({ scope: "group", groupId: "memory-group-a" }, context);
+    expect(roomA.documents.map((doc) => doc.content)).toEqual(["room a"]);
+    expect((await store.read({ scope: "group" }, context)).documents).toEqual([]);
+    const shared = await store.read({ scope: "user", path: "NOTES.md" }, context);
+    expect(shared.documents).toEqual([]);
+    const otherUser = await store.read(
+      { scope: "group", groupId: "memory-group-a" },
+      { ...context, userId: "someone-else" },
+    );
+    expect(otherUser.documents).toEqual([]);
+  });
 });

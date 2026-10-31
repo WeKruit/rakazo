@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingOverviewRole } from "@rakazo/contracts";
+import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import {
   Badge,
   Button,
@@ -608,7 +609,7 @@ export function HomeDashboard({
       <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-6 md:px-8 md:py-10">
         {onGlobalChat ? (
           <Button className="self-start" variant="outline" onClick={onGlobalChat}>
-            <Trans>Main</Trans>
+            {RECRUITING_GLOBAL_AGENT_NAME}
           </Button>
         ) : null}
         <div className="flex flex-wrap items-center gap-2">

@@ -32,6 +32,9 @@ export const RU_MESSAGES: Record<string, string> = {
   "Stop following": "Прекратить отслеживание",
   "Stop research updates": "Остановить обновления исследования",
   "Task transcript": "История задачи",
+  "The computer could not start. Reset it to continue.":
+    "Компьютер не запустился. Сбросьте его, чтобы продолжить.",
+  "Could not reset the computer.": "Не удалось сбросить компьютер.",
   "The reply stopped. Try again.": "Ответ прерван. Повторите попытку.",
   "Thinking…": "Думаю…",
   "Try again": "Повторить",
@@ -842,4 +845,8 @@ export const RU_MESSAGES: Record<string, string> = {
   "Preparing outreach": "Подготовка рассылки",
   "Scheduling interviews": "Планирование собеседований",
   "Delegated task": "Поручённая задача",
+  Closed: "Завершено",
+  Vote: "Голосовать",
+  "Closes in {time}": "Закроется через {time}",
+  "Could not record your vote": "Не удалось учесть ваш голос",
 };

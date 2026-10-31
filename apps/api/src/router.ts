@@ -14,6 +14,7 @@ import type {
 import {
   computerControlExpireJobKey,
   messagingDeliverJob,
+  pollCloseJob,
   routineJobKey,
   routineWakeupJob,
   runContinueJob,
@@ -204,6 +205,7 @@ import {
   CannotDeleteSpaceAsNonOwnerError,
   CannotRenameSpaceAsNonOwnerError,
   ComputerLimitError,
+  changeCanvas,
   claimConversationNotification,
   claimEmptySpaceDeletionForMember,
   createExternalConversationRepos,
@@ -267,6 +269,7 @@ import {
   toTicketDto,
   touchGroupUpdatedAt,
   upgradeRecruitingWorkspace,
+  votePoll,
   withDatabaseActor,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -2767,9 +2770,48 @@ export function createRouter(deps: RouterDeps) {
         }
         return { ok: true as const };
       }),
+      saveCanvasState: authed.threads.saveCanvasState.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        const changed = await changeCanvas(deps.prisma, {
+          threadId: target.threadId,
+          canvasId: input.canvasId,
+          change: { state: input.state },
+        });
+        if (!changed.ok) throw new ORPCError("CONFLICT", { message: changed.error });
+        await deps.events.notify(changed.threadId, changed.eventSeq).catch((error) => {
+          getLogger().error("canvas state realtime notification", error);
+        });
+        return { ok: true as const };
+      }),
+      votePoll: authed.threads.votePoll.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        const user = await deps.prisma.user.findUnique({
+          where: { id: context.actor.userId },
+          select: { name: true },
+        });
+        const voted = await votePoll(deps.prisma, {
+          threadId: target.threadId,
+          pollId: input.pollId,
+          vote: {
+            voter: "user",
+            voterId: context.actor.userId,
+            name: user?.name?.trim() || "You",
+            optionIds: input.optionIds,
+          },
+        });
+        if (!voted.ok) throw new ORPCError("CONFLICT", { message: voted.error });
+        await deps.events.notify(voted.threadId, voted.eventSeq).catch((error) => {
+          getLogger().error("poll vote realtime notification", error);
+        });
+        if (voted.complete)
+          await deps.jobs.enqueue(
+            pollCloseJob({ messageId: voted.messageId, pollId: input.pollId }),
+          );
+        return { ok: true as const };
+      }),
       stop: authed.threads.stop.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
-        await stopThreadRuns(deps, context.actor, target, input.runId, input.scope);
+        await stopThreadRuns(deps, context.actor, target, input.runId, input.scope, true);
         return { ok: true as const };
       }),
       backgroundTasks: authed.threads.backgroundTasks.handler(async ({ context, input }) => {

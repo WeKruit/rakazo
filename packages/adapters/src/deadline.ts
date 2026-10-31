@@ -16,6 +16,7 @@ export const RECORD_TOOLS: ReadonlySet<string> = new Set([
   "read_memory",
   "remember",
   "save_shared_memory",
+  "save_group_memory",
 ]);
 export const RECORD_TOOL_LATE_TEXT =
   "This step did not finish in time and its outcome is unknown. Read the saved state before repeating it, answer any new message from the recruiter now, and keep going.";

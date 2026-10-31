@@ -32,6 +32,9 @@ export const DE_MESSAGES: Record<string, string> = {
   "Stop following": "Nicht mehr verfolgen",
   "Stop research updates": "Forschungsupdates stoppen",
   "Task transcript": "Aufgabenverlauf",
+  "The computer could not start. Reset it to continue.":
+    "Der Computer konnte nicht starten. Setze ihn zurück, um fortzufahren.",
+  "Could not reset the computer.": "Der Computer konnte nicht zurückgesetzt werden.",
   "The reply stopped. Try again.": "Die Antwort wurde unterbrochen. Erneut versuchen.",
   "Thinking…": "Denke nach…",
   "Try again": "Erneut versuchen",
@@ -839,4 +842,8 @@ export const DE_MESSAGES: Record<string, string> = {
   "Preparing outreach": "Ansprache vorbereiten",
   "Scheduling interviews": "Interviews planen",
   "Delegated task": "Übertragene Aufgabe",
+  Closed: "Beendet",
+  Vote: "Abstimmen",
+  "Closes in {time}": "Endet in {time}",
+  "Could not record your vote": "Deine Stimme konnte nicht gespeichert werden",
 };

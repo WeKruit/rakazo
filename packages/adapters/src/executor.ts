@@ -32,6 +32,8 @@ import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
   MEMORY_REVISION_CONFLICT_ERROR,
+  notificationRetryJob,
+  pollCloseJob,
   recruitingAgentRunWaitJob,
   routineJobKey,
   routineWakeupJob,
@@ -50,6 +52,7 @@ import {
   BOT_TITLE_MAX_LENGTH,
   BotSecretName,
   botSecretSubmissionSchema,
+  CANVAS_HTML_MAX_BYTES,
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
   COMPUTER_COMMAND_OUTPUT_MAX_CHARS,
   disabledBuiltinToolSet,
@@ -75,6 +78,7 @@ import {
   RecruitingShortlistToolInputSchema,
   RetainedRecruitingApprovalRequestSchema,
   UsageRecordedPayloadSchema,
+  ViewBlockSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -94,6 +98,7 @@ import {
   boundDirectApprovalDetails,
   boundDirectApprovalRequest,
   CALL_CLIENT_NONCE_PREFIX,
+  COMPUTER_START_FAILED,
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
@@ -131,13 +136,18 @@ import {
   nextFence,
   nextRoutineWakeAt,
   oneTimeMcpWriteEndpoint,
+  POLL_DEFAULT_MINUTES,
+  POLL_MAX_MINUTES,
+  POLL_MIN_MINUTES,
   parseSkillMd,
   planActionGate,
+  pollResultLines,
   promptInvokesSkill,
   RateWindow,
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_GLOBAL_AGENT_NAME,
   RECRUITING_INTAKE_SKILL_NAME,
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
@@ -201,6 +211,8 @@ import {
   backgroundToolRun,
   backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
+  canvasOf,
+  changeCanvas,
   claimRecruitingCrmImport,
   claimRecruitingReply,
   claimRecruitingResearchReadEffect,
@@ -230,6 +242,7 @@ import {
   loadVerifiedRecruitingSchedulingPlan,
   Prisma,
   parseComputerMode,
+  pollOf,
   prepareNativeRecruitingCandidateDecision,
   prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
@@ -253,6 +266,7 @@ import {
   saveRecruitingCalibrationRound,
   searchHistory,
   skipRateLimitedRun,
+  votePoll,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -306,8 +320,14 @@ import {
   resolveAutoReviewProviderKind,
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
+import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
-import { loadBotMessageContext, messageBot, returnBotMessageOutcome } from "./bot-messages.js";
+import {
+  loadBotMessageContext,
+  messageBot,
+  returnBotMessageOutcome,
+  returnDelegatedTeamOutcome,
+} from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
   botSecretToolView,
@@ -657,6 +677,7 @@ import type { TurnWork } from "./turn-report.js";
 import {
   declinedSentence,
   questionStatesWork,
+  restatesUpdate,
   TurnReportLedger,
   turnReportText,
 } from "./turn-report.js";
@@ -1132,6 +1153,10 @@ const FILE_JOB_NOTE =
   "The recruiter attached a file to define the role: read it and the intake skill as your first step with no text before them, then ask the first clarifying question in English.";
 
 /** A handed-off request has one owner, so the recruiter gets one question about it. */
+/** Model-facing: a backgrounded turn must not question the person after they moved on. */
+export const askAfterNewerMessage = (text: string) =>
+  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. Report what this work did in one or two lines with message_user and end the turn.`;
+
 export const ASK_AFTER_HANDOFF =
   "Not asked: you handed this request to a teammate, who owns it now and asks the recruiter if anything is unclear. End this turn now without a reply.";
 const ASK_IN_ENGLISH =
@@ -1220,10 +1245,11 @@ export function pastedJobTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles, interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. Open the role's existing conversation for role-specific work. Never create or bind a role in global Main.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never create or bind a role in global Main.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
+  "canvas_read",
   "computer_observe",
   "list_files",
   "read_file",
@@ -1245,6 +1271,7 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "browser_snapshot",
   "list_secrets",
   "cloud_agent_status",
+  "wait_for_work",
 ]);
 /** Added to the turn prompt when the user spoke this message on a live voice call. */
 const VOICE_CALL_BASE_INSTRUCTION =
@@ -4308,6 +4335,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         deps.events.pauseRunForInput(modelRetries ? { ...input, modelRetries } : input);
       setupMark("lease");
       let leaseValid = true;
+      /** Why this run's computer would not start, if it did not. */
+      let computerStartFailure: unknown;
       let lastLeaseCheckAt = 0;
       let retainComputerLease = false;
       let screenRelease: { computer: ComputerRef; context: AdapterContext } | undefined;
@@ -4744,8 +4773,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           "memoryContext",
           messagingChannelRun
             ? Promise.resolve({ text: undefined, documents: [] })
-            : loadAgentMemoryContext(deps.memory, bot.id, context, undefined, (text) =>
-                redactSecrets(text, runSecrets),
+            : loadAgentMemoryContext(
+                deps.memory,
+                bot.id,
+                context,
+                undefined,
+                (text) => redactSecrets(text, runSecrets),
+                thread.groupId,
               ),
         );
         // What the frozen prompt was built from, read beside the setup loads; later turn
@@ -4874,6 +4908,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context,
             undefined,
             (text) => redactSecrets(text, runSecrets),
+            thread.groupId,
           );
         };
         const adoptRecruitingContext = async (
@@ -5169,7 +5204,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context.signal.throwIfAborted();
             return computer;
           },
-          () => runAbortController?.abort(),
+          (error) => {
+            computerStartFailure = error;
+            runAbortController?.abort();
+          },
         );
         // This marks only the lazy handle; first-use provisioning remains deferred.
         setupMark("computerHandle");
@@ -5895,6 +5933,37 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ?.savedCandidates
             : undefined;
           return turnReportText(work, saved);
+        };
+        /** The person's newest message since this run began that a different run answers. */
+        const newerMessageAnsweredElsewhere = async () => {
+          if (!run.createdAt) return undefined;
+          let newer: { blocks: unknown } | null = null;
+          try {
+            newer = await deps.prisma.message.findFirst({
+              where: {
+                threadId: thread.id,
+                role: "user",
+                botId: null,
+                createdAt: { gt: run.createdAt },
+                OR: [
+                  { sourceRuns: { some: { id: { not: runId } } } },
+                  {
+                    steeringMessages: {
+                      some: { runId: { not: runId }, claimedAt: { not: null } },
+                    },
+                  },
+                ],
+              },
+              orderBy: { seq: "desc" },
+              select: { blocks: true },
+            });
+          } catch {
+            // Without the check the question is asked as before.
+          }
+          if (!newer) return undefined;
+          return (Array.isArray(newer.blocks) ? (newer.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+            .join("\n");
         };
         /** What the recruiter wrote after this run recorded its round, newest message. */
         const recruiterReplyAfterRound = async () => {
@@ -10462,15 +10531,23 @@ export function createRunExecutor(deps: ExecutorDeps) {
             return deliverRecruitingRoleResult(result, args.operation === "read");
           }
           if (name === "read_memory") {
-            if (args.scope !== "bot" && args.scope !== "user") {
-              return finish({ error: "scope must be bot or user" });
+            if (args.scope !== "bot" && args.scope !== "user" && args.scope !== "group") {
+              return finish({ error: "scope must be bot, user or group" });
+            }
+            if (args.scope === "group" && !thread.groupId) {
+              return finish({ error: "Group memory exists only in a group conversation." });
             }
             if (typeof args.path !== "string" || !args.path.trim()) {
               return finish({ error: "path is required" });
             }
             const path = args.path.trim();
             const snapshot = await deps.memory.read(
-              { scope: args.scope, botId: args.scope === "bot" ? bot.id : undefined, path },
+              {
+                scope: args.scope,
+                botId: args.scope === "bot" ? bot.id : undefined,
+                groupId: args.scope === "group" ? (thread.groupId ?? undefined) : undefined,
+                path,
+              },
               context,
             );
             const document = snapshot.documents[0];
@@ -10481,18 +10558,26 @@ export function createRunExecutor(deps: ExecutorDeps) {
               revision: document?.revision ?? 0,
             });
           }
-          if (name === "remember" || name === "save_shared_memory") {
-            const shared = name === "save_shared_memory";
+          if (
+            name === "remember" ||
+            name === "save_shared_memory" ||
+            name === "save_group_memory"
+          ) {
+            const shared = name !== "remember";
+            const groupId =
+              name === "save_group_memory" ? (thread.groupId ?? undefined) : undefined;
+            if (name === "save_group_memory" && !groupId)
+              return finish({ error: "Group memory exists only in a group conversation." });
             const invalid =
               (shared ? sharedMemorySaveError(args) : undefined) ?? nativeMemorySaveError(args);
             if (invalid) return finish({ error: invalid });
             const path = typeof args.path === "string" ? args.path.trim() : "MEMORY.md";
-            const scope = shared ? "user" : "bot";
+            const scope = groupId ? "group" : shared ? "user" : "bot";
             const botId = shared ? undefined : bot.id;
             let content = args.content as string;
             if (args.edit !== undefined) {
               // Partial edit: merge into the loaded document; commit still checks expectedRevision.
-              const current = await deps.memory.read({ scope, botId, path }, context);
+              const current = await deps.memory.read({ scope, botId, groupId, path }, context);
               const merged = applyMemoryEdit(
                 current.documents[0]?.content ?? "",
                 args.edit as { find: string; replace: string },
@@ -10513,6 +10598,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 {
                   scope,
                   ...(botId ? { botId } : {}),
+                  ...(groupId ? { groupId } : {}),
                   path,
                   content,
                   expectedRevision: args.expectedRevision as number,
@@ -10526,7 +10612,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             } catch (error) {
               const message = error instanceof Error ? error.message : "Could not save memory";
               if (message !== MEMORY_REVISION_CONFLICT_ERROR) throw error;
-              const current = await deps.memory.read({ scope, botId, path }, context);
+              const current = await deps.memory.read({ scope, botId, groupId, path }, context);
               return finish({
                 error: message,
                 currentRevision: current.documents[0]?.revision ?? 0,
@@ -10619,6 +10705,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 args,
               ),
             );
+          }
+          if (name === "wait_for_work") {
+            return waitForBackgroundWork(deps.prisma, {
+              threadId: run.threadId,
+              selfRunId: run.id,
+              ids: Array.isArray(args.ids) ? args.ids.map(String) : undefined,
+              mode: args.mode === "any" ? "any" : "all",
+              timeoutSeconds:
+                typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined,
+              signal: context.signal,
+            });
           }
           if (name === "task_catalog") {
             return taskCatalogFromTool(deps, {
@@ -11507,6 +11604,190 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   }
                 : { ok: true },
             );
+          }
+          if (name === "delegate_to_role") {
+            const role = await deps.prisma.recruitingRole.findFirst({
+              where: {
+                id: String(args.role_id ?? ""),
+                spaceId: run.spaceId,
+                userId: run.userId,
+                archivedAt: null,
+              },
+              select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
+            });
+            if (!role?.sourceThread.groupId)
+              return finish({
+                error:
+                  "No active role team with that roleId. Read recruiting_candidates operation roles and pass its id.",
+              });
+            const sent = await messageBot(
+              deps,
+              { ...run, sourceMessageId: run.sourceMessageId },
+              { id: bot.id, name: bot.name },
+              {
+                bot_id: bot.id,
+                thread_id: role.sourceThread.id,
+                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                target_label: `${role.title} team`,
+                message: redactSecrets(String(args.message ?? ""), runSecrets),
+                intent: "request",
+                deliveryKey: effectKey,
+              },
+            );
+            if (!sent.ok) return finish({ error: sent.error });
+            return finish({
+              ok: true,
+              team: sent.name,
+              roleGroupLink: `/app/g/${role.sourceThread.groupId}`,
+              note: sent.note,
+            });
+          }
+          if (name === "render_view") {
+            const parsed = ViewBlockSchema.safeParse({ ...args, kind: "view" });
+            if (!parsed.success)
+              return finish({
+                error: `Invalid view: ${parsed.error.issues[0]?.message ?? "check the fields"}`,
+              });
+            const view = parsed.data;
+            if (view.layout === "metrics" ? !view.metrics.length : !view.rows.length)
+              return finish({
+                error: view.layout === "metrics" ? "metrics are required" : "rows are required",
+              });
+            if (view.layout === "board" && !view.groupBy)
+              return finish({ error: "groupBy is required for a board" });
+            if (JSON.stringify(view).length > 200_000)
+              return finish({ error: "This view is too large; show fewer rows or columns." });
+            const message = await publishMessage(deps, run, "bot", [view]);
+            return finish(
+              message ? { ok: true } : { error: "Views cannot be shown from this kind of run." },
+            );
+          }
+          if (name === "canvas_write") {
+            const html = String(args.html ?? "");
+            const title = visible(String(args.title ?? "")).trim() || "Canvas";
+            if (!html.trim()) return finish({ error: "html is required" });
+            if (new TextEncoder().encode(html).length > CANVAS_HTML_MAX_BYTES)
+              return finish({
+                error: `A canvas is limited to ${CANVAS_HTML_MAX_BYTES} bytes of HTML.`,
+              });
+            const existing = args.canvasId ? String(args.canvasId) : undefined;
+            if (existing) {
+              const changed = await changeCanvas(deps.prisma, {
+                threadId: run.threadId,
+                canvasId: existing,
+                change: { html, title },
+              });
+              if (!changed.ok) return finish({ error: changed.error });
+              await deps.events.notify(changed.threadId, changed.eventSeq).catch((error) => {
+                getLogger().error("canvas realtime notification", error);
+              });
+              return finish({ ok: true, canvasId: existing, revision: changed.block.revision });
+            }
+            const canvasId = createHash("sha256")
+              .update(JSON.stringify([run.id, executionId]))
+              .digest("hex")
+              .slice(0, 24);
+            const message = await publishMessage(deps, run, "bot", [
+              { kind: "canvas", canvasId, title, html, revision: 1 },
+            ]);
+            if (!message)
+              return finish({ error: "Canvases cannot be posted from this kind of run." });
+            return finish({ ok: true, canvasId, revision: 1 });
+          }
+          if (name === "canvas_read") {
+            const canvasId = String(args.canvasId ?? "");
+            const found = await deps.prisma.message.findFirst({
+              where: {
+                threadId: run.threadId,
+                blocks: { array_contains: [{ kind: "canvas", canvasId }] },
+              },
+              select: { blocks: true },
+            });
+            const canvas = found ? canvasOf(found.blocks as MessageBlock[], canvasId) : undefined;
+            if (!canvas) return finish({ error: "No canvas with that id in this conversation." });
+            return finish({
+              canvasId,
+              title: canvas.title,
+              revision: canvas.revision,
+              state: canvas.state ?? null,
+            });
+          }
+          if (name === "create_poll") {
+            const options = Array.isArray(args.options)
+              ? [...new Set(args.options.map((option) => visible(String(option)).trim()))].filter(
+                  Boolean,
+                )
+              : [];
+            const question = visible(redactSecrets(String(args.question ?? ""), runSecrets)).trim();
+            if (!question) return finish({ error: "question is required" });
+            if (options.length < 2 || options.length > 6)
+              return finish({ error: "Give two to six different options." });
+            const minutes = Math.min(
+              POLL_MAX_MINUTES,
+              Math.max(
+                POLL_MIN_MINUTES,
+                Math.round(Number(args.closesInMinutes) || POLL_DEFAULT_MINUTES),
+              ),
+            );
+            const pollId = createHash("sha256")
+              .update(JSON.stringify([run.id, executionId]))
+              .digest("hex")
+              .slice(0, 24);
+            const closesAt = new Date(Date.now() + minutes * 60_000);
+            const message = await publishMessage(deps, run, "bot", [
+              {
+                kind: "poll",
+                pollId,
+                question,
+                options: options.map((label, index) => ({ id: String(index + 1), label })),
+                multiple: args.multiple === true,
+                includeTeam: args.includeTeam === true,
+                closesAt: closesAt.toISOString(),
+                status: "open",
+                votes: [],
+              },
+            ]);
+            if (!message) return finish({ error: "Polls cannot be posted from this kind of run." });
+            await deps.jobs.enqueue(pollCloseJob({ messageId: message.id, pollId }, closesAt));
+            return finish({
+              ok: true,
+              pollId,
+              closesAt: closesAt.toISOString(),
+              note: "The poll is posted. Keep working; you are woken here with the result when it closes. Do not wait for it or ask the same question again.",
+            });
+          }
+          if (name === "vote_poll") {
+            const pollId = String(args.pollId ?? "");
+            const message = await deps.prisma.message.findFirst({
+              where: {
+                threadId: run.threadId,
+                blocks: { array_contains: [{ kind: "poll", pollId }] },
+              },
+              select: { blocks: true },
+            });
+            const poll = message ? pollOf(message.blocks as MessageBlock[], pollId) : undefined;
+            if (!poll) return finish({ error: "No open poll with that id in this conversation." });
+            const wanted = (Array.isArray(args.options) ? args.options : []).map((option) =>
+              String(option).trim().toLowerCase(),
+            );
+            const optionIds = poll.options
+              .filter(
+                (option) =>
+                  wanted.includes(option.label.trim().toLowerCase()) || wanted.includes(option.id),
+              )
+              .map((option) => option.id);
+            const voted = await votePoll(deps.prisma, {
+              threadId: run.threadId,
+              pollId,
+              vote: { voter: "bot", voterId: bot.id, name: bot.name, optionIds },
+            });
+            if (!voted.ok) return finish({ error: voted.error });
+            await deps.events.notify(voted.threadId, voted.eventSeq).catch((error) => {
+              getLogger().error("poll vote realtime notification", error);
+            });
+            if (voted.complete)
+              await deps.jobs.enqueue(pollCloseJob({ messageId: voted.messageId, pollId }));
+            return finish({ ok: true, result: pollResultLines(voted.block) });
           }
           if (name === "message_bot") {
             const sent = await messageBot(
@@ -12784,6 +13065,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   onToolCallDelta: streamRoundPicks,
                   beforeAsk: async (question, plannedSearches) => {
                     if (handedOff) return { instead: ASK_AFTER_HANDOFF };
+                    // Workloop: work running behind the conversation never asks the person after
+                    // they moved on; a newer message another reply answers wins.
+                    const moved = await newerMessageAnsweredElsewhere();
+                    if (moved !== undefined) return { instead: askAfterNewerMessage(moved) };
                     if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
                       askDeclineBounced = true;
                       return { instead: ASK_DECLINES };
@@ -13658,6 +13943,15 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             throw new Error(TOOL_STEPS_WITHOUT_RESPONSE);
           }
+          // The update just sent already said it: no second, near-identical message.
+          if (
+            run.trigger !== "bot_message" &&
+            blocks.every((block) => block.kind === "text") &&
+            restatesUpdate(text, midTurnUserTexts.at(-1))
+          ) {
+            text = "";
+            blocks = [];
+          }
           const markUnread = completionMarksUnread(
             run.trigger,
             text,
@@ -13794,6 +14088,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.text,
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
+          } else if (thread.groupId) {
+            // A teammate's turn may be the last one of work delegated from another conversation.
+            await returnDelegatedTeamOutcome(deps, {
+              ...run,
+              sourceMessageId: run.sourceMessageId,
+            }).catch((error) => getLogger().error("delegated team outcome return", error));
           }
           const notifyBody = completionNotificationPreview(text);
           if (
@@ -13976,6 +14276,52 @@ export function createRunExecutor(deps: ExecutorDeps) {
               runSecrets,
             ),
           );
+        }
+        // A computer that keeps failing to start will not fix itself on the next retry: end the
+        // turn with the reset button instead of leaving it queued until the stuck-work reaper.
+        if (
+          !retryForever &&
+          leaseValid &&
+          computerStartFailure !== undefined &&
+          setupError === computerStartFailure &&
+          (await setupFailures(deps.prisma, runId)) >= COMPUTER_START_ATTEMPTS - 1
+        ) {
+          const failed = await deps.events.finalizeRun({
+            spaceId: run.spaceId,
+            threadId: run.threadId,
+            botId: run.botId,
+            runId,
+            taskId: run.taskId,
+            attemptId: attempt.id,
+            leaseOwner: workerId,
+            leaseFence: fence,
+            outcome: "failed",
+            error: COMPUTER_START_FAILED,
+          });
+          if (failed) {
+            if (failed.continuationRunId)
+              await deps.jobs
+                .enqueue(runContinueJob(failed.continuationRunId))
+                .catch((error) => getLogger().error("steering continuation enqueue", error));
+            else if (runSendsFinishNotification(run.trigger)) {
+              try {
+                const owner = await deps.prisma.bot.findUnique({
+                  where: { id: run.botId },
+                  select: { name: true },
+                });
+                await notifyRun(deps, run, {
+                  kind: "failure",
+                  title: `${owner?.name ?? "Your assistant"} failed`,
+                  body: failureNotificationBody(COMPUTER_START_FAILED),
+                  botId: run.botId,
+                  threadId: run.threadId,
+                });
+              } catch (error) {
+                getLogger().error("computer start failure notice", error);
+              }
+            }
+          }
+          return;
         }
         const released = await writeComputerRunRequeue(
           deps,
@@ -14169,19 +14515,37 @@ async function notifyRun(
     !(await routineNotifies(deps.prisma, run.id))
   )
     return;
-  await deps.notifications
-    .send(notice.groupId ? { ...message, groupId: notice.groupId } : message, {
-      operationId: "notify",
-      traceId: run.botId,
-      runId: run.id,
-      spaceId: run.spaceId,
-      userId: run.userId,
-      botId: run.botId,
-      signal: new AbortController().signal,
-    })
-    .catch((error) => {
-      getLogger().error("run notification", error);
-    });
+  const routed = notice.groupId ? { ...message, groupId: notice.groupId } : message;
+  await sendRunNotification(deps.notifications, run, routed).catch(async (error) => {
+    getLogger().error("run notification", error);
+    // A failed push is retried by the job queue instead of being lost.
+    await deps.jobs
+      .enqueue(
+        notificationRetryJob(
+          { runId: run.id, message: routed },
+          new Date(Date.now() + NOTIFICATION_RETRY_DELAY_MS),
+        ),
+      )
+      .catch((enqueueError) => getLogger().error("run notification retry", enqueueError));
+  });
+}
+
+const NOTIFICATION_RETRY_DELAY_MS = 30_000;
+
+export function sendRunNotification(
+  notifications: NotificationProvider,
+  run: { id: string; spaceId: string; userId: string; botId: string },
+  message: NotificationMessage,
+): Promise<void> {
+  return notifications.send(message, {
+    operationId: "notify",
+    traceId: run.botId,
+    runId: run.id,
+    spaceId: run.spaceId,
+    userId: run.userId,
+    botId: run.botId,
+    signal: AbortSignal.timeout(30_000),
+  });
 }
 
 async function renewRunLease(
@@ -14214,6 +14578,18 @@ function nativeMessageSourceInstruction(messageId: string, blocks: readonly Mess
 const COMPUTER_LOGIN_TOOLS: ReadonlySet<string> = new Set(RECRUITING_DISABLED_BUILTIN_TOOLS);
 export const COMPUTER_TOOLS_DISABLED_ERROR =
   "Computer and browser tools are disabled for this recruiting agent. Use the connected mail/calendar/CRM service; if it is not connected, report the exact connection that is missing.";
+/** Starts of the run's computer to try before the turn ends with the reset-the-computer button. */
+const COMPUTER_START_ATTEMPTS = 3;
+
+/** Earlier failed setups of this run; unknown counts as none, so the run retries as before. */
+async function setupFailures(prisma: ExecutorDeps["prisma"], runId: string): Promise<number> {
+  try {
+    return await prisma.attempt.count({ where: { runId, status: "setup_failed" } });
+  } catch {
+    return 0;
+  }
+}
+
 function disabledToolError(name: string): string {
   return COMPUTER_LOGIN_TOOLS.has(name)
     ? COMPUTER_TOOLS_DISABLED_ERROR
@@ -14258,7 +14634,17 @@ export function selectBuiltinToolsForRun(options: {
       (options.ticketBoardEnabled ||
         (tool.name !== "board_tickets" && !tool.name.startsWith("ticket_"))) &&
       (!isBackgroundRunTrigger(options.trigger) ||
-        !["message_user", "message_bot", "handoff_to_bot", "message_agent"].includes(tool.name)) &&
+        ![
+          "message_user",
+          "message_bot",
+          "delegate_to_role",
+          "handoff_to_bot",
+          "message_agent",
+          "create_poll",
+          "vote_poll",
+          "render_view",
+          "canvas_write",
+        ].includes(tool.name)) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.historyRetrievalEnabled ||
         !["search_history", "read_history"].includes(tool.name)) &&
@@ -14276,11 +14662,17 @@ export function selectBuiltinToolsForRun(options: {
           "recruiting_crm_import",
           "read_memory",
           "save_shared_memory",
+          "save_group_memory",
           "save_memory",
           "recall_memory",
           "forget_memory",
           "task_catalog",
           "board_tickets",
+          "create_poll",
+          "vote_poll",
+          "render_view",
+          "canvas_write",
+          "canvas_read",
         ].includes(tool.name) &&
           !tool.name.startsWith("scratchpad_") &&
           !tool.name.startsWith("ticket_"))),

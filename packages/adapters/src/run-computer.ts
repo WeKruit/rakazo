@@ -7,7 +7,10 @@ import type { ComputerRef } from "@rakazo/adapter-kit";
  * create or resume one. A failed start is kept: every later use rethrows it, and the run
  * treats it as the setup failure it was before starts became lazy.
  */
-export function lazyRunComputer(start: () => Promise<ComputerRef>, onFailure?: () => void) {
+export function lazyRunComputer(
+  start: () => Promise<ComputerRef>,
+  onFailure?: (error: unknown) => void,
+) {
   let started: Promise<ComputerRef> | undefined;
   let ready: ComputerRef | undefined;
   let failed = false;
@@ -22,7 +25,7 @@ export function lazyRunComputer(start: () => Promise<ComputerRef>, onFailure?: (
         (error: unknown) => {
           failed = true;
           failure = error;
-          onFailure?.();
+          onFailure?.(error);
           throw error;
         },
       );

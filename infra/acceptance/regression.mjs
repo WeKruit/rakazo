@@ -15,7 +15,8 @@
 //                  money: card-e2e.mjs clicks question, send and booking cards
 //                  clicked in the browser; needs RAKAZO_EMAIL/RAKAZO_PASSWORD and <cases>/cards.json
 //                  {"sendGroup","sendRoleMark","bookingGroup"})
-//   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
+//   --suite full   gate plus midwork (a new requirement and an after-you-finish message sent
+//                  during find-100 each get their own reply), first10 (long JD), attached JD with drafts, contacts and send-20
 //                  (<cases>/t1.pdf), dispatch (each specialist capability asked of the
 //                  coordinator in the t1 chat, or --dispatch-group <id>), ambiguous (vague asks
 //                  in the same chat, or --ambiguous-group <id>: an action or one question card,
@@ -397,6 +398,7 @@ const wanted = new Set(
           "global-recruiting",
           "first10",
           "progress",
+          "midwork",
           "t3",
           "first10-long",
           "t1",
@@ -592,6 +594,90 @@ try {
         if (!event) failures.push("notification regression needs a real bot reply event");
         else await checkNotificationPolicy(rpc, { threadId: event.threadId, eventId: event.id });
       }
+    });
+
+  if (wanted.has("midwork"))
+    await stage("midwork", async (failures) => {
+      // Workloop's busy-input contract on a find-100: a new requirement sent mid-search is
+      // answered within a minute and shapes the rest of the work, an "after you finish" message
+      // waits for the answer, and every message the recruiter sent gets its own reply.
+      const out = path.join(OUT, "midwork.json");
+      const finding = run("midwork", "recruiting-latency.mjs", [
+        "--target",
+        "100",
+        "--out",
+        out,
+        "--keep",
+      ]);
+      let exit;
+      finding.then((code) => {
+        exit = code;
+      });
+      let steer;
+      let follow;
+      let groupId;
+      while (exit === undefined) {
+        await sleep(2_000);
+        let report = null;
+        try {
+          report = fs.existsSync(out) ? JSON.parse(fs.readFileSync(out, "utf8")) : null;
+        } catch {
+          continue;
+        }
+        if (!report?.groupId || !report.milestones?.scale_sent) continue;
+        groupId = report.groupId;
+        if (!(await working(groupId))) continue;
+        if (!steer) {
+          steer = await rpc("threads/send", {
+            groupId,
+            addressing: "coordinator",
+            text: "另外，优先找湾区（San Francisco Bay Area）的人。",
+          });
+          steer.sentAt = Date.now();
+          continue;
+        }
+        if (!follow && Date.now() - steer.sentAt > 20_000) {
+          follow = await rpc("threads/send", {
+            groupId,
+            addressing: "coordinator",
+            text: "全部做完以后，用一句话告诉我一共找到多少人、其中多少在湾区。",
+            queueMode: "follow_up",
+          });
+        }
+      }
+      if (!groupId) return failures.push("find-100 never started scaling; see midwork.log");
+      if (!steer) return failures.push("the search finished before a mid-work message was sent");
+      const messages = await settled(groupId, { limitMs: 10 * 60_000 });
+      const events = await readEvents(groupId);
+      const steerReply = replyAfterInput(events, messages, steer.seq);
+      if (!steerReply) failures.push("the mid-search requirement got no reply of its own");
+      else if (Date.parse(steerReply.createdAt) - steer.sentAt > 60_000)
+        failures.push("the mid-search requirement was answered after more than 60 s");
+      const after = messages.filter(
+        (message) => message.role !== "user" && message.seq > steer.seq,
+      );
+      if (!after.some((message) => /湾区|Bay Area|San Francisco|旧金山/i.test(botText(message))))
+        failures.push("no reply after the new requirement mentions the Bay Area");
+      if (follow) {
+        const delayed = messages.find(
+          (message) => message.role === "user" && message.seq === follow.seq,
+        );
+        if (!delayed) failures.push("the after-you-finish message was not saved");
+        else {
+          try {
+            assertFollowUpDelivery(events, delayed.id, follow.runId);
+          } catch (error) {
+            failures.push(String(error.message ?? error));
+          }
+          if (!replyAfterInput(events, messages, follow.seq))
+            failures.push("the after-you-finish message got no reply");
+        }
+      } else failures.push("the search finished before the after-you-finish message was sent");
+      commonChecks(messages, failures);
+      fs.writeFileSync(
+        path.join(OUT, "midwork-chat.txt"),
+        `${messages.map((message) => `[${message.role}] ${botText(message)}`).join("\n\n")}\n`,
+      );
     });
 
   if (wanted.has("t3"))

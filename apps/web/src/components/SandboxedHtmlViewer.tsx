@@ -1,4 +1,5 @@
-import { HTML_PREVIEW_PATH } from "@rakazo/core";
+import type { CanvasJson } from "@rakazo/contracts";
+import { canvasSaveState, HTML_PREVIEW_PATH } from "@rakazo/core";
 import { useEffect, useRef, useState } from "react";
 
 const PREVIEW_CSP =
@@ -22,7 +23,16 @@ function withPreviewDocument(html: string): string {
   return `${meta}${referrer}${PREVIEW_GUARD}${html}`;
 }
 
-export function SandboxedHtmlViewer({ html, title }: { html: string; title: string }) {
+export function SandboxedHtmlViewer({
+  html,
+  title,
+  onCanvasSave,
+}: {
+  html: string;
+  title: string;
+  /** A canvas app saved its data; only messages from this frame count. */
+  onCanvasSave?: (state: CanvasJson) => void;
+}) {
   const frame = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
   const preview = withPreviewDocument(html);
@@ -30,6 +40,16 @@ export function SandboxedHtmlViewer({ html, title }: { html: string; title: stri
     // The shell is an opaque origin, so its origin cannot be named as the target.
     if (loaded) frame.current?.contentWindow?.postMessage(preview, "*");
   }, [loaded, preview]);
+  useEffect(() => {
+    if (!onCanvasSave) return;
+    const listen = (event: MessageEvent) => {
+      if (event.source !== frame.current?.contentWindow) return;
+      const saved = canvasSaveState(event.data);
+      if (saved) onCanvasSave(saved.state);
+    };
+    addEventListener("message", listen);
+    return () => removeEventListener("message", listen);
+  }, [onCanvasSave]);
   return (
     <iframe
       ref={frame}

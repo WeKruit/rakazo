@@ -328,6 +328,22 @@ describe("live role correspondence", () => {
     expect(output.connections[0]?.status).toBe("configured");
     expect(output.partial).toBe(true);
   });
+  it("shows no replies for a role without a campaign instead of an unknown count", async () => {
+    const { prisma } = fixture();
+    vi.mocked(prisma.externalEffect.findMany).mockResolvedValueOnce([] as never);
+    const execute = vi.fn(async function* () {});
+    const output = empty();
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      actor,
+      { roleId: "role", threadId: "thread", view: "inbox" },
+      [source("instantly")],
+      output,
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(output.status).toBe("empty");
+    expect(output.partial).toBe(false);
+  });
   it("does not read a calendar that has no connection yet", async () => {
     const { prisma } = fixture();
     const execute = vi.fn(async function* () {

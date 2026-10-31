@@ -89,6 +89,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "delete_bot",
   "handoff_to_bot",
   "message_bot",
+  "delegate_to_role",
 ]);
 
 const scheduleCreateProperties = {
@@ -383,6 +384,51 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: AskUserInputJsonSchema,
   },
   {
+    name: "create_poll",
+    description:
+      "Put a quick question or vote to the conversation without stopping your work. The card shows the options, a live count and a countdown; you keep working, and when it closes (at the deadline, or as soon as everyone it waits for has voted) you are woken in this conversation with the result. Use it for a preference you can proceed without, or to let the person and the other assistants here vote; use ask_user instead when you cannot continue without the answer. Ask in ordinary business language with two to six short options. To have teammates vote, set includeTeam and tell them about it with message_bot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: { type: "string", minLength: 1, maxLength: 300 },
+        options: {
+          type: "array",
+          items: { type: "string", minLength: 1, maxLength: 80 },
+          minItems: 2,
+          maxItems: 6,
+        },
+        multiple: { type: "boolean", description: "Allow more than one choice per voter." },
+        closesInMinutes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1440,
+          description: "How long voting stays open. Default 5.",
+        },
+        includeTeam: {
+          type: "boolean",
+          description:
+            "Also wait for the other assistants in this group conversation before closing early.",
+        },
+      },
+      required: ["question", "options"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "vote_poll",
+    description:
+      "Vote on an open poll another assistant posted in this conversation. Pass the poll id from its message and the option labels you choose. Returns the current count.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pollId: { type: "string", minLength: 1 },
+        options: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+      },
+      required: ["pollId", "options"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "request_connection",
     description:
       "When a task needs a service (e.g. HubSpot, Gmail, Instantly, Cal.com) or MCP integration that is not connected to you, show a Connect card and wait; the task resumes after the user connects. Pass serverId for a known server, or provider with the service name when there is none. Use instead of asking the user to open settings.",
@@ -506,6 +552,79 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "render_view",
+    description:
+      "Show records in the chat as a native view the person can read at a glance: a table, a board grouped into lanes by one column (e.g. candidates by stage), or a row of metric cards. Pass the rows you already have; this does not save or change any record. Use render_plot for charts and ask_user for forms.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", maxLength: 120 },
+        layout: { type: "string", enum: ["table", "board", "metrics"] },
+        columns: {
+          type: "array",
+          maxItems: 12,
+          items: {
+            type: "object",
+            properties: { key: { type: "string" }, label: { type: "string" } },
+            required: ["key", "label"],
+          },
+          description: "Table and board: the fields to show, in order.",
+        },
+        rows: {
+          type: "array",
+          maxItems: 500,
+          items: { type: "object" },
+          description: "Table and board: one object per record, keyed by column key.",
+        },
+        groupBy: {
+          type: "string",
+          description: "Board: the column key whose values are the lanes.",
+        },
+        metrics: {
+          type: "array",
+          maxItems: 8,
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+              value: { type: "string" },
+              detail: { type: "string" },
+            },
+            required: ["label", "value"],
+          },
+        },
+      },
+      required: ["layout"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "canvas_write",
+    description:
+      "Create or rewrite a small interactive app (a canvas) in this conversation: one self-contained HTML document with inline CSS and JavaScript. It runs in a sandbox with no network and no access to the product, so put the data it needs inline. The app can keep its own data: window.rakazo.state holds what it saved last and window.rakazo.save(data) saves JSON (up to 64 KB), which you read back with canvas_read. Pass canvasId to rewrite an existing canvas in place; omit it to create one. Use it when the person asks for a tool, tracker, checklist, calculator or other interactive page, not for plain answers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        canvasId: { type: "string" },
+        title: { type: "string", minLength: 1, maxLength: 120 },
+        html: { type: "string", minLength: 1 },
+      },
+      required: ["title", "html"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "canvas_read",
+    description:
+      "Read a canvas in this conversation: its title, revision and the data its app saved.",
+    inputSchema: {
+      type: "object",
+      properties: { canvasId: { type: "string", minLength: 1 } },
+      required: ["canvasId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "add_mcp_server",
     description:
       "Connect an MCP tool server to this Space when the user asks you to add one and provides the details (URL or command, optional token/headers/env). The server is created immediately and assigned to you. If it needs browser OAuth authorization, an approval card appears in the chat for the user to complete — tell them to click Authorize. Do not invent endpoints; only use details the user provided.",
@@ -558,11 +677,11 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "read_memory",
     description:
-      "Read a native Markdown memory document and its revision before preparing a full replacement. User scope is shared across this user's bots in this Space.",
+      "Read a native Markdown memory document and its revision before preparing a full replacement. User scope is shared across this user's bots in this Space; group scope is shared by the assistants in this group conversation.",
     inputSchema: {
       type: "object",
       properties: {
-        scope: { type: "string", enum: ["bot", "user"] },
+        scope: { type: "string", enum: ["bot", "user", "group"] },
         path: { type: "string" },
       },
       required: ["scope", "path"],
@@ -580,7 +699,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "recruiting_candidates",
     description:
-      'Read saved candidates for the current thread role. Resolve a person named in chat FIRST with {operation:"resolve",nameOrEmail}: it matches the role\'s CRM contacts and saved pool by partial, case- and accent-insensitive name (or exact stored email) and returns each match\'s stored email, LinkedIn and source; "ambiguous" lists every match to disambiguate with the user, and crm "unavailable" means the CRM part is unknown, not empty. In a chat with no linked role it searches all of this user\'s active roles and tags each match with roleId and roleTitle; tell the user which role the person belongs to. Each CRM contact match carries correspondence.latest and latestReceived from the role\'s stored correspondence (the Inbox source): use it first for whether the person replied or their latest mail; status unavailable means unknown, not no mail. Look up correspondence only with a returned stored email; never guess one. List uses {operation:"list",query?,cursor?,limit?}; query matches saved names and profile URLs, and each person carries the email an earlier contact lookup saved (address, work/personal, delivery check), so who has an email is answered from it without a new lookup. Sources uses {operation:"sources",candidateKey,cursor?,limit?} with an exact returned candidateKey and returns verified report fields and source URLs from each selected saved row. Preserve pagination and ambiguity; never choose the first match or invent identities, sources or totals. Use returned reports to answer saved-evidence questions; they are attributed provider findings, not a new assessment. Use artifact_read with the exact artifactRef and rowIndex only for original content not covered by the report; do not reread the same evidence merely to answer. A failed source read does not establish complete evidence. Account reads use operation "interviews", "shortlist", "replies", "sequences" or "roles", with optional roleId, since (ISO timestamp), cursor and limit. Account nextCursor pages roles; for a nested candidates.nextCursor or correspondence.nextCursor, pass its exact roleId and itemCursor. Sequence lead pages pass roleId, campaignId, campaignServerId and campaignLeadCursor from the returned campaign. They use the same authorized backend source as the matching pages. In a role conversation they default to that role; in global Main or any conversation without a role they default to all active roles. Every result names the role, includes verified records and counts, and preserves unavailable sources and pagination; an incomplete page is never the total. Use interviews for upcoming/recent bookings and calendar events, shortlist for saved shortlist people (optionally since a date), replies for who replied and when, sequences for email statistics, and roles for role status and the native group/thread to open. Never infer no replies from missing CRM bindings. Round uses {operation:"round"} and returns the latest calibration round (number, the ten people shown, whether the recruiter accepted it); use it to resolve names in round feedback. This tool only reads existing saved data and never searches externally or assesses candidates. Internal keys and artifact references are for tool use; speak to the recruiter using candidate names.',
+      'Read saved candidates for the current thread role. Resolve a person named in chat FIRST with {operation:"resolve",nameOrEmail}: it matches the role\'s CRM contacts and saved pool by partial, case- and accent-insensitive name (or exact stored email) and returns each match\'s stored email, LinkedIn and source; "ambiguous" lists every match to disambiguate with the user, and crm "unavailable" means the CRM part is unknown, not empty. In a chat with no linked role it searches all of this user\'s active roles and tags each match with roleId and roleTitle; tell the user which role the person belongs to. Each CRM contact match carries correspondence.latest and latestReceived from the role\'s stored correspondence (the Inbox source): use it first for whether the person replied or their latest mail; status unavailable means unknown, not no mail. Look up correspondence only with a returned stored email; never guess one. List uses {operation:"list",query?,cursor?,limit?}; query matches saved names and profile URLs, and each person carries the email an earlier contact lookup saved (address, work/personal, delivery check), so who has an email is answered from it without a new lookup. Sources uses {operation:"sources",candidateKey,cursor?,limit?} with an exact returned candidateKey and returns verified report fields and source URLs from each selected saved row. Preserve pagination and ambiguity; never choose the first match or invent identities, sources or totals. Use returned reports to answer saved-evidence questions; they are attributed provider findings, not a new assessment. Use artifact_read with the exact artifactRef and rowIndex only for original content not covered by the report; do not reread the same evidence merely to answer. A failed source read does not establish complete evidence. Account reads use operation "interviews", "shortlist", "replies", "sequences" or "roles", with optional roleId, since (ISO timestamp), cursor and limit. Account nextCursor pages roles; for a nested candidates.nextCursor or correspondence.nextCursor, pass its exact roleId and itemCursor. Sequence lead pages pass roleId, campaignId, campaignServerId and campaignLeadCursor from the returned campaign. They use the same authorized backend source as the matching pages. In a role conversation they default to that role; in global Main or any conversation without a role they default to all active roles. Every result names the role, includes verified records and counts, and preserves unavailable sources and pagination; an incomplete page is never the total. Use interviews for upcoming/recent bookings and calendar events, shortlist for saved shortlist people (optionally since a date), replies for who replied and when, sequences for email statistics, and roles for the status of each role (people saved, shortlisted, last activity, the open card waiting on the recruiter) and the native group/thread to open. Never infer no replies from missing CRM bindings. Round uses {operation:"round"} and returns the latest calibration round (number, the ten people shown, whether the recruiter accepted it); use it to resolve names in round feedback. This tool only reads existing saved data and never searches externally or assesses candidates. Internal keys and artifact references are for tool use; speak to the recruiter using candidate names.',
     inputSchema: z.toJSONSchema(RecruitingCandidatesToolInputSchema, { io: "input" }),
     readOnly: true,
   },
@@ -708,6 +827,27 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "save_group_memory",
+    description:
+      "Save a note shared by the assistants in this group conversation, such as who is doing what, open questions and decisions made here. Other conversations do not see it. Read it with read_memory scope group first and use the loaded expectedRevision, or 0 for a new document. For a small change, prefer edit:{find,replace}. Recruiting preferences belong in recruiting_feedback, not here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string", description: "Document name, for example NOTES.md." },
+        content: { type: "string", description: "The document's complete new content." },
+        expectedRevision: { type: "integer", minimum: 0 },
+        edit: {
+          type: "object",
+          description:
+            "Partial edit: replace the single exact occurrence of find with replace. Mutually exclusive with content.",
+          properties: { find: { type: "string", minLength: 1 }, replace: { type: "string" } },
+          required: ["find", "replace"],
+        },
+      },
+      required: ["path", "expectedRevision"],
+    },
+  },
+  {
     name: "web_search",
     description:
       "Search the public web. Returns titles, URLs, and snippets. Use when you need current information or links; follow with web_fetch to read a page. Does not need a computer.",
@@ -767,6 +907,29 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "wait_for_work",
+    description:
+      'Wait, without spending tokens, for work running in the background of this conversation: research, large people searches, teammates\' handed-off work, cloud agents and automations. mode "all" (default) returns when all of it is done, "any" when the first finishes. Returns done and still running, with ids, kinds and seconds waited. Use it instead of checking again and again. On a long job, wait up to 30 minutes, tell the user the progress, and wait again. New messages from the user still reach you while you wait. For helpers started with run_subagent, use run_subagent wait instead.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        mode: { type: "string", enum: ["all", "any"] },
+        timeout_seconds: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1800,
+          description: "Default 600 (10 minutes), at most 1800 (30 minutes).",
+        },
+        ids: {
+          type: "array",
+          items: { type: "string" },
+          description: "Wait only for these ids from an earlier result; default all.",
+        },
+      },
+    },
+    readOnly: true,
+  },
+  {
     name: "cloud_agent_status",
     description: "Get status, branch, and PR url for a cloud coding agent.",
     inputSchema: {
@@ -809,7 +972,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "search_history",
     description:
-      'Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections. scope:"mine" instead searches this user\'s other conversations in this Space (their other bots and group chats, never other people\'s), returning the conversation title, a short snippet and messageId plus threadId; follow one with read_history using both. When no message has every word, it returns the closest messages ranked by shared words (match:"some_words_ranked"); read them before trusting a match. Saved memory lags and is an index, not the source: search here before saying you do not know or do not remember, and read the original before relying on an exact number, date, quote or decision from memory or a summary.',
+      'Search literal keywords in earlier messages in this chat; every query word must match the same message. For paraphrased recollection, start with one distinctive project or topic keyword. Returns at most five matches, newest first. When nextSearch is present, call search_history with those arguments to continue. Coverage applies only to the requested literal query and range; an empty narrower query does not exhaust an unfinished broader query. Use read_history to check surrounding messages and corrections. scope:"mine" instead searches this user\'s other conversations in this Space (their other bots and group chats, never other people\'s), returning the conversation title, a short snippet and messageId plus threadId; follow one with read_history using both. When no message has every word, it returns the closest messages ranked by shared words (match:"some_words_ranked"); read them before trusting a match. Every result carries answerability (found, partial or none) and, when not found, missingEvidence: when it is none, say the history does not show it instead of guessing. For a question about a time ("last week", "in October", "what did we decide before the brief"), pass after and before so only that window is searched. Saved memory lags and is an index, not the source: search here before saying you do not know or do not remember, and read the original before relying on an exact number, date, quote or decision from memory or a summary.',
     inputSchema: {
       type: "object",
       properties: {
@@ -1203,7 +1366,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "run_subagent",
     description:
-      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. By default the call waits for the result; set background to keep working while it runs. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
+      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. By default the call waits for the result; set background to keep working while it runs. A turn may start up to 32 helpers, at most 8 working at once. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1243,6 +1406,11 @@ export const builtinAgentTools: ConnectorTool[] = [
         timeout_seconds: {
           type: "number",
           description: "With wait: stop waiting after this many seconds (default 60, at most 600).",
+        },
+        output_schema: {
+          type: "object",
+          description:
+            "Optional JSON Schema the helper's result must match. The result comes back as that JSON; a result that does not match gets one correction turn.",
         },
       },
     },
@@ -1366,6 +1534,19 @@ export const builtinAgentTools: ConnectorTool[] = [
         },
       },
       required: ["message"],
+    },
+  },
+  {
+    name: "delegate_to_role",
+    description:
+      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId from recruiting_candidates operation roles and the request in the recruiter's own words with any context they gave. The team works in the background in the role's conversation, with its usual approval cards there, and its result comes back here as a new message for you to relay. Delivery is async and does not end your turn: tell the recruiter in one line which team took it, and never wait or poll. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        role_id: { type: "string", description: "Role id from recruiting_candidates roles." },
+        message: { type: "string", description: "The request, in the recruiter's words." },
+      },
+      required: ["role_id", "message"],
     },
   },
   {

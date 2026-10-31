@@ -51,15 +51,17 @@ import {
   declineConnectionAskInTransaction,
   expireComputerExecutionLeases,
   IsolationError,
+  listThreadBackgroundWork,
   loadQueuedMessageIds,
   lockOwnedGroup,
-  Prisma,
+  type Prisma,
   QueuedMessageError,
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
   STOPPED_TURN,
   threadStopRunWhere,
   touchGroupUpdatedAt,
   updateQueuedMessage,
+  waitingAskTakesText,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
@@ -202,6 +204,26 @@ async function declineConnectionAsks(
       }))
     )
       run.status = "queued";
+}
+
+/**
+ * A message written while an approval, secret or form card waits cannot answer it, so it is
+ * queued behind the card, as a follow-up is, instead of being refused.
+ */
+async function queueBehindCards(
+  tx: Prisma.TransactionClient,
+  threadId: string,
+  runs: Array<{ id: string; status: string }>,
+  requested: "steer" | "follow_up" | undefined,
+): Promise<"steer" | "follow_up" | undefined> {
+  if (requested === "follow_up") return requested;
+  for (const run of runs)
+    if (
+      run.status === "waiting_input" &&
+      !(await waitingAskTakesText(tx, { threadId, runId: run.id }))
+    )
+      return "follow_up";
+  return requested;
 }
 
 type YieldedWake = { threadId: string; botId: string; agentRunId: string };
@@ -989,11 +1011,17 @@ export async function sendThreadMessage(
             yielded,
             target.botId,
           );
-          if (input.queueMode !== "follow_up")
+          const queueMode = await queueBehindCards(
+            tx,
+            target.threadId,
+            activeRuns,
+            input.queueMode,
+          );
+          if (queueMode !== "follow_up")
             await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
           const waitingRuns = activeRuns.filter((run) => run.status === "waiting_input");
           if (
-            input.queueMode !== "follow_up" &&
+            queueMode !== "follow_up" &&
             waitingRuns.length &&
             !activeRuns.some(steersUserMessage)
           ) {
@@ -1054,7 +1082,7 @@ export async function sendThreadMessage(
           if (active) {
             const steers = steersUserMessage(active);
             const queued =
-              input.queueMode === "follow_up" ||
+              queueMode === "follow_up" ||
               !(await answerStatusQuestion(
                 tx,
                 actor,
@@ -1070,7 +1098,7 @@ export async function sendThreadMessage(
                   botId: target.botId,
                   userId: actor.userId,
                   runId: steers ? active.id : null,
-                  ...(input.queueMode === "follow_up"
+                  ...(queueMode === "follow_up"
                     ? { originTrigger: "follow_up" }
                     : steers && input.interrupt
                       ? { originTrigger: "interrupt" }
@@ -1237,7 +1265,8 @@ export async function sendThreadMessage(
           },
         });
         const activeRuns = await yieldBackgroundWakes(tx, actor, target.threadId, live, yielded);
-        if (input.queueMode !== "follow_up")
+        const queueMode = await queueBehindCards(tx, target.threadId, activeRuns, input.queueMode);
+        if (queueMode !== "follow_up")
           await declineConnectionAsks(tx, actor, target.threadId, activeRuns);
         const activeByBotId = new Map<string, (typeof activeRuns)[number]>();
         const answeredByBotId = new Map<string, Array<(typeof activeRuns)[number]>>();
@@ -1247,7 +1276,7 @@ export async function sendThreadMessage(
         for (const run of activeRuns) {
           if (run.status === "waiting_input") {
             if (conversationalBotIds.has(run.botId)) continue;
-            if (input.queueMode === "follow_up") {
+            if (queueMode === "follow_up") {
               activeByBotId.set(run.botId, run);
               continue;
             }
@@ -1299,7 +1328,7 @@ export async function sendThreadMessage(
           if (active) {
             const steers = steersUserMessage(active);
             if (
-              input.queueMode === "follow_up" ||
+              queueMode === "follow_up" ||
               !(await answerStatusQuestion(tx, actor, target.threadId, botId, active, input.text))
             ) {
               steeredCount += 1;
@@ -1309,7 +1338,7 @@ export async function sendThreadMessage(
                   botId,
                   userId: actor.userId,
                   runId: steers ? active.id : null,
-                  ...(input.queueMode === "follow_up"
+                  ...(queueMode === "follow_up"
                     ? { originTrigger: "follow_up" }
                     : steers && input.interrupt
                       ? { originTrigger: "interrupt" }
@@ -1520,38 +1549,7 @@ export async function listThreadBackgroundTasks(
   prisma: Pick<PrismaClient, "$queryRaw">,
   target: ThreadTarget,
 ): Promise<ThreadBackgroundTask[]> {
-  return prisma.$queryRaw<ThreadBackgroundTask[]>`
-    WITH owned AS (
-      SELECT id, "spaceId", "userId" FROM threads WHERE id = ${target.threadId}
-    )
-    SELECT q.id, 'research' AS kind, 'running' AS status
-    FROM recruiting_research_tasks q
-    JOIN runs r ON r.id = q."createdByRunId"
-    JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
-    JOIN recruiting_roles rr ON rr.id = q."roleId" AND rr."spaceId" = o."spaceId" AND rr."userId" = o."userId"
-    WHERE q.state = 'active'
-    UNION ALL
-    SELECT c.id, 'cloud_agent' AS kind, CASE WHEN c."cancelRequested" THEN 'cancelling' ELSE 'running' END AS status
-    FROM cloud_agents c
-    JOIN owned o ON c."threadId" = o.id AND c."spaceId" = o."spaceId" AND c."userId" = o."userId"
-    WHERE c.status = 'running'
-    UNION ALL
-    SELECT r.id, 'run' AS kind, 'running' AS status
-    FROM runs r
-    JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
-    LEFT JOIN messages m ON m.id = r."sourceMessageId"
-    WHERE r.status IN (${Prisma.join([...ACTIVE_RUN_STATUSES])})
-      AND (r.trigger IN (${Prisma.join([...AUTOMATION_RUN_TRIGGERS])})
-        OR m.blocks @> '[{"kind":"handoff"}]'::jsonb)
-    UNION ALL
-    SELECT e.id, 'agent_run' AS kind, 'running' AS status
-    FROM external_effects e
-    JOIN runs r ON r.id = e."runId"
-    JOIN owned o ON r."threadId" = o.id AND r."spaceId" = o."spaceId" AND r."userId" = o."userId"
-    WHERE e."spaceId" = o."spaceId" AND e.kind = 'work_estimate' AND e.status = 'running'
-      AND starts_with(e."idempotencyKey", 'work_estimate:agent_run_')
-    ORDER BY kind, id
-  `;
+  return listThreadBackgroundWork(prisma, target.threadId);
 }
 
 export async function cancelThreadBackgroundTask(
@@ -1645,6 +1643,11 @@ export async function cancelThreadBackgroundTask(
   });
 }
 
+export function stoppedNotice(name: string | null | undefined): string {
+  const who = name?.trim();
+  return who ? `${who} stopped the assistant` : "The assistant was stopped";
+}
+
 export async function stopThreadRuns(
   deps: {
     prisma: PrismaClient;
@@ -1655,6 +1658,7 @@ export async function stopThreadRuns(
   target: ThreadTarget,
   runId?: string,
   scope: "turn" | "all" = "turn",
+  announce = false,
 ) {
   const { runIds, computers, leases, eventSeq } = await deps.prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR UPDATE`;
@@ -1768,7 +1772,31 @@ export async function stopThreadRuns(
         botId: run.botId,
         type: "run.cancelled",
         runId: run.id,
-        payload: {},
+        payload: { stoppedByUserId: actor.userId },
+      });
+      eventSeq = event.seq;
+    }
+    if (announce && cancelled[0]) {
+      // Everyone in the conversation sees who stopped the work, as a line in the transcript.
+      const user = await tx.user.findUnique({
+        where: { id: actor.userId },
+        select: { name: true },
+      });
+      const blocks: MessageBlock[] = [
+        { kind: "meta", text: stoppedNotice(user?.name), resume: true },
+      ];
+      const message = await createThreadMessageInTransaction(tx, {
+        threadId: target.threadId,
+        role: "system",
+        botId: cancelled[0].botId,
+        blocks,
+      });
+      const event = await appendEventInTransaction(tx, {
+        spaceId: actor.spaceId,
+        threadId: target.threadId,
+        botId: cancelled[0].botId,
+        type: "thread.message.created",
+        payload: { messageId: message.id, role: "system", blocks },
       });
       eventSeq = event.seq;
     }
