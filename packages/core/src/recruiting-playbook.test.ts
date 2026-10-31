@@ -573,6 +573,7 @@ describe("turnEndPromise", () => {
     "预计 10 月 25 日 2:00 AM PT 前展示名单，或说明入口的实际阻碍。",
     "已取消本轮地区偏好。预计本批结果或阻碍汇报：ETA 2:35 AM PT。",
     "Saved the brief. I'll start the search next.",
+    "I'll wait for the search to finish and then share the list.",
   ])("finds the promise in %s", (ending) => {
     expect(turnEndPromise(ending)).toBeTruthy();
   });
@@ -584,6 +585,10 @@ describe("turnEndPromise", () => {
     "Handoff ETA after confirmation: 12:10 PM PT.",
     "我会把薪资作为偏好，而非硬性淘汰条件。",
     "我会继续搜索，稍后补进结果。\n\n已保存 60 人，累计 114 人。",
+    // The recruiter asked to stop; acknowledging it owes nothing.
+    "Understood. I'll stop here.",
+    "Got it, I'll wait for your next message.",
+    "好的，我先停在这里，等你消息。",
   ])("leaves %s alone", (ending) => {
     expect(turnEndPromise(ending)).toBeUndefined();
   });
