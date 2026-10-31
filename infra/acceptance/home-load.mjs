@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-// Release check: the signed-in Home opens within its time budget, in a real browser.
+// Release check: the signed-in Home and the left-nav pages open within their time budget, in a
+// real browser.
 //
 //   RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… [RAKAZO_SESSION_FILE=…] \
-//   node infra/acceptance/home-load.mjs [--shell-ms 6000] [--roles-ms 10000] [--overview-ms 15000]
+//   node infra/acceptance/home-load.mjs [--shell-ms 6000] [--roles-ms 10000] [--overview-ms 15000] \
+//     [--view-ms 15000]
 //
 // Measures, from navigation start: the greeting (page shell), the sidebar's role list, and the
-// first Overview numbers. Run it on an account with many roles; that is where Home got slow.
+// first Overview numbers. Then opens Contacts, Sequence, Inbox and Interview for all roles, the
+// way the left nav does, and fails if one keeps loading, shows a load error or the sidebar's
+// roles never appear there. Run it on an account with many roles; that is where Home got slow.
 // Exit 0 = within budget, 1 = too slow or broken, 2 = usage, 3 = could not sign in (auth's
 // rate limit after recent sign-ins; not a product failure). Read-only; secrets are never printed.
 // RAKAZO_SESSION_FILE keeps the signed-in session between runs (keep it outside the repo), so
@@ -27,10 +31,23 @@ const budgets = {
   roles: option("--roles-ms", 10_000),
   overview: option("--overview-ms", 15_000),
 };
-const origin = (process.env.RAKAZO_ORIGIN ?? process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
+const viewBudget = option("--view-ms", 15_000);
+const views = ["contacts", "sequence", "inbox", "interview"];
+const origin = (
+  process.env.RAKAZO_ORIGIN ??
+  process.env.RAKAZO_URL ??
+  ""
+).replace(/\/$/, "");
 const { RAKAZO_EMAIL: email, RAKAZO_PASSWORD: password } = process.env;
-if (!origin || !email || !password || Object.values(budgets).some((ms) => !(ms > 0))) {
-  console.error("Usage: RAKAZO_ORIGIN=… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… node home-load.mjs");
+if (
+  !origin ||
+  !email ||
+  !password ||
+  [...Object.values(budgets), viewBudget].some((ms) => !(ms > 0))
+) {
+  console.error(
+    "Usage: RAKAZO_ORIGIN=… RAKAZO_EMAIL=… RAKAZO_PASSWORD=… node home-load.mjs",
+  );
   process.exit(2);
 }
 
@@ -57,11 +74,14 @@ try {
     // Auth's limit clears within a minute; one wait keeps a busy release from skipping the check.
     for (const wait of [0, 60_000]) {
       await new Promise((resolve) => setTimeout(resolve, wait));
-      const signIn = await context.request.post(`${origin}/api/auth/sign-in/email`, {
-        headers: { origin },
-        data: { email, password },
-        failOnStatusCode: false,
-      });
+      const signIn = await context.request.post(
+        `${origin}/api/auth/sign-in/email`,
+        {
+          headers: { origin },
+          data: { email, password },
+          failOnStatusCode: false,
+        },
+      );
       status = signIn.status();
       if (status !== 429) break;
     }
@@ -86,16 +106,21 @@ try {
       .then(() => Date.now() - start)
       .catch(() => null);
   const [shell, roles, overview] = await Promise.all([
-    mark(() => /^Hello\b/.test(document.querySelector("h1")?.textContent?.trim() ?? "")),
+    mark(() =>
+      /^Hello\b/.test(document.querySelector("h1")?.textContent?.trim() ?? ""),
+    ),
     mark(
       () =>
-        document.querySelector('nav[aria-label="Role conversations"] button') !== null &&
-        !document.body.innerText.includes("Loading roles"),
+        document.querySelector(
+          'nav[aria-label="Role conversations"] button',
+        ) !== null && !document.body.innerText.includes("Loading roles"),
     ),
     mark(
       () =>
         document.querySelector('[aria-label="Outreach funnel"]') !== null ||
-        /No saved overview|Could not load your overview/.test(document.body.innerText),
+        /No saved overview|Could not load your overview/.test(
+          document.body.innerText,
+        ),
     ),
   ]);
   const overviewFailed = await page
@@ -115,7 +140,45 @@ try {
     failed = true;
     console.log("FAIL home overview shows an error");
   }
-  if (errors.length) console.log(`server errors: ${[...new Set(errors)].join(", ")}`);
+  for (const view of views) {
+    const opened = Date.now();
+    await page.goto(`${origin}/app?view=${view}&role=all`, {
+      waitUntil: "commit",
+    });
+    const ms = await page
+      .waitForFunction(
+        () => {
+          const main = document.querySelector(
+            '[data-testid="account-recruiting-view"]',
+          );
+          return (
+            main !== null &&
+            main.querySelector('[role="status"]') === null &&
+            document.querySelector(
+              'nav[aria-label="Role conversations"] button',
+            ) !== null &&
+            !document.body.innerText.includes("Loading roles")
+          );
+        },
+        null,
+        { timeout: viewBudget, polling: 100 },
+      )
+      .then(() => Date.now() - opened)
+      .catch(() => null);
+    const broken = await page
+      .getByTestId("account-recruiting-view")
+      .getByText(/^Could not (load|read)/)
+      .first()
+      .isVisible()
+      .catch(() => false);
+    const ok = ms !== null && !broken;
+    failed ||= !ok;
+    console.log(
+      `${ok ? "PASS" : "FAIL"} ${view} ${ms === null ? "never finished loading" : `${ms} ms`}${broken ? ", shows a load error" : ""} (budget ${viewBudget} ms)`,
+    );
+  }
+  if (errors.length)
+    console.log(`server errors: ${[...new Set(errors)].join(", ")}`);
   process.exitCode = failed ? 1 : 0;
 } finally {
   await browser.close();

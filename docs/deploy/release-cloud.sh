@@ -208,7 +208,7 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
     node "$DIR/infra/acceptance/smoke.mjs" --wait 60 > "$WORK/smoke-$SHORT.log" 2>&1 \
     || { tail -15 "$WORK/smoke-$SHORT.log"; rollback "smoke check failed (log: $WORK/smoke-$SHORT.log)"; }
   log "smoke ok: $(tail -1 "$WORK/smoke-$SHORT.log")"
-  # Signed-in Home must open within its budget (greeting, role list, first Overview numbers).
+  # Signed-in Home and the left-nav pages (Contacts, Sequence, Inbox, Interview) must open within budget.
   # A fresh container may be cold, so it gets a second try. Needs RAKAZO_EMAIL/RAKAZO_PASSWORD.
   if [ -f "$DIR/infra/acceptance/home-load.mjs" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; then
     home=1
