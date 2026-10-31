@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { captureScreenshot, completeOnboarding, signup } from "./helpers";
 
-const EXPIRED_TAKEOVER = "Stopped. This was still waiting for you on the screen.";
+const EXPIRED_TAKEOVER = "The screen wait expired. Open the screen and try again.";
 const EXPIRED_MESSAGE_ID = "msg-stuck-expired";
 
 type ThreadCarrier = {

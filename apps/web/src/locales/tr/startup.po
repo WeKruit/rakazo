@@ -3380,3 +3380,19 @@ msgstr "E-posta adresin"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "Adın"
+
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr ""
+
+#: src/pages/ActivityList.tsx
+msgid "Queued"
+msgstr "Kuyrukta"
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""

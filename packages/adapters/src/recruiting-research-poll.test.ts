@@ -400,12 +400,15 @@ describe("trackDirectRecruitingResearch", () => {
       roleId?: string | null;
       taskRole?: string;
       stopped?: boolean;
+      turnStopped?: boolean;
+      taskClosed?: boolean;
     } = {},
   ) {
     const upsert = vi.fn(async ({ create }: { create: { roleId: string } }) => ({
       id: "local-task",
       roleId: options.taskRole ?? create.roleId,
-      state: "active",
+      state: options.taskClosed ? "closed" : "active",
+      createdByRunId: "run-1",
     }));
     const enqueue = vi.fn(async () => undefined);
     const prisma = {
@@ -418,24 +421,31 @@ describe("trackDirectRecruitingResearch", () => {
         })),
       },
       run: {
-        // The lookup only matches a live run; a stopped run is not found.
-        findFirst: vi.fn(async () =>
-          options.stopped
-            ? null
-            : {
-                id: "run-1",
-                thread: {
-                  activeRecruitingRoleId: options.roleId === undefined ? "role" : options.roleId,
+        findFirst: vi.fn(async ({ select }: { select: { threadId?: boolean } }) =>
+          select.threadId
+            ? { threadId: "thread" }
+            : options.stopped
+              ? null
+              : {
+                  id: "run-1",
+                  thread: {
+                    activeRecruitingRoleId: options.roleId === undefined ? "role" : options.roleId,
+                  },
                 },
-              },
         ),
       },
       recruitingRole: { findFirst: vi.fn(async () => ({ id: "role" })) },
       recruitingResearchTask: { upsert, update: vi.fn() },
+      $queryRaw: vi.fn(),
     };
     return {
       deps: {
-        prisma: prisma as unknown as PrismaClient,
+        prisma: {
+          ...prisma,
+          $transaction: vi.fn(async (callback: (tx: unknown) => Promise<unknown>) =>
+            callback(prisma),
+          ),
+        } as unknown as PrismaClient,
         jobs: { enqueue, cancel: vi.fn(async () => undefined), close: vi.fn() },
       },
       upsert,
@@ -492,7 +502,37 @@ describe("trackDirectRecruitingResearch", () => {
     expect(read.upsert).not.toHaveBeenCalled();
   });
 
-  it("never arms a background follow-up from a run that was stopped", async () => {
+  it("keeps accepted research after stopping only the turn, under the thread lock", async () => {
+    const f = deps({ turnStopped: true });
+    await expect(
+      trackDirectRecruitingResearch(f.deps, context, route, { prompt: "find" }, accepted),
+    ).resolves.toBe("local-task");
+    const prisma = f.deps.prisma;
+    expect(prisma.$transaction).toHaveBeenCalledOnce();
+    expect(prisma.$queryRaw).toHaveBeenCalledWith(expect.anything(), "thread");
+    expect(prisma.run.findFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            { status: { in: expect.any(Array) } },
+            { status: "cancelled", error: "turn_stopped" },
+          ],
+        }),
+      }),
+    );
+    expect(f.enqueue).toHaveBeenCalledOnce();
+  });
+
+  it("never reopens a cancelled task when its original provider call arrives late", async () => {
+    const f = deps({ taskClosed: true });
+    await expect(
+      trackDirectRecruitingResearch(f.deps, context, route, { prompt: "find" }, accepted),
+    ).resolves.toBeNull();
+    expect(f.enqueue).not.toHaveBeenCalled();
+    expect(f.deps.prisma.recruitingResearchTask.update).not.toHaveBeenCalled();
+  });
+
+  it("never arms a background follow-up after Stop everything", async () => {
     const f = deps({ stopped: true });
     await expect(
       trackDirectRecruitingResearch(f.deps, context, route, { prompt: "find" }, accepted),
@@ -503,7 +543,10 @@ describe("trackDirectRecruitingResearch", () => {
     expect(findRun).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          status: { in: expect.not.arrayContaining(["cancelled"]) },
+          OR: [
+            { status: { in: expect.not.arrayContaining(["cancelled"]) } },
+            { status: "cancelled", error: "turn_stopped" },
+          ],
         }),
       }),
     );

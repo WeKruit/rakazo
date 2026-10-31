@@ -20,6 +20,7 @@ const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set([
   "created",
   "tickets",
   "bot_message",
+  "tool_background",
   "recruiting_grade",
   "recruiting_checkin",
 ]);
@@ -43,6 +44,7 @@ export function isBackgroundRunTrigger(trigger: string | null | undefined): bool
  * after the thread's earlier runs; workers also schedule them behind a person's turn.
  */
 export const AUTOMATION_RUN_TRIGGERS = [
+  "tool_background",
   "bot_message",
   "routine",
   "webhook",

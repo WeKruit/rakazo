@@ -56,6 +56,47 @@ const visible = (thread: LiveThread) =>
   thread.messages.map((message) => [message.id, message.role, message.blocks]);
 
 describe("shared thread reducer", () => {
+  it.each([undefined, "group"])(
+    "projects background promotion without resetting time, steps or sibling turns (%s)",
+    (groupId) => {
+      const started = reduceThreadEvent(
+        { ...base, groupId },
+        event(12, "run.started", { trigger: "user" }),
+      );
+      const working = reduceThreadEvent(
+        started,
+        event(13, "agent.tool.called", {
+          name: "web_fetch",
+          executionId: "tool",
+          startedAt: "2026-10-23T00:00:00Z",
+        }),
+      );
+      const promoted = reduceThreadEvent(working, {
+        ...event(14, "run.started", {
+          trigger: "tool_background",
+          sourceTrigger: "user",
+          backgrounded: true,
+          executionId: "tool",
+          durationMs: 10_000,
+        }),
+        createdAt: "2026-10-23T00:00:10Z",
+      });
+      expect(promoted.run).toMatchObject({
+        id: "run",
+        trigger: "tool_background",
+        startedAt: "2026-10-23T00:00:00Z",
+        createdAt: "2026-10-23T00:00:00Z",
+      });
+      expect(promoted.messages).toBe(working.messages);
+      expect(promoted.activeRuns).toHaveLength(1);
+      const person = reduceThreadEvent(promoted, {
+        ...event(15, "run.started", { trigger: "user" }),
+        runId: "person",
+      });
+      expect(person.activeRuns?.map((run) => run.id)).toEqual(["run", "person"]);
+      expect(person.run?.id).toBe("person");
+    },
+  );
   it("starts a run it has not seen, so a mobile snapshot tracks the same run as web", () => {
     const started = reduceThreadEvent(base, event(12, "run.started", { trigger: "user" }));
     expect(started.run).toMatchObject({ id: "run", status: "running", trigger: "user" });
@@ -201,8 +242,20 @@ describe("tool step closure by execution", () => {
       {
         kind: "steps",
         steps: [
-          { label: "Connectors execute tool", count: 1, status: "failed" },
-          { label: "Connectors execute tool", count: 1, peopleWithEmail: 3 },
+          {
+            label: "Connectors execute tool",
+            count: 1,
+            status: "failed",
+            executionId: "a",
+            startedAt: "2026-10-23T00:00:00Z",
+          },
+          {
+            label: "Connectors execute tool",
+            count: 1,
+            peopleWithEmail: 3,
+            executionId: "b",
+            startedAt: "2026-10-23T00:00:00Z",
+          },
         ],
       },
     ]);
@@ -215,7 +268,18 @@ describe("tool step closure by execution", () => {
       event(13, "agent.tool.called", { name: "web_search", executionId: "a" }),
     ]);
     expect(live(end)).toEqual([
-      { kind: "steps", steps: [{ label: "Web search", count: 1, status: "failed" }] },
+      {
+        kind: "steps",
+        steps: [
+          {
+            label: "Web search",
+            count: 1,
+            status: "failed",
+            executionId: "a",
+            startedAt: "2026-10-23T00:00:00Z",
+          },
+        ],
+      },
     ]);
   });
 
@@ -300,6 +364,15 @@ describe("queued input", () => {
 });
 
 describe("expired wait", () => {
+  it("uses each waiting event timestamp as the persisted deadline anchor on every client", () => {
+    const started = reduceThreadEvent(base, event(11, "run.started"));
+    const waiting = reduceThreadEvent(started, {
+      ...event(12, "run.waiting_input", { updatedAt: "2026-10-30T12:00:00.000Z" }),
+      createdAt: "2026-10-30T12:00:02.000Z",
+    });
+    expect(waiting.run).toMatchObject({ updatedAt: "2026-10-30T12:00:00.000Z" });
+    expect(waiting.activeRuns?.[0]).toMatchObject({ updatedAt: "2026-10-30T12:00:00.000Z" });
+  });
   const card = { kind: "ask", text: "Which city?", status: "pending" } as const;
   const waiting = fold(base, [
     event(11, "run.started", { trigger: "user" }),

@@ -533,6 +533,8 @@ export interface AgentRunRequest {
     route?: ConnectorRoute,
     observer?: AgentToolExecutionObserver,
   ) => Promise<unknown>;
+  /** Move a slow executing tool's native run out of the person's conversation lane. */
+  onSlowTool?: (tool: { name: string; executionId: string; durationMs: number }) => Promise<void>;
   /**
    * Awaited before a question card pauses the run, so work the run started finishes first.
    * Returns the user's earlier answer when the conversation already answered this question;

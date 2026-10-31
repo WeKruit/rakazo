@@ -4,6 +4,7 @@ import { formatter } from "@lingui/format-po";
 // Optional pages and recruiting views already sit behind lazy UI boundaries.
 const deferredPages = [
   "src/components/AskCard.tsx",
+  "src/components/AskDeadline.tsx",
   "src/pages/shell/message-cards.tsx",
   "src/pages/shell/dialogs.tsx",
   "src/components/ComputerUpdateProgress.tsx",

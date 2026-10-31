@@ -7543,6 +7543,7 @@ const nativeQuestion = {
       { id: "choice-2", label: "Need more evidence" },
     ],
   },
+  expiresAt: "2026-10-31T12:00:00.000Z",
   runStatus: "waiting_input",
   isCurrent: true,
   canAnswer: true,

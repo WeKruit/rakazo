@@ -1,6 +1,7 @@
 export * from "./actor-db.js";
 export * from "./artifact-versions.js";
 export * from "./automation-rate.js";
+export * from "./background-tool.js";
 export * from "./billing.js";
 export * from "./board.js";
 export * from "./board-live.js";
@@ -21,6 +22,7 @@ export * from "./messages.js";
 export * from "./messaging.js";
 export * from "./model-backups.js";
 export * from "./model-credentials.js";
+export * from "./notifications.js";
 export * from "./queued-messages.js";
 export * from "./recruiting.js";
 export * from "./recruiting-bootstrap.js";

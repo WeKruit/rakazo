@@ -17,12 +17,211 @@ import {
   workSessionSteps,
   workStageKind,
   workStageLabel,
+  workStageMessages,
 } from "./live-work.js";
 import type { LiveThread, LiveThreadEvent } from "./thread-reducer.js";
 import { reduceThreadEvent } from "./thread-reducer.js";
 
 const T0 = Date.parse("2026-10-23T10:00:00.000Z");
 const at = (seconds: number) => new Date(T0 + seconds * 1000).toISOString();
+
+it("includes fifty seconds of observed background work, survives reload and excludes a later user wait", () => {
+  const run = { id: "source", botId: "sourcer", status: "running", startedAt: at(0) };
+  const user = { id: "user", role: "user", createdAt: at(0), blocks: [] };
+  const background = {
+    runId: "source",
+    botId: "sourcer",
+    turnStartedAt: at(0),
+    startedAt: at(5),
+    endedAt: null,
+  };
+  let session = observeWorkSession(
+    null,
+    { runs: [run], messages: [user], backgroundWork: [background] },
+    at(5),
+  );
+  session = observeWorkSession(
+    session,
+    { runs: [], messages: [user], backgroundWork: [background] },
+    at(10),
+  );
+  expect(session?.endedAt).toBeNull();
+  expect(workSessionElapsedMs(session!, T0 + 40_000)).toBe(40_000);
+  const done = { runs: [], messages: [user], backgroundWork: [{ ...background, endedAt: at(55) }] };
+  session = observeWorkSession(session, done, at(55));
+  expect(session?.endedAt).toBe(at(55));
+  expect(workSessionElapsedMs(session!, T0 + 90_000)).toBe(55_000);
+  const reloaded = observeWorkSession(null, done, at(90));
+  expect(workSessionElapsedMs(reloaded!, T0 + 90_000)).toBe(55_000);
+  const resumed = observeWorkSession(
+    session,
+    {
+      ...done,
+      runs: [run],
+      messages: [user, { ...user, id: "answer", createdAt: at(200) }],
+    },
+    at(220),
+  );
+  expect(resumed?.startedAt).toBe(at(200));
+  expect(workSessionElapsedMs(resumed!, T0 + 220_000)).toBe(20_000);
+});
+
+it("does not attach an older completed background search to an unrelated new task", () => {
+  const session = observeWorkSession(
+    null,
+    {
+      runs: [{ id: "new", status: "running", startedAt: at(100) }],
+      messages: [{ id: "new-user", role: "user", createdAt: at(100), blocks: [] }],
+      backgroundWork: [
+        { runId: "old", botId: "sourcer", turnStartedAt: at(0), startedAt: at(5), endedAt: at(55) },
+      ],
+    },
+    at(110),
+  );
+  expect(session?.startedAt).toBe(at(100));
+  expect(workSessionElapsedMs(session!, T0 + 110_000)).toBe(10_000);
+});
+
+it("rebuilds a promoted tool turn from its native saved wall duration on reload", () => {
+  const session = observeWorkSession(
+    null,
+    {
+      runs: [],
+      messages: [
+        { id: "user", role: "user", createdAt: at(0), blocks: [] },
+        {
+          id: "result",
+          role: "bot",
+          runId: "promoted",
+          createdAt: at(60),
+          blocks: [
+            {
+              kind: "steps",
+              durationMs: 60_000,
+              steps: [{ label: "Web fetch", count: 1, durationMs: 50_000, startedAt: at(5) }],
+            },
+          ],
+        },
+      ],
+    },
+    at(90),
+  );
+  expect(workSessionElapsedMs(session!, T0 + 90_000)).toBe(60_000);
+});
+
+it("restores completed crew stages and their native transcript after reload within the current user turn", () => {
+  const messages = [
+    { id: "old", role: "bot", runId: "old-run", botId: "outreach", createdAt: at(-10), blocks: [] },
+    { id: "user", role: "user", createdAt: at(0), blocks: [] },
+    {
+      id: "lead",
+      role: "bot",
+      runId: "lead-run",
+      botId: "main",
+      createdAt: at(5),
+      blocks: [
+        {
+          kind: "steps",
+          durationMs: 5_000,
+          steps: [{ label: "Recruiting role", count: 1, durationMs: 100 }],
+        },
+        { kind: "handoff", fromBotId: "main", toBotId: "sourcer", text: "Native task brief" },
+      ],
+    },
+    {
+      id: "source",
+      role: "bot",
+      runId: "source-run",
+      botId: "sourcer",
+      createdAt: at(55),
+      blocks: [
+        {
+          kind: "steps",
+          durationMs: 50_000,
+          steps: [{ label: "Recruiting research", count: 1, durationMs: 49_000 }],
+        },
+      ],
+    },
+    { id: "wake", role: "user", internal: true, createdAt: at(56), blocks: [] },
+    {
+      id: "report",
+      role: "bot",
+      runId: "report-run",
+      botId: "main",
+      createdAt: at(60),
+      blocks: [
+        {
+          kind: "steps",
+          durationMs: 4_000,
+          steps: [{ label: "Read file", count: 1, durationMs: 100 }],
+        },
+      ],
+    },
+  ] satisfies Parameters<typeof observeWorkSession>[1]["messages"];
+  const restored = observeWorkSession(null, { runs: [], messages }, at(90))!;
+  expect(restored.runIds).toEqual(["lead-run", "source-run", "report-run"]);
+  expect(workSessionStages(restored).stages).toEqual([
+    {
+      botId: "sourcer",
+      running: false,
+      steps: [{ activity: "research", count: 1, durationMs: 49_000 }],
+    },
+  ]);
+  expect(workSessionElapsedMs(restored, T0 + 90_000)).toBe(60_000);
+  expect(
+    workStageMessages(messages, {
+      botId: "sourcer",
+      runIds: ["source-run"],
+      sourceRunIds: restored.runIds,
+    }).map((message) => message.id),
+  ).toEqual(["lead", "source"]);
+  const nextTask = observeWorkSession(
+    null,
+    {
+      runs: [],
+      messages: [...messages, { id: "new-user", role: "user", createdAt: at(80), blocks: [] }],
+    },
+    at(90),
+  );
+  expect(nextTask).toBeNull();
+});
+
+it("keeps a completed search and its native completion report in the same reloaded total", () => {
+  const session = observeWorkSession(
+    null,
+    {
+      runs: [],
+      messages: [
+        { id: "user", role: "user", createdAt: at(0), blocks: [] },
+        { id: "native-wake", role: "user", internal: true, createdAt: at(56), blocks: [] },
+        {
+          id: "report",
+          role: "bot",
+          runId: "wake",
+          createdAt: at(70),
+          blocks: [
+            {
+              kind: "steps",
+              durationMs: 15_000,
+              steps: [{ label: "Read file", count: 1, durationMs: 300 }],
+            },
+          ],
+        },
+      ],
+      backgroundWork: [
+        {
+          runId: "source",
+          botId: "sourcer",
+          turnStartedAt: at(0),
+          startedAt: at(5),
+          endedAt: at(55),
+        },
+      ],
+    },
+    at(90),
+  );
+  expect(workSessionElapsedMs(session!, T0 + 90_000)).toBe(70_000);
+});
 
 describe("workActivityForTool", () => {
   it.each([
@@ -139,7 +338,7 @@ describe("observeWorkSession", () => {
     expect(session!.current).toBe("role");
     step(event("agent.tool.completed", 3, { name: "recruiting_role", executionId: "e1" }), 3);
     expect(session!.current).toBeNull();
-    expect(workSessionSteps(session)).toEqual([{ activity: "role", count: 1 }]);
+    expect(workSessionSteps(session)).toEqual([{ activity: "role", count: 1, startedAt: at(2) }]);
 
     // Mid-turn narration replaces the live row; the finished step stays in the turn.
     step(
@@ -162,8 +361,9 @@ describe("observeWorkSession", () => {
       60,
     );
     expect(workSessionSteps(session)).toEqual([
-      { activity: "role", count: 1 },
-      { activity: "research", count: 2 },
+      { activity: "role", count: 1, startedAt: at(2) },
+      { activity: "research", count: 1, startedAt: at(5) },
+      { activity: "research", count: 1, startedAt: at(31) },
     ]);
 
     step(
@@ -178,8 +378,9 @@ describe("observeWorkSession", () => {
     expect(session!.endedAt).toBe(at(72));
     expect(formatWorkDuration(workSessionElapsedMs(session!, T0 + 999_000))).toBe("1m 12s");
     expect(workSessionSteps(session)).toEqual([
-      { activity: "role", count: 1 },
-      { activity: "research", count: 2 },
+      { activity: "role", count: 1, startedAt: at(2) },
+      { activity: "research", count: 1, startedAt: at(5) },
+      { activity: "research", count: 1, startedAt: at(31) },
     ]);
     const settled = session;
     expect(observeWorkSession(session, view(state), at(80))).toBe(settled);
@@ -394,7 +595,9 @@ it("keeps the audited outcome when completion and terminal arrive before a rende
     { runs: thread.activeRuns ?? [], messages: thread.messages },
     at(4),
   );
-  expect(workSessionSteps(session)).toEqual([{ activity: "search", count: 1, status: "failed" }]);
+  expect(workSessionSteps(session)).toEqual([
+    { activity: "search", count: 1, status: "failed", startedAt: at(2) },
+  ]);
 });
 
 it("uses durable final outcomes once without duplicating the live call", () => {
@@ -476,14 +679,16 @@ it("marks an interrupted call paused without changing completed steps during thi
   ].reduce(reduceThreadEvent, start);
   const interrupted = reduceThreadEvent(called, ev(3, "run.failed", { error: "private reason" }));
   expect(runWorkSteps(interrupted.messages[0]).done).toEqual([
-    { activity: "search", status: "paused" },
+    { activity: "search", status: "paused", startedAt: at(2) },
   ]);
   const thinking = [
     ev(3, "agent.tool.completed", { name: "web_search", executionId: "x", outcome: "succeeded" }),
     ev(4, "thread.progress", { text: "", activity: true, phase: "thinking" }),
     ev(5, "run.failed", { error: "private reason" }),
   ].reduce(reduceThreadEvent, called);
-  expect(runWorkSteps(thinking.messages[0]).done).toEqual(["search"]);
+  expect(runWorkSteps(thinking.messages[0]).done).toEqual([
+    { activity: "search", startedAt: at(2) },
+  ]);
 });
 
 describe("workSessionStages", () => {

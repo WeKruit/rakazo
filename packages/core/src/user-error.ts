@@ -1,6 +1,17 @@
 /** Copy each client supplies in its own language. */
 export type UserErrorCopy = { fallback: string; offline: string };
 
+/** These are native model-connection failures, not service or tool error heuristics. */
+export function runRecoveryAction(reason: string): "model_connection" | "retry" {
+  return [
+    "Connect a model in Settings before running bots.",
+    "Model connection changed. Connect it again.",
+    "Model connection is no longer available. Connect it again.",
+  ].includes(reason.trim())
+    ? "model_connection"
+    : "retry";
+}
+
 /** Browser, React Native, Expo, and Node wordings for a request that never got a response. */
 const NETWORK_FAILURE =
   /^(?:failed to fetch|load failed|fetch failed|network ?error|network request failed)|networkerror when attempting|could not connect to the server|internet connection appears to be offline/i;

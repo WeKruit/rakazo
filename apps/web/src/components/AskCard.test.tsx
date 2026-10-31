@@ -22,6 +22,52 @@ import { AskCard } from "./AskCard";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+it.each([false, true])(
+  "shows the persisted deadline for a question or approval (%s) and removes it on answer",
+  (approval) => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-30T12:00:00.000Z"));
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const expiresAt = "2026-10-31T12:00:00.000Z";
+    const block: AskBlock = {
+      kind: "ask",
+      text: "Confirm requirements",
+      status: "pending",
+      ...(approval
+        ? { approvalEffectId: "effect", actions: [{ id: "allow", label: "Allow once" }] }
+        : {}),
+    };
+    try {
+      act(() =>
+        root.render(<AskCard block={block} canAnswer expiresAt={expiresAt} onAnswer={vi.fn()} />),
+      );
+      expect(container.querySelector("time")?.dateTime).toBe(expiresAt);
+      expect(container.textContent).toContain("Expires in 24h 0m");
+      act(() => vi.advanceTimersByTime(60_000));
+      expect(container.textContent).toContain("Expires in 23h 59m");
+      act(() => vi.advanceTimersByTime(24 * 60 * 60_000));
+      expect(container.querySelector("time")?.textContent).toBe("Expired");
+      act(() =>
+        root.render(
+          <AskCard
+            block={{ ...block, status: "answered", answer: "Yes" }}
+            canAnswer={false}
+            expiresAt={expiresAt}
+            onAnswer={vi.fn()}
+          />,
+        ),
+      );
+      expect(container.querySelector("time")).toBeNull();
+    } finally {
+      act(() => root.unmount());
+      container.remove();
+      vi.useRealTimers();
+    }
+  },
+);
+
 it("renders native form fields, validates URL and submits typed multi-select on the same card", async () => {
   const container = document.createElement("div");
   document.body.append(container);

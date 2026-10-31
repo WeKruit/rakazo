@@ -23,6 +23,7 @@ import { Plug } from "lucide-react";
 import { useId, useState } from "react";
 import { connectMcpOauth } from "../lib/mcp-connect";
 import { errorText } from "../lib/user-error";
+import { AskDeadline } from "./AskDeadline";
 import { SuccessPop } from "./ai/primitives";
 
 export type AskBlock = Extract<ThreadMessage["blocks"][number], { kind: "ask" }>;
@@ -101,10 +102,12 @@ function secretFieldLabel(purpose: AskBlock["purpose"]): string {
 export function AskCard({
   block,
   canAnswer,
+  expiresAt,
   onAnswer,
 }: {
   block: AskBlock;
   canAnswer: boolean;
+  expiresAt?: string | null;
   onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
 }) {
   if (block.connection) {
@@ -113,11 +116,19 @@ export function AskCard({
         connection={block.connection}
         answer={block.status === "answered" ? block.answer : undefined}
         canAnswer={canAnswer}
+        expiresAt={block.status !== "answered" ? expiresAt : null}
         onAnswer={onAnswer}
       />
     );
   }
-  return <QuestionAskCard block={block} canAnswer={canAnswer} onAnswer={onAnswer} />;
+  return (
+    <QuestionAskCard
+      block={block}
+      canAnswer={canAnswer}
+      expiresAt={expiresAt}
+      onAnswer={onAnswer}
+    />
+  );
 }
 
 type ConnectionState = "idle" | "connecting" | "connected" | "failed";
@@ -128,11 +139,13 @@ function ConnectionAskCard({
   connection,
   answer,
   canAnswer,
+  expiresAt,
   onAnswer,
 }: {
   connection: AskConnection;
   answer: string | undefined;
   canAnswer: boolean;
+  expiresAt?: string | null;
   onAnswer: (text: AskAnswer) => Promise<void>;
 }) {
   const { t } = useLingui();
@@ -195,6 +208,7 @@ function ConnectionAskCard({
           <span className="block text-[13px] text-muted-foreground">{connection.reason}</span>
         </span>
       </div>
+      {canAnswer && expiresAt ? <AskDeadline expiresAt={expiresAt} /> : null}
       {connected ? (
         <div className="mt-3">
           <SuccessPop label={t`Connected`} />
@@ -236,10 +250,12 @@ function ConnectionAskCard({
 function QuestionAskCard({
   block,
   canAnswer,
+  expiresAt,
   onAnswer,
 }: {
   block: AskBlock;
   canAnswer: boolean;
+  expiresAt?: string | null;
   onAnswer: (text: AskAnswer, username?: string) => Promise<void>;
 }) {
   const { t } = useLingui();
@@ -314,6 +330,9 @@ function QuestionAskCard({
           {block.approvalEffectId ? approvalTitle(block.text) : block.text}
         </ChatMarkdown>
       </div>
+      {canAnswer && block.status !== "answered" && expiresAt ? (
+        <AskDeadline expiresAt={expiresAt} />
+      ) : null}
       {secretInput && block.credential ? (
         <div
           data-testid="secret-ask-destination"

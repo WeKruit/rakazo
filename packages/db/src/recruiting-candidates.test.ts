@@ -6825,7 +6825,7 @@ describe("recruiter CSV candidate import", () => {
       args.where.id === "csv" ? (csvArtifact as never) : contextFind(args),
     );
     const existing: Array<{ candidateKey: string }> = [];
-    Object.assign(f.tx.recruitingCandidate, {
+    const candidateTable = Object.assign(f.tx.recruitingCandidate, {
       createManyAndReturn: vi.fn(async ({ data }: { data: Array<{ candidateKey: string }> }) =>
         data.filter((row) => !existing.some((known) => known.candidateKey === row.candidateKey)),
       ),
@@ -6864,7 +6864,17 @@ describe("recruiter CSV candidate import", () => {
         ...captured,
         outputArtifact,
       });
-    return { ...f, input, trusted, captured, outputArtifact, existing, csvArtifact, save };
+    return {
+      ...f,
+      tx: { ...f.tx, recruitingCandidate: candidateTable },
+      input,
+      trusted,
+      captured,
+      outputArtifact,
+      existing,
+      csvArtifact,
+      save,
+    };
   }
 
   it("saves one unassessed page with CSV provenance and reports skipped rows", async () => {

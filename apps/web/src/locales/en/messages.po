@@ -6192,3 +6192,19 @@ msgstr "Your recruiting workspace."
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "Your tasks"
+
+#: src/components/LiveWork.tsx
+msgid "Cancel task"
+msgstr "Cancel task"
+
+#: src/components/AskDeadline.tsx
+msgid "Expired"
+msgstr "Expired"
+
+#: src/components/AskDeadline.tsx
+msgid "Expires in {time}"
+msgstr "Expires in {time}"
+
+#: src/components/LiveWork.tsx
+msgid "View"
+msgstr "View"

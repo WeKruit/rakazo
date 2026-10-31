@@ -829,15 +829,17 @@ async function main() {
     // The account's recruiting crew, provisioned on first use exactly as the web onboarding does.
     const workspace = await rpc("onboarding/ensureRecruiting", {});
     const home = await rpc("groups/get", { groupId: workspace.groupId });
-    const crew = home.members.map((member) => member.botId);
-    if (!crew.includes(workspace.botId)) fail("No recruiting crew on this account");
-    const group = await rpc("groups/create", {
-      name: `延迟测试 ${new Date().toISOString().slice(5, 16).replace("T", " ")}`,
-      botIds: [workspace.botId, ...crew.filter((id) => id !== workspace.botId)],
-    });
+    const names = new Set(home.members.map((member) => member.name.toLowerCase()));
+    for (const name of ["main", "sourcer", "outreach", "reviewer"])
+      if (!names.has(name)) fail("The native recruiting crew is incomplete");
+    const group = await rpc("groups/duplicate", { groupId: workspace.groupId });
     groupId = group.id;
     report.groupId = groupId;
     save();
+    await rpc("groups/update", {
+      groupId,
+      name: `${TEST_MARK}延迟测试 ${new Date().toISOString().slice(5, 16).replace("T", " ")}`,
+    });
     // Same calls the web app's composer makes: upload the file, then send it with a short line.
     const file = option("--jd-file");
     const artifactIds = file
@@ -860,6 +862,9 @@ async function main() {
     });
     mark("jd_sent");
   } else {
+    const group = await rpc("groups/get", { groupId });
+    if (!group.name.startsWith(TEST_MARK))
+      throw new Error("Use a test copy, never a customer role");
     report.groupId = groupId;
     mark("attached");
   }
@@ -1039,18 +1044,23 @@ async function main() {
     if (!name.startsWith(TEST_MARK))
       await rpc("groups/update", { groupId, name: `${TEST_MARK}${name}`.slice(0, 80) });
   }
-  await archiveCopy();
   report.finishedAt = new Date().toISOString();
   save();
   log(`result ${report.result}; latency ${JSON.stringify(report.latency)}; report ${OUT}`);
-  process.exit(report.result === "pass" ? 0 : 1);
+  process.exitCode = report.result === "pass" ? 0 : 1;
 }
 
-main().catch(async (error) => {
-  report.result = "error";
-  report.error = error.message;
-  save();
-  log(`error: ${error.message}`);
-  await archiveCopy().catch((failure) => log(`archive failed: ${failure.message}`));
-  process.exit(2);
-});
+main()
+  .catch(async (error) => {
+    report.result = "error";
+    report.error = error.message;
+    save();
+    log(`error: ${error.message}`);
+    process.exitCode = 2;
+  })
+  .finally(async () => {
+    await archiveCopy().catch((failure) => {
+      log(`archive failed: ${failure.message}`);
+      process.exitCode = 2;
+    });
+  });

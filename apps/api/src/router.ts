@@ -196,6 +196,7 @@ import {
   CannotDeleteSpaceAsNonOwnerError,
   CannotRenameSpaceAsNonOwnerError,
   ComputerLimitError,
+  claimConversationNotification,
   claimEmptySpaceDeletionForMember,
   createExternalConversationRepos,
   createGroupRepos,
@@ -217,6 +218,7 @@ import {
   formatMessagingLinkCode,
   getRecruitingGroupCrmReferences,
   getRecruitingWorkspaceRoleId,
+  hasConversationNotificationReservation,
   InvalidSpaceNameError,
   IsolationError,
   issueMessagingLinkCode,
@@ -231,6 +233,7 @@ import {
   parseComputerMode,
   RECRUITING_PRESET_SOURCE,
   recordClosedAskAnswer,
+  recordDesktopActivity,
   recruitingCrmConversationId,
   recruitingPresetId,
   releaseSpaceDeletionClaim,
@@ -374,6 +377,8 @@ import {
   shouldForwardPeerThreadEvent,
 } from "./thread-message-pages.js";
 import {
+  cancelThreadBackgroundTask,
+  listThreadBackgroundTasks,
   reactToThreadMessage,
   resolveThreadTarget,
   sendThreadMessage,
@@ -2740,7 +2745,20 @@ export function createRouter(deps: RouterDeps) {
       }),
       stop: authed.threads.stop.handler(async ({ context, input }) => {
         const target = await resolveThreadTarget(deps.prisma, context.actor, input);
-        await stopThreadRuns(deps, context.actor, target, input.runId);
+        await stopThreadRuns(deps, context.actor, target, input.runId, input.scope);
+        return { ok: true as const };
+      }),
+      backgroundTasks: authed.threads.backgroundTasks.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        return listThreadBackgroundTasks(deps.prisma, target);
+      }),
+      cancelTask: authed.threads.cancelTask.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        const runs = await cancelThreadBackgroundTask(deps.prisma, context.actor, target, {
+          id: input.id,
+          kind: input.kind,
+        });
+        for (const id of runs) await stopThreadRuns(deps, context.actor, target, id);
         return { ok: true as const };
       }),
       clear: authed.threads.clear.handler(async ({ context, input }) => {
@@ -6870,6 +6888,26 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     notifications: {
+      desktopActivity: authed.notifications.desktopActivity.handler(async ({ context }) => {
+        await recordDesktopActivity(deps.prisma, context.actor);
+        return { ok: true as const };
+      }),
+      claimBrowser: authed.notifications.claimBrowser.handler(async ({ context, input }) => {
+        const scope = {
+          ...input,
+          spaceId: context.actor.spaceId,
+          userId: context.actor.userId,
+        };
+        const claim = await claimConversationNotification(deps.prisma, {
+          ...scope,
+          channel: "browser",
+        });
+        return {
+          allowed: Boolean(claim),
+          reserved:
+            Boolean(claim) || (await hasConversationNotificationReservation(deps.prisma, scope)),
+        };
+      }),
       registerPush: authed.notifications.registerPush.handler(async ({ context, input }) => {
         const sessionId = context.sessionId;
         if (!sessionId) throw new ORPCError("UNAUTHORIZED");

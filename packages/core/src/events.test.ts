@@ -323,7 +323,7 @@ describe("projectMessages", () => {
     expect(messages).toEqual([]);
   });
 
-  it("collapses repeated tool calls into one step with a count", () => {
+  it("preserves each timed tool call so repeated steps keep their own clocks", () => {
     const messages = projectMessages([
       {
         id: "e1",
@@ -357,8 +357,17 @@ describe("projectMessages", () => {
     expect(messages[0]?.blocks[0]).toEqual({
       kind: "steps",
       steps: [
-        { label: "Slack fetch conversation history", count: 2 },
-        { label: "Slack find channels", count: 1 },
+        {
+          label: "Slack fetch conversation history",
+          count: 1,
+          startedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          label: "Slack fetch conversation history",
+          count: 1,
+          startedAt: "2026-01-01T00:00:01.000Z",
+        },
+        { label: "Slack find channels", count: 1, startedAt: "2026-01-01T00:00:02.000Z" },
       ],
     });
   });
@@ -398,7 +407,10 @@ describe("projectMessages", () => {
     // sentence and the held-back tool call appear together, in that order.
     expect(messages[0]?.blocks).toEqual([
       { kind: "text", text: "Let me check Slack for a broad search." },
-      { kind: "steps", steps: [{ label: "Slack find channels", count: 1 }] },
+      {
+        kind: "steps",
+        steps: [{ label: "Slack find channels", count: 1, startedAt: "2026-01-01T00:00:01.000Z" }],
+      },
     ]);
   });
 
@@ -424,7 +436,10 @@ describe("projectMessages", () => {
       },
     ]);
     expect(messages[0]?.blocks).toEqual([
-      { kind: "steps", steps: [{ label: "Shell", count: 1 }] },
+      {
+        kind: "steps",
+        steps: [{ label: "Shell", count: 1, startedAt: "2026-01-01T00:00:00.000Z" }],
+      },
       { kind: "progress", text: "The check passed." },
     ]);
   });
@@ -467,6 +482,9 @@ describe("projectMessages", () => {
         kind: "progress",
         text: "Let me check what I have locally and try the GitHub API",
         pendingToolNames: ["shell"],
+        pendingToolCalls: [
+          { name: "shell", startedAt: "2026-01-01T00:00:01.000Z", executionId: undefined },
+        ],
       },
     ]);
   });
@@ -531,7 +549,10 @@ describe("projectMessages", () => {
         botId: "bot-a",
         blocks: [
           { kind: "text", text: "Alpha done." },
-          { kind: "steps", steps: [{ label: "Shell", count: 1 }] },
+          {
+            kind: "steps",
+            steps: [{ label: "Shell", count: 1, startedAt: "2026-01-01T00:00:02.000Z" }],
+          },
         ],
       }),
       expect.objectContaining({
@@ -539,7 +560,10 @@ describe("projectMessages", () => {
         botId: "bot-b",
         blocks: [
           { kind: "text", text: "Beta." },
-          { kind: "steps", steps: [{ label: "Read file", count: 1 }] },
+          {
+            kind: "steps",
+            steps: [{ label: "Read file", count: 1, startedAt: "2026-01-01T00:00:03.000Z" }],
+          },
         ],
       }),
     ]);
@@ -837,6 +861,51 @@ it("retains the internal wake marker in live projections", () => {
 });
 
 describe("completeToolStep", () => {
+  it("keeps same-name concurrent receipts paired with their own execution and start", () => {
+    let blocks = appendToolCallSegment([], "web_fetch", {
+      executionId: "first",
+      startedAt: "2026-01-01T00:00:00Z",
+    });
+    blocks = appendToolCallSegment(blocks, "web_fetch", {
+      executionId: "second",
+      startedAt: "2026-01-01T00:00:01Z",
+    });
+    blocks = completeToolStep(blocks, {
+      name: "web_fetch",
+      executionId: "first",
+      durationMs: 6000,
+      outcome: "succeeded",
+    });
+    blocks = completeToolStep(blocks, {
+      name: "web_fetch",
+      executionId: "second",
+      durationMs: 2000,
+      outcome: "error",
+    });
+    expect(blocks).toEqual([
+      {
+        kind: "steps",
+        steps: [
+          {
+            label: "Web fetch",
+            count: 1,
+            executionId: "first",
+            startedAt: "2026-01-01T00:00:00Z",
+            durationMs: 6000,
+          },
+          {
+            label: "Web fetch",
+            count: 1,
+            executionId: "second",
+            startedAt: "2026-01-01T00:00:01Z",
+            durationMs: 2000,
+            status: "failed",
+          },
+        ],
+      },
+    ]);
+  });
+
   it("splits repeated calls without marking other calls failed", () => {
     expect(
       completeToolStep([{ kind: "steps", steps: [{ label: "Web search", count: 2 }] }], {
@@ -884,7 +953,17 @@ it("projects an audited outcome from saved events", () => {
     createdAt: "2026-01-01T00:00:00Z",
   }));
   expect(projectMessages(events)[0]?.blocks).toEqual([
-    { kind: "steps", steps: [{ label: "Connectors execute tool", count: 1, peopleWithEmail: 0 }] },
+    {
+      kind: "steps",
+      steps: [
+        {
+          label: "Connectors execute tool",
+          count: 1,
+          peopleWithEmail: 0,
+          startedAt: "2026-01-01T00:00:00Z",
+        },
+      ],
+    },
   ]);
 });
 

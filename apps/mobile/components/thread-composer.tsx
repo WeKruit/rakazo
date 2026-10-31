@@ -1,6 +1,6 @@
 import type { MenuAction } from "@expo/ui/community/menu";
 import { MenuView } from "@expo/ui/community/menu";
-import type { AgentSkillCatalogEntry } from "@rakazo/contracts";
+import type { AgentSkillCatalogEntry, ThreadBackgroundTask } from "@rakazo/contracts";
 import type { buildComposerMentionOptions, ComposerMention, SlashActionId } from "@rakazo/core";
 import {
   mentionChipKey,
@@ -16,6 +16,7 @@ import { useI18n } from "../lib/i18n";
 import { useMobileTokens, useResolvedAppearance } from "../lib/native";
 import type { ComposerSnapshot } from "../lib/thread-feedback";
 import { GlassSurface } from "./glass-surface";
+import { NativeActionButton } from "./native-action-button";
 import { NativeSymbol } from "./native-symbol";
 
 export type ThreadComposerHandle = {
@@ -40,6 +41,9 @@ type ThreadComposerProps = {
   attachFrom: (source: string) => void;
   send: () => Promise<void>;
   stop: () => Promise<void>;
+  stopAll?: () => Promise<void>;
+  backgroundTasks?: readonly ThreadBackgroundTask[];
+  cancelTask?: (task: ThreadBackgroundTask) => Promise<void>;
   startVoiceCall: () => Promise<void>;
   onSlashAction: (action: SlashActionId) => void;
 };
@@ -61,6 +65,9 @@ export function ThreadComposer({
   attachFrom,
   send,
   stop,
+  stopAll,
+  backgroundTasks = [],
+  cancelTask,
   startVoiceCall,
   onSlashAction,
 }: ThreadComposerProps) {
@@ -68,12 +75,14 @@ export function ThreadComposer({
   const colorScheme = useResolvedAppearance();
   const { t } = useI18n();
   const [draft, setDraft] = useState("");
+  const [queueMode, setQueueMode] = useState<"steer" | "follow_up">("steer");
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [selectedMentions, setSelectedMentions] = useState<ComposerMention[]>([]);
   const [selectedSkill, setSelectedSkill] = useState<AgentSkillCatalogEntry | null>(null);
   useImperativeHandle(ref, () => ({
     snapshot: () => ({
+      queueMode,
       promptText: serializeComposerPrompt(draft, selectedSkill, selectedMentions),
       mentions: selectedMentions,
       skill: selectedSkill,
@@ -290,6 +299,14 @@ export function ThreadComposer({
             </Pressable>
           ))}
         </ScrollView>
+      ) : null}
+      {working || queueMode === "follow_up" ? (
+        <NativeActionButton
+          label={queueMode === "follow_up" ? t("Follow up") : t("Steer")}
+          prominence="plain"
+          size="compact"
+          onPress={() => setQueueMode((mode) => (mode === "steer" ? "follow_up" : "steer"))}
+        />
       ) : null}
       <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 10, marginTop: 8 }}>
         <MenuView
@@ -526,6 +543,57 @@ export function ThreadComposer({
               <NativeSymbol ios="stop.fill" android="stop" size={15} color={tokens.foreground} />
             </GlassSurface>
           </Pressable>
+        ) : null}
+        {stopAll && (working || backgroundTasks.length > 0) ? (
+          <MenuView
+            actions={[
+              {
+                id: "all",
+                title: t("Stop everything"),
+                attributes: { destructive: true, disabled: sending },
+              },
+              ...backgroundTasks.map((task) => ({
+                id: task.id,
+                title:
+                  task.status === "cancelling"
+                    ? t("Cancelling…")
+                    : task.kind === "agent_run"
+                      ? t("Stop following")
+                      : task.kind === "research"
+                        ? t("Stop research updates")
+                        : t("Cancel task"),
+                attributes: { disabled: sending || task.status === "cancelling" },
+              })),
+            ]}
+            colorScheme={colorScheme}
+            onPressAction={(event) => {
+              if (event.nativeEvent.event === "all") void stopAll();
+              else {
+                const task = backgroundTasks.find((row) => row.id === event.nativeEvent.event);
+                if (task) void cancelTask?.(task);
+              }
+            }}
+          >
+            <View
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel={t("Work actions")}
+              style={{ width: 44, height: 44 }}
+            >
+              <GlassSurface
+                shape="circle"
+                style={styles.circleButton}
+                fallbackStyle={{ borderColor: tokens.border, borderWidth: 1 }}
+              >
+                <NativeSymbol
+                  ios="ellipsis"
+                  android="ellipsis-horizontal"
+                  size={16}
+                  color={tokens.foreground}
+                />
+              </GlassSurface>
+            </View>
+          </MenuView>
         ) : null}
       </View>
     </>

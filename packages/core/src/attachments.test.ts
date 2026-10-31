@@ -285,6 +285,29 @@ describe("role chat context", () => {
 });
 
 describe("isXlsxFileName", () => {
+  it("keeps promoted work on its exact source attachments instead of the newer person's message", () => {
+    const original = {
+      id: "source",
+      role: "user",
+      runId: "source-run",
+      blocks: [{ kind: "text" as const, text: "Read the attached brief" }],
+    };
+    const newer = {
+      id: "newer",
+      role: "user",
+      runId: "person-run",
+      blocks: [{ kind: "text" as const, text: "Use a different scope" }],
+    };
+    expect(
+      userTurnMessageForRun("tool_background", "source-run", [original, newer], "source"),
+    ).toBe(original);
+    expect(
+      userTurnMessageForRun("tool_background", "source-run", [original, newer]),
+    ).toBeUndefined();
+    expect(
+      userTurnMessageForRun("tool_background", "source-run", [original, newer], "missing"),
+    ).toBeUndefined();
+  });
   it("detects xlsx names case-insensitively while xlsx has no allowed MIME mapping", () => {
     expect(isXlsxFileName("List.XLSX")).toBe(true);
     expect(isXlsxFileName("list.csv")).toBe(false);

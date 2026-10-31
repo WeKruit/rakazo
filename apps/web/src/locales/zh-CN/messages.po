@@ -6192,3 +6192,19 @@ msgstr "你的招聘工作区。"
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "你的任务"
+
+#: src/components/LiveWork.tsx
+msgid "Cancel task"
+msgstr "取消任务"
+
+#: src/components/AskDeadline.tsx
+msgid "Expired"
+msgstr "已过期"
+
+#: src/components/AskDeadline.tsx
+msgid "Expires in {time}"
+msgstr "将在 {time} 后过期"
+
+#: src/components/LiveWork.tsx
+msgid "View"
+msgstr "查看"

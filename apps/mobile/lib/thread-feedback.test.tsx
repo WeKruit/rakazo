@@ -77,6 +77,7 @@ function Probe({ threadKey }: { threadKey: string }) {
 
 function payload(text = "Hello"): SendPayload {
   return {
+    queueMode: "steer",
     originThreadKey: "bot-1",
     displayText: text,
     replyPreview: "Quoted message",
@@ -94,6 +95,7 @@ function payload(text = "Hello"): SendPayload {
 
 describe("composer settlement", () => {
   const submitted: ComposerSnapshot = {
+    queueMode: "steer",
     promptText: "Hello",
     mentions: [{ kind: "bot", id: "bot-1", name: "Bot" }],
     skill: null,
@@ -106,6 +108,7 @@ describe("composer settlement", () => {
   });
 
   it.each<Partial<ComposerSnapshot>>([
+    { queueMode: "follow_up" },
     { promptText: "Edited" },
     { mentions: [{ kind: "bot", id: "bot-2", name: "Bot" }] },
     { skill: { id: "skill-1", name: "Skill", description: "", source: "user", readOnly: false } },
@@ -250,22 +253,26 @@ describe("scoped mobile outbox", () => {
     expect(container.textContent).toBe("");
     expect(disk.clear).toHaveBeenCalled();
   });
-  it("reports real errors and reuses uploaded artifacts on manual retry", async () => {
-    const attempt = feedback.sendAttempt(payload());
-    request
-      .mockResolvedValueOnce({ id: "artifact-a" })
-      .mockRejectedValueOnce(new Error("Quota exceeded"));
-    await act(async () => {
-      await feedback.send(attempt);
-    });
-    expect(notDelivered).toHaveBeenCalledWith(attempt);
-    await act(async () => {
-      await feedback.send(attempt);
-    });
-    expect(request.mock.calls.filter(([proc]) => proc === "artifacts/create")).toHaveLength(1);
-    const sends = request.mock.calls.filter(([proc]) => proc === "threads/send");
-    expect(sends[0]).toEqual(sends[1]);
-  });
+  it.each(["steer", "follow_up"] as const)(
+    "keeps %s mode and uploaded artifacts on manual retry",
+    async (queueMode) => {
+      const attempt = feedback.sendAttempt({ ...payload(), queueMode });
+      request
+        .mockResolvedValueOnce({ id: "artifact-a" })
+        .mockRejectedValueOnce(new Error("Quota exceeded"));
+      await act(async () => {
+        await feedback.send(attempt);
+      });
+      expect(notDelivered).toHaveBeenCalledWith(attempt);
+      await act(async () => {
+        await feedback.send(attempt);
+      });
+      expect(request.mock.calls.filter(([proc]) => proc === "artifacts/create")).toHaveLength(1);
+      const sends = request.mock.calls.filter(([proc]) => proc === "threads/send");
+      expect(sends[0]).toEqual(sends[1]);
+      expect(sends[0]?.[1].queueMode).toBe(queueMode);
+    },
+  );
   it.each([false, true])("pauses the ordered queue on HTTP 429 (wrapped: %s)", async (wrapped) => {
     reachable = false;
     const first = feedback.sendAttempt(payload("First"));

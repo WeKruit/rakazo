@@ -207,6 +207,7 @@ export function ShellConversation({
     resuming,
     displayedRunError,
     displayedRunErrorId,
+    runErrorNeedsReconnect,
     handleRunErrorPresented,
     transcriptMessages,
     queuedMessages,
@@ -803,12 +804,19 @@ export function ShellConversation({
                   olderCursor={emptyCrmChat ? null : (activeSnapshot?.olderCursor ?? null)}
                   loadingOlder={loadingOlder}
                   answerableAskMessageIds={emptyCrmChat ? NO_ITEMS : answerableAskIds}
+                  waitingRuns={
+                    emptyCrmChat
+                      ? NO_ITEMS
+                      : (activeSnapshot?.activeRuns ??
+                        (activeSnapshot?.run ? [activeSnapshot.run] : []))
+                  }
                   running={!emptyCrmChat && transcriptRunning}
                   tailPhase={
                     emptyCrmChat ? null : threadTailPhase(activeSnapshot ?? null, { sending })
                   }
                   workingBots={emptyCrmChat ? NO_ITEMS : workingBots}
                   workRuns={emptyCrmChat ? NO_ITEMS : workingRuns}
+                  backgroundWork={emptyCrmChat ? NO_ITEMS : activeSnapshot?.backgroundWork}
                   onLoadOlder={loadOlder}
                   onOpenBot={openBot}
                   onAnswer={answerMessage}
@@ -826,6 +834,7 @@ export function ShellConversation({
                   speakingMessageId={speakingMessageId}
                   onSpeak={speakMessage}
                   onOpenComputer={onOpenComputer}
+                  onStopRun={stopRun}
                   liveDetail={liveDetail}
                   workEstimate={workEstimate}
                 />
@@ -921,8 +930,13 @@ export function ShellConversation({
                   onDismissError={dismissComposerError}
                   onRetry={() => {
                     dismissComposerError();
-                    void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID());
+                    if (runErrorNeedsReconnect) {
+                      openSettings("models");
+                      return;
+                    }
+                    void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), "steer", true);
                   }}
+                  retryLabel={runErrorNeedsReconnect ? t`Reconnect` : undefined}
                   sending={sending}
                   fileInputRef={fileInputRef}
                   onAttachmentPick={
@@ -933,6 +947,12 @@ export function ShellConversation({
                   onRemoveAttachment={removeAttachment}
                   onSend={sendFromComposer}
                   onStop={stopRun}
+                  onStopAll={() => stopRun(undefined, "all")}
+                  hasBackgroundWork={
+                    Boolean(activeSnapshot?.backgroundTasks?.length) ||
+                    Boolean(workEstimate) ||
+                    Boolean(activeSnapshot?.activeRuns?.length)
+                  }
                   onVoice={
                     !emptyCrmChat && !inGroup && active
                       ? () => {

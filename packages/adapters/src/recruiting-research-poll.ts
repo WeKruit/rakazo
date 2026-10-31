@@ -8,6 +8,7 @@ import { recruitingResearchPollJob, runContinueJob } from "@rakazo/adapter-kit";
 import type { RunTrigger } from "@rakazo/contracts";
 import { ACTIVE_RUN_STATUSES } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
+import { STOPPED_TURN } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import {
   NOT_GRADING_TASK,
@@ -180,43 +181,59 @@ export async function trackDirectRecruitingResearch(
     return null;
   }
   const scope = { spaceId: context.spaceId, userId: context.userId };
-  const [server, run] = await Promise.all([
-    deps.prisma.mcpServer.findFirst({
-      where: { id: route.resourceId, ...scope },
-      select: { id: true, revision: true, endpoint: true, transport: true },
-    }),
-    // A stopped run never arms a background follow-up, even if its call returns afterwards.
-    deps.prisma.run.findFirst({
-      where: { id: context.runId, ...scope, status: { in: [...ACTIVE_RUN_STATUSES] } },
-      select: { id: true, thread: { select: { activeRecruitingRoleId: true } } },
-    }),
-  ]);
-  const roleId = run?.thread.activeRecruitingRoleId;
-  if (server?.transport !== "streamable_http" || server.endpoint !== AUTUMN_MCP || !roleId)
-    return null;
-  const role = await deps.prisma.recruitingRole.findFirst({
-    where: { id: roleId, ...scope },
-    select: { id: true },
+  const source = await deps.prisma.run.findFirst({
+    where: { id: context.runId, ...scope },
+    select: { threadId: true },
   });
-  if (!role) return null;
-  const identity = { mcpServerId: server.id, serverRevision: server.revision, providerTaskId };
-  const task = await deps.prisma.recruitingResearchTask.upsert({
-    where: { mcpServerId_serverRevision_providerTaskId: identity },
-    update: {},
-    create: { ...identity, roleId, createdByRunId: run.id },
-    select: { id: true, roleId: true, state: true },
-  });
-  // A task already recorded on another role stays where it is.
-  if (task.roleId !== roleId) return null;
-  if (task.state !== "active")
-    await deps.prisma.recruitingResearchTask.update({
-      where: { id: task.id },
-      data: { state: "active" },
+  if (!source) return null;
+  const taskId = await deps.prisma.$transaction(async (tx) => {
+    // Serialize registration with both Stop scopes: a stopped turn keeps accepted work,
+    // while Stop everything cannot be undone by a provider response that arrives later.
+    await tx.$queryRaw`SELECT id FROM threads WHERE id = ${source.threadId} FOR UPDATE`;
+    const [server, run] = await Promise.all([
+      tx.mcpServer.findFirst({
+        where: { id: route.resourceId, ...scope },
+        select: { id: true, revision: true, endpoint: true, transport: true },
+      }),
+      tx.run.findFirst({
+        where: {
+          id: context.runId,
+          ...scope,
+          OR: [
+            { status: { in: [...ACTIVE_RUN_STATUSES] } },
+            { status: "cancelled", error: STOPPED_TURN },
+          ],
+        },
+        select: { id: true, thread: { select: { activeRecruitingRoleId: true } } },
+      }),
+    ]);
+    const roleId = run?.thread.activeRecruitingRoleId;
+    if (server?.transport !== "streamable_http" || server.endpoint !== AUTUMN_MCP || !roleId)
+      return null;
+    const role = await tx.recruitingRole.findFirst({
+      where: { id: roleId, ...scope },
+      select: { id: true },
     });
-  await deps.jobs.enqueue(
-    recruitingResearchPollJob({ taskId: task.id }, recruitingResearchPollDelay(0)),
-  );
-  return task.id;
+    if (!role) return null;
+    const identity = { mcpServerId: server.id, serverRevision: server.revision, providerTaskId };
+    const task = await tx.recruitingResearchTask.upsert({
+      where: { mcpServerId_serverRevision_providerTaskId: identity },
+      update: {},
+      create: { ...identity, roleId, createdByRunId: run.id },
+      select: { id: true, roleId: true, state: true, createdByRunId: true },
+    });
+    if (task.roleId !== roleId) return null;
+    if (task.state === "closed" && task.createdByRunId === run.id) return null;
+    if (task.state !== "active")
+      await tx.recruitingResearchTask.update({
+        where: { id: task.id },
+        data: { state: "active" },
+      });
+    return task.id;
+  });
+  if (taskId)
+    await deps.jobs.enqueue(recruitingResearchPollJob({ taskId }, recruitingResearchPollDelay(0)));
+  return taskId;
 }
 
 /** New rows at the provider that justify showing them in Results before the research finishes. */

@@ -32,7 +32,7 @@ export function compactRosterStatusLabel(status: string): string | null {
     case "waiting_takeover":
       return t`Needs you`;
     case "failed":
-      return t`Error`;
+      return t`Try again`;
     default:
       return null;
   }
@@ -55,11 +55,11 @@ export function threadTailLabel(phase: ThreadTailPhase | null): string | null {
     case "needs_takeover":
       return t`Needs you`;
     case "working":
-      return t`Working…`;
+      return t`Thinking…`;
     case "starting":
-      return t`Starting…`;
+      return t`Thinking…`;
     case "queued":
-      return t`Waiting in line…`;
+      return t`Queued`;
     case "background":
       return t`Working in background…`;
     default:

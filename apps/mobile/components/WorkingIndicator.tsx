@@ -1,5 +1,6 @@
 import type { WorkSession, WorkStageKind, WorkStep } from "@rakazo/core";
 import {
+  formatWorkClock,
   formatWorkDuration,
   workActivityLabel,
   workProgressLabel,
@@ -22,6 +23,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useI18n } from "../lib/i18n";
 import { useMobileTokens } from "../lib/native";
+import { NativeActionButton } from "./native-action-button";
 
 const CYCLE_MS = 1100;
 const DOTS = [0, 1, 2];
@@ -56,6 +58,20 @@ function Dot({
 
 const LIVE_STEP_WINDOW = 6;
 
+function StepClock({ startedAt }: { startedAt: string }) {
+  const tokens = useMobileTokens();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <Text style={{ color: tokens.mutedForeground, fontSize: 12, fontVariant: ["tabular-nums"] }}>
+      {formatWorkClock(now - Date.parse(startedAt))}
+    </Text>
+  );
+}
+
 function StepRows({ steps }: { steps: readonly WorkStep[] }) {
   const tokens = useMobileTokens();
   const { t } = useI18n();
@@ -78,6 +94,7 @@ function StepRows({ steps }: { steps: readonly WorkStep[] }) {
       {step.peopleWithEmail !== undefined
         ? ` · ${t(step.peopleWithEmail === 1 ? "{count} person with email" : "{count} people with email", { count: step.peopleWithEmail })}`
         : ""}
+      {step.durationMs !== undefined ? ` · ${formatWorkDuration(step.durationMs)}` : ""}
     </Text>
   ));
 }
@@ -87,10 +104,14 @@ function StageRow({
   label,
   running,
   steps,
+  onOpen,
+  onCancel,
 }: {
   label: string;
   running: boolean;
   steps: readonly WorkStep[];
+  onOpen?: () => void;
+  onCancel?: () => void;
 }) {
   const tokens = useMobileTokens();
   const { t } = useI18n();
@@ -130,6 +151,16 @@ function StageRow({
           <StepRows steps={running ? steps.slice(-LIVE_STEP_WINDOW) : steps} />
         </View>
       ) : null}
+      {onOpen || (running && onCancel) ? (
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          {onOpen ? (
+            <NativeActionButton label={t("View")} onPress={onOpen} prominence="plain" />
+          ) : null}
+          {running && onCancel ? (
+            <NativeActionButton label={t("Cancel task")} onPress={onCancel} prominence="plain" />
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -137,9 +168,13 @@ function StageRow({
 function Stages({
   session,
   stageKind,
+  onOpenStage,
+  onCancelStage,
 }: {
   session: WorkSession | null;
   stageKind: (botId: string) => WorkStageKind;
+  onOpenStage?: (botId: string) => void;
+  onCancelStage?: (botId: string) => void;
 }) {
   const { t } = useI18n();
   return workSessionStages(session).stages.map((stage) => (
@@ -148,6 +183,8 @@ function Stages({
       label={t(workStageLabel(stageKind(stage.botId)))}
       running={stage.running}
       steps={stage.steps}
+      onOpen={onOpenStage ? () => onOpenStage(stage.botId) : undefined}
+      onCancel={onCancelStage ? () => onCancelStage(stage.botId) : undefined}
     />
   ));
 }
@@ -162,23 +199,31 @@ export function WorkingIndicator({
   tint,
   session,
   stageKind = () => "other",
+  label: feedbackLabel,
+  onOpenStage,
+  onCancelStage,
 }: {
   compact?: boolean;
   tint?: string;
   session?: WorkSession | null;
   /** What each handed-off stage is for, from the member doing it. */
   stageKind?: (botId: string) => WorkStageKind;
+  label?: string;
+  onOpenStage?: (botId: string) => void;
+  onCancelStage?: (botId: string) => void;
 }) {
   const tokens = useMobileTokens();
   const { t } = useI18n();
   const reducedMotion = useReducedMotion();
   const progress = useSharedValue(0);
   const workProgress = session?.progress;
-  const label = workProgress
-    ? t(workProgressLabel(workProgress))
-    : session?.current
-      ? `${t(workActivityLabel(session.current))}…`
-      : t("Working…");
+  const label =
+    feedbackLabel ??
+    (workProgress
+      ? t(workProgressLabel(workProgress))
+      : session?.current
+        ? `${t(workActivityLabel(session.current))}…`
+        : t("Working…"));
 
   useEffect(() => {
     if (reducedMotion || session?.endedAt) return;
@@ -211,7 +256,12 @@ export function WorkingIndicator({
             duration: formatWorkDuration(workSessionElapsedMs(session, Date.now())),
           })}
         </Text>
-        <Stages session={session} stageKind={stageKind} />
+        <Stages
+          session={session}
+          stageKind={stageKind}
+          onOpenStage={onOpenStage}
+          onCancelStage={onCancelStage}
+        />
       </View>
     );
   }
@@ -220,7 +270,12 @@ export function WorkingIndicator({
   return (
     <View style={{ flexShrink: 1, gap: 4 }}>
       <StepRows steps={steps} />
-      <Stages session={session ?? null} stageKind={stageKind} />
+      <Stages
+        session={session ?? null}
+        stageKind={stageKind}
+        onOpenStage={onOpenStage}
+        onCancelStage={onCancelStage}
+      />
       <View
         accessibilityLabel={label}
         accessibilityRole="text"
@@ -252,6 +307,7 @@ export function WorkingIndicator({
             {label}
           </Text>
         ) : null}
+        {session?.currentStartedAt ? <StepClock startedAt={session.currentStartedAt} /> : null}
       </View>
     </View>
   );

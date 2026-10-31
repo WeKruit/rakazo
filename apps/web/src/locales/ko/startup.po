@@ -3380,3 +3380,19 @@ msgstr "이메일 주소"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "이름"
+
+#: src/components/LiveWork.tsx
+msgid "Delegated task"
+msgstr ""
+
+#: src/components/LiveWork.tsx
+msgid "Finding candidates"
+msgstr ""
+
+#: src/pages/ActivityList.tsx
+msgid "Queued"
+msgstr "대기 중"
+
+#: src/pages/PluginsOverlay.tsx
+msgid "Reconnect"
+msgstr ""

@@ -1,6 +1,11 @@
 import { i18n } from "@lingui/core";
 import { useLingui } from "@lingui/react/macro";
-import type { AskAnswer, MessageReaction, ThreadMessage } from "@rakazo/contracts";
+import type {
+  AskAnswer,
+  BackgroundWorkTiming,
+  MessageReaction,
+  ThreadMessage,
+} from "@rakazo/contracts";
 import type { ThreadTailPhase, WorkEstimate, WorkTracker } from "@rakazo/core";
 import {
   EMPTY_WORK_TRACKER,
@@ -9,6 +14,7 @@ import {
   isPeerReceiptBlocks,
   isToolActivityBlock,
   projectMessageReactions,
+  stuckWorkExpiresAt,
   timeSeparatorIds,
   trackWork,
   workStageKind,
@@ -57,6 +63,12 @@ const BackgroundWork = lazyPanel(() =>
   withFeatureMessages(() => import("../../components/LiveWork")).then((m) => m.BackgroundWork),
 );
 
+const StageTranscript = lazyPanel(() =>
+  withFeatureMessages(() => import("../../components/StageTranscript")).then(
+    (m) => m.StageTranscript,
+  ),
+);
+
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { quoteDraftForSelection } from "../../lib/quote-selection";
 import { isRunPhase, rosterWorkStatusLabel, threadTailLabel } from "../../lib/roster-status";
@@ -82,10 +94,12 @@ export const Transcript = memo(function Transcript({
   olderCursor,
   loadingOlder,
   answerableAskMessageIds,
+  waitingRuns,
   running,
   tailPhase,
   workingBots,
   workRuns,
+  backgroundWork,
   onLoadOlder,
   onOpenBot,
   onAnswer,
@@ -103,6 +117,7 @@ export const Transcript = memo(function Transcript({
   speakingMessageId,
   onSpeak,
   onOpenComputer,
+  onStopRun,
   liveDetail,
   workEstimate,
 }: {
@@ -117,6 +132,7 @@ export const Transcript = memo(function Transcript({
   olderCursor: number | null;
   loadingOlder: boolean;
   answerableAskMessageIds: string[];
+  waitingRuns: ReadonlyArray<{ id: string; status: string; updatedAt: string }>;
   running: boolean;
   tailPhase: ThreadTailPhase | null;
   workingBots: GroupAvatarMember[];
@@ -127,6 +143,7 @@ export const Transcript = memo(function Transcript({
     startedAt: string | null;
     createdAt: string;
   }>;
+  backgroundWork?: readonly BackgroundWorkTiming[];
   onLoadOlder: () => void | Promise<void>;
   onOpenBot: (botId: string) => void;
   onAnswer: (message: ThreadMessage, text: AskAnswer, username?: string) => Promise<void>;
@@ -146,6 +163,7 @@ export const Transcript = memo(function Transcript({
   speakingMessageId: string | null;
   onSpeak: (message: ThreadMessage) => void;
   onOpenComputer: (botId?: string) => void;
+  onStopRun?: (runId: string) => Promise<void>;
   /** Business progress for the live work line, e.g. people added to Results. */
   liveDetail?: ReactNode;
   /** Big or background work this conversation is waiting on. */
@@ -187,10 +205,30 @@ export const Transcript = memo(function Transcript({
   const workTracker = useRef<WorkTracker>(EMPTY_WORK_TRACKER);
   workTracker.current = trackWork(
     workTracker.current,
-    { runs: workRuns, messages },
+    { runs: workRuns, messages, backgroundWork },
     new Date(Date.now()).toISOString(),
   );
   const workSession = workTracker.current.session;
+  const [openStage, setOpenStage] = useState<{
+    botId: string;
+    runIds: string[];
+    sourceRunIds: string[];
+  } | null>(null);
+  const openWorkStage = (botId: string) => {
+    if (!workSession) return;
+    setOpenStage({
+      botId,
+      runIds: workSession.runIds.filter((id) => workSession.runBots[id] === botId),
+      sourceRunIds: workSession.runIds,
+    });
+  };
+  const cancelWorkStage = onStopRun
+    ? async (botId: string) => {
+        for (const id of Object.keys(workSession?.live ?? {})) {
+          if (workSession?.runBots[id] === botId) await onStopRun(id);
+        }
+      }
+    : undefined;
   const stageKind = useCallback((botId: string) => workStageKind(peerBot(botId)), [peerBot]);
   const workingLabel =
     showToolActivity && isRunPhase(tailPhase) && workingBots.length
@@ -537,6 +575,10 @@ export const Transcript = memo(function Transcript({
                         artifactTarget={artifactTarget}
                         message={message}
                         canAnswer={answerableAskMessageIds.includes(message.id)}
+                        askExpiresAt={(() => {
+                          const run = waitingRuns.find((run) => run.id === message.runId);
+                          return run ? stuckWorkExpiresAt(run.status, run.updatedAt) : null;
+                        })()}
                         onOpenBot={onOpenBot}
                         onOpenPeerMessages={onOpenPeerMessages}
                         onAnswer={onAnswer}
@@ -638,6 +680,7 @@ export const Transcript = memo(function Transcript({
         {workingLabel &&
         // Streaming reply text is its own progress; the run label steps aside for it.
         !(
+          tailPhase !== "starting" &&
           isRunPhase(tailPhase) &&
           messages.some(
             (message) =>
@@ -659,7 +702,7 @@ export const Transcript = memo(function Transcript({
             tailPhase === "retrying" ? (
             <LiveWork
               session={
-                workSession?.endedAt
+                tailPhase === "starting" || workSession?.endedAt
                   ? null
                   : workSession && tailPhase === "compacting"
                     ? { ...workSession, current: null }
@@ -671,6 +714,8 @@ export const Transcript = memo(function Transcript({
               showSteps={!showToolActivity}
               stageKind={stageKind}
               estimate={workEstimate}
+              onOpenStage={openWorkStage}
+              onCancelStage={cancelWorkStage}
             />
           ) : (
             <LoadingState
@@ -688,7 +733,13 @@ export const Transcript = memo(function Transcript({
             !tailPhase &&
             !showToolActivity &&
             messages.at(-1)?.role !== "user" ? (
-              <LiveWork session={workSession} live={false} label="" stageKind={stageKind} />
+              <LiveWork
+                session={workSession}
+                live={false}
+                label=""
+                stageKind={stageKind}
+                onOpenStage={openWorkStage}
+              />
             ) : null}
             {workEstimate && !tailPhase ? <BackgroundWork estimate={workEstimate} /> : null}
           </>
@@ -702,6 +753,35 @@ export const Transcript = memo(function Transcript({
             window.getSelection()?.removeAllRanges();
             setQuoteDraft(null);
           }}
+        />
+      ) : null}
+      {openStage ? (
+        <StageTranscript
+          target={artifactTarget}
+          liveMessages={messages}
+          showToolActivity={showToolActivity}
+          {...openStage}
+          onClose={() => setOpenStage(null)}
+          renderMessage={(message) => (
+            <MessageView
+              artifactTarget={artifactTarget}
+              message={message}
+              canAnswer={false}
+              onAnswer={onAnswer}
+              onOpenBot={onOpenBot}
+              onOpenPeerMessages={onOpenPeerMessages}
+              memberName={memberName}
+              peerBot={peerBot}
+              onRefresh={onRefresh}
+              onBotChanged={onBotChanged}
+              onAddRoutine={onAddRoutine}
+              voiceReady={false}
+              speaking={false}
+              onSpeak={() => {}}
+              onOpenComputer={onOpenComputer}
+              showToolActivity={showToolActivity}
+            />
+          )}
         />
       ) : null}
       <button

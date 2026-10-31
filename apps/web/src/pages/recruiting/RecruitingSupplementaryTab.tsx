@@ -204,6 +204,7 @@ export function RecruitingSupplementaryTab({
                 <AskCard
                   block={question.block}
                   canAnswer={question.canAnswer}
+                  expiresAt={question.expiresAt}
                   onAnswer={async (answer) => {
                     await rpc.threads.answer({
                       ...target,

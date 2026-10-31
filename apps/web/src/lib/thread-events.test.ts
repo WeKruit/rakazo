@@ -447,6 +447,7 @@ describe("thread event reduction", () => {
       startedAt: null,
       completedAt: null,
       createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T00:00:00.000Z",
     };
 
     const next = reduceThreadSnapshot(
@@ -1052,6 +1053,7 @@ describe("thread event reduction", () => {
         startedAt: null,
         completedAt: null,
         createdAt: "2026-08-16T00:00:00.000Z",
+        updatedAt: "2026-08-16T00:00:00.000Z",
       },
     };
 
@@ -1128,8 +1130,17 @@ describe("thread event reduction", () => {
           {
             kind: "steps",
             steps: [
-              { label: "Slack find channels", count: 1 },
-              { label: "Slack fetch conversation history", count: 2 },
+              { label: "Slack find channels", count: 1, startedAt: "2026-08-16T00:00:01.000Z" },
+              {
+                label: "Slack fetch conversation history",
+                count: 1,
+                startedAt: "2026-08-16T00:00:01.000Z",
+              },
+              {
+                label: "Slack fetch conversation history",
+                count: 1,
+                startedAt: "2026-08-16T00:00:01.000Z",
+              },
             ],
           },
           { kind: "progress", activity: true, text: "" },
@@ -1241,6 +1252,13 @@ describe("thread event reduction", () => {
             kind: "progress",
             text: "Let me check Slack ",
             pendingToolNames: ["SLACK_FIND_CHANNELS"],
+            pendingToolCalls: [
+              {
+                name: "SLACK_FIND_CHANNELS",
+                startedAt: "2026-08-16T00:00:01.000Z",
+                executionId: undefined,
+              },
+            ],
           },
         ],
       }),
@@ -1263,7 +1281,12 @@ describe("thread event reduction", () => {
         id: "progress:run-1",
         blocks: [
           { kind: "text", text: "Let me check Slack for a broad search." },
-          { kind: "steps", steps: [{ label: "Slack find channels", count: 1 }] },
+          {
+            kind: "steps",
+            steps: [
+              { label: "Slack find channels", count: 1, startedAt: "2026-08-16T00:00:01.000Z" },
+            ],
+          },
         ],
       }),
     ]);
@@ -1312,7 +1335,12 @@ describe("thread event reduction", () => {
         id: "progress:run-1",
         blocks: [
           { kind: "text", text: "Let me check Done." },
-          { kind: "steps", steps: [{ label: "Slack find channels", count: 1 }] },
+          {
+            kind: "steps",
+            steps: [
+              { label: "Slack find channels", count: 1, startedAt: "2026-08-16T00:00:01.000Z" },
+            ],
+          },
         ],
       }),
     ]);
@@ -1359,6 +1387,13 @@ describe("thread event reduction", () => {
             kind: "progress",
             text: "Let me check Slack Found it, now sanding",
             pendingToolNames: ["SLACK_FIND_CHANNELS"],
+            pendingToolCalls: [
+              {
+                name: "SLACK_FIND_CHANNELS",
+                startedAt: "2026-08-16T00:00:01.000Z",
+                executionId: undefined,
+              },
+            ],
           },
         ],
       }),
@@ -1429,6 +1464,7 @@ describe("thread event reduction", () => {
       startedAt: null,
       completedAt: null,
       createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T00:00:00.000Z",
     };
     const otherLive = {
       ...message("progress:run-b", [{ kind: "progress" as const, text: "Other bot" }]),
@@ -1544,6 +1580,7 @@ describe("thread event reduction", () => {
       startedAt: null,
       completedAt: null,
       createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T00:00:00.000Z",
     };
     const waitingRun = { ...newerRun, id: "run-waiting", botId: "bot-b", taskId: "task-b" };
     const initial: ThreadSnapshot = {
@@ -1861,6 +1898,7 @@ function threadRun(id: string, botId = "bot-1"): NonNullable<ThreadSnapshot["run
     startedAt: null,
     completedAt: null,
     createdAt: "2026-08-16T00:00:00.000Z",
+    updatedAt: "2026-08-16T00:00:00.000Z",
   };
 }
 
