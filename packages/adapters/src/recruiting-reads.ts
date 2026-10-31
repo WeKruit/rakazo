@@ -1469,6 +1469,7 @@ export async function getRecruitingCorrespondence(
           const saved = contacts.get(contact.candidateKey);
           contacts.set(contact.candidateKey, {
             ...contact,
+            ...(saved?.imported ? { imported: true } : {}),
             emails: [
               ...new Map(
                 [...(saved?.emails ?? []), ...contact.emails].map((email) => [
