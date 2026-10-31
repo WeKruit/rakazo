@@ -95,6 +95,7 @@ async function main() {
         "packages/testkit/src/usage-accounting.postgres.test.ts",
         "packages/db/src/history-retrieval.postgres.test.ts",
         "packages/db/src/work-metrics.postgres.test.ts",
+        "packages/db/src/message-embeddings.postgres.test.ts",
         "packages/testkit/src/history-retrieval.postgres.test.ts",
         "packages/testkit/src/history-short-product.postgres.test.ts",
         "packages/testkit/src/history-followup-product.postgres.test.ts",

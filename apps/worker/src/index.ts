@@ -21,6 +21,7 @@ import {
   createCloudAgentConnection,
   createCompanySiteResolver,
   createConnectorStack,
+  createDeploymentEmbedder,
   createExaOrganizationSearch,
   createJobReconciler,
   createMessagingContextLoader,
@@ -75,6 +76,7 @@ import {
   createDb,
   createPool,
   createThreadEvents,
+  embedRecentMessages,
   isTooManyDatabaseConnections,
   parsePositiveInteger,
   pushSessionExpiresAt,
@@ -88,6 +90,9 @@ import { MarkdownMemoryStore } from "@rakazo/memory";
 const PROFILE_FILL_DELAY_MS = 60_000;
 // Organization lookups per start for logos not saved yet; each is one company-index search.
 const LOGO_FILL_MAX_LOOKUPS = 6_000;
+// Recent messages get meaning vectors for history search; about US$0.10 a day at most.
+const EMBED_INTERVAL_MS = 60_000;
+const EMBED_MAX_TOKENS_PER_DAY = 5_000_000;
 
 const staging = hostedStagingConfig(process.env);
 const logger = createRootLogger(
@@ -159,6 +164,7 @@ async function main() {
   // Same resolver the API uses, so both processes agree on provider, model and key.
   const { key: deploymentModelKey, configured: deploymentModelConfigured } =
     resolveDeploymentModel();
+  const embedder = createDeploymentEmbedder();
   const sandboxProvider = resolveSandboxProvider(process.env);
   const sandbox = createRunSandbox(sandboxProvider, {
     ...sandboxProviderOptionsFromEnv(process.env),
@@ -327,6 +333,7 @@ async function main() {
     ticketBoardEnabled,
     messaging: messaging ? createMessagingContextLoader(prisma) : undefined,
     web: createWebProvider(),
+    embedder,
     cloudAgent,
     shutdownSignal: shutdown.signal,
   });
@@ -402,6 +409,23 @@ async function main() {
       )
       .catch((error) => logger.warn("organization.logos.fill failed", { error: String(error) }));
   }, PROFILE_FILL_DELAY_MS).unref();
+  if (embedder) {
+    let embedding = false;
+    setInterval(() => {
+      if (embedding || shutdown.signal.aborted) return;
+      embedding = true;
+      void embedRecentMessages(prisma, embedder, {
+        maxTokensPerDay: EMBED_MAX_TOKENS_PER_DAY,
+        signal: shutdown.signal,
+        onError: (error) => logger.warn("history.embed failed", { error: String(error) }),
+      })
+        .then((result) => result.embedded && logger.info("history.embed", result))
+        .catch((error) => logger.warn("history.embed failed", { error: String(error) }))
+        .finally(() => {
+          embedding = false;
+        });
+    }, EMBED_INTERVAL_MS).unref();
+  }
 
   const drain = createWorkerDrain({
     stopJobs: () => jobHost.stop(),
