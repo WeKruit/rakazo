@@ -2917,7 +2917,16 @@ export type RecruitingCrmReadDeps = {
   signal?: AbortSignal;
   stillAuthorized?: () => Promise<boolean>;
   reauthorize: () => Promise<ThreadTarget>;
+  /**
+   * One request's CRM organization memberships, shared by its reads of several roles. Each read
+   * still checks its own access to the membership tool before using them.
+   */
+  crmMemberships?: CrmMembershipReads;
 };
+export type CrmMembershipReads = Map<
+  string,
+  Promise<ReturnType<typeof RecruitingCrmMembershipRowsSchema.parse>>
+>;
 type RecruitingCrmRoleLookup = { operation: "role"; reference: RecruitingCrmRoleReference };
 /**
  * `allPages` returns every candidate of the role in one result: the role binding is checked once,
@@ -3122,18 +3131,22 @@ export async function getRecruitingCrmData(
         throw unavailable();
       return payload.data;
     }
-    const memberships = new Map<
-      string,
-      Promise<ReturnType<typeof RecruitingCrmMembershipRowsSchema.parse>>
-    >();
-    const membershipRows = (server: Server) => {
-      let rows = memberships.get(server.id);
-      if (!rows) {
-        rows = read(server, "list_crm_memberships", {}).then((value) =>
-          parse(RecruitingCrmMembershipRowsSchema, value),
-        );
-        memberships.set(server.id, rows);
+    const memberships: CrmMembershipReads = deps.crmMemberships ?? new Map();
+    const membershipRows = async (server: Server) => {
+      const key = `${server.id}:${server.revision}`;
+      const shared = memberships.get(key);
+      if (shared) {
+        const rows = await shared;
+        await sourceFence(server, "list_crm_memberships");
+        return rows;
       }
+      const rows = read(server, "list_crm_memberships", {}).then((value) =>
+        parse(RecruitingCrmMembershipRowsSchema, value),
+      );
+      memberships.set(key, rows);
+      rows.catch(() => {
+        if (memberships.get(key) === rows) memberships.delete(key);
+      });
       return rows;
     };
     const where = {
