@@ -457,6 +457,7 @@ import {
   readInstantlyEmail,
   readInstantlyReplyRequest,
 } from "./instantly-reply.js";
+import type { TextJudge } from "./judge.js";
 import {
   assertConnectorToolArgs,
   CATALOG_EXECUTE,
@@ -3551,6 +3552,8 @@ export interface ExecutorDeps {
   web?: WebProvider;
   /** Meaning vectors for history search when no words match; absent keeps word search only. */
   embedder?: TextEmbedder | null;
+  /** Optional yes/no judge the server asks about replies; absent means the wording rules decide. */
+  judge?: { resolve(): Promise<TextJudge | undefined> };
   /** Page browser (DOM refs) on the bot computer. Defaults to the sandbox live browser when supported. */
   browser?: BrowserProvider;
   secretHttp?: RemoteTransportDependencies;
@@ -14101,6 +14104,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   tools,
                   worked: turnReport.worked(),
                   read: turnReport.read(),
+                  judge: () => deps.judge?.resolve() ?? Promise.resolve(undefined),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
                   ...(handedIn

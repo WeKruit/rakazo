@@ -1105,6 +1105,17 @@ describe("planDeclineRetry", () => {
     ).toBeUndefined();
   });
 
+  it("keeps a reply the judge is sure is not a refusal, and retries when it is unsure or absent", async () => {
+    const judged = (p: number | undefined) => ({
+      ...input,
+      judge: async () => ({ yes: vi.fn(async () => p) }),
+    });
+    const human = { prisma: prisma([{ clientNonce: "send:human" }]) };
+    expect(await planDeclineRetry(human, judged(0.1))).toBeUndefined();
+    expect((await planDeclineRetry(human, judged(0.9)))?.note).toContain("bot_id bot-o");
+    expect((await planDeclineRetry(human, judged(undefined)))?.note).toContain("bot_id bot-o");
+  });
+
   it("keeps a long task going while the server counts work left, until a card or the limit", async () => {
     const retried = (times: number) => ({
       prisma: prisma(

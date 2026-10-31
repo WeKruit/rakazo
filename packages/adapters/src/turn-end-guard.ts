@@ -11,6 +11,7 @@ import {
 import { type PrismaClient, readRecruitingPlaybookStep } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import type { TextJudge } from "./judge.js";
 import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 import type { DeclineRetry } from "./turn-report.js";
 import { declineRetry, draftVariables, questionCard, retryReason } from "./turn-report.js";
@@ -688,6 +689,11 @@ export function turnRequestText(
     .join("\n");
 }
 
+const REFUSAL_QUESTION =
+  "The recruiter asked `request`; the assistant's final message is `reply`. Does the reply refuse, fail to do, or put off doing what was asked (says it can't or won't, asks permission or offers to do it instead of doing it)? Answer no when the reply delivers the requested result or report and only notes a limit of its sources (for example a calendar or record that isn't connected or is incomplete) as a caveat. A confirmation or approval card waiting for the recruiter counts as doing the request, and a plain answer to a yes/no question is not a refusal.";
+/** Below this probability of a refusal the judge keeps the reply. */
+const JUDGE_KEEPS_BELOW = 0.3;
+
 /** Stages whose own questions and lists are the turn's deliverable: an offer there is not a deferral. */
 const QUESTION_STAGES = new Set(["intake", "calibration_10"]);
 
@@ -721,6 +727,8 @@ export async function planDeclineRetry(
     stage?: () => Promise<string | undefined>;
     /** Work the turn left unfinished by the server's own count (e.g. people still to look up). */
     owedWork?: string;
+    /** An optional judge that can overrule the wording check when a reply only reads as a refusal. */
+    judge?: () => Promise<TextJudge | undefined>;
   },
 ): Promise<DeclineRetry | undefined> {
   const recentContinues = async () =>
@@ -761,6 +769,16 @@ export async function planDeclineRetry(
     return declined && !variables ? questionCard(input.reply, declined) : undefined;
   if (variables) return variables;
   if (!declined) return undefined;
+  // The wording check reads any "I can't …" as a refusal, including a coverage aside in an
+  // answer. A judge that is clearly sure the reply does what was asked keeps it.
+  if (declined.kind === "decline") {
+    const judge = await input.judge?.();
+    const refuses = await judge?.yes(REFUSAL_QUESTION, {
+      request: input.personRequest ?? input.request,
+      reply: input.reply,
+    });
+    if (refuses !== undefined && refuses < JUDGE_KEEPS_BELOW) return undefined;
+  }
   const members = input.groupId
     ? await deps.prisma.chatGroupMember.findMany({
         where: {

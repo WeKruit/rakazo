@@ -1,5 +1,5 @@
 import type { JobPublisher, JobWorkerHost } from "@rakazo/adapter-kit";
-import { ComposioConnector, IntegrationProviderSettings } from "@rakazo/adapters";
+import { ComposioConnector, IntegrationProviderSettings, JudgeSettings } from "@rakazo/adapters";
 import { hostedStagingConfig } from "@rakazo/core";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
 import { createWorkerDrain } from "./drain.js";
@@ -334,6 +334,7 @@ async function main() {
     messaging: messaging ? createMessagingContextLoader(prisma) : undefined,
     web: createWebProvider(),
     embedder,
+    judge: new JudgeSettings(prisma, secrets),
     cloudAgent,
     shutdownSignal: shutdown.signal,
   });

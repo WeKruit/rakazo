@@ -32,6 +32,7 @@ import type {
   FaviconResolver,
   getBotSecretMetadata,
   IntegrationProviderSettings,
+  JudgeSettings,
   MemoryProviderResolver,
   PiOAuthConnected,
   PiOAuthLogins,
@@ -701,6 +702,7 @@ export interface RouterDeps {
     provider: string,
   ) => void;
   integrationSettings?: IntegrationProviderSettings;
+  judgeSettings?: JudgeSettings;
   composio?: ComposioProvider;
   mcpOAuth?: McpOAuthBroker;
   connectors: ConnectorRegistry;
@@ -5677,6 +5679,19 @@ export function createRouter(deps: RouterDeps) {
           throw new ORPCError("BAD_REQUEST", {
             message: "Could not verify or save these credentials",
           });
+        }
+        return { ok: true as const };
+      }),
+      saveJudge: authed.integrationSetup.saveJudge.handler(async ({ context, input }) => {
+        if (!context.actor.isDeploymentOwner) throw new ORPCError("FORBIDDEN");
+        if (!deps.judgeSettings) throw new ORPCError("NOT_IMPLEMENTED");
+        try {
+          await deps.judgeSettings.save(
+            input,
+            connectionContext(context.actor, "integrationSetup.saveJudge", context.signal),
+          );
+        } catch {
+          throw new ORPCError("BAD_REQUEST", { message: "Could not verify or save this key" });
         }
         return { ok: true as const };
       }),
