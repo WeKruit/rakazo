@@ -23,61 +23,71 @@ import { isPeopleSearchEndpoint, linkedinPersonKey } from "./recruiting-profiles
 export { isRecruitingCandidateReportField, projectRecruitingCandidateReport } from "@rakazo/core";
 export { mcpObject } from "@rakazo/core/node/approval-effect-key";
 
-async function nativeMcpCreationReceipts(
+/** Receipts read per page: each holds a full provider answer, so most callers stop early. */
+const RECEIPT_PAGE = 20;
+
+/**
+ * This person's native creation receipts on one connection, newest first, read one page at a
+ * time so a caller that finds what it needs in the newest receipts never loads the whole history.
+ */
+async function* nativeMcpCreationReceipts(
   prisma: PrismaClient,
   actor: Pick<AdapterContext, "userId" | "spaceId">,
   server: Pick<McpServer, "id" | "revision">,
   toolName: string,
   scope: { threadId?: string; since?: Date } = {},
-) {
+): AsyncGenerator<{ args: Record<string, unknown>; result: unknown }> {
   // ponytail: inspect only native creation receipts, never full saved candidate outputs.
-  const effects = await prisma.externalEffect.findMany({
-    where: {
-      spaceId: actor.spaceId,
-      status: "completed",
-      run: {
+  for (let skip = 0; ; skip += RECEIPT_PAGE) {
+    const page = await prisma.externalEffect.findMany({
+      where: {
         spaceId: actor.spaceId,
-        userId: actor.userId,
-        ...(scope.threadId ? { threadId: scope.threadId } : {}),
+        status: "completed",
+        run: {
+          spaceId: actor.spaceId,
+          userId: actor.userId,
+          ...(scope.threadId ? { threadId: scope.threadId } : {}),
+        },
+        ...(scope.since ? { createdAt: { gte: scope.since } } : {}),
+        OR: [["2", "route"], ["3"]].map((path) => ({
+          AND: [
+            { request: { path: [...path, "connectorId"], equals: "mcp" } },
+            { request: { path: [...path, "resourceId"], equals: server.id } },
+            { request: { path: [...path, "resourceRevision"], equals: server.revision } },
+            { request: { path: [...path, "toolName"], equals: toolName } },
+          ],
+        })),
       },
-      ...(scope.since ? { createdAt: { gte: scope.since } } : {}),
-      OR: [["2", "route"], ["3"]].map((path) => ({
-        AND: [
-          { request: { path: [...path, "connectorId"], equals: "mcp" } },
-          { request: { path: [...path, "resourceId"], equals: server.id } },
-          { request: { path: [...path, "resourceRevision"], equals: server.revision } },
-          { request: { path: [...path, "toolName"], equals: toolName } },
-        ],
-      })),
-    },
-    orderBy: { createdAt: "desc" },
-    select: { request: true, result: true },
-  });
-  const receipts: Array<{ args: Record<string, unknown>; result: unknown }> = [];
-  for (const effect of effects) {
-    const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
-    const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
-    const route = direct?.route ?? catalog?.route;
-    const requestArgs = direct?.args ?? record(catalog?.args.arguments);
-    if (
-      route?.connectorId !== "mcp" ||
-      route.resourceId !== server.id ||
-      route.resourceRevision !== server.revision ||
-      route.toolName !== toolName ||
-      !requestArgs ||
-      // The executor appends the resolved route only after the catalog id or display name
-      // resolved to this exact tool, so the route, not the model-chosen id, is authoritative.
-      (!direct &&
-        (!catalog?.route ||
-          !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)))
-    )
-      continue;
-    receipts.push({
-      args: requestArgs,
-      result: record(effect.result)?.providerResult ?? effect.result,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      select: { request: true, result: true },
+      skip,
+      take: RECEIPT_PAGE,
     });
+    for (const effect of page) {
+      const direct = boundDirectApprovalDetails(effect.request, "__rakazoCatalogTool");
+      const catalog = catalogApprovalDetails(effect.request, "__rakazoCatalogTool");
+      const route = direct?.route ?? catalog?.route;
+      const requestArgs = direct?.args ?? record(catalog?.args.arguments);
+      if (
+        route?.connectorId !== "mcp" ||
+        route.resourceId !== server.id ||
+        route.resourceRevision !== server.revision ||
+        route.toolName !== toolName ||
+        !requestArgs ||
+        // The executor appends the resolved route only after the catalog id or display name
+        // resolved to this exact tool, so the route, not the model-chosen id, is authoritative.
+        (!direct &&
+          (!catalog?.route ||
+            !["connectors_execute_tool", "mcp_execute_tool"].includes(catalog.toolName)))
+      )
+        continue;
+      yield {
+        args: requestArgs,
+        result: record(effect.result)?.providerResult ?? effect.result,
+      };
+    }
+    if (page.length < RECEIPT_PAGE) return;
   }
-  return receipts;
 }
 
 /** A shared provider account never grants access to another product user's research. */
@@ -110,7 +120,7 @@ export async function requireAutumnTaskOwnership(
     select: { id: true },
   });
   if (task) return;
-  for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "research")) {
+  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "research")) {
     if (!nonblank(receipt.args.prompt) || receipt.args.task_id !== undefined) continue;
     const observation = classifyRecruitingResearchResult(receipt.result, { operation: "create" });
     if (observation.deliveryState === "accepted" && observation.providerTaskId === args.task_id)
@@ -296,10 +306,12 @@ async function earlierGradingRun(
 ): Promise<string | undefined> {
   const wanted = gradedPeopleKey(people);
   if (!wanted) return undefined;
-  const receipts = await nativeMcpCreationReceipts(prisma, actor, server, "agent_run", {
+  const receipts: Array<{ args: Record<string, unknown>; result: unknown }> = [];
+  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "agent_run", {
     threadId,
     since: new Date(Date.now() - GRADING_REUSE_MS),
-  });
+  }))
+    receipts.push(receipt);
   const failed = new Set<string>();
   for (const receipt of receipts) {
     const body = mcpObject(receipt.result);
@@ -346,9 +358,10 @@ export async function prepareAgentRun(
   const named = (["runId", "previousRunId"] as const).filter((field) => args[field] !== undefined);
   if (named.length) {
     const owned = new Set<string>();
-    for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "agent_run")) {
+    for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "agent_run")) {
       const id = mcpObject(receipt.result)?.id;
       if (typeof id === "string") owned.add(id);
+      if (named.every((field) => owned.has(String(args[field])))) break;
     }
     for (const field of named)
       if (!owned.has(String(args[field])))
@@ -502,7 +515,7 @@ export async function requireFullEnrichJobOwnership(
   if (toolName === "enrich_bulk" && args.enrichment_id === undefined) return args;
   if (toolName === "get_enrichment_results") {
     const owned: string[] = [];
-    for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, "enrich_bulk")) {
+    for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, "enrich_bulk")) {
       if (receipt.args.enrichment_id !== undefined || record(receipt.result)?.isError === true)
         continue;
       const body = mcpObject(receipt.result);
@@ -538,7 +551,7 @@ export async function savedContactLookups(
   toolName: string,
   into: SavedContactLookups = { emails: new Map(), searched: new Map() },
 ): Promise<SavedContactLookups> {
-  for (const receipt of await nativeMcpCreationReceipts(prisma, actor, server, toolName)) {
+  for await (const receipt of nativeMcpCreationReceipts(prisma, actor, server, toolName)) {
     const people = mcpObject(receipt.result)?.people;
     for (const person of Array.isArray(people) ? people : []) {
       const entry = record(person);

@@ -451,7 +451,8 @@ describe("threadSnapshot", () => {
 
     const snapshot = await threadSnapshot({ prisma }, target);
 
-    expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    // A snapshot, not a share lock on the thread row: opening a thread never waits for its writers.
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
     expect(snapshot.backgroundTasks).toBeDefined();
     expect(findManyEvents).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -485,6 +486,7 @@ describe("threadSnapshot", () => {
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       timeout: 15_000,
       maxWait: 5_000,
+      isolationLevel: "RepeatableRead",
     });
   });
 
@@ -819,6 +821,7 @@ describe("threadSnapshot", () => {
     expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), {
       timeout: 15_000,
       maxWait: 5_000,
+      isolationLevel: "RepeatableRead",
     });
   });
 
