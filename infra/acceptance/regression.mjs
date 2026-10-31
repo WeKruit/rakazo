@@ -10,7 +10,8 @@
 //     node infra/acceptance/regression.mjs [--suite gate|full] [--cases <dir>] [--only a,b] [--out <dir>]
 //   --suite gate   after every deploy: smoke, first10 (short JD), progress question during find-50
 //                  (which must end with a report stating the new count), pasted English JD
-//                  (needs <cases>/t3.txt), cards (card-e2e.mjs: question, send and booking cards
+//                  (needs <cases>/t3.txt). cards (full suite or --only cards; it searches, so it costs
+//                  money: card-e2e.mjs clicks question, send and booking cards
 //                  clicked in the browser; needs RAKAZO_EMAIL/RAKAZO_PASSWORD and <cases>/cards.json
 //                  {"sendGroup","sendRoleMark","bookingGroup"})
 //   --suite full   gate plus first10 (long JD), attached JD with drafts, contacts and send-20
@@ -331,7 +332,7 @@ const wanted = new Set(
           "t5",
           "expired",
         ]
-      : ["smoke", "isolation", "first10", "progress", "t3", "cards"]),
+      : ["smoke", "isolation", "first10", "progress", "t3"]),
 );
 
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
