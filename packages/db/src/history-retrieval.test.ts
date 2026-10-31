@@ -281,6 +281,26 @@ function sql(mock: ReturnType<typeof db>["mock"], call = 0) {
   return mock.$queryRaw.mock.calls[call]![0] as Prisma.Sql;
 }
 describe("local history retrieval", () => {
+  it("tells the agent whether the history holds the answer, inside the result", async () => {
+    const { mock, prisma } = db();
+    mock.$queryRaw.mockResolvedValueOnce([row(4)]);
+    const found = await searchHistory(prisma, scope, { query: "batch" });
+    expect(found).toMatchObject({ answerability: "found" });
+    expect(found).not.toHaveProperty("missingEvidence");
+    mock.$queryRaw.mockResolvedValueOnce([]);
+    const none = await searchHistory(prisma, scope, {
+      query: "salary band",
+      after: "2026-10-01",
+    });
+    expect(none).toMatchObject({ answerability: "none", messages: [] });
+    expect(none.missingEvidence).toContain(
+      'this conversation from 2026-10-01 matches "salary band"',
+    );
+    mock.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([row(2, "salary is open")]);
+    const partial = await searchHistory(prisma, scope, { query: "salary band", scope: "mine" });
+    expect(partial).toMatchObject({ answerability: "partial", match: "some_words_ranked" });
+    expect(partial.missingEvidence).toContain("only share some words");
+  });
   it("bounds search excerpts and pages by stable sequence", async () => {
     const { mock, prisma } = db();
     mock.$queryRaw.mockResolvedValue([row(10), row(9), row(8)]);

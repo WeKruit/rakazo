@@ -15,6 +15,8 @@ import {
 const GOLDEN_BY_VERSION: Record<number, string> = {
   1: "086577d14d7f578e997849d69416dfb8f7d0282c59cfbcf192e2a77c28f047fa",
   2: "531ad276e3d4642ccb095e1d219940e85021bb4946c73eac42a3a2afc49c7152",
+  // 3: bot_message_received may name the conversation its outcome returns to (role team delegation).
+  3: "fa2f7a5998cb406ab33cf7a0a7c99df8eea287fc1a4a44535c82b8b095c3c910",
 };
 
 const OLD_ROWS: unknown[] = [
@@ -32,6 +34,15 @@ const OLD_ROWS: unknown[] = [
   { kind: "ask", text: "Remote or onsite?", status: "pending" },
   { kind: "ask", text: "Remote or onsite?", status: "answered", answer: "Remote" },
   { kind: "steps", steps: [{ label: "Searching candidates", count: 2 }], durationMs: 4200 },
+  {
+    kind: "bot_message_received",
+    fromBotId: "bot-a",
+    fromBotName: "Main",
+    text: "Find ten people.",
+    intent: "request",
+    returnToMessageId: "message-a",
+    hop: 1,
+  },
 ];
 
 describe("stored event shapes", () => {

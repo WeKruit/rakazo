@@ -17,6 +17,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this
@@ -79,6 +80,11 @@ export async function messageBot(
     message: string;
     intent?: BotMessageIntent;
     deliveryKey?: string;
+    /** Another conversation of this user that the target bot belongs to (a role team's chat). */
+    thread_id?: string;
+    /** Names shown for each side when they differ from the bots' own names. */
+    sender_label?: string;
+    target_label?: string;
   },
   options?: { allowTerminalSource?: boolean; forceUnread?: boolean },
 ) {
@@ -104,9 +110,25 @@ export async function messageBot(
     name: input.confirm_name,
   });
   if (!target) return { ok: false as const, error: "no bot found with that id or name" };
-  if (target.id === sender.id) return { ok: false as const, error: "a bot cannot message itself" };
-  if (!target.thread)
-    return { ok: false as const, error: `${target.name} has no chat to deliver to` };
+  // The same bot may work in another conversation (Kruit and a role team's coordinator).
+  const crossThread = Boolean(input.thread_id && input.thread_id !== run.threadId);
+  if (target.id === sender.id && !crossThread)
+    return { ok: false as const, error: "a bot cannot message itself" };
+  const targetName = input.target_label ?? target.name;
+  const senderName = input.sender_label ?? sender.name;
+  const addressedThread = input.thread_id
+    ? await deps.prisma.thread.findFirst({
+        where: {
+          id: input.thread_id,
+          spaceId: run.spaceId,
+          userId: run.userId,
+          group: { archivedAt: null, members: { some: { botId: target.id } } },
+        },
+        select: { id: true },
+      })
+    : target.thread;
+  if (!addressedThread)
+    return { ok: false as const, error: `${targetName} has no chat to deliver to` };
   const returnsToSender =
     options?.allowTerminalSource === true &&
     (intent === "result" || intent === "status") &&
@@ -122,7 +144,7 @@ export async function messageBot(
     };
   }
 
-  const targetThreadId = target.thread.id;
+  const targetThreadId = addressedThread.id;
 
   // A tool call can be re-executed after a lease expiry, so a delivery has to be
   // replayable: without this the recipient is messaged twice and woken twice.
@@ -131,17 +153,21 @@ export async function messageBot(
     ({
       ok: true as const,
       botId: target.id,
-      name: target.name,
+      name: targetName,
       delivered: message,
       replayed: true as const,
-      note: `Already sent to ${target.name} in this turn; it was not sent again.`,
+      note: `Already sent to ${targetName} in this turn; it was not sent again.`,
     }) as const;
 
-  const wakePrompt = buildBotMessageWakePrompt({ from: sender, text: message, intent });
+  const wakePrompt = buildBotMessageWakePrompt({
+    from: { ...sender, name: senderName },
+    text: message,
+    intent,
+  });
   const outboundBlock: MessageBlock = {
     kind: "bot_message_sent",
     toBotId: target.id,
-    toBotName: target.name,
+    toBotName: targetName,
     text: message,
     intent,
   };
@@ -205,7 +231,7 @@ export async function messageBot(
           select: { id: true },
         });
         if (!stillAddressable)
-          return { ok: false as const, error: `${target.name} is no longer available` };
+          return { ok: false as const, error: `${targetName} is no longer available` };
 
         // Echo into the sender's chat in the same transaction so a failed notify
         // cannot leave one side delivered and the other blank.
@@ -221,18 +247,22 @@ export async function messageBot(
         const inboundBlock: MessageBlock = {
           kind: "bot_message_received",
           fromBotId: sender.id,
-          fromBotName: sender.name,
+          fromBotName: senderName,
           text: message,
           hop,
           intent,
           returnToMessageId: outbound.id,
+          ...(crossThread ? { returnThreadId: run.threadId } : {}),
         };
         const inbound = await createThreadMessageInTransaction(tx, {
           threadId: targetThreadId,
           role: "user",
           blocks: [inboundBlock],
           replyToMessageId:
-            sourceContext?.fromBotId === target.id && intent !== "fyi"
+            sourceContext?.fromBotId === target.id &&
+            intent !== "fyi" &&
+            // The echo being answered must live in the conversation receiving this reply.
+            (!crossThread || sourceContext.returnThreadId === targetThreadId)
               ? sourceContext.returnToMessageId
               : undefined,
           clientNonce: deliveryKey,
@@ -315,9 +345,9 @@ export async function messageBot(
   return {
     ok: true as const,
     botId: target.id,
-    name: target.name,
+    name: targetName,
     delivered: message,
-    note: `Sent to ${target.name}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
+    note: `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
   };
 }
 
@@ -348,6 +378,12 @@ export async function returnBotMessageOutcome(
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
+  // Work delegated from another conversation returns once, when the team's whole chain is done.
+  if (source.returnThreadId && intent === "result") {
+    await markBotOutcomeReturned(deps.prisma, run.id);
+    await returnDelegatedTeamOutcome(deps, run);
+    return true;
+  }
   const sent = await deps.prisma.message.findMany({
     where: { threadId: run.threadId, runId: run.id },
     select: { blocks: true },
@@ -366,6 +402,13 @@ export async function returnBotMessageOutcome(
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
+  // A request delegated from another conversation returns there, named after this one.
+  const returnThread = source.returnThreadId
+    ? await deps.prisma.thread.findFirst({
+        where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId },
+        select: { group: { select: { name: true } } },
+      })
+    : null;
   const outcome = await messageBot(
     deps,
     run,
@@ -374,6 +417,13 @@ export async function returnBotMessageOutcome(
       bot_id: source.fromBotId,
       message: clampBotMessage(text),
       intent,
+      ...(source.returnThreadId
+        ? {
+            thread_id: source.returnThreadId,
+            target_label: source.fromBotName,
+            ...(returnThread?.group ? { sender_label: `${returnThread.group.name} team` } : {}),
+          }
+        : {}),
       // One key per run so status vs result (executor vs reconciler) cannot double-deliver.
       deliveryKey: `auto-outcome:${run.id}`,
     },
@@ -385,6 +435,100 @@ export async function returnBotMessageOutcome(
   if (outcome.ok) await markBotOutcomeReturned(deps.prisma, run.id);
   return outcome.ok;
 }
+
+/**
+ * A role team's conversation went quiet after work another conversation delegated to it: send
+ * the team's latest reply back there, exactly once per delegated request. Waits while a teammate
+ * still has a turn queued, running or waiting on the recruiter, or the role's research is still
+ * running, so a handoff to a specialist returns the specialist's result, not "it's on it".
+ */
+export async function returnDelegatedTeamOutcome(
+  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
+  run: {
+    id: string;
+    spaceId: string;
+    threadId: string;
+    botId: string;
+    userId: string;
+    sourceMessageId?: string | null;
+  },
+): Promise<void> {
+  const thread = await deps.prisma.thread.findFirst({
+    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
+    select: { activeRecruitingRoleId: true, group: { select: { name: true } } },
+  });
+  if (!thread?.group) return;
+  const since = new Date(Date.now() - DELEGATION_RETURN_WINDOW_MS);
+  const delegated = await deps.prisma.message.findFirst({
+    where: {
+      threadId: run.threadId,
+      role: "user",
+      createdAt: { gte: since },
+      blocks: { array_contains: [{ kind: "bot_message_received" }] },
+    },
+    orderBy: { seq: "desc" },
+    select: { id: true, seq: true, blocks: true },
+  });
+  const root = botMessageContext(
+    Array.isArray(delegated?.blocks) ? (delegated.blocks as MessageBlock[]) : [],
+  );
+  // Only a request answers back; a returned result never bounces to the team again.
+  if (!delegated || !root?.returnThreadId) return;
+  if (root.intent !== undefined && root.intent !== "request" && root.intent !== "question") return;
+  const busy = await deps.prisma.run.findFirst({
+    where: {
+      threadId: run.threadId,
+      id: { not: run.id },
+      status: { in: ["queued", "running", "waiting_input"] },
+    },
+    select: { id: true },
+  });
+  if (busy) return;
+  if (
+    thread.activeRecruitingRoleId &&
+    (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId))
+  )
+    return;
+  // The team's replies since the request, up to the recruiter's next own message there.
+  const later = await deps.prisma.message.findMany({
+    where: { threadId: run.threadId, seq: { gt: delegated.seq } },
+    orderBy: { seq: "asc" },
+    take: 200,
+    select: { role: true, blocks: true },
+  });
+  let text = "";
+  for (const message of later) {
+    const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
+    if (message.role === "user" && !botMessageContext(blocks)) break;
+    if (message.role !== "bot") continue;
+    const reply = blocks
+      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+      .join("\n")
+      .trim();
+    if (reply) text = reply;
+  }
+  if (!text) return;
+  const sent = await messageBot(
+    deps,
+    run,
+    { id: run.botId, name: thread.group.name },
+    {
+      bot_id: root.fromBotId,
+      thread_id: root.returnThreadId,
+      sender_label: `${thread.group.name} team`,
+      target_label: root.fromBotName,
+      message: clampBotMessage(text),
+      intent: "result",
+      deliveryKey: `delegation-outcome:${delegated.id}`,
+    },
+    { allowTerminalSource: true },
+  );
+  if (!sent.ok)
+    getLogger().warn("delegated team outcome not returned", { runId: run.id, error: sent.error });
+}
+
+/** Only a recent delegation is still waiting for its team's result. */
+const DELEGATION_RETURN_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 async function markBotOutcomeReturned(prisma: PrismaClient, runId: string) {
   await prisma.run.updateMany({

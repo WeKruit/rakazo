@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Group, RecruitingCrmDataOutput } from "@rakazo/contracts";
+import { RECRUITING_GLOBAL_AGENT_NAME } from "@rakazo/core";
 import { Badge, Button, cn, Input, Skeleton } from "@rakazo/ui-web";
 import {
   Bookmark,
@@ -300,7 +301,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
       <nav aria-label={t`Recruiting workspace`} className="hire-nav">
         <Button variant="ghost" onClick={onGlobalChat}>
           <MessageSquare size={18} aria-hidden="true" />
-          <Trans>Main</Trans>
+          {RECRUITING_GLOBAL_AGENT_NAME}
         </Button>
         <Button variant="ghost" disabled={!canCreateRole} onClick={onNewRole}>
           <PlusCircle size={18} aria-hidden="true" />
@@ -335,7 +336,7 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         ))}
       </nav>
       <div className="hire-role-heading">
-        <Trans>All roles</Trans>
+        <Trans>Role teams</Trans>
       </div>
       <div className="relative mx-1 mb-2">
         <Search

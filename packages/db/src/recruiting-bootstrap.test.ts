@@ -147,6 +147,11 @@ function fixture() {
         return found ? { ...found, members: found.members.map((member) => ({ ...member })) } : null;
       }),
       count: vi.fn(async () => (group ? 1 : 0)),
+      update: vi.fn(async ({ where, data }) => {
+        const found = globalGroups.get(where.id);
+        if (found) Object.assign(found, data);
+        return found;
+      }),
     },
     chatGroupMember: {
       createMany: vi.fn(async ({ data }) => {
@@ -444,7 +449,7 @@ describe("ensureRecruitingWorkspace", () => {
     expect(native.group).toHaveBeenCalledWith(
       f.tx,
       actor,
-      expect.objectContaining({ id: recruiting.recruitingGlobalGroupId(actor), name: "Main" }),
+      expect.objectContaining({ id: recruiting.recruitingGlobalGroupId(actor), name: "Kruit" }),
     );
     await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
     expect(native.bot).toHaveBeenCalledTimes(5);
@@ -1375,12 +1380,26 @@ it("provisions one separate global native conversation with the same private cre
   expect(native.group.mock.calls.filter(([, , input]) => input.id === globalId)).toHaveLength(1);
   expect(native.group).toHaveBeenCalledWith(f.tx, actor, {
     id: globalId,
-    name: "Main",
+    name: "Kruit",
     botIds: f.bots.map((bot) => bot.id),
   });
   expect(globalId).not.toBe(f.getGroup()!.id);
+  expect(f.tx.chatGroup.update).not.toHaveBeenCalled();
   expect(recruiting.recruitingGlobalGroupId({ ...actor, userId: "other" })).not.toBe(globalId);
   expect(recruiting.recruitingGlobalGroupId({ ...actor, spaceId: "other" })).not.toBe(globalId);
+});
+
+it("renames an existing global conversation still called Main and keeps it", async () => {
+  const f = fixture();
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+  const globalId = recruiting.recruitingGlobalGroupId(actor);
+  f.globalGroups.get(globalId)!.name = "Main";
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+  expect(f.tx.chatGroup.update).toHaveBeenCalledWith({
+    where: { id: globalId },
+    data: { name: "Kruit" },
+  });
+  expect(native.group.mock.calls.filter(([, , input]) => input.id === globalId)).toHaveLength(1);
 });
 
 describe("startup recruiting account backfill", () => {

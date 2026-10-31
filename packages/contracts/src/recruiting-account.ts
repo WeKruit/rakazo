@@ -73,6 +73,18 @@ export const RecruitingAccountViewOutputSchema = z.strictObject({
         .optional(),
       reminders: ListRecruitingRemindersOutput.optional(),
       feedback: ListRecruitingFeedbackOutput.optional(),
+      /** Roles view: where the role stands, from saved records only. */
+      status: z
+        .strictObject({
+          savedPeople: z.number().int().min(0),
+          shortlisted: z.number().int().min(0),
+          lastActivityAt: IsoDate.nullable(),
+          /** What the recruiter owes this role's team, with the open card's exact text. */
+          waitingOnYou: z
+            .strictObject({ kind: z.enum(["approval", "question"]), text: z.string() })
+            .nullable(),
+        })
+        .optional(),
     }),
   ),
   nextCursor: Id.nullable(),

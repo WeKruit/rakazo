@@ -3582,3 +3582,7 @@ msgstr "Deine E-Mail-Adresse"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "Dein Name"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role teams"
+msgstr "Rollenteams"

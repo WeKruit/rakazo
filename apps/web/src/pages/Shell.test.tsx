@@ -3453,7 +3453,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
     (button) => button.textContent,
   );
   expect(labels).toEqual([
-    "Main",
+    "Kruit",
     "New Role",
     "Job Brief",
     "Client feedback",
@@ -3947,7 +3947,7 @@ it.each([false, true])(
     expect(container?.querySelector('[data-product-view="recruiting"]')).not.toBeNull();
     expect(
       container?.querySelector('[data-testid="recruiting-navigation"]')?.textContent,
-    ).toContain("All roles");
+    ).toContain("Role teams");
     expect(container?.querySelector('[data-testid="create-menu-trigger"]')).toBeNull();
     expect(document.body.querySelector('select[aria-label="Send to"]')).toBeNull();
     expect(view.getProps().candidateFeedbackRecipients).toEqual([{ id: "bot-1", name: "Main" }]);

@@ -145,6 +145,7 @@ import {
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_GLOBAL_AGENT_NAME,
   RECRUITING_INTAKE_SKILL_NAME,
   RECRUITING_ROUND_NEXT_STEP,
   RECRUITING_SEARCH_AUTOSAVED_NEXT_STEP,
@@ -318,7 +319,12 @@ import {
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
-import { loadBotMessageContext, messageBot, returnBotMessageOutcome } from "./bot-messages.js";
+import {
+  loadBotMessageContext,
+  messageBot,
+  returnBotMessageOutcome,
+  returnDelegatedTeamOutcome,
+} from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
   botSecretToolView,
@@ -1231,7 +1237,7 @@ export function pastedJobTitle(text: string): string | null {
 }
 
 const NO_RECRUITING_ROLE_CONTEXT =
-  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles, interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. Open the role's existing conversation for role-specific work. Never create or bind a role in global Main.";
+  "No recruiting role is selected. Earlier role snapshots do not apply. For cross-role reads use recruiting_candidates operations roles (each role's status), interviews, shortlist, replies and sequences; default to all of this user's active roles and name each role. For role-specific work, hand it to the role's team with delegate_to_role when offered, otherwise link the role's existing conversation. Never create or bind a role in global Main.";
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
@@ -11543,6 +11549,43 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : { ok: true },
             );
           }
+          if (name === "delegate_to_role") {
+            const role = await deps.prisma.recruitingRole.findFirst({
+              where: {
+                id: String(args.role_id ?? ""),
+                spaceId: run.spaceId,
+                userId: run.userId,
+                archivedAt: null,
+              },
+              select: { title: true, sourceThread: { select: { id: true, groupId: true } } },
+            });
+            if (!role?.sourceThread.groupId)
+              return finish({
+                error:
+                  "No active role team with that roleId. Read recruiting_candidates operation roles and pass its id.",
+              });
+            const sent = await messageBot(
+              deps,
+              { ...run, sourceMessageId: run.sourceMessageId },
+              { id: bot.id, name: bot.name },
+              {
+                bot_id: bot.id,
+                thread_id: role.sourceThread.id,
+                sender_label: RECRUITING_GLOBAL_AGENT_NAME,
+                target_label: `${role.title} team`,
+                message: redactSecrets(String(args.message ?? ""), runSecrets),
+                intent: "request",
+                deliveryKey: effectKey,
+              },
+            );
+            if (!sent.ok) return finish({ error: sent.error });
+            return finish({
+              ok: true,
+              team: sent.name,
+              roleGroupLink: `/app/g/${role.sourceThread.groupId}`,
+              note: sent.note,
+            });
+          }
           if (name === "render_view") {
             const parsed = ViewBlockSchema.safeParse({ ...args, kind: "view" });
             if (!parsed.success)
@@ -13975,6 +14018,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.text,
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
+          } else if (thread.groupId) {
+            // A teammate's turn may be the last one of work delegated from another conversation.
+            await returnDelegatedTeamOutcome(deps, {
+              ...run,
+              sourceMessageId: run.sourceMessageId,
+            }).catch((error) => getLogger().error("delegated team outcome return", error));
           }
           const notifyBody = completionNotificationPreview(text);
           if (
@@ -14442,6 +14491,7 @@ export function selectBuiltinToolsForRun(options: {
         ![
           "message_user",
           "message_bot",
+          "delegate_to_role",
           "handoff_to_bot",
           "message_agent",
           "create_poll",

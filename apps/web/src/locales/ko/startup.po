@@ -3582,3 +3582,7 @@ msgstr "이메일 주소"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "이름"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role teams"
+msgstr "역할별 팀"
