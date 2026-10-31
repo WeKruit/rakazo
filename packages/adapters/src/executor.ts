@@ -512,7 +512,7 @@ import {
   searchChartCatalog,
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
-import { createCreditGuard } from "./provider-credits.js";
+import { createCreditGuard, retryWhileOutOfCredits } from "./provider-credits.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -3576,6 +3576,13 @@ function isFailedToolResult(value: unknown): value is { error: unknown } {
   if (!value || typeof value !== "object" || !("error" in value)) return false;
   const error = (value as { error?: unknown }).error;
   return error !== undefined && error !== null;
+}
+
+/** A connector result's failure as text, for matching provider refusals. */
+function connectorFailureText(result: unknown): string | undefined {
+  const failure = toolResultError(result);
+  if (failure === undefined) return undefined;
+  return typeof failure === "string" ? failure : JSON.stringify(failure);
 }
 
 /**
@@ -11976,44 +11983,61 @@ export function createRunExecutor(deps: ExecutorDeps) {
               }
             }
             if (viaConnector) connectorReadOnly.set(executionId, declaredReadOnly === true);
-            let result: unknown = { error: `unknown tool ${name}` };
-            for await (const event of deps.connector.execute(
-              { ...connectorCall, tool: name, args, executionId: effectKey },
-              schedulingSelection?.operation === "confirm" && applied
-                ? { ...context, schedulingConfirmationEffectId: applied.effect.id }
-                : context,
-            )) {
-              if (event.type === "result") {
-                result = event.data;
-                const logIds = collectLogIds(event.data);
-                for (const logId of logIds) {
-                  await deps.events.append({
-                    spaceId: run.spaceId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    runId: run.id,
-                    type: "effect.recorded",
-                    payload: { tool: name, logId },
-                  });
+            // A drained balance that auto top-up refills soon is waited out with the same call,
+            // which the provider refused without doing or charging anything.
+            const connector = deps.connector;
+            const executeOnce = async (): Promise<{ result: unknown } | { settled: unknown }> => {
+              let result: unknown = { error: `unknown tool ${name}` };
+              for await (const event of connector.execute(
+                { ...connectorCall, tool: name, args, executionId: effectKey },
+                schedulingSelection?.operation === "confirm" && applied
+                  ? { ...context, schedulingConfirmationEffectId: applied.effect.id }
+                  : context,
+              )) {
+                if (event.type === "result") {
+                  result = event.data;
+                  const logIds = collectLogIds(event.data);
+                  for (const logId of logIds) {
+                    await deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      runId: run.id,
+                      type: "effect.recorded",
+                      payload: { tool: name, logId },
+                    });
+                  }
+                }
+                if (event.type === "error") {
+                  result = { error: event.message };
+                  for (const logId of event.logIds ?? []) {
+                    await deps.events.append({
+                      spaceId: run.spaceId,
+                      threadId: thread.id,
+                      botId: bot.id,
+                      runId: run.id,
+                      type: "effect.recorded",
+                      payload: { tool: name, logId },
+                    });
+                  }
+                  if (event.outcome === "uncertain" && declaredReadOnly !== true && applied) {
+                    return {
+                      settled: await settleUncertainEffect(deps.prisma, applied.effect.id, name),
+                    };
+                  }
                 }
               }
-              if (event.type === "error") {
-                result = { error: event.message };
-                for (const logId of event.logIds ?? []) {
-                  await deps.events.append({
-                    spaceId: run.spaceId,
-                    threadId: thread.id,
-                    botId: bot.id,
-                    runId: run.id,
-                    type: "effect.recorded",
-                    payload: { tool: name, logId },
-                  });
-                }
-                if (event.outcome === "uncertain" && declaredReadOnly !== true && applied) {
-                  return settleUncertainEffect(deps.prisma, applied.effect.id, name);
-                }
-              }
-            }
+              return { result };
+            };
+            const executed = await retryWhileOutOfCredits(executeOnce, {
+              failure: (outcome) =>
+                "result" in outcome ? connectorFailureText(outcome.result) : undefined,
+              signal: context.signal,
+              onRetry: (delayMs) =>
+                getLogger().warn("connector.out_of_credits.retry", { runId, tool: name, delayMs }),
+            });
+            if ("settled" in executed) return executed.settled;
+            const result = executed.result;
             if (researchAdmission) {
               if (!(await persistEffectResult(result))) return uncertainEffectResult(name);
               if (!applied) throw new Error("Recruiting receipt requires its native effect");
