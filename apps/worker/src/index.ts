@@ -65,6 +65,7 @@ import {
 import { createAuth, getOidcAccessToken, oidcConfigFromEnv } from "@rakazo/auth";
 import { resolveAuthSecret, resolveEncryptionKey, resolveSupervisorToken } from "@rakazo/core";
 import {
+  backfillRecruitingCrews,
   closePoolSessions,
   createBoardEvents,
   createDb,
@@ -461,6 +462,15 @@ async function main() {
 
   logger.info("boot.phase", { phase: "ready", "boot.elapsed_ms": Math.round(performance.now()) });
   logger.info("worker ready", { degraded: secrets.describe().capabilities.degraded ?? false });
+  // Every account with a recruiting crew gets the current defaults (its Reviewer in every
+  // conversation, the tools it grades with) on each release, not only when the person signs in.
+  void backfillRecruitingCrews(
+    prisma,
+    { sandboxKind: sandboxProvider, firstPartyMcpUrl: trustedMcpEndpoint },
+    (error) => logger.error("recruiting crew backfill", error),
+  )
+    .then((accounts) => logger.info("recruiting crew backfill done", { accounts }))
+    .catch((error) => logger.error("recruiting crew backfill", error));
 }
 
 main().catch(async (error) => {

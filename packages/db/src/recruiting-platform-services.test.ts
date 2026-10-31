@@ -21,6 +21,9 @@ function fixture(
     lead?: boolean;
     linked?: number;
     grants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
+    reviewerGrants?: { id: string; allowAllTools: boolean; allowedTools: string[] }[];
+    /** Recruiting conversations of this crew that lack its Reviewer. */
+    withoutReviewer?: { id: string; members: number }[];
   } = {},
 ) {
   const servers = { ...options.servers };
@@ -47,6 +50,7 @@ function fixture(
       }),
     },
     bot: {
+      count: vi.fn(async () => (options.withoutReviewer ? 1 : 0)),
       findFirst: vi.fn(async () => (options.lead === false ? null : { id: "main-bot" })),
       findMany: vi.fn(async () =>
         (missing[current] ?? []).map((id) => ({
@@ -56,9 +60,23 @@ function fixture(
         })),
       ),
     },
+    chatGroup: {
+      findMany: vi.fn(async () =>
+        (options.withoutReviewer ?? []).map((group) => ({
+          id: group.id,
+          _count: { members: group.members },
+        })),
+      ),
+    },
+    chatGroupMember: { createMany: vi.fn(async () => ({ count: 1 })) },
     botMcpServer: {
       count: vi.fn(async () => options.linked ?? 0),
-      findMany: vi.fn(async () => options.grants ?? []),
+      // The Reviewer's grants answer only the query for its role.
+      findMany: vi.fn(async ({ where }: { where: unknown }) =>
+        JSON.stringify(where).includes(":reviewer")
+          ? (options.reviewerGrants ?? [])
+          : (options.grants ?? []),
+      ),
       updateMany: vi.fn(async () => ({ count: 1 })),
       createMany: vi.fn(async () => {
         missing[current] = [];
@@ -74,6 +92,29 @@ function fixture(
 }
 
 describe("ensurePlatformServices", () => {
+  it("adds the Reviewer to every recruiting conversation of the crew that lacks it", async () => {
+    const f = fixture({
+      withoutReviewer: [
+        { id: "copy-1", members: 3 },
+        { id: "full", members: 6 },
+      ],
+    });
+    await ensurePlatformServices(f.prisma, actor);
+    // bot.findFirst answers "main-bot" for the Reviewer lookup too.
+    expect(f.tx.chatGroupMember.createMany).toHaveBeenCalledWith({
+      data: [{ groupId: "copy-1", botId: "main-bot" }],
+      skipDuplicates: true,
+    });
+  });
+
+  it("gives the Reviewer the agent run it grades with", async () => {
+    const f = fixture({ reviewerGrants: [{ id: "g", allowAllTools: false, allowedTools: [] }] });
+    await ensurePlatformServices(f.prisma, actor);
+    expect(f.tx.botMcpServer.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { allowedTools: ["agent_run"] } }),
+    );
+  });
+
   it("creates the services and links the crew members that predate them", async () => {
     const f = fixture({
       missing: { "people-search": ["main-bot", "sourcer-bot"], fullenrich: ["outreach-bot"] },

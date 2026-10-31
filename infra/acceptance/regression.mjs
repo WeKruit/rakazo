@@ -800,8 +800,9 @@ for (const name of ["progress", "t3", "t1"]) {
   const { groupId } = reportOf(name);
   if (groupId) await rpc("groups/archive", { groupId }).catch((error) => log(error.message));
 }
-// Sweep copies other harness runs left idle; keep the booking fixture the t5 case reuses.
-if (TOKEN) {
+// Sweep copies other harness runs left idle (a failed case may stop before archiving its own);
+// keep the booking fixture the t5 case reuses. Runs with a password sign-in too.
+{
   const t5 = CASES && path.join(CASES, "t5.json");
   const keep =
     option("--t5-group") ??

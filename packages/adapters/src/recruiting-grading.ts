@@ -577,7 +577,14 @@ async function researchTeammate(
       )
         .map((member, index) => ({
           id: member.botId,
-          rank: member.bot && recruitingBotKey(member.bot) === "reviewer" ? -1 : index,
+          // The coordinator only talks with the recruiter: it grades only when nobody else can.
+          rank: !member.bot
+            ? index
+            : recruitingBotKey(member.bot) === "reviewer"
+              ? -1
+              : recruitingBotKey(member.bot) === "main"
+                ? Number.MAX_SAFE_INTEGER
+                : index,
         }))
         .sort((a, b) => a.rank - b.rank)
         .map((member) => member.id)
