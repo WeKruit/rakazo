@@ -7,6 +7,12 @@ import { rpc } from "../lib/rpc";
 import { errorText } from "../lib/user-error";
 
 function describeRule(rule: ActionApprovalRule): string {
+  if (rule.matchKind === "egress") {
+    if (rule.matchValue === "*") return t`Computer reaches only allowed sites`;
+    return rule.effect === "block"
+      ? t`Computer never reaches ${rule.matchValue}`
+      : t`Computer may reach ${rule.matchValue}`;
+  }
   if (rule.effect === "block") return t`Block ${rule.matchValue}`;
   if (rule.effect === "hide") return t`Hide ${rule.matchValue}`;
   if (rule.effect === "require_approval") {
@@ -35,6 +41,9 @@ export function ApprovalRulesSettings() {
   const [autoReview, setAutoReview] = useState<ActionAutoReviewSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [toolName, setToolName] = useState("");
+  const sitesLimitId = useId();
+  const siteId = useId();
+  const [site, setSite] = useState("");
   const [savingRule, setSavingRule] = useState<string | null>(null);
   const [savingAutoReview, setSavingAutoReview] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +71,7 @@ export function ApprovalRulesSettings() {
 
   async function addRule(
     effect: ActionApprovalRule["effect"],
-    matchKind: "category" | "tool",
+    matchKind: "category" | "tool" | "egress",
     value: string,
   ) {
     const matchValue = value.trim();
@@ -87,12 +96,17 @@ export function ApprovalRulesSettings() {
       });
       setRules((current) => [...current, saved]);
       if (matchKind === "tool") setToolName("");
+      if (matchKind === "egress") setSite("");
     } catch (err) {
       setError(errorText(err, t`Could not save rule`));
     } finally {
       setSavingRule(null);
     }
   }
+
+  const sitesLimit = rules.find(
+    (rule) => rule.matchKind === "egress" && rule.effect === "block" && rule.matchValue === "*",
+  );
 
   async function removeRule(id: string) {
     setError(null);
@@ -208,29 +222,75 @@ export function ApprovalRulesSettings() {
           ) : null}
         </div>
       </div>
+      <div className="mt-5 flex items-start gap-3">
+        <Switch
+          id={sitesLimitId}
+          className="mt-0.5"
+          checked={Boolean(sitesLimit)}
+          disabled={loading || savingRule !== null}
+          onCheckedChange={(checked) =>
+            void (checked
+              ? addRule("block", "egress", "*")
+              : sitesLimit && removeRule(sitesLimit.id))
+          }
+        />
+        <div className="flex-1">
+          <Label htmlFor={sitesLimitId} className="text-[14px] font-normal text-foreground/75">
+            <Trans>Computer reaches only allowed sites</Trans>
+          </Label>
+          {sitesLimit ? (
+            <form
+              className="mt-2 flex gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void addRule("always_allow", "egress", site);
+              }}
+            >
+              <Input
+                id={siteId}
+                aria-label={t`Allowed site`}
+                value={site}
+                onChange={(event) => setSite(event.target.value)}
+                placeholder="example.com"
+                maxLength={253}
+                disabled={loading || savingRule !== null}
+              />
+              <Button
+                type="submit"
+                variant="outline"
+                disabled={loading || savingRule !== null || !site.trim()}
+              >
+                <Trans>Allow</Trans>
+              </Button>
+            </form>
+          ) : null}
+        </div>
+      </div>
       {error ? <p className="mt-3 text-[13px] text-destructive">{error}</p> : null}
       {loading ? (
         <p className="mt-4 text-[13px] text-muted-foreground">
           <Trans>Loading rules…</Trans>
         </p>
-      ) : rules.length > 0 ? (
+      ) : rules.some((rule) => rule !== sitesLimit) ? (
         <ul className="mt-4 space-y-2">
-          {rules.map((rule) => (
-            <li
-              key={rule.id}
-              className="flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-2"
-            >
-              <span className="text-[13.5px] text-foreground/75">{describeRule(rule)}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground"
-                onClick={() => void removeRule(rule.id)}
+          {rules
+            .filter((rule) => rule !== sitesLimit)
+            .map((rule) => (
+              <li
+                key={rule.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-2"
               >
-                <Trans>Remove</Trans>
-              </Button>
-            </li>
-          ))}
+                <span className="text-[13.5px] text-foreground/75">{describeRule(rule)}</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-muted-foreground"
+                  onClick={() => void removeRule(rule.id)}
+                >
+                  <Trans>Remove</Trans>
+                </Button>
+              </li>
+            ))}
         </ul>
       ) : null}
     </div>

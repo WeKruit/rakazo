@@ -133,6 +133,7 @@ import {
   parseSkillMd,
   planActionGate,
   promptInvokesSkill,
+  RateWindow,
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
@@ -143,6 +144,8 @@ import {
   REPLY_IN_ENGLISH_NOTE,
   RecruitingAssessmentValidationError,
   RecruitingPlaybookValidationError,
+  RUN_EGRESS_PER_MINUTE,
+  RUN_EGRESS_RATE_LIMITED,
   recipientsShownToRecruiter,
   recruiterAskedToSend,
   recruiterConnectBlock,
@@ -306,6 +309,7 @@ import { loadBotMessageContext, messageBot, returnBotMessageOutcome } from "./bo
 import {
   allowPrivateHttpSecretOrigins,
   botSecretToolView,
+  botSiteCredentialHeaders,
   commandCredentialRedactions,
   findBotSecret,
   findCommandVariableConflict,
@@ -364,6 +368,15 @@ import {
   renewComputerExecutionLease,
   screenLeaseIdForRun,
 } from "./computer-lifecycle.js";
+import {
+  applyComputerNetworkPolicy,
+  EGRESS_ALL_SITES,
+  EGRESS_RULE_KIND,
+  egressHost,
+  egressLocked,
+  egressPolicy,
+  loadEgressRules,
+} from "./computer-network.js";
 import { withComputerScreenAvailability } from "./computer-screens.js";
 import {
   displayBotWorkspacePath,
@@ -664,6 +677,12 @@ import {
   workEstimateForResearch,
   workStartNote,
 } from "./work-estimate.js";
+
+/** Built-in tools that reach the outside network for the run. */
+const EGRESS_BUILTIN_TOOLS = new Set(["web_fetch", "web_search", "browser_navigate"]);
+const runEgressWindow = new RateWindow(RUN_EGRESS_PER_MINUTE, 60_000);
+const SECRET_IN_OUTBOUND_ARGS_REFUSAL =
+  "Not run: this call would send a saved credential to an outside service. Credentials are never passed in tool arguments; continue without it.";
 
 /** The first job-posting link in a recruiter's message; profile links are candidates, not roles. */
 export function jobLinkIn(text: string): string | null {
@@ -5078,6 +5097,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
         const storedComputer = bot.computer;
         const computerMode = parseComputerMode(storedComputer.scope);
         const computerAdmissionRetained = resumeHeldLease;
+        // Set once the computer starts: a locked computer reaches only allowed sites and gets
+        // site credentials at the provider's edge instead of shell variables.
+        let computerNetworkLocked = false;
+        const applyRunComputerNetwork = async (computer: ComputerRef) => {
+          const egressRules = await loadEgressRules(deps.prisma, run.spaceId);
+          computerNetworkLocked = egressLocked(egressRules);
+          await applyComputerNetworkPolicy(
+            deps.sandbox,
+            computer,
+            egressPolicy(
+              egressRules,
+              // A shared computer carries no one bot's credentials.
+              computerNetworkLocked && computerMode === "dedicated"
+                ? await botSiteCredentialHeaders({
+                    prisma: deps.prisma,
+                    secretStore: deps.secretStore,
+                    scope: run,
+                    registerRedactions: (values) => runSecrets.push(...values),
+                  })
+                : [],
+            ),
+            context,
+          );
+        };
         const runComputer = lazyRunComputer(
           async () => {
             context.signal.throwIfAborted();
@@ -5106,6 +5149,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context.signal.throwIfAborted();
             const computer = await provisionComputer(deps, storedComputer.id, context, "bot");
             screenRelease = { computer, context };
+            await applyRunComputerNetwork(computer);
             scheduleComputerSleep(deps.jobs, storedComputer.id);
             context.signal.throwIfAborted();
             return computer;
@@ -5281,8 +5325,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The intro turn confirms how a bot read its own role before anyone hands it
         // real work — it must not be able to act on that reading (shell, computer,
         // scheduling, spawning another bot, ...) before the user has assigned any task.
+        // Asking to allow a site only means something on a computer limited to allowed sites.
+        const sitesLimited = await Promise.resolve()
+          .then(() => loadEgressRules(deps.prisma, run.spaceId))
+          .then(egressLocked, () => false);
         const listedTools = withoutHiddenTools(
-          [...builtins, ...exposedConnectorTools],
+          [...builtins, ...exposedConnectorTools].filter(
+            (tool) => sitesLimited || tool.name !== "allow_computer_site",
+          ),
           await loadOwnerToolRules(),
           connectedPlugins.map((plugin) => plugin.provider),
         );
@@ -6042,6 +6092,22 @@ export function createRunExecutor(deps: ExecutorDeps) {
             })
           )
             return { error: BLOCKED_TOOL_REFUSAL };
+          if (
+            (!BUILTIN_AGENT_TOOL_NAMES.has(name) || EGRESS_BUILTIN_TOOLS.has(name)) &&
+            !runEgressWindow.take(run.id)
+          ) {
+            getLogger().warn("rate_limit.egress", { runId: run.id, tool: name });
+            return { error: RUN_EGRESS_RATE_LIMITED };
+          }
+          // Text the model read (a page, an email, a tool result) may ask it to send a credential
+          // out. Credentials reach outside services only through their own server-side channels.
+          if (
+            (!BUILTIN_AGENT_TOOL_NAMES.has(name) || EGRESS_BUILTIN_TOOLS.has(name)) &&
+            containsSecret(rawArgs, runSecrets)
+          ) {
+            getLogger().warn("security.secret_blocked", { runId: run.id, tool: name });
+            return { error: SECRET_IN_OUTBOUND_ARGS_REFUSAL };
+          }
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
             readExternalText = true;
           // Before the first picks, one step's extra searches are refused once: the model picks
@@ -9654,14 +9720,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             );
             // Loaded per command so a command variable added, replaced, or removed mid-run
             // applies to the next command. Registered for redaction before anything runs.
-            const commandEnvironment = await shellCommandEnvironment({
-              prisma: deps.prisma,
-              secretStore: deps.secretStore,
-              scope: run,
-              spaceEnvironment: agentEnvironment,
-              registerRedactions: registerRunSecrets,
-              command,
-            });
+            // A locked computer never holds a secret: its credentials are added at the edge.
+            const commandEnvironment = computerNetworkLocked
+              ? { env: {}, unsetEnv: [] }
+              : await shellCommandEnvironment({
+                  prisma: deps.prisma,
+                  secretStore: deps.secretStore,
+                  scope: run,
+                  spaceEnvironment: agentEnvironment,
+                  registerRedactions: registerRunSecrets,
+                  command,
+                });
             workspaceCheckpoint.markDirty();
             const commandEvent = {
               executionId,
@@ -10940,6 +11009,33 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 ? "The call is already closed and now carries your title. The user is reading, not listening: finish any remaining work as a normal chat reply with full formatting."
                 : "Call ended and your farewell was spoken. The user is now reading, not listening: finish any remaining work as a normal chat reply with full formatting.",
             });
+          }
+          if (name === "allow_computer_site") {
+            const site = egressHost(String(args.site ?? ""));
+            if (!site || site === EGRESS_ALL_SITES)
+              return finish({ error: "Name one site, for example pypi.org." });
+            await deps.prisma.actionApprovalRule.upsert({
+              where: {
+                spaceId_createdByUserId_effect_matchKind_matchValue: {
+                  spaceId: run.spaceId,
+                  createdByUserId: run.userId,
+                  effect: "always_allow",
+                  matchKind: EGRESS_RULE_KIND,
+                  matchValue: site,
+                },
+              },
+              create: {
+                spaceId: run.spaceId,
+                createdByUserId: run.userId,
+                effect: "always_allow",
+                matchKind: EGRESS_RULE_KIND,
+                matchValue: site,
+              },
+              update: {},
+            });
+            const ready = runComputer.ready;
+            if (ready) await applyRunComputerNetwork(ready);
+            return finish({ ok: `Your computer can now reach ${site}.` });
           }
           if (name === "list_secrets") return listBotSecrets(deps.prisma, run);
           if (name === "forget_secret") {

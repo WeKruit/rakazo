@@ -48,7 +48,7 @@ export function commandCredentialRedactions(environment: Record<string, string>)
   return [...new Set(Object.values(environment).flatMap(commandRedactionForms))];
 }
 
-function credentialHeader(destination: BotSecretDestination, plaintext: string) {
+function credentialHeader(destination: Pick<BotSecretDestination, "auth">, plaintext: string) {
   // A login is only typed into its site, and a command variable only reaches shell commands.
   if (destination.auth.type === "login" || destination.auth.type === "command") {
     throw new Error("Credential cannot be used with this authentication method");
@@ -163,6 +163,47 @@ export async function loadBotCommandEnvironment(
     if (value && !value.includes("\0")) environment[variable] = value;
   }
   return environment;
+}
+
+/**
+ * This bot's site credentials (bearer, header, basic) as the header each adds for its origin's
+ * host. For a provider that injects them outside the computer. Values go to `registerRedactions`
+ * first; an unreadable or unusable one is left out.
+ */
+export async function botSiteCredentialHeaders(input: {
+  prisma: PrismaClient;
+  secretStore: Pick<SecretStore, "load">;
+  scope: BotSecretScope;
+  registerRedactions: (values: string[]) => void;
+}): Promise<Array<{ host: string; headers: Record<string, string> }>> {
+  const rows = await input.prisma.botSecret.findMany({
+    where: scopeFields(input.scope),
+    select: { id: true, origin: true, auth: true, ciphertext: true },
+    orderBy: { name: "asc" },
+    take: 100,
+  });
+  const credentials: Array<{ host: string; headers: Record<string, string> }> = [];
+  for (const row of rows) {
+    const auth = BotSecretAuth.safeParse(row.auth);
+    if (!auth.success || auth.data.type === "command" || auth.data.type === "login") continue;
+    let host: string;
+    try {
+      const origin = new URL(row.origin);
+      if (origin.protocol !== "https:") continue;
+      host = origin.hostname;
+    } catch {
+      continue;
+    }
+    try {
+      const plaintext = await input.secretStore.load(row.ciphertext, row.id);
+      const header = credentialHeader({ auth: auth.data }, plaintext);
+      input.registerRedactions([...commandRedactionForms(plaintext), header.value]);
+      credentials.push({ host, headers: { [header.name]: header.value } });
+    } catch {
+      // One unreadable credential must not stop the computer.
+    }
+  }
+  return credentials;
 }
 
 /**

@@ -12,6 +12,7 @@ import {
   type WebhookDeps,
   type WebhookSecretCache,
 } from "./webhook-inbound.js";
+import { hasValidWebhookSignature } from "./webhook-signature.js";
 
 export {
   formatGithubEventPrompt,
@@ -55,8 +56,15 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
       throw error;
     }
 
-    // Same 401 for missing bot, missing secret, and bad bearer so bot ids are not enumerable.
-    if (!target || !hasValidBearerToken(c.req.header("authorization"), target.expected)) {
+    // Same 401 for missing bot, missing secret, and bad bearer or signature so bot ids are not
+    // enumerable.
+    if (
+      !target ||
+      !(
+        hasValidBearerToken(c.req.header("authorization"), target.expected) ||
+        hasValidWebhookSignature(c.req.header("x-rakazo-signature"), target.expected, raw)
+      )
+    ) {
       return unauthorized();
     }
 

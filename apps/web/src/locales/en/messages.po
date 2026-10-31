@@ -411,6 +411,10 @@ msgstr "All time"
 msgid "All tools"
 msgstr "All tools"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr "Allow"
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -441,6 +445,10 @@ msgstr "Allow purchase actions without asking"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "Allowed once"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr "Allowed site"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -1194,6 +1202,20 @@ msgstr "Completed"
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "Computer"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr "Computer may reach {0}"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr "Computer never reaches {0}"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr "Computer reaches only allowed sites"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"

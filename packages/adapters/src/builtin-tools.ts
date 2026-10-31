@@ -333,7 +333,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "shell",
     description:
-      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. Run Python as python3, never python.",
+      "Run a command inside this bot's computer. cwd defaults to the bot's folder on a Team Computer and the workspace root on a Private Computer. Output can arrive while the command is still running; tell the user any one-time code or sign-in URL in that output. Run Python as python3, never python. A replacement computer keeps your files but not installed packages; put install commands in .rakazo/setup.sh at the workspace root and they run again on every new computer.",
     inputSchema: {
       type: "object",
       properties: {
@@ -447,6 +447,17 @@ export const builtinAgentTools: ConnectorTool[] = [
     description:
       "Make an authenticated HTTPS request using a saved credential name. The backend injects authentication only at its saved origin. Redirects are rejected; response echoes of the credential are redacted. Use normal request URLs and bodies without secret placeholders.",
     inputSchema: z.toJSONSchema(SecretHttpRequest, { io: "input" }),
+  },
+  {
+    name: "allow_computer_site",
+    description:
+      "Ask the person to let your computer reach one more site. Your computer can reach only the sites they allowed; use this after a command or page on your computer could not connect to a site the work needs. Name the site and why.",
+    inputSchema: z.toJSONSchema(
+      z.object({
+        site: z.string().min(1).max(253).describe("Host name, for example pypi.org"),
+        reason: z.string().min(1).max(300),
+      }),
+    ),
   },
   {
     name: "forget_secret",

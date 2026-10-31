@@ -229,6 +229,7 @@ async function runWithModel(
       ),
     },
     secret: { findFirst: vi.fn(async () => null) },
+    actionApprovalRule: { findMany: vi.fn(async () => []) },
     userModelCredential: { findFirst: vi.fn(async () => null) },
     spaceBackupModel: {
       findMany: vi.fn(async () => {
