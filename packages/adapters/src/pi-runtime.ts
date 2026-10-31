@@ -568,6 +568,8 @@ export class PiAgentRuntime implements AgentRuntime {
         // continues from the partial assistant message.
         let modelStreaming = false;
         let interjected = false;
+        // The reader sees where a reply was cut off by their new message.
+        let cutMidReply = false;
         let interjectClaim: Promise<void> | undefined;
         const pollInterject = () => {
           if (!modelStreaming || interjectClaim || !request.claimSteering || signal.aborted) return;
@@ -581,6 +583,7 @@ export class PiAgentRuntime implements AgentRuntime {
               host.steeredUnseen = (host.steeredUnseen ?? 0) + steering.length;
               if (modelStreaming && steering.some((item) => item.interrupt)) {
                 interjected = true;
+                cutMidReply ||= currentMessageStreamed.trim().length > 0;
                 agent.abort();
               }
             })
@@ -796,9 +799,15 @@ export class PiAgentRuntime implements AgentRuntime {
             interjected = false;
             await interjectClaim;
             keepInterruptedAssistantMessage(agent.state.messages);
-            if (streamed.trim() && !streamed.endsWith("\n")) {
-              queue.push({ type: "text", text: "\n\n" });
-              streamed += "\n\n";
+            const gap = cutMidReply
+              ? `${streamed.endsWith("\n") ? "\n" : "\n\n"}${INTERRUPTED_DIVIDER}\n\n`
+              : streamed.trim() && !streamed.endsWith("\n")
+                ? "\n\n"
+                : "";
+            cutMidReply = false;
+            if (gap) {
+              queue.push({ type: "text", text: gap });
+              streamed += gap;
             }
             host.steeredUnseen = 0;
             await agent.continue();
@@ -2922,6 +2931,9 @@ function messageHasToolCall(message: unknown): boolean {
 }
 
 const INTERJECT_POLL_MS = 2_000;
+
+/** Markdown rule between a reply cut off by a new message and the answer that follows. */
+export const INTERRUPTED_DIVIDER = "---";
 
 /**
  * Keep the partial text of an interrupted assistant message in context and drop

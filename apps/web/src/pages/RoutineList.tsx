@@ -1,3 +1,4 @@
+import { i18n } from "@lingui/core";
 import { t } from "@lingui/core/macro";
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Routine } from "@rakazo/contracts";
@@ -22,6 +23,20 @@ export function routineTriggerSummary(routine: Routine): string {
   else if (routine.messageProvider) parts.push(t`Message event`);
   for (const cron of routine.crons) parts.push(formatCron(cron));
   return parts.length > 0 ? parts.join(" · ") : t`No trigger`;
+}
+
+/** When an active scheduled routine runs next, in the reader's locale and time zone. */
+export function routineNextRun(routine: Routine, now = new Date()): string | null {
+  if (!routine.active || !routine.nextRunAt) return null;
+  const next = new Date(routine.nextRunAt);
+  if (Number.isNaN(next.getTime())) return null;
+  const sameDay = next.toDateString() === now.toDateString();
+  const when = next.toLocaleString(i18n.locale || "en", {
+    ...(sameDay ? {} : { month: "short", day: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return t`Next ${when}`;
 }
 
 export function RoutineListHeader({ onCreate }: { onCreate: () => void }) {
@@ -76,6 +91,7 @@ export function RoutineListRow({
           </span>
           <span className="block truncate text-[12.5px] text-muted-foreground/80">
             {routineTriggerSummary(routine)}
+            {routineNextRun(routine) ? ` · ${routineNextRun(routine)}` : ""}
             {routine.modelProvider && routine.modelId ? ` · ${routine.modelId}` : ""}
           </span>
         </span>

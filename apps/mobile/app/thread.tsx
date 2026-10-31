@@ -3552,6 +3552,21 @@ const MessageBubble = memo(function MessageBubble({
       </Pressable>
     );
   }
+  const meta = message.blocks.find(
+    (block): block is Extract<MessageBlock, { kind: "meta" }> => block.kind === "meta",
+  );
+  if (meta) {
+    return (
+      <Pressable
+        {...actionProps}
+        style={{ width: "100%", paddingVertical: 4, alignItems: "center" }}
+      >
+        <Text style={{ color: tokens.mutedForeground, fontSize: 13.5, textAlign: "center" }}>
+          {meta.text}
+        </Text>
+      </Pressable>
+    );
+  }
   const special = message.blocks.find(
     (block) =>
       block.kind === "subagent" || block.kind === "child_bot" || block.kind === "cloud_agent",

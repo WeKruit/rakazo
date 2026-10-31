@@ -10,6 +10,7 @@ import {
   reactToThreadMessage,
   sendThreadMessage,
   stopThreadRuns,
+  stoppedNotice,
   threadHead,
   threadSnapshot,
 } from "./thread-target.js";
@@ -4804,7 +4805,7 @@ describe("stopThreadRuns", () => {
         botId: "bot-a",
         type: "run.cancelled",
         runId: "run-a",
-        payload: {},
+        payload: { stoppedByUserId: "user-1" },
         seq: 2,
       }),
       expect.objectContaining({
@@ -4813,7 +4814,7 @@ describe("stopThreadRuns", () => {
         botId: "bot-b",
         type: "run.cancelled",
         runId: "run-b",
-        payload: {},
+        payload: { stoppedByUserId: "user-1" },
         seq: 3,
       }),
     ]);
@@ -4825,6 +4826,79 @@ describe("stopThreadRuns", () => {
       where: { type: "thread.progress", runId: { in: ["run-a", "run-b"] } },
     });
     expect(notify).toHaveBeenCalledWith("thread-1", 3);
+  });
+
+  it("tells the conversation who stopped the assistant", async () => {
+    const messages: Record<string, unknown>[] = [];
+    const events: Record<string, unknown>[] = [];
+    const transaction = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      ...stopAllTables(),
+      thread: {
+        findUnique: vi.fn().mockResolvedValue({ spaceId: "workspace-1" }),
+        update: vi.fn().mockResolvedValue({ nextEventSeq: 9, nextMessageSeq: 4 }),
+      },
+      run: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        updateManyAndReturn: vi.fn().mockResolvedValue([{ id: "run-a", botId: "bot-a" }]),
+        findUnique: vi.fn().mockResolvedValue({ status: "cancelled" }),
+      },
+      user: { findUnique: vi.fn().mockResolvedValue({ name: "Dana" }) },
+      message: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          messages.push(data);
+          return { id: "message-1", ...data };
+        }),
+      },
+      steeringMessage: {
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+      computer: { findMany: vi.fn().mockResolvedValue([]) },
+      computerExecutionLease: { findMany: vi.fn().mockResolvedValue([]) },
+      event: {
+        create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+          events.push(data);
+          return data;
+        }),
+        deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn(async (callback: (client: typeof transaction) => unknown) =>
+        callback(transaction),
+      ),
+      computer: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+      computerExecutionLease: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
+    } as unknown as PrismaClient;
+    const actor = { spaceId: "workspace-1", userId: "user-1" } as Actor;
+    const target = {
+      kind: "bot",
+      botId: "bot-a",
+      botName: "Main",
+      threadId: "thread-1",
+    } as unknown as ThreadTarget;
+    const deps = {
+      prisma,
+      sandbox: {} as SandboxProvider,
+      events: { notify: vi.fn().mockResolvedValue(undefined) } as never,
+    };
+
+    await stopThreadRuns(deps, actor, target, undefined, "turn", true);
+
+    expect(messages).toEqual([
+      expect.objectContaining({
+        role: "system",
+        blocks: [{ kind: "meta", text: "Dana stopped the assistant" }],
+      }),
+    ]);
+    expect(events.map((event) => event.type)).toEqual(["run.cancelled", "thread.message.created"]);
+
+    // A background task cancelled from its panel is not announced.
+    messages.length = 0;
+    await stopThreadRuns(deps, actor, target, "run-a");
+    expect(messages).toEqual([]);
+    expect(stoppedNotice("  ")).toBe("The assistant was stopped");
   });
 
   it("ends research and reminders only for Stop everything", async () => {

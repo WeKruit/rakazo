@@ -1645,6 +1645,11 @@ export async function cancelThreadBackgroundTask(
   });
 }
 
+export function stoppedNotice(name: string | null | undefined): string {
+  const who = name?.trim();
+  return who ? `${who} stopped the assistant` : "The assistant was stopped";
+}
+
 export async function stopThreadRuns(
   deps: {
     prisma: PrismaClient;
@@ -1655,6 +1660,7 @@ export async function stopThreadRuns(
   target: ThreadTarget,
   runId?: string,
   scope: "turn" | "all" = "turn",
+  announce = false,
 ) {
   const { runIds, computers, leases, eventSeq } = await deps.prisma.$transaction(async (tx) => {
     await tx.$queryRaw`SELECT id FROM threads WHERE id = ${target.threadId} FOR UPDATE`;
@@ -1768,7 +1774,29 @@ export async function stopThreadRuns(
         botId: run.botId,
         type: "run.cancelled",
         runId: run.id,
-        payload: {},
+        payload: { stoppedByUserId: actor.userId },
+      });
+      eventSeq = event.seq;
+    }
+    if (announce && cancelled[0]) {
+      // Everyone in the conversation sees who stopped the work, as a line in the transcript.
+      const user = await tx.user.findUnique({
+        where: { id: actor.userId },
+        select: { name: true },
+      });
+      const blocks: MessageBlock[] = [{ kind: "meta", text: stoppedNotice(user?.name) }];
+      const message = await createThreadMessageInTransaction(tx, {
+        threadId: target.threadId,
+        role: "system",
+        botId: cancelled[0].botId,
+        blocks,
+      });
+      const event = await appendEventInTransaction(tx, {
+        spaceId: actor.spaceId,
+        threadId: target.threadId,
+        botId: cancelled[0].botId,
+        type: "thread.message.created",
+        payload: { messageId: message.id, role: "system", blocks },
       });
       eventSeq = event.seq;
     }
