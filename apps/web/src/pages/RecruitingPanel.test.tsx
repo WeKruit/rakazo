@@ -398,7 +398,8 @@ it("shows exact candidate native correspondence with CRM history without treatin
     await vi.dynamicImportSettled();
   });
   expect(view.container.textContent).toContain("read full body");
-  expect(view.container.textContent).toContain("Instantly account");
+  expect(view.container.textContent).toContain("Email account");
+  expect(view.container.textContent).not.toContain("Instantly");
   expect(view.container.textContent).toContain("Send outcome unknown");
   expect(view.container.querySelectorAll('[aria-label="Saved emails"] button')).toHaveLength(4);
   await view.click("sent_recorded");
