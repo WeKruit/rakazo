@@ -704,6 +704,8 @@ const CSV_IMPORT_FIELDS = {
   title: "current_title",
   location: "location",
   resumeUrl: "resume_url",
+  email: "email",
+  phone: "phone",
 } as const;
 
 /** Save a recruiter-supplied text/csv artifact as one unassessed candidate page on the role. */

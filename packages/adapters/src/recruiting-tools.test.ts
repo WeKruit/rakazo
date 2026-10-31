@@ -1,6 +1,11 @@
 import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { Actor } from "@rakazo/contracts";
-import { boundDirectApprovalRequest, readRecruitingResearchReadArtifact } from "@rakazo/core";
+import { RecruitingResearchToolInputSchema } from "@rakazo/contracts";
+import {
+  boundDirectApprovalRequest,
+  projectRecruitingCandidateReport,
+  readRecruitingResearchReadArtifact,
+} from "@rakazo/core";
 import type * as Database from "@rakazo/db";
 import type { PrismaClient } from "@rakazo/db";
 import {
@@ -319,6 +324,35 @@ describe("recruiter CSV import", () => {
     });
     expect(captured.outputArtifact.hash).toBe(
       createHash("sha256").update(d.put.mock.calls[0]![0].bytes).digest("hex"),
+    );
+  });
+
+  it("retains mapped email and phone in the saved candidate report", async () => {
+    const contactInput = RecruitingResearchToolInputSchema.parse({
+      ...input,
+      mapping: { ...input.mapping, email: "Email", phone: "Phone" },
+    });
+    if (contactInput.operation !== "import_csv") throw new Error("Expected CSV import");
+    const d = deps(
+      "Name,LinkedIn,Company,Email,Phone\n" +
+        "Ada Example,https://www.linkedin.com/in/example,Example Co,ada@example.test,+1 555 0100\n",
+    );
+    await tools.importRecruitingCandidateCsv(
+      d as never,
+      { ...trusted, effectRequest: contactInput },
+      contactInput,
+      adapterContext,
+    );
+    const captured = vi.mocked(saveRecruitingCandidateCsvImport).mock.calls[0]![4];
+    expect(captured.rows[0]!.row).toMatchObject({
+      email: "ada@example.test",
+      phone: "+1 555 0100",
+    });
+    expect(projectRecruitingCandidateReport(captured.rows[0]!.row).fields).toEqual(
+      expect.arrayContaining([
+        { label: "Email", value: "ada@example.test", sourceUrls: [] },
+        { label: "Phone", value: "+1 555 0100", sourceUrls: [] },
+      ]),
     );
   });
 
