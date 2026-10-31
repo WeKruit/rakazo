@@ -1108,8 +1108,17 @@ export async function backfillRecruitingCrews(
   options: { sandboxKind: string; firstPartyMcpUrl?: string },
   onError: (error: unknown) => void,
 ): Promise<number> {
+  // Every account with a recruiting lead, including crews set up before recruiting spawn keys
+  // (their Main is found by name and its research grant, as ensureReviewer does).
+  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
   const leads = await prisma.bot.findMany({
-    where: { archivedAt: null, spawnKey: { startsWith: "recruiting:", endsWith: ":main" } },
+    where: {
+      archivedAt: null,
+      OR: [
+        { spawnKey: { startsWith: "recruiting:", endsWith: ":main" } },
+        { name: "Main", mcpServers: { some: { server: { endpoint: research.endpoint } } } },
+      ],
+    },
     distinct: ["spaceId", "userId"],
     select: { spaceId: true, userId: true },
   });
