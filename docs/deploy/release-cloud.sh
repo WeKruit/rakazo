@@ -9,6 +9,11 @@
 #   release-cloud.sh <branch> premerge # unit tests on main merged with the branch, before it is merged;
 #                                      # a pass is reused when the real merge has the same code
 #   RELEASE_ROLLBACK=1 ... deploy   # emergency rollback to a tested SHA: works while live /ready is broken, no gap wait
+#   RELEASE_TARGET=test release-cloud.sh <SHA|branch> deploy
+#                                   # deploy any commit to the test environment (own App, Volume, Secret
+#                                   # and database; needs RAKAZO_TEST_URL). No unit tests, no gap wait.
+#                                   # Production only accepts a main SHA whose code passed there first.
+#   RELEASE_SKIP_TEST_ENV=<short> ... deploy  # production without a test-environment pass (emergency)
 #   RELEASE_TEST_DATABASE_URL=postgresql://…@localhost/scratch  # also run the real-Postgres journeys
 #                                   # (pnpm test:integration) after the unit tests; local scratch DB only
 #
@@ -22,9 +27,24 @@ MODE=${2:-check}
 REPO=${RAKAZO_REPO:-/home/user/rakazo}
 WORK=${RELEASE_WORK:-$HOME/rakazo-releases}
 # Direct Modal URL of the app (not the custom domain); set it in the release environment.
-URL=${RAKAZO_URL:?set RAKAZO_URL to the Modal app URL}
-export MODAL_APP_NAME=wekruit-recruiting MODAL_SECRET_NAME=wekruit-recruiting-config \
-  MODAL_VOLUME_NAME=wekruit-recruiting-files MODAL_ENVIRONMENT=main
+TARGET=${RELEASE_TARGET:-prod}
+# Commits whose code passed on the test environment; keep it on durable storage.
+PASSED=${RELEASE_TEST_PASSED_DIR:-$WORK/test-passed}
+case "$TARGET" in
+  prod)
+    URL=${RAKAZO_URL:?set RAKAZO_URL to the Modal app URL}
+    ORIGIN=${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}
+    export MODAL_APP_NAME=wekruit-recruiting MODAL_SECRET_NAME=wekruit-recruiting-config \
+      MODAL_VOLUME_NAME=wekruit-recruiting-files MODAL_ENVIRONMENT=main ;;
+  test)
+    URL=${RAKAZO_TEST_URL:?set RAKAZO_TEST_URL to the test Modal app URL}
+    ORIGIN=$URL
+    export MODAL_APP_NAME=wekruit-recruiting-test MODAL_SECRET_NAME=wekruit-recruiting-test-config \
+      MODAL_VOLUME_NAME=wekruit-recruiting-test-files MODAL_ENVIRONMENT=test
+    # Release logs and builds stay apart from production's.
+    WORK="$WORK/test" ;;
+  *) echo "RELEASE_TARGET must be prod or test" >&2; exit 1 ;;
+esac
 
 die() { echo "RELEASE CHECK FAILED: $*" >&2; exit 1; }
 log() { echo "$(date -u +%H:%M:%S) $*"; }
@@ -85,8 +105,10 @@ if [ "$MODE" = premerge ]; then
   SHA=$(git -C "$REPO" commit-tree "$TREE_ID" -p origin/main -p FETCH_HEAD -m "premerge $SHA_IN")
   git -C "$REPO" update-ref "refs/premerge/$SHA" "$SHA"
 else
+  # The test environment takes any pushed commit or branch; production only main.
+  [ "$TARGET" = test ] && { git -C "$REPO" fetch -q origin "$SHA_IN" 2>/dev/null && SHA_IN=$(git -C "$REPO" rev-parse FETCH_HEAD) || true; }
   SHA=$(git -C "$REPO" rev-parse --verify "$SHA_IN^{commit}") || die "unknown SHA $SHA_IN"
-  git -C "$REPO" merge-base --is-ancestor "$SHA" origin/main || die "$SHA is not on origin/main"
+  [ "$TARGET" = test ] || git -C "$REPO" merge-base --is-ancestor "$SHA" origin/main || die "$SHA is not on origin/main"
 fi
 SHORT=${SHA:0:8}
 # Keep the whole timestamped run on disk; wrappers often show only the tail.
@@ -138,6 +160,19 @@ run_tests() {
   fi
   touch "$TESTED"; exec 8>&-
 }
+# Production stays on builds that already ran on the test environment (same code outside docs/).
+passed_on_test() {
+  local prev; [ -f "$PASSED/$SHA" ] && return 0
+  for prev in $(ls -t "$PASSED" 2>/dev/null | head -80); do
+    git -C "$REPO" cat-file -e "$prev^{commit}" 2>/dev/null || git -C "$REPO" fetch -q origin "$prev" 2>/dev/null || continue
+    code_same "$prev" "$SHA" && return 0
+  done
+  return 1
+}
+if [ "$TARGET" = prod ] && [ "$MODE" = deploy ] && [ "${RELEASE_ROLLBACK:-}" != 1 ] \
+  && [ "${RELEASE_SKIP_TEST_ENV:-}" != "$SHORT" ] && ! passed_on_test; then
+  die "$SHORT has not passed on the test environment; run RELEASE_TARGET=test first (RELEASE_SKIP_TEST_ENV=$SHORT for an emergency)"
+fi
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }
 [ "$MODE" = premerge ] && { run_tests; log "PREMERGE OK $SHA_IN on main ${SHORT} (safe to merge)"; exit 0; }
 if [ "$MODE" = prebuild ]; then
@@ -150,11 +185,11 @@ fi
 
 # 2) Live state and what changes.
 LIVE=$(live_revision)
-if [ -z "$LIVE" ]; then [ "${RELEASE_ROLLBACK:-}" = 1 ] || die "live /ready did not answer with a revision (RELEASE_ROLLBACK=1 to roll back anyway)"; LIVE=unknown; fi
+if [ -z "$LIVE" ]; then [ "${RELEASE_ROLLBACK:-}" = 1 ] || [ "$TARGET" = test ] || die "live /ready did not answer with a revision (RELEASE_ROLLBACK=1 to roll back anyway)"; LIVE=unknown; fi
 log "live ${LIVE:0:8} -> target $SHORT ($(git -C "$REPO" rev-list --count "$LIVE..$SHA" 2>/dev/null || echo '?') commits)"
 git -C "$REPO" diff --name-status "$LIVE" "$SHA" -- packages/db/prisma/migrations infra/modal 2>/dev/null | sed 's/^/  /' || true
 N=$(containers); log "containers running: $N"
-[ "$N" = 1 ] || die "expected exactly 1 container (another deploy may be in progress)"
+[ "$N" = 1 ] || { [ "$TARGET" = test ] && [ "$N" = 0 ]; } || die "expected exactly 1 container (another deploy may be in progress)"
 
 # 3) Active-run gate: recreate kills in-flight runs. waiting_input cards survive recreate.
 log "checking active runs"; ACTIVE=$(db_query "$ACTIVE_SQL") || ACTIVE="unknown"
@@ -181,7 +216,13 @@ if [ "${RELEASE_PREBUILD:-1}" = 1 ] && [ ! -f "$WORK/prebuilt/$SHA" ]; then
   prebuild_image "$DIR" > "$WORK/prebuild-$SHORT.log" 2>&1 &
   PREBUILD=$!; log "building image for $SHORT in the background"
 fi
-run_tests
+if [ "$TARGET" = test ] && [ "${RELEASE_TEST_UNITS:-}" != 1 ]; then
+  log "unit tests skipped on the test environment (RELEASE_TEST_UNITS=1 runs them)"
+  # Test runs on the test environment never hold its deploys.
+  RELEASE_ALLOW_ACTIVE=$SHORT
+else
+  run_tests
+fi
 # Wait for a gap with no running work (waiting_input is excluded above); give up after RELEASE_GAP_WAIT s.
 gap_deadline=$(( $(date +%s) + ${RELEASE_GAP_WAIT:-1800} ))
 while [ "$ACTIVE" != "[]" ] && [ "${RELEASE_ALLOW_ACTIVE:-}" != "$SHORT" ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; do
@@ -193,7 +234,7 @@ done
 # Left-nav pages that already fail on the live build do not block a release; only regressions do.
 BASE_VIEWS=unknown
 if [ -f "$DIR/infra/acceptance/home-load.mjs" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; then
-  RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
+  RAKAZO_ORIGIN="$ORIGIN" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
     node "$DIR/infra/acceptance/home-load.mjs" > "$WORK/home-base-$SHORT.log" 2>&1 && BASE_VIEWS=ok || {
       [ $? = 3 ] || BASE_VIEWS=failing; }
   log "live build left-nav pages: $BASE_VIEWS"
@@ -210,6 +251,7 @@ log "deploying $SHORT (recreate)"
 # 6) Proof: the new revision serves /ready, and the smoke check passes on both hosts within 60 s.
 #    Otherwise redeploy the previous build automatically (its release folder is kept here).
 rollback() {
+  [ "$TARGET" = test ] && die "$1 (test environment; not rolled back)"
   local prev="$WORK/releases/$LIVE"
   [ "$LIVE" != unknown ] && [ -d "$prev" ] || die "$1; NO AUTO-ROLLBACK (no local build of previous ${LIVE:0:8})"
   log "ROLLING BACK to ${LIVE:0:8}: $1"
@@ -223,7 +265,7 @@ until [ "$(live_revision)" = "$SHA" ]; do
   sleep 3
 done
 if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
-  RAKAZO_URL="$URL" RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_EXPECT_SHA="$SHA" \
+  RAKAZO_URL="$URL" RAKAZO_ORIGIN="$ORIGIN" RAKAZO_EXPECT_SHA="$SHA" \
     node "$DIR/infra/acceptance/smoke.mjs" --wait 60 > "$WORK/smoke-$SHORT.log" 2>&1 \
     || { tail -15 "$WORK/smoke-$SHORT.log"; rollback "smoke check failed (log: $WORK/smoke-$SHORT.log)"; }
   log "smoke ok: $(tail -1 "$WORK/smoke-$SHORT.log")"
@@ -233,7 +275,7 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
     home=1
     # A fresh container runs its startup backfills first, so later attempts wait longer.
     for attempt in 1 2 3; do
-      RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
+      RAKAZO_ORIGIN="$ORIGIN" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
         node "$DIR/infra/acceptance/home-load.mjs" > "$WORK/home-$SHORT.log" 2>&1 && home=0 || home=$?
       [ "$home" = 1 ] || [ "$home" = 4 ] || break
       sleep 30
@@ -251,7 +293,7 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
   fi
 else
   for p in / /ready /health; do
-    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}$p")
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "$ORIGIN$p")
     [ "$code" = 200 ] || rollback "custom domain $p returned $code"
   done
 fi
@@ -263,6 +305,7 @@ fi
 PAID_PATHS='^packages/(adapters/src/(recruiting-|mcp-connector|contact-)|core/src/recruiting-)|^infra/acceptance/regression\.mjs$'
 paid_change() {
   [ "${RELEASE_PAID_CHECKS:-}" = 1 ] && return 0
+  [ "$TARGET" = test ] && return 1
   [ "$LIVE" != unknown ] || return 0
   git -C "$REPO" diff --name-only "$LIVE" "$SHA" -- . 2>/dev/null | grep -v '\.test\.' | grep -qE "$PAID_PATHS"
 }
@@ -270,7 +313,7 @@ if [ "${RELEASE_ROLLBACK:-}" != 1 ] && ! paid_change; then
   log "contacts check skipped: no search, grading or contact code changed (RELEASE_PAID_CHECKS=1 to run it)"
 elif [ -n "${RELEASE_CASES:-}" ] && [ -f "$DIR/infra/acceptance/regression.mjs" ] \
   && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ] && [ "${RELEASE_ROLLBACK:-}" != 1 ]; then
-  RAKAZO_URL="$URL" RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" \
+  RAKAZO_URL="$URL" RAKAZO_ORIGIN="$ORIGIN" \
     node "$DIR/infra/acceptance/regression.mjs" --only contacts --paid --cases "$RELEASE_CASES" \
       --out "$WORK/contacts-$SHORT" > "$WORK/contacts-$SHORT.log" 2>&1 \
     || { tail -8 "$WORK/contacts-$SHORT.log"; rollback "contacts check failed (log: $WORK/contacts-$SHORT.log)"; }
@@ -280,7 +323,7 @@ else
 fi
 # Account-level pages must read actual product and CRM records after deployment.
 if [ "$GLOBAL_CHECK" = 1 ]; then
-  RAKAZO_URL="$URL" RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" \
+  RAKAZO_URL="$URL" RAKAZO_ORIGIN="$ORIGIN" \
     node "$DIR/infra/acceptance/regression.mjs" --only global-recruiting \
       --global-fixtures "$GLOBAL_FIXTURES" --out "$WORK/global-recruiting-$SHORT" \
       > "$WORK/global-recruiting-$SHORT.log" 2>&1 \
@@ -296,4 +339,5 @@ LEDGER_AFTER=$(db_query "$LEDGER_SQL") || LEDGER_AFTER="unknown (db query failed
 kill $PROBE 2>/dev/null || true
 DOWN=$(awk '$2!="200"{n++} END{print n*2+0}' "$WORK/health-$SHORT.log")
 log "ledger after: $LEDGER_AFTER"
-echo "RELEASE OK $SHORT live=$SHA previous=$LIVE health_non200≈${DOWN}s"
+[ "$TARGET" = test ] && { mkdir -p "$PASSED"; touch "$PASSED/$SHA"; }
+echo "RELEASE OK ($TARGET) $SHORT live=$SHA previous=$LIVE health_non200≈${DOWN}s"

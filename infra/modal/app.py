@@ -19,6 +19,10 @@ RELEASE_PROFILE = release_profile(os.environ)
 APP_NAME = os.environ.get("MODAL_APP_NAME", "rakazo-recruiting")
 SECRET_NAME = os.environ.get("MODAL_SECRET_NAME", f"{APP_NAME}-config")
 VOLUME_NAME = os.environ.get("MODAL_VOLUME_NAME", f"{APP_NAME}-files")
+# The test environment is a full copy of production with its own App, Volume, Secret and database,
+# so development and test runs never touch production. Its database URL lives in its own Secret.
+MODAL_ENVIRONMENT = os.environ.get("MODAL_ENVIRONMENT", "main")
+TEST_ENVIRONMENT = MODAL_ENVIRONMENT == "test"
 # Per-service database pool and worker slots; the budget is explained where the services start.
 SERVICE_ENV = {
     "api": {"DB_POOL_MAX": "6"},
@@ -49,6 +53,8 @@ def source_revision() -> str:
 SOURCE_REVISION = source_revision() if modal.is_local() else "unknown"
 files = modal.Volume.from_name(VOLUME_NAME, create_if_missing=False)
 config = modal.Secret.from_name(SECRET_NAME)
+# Later Secrets win, so the test database URL overrides anything in the shared config.
+secrets = [config, modal.Secret.from_name(f"{APP_NAME}-db")] if TEST_ENVIRONMENT else [config]
 image = (
     modal.Image.from_registry("node:24.22.0-bookworm-slim", add_python="3.11")
     .apt_install("ca-certificates", "git", "openssl", "poppler-utils")
@@ -91,10 +97,10 @@ image = (
 
 @app.server(
     image=image,
-    secrets=[config],
+    secrets=secrets,
     volumes={"/data": files},
     env={"MODAL_APP_NAME": APP_NAME, "MODAL_SECRET_NAME": SECRET_NAME, "MODAL_VOLUME_NAME": VOLUME_NAME,
-         "MODAL_ENVIRONMENT": os.environ.get("MODAL_ENVIRONMENT", "main"),
+         "MODAL_ENVIRONMENT": MODAL_ENVIRONMENT,
          "RAKAZO_RELEASE_PROFILE": RELEASE_PROFILE, "RAKAZO_GIT_SHA": SOURCE_REVISION},
     port=8000,
     compute_region="us-west",
@@ -102,10 +108,11 @@ image = (
     min_containers=1,
     max_containers=1,  # ponytail: one native DATA_DIR writer; scale only with a shared store.
     max_concurrency=128,
-    nonpreemptible=True,
+    # Test may be preempted and reserves less memory; it only serves development and test runs.
+    nonpreemptible=not TEST_ENVIRONMENT,
     # Request is the idle reservation; the limit lets the cold start burst.
     cpu=(0.125, 4.0),
-    memory=(2048, 4096),
+    memory=(1024 if TEST_ENVIRONMENT else 2048, 4096),
     startup_timeout=180,
     exit_grace_period=10,
 )
