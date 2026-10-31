@@ -12379,8 +12379,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           const linked = texts.find((item) => jobLinkIn(item.text) !== null);
           const pasted = linked ? undefined : texts.find((item) => pastedJobTitle(item.text));
           const block = linked ?? pasted;
-          if (!block) return undefined;
-          const create = (title: string, sourceRefs: unknown[]) =>
+          const file = block
+            ? undefined
+            : currentTurnMessage.blocks.find(
+                (item): item is Extract<MessageBlock, { kind: "file" }> => item.kind === "file",
+              );
+          if (!block && !file) return undefined;
+          const create = (title: string, sourceRefs: unknown[], quote: string) =>
             applyTool(
               "recruiting_role",
               {
@@ -12391,7 +12396,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 criteria: [],
                 preferences: [],
                 definitionQuestions: [],
-                intent: { basis: "direct", quote: block.text.trim() },
+                intent: { basis: "direct", quote: quote.trim() },
               },
               `${runId}:job-role`,
             ).catch((error) => {
@@ -12401,10 +12406,35 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           const ask = `The role is revision 1 once saved (use expectedRoleRevision 1 until you save it again). Ask the first clarifying question now with ask_user, in English, with no role read or assessment first (or, when nothing needs clarifying, issue the calibration searches now). ${PLANNED_SEARCHES_NOTE}`;
           try {
+            // A JD sent as a file is read here, like a pasted one, so the model's first step is
+            // the question instead of reading the file and writing the role itself.
+            if (file) {
+              const read = (await applyTool(
+                "artifact_read",
+                { artifactId: file.artifactId, limit: 16_000 },
+                `${runId}:job-file`,
+              )) as { text?: unknown };
+              // Only a file that reads as a JD; a candidate list or other file stays with the model.
+              const title =
+                typeof read?.text === "string" && !/csv|sheet|excel/i.test(file.mimeType)
+                  ? pastedJobTitle(read.text)
+                  : null;
+              if (!title || typeof read.text !== "string") return undefined;
+              const quote =
+                texts
+                  .map((item) => item.text)
+                  .join("\n")
+                  .trim() || file.name;
+              return {
+                saving: create(title, [], quote),
+                note: `The recruiter's attached JD (${file.name}) is read and is being saved as a new role titled "${title}" with no brief yet. Do not read the file again and do not create, rename or update a role in this turn. Its text:\n\n${read.text}\n\n${ask}${jobStatesYears(read.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
+              };
+            }
+            if (!block) return undefined;
             if (pasted) {
               const title = pastedJobTitle(pasted.text)!;
               return {
-                saving: create(title, []),
+                saving: create(title, [], block.text),
                 note: `The recruiter's pasted JD is being saved as a new role titled "${title}" with no brief yet. Do not create, rename or update a role in this turn. ${ask}${jobStatesYears(pasted.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
               };
             }
@@ -12427,17 +12457,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const title =
               (typeof read.title === "string" && read.title.trim().slice(0, 200)) || material.url;
             return {
-              saving: create(title, [
-                {
-                  id: "job-link",
-                  kind: "original_material",
-                  anchor: { kind: "artifact", artifact: material.artifact, locator: "text" },
-                  readState: "read",
-                  readAt: material.readAt,
-                  url: material.url,
-                  quote: read.text.trim().slice(0, 300).trim(),
-                },
-              ]),
+              saving: create(
+                title,
+                [
+                  {
+                    id: "job-link",
+                    kind: "original_material",
+                    anchor: { kind: "artifact", artifact: material.artifact, locator: "text" },
+                    readState: "read",
+                    readAt: material.readAt,
+                    url: material.url,
+                    quote: read.text.trim().slice(0, 300).trim(),
+                  },
+                ],
+                block.text,
+              ),
               note: `The recruiter's link is read and is being saved as a new role titled "${title}" with no brief yet (artifact ${material.artifact.artifactId}, sha256 ${material.artifact.sha256}, readAt ${material.readAt}). Do not read the link again and do not create a role. Its text:\n\n${read.text}\n\n${ask}${jobStatesYears(read.text) ? "" : ` ${YEARS_OPEN_NOTE}`}`,
             };
           } catch (error) {
