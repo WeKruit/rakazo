@@ -12,6 +12,8 @@ import { AUTOCONTINUE_NONCE_PREFIX } from "./turn-end-guard.js";
  * agent's call; this only makes sure the person is not left without one.
  */
 export const REPLY_CHECK_DELAY_MS = 5_000;
+/** The error a person's Stop of one turn leaves on it (kept in step with cancel-runs). */
+const STOPPED_TURN_ERROR = "turn_stopped";
 /** Older unanswered messages are left alone: the person has moved on. */
 const MAX_AGE_MS = 60 * 60_000;
 /**
@@ -93,9 +95,10 @@ export async function checkThreadReplied(
   // to be picked up. That turn ending schedules this check again.
   if (latest.steeringMessages.some((row) => !row.claimedAt)) return skipped("pending");
   // The person stopped the turn that had their message: answering anyway would undo the stop.
-  // A stuck turn the server cancelled carries an error and is still answered.
+  // A person's Stop leaves no error or "turn_stopped"; a stuck turn the server cancelled carries
+  // another error and is still answered.
   const stopped = (run: { status: string; error: string | null } | null | undefined) =>
-    run?.status === "cancelled" && !run.error;
+    run?.status === "cancelled" && (!run.error || run.error === STOPPED_TURN_ERROR);
   if (stopped(source) || latest.steeringMessages.some((row) => stopped(row.run)))
     return skipped("stopped");
   const busy = await deps.prisma.run.findFirst({
