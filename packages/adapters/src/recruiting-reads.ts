@@ -3200,30 +3200,40 @@ export async function getRecruitingCrmData(
     };
     async function read(server: Server, tool: string, args: Record<string, unknown>) {
       await sourceFence(server, tool);
-      const results: unknown[] = [];
+      let results: unknown[] = [];
       let failed = false;
-      try {
-        for await (const event of deps.connectors.execute(
-          {
-            tool,
-            route: {
-              connectorId: "mcp",
-              resourceId: server.id,
-              resourceRevision: server.revision,
-              toolName: tool,
+      // These are all reads. A connection that broke mid-call (a server restart closes pooled
+      // sessions) gets one more try; the connector already dropped that session.
+      for (let attempt = 0; attempt < 2; attempt++) {
+        results = [];
+        failed = false;
+        let broken = false;
+        try {
+          for await (const event of deps.connectors.execute(
+            {
+              tool,
+              route: {
+                connectorId: "mcp",
+                resourceId: server.id,
+                resourceRevision: server.revision,
+                toolName: tool,
+              },
+              args,
+              executionId: randomUUID(),
             },
-            args,
-            executionId: randomUUID(),
-          },
-          context,
-        )) {
-          if (event.type === "result") results.push(event.data);
-          if (event.type === "error") {
-            failed = true;
+            context,
+          )) {
+            if (event.type === "result") results.push(event.data);
+            if (event.type === "error") {
+              failed = true;
+              broken ||= event.outcome === "uncertain";
+            }
           }
+        } catch {
+          failed = true;
+          broken = true;
         }
-      } catch {
-        failed = true;
+        if (!failed || !broken || signal.aborted) break;
       }
       invalidateFences();
       await sourceFence(server, tool);
