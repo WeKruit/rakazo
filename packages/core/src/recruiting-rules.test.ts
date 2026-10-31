@@ -577,6 +577,13 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "「再来点」 with 140 people saved was answered as an earlier target already met.",
   },
   {
+    rule: "a conflicting note never holds the scale",
+    in: "RECRUITING_SCALE_START",
+    phrase:
+      "never holds the scale: scale with the confirmed brief first, then ask that one question",
+    why: "A Bay Area preference on an on-site Atlanta role held the 100-person scale behind a question card.",
+  },
+  {
     rule: "hand off only the shortfall",
     in: "RECRUITING_SCALE_START",
     phrase: "only when the people search stopped short of the target",

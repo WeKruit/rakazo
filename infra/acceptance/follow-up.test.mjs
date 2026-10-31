@@ -106,3 +106,41 @@ test("direct post-promotion input requires its own source event and later start"
   );
   assert.equal(replyAfterInput([started, posted], [input, reply], 9), null);
 });
+
+test("a reply from the teammate the input's turn handed off to counts", async () => {
+  const { replyAfterInput } = await import("./follow-up.mjs");
+  const input = { id: "input", role: "user", seq: 9, runId: "main-turn" };
+  const reply = {
+    id: "reply",
+    role: "bot",
+    runId: "teammate-turn",
+    blocks: [{ kind: "text", text: "Checking contacts" }],
+  };
+  const events = [
+    {
+      type: "thread.message.created",
+      seq: 10,
+      runId: "main-turn",
+      payload: { role: "user", messageId: "input" },
+    },
+    { type: "run.started", seq: 11, runId: "main-turn", payload: { trigger: "user" } },
+    { type: "agent.tool.called", seq: 12, runId: "main-turn", payload: { name: "handoff_to_bot" } },
+    { type: "run.started", seq: 13, runId: "teammate-turn", payload: { trigger: "follow_up" } },
+    {
+      type: "thread.message.created",
+      seq: 14,
+      runId: "teammate-turn",
+      payload: { messageId: "reply" },
+    },
+  ];
+  assert.equal(replyAfterInput(events, [input, reply], 9), reply);
+  // Without the handoff, a teammate's message is not this input's reply.
+  assert.equal(
+    replyAfterInput(
+      events.filter((event) => event.seq !== 12),
+      [input, reply],
+      9,
+    ),
+    null,
+  );
+});
