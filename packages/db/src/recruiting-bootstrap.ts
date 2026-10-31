@@ -10,6 +10,7 @@ import {
   RECRUITING_DEFAULT_BOTS,
   RECRUITING_DEFAULT_SKILLS,
   RECRUITING_DISABLED_BUILTIN_TOOLS,
+  RECRUITING_GLOBAL_AGENT_NAME,
   recruitingBotKey,
 } from "@rakazo/core";
 import type { Bot, BotMcpServer, CapabilityInstall, McpServer, PrismaClient } from "./client.js";
@@ -163,11 +164,16 @@ async function ensureGlobalConversation(
   const id = recruitingGlobalGroupId(actor);
   const existing = await tx.chatGroup.findFirst({
     where: { id, spaceId: actor.spaceId, userId: actor.userId },
-    select: { id: true },
+    select: { id: true, name: true },
   });
-  if (existing) return;
+  if (existing) {
+    // Accounts created before the global agent had its own name keep their history, renamed.
+    if (existing.name === "Main")
+      await tx.chatGroup.update({ where: { id }, data: { name: RECRUITING_GLOBAL_AGENT_NAME } });
+    return;
+  }
   // ponytail: reuse this account's native crew; role work opens its existing role conversation.
-  await createGroupInTransaction(tx, actor, { id, name: "Main", botIds });
+  await createGroupInTransaction(tx, actor, { id, name: RECRUITING_GLOBAL_AGENT_NAME, botIds });
 }
 
 function presetWhere(actor: Actor) {

@@ -9,6 +9,7 @@ import {
   RecruitingAccountViewInputSchema,
   RecruitingAccountViewOutputSchema,
 } from "@rakazo/contracts";
+import { pendingInputAttention } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import {
   createGroupRepos,
@@ -41,6 +42,76 @@ export type RecruitingAccountReadDeps = {
 };
 
 const ROLE_READ_CONCURRENCY = 2;
+
+type RoleStatus = NonNullable<RecruitingAccountViewOutput["items"][number]["status"]>;
+
+/** Saved counts, latest activity and any open card per role, in five bounded reads. */
+async function readRoleStatuses(
+  prisma: PrismaClient,
+  actor: Actor,
+  roles: readonly { id: string; sourceThreadId: string }[],
+): Promise<Map<string, RoleStatus>> {
+  const roleIds = roles.map((role) => role.id);
+  const threadIds = roles.map((role) => role.sourceThreadId);
+  if (!roleIds.length) return new Map();
+  const owned = { spaceId: actor.spaceId, userId: actor.userId };
+  const waiting = await prisma.run.findMany({
+    where: { threadId: { in: threadIds }, status: "waiting_input", thread: owned },
+    select: { id: true },
+  });
+  const [saved, shortlisted, latest, cards] = await Promise.all([
+    prisma.recruitingCandidate.groupBy({
+      by: ["roleId"],
+      where: { roleId: { in: roleIds }, role: owned },
+      _count: { _all: true },
+    }),
+    prisma.recruitingCandidate.groupBy({
+      by: ["roleId"],
+      where: { roleId: { in: roleIds }, role: owned, shortlisted: true },
+      _count: { _all: true },
+    }),
+    prisma.message.groupBy({
+      by: ["threadId"],
+      where: { threadId: { in: threadIds }, thread: owned },
+      _max: { createdAt: true },
+    }),
+    prisma.message.findMany({
+      where: {
+        threadId: { in: threadIds },
+        runId: { in: waiting.map((run) => run.id) },
+        role: "bot",
+        thread: owned,
+        blocks: { array_contains: [{ kind: "ask", status: "pending" }] },
+      },
+      orderBy: { seq: "desc" },
+      select: { threadId: true, blocks: true },
+    }),
+  ]);
+  const count = (rows: { roleId: string; _count: { _all: number } }[], id: string) =>
+    rows.find((row) => row.roleId === id)?._count._all ?? 0;
+  return new Map(
+    roles.map((role) => {
+      const card = cards.find((row) => row.threadId === role.sourceThreadId);
+      const kind = card ? pendingInputAttention(card.blocks) : null;
+      const ask = Array.isArray(card?.blocks)
+        ? (card.blocks as { kind?: unknown; status?: unknown; text?: unknown }[]).find(
+            (block) => block?.kind === "ask" && block.status === "pending",
+          )
+        : undefined;
+      const at = latest.find((row) => row.threadId === role.sourceThreadId)?._max.createdAt;
+      return [
+        role.id,
+        {
+          savedPeople: count(saved, role.id),
+          shortlisted: count(shortlisted, role.id),
+          lastActivityAt: at ? at.toISOString() : null,
+          waitingOnYou:
+            kind && typeof ask?.text === "string" ? { kind, text: ask.text.slice(0, 500) } : null,
+        },
+      ];
+    }),
+  );
+}
 
 /** One account-scoped read used by the recruiting pages and the native recruiting tool. */
 export async function readRecruitingAccountView(
@@ -175,6 +246,10 @@ export async function readRecruitingAccountView(
           rows.length > input.limit ? (routines.at(-1)?.id ?? null) : null,
       });
     }
+    const statuses =
+      input.view === "roles"
+        ? await readRoleStatuses(deps.prisma, actor, page)
+        : new Map<string, RoleStatus>();
     const readItem = async (
       row: (typeof page)[number],
     ): Promise<RecruitingAccountViewOutput["items"][number]> => {
@@ -200,7 +275,8 @@ export async function readRecruitingAccountView(
         if (bot.thread?.id !== thread.id) throw new ORPCError("NOT_FOUND");
         return { kind: "bot", botId: bot.id, threadId: thread.id };
       };
-      if (input.view === "roles") return { roleId: row.id };
+      if (input.view === "roles")
+        return { roleId: row.id, status: statuses.get(row.id) };
       const target = await authorize();
       const workspace = await getRecruitingWorkspace(deps.prisma, actor, {
         threadId: thread.id,
