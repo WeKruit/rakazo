@@ -4,6 +4,7 @@ import type {
   AgentRuntimeEvent,
   AutoReviewProvider,
   ConnectorCall,
+  ConnectorEvent,
   ConnectorTool,
 } from "@rakazo/adapter-kit";
 import { MEMORY_REVISION_CONFLICT_ERROR } from "@rakazo/adapter-kit";
@@ -352,7 +353,7 @@ function fixture({
     return true;
   });
   const finalizeRun = vi.fn(async () => ({ continuationRunId: null }));
-  const execute = vi.fn(async function* (call: ConnectorCall) {
+  const execute = vi.fn(async function* (call: ConnectorCall): AsyncGenerator<ConnectorEvent> {
     if (transportUncertain) {
       yield { type: "error" as const, message: "Response lost", outcome: "uncertain" as const };
       return;
@@ -524,6 +525,58 @@ describe("disabled builtins", () => {
     expect(f.commit).not.toHaveBeenCalled();
     expect(f.execute).not.toHaveBeenCalled();
     expect(f.effects).toEqual([]);
+  });
+});
+
+describe("a provider briefly out of credits", () => {
+  it("waits for the top-up and repeats the same call instead of giving up", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const f = fixture();
+      let refusals = 2;
+      f.execute.mockImplementation(async function* (call: ConnectorCall) {
+        if (refusals-- > 0) {
+          yield { type: "error" as const, message: "402 Payment Required: out of credits" };
+          return;
+        }
+        yield { type: "result" as const, data: { item: call.args.id } };
+      });
+      const running = f.run();
+      await vi.advanceTimersByTimeAsync(60_000);
+      await running;
+      expect(f.execute).toHaveBeenCalledTimes(3);
+      const keys = f.execute.mock.calls.map(([call]) => call.executionId);
+      expect(new Set(keys).size).toBe(1);
+      expect(f.results).toEqual([{ item: "item-1" }]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("tells the model once the service stays out of credits", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const f = fixture({ name: "demo__get_item" });
+      f.execute.mockImplementation(async function* () {
+        yield { type: "error" as const, message: "402 Payment Required: out of credits" };
+      });
+      const running = f.run();
+      await vi.advanceTimersByTimeAsync(10 * 60_000);
+      await running;
+      expect(f.execute).toHaveBeenCalledTimes(7);
+      expect(JSON.stringify(f.results)).toContain("still out of credits after waiting");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait on other failures", async () => {
+    const f = fixture();
+    f.execute.mockImplementation(async function* () {
+      yield { type: "error" as const, message: "invalid query" };
+    });
+    await f.run();
+    expect(f.execute).toHaveBeenCalledOnce();
   });
 });
 
