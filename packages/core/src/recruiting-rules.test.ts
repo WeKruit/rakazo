@@ -566,14 +566,14 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     rule: "more without a number past the target",
     in: "RECRUITING_SCALE_START",
     phrase:
-      'a request for more without a number (for example "more", "再来点") when Results already hold 100 or more means 50 more than the current total',
+      'a request for more without a number (for example "more", "再来点") when Results already hold 100 or more is a new goal: ask one question on how many more',
     why: "「再来点」 with 140 people saved was answered as an earlier target already met.",
   },
   {
     rule: "a new request for more is a new target",
     in: "Recruitment sourcing continuation skill",
     phrase:
-      'a new request for more people (for example "more", "再来点") is a new target, the current total plus the number asked or 50, never an earlier target already met',
+      "a new request from the recruiter is never refused or answered as an earlier target already met",
     why: "「再来点」 with 140 people saved was answered as an earlier target already met.",
   },
   {
