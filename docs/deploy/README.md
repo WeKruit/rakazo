@@ -11,4 +11,11 @@ Working notes for the hosted headhunter deployment (Modal app behind a Cloudflar
 | [MULTI-CONTAINER-PLAN-20261027.md](./MULTI-CONTAINER-PLAN-20261027.md) | State that still pins production to one container, and the steps to remove it. |
 | [ARCHITECTURE-GAPS-ITEM1.md](./ARCHITECTURE-GAPS-ITEM1.md) | Items 0 and 1 of the 2026-10-27 architecture gap audit. |
 
+## Test environment
+
+A full copy of production for development and test runs, so they never block production users. It lives in the Modal environment `test`: App `wekruit-recruiting-test`, Volume `wekruit-recruiting-test-files`, Secret `wekruit-recruiting-test-config`, and Secret `wekruit-recruiting-test-db` holding `DATABASE_URL` for its own database. It has its own sign-in and encryption keys, starts with no customer data, and has no mail or outreach credentials, so it cannot send real email or outreach.
+
+- `RELEASE_TARGET=test RAKAZO_TEST_URL=<test app URL> release-cloud.sh <SHA|branch> deploy` deploys any pushed commit; no unit tests or idle wait. A pass is recorded in `RELEASE_TEST_PASSED_DIR` (default `$RELEASE_WORK/test-passed`; keep it on durable storage).
+- A production deploy refuses a commit whose code (outside `docs/`) has not passed on the test environment. Rollbacks are exempt; `RELEASE_SKIP_TEST_ENV=<short SHA>` is the explicit emergency override.
+
 Later work on split services and worker slots is tracked as C5 in [../wekruit/ARCHITECTURE-WORKPLAN.md](../wekruit/ARCHITECTURE-WORKPLAN.md) and the `../wekruit/C5-*.md` notes.
