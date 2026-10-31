@@ -88,6 +88,19 @@ describe("people-search agent runs", () => {
     );
   });
 
+  it("stops reading older runs once the named run is found", async () => {
+    const db = fixture();
+    const page = Array.from({ length: 20 }, () => started);
+    db.externalEffect.findMany.mockImplementation(async () => page as never);
+    await expect(prepare(db, { runId: "agent_run_mine" })).resolves.toEqual({
+      runId: "agent_run_mine",
+    });
+    expect(db.externalEffect.findMany).toHaveBeenCalledTimes(1);
+    expect(db.externalEffect.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ skip: 0, take: 20 }),
+    );
+  });
+
   it("returns people and leaves out people already in the role", async () => {
     const db = fixture();
     await expect(
