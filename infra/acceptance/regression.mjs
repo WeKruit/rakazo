@@ -244,8 +244,17 @@ const sendCard = (message) =>
   (message.blocks ?? []).some((block) => block.kind === "ask" && block.approvalEffectId);
 
 // A contact lookup reply lists addresses or says how many people have one, not only that it is checking.
-const CONTACT_REPORT =
-  /[\w.+-]+@[\w-]+\.\w|(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)[^.\n]{0,80}\d|\d[^.\n]{0,80}(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)/i;
+const COUNT = String.raw`(?:\d+|all|none)`;
+const CONTACT_WORD = String.raw`(?:e-?mails?|address(?:es)?|contacts?|邮箱|联系方式)`;
+const CONTACT_REPORT = new RegExp(
+  [
+    String.raw`[\w.+-]+@[\w-]+\.\w`,
+    String.raw`\bno ${CONTACT_WORD}\b[^.\n]{0,20}\bfound\b`,
+    String.raw`${CONTACT_WORD}[^.\n]{0,80}\b${COUNT}\b`,
+    String.raw`\b${COUNT}\b[^.\n]{0,80}${CONTACT_WORD}`,
+  ].join("|"),
+  "i",
+);
 
 /** Sends one recruiter message and waits until the crew settles. Never answers a card. */
 async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
@@ -791,12 +800,18 @@ try {
     { ask: "帮第一个人约下周三下午的面试", owners: /schedul/i, capability: "booking" },
     { ask: "把这个面试改到下周四", owners: /schedul/i, capability: "reschedule" },
   ];
+  // The turn's result is its last words; its opening line only says what it is about to do.
+  const lastReply = (replies) =>
+    recruiterSees(replies)
+      .map(botText)
+      .filter((text) => text.trim())
+      .at(-1) ?? "";
   /** 找contact, 找contact again and 发20个人的先 in a role chat with saved people. */
   async function contactsAndSend(groupId, failures) {
     const startedAt = new Date().toISOString();
     const contacts = await say(groupId, "找contact");
     if (!contacts.replies.length) failures.push("「找contact」 got no reply");
-    else if (!CONTACT_REPORT.test(recruiterSees(contacts.replies).map(botText).join("\n")))
+    else if (!CONTACT_REPORT.test(lastReply(contacts.replies)))
       failures.push("「找contact」 reply does not say who has an email");
     const askedAgain = new Date().toISOString();
     const again = await say(groupId, "找contact");
@@ -804,7 +819,7 @@ try {
       failures.push(
         `repeat 「找contact」 first reply after ${again.firstReply ?? "never"} s (limit 60 s)`,
       );
-    else if (!CONTACT_REPORT.test(recruiterSees(again.replies).map(botText).join("\n")))
+    else if (!CONTACT_REPORT.test(lastReply(again.replies)))
       failures.push("repeat 「找contact」 reply does not say who has an email");
     const events = await readEvents(groupId).catch(() => []);
     // Everyone was looked up a moment ago, so the repeat may not pay a source for anyone again.
