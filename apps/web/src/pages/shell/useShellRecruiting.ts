@@ -176,6 +176,8 @@ export function useShellRecruiting({
     "inbox",
     "interview",
     "workflow",
+    "routines",
+    "tasks",
   ];
   const requestedWorkspaceView = searchParams.get("view") as RecruitingWorkspaceView | null;
   const recruitingWorkspaceView: RecruitingWorkspaceView =
@@ -220,7 +222,8 @@ export function useShellRecruiting({
     !crmMode &&
     !workspaceNewRole &&
     inGroup &&
-    recruitingWorkspaceView !== "conversation";
+    recruitingWorkspaceView !== "conversation" &&
+    !["sequence", "inbox", "interview"].includes(recruitingWorkspaceView);
   const bindingReadKey = JSON.stringify([recruitingCacheScope, recruitingRefresh]);
   const [bindingRead, setBindingRead] = useState<{
     key: string;
@@ -409,14 +412,31 @@ export function useShellRecruiting({
     !workspaceNewRole &&
     ["brief", "feedback"].includes(recruitingWorkspaceView);
   function openRecruitingView(view: RecruitingWorkspaceView) {
-    setSearchParams(
-      (current) => {
-        const next = new URLSearchParams(current);
-        next.set("view", view);
-        return next;
-      },
-      { replace: true },
-    );
+    if (
+      [
+        "brief",
+        "feedback",
+        "shortlist",
+        "contacts",
+        "sequence",
+        "inbox",
+        "interview",
+        "routines",
+        "tasks",
+      ].includes(view)
+    ) {
+      navigate(`/app?${new URLSearchParams({ view, role: "all" })}`);
+    } else {
+      setSearchParams(
+        (current) => {
+          const next = new URLSearchParams(current);
+          next.set("view", view);
+          next.delete("role");
+          return next;
+        },
+        { replace: true },
+      );
+    }
     setMobileSidebarOpen(false);
     setPanel(null);
   }

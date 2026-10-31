@@ -14,9 +14,8 @@ const MAX_WAIT_MS = 15_000;
 const MAX_CACHED_NAMES = 5_000;
 // A found logo is kept a year; organizations rarely change it.
 const FOUND_TTL_MS = 365 * 24 * 60 * 60 * 1000;
-const MISSING_TTL_MS = 3 * 24 * 60 * 60 * 1000;
-// A miss while the index could not answer (rate limit, timeout) is only a guess: asked again soon.
-const UNSURE_TTL_MS = 10 * 60 * 1000;
+// Two days; organization-logos.ts tells older three-day misses apart by it.
+const MISSING_TTL_MS = 2 * 24 * 60 * 60 * 1000;
 const LEGAL_SUFFIXES = new Set([
   "inc",
   "llc",
@@ -125,8 +124,7 @@ export function createCompanySiteResolver(
   const cache = new Map<string, Found & { expiresAt: number }>();
   const inFlight = new Map<string, Promise<CompanySiteAnswer>>();
   const limit = concurrencyLimit(MAX_CONCURRENT, MAX_WAITING, MAX_WAIT_MS);
-  const ttl = (found: Found) =>
-    found.host || found.icon ? FOUND_TTL_MS : found.unsure ? UNSURE_TTL_MS : MISSING_TTL_MS;
+  const ttl = (found: Found) => (found.host || found.icon ? FOUND_TTL_MS : MISSING_TTL_MS);
   const remember = (key: string, found: Found, expiresAt = now() + ttl(found)) => {
     cache.delete(key);
     cache.set(key, { host: found.host, ...(found.icon ? { icon: found.icon } : {}), expiresAt });
@@ -149,10 +147,11 @@ export function createCompanySiteResolver(
     // Turned away by a full queue is not a miss: not remembered, and the client asks again.
     if (found === BUSY) return { host: null, retry: true };
     const answer = found ?? { host: null, unsure: true as const };
+    // The index could not answer (rate limit, timeout): the page asks again shortly instead of
+    // showing initials, and nothing is remembered.
+    if (answer.unsure) return { host: null, retry: true };
     remember(key, answer);
-    // A miss while the index could not answer is a guess, never saved for everyone.
-    if (!answer.unsure)
-      await options.store?.put(key, answerOf(answer), now() + ttl(answer)).catch(() => undefined);
+    await options.store?.put(key, answerOf(answer), now() + ttl(answer)).catch(() => undefined);
     return answerOf(answer);
   };
   return {
@@ -287,6 +286,7 @@ const NOT_OWN_SITE =
   /(?:^|\.)(?:linkedin\.com|wikipedia\.org|facebook\.com|crunchbase\.com|zoominfo\.com|bloomberg\.com|glassdoor\.com|indeed\.com|x\.com|twitter\.com|instagram\.com|youtube\.com|exa\.ai)$/;
 
 const UNANSWERED = Symbol("unanswered");
+const INDEX_RETRIES = 2;
 
 /**
  * The indexed organization with this name: its own site host, or null when the index lists only a
@@ -300,10 +300,15 @@ async function indexedSite(
 ): Promise<{ host: string | null; image?: string } | null | typeof UNANSWERED> {
   if (tokens.length === 1 && GENERIC_WORDS.has(tokens[0]!)) return null;
   let results: Awaited<ReturnType<OrganizationSearch>>;
-  try {
-    results = await search(tokens.join(" "), signal);
-  } catch {
-    return UNANSWERED;
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      results = await search(tokens.join(" "), signal);
+      break;
+    } catch {
+      // A busy index (many names at once) usually answers a moment later.
+      if (attempt >= INDEX_RETRIES || signal.aborted) return UNANSWERED;
+      await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** attempt));
+    }
   }
   let logoOnly: { host: null; image: string } | null = null;
   for (const { url, title, image } of results) {

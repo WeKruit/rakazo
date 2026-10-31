@@ -8,6 +8,7 @@ import type {
   RecruitingSchedulingPlan,
   RecruitingSourceRef,
 } from "@rakazo/contracts";
+import { accountItem, accountRolesData } from "./recruiting-account-data";
 
 // Offline synthetic records for the actual App/Shell routes. No provider calls or data.
 export const appGroupId = "fixture-group";
@@ -19,7 +20,7 @@ const source = {
   name: "CRM",
   organizationId: "00000000-0000-4000-8000-000000000001",
 };
-const crmTarget = {
+export const crmTarget = {
   mcpServerId: source.serverId,
   serverRevision: 1,
   organizationId: source.organizationId,
@@ -28,7 +29,7 @@ const crmTarget = {
   clientLabel: "Example Labs",
   roleLabel: "Staff Platform Engineer",
 };
-const role = {
+export const role = {
   id: appRoleId,
   spaceId: "fixture-space",
   userId: "fixture-user",
@@ -45,7 +46,7 @@ const criterionSource: RecruitingSourceRef = {
   readAt: checkedAt,
   quote: "The role requires C++ production systems experience.",
 };
-const revision: RecruitingRoleRevision = {
+export const revision: RecruitingRoleRevision = {
   id: "fixture-revision",
   roleId: role.id,
   revision: 1,
@@ -440,6 +441,39 @@ export async function mockRecruitingApp(
     let method = url.pathname.slice(5);
     let input = (route.request().postDataJSON()?.json ?? {}) as Record<string, unknown>;
     calls.push({ method, input });
+    if (method === "recruiting/overview") {
+      const role = accountRolesData()[0]!;
+      return route.fulfill({
+        contentType: "text/event-stream",
+        body: `${[
+          {
+            kind: "role",
+            role: {
+              groupId: role.groupId,
+              roleId: role.id,
+              shortlisted: 1,
+              shortlistedDates: [checkedAt],
+              contacted: 3,
+              replied: 1,
+              interested: 1,
+              interestedPartial: false,
+              incomplete: false,
+              bookings: options.emptyCalendar
+                ? []
+                : accountItem(role, 0).correspondence!.events.map((event) => ({
+                    ...event,
+                    title: "Avery · Platform interview",
+                    status: options.calendarStatus ?? "confirmed",
+                  })),
+              bookingUnknown: false,
+            },
+          },
+          { kind: "done" },
+        ]
+          .map((event) => `event: message\ndata: ${JSON.stringify({ json: event })}\n\n`)
+          .join("")}event: done\ndata: {}\n\n`,
+      });
+    }
     if (method === "threads/subscribe") {
       await new Promise<void>((resolve) => page.once("close", () => resolve()));
       return;
@@ -451,8 +485,45 @@ export async function mockRecruitingApp(
       input = { ...((viewInput.query as Record<string, unknown>) ?? {}), roleId: viewInput.roleId };
     }
     let value: unknown;
-    if (method === "bootstrap") value = bootstrap;
+    if (method === "recruiting/accountView") {
+      const roles = accountRolesData().slice(0, 1);
+      const selected = roles.filter((role) => !input.roleId || input.roleId === role.id);
+      value = {
+        roles,
+        items: selected.map((role) => {
+          const item = accountItem(role, 0);
+          if (options.emptyCalendar && item.correspondence) item.correspondence.events = [];
+          if (options.emptyMail && item.correspondence) item.correspondence.emails = [];
+          if (!options.nativeScheduling && item.candidates) item.candidates.crmStatus = "ok";
+          if (item.workspace)
+            item.workspace.crmTarget = options.nativeScheduling
+              ? null
+              : { bindingEffectId: "fixture-binding", target: crmTarget };
+          if (options.multipleCampaigns && item.campaign)
+            item.campaigns = [
+              item.campaign,
+              {
+                ...item.campaign,
+                campaign: item.campaign.campaign
+                  ? {
+                      ...item.campaign.campaign,
+                      id: "fixture-second-campaign",
+                      name: "Platform follow-up",
+                    }
+                  : null,
+              },
+            ];
+          return item;
+        }),
+        nextCursor: null,
+      };
+    } else if (method === "bootstrap") value = bootstrap;
     else if (method === "me") value = bootstrap.me;
+    else if (method === "links/companySite") value = { host: null };
+    else if (method === "bots/page")
+      value = { items: input.archived ? [] : bootstrap.bots, nextOffset: null };
+    else if (method === "groups/page")
+      value = { items: input.archived ? [] : bootstrap.groups, nextOffset: null };
     else if (method === "spaces/list")
       value = {
         spaces: bootstrap.spaces,
@@ -494,6 +565,8 @@ export async function mockRecruitingApp(
           ? null
           : { bindingEffectId: "fixture-binding", target: crmTarget },
       };
+    else if (method === "notifications/desktopActivity") value = { ok: true };
+    else if (method === "recruiting/workEstimate") value = { activities: [], updatedAt: checkedAt };
     else if (method === "recruiting/roleSetup") value = { ready: true, attention: null, items: [] };
     else if (method === "recruiting/listCandidates") {
       const items = candidates

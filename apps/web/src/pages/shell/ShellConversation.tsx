@@ -78,11 +78,13 @@ export function ShellConversation({
   model,
   roleCreationForm,
   nativeCorrespondence,
+  primaryPage,
   reviewSchedulingPlan,
 }: {
   model: ReturnType<typeof useShellController>;
   roleCreationForm: ReactNode;
   nativeCorrespondence: ReactNode;
+  primaryPage?: ReactNode;
   reviewSchedulingPlan: (handoff: SchedulingPlanHandoff) => void;
 }) {
   const { t } = useLingui();
@@ -297,7 +299,7 @@ export function ShellConversation({
         !(workspaceCandidates && knownThreadId) ? (
         <MessageSkeleton label={t`Loading…`} />
       ) : null}
-      {roleChatWorkspace && (inGroup ? groupId : active?.id) ? (
+      {!primaryPage && roleChatWorkspace && (inGroup ? groupId : active?.id) ? (
         <RoleSetupCard
           conversation={inGroup ? { groupId: groupId! } : { botId: active!.id }}
           refreshSignal={recruitingRefresh}
@@ -325,21 +327,28 @@ export function ShellConversation({
           {roleCreationForm}
         </div>
       ) : null}
-      {boundRoleView && currentBindingRead?.failed ? (
+      {primaryPage}
+      {!primaryPage && boundRoleView && currentBindingRead?.failed ? (
         <div className="px-6">
           <RetryNotice onRetry={() => setRecruitingRefresh((value) => value + 1)}>
             <Trans>Could not load this role’s candidate records.</Trans>
           </RetryNotice>
         </div>
-      ) : boundRoleCrmMode && !effectiveCrmSelection ? (
+      ) : !primaryPage && boundRoleCrmMode && !effectiveCrmSelection ? (
         <div className="p-6">
           <TabLoading />
         </div>
       ) : null}
-      {!switchingRole &&
+      {!primaryPage &&
+      !switchingRole &&
       (crmMode || (boundRoleCrmMode && effectiveCrmSelection)) &&
       activeSnapshot?.threadId ? (
-        <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto",
+            recruitingWorkspaceView === "contacts" && "hire-contacts-view",
+          )}
+        >
           {effectiveCrmSelection ? (
             <RecruitingPanel
               workspaceRead={currentWorkspaceRead}
@@ -386,7 +395,7 @@ export function ShellConversation({
           )}
         </div>
       ) : null}
-      {!switchingRole && workspaceCorrespondence && activeSnapshot?.threadId ? (
+      {!primaryPage && !switchingRole && workspaceCorrespondence && activeSnapshot?.threadId ? (
         <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
           {currentBindingRead?.workspace && recruitingWorkspaceView !== "inbox" ? (
             <div className="recruiting-workspace-content">
@@ -428,7 +437,12 @@ export function ShellConversation({
         </div>
       ) : null}
       {!switchingRole && workspaceCandidates && knownThreadId ? (
-        <div className="rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "rk-scroll recruiting-workspace-main min-h-0 flex-1 overflow-y-auto",
+            recruitingWorkspaceView === "contacts" && "hire-contacts-view",
+          )}
+        >
           <div className="recruiting-workspace-content">
             {recruitingWorkspaceView === "results" ? (
               <CalibrationRoundCard

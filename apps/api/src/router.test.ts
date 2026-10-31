@@ -320,7 +320,7 @@ describe("account preferences", () => {
       take: 200,
       skip: 0,
       orderBy: { id: "asc" },
-      where: { botId: "bot-1", spaceId: f.actor.spaceId },
+      where: { botId: "bot-1", spaceId: f.actor.spaceId, userId: f.actor.userId },
     });
   });
 

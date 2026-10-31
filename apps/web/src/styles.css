@@ -1270,3 +1270,13 @@ body,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Contacts keeps wheel, touch and keyboard scrolling without nested scrollbar tracks. */
+.hire-contacts-view,
+.hire-contacts-view .candidate-viewport {
+  scrollbar-width: none;
+}
+.hire-contacts-view::-webkit-scrollbar,
+.hire-contacts-view .candidate-viewport::-webkit-scrollbar {
+  display: none;
+}

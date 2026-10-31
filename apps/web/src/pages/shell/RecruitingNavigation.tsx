@@ -4,8 +4,11 @@ import { Badge, Button, cn, Input, Skeleton } from "@rakazo/ui-web";
 import {
   Bookmark,
   CalendarDays,
+  Clock,
   FolderOpen,
   Inbox,
+  ListChecks,
+  MessageSquare,
   MoreHorizontal,
   PanelLeft,
   PlusCircle,
@@ -13,7 +16,6 @@ import {
   Send,
   Sparkles,
   Users,
-  WandSparkles,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { ArtifactTarget } from "../../lib/artifact-open";
@@ -37,7 +39,9 @@ export type RecruitingWorkspaceView =
   | "sequence"
   | "inbox"
   | "interview"
-  | "workflow";
+  | "workflow"
+  | "routines"
+  | "tasks";
 
 /** Whether two CRM role reads belong to the same user and Space (scope is [user, Space, thread]). */
 function sameAccount(previousKey: string, nextKey: string) {
@@ -70,7 +74,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   archivedOpen,
   groupId,
   query,
-  canOpenDashboard,
   canCreateRole,
   onQueryChange,
   view,
@@ -88,9 +91,11 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
   onOpenCrmRole,
   loading = false,
   onPrefetchRole,
+  onGlobalChat,
 }: {
   /** The role list has not arrived yet. */
   loading?: boolean;
+  onGlobalChat?: () => void;
   /** Hover or focus on a role: start reading its conversation before the click. */
   onPrefetchRole?: (id: string) => void;
   crmContext?: {
@@ -293,6 +298,10 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         </button>
       </div>
       <nav aria-label={t`Recruiting workspace`} className="hire-nav">
+        <Button variant="ghost" onClick={onGlobalChat}>
+          <MessageSquare size={18} aria-hidden="true" />
+          <Trans>Main</Trans>
+        </Button>
         <Button variant="ghost" disabled={!canCreateRole} onClick={onNewRole}>
           <PlusCircle size={18} aria-hidden="true" />
           <Trans>New Role</Trans>
@@ -300,7 +309,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         <Button
           variant="ghost"
           aria-current={view === "brief" ? "page" : undefined}
-          disabled={!canOpenDashboard}
           onClick={() => onView("brief")}
         >
           <FolderOpen size={18} aria-hidden="true" />
@@ -309,7 +317,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
         <Button
           variant="ghost"
           aria-current={view === "feedback" ? "page" : undefined}
-          disabled={!canOpenDashboard}
           onClick={() => onView("feedback")}
         >
           <Sparkles size={18} aria-hidden="true" />
@@ -319,7 +326,6 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
           <Button
             key={target}
             variant="ghost"
-            disabled={!canOpenDashboard}
             aria-current={view === target ? "page" : undefined}
             onClick={() => onView(target)}
           >
@@ -564,12 +570,19 @@ export const RecruitingNavigation = memoWithLatestHandlers(function RecruitingNa
       <div className="hire-sidebar-bottom">
         <Button
           variant="ghost"
-          disabled={!canOpenDashboard}
-          aria-current={view === "workflow" ? "page" : undefined}
-          onClick={() => onView("workflow")}
+          aria-current={view === "routines" ? "page" : undefined}
+          onClick={() => onView("routines")}
         >
-          <WandSparkles size={17} aria-hidden="true" />
-          <Trans>Recruiting workflow</Trans>
+          <Clock size={17} aria-hidden="true" />
+          <Trans>Routines</Trans>
+        </Button>
+        <Button
+          variant="ghost"
+          aria-current={view === "tasks" ? "page" : undefined}
+          onClick={() => onView("tasks")}
+        >
+          <ListChecks size={17} aria-hidden="true" />
+          <Trans>Tasks</Trans>
         </Button>
       </div>
     </div>

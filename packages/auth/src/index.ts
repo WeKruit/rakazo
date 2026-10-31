@@ -44,6 +44,7 @@ export interface AuthEnv {
   email?: TransactionalEmailProvider;
   onEmailError?: (error: unknown) => void;
   beforeDeleteUser?: (userId: string) => Promise<void>;
+  ensureUserSpace?: (user: { id: string; email: string }, spaceId: string) => Promise<void>;
   /** Runs when a session row is deleted. Delivery also drops a token whose session is missing or expired. */
   afterDeleteSession?: (session: AuthSession) => Promise<void>;
   /** Runs when a password change replaces the caller's own session instead of ending it. */
@@ -520,7 +521,26 @@ export function createAuth(prisma: PrismaClient, env: AuthEnv) {
               ) {
                 throw new APIError("FORBIDDEN", { message: "Registration is closed" });
               }
-              await bootstrapUserSpace(prisma, user, env);
+              const { spaceId } = await bootstrapUserSpace(prisma, user, env);
+              await env.ensureUserSpace?.(user, spaceId);
+            } else if (env.ensureUserSpace) {
+              // A failed first-session provision may leave the private membership committed.
+              // Retry the same idempotent bootstrap before issuing another session.
+              const personal = await prisma.spaceMember.findFirst({
+                where: {
+                  userId: user.id,
+                  role: "owner",
+                  space: {
+                    isDefault: true,
+                    createdByUserId: user.id,
+                    deletingAt: null,
+                    memberships: { every: { userId: user.id } },
+                    organization: { members: { every: { userId: user.id } } },
+                  },
+                },
+                select: { spaceId: true },
+              });
+              if (personal) await env.ensureUserSpace(user, personal.spaceId);
             }
           },
           after: async (session, ctx) => {

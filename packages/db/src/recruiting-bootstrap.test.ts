@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Actor } from "@rakazo/contracts";
-import { memoryTidyRoutineCron } from "@rakazo/core";
+import { memoryTidyRoutineCron, RECRUITING_DEFAULT_BOTS } from "@rakazo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import * as recruiting from "./recruiting-bootstrap.js";
@@ -102,6 +102,18 @@ function fixture() {
     thread: { id: string };
     members: { botId: string }[];
   } | null = null;
+  const globalGroups = new Map<
+    string,
+    {
+      id: string;
+      userId: string;
+      spaceId: string;
+      name: string;
+      archivedAt: Date | null;
+      thread: { id: string };
+      members: { botId: string }[];
+    }
+  >();
   const tx = {
     $queryRaw: vi.fn(async (_query: { sql: string }) => [{ complete: true }]),
     spaceMember: {
@@ -128,9 +140,12 @@ function fixture() {
       }),
     },
     chatGroup: {
-      findFirst: vi.fn(async () =>
-        group ? { ...group, members: group.members.map((member) => ({ ...member })) } : null,
-      ),
+      findFirst: vi.fn(async ({ where }) => {
+        const found = where.id?.startsWith("recruiting-global-")
+          ? globalGroups.get(where.id)
+          : group;
+        return found ? { ...found, members: found.members.map((member) => ({ ...member })) } : null;
+      }),
       count: vi.fn(async () => (group ? 1 : 0)),
     },
     chatGroupMember: {
@@ -235,7 +250,7 @@ function fixture() {
     return bot;
   });
   native.group.mockImplementation(async (_tx, _actor, input) => {
-    group = {
+    const created = {
       id: input.id,
       userId: actor.userId,
       spaceId: actor.spaceId,
@@ -244,7 +259,9 @@ function fixture() {
       thread: { id: "crew-thread" },
       members: input.botIds.map((botId: string) => ({ botId })),
     };
-    return group;
+    if (input.id?.startsWith("recruiting-global-")) globalGroups.set(input.id, created);
+    else group = created;
+    return created;
   });
   const prisma = {
     $transaction: vi.fn(async (callback) => callback(tx)),
@@ -263,6 +280,7 @@ function fixture() {
       busy = true;
     },
     getGroup: () => group,
+    globalGroups,
   };
 }
 
@@ -372,7 +390,7 @@ describe("ensureRecruitingWorkspace", () => {
     });
     expect(again).toEqual(first);
     expect(native.bot).toHaveBeenCalledTimes(5);
-    expect(native.group).toHaveBeenCalledTimes(1);
+    expect(native.group).toHaveBeenCalledTimes(2);
     expect(f.bots[0]!.instructions).toBe("My private instructions");
     expect(f.tx.mcpServer.create).not.toHaveBeenCalled();
   });
@@ -407,7 +425,7 @@ describe("ensureRecruitingWorkspace", () => {
     expect(native.group).not.toHaveBeenCalled();
   });
 
-  it("does not add defaults to an existing non-product workspace or revive archived defaults", async () => {
+  it("adds the private global defaults beside an existing custom conversation without changing it", async () => {
     const f = fixture();
     f.bots.push({
       id: "custom",
@@ -419,12 +437,17 @@ describe("ensureRecruitingWorkspace", () => {
       disabledBuiltinTools: [],
       archivedAt: null,
     });
-    await expect(
-      recruiting.ensureRecruitingWorkspace(f.prisma, actor, {
-        sandboxKind: "fake",
-      }),
-    ).rejects.toThrow();
-    expect(native.bot).not.toHaveBeenCalled();
+    const custom = structuredClone(f.bots[0]);
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    expect(f.bots.find((bot) => bot.id === "custom")).toEqual(custom);
+    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(native.group).toHaveBeenCalledWith(
+      f.tx,
+      actor,
+      expect.objectContaining({ id: recruiting.recruitingGlobalGroupId(actor), name: "Main" }),
+    );
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    expect(native.bot).toHaveBeenCalledTimes(5);
   });
 
   it("does not revive an archived product workspace", async () => {
@@ -530,7 +553,7 @@ describe("recruiting bootstrap idempotency and per-user identity", () => {
     );
     expect(snapshot(f)).toBe(before);
     expect(native.bot).toHaveBeenCalledTimes(5);
-    expect(native.group).toHaveBeenCalledTimes(1);
+    expect(native.group).toHaveBeenCalledTimes(2);
   });
 
   it("keeps private edits and removed grants across repeated login and upgrade", async () => {
@@ -750,7 +773,7 @@ describe("managed recruiting computer policy", () => {
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
     expect(f.tx.bot.updateMany).not.toHaveBeenCalled();
     expect(native.bot).toHaveBeenCalledTimes(5);
-    expect(native.group).toHaveBeenCalledOnce();
+    expect(native.group).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(f.assignments)).toBe(assignments);
   });
 });
@@ -1173,7 +1196,9 @@ describe("crews set up before the recruiting preset", () => {
       skipDuplicates: true,
     });
     const main = f.bots.find((bot) => bot.id === "old-main")!;
-    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(main.instructions).toBe(
+      RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!.instructions,
+    );
     expect(main.name).toBe("Main");
     expect(main.disabledBuiltinTools).toContain("request_secret");
     expect(f.skills.map((skill) => skill.name)).toEqual(["My own notes"]);
@@ -1202,7 +1227,9 @@ describe("crews set up before the recruiting preset", () => {
     expect(main.instructions).toBe("Edited");
     f.presets[0]!.digest = "older catalog";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(main.instructions).toBe(
+      RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!.instructions,
+    );
   });
 
   it("upgrades on sign-in too, and waits while a run is active", async () => {
@@ -1220,7 +1247,9 @@ describe("crews set up before the recruiting preset", () => {
     main.instructions = "Older defaults";
     f.presets[0]!.digest = "older catalog";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(main.instructions).toBe(
+      RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!.instructions,
+    );
     expect(f.tx.run.count).toHaveBeenCalledWith({
       where: {
         spaceId: actor.spaceId,
@@ -1233,10 +1262,16 @@ describe("crews set up before the recruiting preset", () => {
   it("does not adopt a crew without the platform research service", async () => {
     const f = legacy();
     f.assignments.splice(0);
-    await expect(recruiting.ensureRecruitingWorkspace(f.prisma, actor, options)).rejects.toThrow(
-      "already has conversations",
-    );
+    const original = f.bots.map((bot) => structuredClone(bot));
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, options);
+    for (const bot of original)
+      expect(f.bots.find((current) => current.id === bot.id)).toEqual(bot);
     expect(f.bots.find((bot) => bot.id === "old-main")!.instructions).toBe("Old Main instructions");
+    expect(native.bot).toHaveBeenCalledTimes(5);
+    const global = native.group.mock.calls.find(
+      ([, , input]) => input.id === recruiting.recruitingGlobalGroupId(actor),
+    )?.[2];
+    expect(global.botIds).not.toContain("old-main");
   });
 
   it("gives the adopted crew one nightly memory tidy per bot, once", async () => {
@@ -1329,5 +1364,135 @@ describe("nightly memory tidy defaults", () => {
       ["a", "b", "c", "d", "e", "f"].map((id) => memoryTidyRoutineCron(`person-${id}`)),
     );
     expect(minutes.size).toBeGreaterThan(1);
+  });
+});
+
+it("provisions one separate global native conversation with the same private crew", async () => {
+  const f = fixture();
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+  await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+  const globalId = recruiting.recruitingGlobalGroupId(actor);
+  expect(native.group.mock.calls.filter(([, , input]) => input.id === globalId)).toHaveLength(1);
+  expect(native.group).toHaveBeenCalledWith(f.tx, actor, {
+    id: globalId,
+    name: "Main",
+    botIds: f.bots.map((bot) => bot.id),
+  });
+  expect(globalId).not.toBe(f.getGroup()!.id);
+  expect(recruiting.recruitingGlobalGroupId({ ...actor, userId: "other" })).not.toBe(globalId);
+  expect(recruiting.recruitingGlobalGroupId({ ...actor, spaceId: "other" })).not.toBe(globalId);
+});
+
+describe("startup recruiting account backfill", () => {
+  function privateMembership(userId = actor.userId, spaceId = actor.spaceId) {
+    return {
+      userId,
+      spaceId,
+      space: {
+        createdByUserId: userId,
+        memberships: [{ userId }],
+        organization: { members: [{ userId }] },
+      },
+    };
+  }
+  function account() {
+    const f = fixture();
+    const findGroup = f.tx.chatGroup.findFirst.getMockImplementation()!;
+    f.tx.chatGroup.findFirst.mockImplementation(async (args) => {
+      const group = await findGroup(args);
+      return group && args.include?.members
+        ? {
+            ...group,
+            members: group.members.map((member) => ({
+              botId: member.botId,
+              bot: {
+                ...f.bots.find((bot) => bot.id === member.botId),
+                userId: actor.userId,
+                spaceId: actor.spaceId,
+              },
+            })),
+          }
+        : group;
+    });
+    Object.assign(f.prisma, {
+      spaceMember: { findMany: vi.fn(async () => [privateMembership()]) },
+      user: { findMany: vi.fn(async () => [{ id: actor.userId, email: actor.email }]) },
+      chatGroup: f.tx.chatGroup,
+      mcpServer: f.tx.mcpServer,
+      bot: { ...f.tx.bot, findFirst: vi.fn(async () => null), count: vi.fn(async () => 0) },
+      botMcpServer: { ...f.tx.botMcpServer, findMany: vi.fn(async () => []) },
+    });
+    return f;
+  }
+  it("provisions an existing private account that has never opened recruiting, once", async () => {
+    const f = account();
+    const errors = vi.fn();
+    expect(
+      await recruiting.backfillRecruitingCrews(f.prisma, { sandboxKind: "fake" }, errors),
+    ).toBe(1);
+    expect(errors).not.toHaveBeenCalled();
+    expect(f.bots).toHaveLength(5);
+    expect(f.globalGroups.has(recruiting.recruitingGlobalGroupId(actor))).toBe(true);
+    expect(
+      await recruiting.backfillRecruitingCrews(f.prisma, { sandboxKind: "fake" }, errors),
+    ).toBe(1);
+    expect(errors).not.toHaveBeenCalled();
+    expect(native.bot).toHaveBeenCalledTimes(5);
+    expect(f.globalGroups).toHaveLength(1);
+  });
+  it("excludes shared Spaces and ownership mismatches from the startup population", async () => {
+    const f = account();
+    const shared = privateMembership("other-user", "shared-space");
+    shared.space.memberships.push({ userId: actor.userId });
+    const organization = privateMembership("other-user", "shared-organization");
+    organization.space.organization.members.push({ userId: actor.userId });
+    const mismatch = privateMembership("other-user", "wrong-owner");
+    mismatch.space.createdByUserId = actor.userId;
+    vi.mocked(f.prisma.spaceMember.findMany).mockResolvedValue([
+      privateMembership(),
+      shared,
+      organization,
+      mismatch,
+    ] as never);
+    const errors = vi.fn();
+    await recruiting.backfillRecruitingCrews(f.prisma, { sandboxKind: "fake" }, errors);
+    expect(errors).not.toHaveBeenCalled();
+    expect(
+      native.bot.mock.calls.every(
+        ([, who]) => who.userId === actor.userId && who.spaceId === actor.spaceId,
+      ),
+    ).toBe(true);
+    expect(f.prisma.spaceMember.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { role: "owner", space: { isDefault: true, deletingAt: null } },
+      }),
+    );
+  });
+  it("does not create new conversations or upgrade services after the product workspace was archived", async () => {
+    const f = account();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    f.getGroup()!.archivedAt = new Date();
+    f.globalGroups.clear();
+    native.group.mockClear();
+    const before = structuredClone(f.servers);
+    const errors = vi.fn();
+    await recruiting.backfillRecruitingCrews(f.prisma, { sandboxKind: "fake" }, errors);
+    expect(errors).not.toHaveBeenCalled();
+    expect(native.group).not.toHaveBeenCalled();
+    expect(f.servers).toEqual(before);
+  });
+  it("preserves an archived global Main and its chosen membership", async () => {
+    const f = account();
+    await recruiting.ensureRecruitingWorkspace(f.prisma, actor, { sandboxKind: "fake" });
+    const global = f.globalGroups.get(recruiting.recruitingGlobalGroupId(actor))!;
+    global.archivedAt = new Date();
+    global.members.splice(1);
+    const before = structuredClone(global);
+    native.group.mockClear();
+    const errors = vi.fn();
+    await recruiting.backfillRecruitingCrews(f.prisma, { sandboxKind: "fake" }, errors);
+    expect(errors).not.toHaveBeenCalled();
+    expect(global).toEqual(before);
+    expect(native.group).not.toHaveBeenCalled();
   });
 });

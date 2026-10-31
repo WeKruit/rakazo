@@ -410,6 +410,7 @@ export function routineModelIssues(
 export const RoutineSchema = z.object({
   id: Id,
   botId: Id,
+  threadId: Id.nullable().optional(),
   name: z.string(),
   prompt: z.string(),
   crons: z.array(z.string()),
@@ -437,6 +438,7 @@ export type Routine = z.infer<typeof RoutineSchema>;
 export const CreateRoutineInput = z
   .object({
     botId: Id,
+    threadId: Id.optional(),
     name: z.string().min(1).max(80),
     prompt: z.string().min(1),
     crons: z.array(z.string().min(1)).default([]),

@@ -10,13 +10,16 @@ export function createPrismaOrganizationLogoStore(
   return {
     async get(key) {
       const row = await prisma.organizationLogo.findUnique({ where: { key } });
-      return row
-        ? {
-            host: row.host,
-            ...(row.icon ? { icon: row.icon } : {}),
-            expiresAt: row.checkAgainAt.getTime(),
-          }
-        : null;
+      if (!row) return null;
+      const staleMiss =
+        !row.host &&
+        !row.icon &&
+        row.checkAgainAt.getTime() - row.checkedAt.getTime() > OLD_MISS_MS;
+      return {
+        host: row.host,
+        ...(row.icon ? { icon: row.icon } : {}),
+        expiresAt: staleMiss ? 0 : row.checkAgainAt.getTime(),
+      };
     },
     async put(key, found, expiresAt) {
       const data = {
@@ -34,23 +37,35 @@ export function createPrismaOrganizationLogoStore(
   };
 }
 
+/**
+ * Misses saved while the index search read only three results were kept three days; they may have
+ * missed an organization the index has, so they are looked up again. Misses are now kept two days,
+ * which tells them apart.
+ */
+const OLD_MISS_MS = 2.5 * 24 * 60 * 60 * 1000;
 const MAX_NAMES = 50_000;
 const CLAIM_MS = 15 * 60 * 1000;
 /** A claimed name not looked up yet: due at once, so a page asking meanwhile looks it up too. */
 const UNCHECKED = new Date(0);
 
-/** Takes a name for this worker; false when another worker is already looking it up. */
-async function claim(prisma: Pick<PrismaClient, "organizationLogo">, key: string) {
+/**
+ * Takes a name for this worker; false when another worker is already looking it up. An old miss
+ * is taken too, and becomes an unfinished claim until the lookup saves its answer.
+ */
+async function claim(prisma: Pick<PrismaClient, "organizationLogo" | "$executeRaw">, key: string) {
   const created = await prisma.organizationLogo
     .create({ data: { key, checkAgainAt: UNCHECKED } })
     .then(() => true)
     .catch(() => false);
   if (created) return true;
-  const { count } = await prisma.organizationLogo.updateMany({
-    where: { key, checkAgainAt: UNCHECKED, checkedAt: { lt: new Date(Date.now() - CLAIM_MS) } },
-    data: { checkedAt: new Date() },
-  });
-  return count === 1;
+  const taken = await prisma.$executeRaw`
+    UPDATE organization_logos
+       SET "checkedAt" = now() AT TIME ZONE 'UTC', "checkAgainAt" = 'epoch'::timestamp
+     WHERE key = ${key} AND host IS NULL AND icon IS NULL
+       AND (("checkAgainAt" = 'epoch'::timestamp
+              AND "checkedAt" < now() AT TIME ZONE 'UTC' - make_interval(secs => ${CLAIM_MS / 1000}))
+            OR "checkAgainAt" - "checkedAt" > make_interval(secs => ${OLD_MISS_MS / 1000}))`;
+  return taken === 1;
 }
 const CONCURRENCY = 2;
 
@@ -60,7 +75,7 @@ const CONCURRENCY = 2;
  * run on every start: names with a saved answer are skipped, and a failure only skips that name.
  */
 export async function fillOrganizationLogos(
-  prisma: Pick<PrismaClient, "organizationLogo" | "$queryRaw">,
+  prisma: Pick<PrismaClient, "organizationLogo" | "$queryRaw" | "$executeRaw">,
   resolver: CompanySiteResolver,
   options: { signal?: AbortSignal; maxLookups: number },
 ) {
@@ -89,15 +104,25 @@ export async function fillOrganizationLogos(
     GROUP BY name
     ORDER BY max(seen) DESC
     LIMIT ${MAX_NAMES}`;
-  // Names with a saved answer are done; a claim whose lookup never finished is tried again.
-  const saved = new Set(
-    (
-      await prisma.organizationLogo.findMany({
-        where: { checkAgainAt: { gt: UNCHECKED } },
-        select: { key: true },
-      })
-    ).map((row) => row.key),
-  );
+  // Names with a saved answer are done; a claim whose lookup never finished, or an old miss, is
+  // tried again.
+  const found = await prisma.organizationLogo.findMany({
+    where: {
+      checkAgainAt: { gt: UNCHECKED },
+      OR: [{ host: { not: null } }, { icon: { not: null } }],
+    },
+    select: { key: true },
+  });
+  const misses = await prisma.organizationLogo.findMany({
+    where: { checkAgainAt: { gt: UNCHECKED }, host: null, icon: null },
+    select: { key: true, checkedAt: true, checkAgainAt: true },
+  });
+  const saved = new Set([
+    ...found.map((row) => row.key),
+    ...misses
+      .filter((row) => row.checkAgainAt.getTime() - row.checkedAt.getTime() <= OLD_MISS_MS)
+      .map((row) => row.key),
+  ]);
   const queue: string[] = [];
   for (const { name } of rows) {
     const key = companyTokens(name).join(" ");

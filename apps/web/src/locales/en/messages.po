@@ -80,6 +80,16 @@ msgstr "{0} left"
 msgid "{0} minutes"
 msgstr "{0} minutes"
 
+#. placeholder {0}: item.candidates?.total ?? 0
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "{0} people"
+msgstr "{0} people"
+
+#. placeholder {0}: repliesIncomplete ? `${replies.length}+` : replies.length
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "{0} replies"
+msgstr "{0} replies"
+
 #. placeholder {0}: sender.name
 #: src/pages/ExternalConversationSettings.tsx
 msgid "{0} rollup hours"
@@ -239,6 +249,10 @@ msgstr "Add {name} to shortlist"
 msgid "Add a model in Settings to use this."
 msgstr "Add a model in Settings to use this."
 
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "Add a name and prompt."
+msgstr "Add a name and prompt."
+
 #: src/pages/RoutineEditor.tsx
 msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
 msgstr "Add a schedule, webhook, GitHub, or message trigger to run this routine."
@@ -378,6 +392,11 @@ msgstr "All projects"
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "All providers"
 msgstr "All providers"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "All roles"
+msgstr "All roles"
 
 #: src/pages/ActivityList.tsx
 #: src/pages/recruiting/InterviewCalendar.tsx
@@ -811,6 +830,10 @@ msgstr "Cancel new group"
 msgid "Cancel new role"
 msgstr "Cancel new role"
 
+#: src/components/LiveWork.tsx
+msgid "Cancel task"
+msgstr "Cancel task"
+
 #: src/pages/BillingSettingsPanel.tsx
 msgid "Canceled"
 msgstr "Canceled"
@@ -1040,6 +1063,7 @@ msgstr "Clearing…"
 msgid "Client"
 msgstr "Client"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Client feedback"
 msgstr "Client feedback"
@@ -1145,6 +1169,10 @@ msgstr "Compact"
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Company"
 msgstr "Company"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Company deck"
+msgstr "Company deck"
 
 #: src/pages/recruiting/fieldLabels.ts
 msgid "Company type"
@@ -1285,6 +1313,10 @@ msgstr "Connect an app"
 msgid "Connect API key"
 msgstr "Connect API key"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Connect calendar"
+msgstr "Connect calendar"
+
 #: src/pages/PluginsOverlay.tsx
 msgid "Connect Executor"
 msgstr "Connect Executor"
@@ -1371,6 +1403,10 @@ msgstr "Contact status"
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Contacted"
 msgstr "Contacted"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Contacts"
+msgstr "Contacts"
 
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "Context"
@@ -1597,6 +1633,10 @@ msgstr "Could not load billing"
 msgid "Could not load bots. Reload to try again."
 msgstr "Could not load bots. Reload to try again."
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Could not load calendar records."
+msgstr "Could not load calendar records."
+
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/recruiting/SequenceTab.tsx
@@ -1640,9 +1680,21 @@ msgstr "Could not load MCP servers"
 msgid "Could not load model settings"
 msgstr "Could not load model settings"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Could not load recruiting records."
+msgstr "Could not load recruiting records."
+
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Could not load recruiting. Refresh to try again."
 msgstr "Could not load recruiting. Refresh to try again."
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Could not load replies."
+msgstr "Could not load replies."
+
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "Could not load routines."
+msgstr "Could not load routines."
 
 #: src/pages/RoutineRunHistory.tsx
 msgid "Could not load run history"
@@ -1717,6 +1769,7 @@ msgstr "Could not prepare your workspace"
 msgid "Could not reach the server"
 msgstr "Could not reach the server"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "Could not read this campaign."
 msgstr "Could not read this campaign."
@@ -1783,6 +1836,10 @@ msgstr "Could not save group"
 msgid "Could not save model"
 msgstr "Could not save model"
 
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "Could not save routine"
+msgstr "Could not save routine"
+
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Could not save rule"
 msgstr "Could not save rule"
@@ -1811,6 +1868,10 @@ msgstr "Could not save that voice"
 #: src/pages/shell/bot-credentials.tsx
 msgid "Could not save the credential"
 msgstr "Could not save the credential"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Could not save the reminder."
+msgstr "Could not save the reminder."
 
 #: src/pages/shell/message-cards.tsx
 msgid "Could not save this choice"
@@ -2223,6 +2284,7 @@ msgstr "Does not match"
 
 #: src/components/LiveWork.tsx
 #: src/pages/ActivityList.tsx
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Done"
 msgstr "Done"
@@ -2478,6 +2540,14 @@ msgstr "Expand"
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Experience"
 msgstr "Experience"
+
+#: src/components/AskDeadline.tsx
+msgid "Expired"
+msgstr "Expired"
+
+#: src/components/AskDeadline.tsx
+msgid "Expires in {time}"
+msgstr "Expires in {time}"
 
 #: src/pages/shell/bot-panel.tsx
 msgid "Export"
@@ -2789,6 +2859,7 @@ msgstr "Imported list"
 msgid "Inactive"
 msgstr "Inactive"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Inbox"
 msgstr "Inbox"
@@ -2873,6 +2944,7 @@ msgstr "Interval amount"
 msgid "Interval unit"
 msgstr "Interval unit"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/InterviewTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
@@ -2911,6 +2983,10 @@ msgstr "Its conversation, files, and routines will be permanently deleted. Bots 
 #: src/pages/recruiting/RecruitingRoleTab.tsx
 msgid "JD"
 msgstr "JD"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Job Brief"
+msgstr "Job Brief"
 
 #: src/pages/GroupPanel.tsx
 msgid "Job description"
@@ -3010,6 +3086,7 @@ msgid "Listening"
 msgstr "Listening"
 
 #: src/pages/Artifacts.tsx
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Load more"
 msgstr "Load more"
@@ -3107,6 +3184,7 @@ msgstr "Local access lets bots run commands without asking. Avoid it on shared o
 msgid "Local Server Settings"
 msgstr "Local Server Settings"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/fieldLabels.ts
 #: src/pages/recruiting/InterviewCalendar.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
@@ -3141,6 +3219,10 @@ msgstr "Lowercase letters, numbers, hyphens and underscores, starting with a let
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Mailbox not recorded"
 msgstr "Mailbox not recorded"
+
+#: src/pages/recruiting/HomeDashboard.tsx
+msgid "Main"
+msgstr "Main"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -3481,6 +3563,10 @@ msgstr "Next campaigns"
 msgid "Next contact campaigns"
 msgstr "Next contact campaigns"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Next page"
+msgstr "Next page"
+
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Next week"
 msgstr "Next week"
@@ -3513,6 +3599,10 @@ msgstr "no auth"
 msgid "No authentication"
 msgstr "No authentication"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No campaign yet."
+msgstr "No campaign yet."
+
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No chat apps linked yet."
 msgstr "No chat apps linked yet."
@@ -3525,9 +3615,17 @@ msgstr "No contact campaign associations were returned."
 msgid "No contacts for this role yet."
 msgstr "No contacts for this role yet."
 
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "No conversation yet."
+msgstr "No conversation yet."
+
 #: src/pages/shell/bot-credentials.tsx
 msgid "No credentials saved for this bot."
 msgstr "No credentials saved for this bot."
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No feedback yet."
+msgstr "No feedback yet."
 
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No future confirmed event appears in these saved checks."
@@ -3552,6 +3650,10 @@ msgstr "No interviews in progress for this role."
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
 msgstr "No invitation is created by this view. Availability is the saved observation, not a reservation. Calendar records may include other roles; their role association has not been verified."
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No job brief yet."
+msgstr "No job brief yet."
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No job description is saved for this role. Add a JD or link when starting recruiting."
@@ -3613,6 +3715,11 @@ msgstr "No records matched this search."
 msgid "No recruiter messages were found."
 msgstr "No recruiter messages were found."
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/RecruitingCorrespondence.tsx
+msgid "No replies yet."
+msgstr "No replies yet."
+
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 msgid "No research activity"
 msgstr "No research activity"
@@ -3630,6 +3737,7 @@ msgstr "No role linked"
 msgid "No role linked yet. Describe the role in this conversation."
 msgstr "No role linked yet. Describe the role in this conversation."
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No roles yet."
 msgstr "No roles yet."
@@ -3715,10 +3823,6 @@ msgstr "No skills yet"
 msgid "No stored campaign associations were returned for this role."
 msgstr "No stored campaign associations were returned for this role."
 
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "No stored emails for this role."
-msgstr "No stored emails for this role."
-
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No stored messages were returned for this contact."
 msgstr "No stored messages were returned for this contact."
@@ -3734,6 +3838,10 @@ msgstr "No subject"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "No supported future interval is recorded. Check availability before choosing a time."
 msgstr "No supported future interval is recorded. Check availability before choosing a time."
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "No tasks yet."
+msgstr "No tasks yet."
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No team conversations yet."
@@ -3968,6 +4076,10 @@ msgstr "Open work"
 msgid "OpenAI-compatible server URL"
 msgstr "OpenAI-compatible server URL"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Opened"
+msgstr "Opened"
+
 #: src/pages/Onboarding.tsx
 msgid "Opening chat…"
 msgstr "Opening chat…"
@@ -4115,6 +4227,10 @@ msgstr "Paste the OpenAI-compatible address from your server. WeKruit Headhunter
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Paste your API key"
 msgstr "Paste your API key"
+
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "Pause"
+msgstr "Pause"
 
 #: src/pages/recruiting/CandidateFeedback.tsx
 msgid "Pause consideration"
@@ -4559,6 +4675,7 @@ msgstr "Replace value"
 msgid "Replaced"
 msgstr "Replaced"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Replied"
 msgstr "Replied"
@@ -4636,6 +4753,7 @@ msgstr "Results saved"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/DetailPanel.tsx
+#: src/pages/recruiting/RecruitingRoutines.tsx
 msgid "Resume"
 msgstr "Resume"
 
@@ -4757,6 +4875,7 @@ msgstr "Risks"
 msgid "Robot"
 msgstr "Robot"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/CandidateDetailDialog.tsx
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
@@ -4825,6 +4944,11 @@ msgstr "Rounds"
 msgid "Routine"
 msgstr "Routine"
 
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "Routine conversation"
+msgstr "Routine conversation"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/RoutineList.tsx
 msgid "Routines"
 msgstr "Routines"
@@ -4846,6 +4970,14 @@ msgstr "Run at"
 msgid "Run history"
 msgstr "Run history"
 
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "Run now"
+msgstr "Run now"
+
+#: src/pages/recruiting/RecruitingRoutines.tsx
+msgid "Run time must be in the future."
+msgstr "Run time must be in the future."
+
 #: src/pages/ActivityList.tsx
 msgid "Running"
 msgstr "Running"
@@ -4861,6 +4993,10 @@ msgstr "Running…"
 #: src/pages/RoutineEditor.tsx
 msgid "Runs when this bot receives a verified message from this provider."
 msgstr "Runs when this bot receives a verified message from this provider."
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Salary range"
+msgstr "Salary range"
 
 #: src/components/AskCard.tsx
 #: src/pages/Board.tsx
@@ -5269,6 +5405,10 @@ msgstr "Sending…"
 msgid "Seniority"
 msgstr "Seniority"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Sent"
+msgstr "Sent"
+
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "Sent at"
 msgstr "Sent at"
@@ -5277,6 +5417,7 @@ msgstr "Sent at"
 msgid "Sentry alert"
 msgstr "Sentry alert"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Sequence"
@@ -5343,6 +5484,7 @@ msgstr "Shared documents"
 msgid "Shared skills"
 msgstr "Shared skills"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
@@ -5383,6 +5525,10 @@ msgstr "Show list"
 #: src/pages/PluginsOverlay.tsx
 msgid "Show more"
 msgstr "Show more"
+
+#: src/pages/recruiting/AccountRecruitingView.tsx
+msgid "Show navigation"
+msgstr "Show navigation"
 
 #: src/pages/recruiting/ActivityTab.tsx
 msgid "Showing available activity; more history may exist."
@@ -5666,6 +5812,7 @@ msgstr "Syncing"
 msgid "System"
 msgstr "System"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/DetailPanel.tsx
 msgid "Tasks"
 msgstr "Tasks"
@@ -5927,6 +6074,7 @@ msgstr "Unlink"
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "Unnamed candidate"
 msgstr "Unnamed candidate"
 
@@ -6064,6 +6212,10 @@ msgstr "Version"
 msgid "Version {0}"
 msgstr "Version {0}"
 
+#: src/components/LiveWork.tsx
+msgid "View"
+msgstr "View"
+
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "View {name}"
 msgstr "View {name}"
@@ -6192,19 +6344,3 @@ msgstr "Your recruiting workspace."
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "Your tasks"
-
-#: src/components/LiveWork.tsx
-msgid "Cancel task"
-msgstr "Cancel task"
-
-#: src/components/AskDeadline.tsx
-msgid "Expired"
-msgstr "Expired"
-
-#: src/components/AskDeadline.tsx
-msgid "Expires in {time}"
-msgstr "Expires in {time}"
-
-#: src/components/LiveWork.tsx
-msgid "View"
-msgstr "View"

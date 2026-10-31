@@ -64,6 +64,8 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
     userName,
     initials,
   } = model;
+  const newRoleSource =
+    activeGroup ?? groups.find((group) => group.id.startsWith("recruiting-global-"));
   const readCache = recruitingReadCache.current;
   const crmContext = useMemo(
     () =>
@@ -107,17 +109,25 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
             crmContext={crmContext}
             crmSelection={effectiveCrmSelection}
             onOpenCrmRole={(selection) => void openCrmRole(selection)}
-            groups={groups}
+            groups={groups.filter((group) => !group.id.startsWith("recruiting-global-"))}
             archivedGroups={archivedGroups}
             archivedOpen={archivedOpen}
             groupId={groupId}
             query={query}
             view={recruitingWorkspaceView}
             onView={openRecruitingView}
+            onGlobalChat={() => {
+              const main = groups.find((group) => group.id.startsWith("recruiting-global-"));
+              if (main) {
+                setPanel(null);
+                setMobileSidebarOpen(false);
+                navigate(`/app/g/${main.id}?view=conversation`);
+              }
+            }}
             onCollapse={() => setBotsSidebarCollapsedPref(true)}
             canOpenDashboard={Boolean(activeSnapshot?.threadId)}
             canCreateRole={
-              Boolean(activeGroup && canCreateRoleFrom(activeGroup.id)) ||
+              Boolean(newRoleSource && canCreateRoleFrom(newRoleSource.id)) ||
               archivedGroups.some((group) => canCreateRoleFrom(group.id))
             }
             canCreateRoleFrom={canCreateRoleFrom}
@@ -128,7 +138,8 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
               navigate(`/app/g/${id}?view=results`);
             }}
             onNewRole={() => {
-              if (activeGroup && canCreateRoleFrom(activeGroup.id)) startNewRole(activeGroup.id);
+              if (newRoleSource && canCreateRoleFrom(newRoleSource.id))
+                startNewRole(newRoleSource.id);
               else setArchivedOpen(true);
             }}
             onNewRoleFrom={startNewRole}

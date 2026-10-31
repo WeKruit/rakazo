@@ -31,6 +31,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertFollowUpDelivery, replyAfterInput } from "./follow-up.mjs";
+import { verifyGlobalRecruiting } from "./global-recruiting.mjs";
+import { verifyGlobalRecruitingChat } from "./global-recruiting-chat.mjs";
 import { checkNotificationPolicy } from "./notification-policy.mjs";
 import { checkReviewerGrading } from "./reviewer-grading.mjs";
 import { assertSlowToolPromotion } from "./slow-tool.mjs";
@@ -341,6 +343,7 @@ const wanted = new Set(
       ? [
           "smoke",
           "isolation",
+          "global-recruiting",
           "first10",
           "progress",
           "t3",
@@ -352,13 +355,15 @@ const wanted = new Set(
           "t5",
           "expired",
         ]
-      : ["smoke", "isolation", "first10", "progress", "t3", "contacts"]),
+      : ["smoke", "global-recruiting", "isolation", "first10", "progress", "t3", "contacts"]),
 );
 
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
 // or the harness itself stops early. Keeps the booking fixture the t5 case reuses. A sweep that
 // leaves an idle copy unarchived fails the run.
 async function cleanUp() {
+  // The read-only global case archives only its validated copies in its own finally block.
+  if (wanted.size === 1 && wanted.has("global-recruiting")) return;
   const t5 = CASES && path.join(CASES, "t5.json");
   const keep =
     option("--t5-group") ??
@@ -437,6 +442,26 @@ async function readEvents(groupId, { limitMs = 15_000 } = {}) {
 
 let passed = false;
 try {
+  if (wanted.has("global-recruiting"))
+    await stage("global-recruiting", async (failures) => {
+      const file =
+        option("--global-fixtures") ?? (CASES && path.join(CASES, "global-recruiting.json"));
+      if (!file || !fs.existsSync(file))
+        return failures.push(
+          "Provide --global-fixtures or <cases>/global-recruiting.json listing the product and CRM test copies",
+        );
+      const fixture = JSON.parse(fs.readFileSync(file, "utf8"));
+      // Read-only: the listed copies stay in place for the next release.
+      const result = await verifyGlobalRecruiting(rpc, fixture);
+      result.nativeChat = args.includes("--global-chat")
+        ? await verifyGlobalRecruitingChat(rpc, fixture, { say, readEvents })
+        : {
+            tested: false,
+            reason: "not tested: native chat requires approved model calls and --global-chat",
+          };
+      fs.writeFileSync(path.join(OUT, "global-recruiting.json"), JSON.stringify(result, null, 2));
+    });
+
   if (wanted.has("smoke"))
     await stage("smoke", async (failures) => {
       // Both hosts: pages, /health, /ready (revision when RAKAZO_EXPECT_SHA is set), rpc, sign-in.

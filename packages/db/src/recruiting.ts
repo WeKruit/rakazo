@@ -745,6 +745,10 @@ async function createRoleInTransaction(
   artifacts: ReadonlyMap<string, Uint8Array>,
 ) {
   const thread = await requireThread(tx, actor, input.sourceThreadId);
+  if (thread.groupId?.startsWith("recruiting-global-"))
+    throw new IsolationError(
+      "Open a role conversation to create a role; Main stays across all roles",
+    );
   if (input.brief) validateRecruitingBrief(input.brief, input);
   const messages = await validateReadSources(tx, actor, definitionSources(input), artifacts);
   validateBriefAuthorship(input, messages);
@@ -786,6 +790,8 @@ async function bindRoleInTransaction(
   input: { threadId: string; roleId: string | null },
 ) {
   const thread = await requireThread(tx, actor, input.threadId);
+  if (input.roleId && thread.groupId?.startsWith("recruiting-global-"))
+    throw new IsolationError("Open the role conversation; Main stays across all roles");
   const role = input.roleId ? await requireRole(tx, actor, input.roleId) : null;
   if ((thread.activeRecruitingRoleId ?? null) === (role?.id ?? null))
     return role ? roleSnapshot(tx, actor, role) : null;
@@ -10678,6 +10684,7 @@ export async function listRecruitingCandidates(
         assessmentState: input.assessmentState ?? null,
         verdict: input.verdict ?? null,
         shortlisted: input.shortlisted ?? null,
+        ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
         actionId: input.actionId ?? null,
         sourceEffectId: input.sourceEffectId ?? null,
       });
@@ -10707,6 +10714,10 @@ export async function listRecruitingCandidates(
       if (input.verdict) clauses.push(Prisma.sql`b."hardGate" = ${input.verdict}`);
       if (input.shortlisted !== undefined)
         clauses.push(Prisma.sql`b."shortlisted" = ${input.shortlisted}`);
+      if (input.shortlistedSince)
+        clauses.push(
+          Prisma.sql`b."shortlistedAt"::timestamptz >= ${new Date(input.shortlistedSince)}`,
+        );
       if (explicitSource) clauses.push(Prisma.sql`b."sourcePageId" IS NOT NULL`);
       const filtered = Prisma.sql`${candidateIndexQuery(role.id, sort, rankDomainPageId ?? input.sourceEffectId, input)}, filtered AS (SELECT b.* FROM base b WHERE ${Prisma.join(clauses, " AND ")})`;
       const sortValue = matchSort

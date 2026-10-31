@@ -11,6 +11,7 @@ export const ListRecruitingCandidatesInput = z.strictObject({
   assessmentState: z.enum(["unassessed", "current", "outdated"]).optional(),
   verdict: VerdictSchema.optional(),
   shortlisted: z.boolean().optional(),
+  shortlistedSince: z.iso.datetime().optional(),
   actionId: RecruitingId.optional(),
   sourceEffectId: RecruitingId.optional(),
   sort: z.enum(["name", "recent", "rank", "tier", "score"]).optional(),

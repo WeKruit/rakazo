@@ -90,6 +90,29 @@ describePostgres("organization logos (PostgreSQL)", () => {
       { host: null, icon: ICON },
       Date.now() + 60_000,
     );
+    // A miss saved by the three-result search (kept three days) is looked up again; a newer
+    // two-day miss is trusted.
+    const day = 24 * 60 * 60 * 1000;
+    const old = `old miss ${suffix}`.toLowerCase().replace(/-/g, " ");
+    const recent = `recent miss ${suffix}`.toLowerCase().replace(/-/g, " ");
+    await prisma.organizationLogo.createMany({
+      data: [
+        { key: old, checkedAt: new Date(), checkAgainAt: new Date(Date.now() + 3 * day) },
+        { key: recent, checkedAt: new Date(), checkAgainAt: new Date(Date.now() + 2 * day) },
+      ],
+    });
+    const recheck = vi.fn(async (name: string) => [
+      { url: "https://example.org/", title: name, image: "" },
+    ]);
+    const again = createCompanySiteResolver({
+      store,
+      searchOrganizations: recheck,
+      fetch: vi.fn(async () => new Response("", { status: 404 })),
+    });
+    await again.companySite(old);
+    await again.companySite(recent);
+    expect(recheck.mock.calls.map(([name]) => name)).toEqual([old]);
+
     const afterDeploy = vi.fn();
     const fresh = createCompanySiteResolver({ store, searchOrganizations: afterDeploy });
     await expect(fresh.companySite(club)).resolves.toEqual({ host: null, icon: ICON });

@@ -143,10 +143,10 @@ it("shows a loading indicator while the role binding is read", async () => {
   expect(view.querySelector('[role="status"]')?.textContent).toContain("Loading");
 });
 
-it("says the role is not linked instead of inventing CRM contacts", async () => {
+it("does not infer an empty candidate pool from a missing CRM binding", async () => {
   listCandidates.mockResolvedValue({ crmTarget: null });
   const view = await mount(<ContactsTab {...props} />);
-  expect(view.textContent).toContain("No candidate records for this role yet.");
+  expect(view.textContent).not.toContain("No candidate records for this role yet.");
   expect(crmData).not.toHaveBeenCalled();
 });
 

@@ -150,18 +150,18 @@ describe("company site", () => {
     expect(answer.icon).toMatch(/^data:image\/png;base64,/);
   });
 
-  it("asks the index again soon when it could not answer, instead of remembering a miss", async () => {
-    let time = 0;
+  it("asks the index again when busy, and has the page ask later instead of a miss", async () => {
     const fetch = vi.fn(async () => new Response("", { status: 404 }));
     const searchOrganizations = vi
       .fn()
       .mockRejectedValueOnce(new Error("rate limited"))
-      .mockResolvedValue([{ url: "https://esu.edu/", title: "Example State University" }]);
-    const resolver = createCompanySiteResolver({ fetch, searchOrganizations, now: () => time });
-    expect(await resolver.companySite("Example State University")).toEqual({ host: null });
-    time += 11 * 60 * 1000;
+      .mockResolvedValueOnce([{ url: "https://esu.edu/", title: "Example State University" }])
+      .mockRejectedValue(new Error("rate limited"));
+    const resolver = createCompanySiteResolver({ fetch, searchOrganizations });
     expect(await resolver.companySite("Example State University")).toEqual({ host: "esu.edu" });
-  });
+    expect(await resolver.companySite("Busy Org")).toEqual({ host: null, retry: true });
+    expect(searchOrganizations).toHaveBeenCalledTimes(5);
+  }, 15_000);
 
   it("saves answers for every process but never a miss the index could not confirm", async () => {
     const saved = new Map<string, unknown>();
@@ -181,7 +181,7 @@ describe("company site", () => {
     await resolver.companySite("Example State University");
     await resolver.companySite("Busy Org");
     expect([...saved]).toEqual([["example state university", { host: "esu.edu" }]]);
-  });
+  }, 15_000);
 });
 
 async function sharpPng() {

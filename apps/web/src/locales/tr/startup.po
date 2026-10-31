@@ -397,6 +397,15 @@ msgstr ""
 msgid "Back to sign in"
 msgstr "Oturum açmaya geri dön"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Background task"
+msgstr ""
+
+#: src/components/BackgroundTasks.tsx
+#: src/pages/shell/Composer.tsx
+msgid "Background tasks"
+msgstr ""
+
 #: src/pages/memory-providers/SupermemorySettingsForm.tsx
 msgid "Base URL"
 msgstr "Temel URL"
@@ -481,9 +490,17 @@ msgstr ""
 msgid "Cancel reply"
 msgstr "Yanıtı iptal et"
 
+#: src/components/BackgroundTasks.tsx
+msgid "Cancel task"
+msgstr ""
+
 #: src/components/CloudAgentCard.tsx
 msgid "cancelled"
 msgstr "iptal edildi"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Cancelling…"
+msgstr ""
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Candidate cards"
@@ -610,7 +627,9 @@ msgstr ""
 msgid "Client secret"
 msgstr ""
 
+#: src/components/BackgroundTasks.tsx
 #: src/components/LazyOverlay.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/shell/avatar-studio-popover.tsx
 #: src/pages/WindowChrome.tsx
 msgid "Close"
@@ -900,6 +919,10 @@ msgstr "Bu dosya yüklenemedi."
 msgid "Could not load this role’s candidate records."
 msgstr ""
 
+#: src/components/StageTranscript.tsx
+msgid "Could not load this task."
+msgstr ""
+
 #: src/components/SoftwareUpdateSection.tsx
 msgid "Could not load update status"
 msgstr ""
@@ -980,6 +1003,10 @@ msgstr ""
 
 #: src/pages/shell/useShellMessages.ts
 msgid "Could not update reaction"
+msgstr ""
+
+#: src/components/BackgroundTasks.tsx
+msgid "Could not update tasks."
 msgstr ""
 
 #: src/components/computer/FilesApp.tsx
@@ -1082,6 +1109,10 @@ msgstr ""
 #. placeholder {0}: step.delay
 #: src/pages/recruiting/CampaignObservedDetails.tsx
 msgid "Delay: {0} days"
+msgstr ""
+
+#: src/components/BackgroundTasks.tsx
+msgid "Delegated task"
 msgstr ""
 
 #: src/pages/recruiting/NotesTab.tsx
@@ -1272,7 +1303,6 @@ msgstr "Geçerli bir e-posta girin"
 msgid "Enter an API key before testing."
 msgstr "Test etmeden önce bir API anahtarı gir."
 
-#: src/lib/roster-status.ts
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Error"
 msgstr ""
@@ -1343,6 +1373,10 @@ msgstr ""
 msgid "Find this person's work email from saved evidence or available connected services. If a connection is missing, explain what needs connecting. Save the returned source and provider status, do not invent contact details, and do not send a message."
 msgstr ""
 
+#: src/components/BackgroundTasks.tsx
+msgid "Finding candidates"
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "Finish subscription sign-in, then test again."
 msgstr "Abonelik girişini tamamla, sonra yeniden test et."
@@ -1366,6 +1400,10 @@ msgstr ""
 
 #: src/pages/recruiting/CriteriaEditor.tsx
 msgid "Fixed date"
+msgstr ""
+
+#: src/pages/shell/Composer.tsx
+msgid "Follow up"
 msgstr ""
 
 #: src/pages/Auth.tsx
@@ -1621,7 +1659,9 @@ msgid "Loading trace…"
 msgstr ""
 
 #: src/App.tsx
+#: src/components/BackgroundTasks.tsx
 #: src/components/markdown-link-prompt.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/shared.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -1654,6 +1694,10 @@ msgstr "Düşük"
 #: src/lib/ticket-priority.ts
 msgid "Low"
 msgstr "Düşük"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Main"
+msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1694,11 +1738,6 @@ msgstr ""
 #: src/lib/message-text.ts
 #: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/shell/Composer.tsx
-msgid "Message"
-msgstr "Mesaj"
-
-#. js-lingui-explicit-id
-#: src/lib/browser-notifications.ts
 msgid "Message"
 msgstr "Mesaj"
 
@@ -1849,6 +1888,10 @@ msgstr ""
 msgid "No apps found"
 msgstr ""
 
+#: src/components/BackgroundTasks.tsx
+msgid "No background tasks."
+msgstr ""
+
 #: src/components/computer/TerminalApp.tsx
 msgid "No bot activity yet."
 msgstr "Henüz bot etkinliği yok."
@@ -1895,6 +1938,10 @@ msgstr ""
 msgid "No loaded candidates match this date filter."
 msgstr ""
 
+#: src/components/StageTranscript.tsx
+msgid "No messages yet."
+msgstr ""
+
 #: src/lib/model-connection-preflight.ts
 msgid "No models listed."
 msgstr "Listelenen model yok."
@@ -1909,6 +1956,10 @@ msgstr ""
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No remote MCP servers found"
+msgstr ""
+
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "No replies yet."
 msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
@@ -1931,7 +1982,6 @@ msgstr ""
 msgid "No steps returned."
 msgstr ""
 
-#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No stored emails for this candidate."
 msgstr ""
@@ -2193,6 +2243,11 @@ msgstr "Çekme isteği"
 msgid "Qualifying work"
 msgstr ""
 
+#: src/lib/roster-status.ts
+#: src/pages/shell/queued-messages.tsx
+msgid "Queued"
+msgstr "Kuyrukta"
+
 #: src/pages/shell/queued-messages.tsx
 msgid "Queued messages"
 msgstr ""
@@ -2247,6 +2302,14 @@ msgstr ""
 
 #: src/pages/recruiting/EmailConversation.tsx
 msgid "Recipients unavailable"
+msgstr ""
+
+#: src/pages/shell/ShellConversation.tsx
+msgid "Reconnect"
+msgstr ""
+
+#: src/pages/shell/useShellController.tsx
+msgid "Reconnect your model to continue."
 msgstr ""
 
 #: src/App.tsx
@@ -2310,10 +2373,6 @@ msgstr ""
 
 #: src/pages/RecruitingPanel.tsx
 msgid "Recruiting views"
-msgstr ""
-
-#: src/pages/shell/RecruitingNavigation.tsx
-msgid "Recruiting workflow"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
@@ -2494,6 +2553,8 @@ msgid "Resume: {0}"
 msgstr ""
 
 #: src/components/AccountAccess.tsx
+#: src/components/BackgroundTasks.tsx
+#: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 msgid "Retry"
@@ -2562,6 +2623,10 @@ msgstr ""
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Routine"
 msgstr "Rutin"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Routines"
+msgstr "Rutinler"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Run time must be in the future."
@@ -2892,10 +2957,6 @@ msgstr ""
 msgid "Some saved contact details could not be displayed."
 msgstr ""
 
-#: src/pages/shell/useShellController.tsx
-msgid "Something went wrong."
-msgstr "Bir şeyler ters gitti."
-
 #: src/App.tsx
 #: src/components/markdown-link-prompt.tsx
 #: src/lib/user-error.ts
@@ -2952,6 +3013,10 @@ msgstr ""
 msgid "Status"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Steer"
+msgstr ""
+
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Step failed"
 msgstr ""
@@ -2974,6 +3039,14 @@ msgstr ""
 msgid "Stop considering"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Stop everything"
+msgstr ""
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop following"
+msgstr ""
+
 #: src/pages/ShellMessage.tsx
 msgid "Stop speaking"
 msgstr "Seslendirmeyi durdur"
@@ -2981,6 +3054,10 @@ msgstr "Seslendirmeyi durdur"
 #: src/components/teach/TeachRecordingChrome.tsx
 msgid "Stop teaching"
 msgstr "Öğretmeyi durdur"
+
+#: src/components/BackgroundTasks.tsx
+msgid "Stop updates"
+msgstr ""
 
 #: src/pages/recruiting/SequenceStats.tsx
 msgid "Stopped"
@@ -3004,6 +3081,10 @@ msgstr ""
 msgid "Switch bot"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Tab to switch"
+msgstr ""
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "Table"
@@ -3013,7 +3094,12 @@ msgstr "Tablo"
 msgid "Take control"
 msgstr "Kontrolü al"
 
+#: src/components/StageTranscript.tsx
+msgid "Task transcript"
+msgstr ""
+
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Tasks"
 msgstr ""
 
@@ -3073,8 +3159,16 @@ msgstr ""
 msgid "The recruiting team is not ready yet."
 msgstr ""
 
+#: src/pages/shell/useShellController.tsx
+msgid "The reply stopped. Try again."
+msgstr ""
+
 #: src/pages/shell/useShellCreation.ts
 msgid "The workspace changed. Open the role again."
+msgstr ""
+
+#: src/lib/roster-status.ts
+msgid "Thinking…"
 msgstr ""
 
 #: src/pages/shell/computer-presentation.tsx
@@ -3150,6 +3244,7 @@ msgstr ""
 msgid "Transcript"
 msgstr "Döküm"
 
+#: src/lib/roster-status.ts
 #: src/pages/shell/Composer.tsx
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Try again"
@@ -3331,6 +3426,10 @@ msgstr "Ne zaman kullanılır"
 msgid "Won't do"
 msgstr ""
 
+#: src/pages/shell/Composer.tsx
+msgid "Work actions"
+msgstr ""
+
 #: src/lib/roster-status.ts
 msgid "Working in background…"
 msgstr "Arka planda çalışıyor…"
@@ -3380,19 +3479,3 @@ msgstr "E-posta adresin"
 #: src/pages/Auth.tsx
 msgid "Your name"
 msgstr "Adın"
-
-#: src/components/LiveWork.tsx
-msgid "Delegated task"
-msgstr ""
-
-#: src/components/LiveWork.tsx
-msgid "Finding candidates"
-msgstr ""
-
-#: src/pages/ActivityList.tsx
-msgid "Queued"
-msgstr "Kuyrukta"
-
-#: src/pages/PluginsOverlay.tsx
-msgid "Reconnect"
-msgstr ""
