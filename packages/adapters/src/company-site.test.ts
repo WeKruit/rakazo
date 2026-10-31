@@ -162,6 +162,26 @@ describe("company site", () => {
     time += 11 * 60 * 1000;
     expect(await resolver.companySite("Example State University")).toEqual({ host: "esu.edu" });
   });
+
+  it("saves answers for every process but never a miss the index could not confirm", async () => {
+    const saved = new Map<string, unknown>();
+    const store = {
+      get: vi.fn(async () => null),
+      put: vi.fn(async (key: string, found: unknown) => void saved.set(key, found)),
+    };
+    const fetch = vi.fn(async () => new Response("", { status: 404 }));
+    const resolver = createCompanySiteResolver({
+      fetch,
+      store,
+      searchOrganizations: async (name) => {
+        if (name === "busy org") throw new Error("rate limited");
+        return [{ url: "https://esu.edu/", title: "Example State University" }];
+      },
+    });
+    await resolver.companySite("Example State University");
+    await resolver.companySite("Busy Org");
+    expect([...saved]).toEqual([["example state university", { host: "esu.edu" }]]);
+  });
 });
 
 async function sharpPng() {

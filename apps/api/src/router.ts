@@ -62,6 +62,7 @@ import {
   createCompanySiteResolver,
   createExaOrganizationSearch,
   createFaviconResolver,
+  createPrismaOrganizationLogoStore,
   createTicket,
   createVoiceProvider,
   currentWorkEstimate,
@@ -918,7 +919,10 @@ export function createRouter(deps: RouterDeps) {
   const favicons = deps.favicons ?? createFaviconResolver();
   const companySites =
     deps.companySites ??
-    createCompanySiteResolver({ searchOrganizations: createExaOrganizationSearch() });
+    createCompanySiteResolver({
+      searchOrganizations: createExaOrganizationSearch(),
+      store: createPrismaOrganizationLogoStore(deps.prisma),
+    });
   const refreshExpiredCredential =
     deps.refreshExpiredModelCredential ??
     ((scope: { userId: string; spaceId: string }, secretId: string, provider: string) =>
