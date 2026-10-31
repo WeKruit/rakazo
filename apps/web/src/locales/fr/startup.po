@@ -1655,6 +1655,10 @@ msgstr "Faible"
 msgid "Low"
 msgstr "Faible"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Main"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
@@ -2313,10 +2317,6 @@ msgid "Recruiting views"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Recruiting workflow"
-msgstr ""
-
-#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workspace"
 msgstr ""
 
@@ -2562,6 +2562,10 @@ msgstr ""
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Routine"
 msgstr "Routine"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Routines"
+msgstr "Routines"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Run time must be in the future."
@@ -3014,6 +3018,7 @@ msgid "Take control"
 msgstr "Prendre le contrôle"
 
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Tasks"
 msgstr ""
 

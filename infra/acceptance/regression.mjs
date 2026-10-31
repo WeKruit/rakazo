@@ -47,6 +47,10 @@ import {
   assertStopKeepsBackground,
   assertTestCopy,
 } from "./workloop-task-controls.mjs";
+import {
+  assertGlobalRecruitingCopiesArchived,
+  verifyGlobalRecruiting,
+} from "./global-recruiting.mjs";
 
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
@@ -321,6 +325,7 @@ const wanted = new Set(
       ? [
           "smoke",
           "isolation",
+          "global-recruiting",
           "first10",
           "progress",
           "t3",
@@ -332,13 +337,15 @@ const wanted = new Set(
           "t5",
           "expired",
         ]
-      : ["smoke", "isolation", "first10", "progress", "t3"]),
+      : ["smoke", "global-recruiting", "isolation", "first10", "progress", "t3"]),
 );
 
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
 // or the harness itself stops early. Keeps the booking fixture the t5 case reuses. A sweep that
 // leaves an idle copy unarchived fails the run.
 async function cleanUp() {
+  // The read-only global case archives only its validated copies in its own finally block.
+  if (wanted.size === 1 && wanted.has("global-recruiting")) return;
   const t5 = CASES && path.join(CASES, "t5.json");
   const keep =
     option("--t5-group") ??
@@ -367,6 +374,42 @@ async function cleanUp() {
 
 let passed = false;
 try {
+  if (wanted.has("global-recruiting"))
+    await stage("global-recruiting", async (failures) => {
+      const file =
+        option("--global-fixtures") ?? (CASES && path.join(CASES, "global-recruiting.json"));
+      if (!file || !fs.existsSync(file))
+        return failures.push(
+          "Provide --global-fixtures or <cases>/global-recruiting.json for an isolated test account with product and CRM test copies",
+        );
+      const fixture = JSON.parse(fs.readFileSync(file, "utf8"));
+      let groups = [];
+      try {
+        const result = await verifyGlobalRecruiting(rpc, fixture, {
+          onValidatedGroups: (ids) => {
+            groups = ids;
+          },
+        });
+        fs.writeFileSync(path.join(OUT, "global-recruiting.json"), JSON.stringify(result, null, 2));
+      } finally {
+        // The existing archive flow independently refuses real roles and skips working runs.
+        if (groups.length) {
+          const code = await run("global-recruiting-archive", "archive-test-copies.mjs", [
+            "--idle-hours",
+            "0",
+            "--only",
+            groups.join(","),
+          ]);
+          if (code !== 0) failures.push("Could not archive the global recruiting test copies");
+          try {
+            await assertGlobalRecruitingCopiesArchived(rpc, groups);
+          } catch (error) {
+            failures.push(error.message);
+          }
+        }
+      }
+    });
+
   if (wanted.has("smoke"))
     await stage("smoke", async (failures) => {
       // Both hosts: pages, /health, /ready (revision when RAKAZO_EXPECT_SHA is set), rpc, sign-in.

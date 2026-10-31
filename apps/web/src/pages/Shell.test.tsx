@@ -75,6 +75,7 @@ const shellApi = vi.hoisted(() => ({
   reorderBots: vi.fn(),
   dropStreams: new Set<(reason: Error) => void>(),
   recruiting: {
+    accountView: vi.fn().mockResolvedValue({ roles: [], items: [], nextCursor: null }),
     profileActivity: { recordView: vi.fn() },
     crmData: vi.fn(),
     correspondence: vi.fn(),
@@ -546,6 +547,32 @@ async function renderFeedbackShell(
     },
     crmTarget: options.crmTarget ?? null,
   };
+  shellApi.recruiting.accountView.mockImplementation(async (input) => ({
+    roles: [
+      {
+        id: recruitingWorkspace.role.id,
+        title: group.name,
+        threadId: thread.threadId,
+        groupId: group.id,
+        stage: "intake",
+      },
+    ],
+    items: [
+      {
+        roleId: recruitingWorkspace.role.id,
+        workspace: recruitingWorkspace,
+        ...(["inbox", "interview", "sequence"].includes(input.view)
+          ? {
+              correspondence: await shellApi.recruiting.correspondence({
+                groupId: group.id,
+                view: input.view === "sequence" ? "contacts" : input.view,
+              }),
+            }
+          : {}),
+      },
+    ],
+    nextCursor: null,
+  }));
   shellApi.recruiting.getWorkspace.mockImplementation(async () => {
     if (options.workspaceReady) await options.workspaceReady;
     if (options.workspaceFailure) throw new Error("Workspace unavailable");
@@ -2696,11 +2723,8 @@ it("keeps one native chat, draft, attachment and pending card through full-width
   const draft = "Keep robotics-company experience preferred, not required.";
   type(composer, draft);
   const card = document.body.querySelector('[data-message-id="pending-main"]');
-  for (const [label, summary] of [
-    ["Job Brief", "brief"],
-    ["Client feedback", "feedback"],
-  ] as const) {
-    await view.click(label);
+  for (const summary of ["brief", "feedback"] as const) {
+    await view.navigate(`/app/g/group-1?view=${summary}`);
     expect(container?.querySelector(".hire-brief-grid")).not.toBeNull();
     expect(view.getProps().summary).toBe(summary);
     expect(container?.querySelector('[data-testid="side-panel"]')?.getAttribute("data-panel")).toBe(
@@ -2729,7 +2753,7 @@ it("keeps one native chat, draft, attachment and pending card through full-width
   });
 });
 
-it("keeps the same role chat widget, draft and native card across workspace menus without creating another thread", async () => {
+it("keeps the same role chat widget, draft and native card across direct role pages without creating another thread", async () => {
   setToolActivityPreference("off");
   const view = await renderFeedbackShell("group", undefined, {
     isDeploymentOwner: false,
@@ -2744,7 +2768,9 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   expect(chat.classList.contains("hire-role-chat")).toBe(true);
   type(composer, "Which saved candidates have robotics experience?");
   for (const label of ["Contacts", "Shortlist", "Sequence", "Inbox", "Interview"]) {
-    await view.click(label);
+    await view.navigate(
+      `/app/g/group-1?view=${({ Contacts: "contacts", Shortlist: "shortlist", Sequence: "sequence", Inbox: "inbox", Interview: "interview" } as Record<string, string>)[label]}`,
+    );
     expect(container!.querySelector('textarea[name="chat-message"]')).toBe(composer);
     expect(composer.value).toBe("Which saved candidates have robotics experience?");
     expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
@@ -2765,7 +2791,7 @@ it("keeps the same role chat widget, draft and native card across workspace menu
   );
   await vi.waitFor(async () => {
     await act(async () => {});
-    expect(container?.querySelector('section[aria-label="Interview"]')).not.toBeNull();
+    expect(container?.querySelector('section[aria-label="Calendar"]')).not.toBeNull();
   });
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(card);
   await view.click("Collapse role chat");
@@ -3239,7 +3265,7 @@ it("follows the latest messages on role chat reveal while preserving a manually 
   await view.openRoleChat();
   expect(scroll).toHaveBeenCalledExactlyOnceWith({ top: 2_000, behavior: "auto" });
   scroll.mockClear();
-  await view.click("Contacts");
+  await view.navigate("/app/g/group-1?view=contacts");
   expect(scroll).not.toHaveBeenCalled();
   act(() => {
     transcript.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, bubbles: true }));
@@ -3248,8 +3274,8 @@ it("follows the latest messages on role chat reveal while preserving a manually 
   });
   await view.click("Collapse role chat");
   await view.openRoleChat();
-  await view.click("Job Brief");
-  await view.click("Client feedback");
+  await view.navigate("/app/g/group-1?view=brief");
+  await view.navigate("/app/g/group-1?view=feedback");
   expect(scroll).not.toHaveBeenCalled();
   expect(transcript.scrollTop).toBe(350);
   expect(container!.querySelector('[data-testid="transcript"]')).toBe(transcript);
@@ -3284,7 +3310,7 @@ it("handles an exact native message jump once in the open role chat", async () =
   expect(scroll).not.toHaveBeenCalled();
 });
 
-it("enables Job Brief only after a cold native thread snapshot is available", async () => {
+it("opens global Job Brief without waiting for a cold role thread", async () => {
   setToolActivityPreference("off");
   let finishThread!: () => void;
   const threadReady = new Promise<void>((resolve) => {
@@ -3300,20 +3326,16 @@ it("enables Job Brief only after a cold native thread snapshot is available", as
       '[data-testid="recruiting-navigation"] button',
     ),
   ].find((button) => button.textContent === "Job Brief")!;
-  expect(brief.disabled).toBe(true);
+  expect(brief.disabled).toBe(false);
   await view.click("Job Brief");
-  expect(container?.querySelector('[data-testid="side-panel"]')?.getAttribute("data-panel")).toBe(
-    "closed",
+  await act(async () => vi.dynamicImportSettled());
+  expect(container?.querySelector('[data-testid="account-recruiting-view"]')).not.toBeNull();
+  expect(shellApi.recruiting.accountView).toHaveBeenCalledWith(
+    expect.objectContaining({ view: "brief" }),
   );
   expect(shellApi.recruiting.getWorkspace).not.toHaveBeenCalled();
   await act(async () => finishThread());
-  expect(brief.disabled).toBe(false);
-  await view.click("Job Brief");
-  expect(view.getProps().summary).toBe("brief");
-  expect(
-    container?.querySelector('.hire-live-criteria[aria-label="Search Criteria"]'),
-  ).not.toBeNull();
-  expect(brief.getAttribute("aria-current")).toBe("page");
+  expect(container?.querySelector('[data-testid="account-recruiting-view"]')).not.toBeNull();
 });
 
 it("opens native brief and feedback views, reviews workflow, and continues the same role conversation", async () => {
@@ -3325,22 +3347,23 @@ it("opens native brief and feedback views, reviews workflow, and continues the s
   const originalCard = document.body.querySelector('[data-message-id="pending-main"]');
   const selectedTab = () =>
     container?.querySelector('[role="tab"][aria-selected="true"]')?.textContent;
-  await view.click("Job Brief");
+  await view.navigate("/app/g/group-1?view=brief");
   expect(view.getProps().summary).toBe("brief");
-  await view.click("Client feedback");
+  await view.navigate("/app/g/group-1?view=feedback");
   expect(view.getProps().summary).toBe("feedback");
   expect(container?.querySelector(".hire-live-criteria")?.textContent).toContain(
     "No saved feedback yet.",
   );
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(originalCard);
-  await view.click("Recruiting workflow");
+  expect(container?.textContent).not.toContain("Recruiting workflow");
+  await view.navigate("/app/g/group-1?view=workflow");
   expect(view.getProps().presentation).toBe("workspace");
   expect(view.getProps().tab).toBe("dashboard");
   await act(async () => vi.dynamicImportSettled());
   expect(container?.querySelector(".recruiting-workspace-content")?.textContent).toContain(
     "Research history",
   );
-  await view.click("Job Brief");
+  await view.navigate("/app/g/group-1?view=brief");
   expect(view.getProps().summary).toBe("brief");
   await view.navigate("/app/g/group-1?view=conversation");
   expect(document.body.querySelector('[data-message-id="pending-main"]')).toBe(originalCard);
@@ -3377,6 +3400,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
     (button) => button.textContent,
   );
   expect(labels).toEqual([
+    "Main",
     "New Role",
     "Job Brief",
     "Client feedback",
@@ -3425,14 +3449,14 @@ it("opens a normal recruiting role on native candidate results and restores coll
     items: shortlisted ? [] : page.items,
     total: shortlisted ? 0 : 1,
   }));
-  await view.click("Shortlist");
+  await view.navigate("/app/g/group-1?view=shortlist");
   expect(container?.querySelector("h1")?.textContent).toBe("Shortlist");
   expect(container?.textContent).toContain("No shortlisted candidates yet.");
   expect(container?.textContent).not.toContain("No saved candidates");
   await view.click("Browse all candidates");
   expect(view.getProps().view).toBe("contacts");
   expect(container?.querySelector("table")?.textContent).toContain(view.candidate.name);
-  await view.click("Contacts");
+  await view.navigate("/app/g/group-1?view=contacts");
   expect(container?.querySelector("h1")?.textContent).toBe("Contacts");
   expect(shellApi.recruiting.correspondence).toHaveBeenLastCalledWith({
     groupId: "group-1",
@@ -6037,3 +6061,41 @@ it("retries a failed reply without sending or clearing the recruiter's new draft
 });
 
 shellApi.recruiting.readView.mockImplementation(recruitingReadViewFixture(shellApi.recruiting));
+
+it.each(["brief", "interview", "contacts"])(
+  "opens the same native New Role form from the %s account page",
+  async (page) => {
+    setToolActivityPreference("off");
+    const view = await renderFeedbackShell("group", undefined, {
+      isDeploymentOwner: false,
+      openFeedback: false,
+      initialPath: `/app/g/group-1?view=${page}&role=all`,
+    });
+    expect(container?.querySelector('[data-testid="account-recruiting-view"]')).not.toBeNull();
+    await view.click("New Role");
+    await act(async () => vi.dynamicImportSettled());
+    expect(container?.querySelector('textarea[aria-label="Job description"]')).not.toBeNull();
+    expect(container?.querySelector('[data-testid="account-recruiting-view"]')).toBeNull();
+    await view.click("Cancel new role");
+    expect(container?.querySelector('[data-testid="account-recruiting-view"]')).not.toBeNull();
+  },
+);
+
+it("uses the canonical global crew when creating a role from an account page without an open role", async () => {
+  setToolActivityPreference("off");
+  const view = await renderFeedbackShell("group", undefined, {
+    isDeploymentOwner: false,
+    openFeedback: false,
+  });
+  Object.assign(view.group, { id: "recruiting-global-test", name: "Main" });
+  Object.assign(view.thread, { groupId: "recruiting-global-test" });
+  await act(async () => view.navigate("/app?view=brief&role=all"));
+  const create = [...container!.querySelectorAll<HTMLButtonElement>("button")].find(
+    (button) => button.textContent === "New Role",
+  )!;
+  expect(create.disabled).toBe(false);
+  await act(async () => create.click());
+  await act(async () => vi.dynamicImportSettled());
+  expect(container?.querySelector('textarea[aria-label="Job description"]')).not.toBeNull();
+  expect(container?.querySelector('[data-testid="account-recruiting-view"]')).toBeNull();
+});

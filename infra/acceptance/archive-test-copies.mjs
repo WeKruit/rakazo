@@ -36,6 +36,7 @@ if (EMAIL && PASSWORD) {
 const IDLE_MS = Number(option("--idle-hours", "2")) * 3_600_000;
 const KEEP = new Set((option("--keep", "") ?? "").split(",").filter(Boolean));
 const DRY = args.includes("--dry-run");
+const ONLY = new Set((option("--only", "") ?? "").split(",").filter(Boolean));
 const COPY = /^测试副本 · /;
 
 async function rpc(route, json) {
@@ -68,6 +69,7 @@ const idleCopies = (groups) =>
     (group) =>
       COPY.test(group.name) &&
       !KEEP.has(group.id) &&
+      (!ONLY.size || ONLY.has(group.id)) &&
       Date.now() - Date.parse(group.updatedAt) >= IDLE_MS,
   );
 const groups = await activeGroups();

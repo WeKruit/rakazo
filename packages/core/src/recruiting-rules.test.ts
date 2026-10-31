@@ -983,10 +983,10 @@ const PINNED_RECRUITING_RULES: PinnedRule[] = [
     why: "The retired wording asked the recruiter to set up a campaign and mailbox.",
   },
   {
-    rule: "who replied reads the mailbox",
+    rule: "who replied uses the shared Inbox source",
     in: EVERY_BOT,
-    phrase: "never claim no inbox while Instantly is assigned or answer from old history",
-    why: "Reply questions were answered from old saved history or said there was no inbox.",
+    phrase: "never infer no replies from a missing CRM binding or old history",
+    why: "The shared replies read now merges product mail with CRM history, replacing manual provider reads without treating an unbound product role as empty.",
   },
 
   // Routing and handoffs

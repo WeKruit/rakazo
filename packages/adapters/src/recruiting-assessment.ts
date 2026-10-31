@@ -34,13 +34,13 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { inputPausedToolResult } from "./approval-effect.js";
+import { readRecruitingAccountView } from "./recruiting-account.js";
 import {
   bestLookedUpEmail,
   createRecruitingCandidateReportReader,
   lookedUpContactEmails,
 } from "./recruiting-research.js";
 import {
-  listRecruitingRoleReplies,
   rememberResolvedContactEmails,
   resolveRecruitingContact,
   resolveRecruitingContactAcrossRoles,
@@ -126,20 +126,94 @@ export async function executeRecruitingCandidatesTool(
       succeeded = true;
       return result;
     }
+    if (
+      input.operation === "roles" ||
+      input.operation === "interviews" ||
+      input.operation === "shortlist" ||
+      input.operation === "replies" ||
+      input.operation === "sequences"
+    ) {
+      const views = {
+        roles: "roles",
+        interviews: "interview",
+        shortlist: "shortlist",
+        replies: "inbox",
+        sequences: "sequence",
+      } as const;
+      const operation = input.operation as keyof typeof views;
+      if (!deps.connector) throw new Error("Recruiting records require a connected tool host");
+      const result = await readRecruitingAccountView(
+        {
+          ...deps,
+          connectors: deps.connector,
+          signal: context.signal,
+          stillAuthorized: async () => {
+            await requireRecruitingRun(deps.prisma, trusted, context);
+            return true;
+          },
+        },
+        trusted.actor,
+        {
+          view: views[operation],
+          roleId: ("roleId" in input ? input.roleId : undefined) ?? roleId ?? undefined,
+          since: "since" in input ? input.since : undefined,
+          cursor: input.cursor,
+          itemCursor: input.itemCursor,
+          campaignId: input.campaignId,
+          campaignServerId: input.campaignServerId,
+          campaignLeadCursor: input.campaignLeadCursor,
+          limit: input.limit ?? 20,
+        },
+      );
+      const unknownReplyDirections =
+        operation === "replies"
+          ? result.items.reduce(
+              (total, item) =>
+                total +
+                (item.correspondence?.emails.filter(
+                  (email) => (email.direction ?? email.crm?.direction) == null,
+                ).length ?? 0),
+              0,
+            )
+          : 0;
+      if (operation === "replies") {
+        for (const item of result.items) {
+          if (item.correspondence)
+            item.correspondence.emails = item.correspondence.emails.filter(
+              (email) => (email.direction ?? email.crm?.direction) === "received",
+            );
+        }
+      }
+      itemCount = result.items.length;
+      succeeded = true;
+      return operation === "replies"
+        ? {
+            ...result,
+            counts: {
+              messages: result.items.reduce(
+                (total, item) => total + (item.correspondence?.emails.length ?? 0),
+                0,
+              ),
+              people: new Set(
+                result.items.flatMap(
+                  (item) =>
+                    item.correspondence?.emails.map((email) => email.sender).filter(Boolean) ?? [],
+                ),
+              ).size,
+              complete:
+                result.nextCursor === null &&
+                unknownReplyDirections === 0 &&
+                result.items.every(
+                  (item) =>
+                    item.correspondence?.partial !== true && !item.correspondence?.nextCursor,
+                ),
+            },
+          }
+        : result;
+    }
     if (!roleId) {
       succeeded = true;
       return { status: "no_current_role" as const };
-    }
-    if (input.operation === "replies") {
-      const result = await listRecruitingRoleReplies(
-        deps,
-        trusted.actor,
-        { roleId, ...(input.limit ? { limit: input.limit } : {}) },
-        context,
-      );
-      itemCount = result.people.length;
-      succeeded = true;
-      return result;
     }
     if (input.operation === "round") {
       const { round } = await readRecruitingCalibrationRound(deps.prisma, trusted.actor, {

@@ -17,10 +17,12 @@ export type { ComposerHandle } from "./shell/Composer";
 export { Composer, candidateReferenceText } from "./shell/Composer";
 
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { ComputerReleaseReason } from "@rakazo/contracts";
+import type { ComputerReleaseReason, RecruitingAccountViewOutput } from "@rakazo/contracts";
 import { AvatarStyleProvider, BotAvatar, Button } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import type { ComponentProps } from "react";
+import { useSearchParams } from "react-router-dom";
+import { isAccountRecruitingView } from "../lib/recruiting-read-view";
 
 const ComputerMaintenanceActions = lazyPanel(() =>
   import("../components/ComputerMaintenanceActions").then((m) => m.ComputerMaintenanceActions),
@@ -78,6 +80,12 @@ const HomeDashboard = lazyPanel(() =>
   ),
 );
 
+const AccountRecruitingView = lazyPanel(() =>
+  withFeatureMessages(() => import("./recruiting/AccountRecruitingView")).then(
+    (module) => module.AccountRecruitingView,
+  ),
+);
+
 const RecruitingCorrespondence = lazyPanel(() =>
   withFeatureMessages(() => import("./RecruitingCorrespondence")).then(
     (module) => (props: ComponentProps<typeof module.RecruitingCorrespondence>) => (
@@ -93,6 +101,19 @@ const MOBILE_SIDEBAR_SWIPE_DISTANCE_PX = 56;
 
 export function ShellPage() {
   const model = useShellController();
+  const [accountParams] = useSearchParams();
+  const accountView =
+    !model.showToolActivity &&
+    model.panel !== "create-group" &&
+    isAccountRecruitingView(accountParams.get("view")) &&
+    (!model.groupId || accountParams.has("role"));
+  const roleCorrespondencePage =
+    !model.showToolActivity &&
+    model.panel !== "create-group" &&
+    !model.crmMode &&
+    Boolean(model.groupId) &&
+    !accountParams.has("role") &&
+    ["sequence", "inbox", "interview"].includes(accountParams.get("view") ?? "");
   const { t } = useLingui();
   const {
     navigate,
@@ -221,10 +242,11 @@ export function ShellPage() {
   };
 
   // biome-ignore format: ponytail: preserve the native console markup when sharing this shell.
-  const nativeCorrespondence =
+  const renderCorrespondence = (page?:RecruitingAccountViewOutput["items"][number]) =>
     knownThreadId && ["sequence", "inbox", "interview"].includes(recruitingWorkspaceView) ? (
       <RecruitingCorrespondence
         view={recruitingWorkspaceView as "sequence" | "inbox" | "interview"}
+        page={page}
         messages={transcriptMessages}
         artifactTarget={transcriptArtifactTarget}
         threadId={knownThreadId}
@@ -241,6 +263,22 @@ export function ShellPage() {
         readCacheScope={recruitingCacheScope}
       />
     ) : null;
+  const accountPage = (
+    <AccountRecruitingView
+      key={JSON.stringify([userId, bootstrapMe?.spaceId])}
+      accountKey={JSON.stringify([userId, bootstrapMe?.spaceId])}
+      groupId={model.groupId}
+      groups={groups}
+      bots={bots}
+      refreshSignal={recruitingRefresh}
+      onOpenNavigation={() => {
+        setBotsSidebarCollapsedPref(false);
+        setMobileSidebarOpen(true);
+      }}
+      onOpenConnections={() => setPluginsOpen(true)}
+      renderCorrespondence={roleCorrespondencePage ? renderCorrespondence : undefined}
+    />
+  );
   const shell = (
     <div
       data-testid="shell-root"
@@ -361,10 +399,14 @@ export function ShellPage() {
         />
       )}
 
-      {homeView ? (
+      {homeView && !accountView ? (
         <HomeDashboard
           userName={session.data?.user.name}
-          groups={groups}
+          onGlobalChat={() => {
+            const main = groups.find((group) => group.id.startsWith("recruiting-global-"));
+            if (main) navigate(`/app/g/${main.id}?view=conversation`);
+          }}
+          groups={groups.filter((group) => !group.id.startsWith("recruiting-global-"))}
           readCache={recruitingReadCache.current}
           readCacheScope={
             userId && bootstrapMe?.spaceId
@@ -385,12 +427,17 @@ export function ShellPage() {
         />
       ) : null}
       {/* Keep the composer's z-index inside the chat so phone overlays like the side panel cover it. */}
-      <ShellConversation
-        reviewSchedulingPlan={reviewSchedulingPlan}
-        model={model}
-        roleCreationForm={roleCreationForm}
-        nativeCorrespondence={nativeCorrespondence}
-      />
+      {accountView ? (
+        accountPage
+      ) : (
+        <ShellConversation
+          reviewSchedulingPlan={reviewSchedulingPlan}
+          model={model}
+          roleCreationForm={roleCreationForm}
+          nativeCorrespondence={renderCorrespondence()}
+          primaryPage={roleCorrespondencePage ? accountPage : undefined}
+        />
+      )}
 
       {model.call ? (
         <CallCard

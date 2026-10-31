@@ -1655,6 +1655,10 @@ msgstr "Bajo"
 msgid "Low"
 msgstr "Bajo"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Main"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
@@ -2313,10 +2317,6 @@ msgid "Recruiting views"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Recruiting workflow"
-msgstr ""
-
-#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workspace"
 msgstr ""
 
@@ -2562,6 +2562,10 @@ msgstr ""
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Routine"
 msgstr "Rutina"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Routines"
+msgstr "Rutinas"
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Run time must be in the future."
@@ -3014,6 +3018,7 @@ msgid "Take control"
 msgstr "Tomar el control"
 
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Tasks"
 msgstr ""
 

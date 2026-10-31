@@ -169,6 +169,17 @@ async function main() {
     ] = await Promise.all([import("@rakazo/adapters"), import("../../../../apps/api/src/app.ts")]);
     const { serve } = await import("@hono/node-server");
     const thirdParties = new ThirdPartyConnectorEmulator();
+    const journey = e2eSpec?.includes("recruiting-global-journey")
+      ? new (
+          await import("../recruiting-global-journey-fixture.js")
+        ).RecruitingGlobalJourneyFixture(process.env.DATA_DIR!, process.env.ENCRYPTION_KEY!)
+      : undefined;
+    if (journey) {
+      process.env.RECRUITING_JOURNEY_FIXTURE = "1";
+      process.env.PI_DEFAULT_PROVIDER = "openai";
+      process.env.PI_DEFAULT_MODEL = "gpt-6-luna";
+      process.env.OPENAI_API_KEY = "offline-fixture-model-key";
+    }
     const pipedream = new PipedreamConnector(
       {
         clientId: "fake-client-id",
@@ -186,16 +197,20 @@ async function main() {
       composio: new ComposioEmulator(),
       pipedream,
       email,
+      ...(journey ? { runtime: journey } : {}),
       remoteConnectors: {
-        fetch: thirdParties.fetch,
+        fetch: journey ? journey.fetch(thirdParties.fetch) : thirdParties.fetch,
         resolveHostname: thirdParties.resolveHostname,
       },
       integrationsCatalogUrl: "https://catalog.example.test/",
     });
+    journey?.bind(handles.prisma);
     let activeRequests = 0;
     const requestWaiters = new Set<() => void>();
     const server = serve({
       fetch: async (request) => {
+        if (journey && new URL(request.url).pathname === "/__e2e/recruiting-records")
+          return Response.json(journey.records);
         if (new URL(request.url).pathname === "/__e2e/emails") {
           return Response.json(email.sent, { headers: { "cache-control": "no-store" } });
         }
@@ -225,6 +240,7 @@ async function main() {
             "exec",
             "playwright",
             "test",
+            ...(journey ? ["--config", "playwright.journey.config.ts"] : []),
             ...(e2eSpec ? [e2eSpec] : []),
             ...(e2eGrep ? ["--grep", e2eGrep] : []),
           ],

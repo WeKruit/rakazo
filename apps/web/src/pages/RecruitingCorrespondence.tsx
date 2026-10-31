@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type {
+  RecruitingAccountViewOutput,
   RecruitingCorrespondenceReference,
   RecruitingOutreachSequence,
   RecruitingCorrespondence as SavedCorrespondence,
@@ -27,7 +28,7 @@ import { AvailabilityRanges } from "./recruiting/AvailabilityRanges";
 import { useRecruitingDetail } from "./recruiting/detail";
 import { EmailConversation } from "./recruiting/EmailConversation";
 import type { SchedulingPlanHandoff } from "./recruiting/SchedulingPlan";
-import { SchedulingPlanForm } from "./recruiting/SchedulingPlan";
+import { SchedulingPlanForm, SchedulingPlanHistory } from "./recruiting/SchedulingPlan";
 import { sequenceLine, useSequenceLabels, useSequenceStats } from "./recruiting/SequenceStats";
 import { RoleCampaignCard } from "./recruiting/SequenceTab";
 import { LoadMore, type RoleCrm, useCrmPages, useKeyedRead } from "./recruiting/shared";
@@ -50,6 +51,7 @@ type Props = {
   onReviewSchedulingPlan?: (handoff: SchedulingPlanHandoff) => void;
   onOpenConnections: () => void;
   onSaveDraft?: (input: RecruitingSequenceSaveInput) => Promise<void>;
+  page?: RecruitingAccountViewOutput["items"][number];
   refreshSignal?: number;
   readCache?: RecruitingReadCache;
   readCacheScope?: string;
@@ -368,6 +370,7 @@ function SavedCorrespondenceView({
   onOpenConnections,
   onEmailSelection,
   onReviewSchedulingPlan,
+  page,
   refreshSignal = 0,
   readCache,
   readCacheScope,
@@ -379,6 +382,7 @@ function SavedCorrespondenceView({
   | "onOpenConnections"
   | "onEmailSelection"
   | "onReviewSchedulingPlan"
+  | "page"
   | "refreshSignal"
   | "readCache"
   | "readCacheScope"
@@ -423,6 +427,7 @@ function SavedCorrespondenceView({
     fresh?: boolean;
   }>();
   useEffect(() => {
+    if (page) return;
     let cancelled = false;
     const abort = new AbortController();
     const cacheEpoch = readCache?.epoch;
@@ -468,11 +473,15 @@ function SavedCorrespondenceView({
       cancelled = true;
       abort.abort();
     };
-  }, [key, cacheKey, readCache, readCacheScope, scopeKey]);
-  const current = read?.key === key && read.scopeKey === scopeKey ? read : undefined;
+  }, [key, cacheKey, readCache, readCacheScope, scopeKey, page]);
+  const current = page
+    ? { key, scopeKey, data: page.correspondence, fresh: true, failed: false }
+    : read?.key === key && read.scopeKey === scopeKey
+      ? read
+      : undefined;
   const data = current?.data;
   const workspaceRead = useKeyedRead(
-    view === "inbox" && data?.roleId && threadId
+    !page && view === "inbox" && data?.roleId && threadId
       ? JSON.stringify([scopeKey, data.roleId, threadId, refreshSignal, refresh])
       : null,
     async () => {
@@ -481,7 +490,7 @@ function SavedCorrespondenceView({
       return workspace;
     },
   );
-  const workspace = workspaceRead.data;
+  const workspace = page?.workspace ?? workspaceRead.data;
   const target = workspace?.crmTarget?.target;
   const crm: RoleCrm = workspaceRead.loading
     ? { status: "loading" }
@@ -490,14 +499,46 @@ function SavedCorrespondenceView({
       : target
         ? { status: "ready", target, conversation: artifactTarget }
         : { status: "unbound" };
-  const people = useCrmPages(crm, "candidates", target ? { crmRoleId: target.crmRoleId } : null, {
-    spaceId: workspace?.role.spaceId ?? "",
-    readCache,
-    readCacheScope,
-    refreshSignal: refreshSignal + refresh,
-  });
+  const readCrm: RoleCrm = page ? { status: "unbound" } : crm;
+  const peopleRead = useCrmPages(
+    readCrm,
+    "candidates",
+    target ? { crmRoleId: target.crmRoleId } : null,
+    {
+      spaceId: workspace?.role.spaceId ?? "",
+      readCache,
+      readCacheScope,
+      refreshSignal: refreshSignal + refresh,
+    },
+  );
+  const people = page
+    ? {
+        ...peopleRead,
+        failed: false,
+        data: {
+          items: (page.candidates?.items ?? []).flatMap((person) =>
+            person.crm
+              ? [
+                  {
+                    ...person.crm,
+                    name: person.name ?? t`Unnamed candidate`,
+                    email: person.email,
+                    title: person.title,
+                    location: person.location,
+                    linkedinUrl: person.linkedinUrl,
+                    phone: person.crm.phone ?? null,
+                    roleSpecId: target?.crmRoleId ?? null,
+                    legacyClientLabel: target?.clientLabel ?? "",
+                    legacyRoleLabel: target?.roleLabel ?? "",
+                  },
+                ]
+              : [],
+          ),
+        },
+      }
+    : peopleRead;
   const sequenceStats = useSequenceStats(
-    crm,
+    readCrm,
     (people.data?.items ?? []).map((person) => person.candidateId),
     {
       spaceId: workspace?.role.spaceId ?? "",
@@ -722,7 +763,7 @@ function SavedCorrespondenceView({
           </Trans>
         </p>
       ) : null}
-      {data && data.status !== "ready" ? (
+      {data && data.status !== "ready" && (interview || data.status !== "empty") ? (
         <section className="hire-empty">
           {interview ? <CalendarDays size={34} aria-hidden /> : <Inbox size={34} aria-hidden />}
           <h2>
@@ -788,9 +829,9 @@ function SavedCorrespondenceView({
               <Trans>Could not load candidate records. Try refreshing.</Trans>
             </p>
           ) : null}
-          {!data.emails.length ? (
-            <p className="hidden lg:block">
-              <Trans>No stored emails for this role.</Trans>
+          {!data.emails.length && !data.partial && !data.nextCursor ? (
+            <p>
+              <Trans>No replies yet.</Trans>
             </p>
           ) : null}
           <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,2fr)]">
@@ -957,45 +998,48 @@ function SavedCorrespondenceView({
                   ) : null}
                 </section>
               ) : null}
-              <EmailConversation
-                candidateName={selectedPerson?.name}
-                candidateTitle={selectedPerson?.title}
-                onOpenProfile={
-                  detail && selectedPerson && workspace
-                    ? () =>
-                        detail.open({
-                          view: "contact",
-                          person: selectedPerson,
-                          role: {
-                            roleId: workspace.role.id,
-                            spaceId: workspace.role.spaceId,
-                            conversation: artifactTarget,
-                          },
-                        })
-                    : undefined
-                }
-                items={threadEmails.map((email) => ({
-                  ...email,
-                  threadId: email.providerThreadId,
-                  organizationId: email.crm?.organizationId,
-                  crmRoleId: email.crm?.crmRoleId,
-                  direction: email.crm?.direction ?? null,
-                  partial: email.snippet,
-                  candidateId: email.crm?.candidateId,
-                }))}
-                selectedId={selected?.id}
-                onSelect={(email) => setSelectedId(email.id)}
-                onDraftReply={
-                  selected && current?.fresh && !current.failed
-                    ? (email) => {
-                        if (email.id !== selected.id) return;
-                        onConversation(
-                          t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
-                        );
-                      }
-                    : undefined
-                }
-              />
+              {threadEmails.length ||
+              (data.emails.length && !data.partial && !data.nextCursor && mailFilter === "all") ? (
+                <EmailConversation
+                  candidateName={selectedPerson?.name}
+                  candidateTitle={selectedPerson?.title}
+                  onOpenProfile={
+                    detail && selectedPerson && workspace
+                      ? () =>
+                          detail.open({
+                            view: "contact",
+                            person: selectedPerson,
+                            role: {
+                              roleId: workspace.role.id,
+                              spaceId: workspace.role.spaceId,
+                              conversation: artifactTarget,
+                            },
+                          })
+                      : undefined
+                  }
+                  items={threadEmails.map((email) => ({
+                    ...email,
+                    threadId: email.providerThreadId,
+                    organizationId: email.crm?.organizationId,
+                    crmRoleId: email.crm?.crmRoleId,
+                    direction: email.direction ?? email.crm?.direction ?? null,
+                    partial: email.snippet,
+                    candidateId: email.crm?.candidateId,
+                  }))}
+                  selectedId={selected?.id}
+                  onSelect={(email) => setSelectedId(email.id)}
+                  onDraftReply={
+                    selected && current?.fresh && !current.failed
+                      ? (email) => {
+                          if (email.id !== selected.id) return;
+                          onConversation(
+                            t`Draft a reply to the selected email for me to review. Read the original conversation and verify the candidate and role. Do not send.`,
+                          );
+                        }
+                      : undefined
+                  }
+                />
+              ) : null}
               {parsed?.success && workspace?.role.revision ? (
                 <>
                   <Button variant="outline" onClick={() => setPlanningKey(planKey)}>
@@ -1100,6 +1144,7 @@ export function RecruitingCorrespondence({
   onEmailSelection,
   onReviewSchedulingPlan,
   onSaveDraft,
+  page,
   refreshSignal,
   readCache,
   readCacheScope,
@@ -1182,16 +1227,18 @@ export function RecruitingCorrespondence({
             <Trans>Review the outreach files saved in this conversation.</Trans>
           </p>
         </header>
-        <RoleCampaignCard
-          conversation={
-            "groupId" in artifactTarget
-              ? { groupId: artifactTarget.groupId }
-              : { botId: artifactTarget.botId }
-          }
-          refreshSignal={refreshSignal}
-          readCache={readCache}
-          readCacheScope={readCacheScope}
-        />
+        {!page ? (
+          <RoleCampaignCard
+            conversation={
+              "groupId" in artifactTarget
+                ? { groupId: artifactTarget.groupId }
+                : { botId: artifactTarget.botId }
+            }
+            refreshSignal={refreshSignal}
+            readCache={readCache}
+            readCacheScope={readCacheScope}
+          />
+        ) : null}
         {files.length > 1 ? (
           <NativeSelect
             aria-label={t`Saved sequence file`}
@@ -1322,9 +1369,19 @@ export function RecruitingCorrespondence({
     );
   }
 
+  if (view === "interview" && page)
+    return page.scheduling && threadId ? (
+      <SchedulingPlanHistory
+        threadId={threadId}
+        roleId={page.roleId}
+        snapshot={page.scheduling}
+        onReview={onReviewSchedulingPlan}
+      />
+    ) : null;
   return (
     <SavedCorrespondenceView
       view={view}
+      page={page}
       artifactTarget={artifactTarget}
       threadId={threadId}
       onConversation={onConversation}

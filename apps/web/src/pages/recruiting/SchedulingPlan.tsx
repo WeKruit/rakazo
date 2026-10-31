@@ -98,7 +98,9 @@ export function SchedulingPlanHistory({
   roleId,
   refreshSignal,
   onReview,
+  snapshot,
 }: {
+  snapshot?: Awaited<ReturnType<typeof rpc.recruiting.schedulingPlans>>;
   threadId: string;
   roleId: string;
   refreshSignal?: number;
@@ -106,18 +108,19 @@ export function SchedulingPlanHistory({
 }) {
   const { t } = useLingui();
   const read = useKeyedRead(
-    JSON.stringify(["scheduling-plans", threadId, roleId, refreshSignal]),
+    snapshot ? null : JSON.stringify(["scheduling-plans", threadId, roleId, refreshSignal]),
     () => rpc.recruiting.schedulingPlans({ threadId }),
   );
+  const data = snapshot ?? read.data;
   const plans =
-    read.data?.plans.filter((plan) => plan.roleId === roleId && plan.threadId === threadId) ?? [];
-  if (!read.failed && !plans.length && !read.data?.partial) return null;
+    data?.plans.filter((plan) => plan.roleId === roleId && plan.threadId === threadId) ?? [];
+  if (!read.failed && !plans.length && !data?.partial) return null;
   return (
     <section aria-label={t`Saved interview plans`} className="mt-6 space-y-3">
       <h3 className="font-medium">
         <Trans>Saved interview plans</Trans>
       </h3>
-      {read.data?.partial ? (
+      {data?.partial ? (
         <p className="text-xs text-muted-foreground">
           <Trans>Only recent saved records are shown. Earlier plans may be missing.</Trans>
         </p>

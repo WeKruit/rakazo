@@ -250,7 +250,7 @@ export function EmailConversation({
         </ol>
       ) : (
         <p className="p-4 text-sm text-muted-foreground">
-          <Trans>No stored emails for this candidate.</Trans>
+          <Trans>No replies yet.</Trans>
         </p>
       )}
     </section>

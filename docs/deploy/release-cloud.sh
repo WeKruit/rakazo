@@ -142,6 +142,12 @@ LEDGER_BEFORE=$(db_query "$LEDGER_SQL") || LEDGER_BEFORE="unknown (db query fail
 log "ledger before: $LEDGER_BEFORE"
 [ "$MODE" = check ] && { log "CHECK DONE $SHORT (nothing deployed)"; exit 0; }
 [ "$MODE" = deploy ] || die "mode must be check, test or deploy"
+# The cross-role regression uses existing sign-in credentials for an isolated test account.
+# Refuse before deployment if its private test-copy expectations are unavailable.
+GLOBAL_FIXTURES=${RAKAZO_GLOBAL_FIXTURES:-${RELEASE_REGRESSION_CASES:+$RELEASE_REGRESSION_CASES/global-recruiting.json}}
+[ -n "$GLOBAL_FIXTURES" ] && [ -f "$GLOBAL_FIXTURES" ] || die "set RAKAZO_GLOBAL_FIXTURES to the isolated account's global-recruiting.json"
+[ -n "${RAKAZO_TOKEN:-}" ] || { [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; } || die "isolated regression account sign-in is missing"
+
 # 4) One release at a time on this machine; exact-SHA archive with the revision marker.
 mkdir -p "$WORK"; exec 9>"$WORK/.lock"; flock -n 9 || die "another release is running here"
 DIR="$WORK/releases/$SHA"; rm -rf "$DIR"; mkdir -p "$DIR"
@@ -214,6 +220,13 @@ else
     [ "$code" = 200 ] || rollback "custom domain $p returned $code"
   done
 fi
+# Account-level pages must read actual product and CRM records after deployment.
+RAKAZO_URL="$URL" RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" \
+  node "$DIR/infra/acceptance/regression.mjs" --only global-recruiting \
+    --global-fixtures "$GLOBAL_FIXTURES" --out "$WORK/global-recruiting-$SHORT" \
+    > "$WORK/global-recruiting-$SHORT.log" 2>&1 \
+  || rollback "global recruiting regression failed (log: $WORK/global-recruiting-$SHORT.log)"
+log "global recruiting regression passed"
 for _ in $(seq 1 40); do [ "$(containers)" = 1 ] && break; sleep 3; done
 [ "$(containers)" = 1 ] || die "more than one container after deploy"
 [ "$(curl -s -o /dev/null -w '%{http_code}' "$URL/health")" = 200 ] || die "/health not 200"

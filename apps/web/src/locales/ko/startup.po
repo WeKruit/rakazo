@@ -1655,6 +1655,10 @@ msgstr "낮음"
 msgid "Low"
 msgstr "낮음"
 
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Main"
+msgstr ""
+
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/SkillEvidence.tsx
@@ -2313,10 +2317,6 @@ msgid "Recruiting views"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Recruiting workflow"
-msgstr ""
-
-#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Recruiting workspace"
 msgstr ""
 
@@ -2561,6 +2561,10 @@ msgstr ""
 
 #: src/pages/shell/ShellPanelContent.tsx
 msgid "Routine"
+msgstr "자동 실행"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Routines"
 msgstr "자동 실행"
 
 #: src/pages/shell/ShellPanelContent.tsx
@@ -3014,6 +3018,7 @@ msgid "Take control"
 msgstr "제어권 가져오기"
 
 #: src/pages/recruiting/TasksTab.tsx
+#: src/pages/shell/RecruitingNavigation.tsx
 msgid "Tasks"
 msgstr ""
 

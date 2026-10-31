@@ -6,10 +6,8 @@ async function openRoute(page: Page, view: string) {
   await page.goto(`/app/g/${appGroupId}?view=${view}`);
   await expect(page.locator('[data-rakazo-app-state="ready"]')).toBeVisible();
   const collapse = page.getByRole("button", { name: "Collapse role chat", exact: true });
-  if (view !== "home") {
-    await expect(collapse).toBeVisible();
-    await collapse.click();
-  }
+  if (["contacts", "shortlist"].includes(view)) await expect(collapse).toBeVisible();
+  if (view !== "home" && (await collapse.isVisible())) await collapse.click();
   await expect(page.locator('[data-rakazo-app-state="failed"]')).toHaveCount(0);
 }
 
@@ -156,6 +154,8 @@ for (const width of [1440, 390]) {
         const actionBox = await action.boundingBox();
         expect(actionBox!.x + actionBox!.width).toBeLessThanOrEqual(tableBox!.x + tableBox!.width);
       }
+      await expect(page.locator(".hire-contacts-view")).toHaveCSS("scrollbar-width", "none");
+      await expect(page.locator(".candidate-viewport")).toHaveCSS("scrollbar-width", "none");
       await capture(page, testInfo, `app-contacts-${width}`);
       const layout = page.getByRole("group", { name: "Contact layout", exact: true });
       const cards = layout.getByRole("button", { name: "Cards", exact: true });
@@ -220,62 +220,20 @@ for (const width of [1440, 390]) {
           .click();
         await expect(page).toHaveURL(/view=sequence/);
       } else await openRoute(page, "sequence");
-      await expect(page.getByRole("region", { name: "Sequence", exact: true })).toBeVisible();
-      await expect(
-        page.getByRole("rowheader", { name: "Platform outreach", exact: true }).first(),
-      ).toBeVisible();
-      await expect(
-        page.getByText("Recruiter messages are unavailable for this role."),
-      ).toBeVisible();
-      await capture(page, testInfo, `app-sequence-entry-${width}`);
-      const roleHeading = page
-        .getByRole("heading", { name: "Staff Platform Engineer", exact: true })
-        .first();
-      await expect(roleHeading).toBeInViewport({ ratio: 1 });
+      const sequence = page.getByTestId("account-recruiting-view");
+      await expect(sequence.getByText("Platform outreach", { exact: true })).toBeVisible();
+      await expect(sequence.getByText("avery@example.test", { exact: true }).first()).toBeVisible();
+      await expect(sequence.getByText("No candidate records for this role yet.")).toHaveCount(0);
       await capture(page, testInfo, `app-sequence-${width}`);
-
       await openRoute(page, "inbox");
-      const inbox = page.getByRole("region", { name: "Inbox", exact: true });
-      const rail = inbox.getByRole("region", { name: "Candidate conversations", exact: true });
-      const avery = rail.getByRole("button", { name: "Avery Example", exact: true });
-      const conversation = page.getByTestId("email-conversation");
-      await expect(avery).toBeVisible();
-      await expect(rail.getByRole("button", { name: "Avery Example", exact: true })).toHaveCount(1);
-      await expect(
-        rail.getByText("In progress · Opened 3 · Replied 1", { exact: true }),
-      ).toBeVisible();
-      await capture(page, testInfo, `app-inbox-entry-${width}`);
-      if (width === 390) {
-        await expect(conversation).toBeHidden();
-        await rail.scrollIntoViewIfNeeded();
-        await capture(page, testInfo, `app-inbox-unselected-${width}`);
-        await avery.focus();
-        await page.keyboard.press("Enter");
-        await expect(conversation).toBeVisible();
-        await expect(rail).toBeHidden();
-        const back = inbox.getByRole("button", { name: "Back to inbox", exact: true });
-        await back.click();
-        await expect(avery).toBeFocused();
-        await expect(conversation).toBeHidden();
-        await page.keyboard.press("Enter");
-      }
+      const inbox = page.getByTestId("account-recruiting-view");
+      const conversation = inbox.getByTestId("email-conversation");
+      if (width === 390)
+        await inbox.getByRole("button", { name: "Avery Example", exact: true }).first().click();
       await expect(
         conversation.getByText("Tuesday afternoon works", { exact: false }).first(),
       ).toBeVisible();
-      await conversation.scrollIntoViewIfNeeded();
-      await capture(page, testInfo, `app-inbox-selected-${width}`);
-      await conversation.locator("summary").first().click();
-      await expect(
-        conversation.getByText("Would Tuesday or Wednesday work", { exact: false }).first(),
-      ).toBeVisible();
-      await capture(page, testInfo, `app-inbox-history-${width}`);
-      await conversation.getByRole("button", { name: "Profile", exact: true }).click();
-      await expect(
-        panel.getByRole("heading", { name: "Avery Example", exact: true }),
-      ).toBeVisible();
-      await capture(page, testInfo, `app-inbox-profile-${width}`);
-      await page.keyboard.press("Escape");
-      await expect(panel).toHaveCount(0);
+      await capture(page, testInfo, `app-inbox-${width}`);
 
       await openRoute(page, "interview");
       const calendar = page.getByTestId("interview-calendar");
@@ -302,7 +260,7 @@ for (const width of [1440, 390]) {
         await expect(await visibleSelectedDay(page)).toHaveText("Fri, Oct 23");
         expect(await parentScrolls()).toEqual(before);
       }
-      const event = calendar.getByRole("button", { name: /Avery · Platform interview/ }).first();
+      const event = calendar.getByRole("button", { name: /Avery platform interview/ }).first();
       await expect(event).toBeVisible();
       await expect(
         calendar.getByRole("complementary", { name: "Saved calendar events", exact: true }),
@@ -321,13 +279,9 @@ for (const width of [1440, 390]) {
         });
         await eventLink.scrollIntoViewIfNeeded();
         await expect(eventLink).toBeInViewport();
-        const linkBox = await eventLink.boundingBox();
-        const chatBox = await page
-          .getByRole("button", { name: "Open role chat", exact: true })
-          .boundingBox();
-        expect(
-          linkBox!.y + linkBox!.height <= chatBox!.y || linkBox!.x + linkBox!.width <= chatBox!.x,
-        ).toBe(true);
+        await expect(page.getByRole("button", { name: "Open role chat", exact: true })).toHaveCount(
+          0,
+        );
       }
       await capture(page, testInfo, `app-interview-details-${width}`);
       await calendar
@@ -365,21 +319,8 @@ for (const width of [1440, 390]) {
     await page.clock.setFixedTime(new Date("2026-10-23T12:00:00Z"));
     const fixture = await mockRecruitingApp(page, { emptyCalendar: true, emptyMail: true });
     await openRoute(page, "inbox");
-    const inbox = page.getByRole("region", { name: "Inbox", exact: true });
-    if (width === 390) {
-      await inbox
-        .getByRole("region", { name: "Candidate conversations", exact: true })
-        .getByRole("button", { name: "Avery Example", exact: true })
-        .click();
-      await expect(
-        inbox.getByText("No stored emails for this candidate.", { exact: true }),
-      ).toBeVisible();
-    } else {
-      await expect(
-        inbox.getByText("No stored emails for this role.", { exact: true }),
-      ).toBeVisible();
-    }
-    await inbox.scrollIntoViewIfNeeded();
+    const inbox = page.getByTestId("account-recruiting-view");
+    await expect(inbox.getByText("No replies yet.", { exact: true })).toBeVisible();
     await capture(page, testInfo, `app-inbox-empty-${width}`);
     await openRoute(page, "interview");
     const calendar = page.getByTestId("interview-calendar");
@@ -396,64 +337,20 @@ for (const width of [1440, 390]) {
   });
 }
 
-test("changing workspace tabs resets the primary scroll", async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await mockRecruitingApp(page);
-  await openRoute(page, "sequence");
-  // Route readiness precedes the lazy Sequence module and its content read.
-  const sequence = page.getByRole("region", { name: "Sequence", exact: true });
-  await expect(
-    sequence.getByRole("rowheader", { name: "Platform outreach", exact: true }).first(),
-  ).toBeVisible();
-  const primary = page.locator(".recruiting-workspace-main");
-  await primary.evaluate((element) => {
-    element.scrollTop = element.scrollHeight;
-  });
-  expect(await primary.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await page
-    .getByRole("navigation", { name: "Recruiting workspace" })
-    .getByRole("button", { name: "Inbox", exact: true })
-    .click();
-  await expect(page).toHaveURL(/view=inbox/);
-  await expect.poll(() => primary.evaluate((element) => element.scrollTop)).toBe(0);
-  await expect(
-    page.getByRole("heading", { name: "Staff Platform Engineer", exact: true }).first(),
-  ).toBeInViewport({ ratio: 1 });
-});
-
 for (const width of [1440, 390]) {
-  test(`actual Sequence selects a campaign from its authorized page at ${width}px`, async ({
+  test(`actual Sequence shows all authorized campaigns at ${width}px`, async ({
     page,
   }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     const fixture = await mockRecruitingApp(page, { multipleCampaigns: true });
     await openRoute(page, "sequence");
-    const sequence = page.getByRole("region", { name: "Sequence", exact: true });
-    const selector = sequence.getByRole("combobox", { name: "Campaign", exact: true });
-    const roleHeading = page
-      .getByRole("heading", { name: "Staff Platform Engineer", exact: true })
-      .first();
-    await expect(roleHeading).toBeInViewport({ ratio: 1 });
-    await expect(selector).toHaveValue("");
-    await sequence.getByRole("button", { name: "Load more", exact: true }).click();
-    await expect(selector.locator('option[value="fixture-second-campaign"]')).toHaveText(
-      "Platform follow-up",
+    const sequence = page.getByTestId("account-recruiting-view");
+    await expect(sequence.getByText("Platform outreach", { exact: true })).toBeVisible();
+    await expect(sequence.getByText("Platform follow-up", { exact: true })).toBeVisible();
+    await capture(page, testInfo, `app-sequence-campaigns-${width}`);
+    expect(fixture.calls.filter((call) => call.method === "recruiting/accountView")).toHaveLength(
+      1,
     );
-    await selector.selectOption("fixture-second-campaign");
-    await expect
-      .poll(
-        () =>
-          fixture.calls.filter((call) => call.method === "recruiting/roleCampaign").at(-1)?.input,
-      )
-      .toMatchObject({
-        campaignId: "fixture-second-campaign",
-        campaignOffset: 25,
-      });
-    await expect(selector).toHaveValue("fixture-second-campaign");
-    // Loading later pages scrolls on mobile; return to the role heading for this interaction capture.
-    await roleHeading.scrollIntoViewIfNeeded();
-    await expect(roleHeading).toBeInViewport({ ratio: 1 });
-    await capture(page, testInfo, `app-sequence-campaign-selection-${width}`);
     expect(fixture.unknown).toEqual([]);
   });
 }
@@ -480,42 +377,24 @@ test("Overview drilldowns preserve the exact role and evidence tab", async ({ pa
 });
 
 for (const width of [1440, 390]) {
-  test(`actual observed Inbox metadata, campaign details and booked Overview at ${width}px`, async ({
-    page,
-  }, testInfo) => {
+  test(`actual replies, campaign and booked Overview at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
     await page.clock.setFixedTime(new Date("2026-10-23T12:00:00Z"));
     const fixture = await mockRecruitingApp(page, { calendarStatus: "accepted" });
     await openRoute(page, "inbox");
-    const inbox = page.getByRole("region", { name: "Inbox", exact: true });
+    const inbox = page.getByTestId("account-recruiting-view");
+    if (width === 390)
+      await inbox.getByRole("button", { name: "Avery Example", exact: true }).first().click();
+    await expect(inbox.getByText("Interview availability", { exact: true }).first()).toBeVisible();
     await expect(
-      inbox.getByText("Loaded observations: 4 emails · 1 unread · 1 read status unknown", {
-        exact: true,
-      }),
+      inbox.getByText("Tuesday afternoon works", { exact: false }).first(),
     ).toBeVisible();
-    await inbox.getByRole("button", { name: "Unread", exact: true }).click();
-    const rail = inbox.getByRole("region", { name: "Candidate conversations", exact: true });
-    await expect(rail.getByRole("button", { name: "Blake Sample", exact: true })).toHaveCount(0);
-    await rail.getByRole("button", { name: "Avery Example", exact: true }).click();
-    const metadata = inbox.getByRole("region", { name: "Observed email metadata", exact: true });
-    await expect(metadata).toContainText("Observed unread");
-    await expect(metadata).toContainText("Step · 2");
-    await expect(metadata.locator("time")).toHaveAttribute("datetime", checkedAt);
-    await metadata.scrollIntoViewIfNeeded();
-    await capture(page, testInfo, `app-inbox-observed-unread-${width}`);
+    await capture(page, testInfo, `app-inbox-observed-${width}`);
     await openRoute(page, "sequence");
-    const schedule = page
-      .getByRole("heading", { name: "Sending schedule", exact: true })
-      .locator("..");
-    await expect(schedule).toContainText("Business hours");
-    await expect(schedule).toContainText("09:00 – 17:00 · America/New_York");
-    await expect(schedule).toContainText("Days unavailable.");
-    const steps = page.getByRole("heading", { name: "Email steps", exact: true }).locator("..");
-    await expect(steps).toContainText("Delay: 2 days");
-    await expect(steps).toContainText("Platform introduction");
-    await expect(steps).toContainText("Observed introduction copy from the selected campaign.");
-    await schedule.scrollIntoViewIfNeeded();
-    await capture(page, testInfo, `app-sequence-observed-details-${width}`);
+    await expect(
+      page.getByTestId("account-recruiting-view").getByText("Platform outreach", { exact: true }),
+    ).toBeVisible();
+    await capture(page, testInfo, `app-sequence-observed-${width}`);
     await openRoute(page, "home");
     const bookings = page.getByRole("list", { name: "Upcoming recorded bookings", exact: true });
     await expect(bookings.getByRole("button")).toHaveCount(1);

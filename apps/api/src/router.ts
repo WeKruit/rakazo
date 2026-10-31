@@ -111,6 +111,7 @@ import {
   provisionComputer,
   queueComputerUpdate,
   RoutineUpdateError,
+  readRecruitingAccountView,
   releaseComputerExecutionLease,
   replaceComputer,
   resolveAutoReviewChecker,
@@ -3904,6 +3905,27 @@ export function createRouter(deps: RouterDeps) {
       }),
     },
     recruiting: {
+      accountView: authed.recruiting.accountView.handler(async ({ context, input }) =>
+        readRecruitingAccountView(
+          {
+            prisma: deps.prisma,
+            artifacts: deps.artifacts,
+            connectors: deps.connectors,
+            firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+            signal: context.signal,
+            stillAuthorized: context.stillAuthorized,
+            oauth: mcpOAuth,
+            productIdentity: deps.env.firstPartyMcpUrl
+              ? {
+                  endpoint: deps.env.firstPartyMcpUrl,
+                  connected: (await productIdentityStatus(context.actor)) === "connected",
+                }
+              : undefined,
+          },
+          context.actor,
+          input,
+        ),
+      ),
       crmData: authed.recruiting.crmData.handler(async ({ context, input }) =>
         getRecruitingCrmData(
           {
@@ -4303,7 +4325,15 @@ export function createRouter(deps: RouterDeps) {
       ),
       list: authed.routines.list.handler(async ({ context, input }) => {
         await repos.getBot(context.actor, input.botId);
-        return listRoutinesDto(deps, context.actor, input.botId, input.offset ?? 0);
+        if (input.allConversations && input.threadId) throw new ORPCError("BAD_REQUEST");
+        return listRoutinesDto(
+          deps,
+          context.actor,
+          input.botId,
+          input.offset ?? 0,
+          input.threadId,
+          input.allConversations,
+        );
       }),
       create: authed.routines.create.handler(async ({ context, input }) => {
         if (hasMixedOneShotSchedule(input.crons)) {
@@ -4319,6 +4349,22 @@ export function createRouter(deps: RouterDeps) {
         const intervalError = routineIntervalError(input.crons, input.timezone);
         if (intervalError) throw new ORPCError("BAD_REQUEST", { message: intervalError });
         const bot = await repos.getBot(context.actor, input.botId);
+        if (input.threadId) {
+          const target = await deps.prisma.thread.findFirst({
+            where: {
+              id: input.threadId,
+              spaceId: context.actor.spaceId,
+              userId: context.actor.userId,
+              group: {
+                userId: context.actor.userId,
+                archivedAt: null,
+                members: { some: { botId: bot.id } },
+              },
+            },
+            select: { id: true },
+          });
+          if (!target) throw new ORPCError("NOT_FOUND");
+        }
         await assertRoutineModel(context.actor, input);
         // Validate every recurring cron even when inactive; @once and webhook-only have no next date.
         let nextRunAt: Date | null = null;
@@ -4331,6 +4377,7 @@ export function createRouter(deps: RouterDeps) {
             spaceId: context.actor.spaceId,
             botId: input.botId,
             userId: context.actor.userId,
+            threadId: input.threadId ?? null,
             name: input.name,
             prompt: input.prompt,
             crons: input.crons,
@@ -7880,6 +7927,7 @@ function nextRoutineDate(crons: string[], timezone: string): Date {
 function mapRoutine(row: {
   id: string;
   botId: string;
+  threadId?: string | null;
   name: string;
   prompt: string;
   crons: string[];
@@ -7899,6 +7947,7 @@ function mapRoutine(row: {
   return {
     id: row.id,
     botId: row.botId,
+    threadId: row.threadId ?? null,
     name: row.name,
     prompt: row.prompt,
     crons: row.crons,
@@ -7917,10 +7966,30 @@ function mapRoutine(row: {
   };
 }
 
-async function listRoutinesDto(deps: RouterDeps, actor: Actor, botId: string, offset?: number) {
+async function listRoutinesDto(
+  deps: RouterDeps,
+  actor: Actor,
+  botId: string,
+  offset?: number,
+  threadId?: string,
+  allConversations = false,
+) {
   const rows = await deps.prisma.routine.findMany({
     ...(offset === undefined ? {} : { take: 200, skip: offset, orderBy: { id: "asc" as const } }),
-    where: { botId, spaceId: actor.spaceId },
+    where: {
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      ...(allConversations
+        ? {
+            bot: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
+            thread: {
+              userId: actor.userId,
+              spaceId: actor.spaceId,
+              group: { userId: actor.userId, spaceId: actor.spaceId, archivedAt: null },
+            },
+          }
+        : { botId, ...(threadId ? { threadId } : {}) }),
+    },
   });
   return rows.map(mapRoutine);
 }

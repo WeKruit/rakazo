@@ -148,7 +148,7 @@ it("filters explicit foreign candidates and replaces selected draft context when
   await act(async () => button(view, "Draft reply").click());
   expect(draft.mock.calls.at(-1)![0]).toBe(foreign);
   await render(<EmailConversation {...props} candidateId="candidate-c" />);
-  expect(view.textContent).toContain("No stored emails for this candidate.");
+  expect(view.textContent).toContain("No replies yet.");
   expect(button(view, "Draft reply")).toBeUndefined();
 });
 

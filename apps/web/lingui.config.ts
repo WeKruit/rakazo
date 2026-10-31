@@ -17,6 +17,8 @@ const deferredPages = [
   "src/pages/recruiting/CandidatePresentation.tsx",
   "src/pages/recruiting/SchedulingPlan.tsx",
   "src/pages/recruiting/HomeDashboard.tsx",
+  "src/pages/recruiting/AccountRecruitingView.tsx",
+  "src/pages/recruiting/RecruitingRoutines.tsx",
   "src/pages/recruiting/DetailPanel.tsx",
   "src/pages/recruiting/RecruitingSupplementaryTab.tsx",
   "src/pages/recruiting/InterviewCalendar.tsx",

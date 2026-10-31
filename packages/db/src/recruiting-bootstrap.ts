@@ -150,6 +150,26 @@ const catalogDigest = (firstPartyMcpUrl?: string) =>
 export function recruitingPresetId(actor: Pick<Actor, "spaceId" | "userId">): string {
   return `recruiting-defaults-${digest([actor.spaceId, actor.userId])}`;
 }
+/** Stable native group identity; clients locate it in their scoped group list. */
+export function recruitingGlobalGroupId(actor: Pick<Actor, "spaceId" | "userId">): string {
+  return `recruiting-global-${digest([actor.spaceId, actor.userId])}`;
+}
+
+async function ensureGlobalConversation(
+  tx: Prisma.TransactionClient,
+  actor: Actor,
+  botIds: string[],
+): Promise<void> {
+  const id = recruitingGlobalGroupId(actor);
+  const existing = await tx.chatGroup.findFirst({
+    where: { id, spaceId: actor.spaceId, userId: actor.userId },
+    select: { id: true },
+  });
+  if (existing) return;
+  // ponytail: reuse this account's native crew; role work opens its existing role conversation.
+  await createGroupInTransaction(tx, actor, { id, name: "Main", botIds });
+}
+
 function presetWhere(actor: Actor) {
   return {
     id: recruitingPresetId(actor),
@@ -359,6 +379,11 @@ async function adoptLegacyCrew(
       botIds: crew.map((item) => item.bot.id),
     }));
   const result = { botId: main.id, groupId: group.id };
+  await ensureGlobalConversation(
+    tx,
+    actor,
+    crew.map((item) => item.bot.id),
+  );
 
   const target = legacyDigest(options.firstPartyMcpUrl);
   if (installed?.digest === target) return result;
@@ -840,7 +865,7 @@ export async function ensureRecruitingWorkspace(
         select: { id: true },
       });
       if (!personal) throw new IsolationError("Recruiting setup requires your private Space");
-      const [bots, existing, groupCount] = await Promise.all([
+      const [bots, existing] = await Promise.all([
         tx.bot.findMany({
           where: { spaceId: actor.spaceId, userId: actor.userId },
           select: {
@@ -857,7 +882,6 @@ export async function ensureRecruitingWorkspace(
           where: { id: groupId, spaceId: actor.spaceId, userId: actor.userId },
           include: { thread: { select: { id: true } } },
         }),
-        tx.chatGroup.count({ where: { spaceId: actor.spaceId, userId: actor.userId } }),
       ]);
       const installed = await tx.capabilityInstall.findFirst({ where: presetWhere(actor) });
       if (!existing && (!installed || installed.version === LEGACY_PRESET_VERSION)) {
@@ -880,8 +904,6 @@ export async function ensureRecruitingWorkspace(
           );
         }
       } else {
-        if (bots.length || groupCount)
-          throw new IsolationError("This Space already has conversations");
         const kind = await recruitingComputerKind(tx, options.sandboxKind);
         ownedBots = [];
         for (const [index, role] of RECRUITING_DEFAULT_BOTS.entries()) {
@@ -1005,6 +1027,11 @@ export async function ensureRecruitingWorkspace(
       }
       const main = ownedBots.find((bot) => bot.spawnKey === spawnKey("main"));
       if (!main) throw new IsolationError();
+      await ensureGlobalConversation(
+        tx,
+        actor,
+        ownedBots.filter((bot) => !bot.archivedAt).map((bot) => bot.id),
+      );
       return { botId: main.id, groupId };
     },
     {
@@ -1099,7 +1126,7 @@ async function ensureReviewer(
 }
 
 /**
- * Bring every account with a recruiting crew to the current defaults now, as signing in would,
+ * Bring every private account to the current recruiting defaults now, including accounts without a crew,
  * instead of waiting for each person to open the app. Each account is independent: one that
  * fails is logged by the caller's handler and the rest continue.
  */
@@ -1108,20 +1135,26 @@ export async function backfillRecruitingCrews(
   options: { sandboxKind: string; firstPartyMcpUrl?: string },
   onError: (error: unknown) => void,
 ): Promise<number> {
-  // Every account with a recruiting lead, including crews set up before recruiting spawn keys
-  // (their Main is found by name and its research grant, as ensureReviewer does).
-  const research = RECRUITING_SERVICES.find((service) => service.slug === "autumn")!;
-  const leads = await prisma.bot.findMany({
-    where: {
-      archivedAt: null,
-      OR: [
-        { spawnKey: { startsWith: "recruiting:", endsWith: ":main" } },
-        { name: "Main", mcpServers: { some: { server: { endpoint: research.endpoint } } } },
-      ],
+  const memberships = await prisma.spaceMember.findMany({
+    where: { role: "owner", space: { isDefault: true, deletingAt: null } },
+    select: {
+      spaceId: true,
+      userId: true,
+      space: {
+        select: {
+          createdByUserId: true,
+          memberships: { select: { userId: true } },
+          organization: { select: { members: { select: { userId: true } } } },
+        },
+      },
     },
-    distinct: ["spaceId", "userId"],
-    select: { spaceId: true, userId: true },
   });
+  const leads = memberships.filter(
+    (member) =>
+      member.space.createdByUserId === member.userId &&
+      member.space.memberships.every((row) => row.userId === member.userId) &&
+      member.space.organization.members.every((row) => row.userId === member.userId),
+  );
   const emails = new Map(
     (
       await prisma.user.findMany({
@@ -1141,8 +1174,57 @@ export async function backfillRecruitingCrews(
       isDeploymentOwner: false,
     };
     try {
+      const installed = await prisma.capabilityInstall.findFirst({ where: presetWhere(actor) });
+      if (installed && installed.version !== LEGACY_PRESET_VERSION) {
+        const home = await prisma.chatGroup.findFirst({
+          where: {
+            id: `recruiting-${digest([actor.spaceId, actor.userId])}`,
+            userId: actor.userId,
+            spaceId: actor.spaceId,
+          },
+          select: { archivedAt: true },
+        });
+        if (!home || home.archivedAt) {
+          done += 1;
+          continue;
+        }
+      }
+      if (!installed) await ensureRecruitingWorkspace(prisma, actor, options);
       await upgradeRecruitingWorkspace(prisma, actor, options);
       await ensurePlatformServices(prisma, actor, options);
+      await prisma.$transaction(async (tx) => {
+        await lockSpaceForContentCreation(tx, actor);
+        const installed = await tx.capabilityInstall.findFirst({ where: presetWhere(actor) });
+        if (!installed) return;
+        if (installed.version === LEGACY_PRESET_VERSION) {
+          await adoptLegacyCrew(tx, actor, installed, options);
+          return;
+        }
+        const group = await tx.chatGroup.findFirst({
+          where: {
+            id: `recruiting-${digest([actor.spaceId, actor.userId])}`,
+            spaceId: actor.spaceId,
+            userId: actor.userId,
+            archivedAt: null,
+          },
+          include: { members: { include: { bot: true } } },
+        });
+        if (!group || group.archivedAt) return;
+        const active = group.members.filter(
+          (member) =>
+            !member.bot.archivedAt &&
+            member.bot.userId === actor.userId &&
+            member.bot.spaceId === actor.spaceId,
+        );
+        if (!active.some((member) => member.bot.spawnKey === `recruiting:${actor.userId}:main`))
+          return;
+        if (active.length >= 2)
+          await ensureGlobalConversation(
+            tx,
+            actor,
+            active.map((member) => member.bot.id),
+          );
+      });
       done += 1;
     } catch (error) {
       onError(error);

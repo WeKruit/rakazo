@@ -1,6 +1,6 @@
 # Left navigation, global view and global chat
 
-Status: diagnosis and work plan. No product code changed yet.
+Status: implementation on PR #597. The diagnosis below records the original baseline; current sources, checks and live-validation boundaries are in [GLOBAL-RECRUITING-ACCEPTANCE.md](GLOBAL-RECRUITING-ACCEPTANCE.md).
 
 ## What recruiters see
 

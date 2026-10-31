@@ -604,6 +604,9 @@ importers:
       '@observablehq/plot':
         specifier: 0.6.17
         version: 0.6.17
+      '@orpc/server':
+        specifier: 1.15.0
+        version: 1.15.0(@opentelemetry/api@1.9.1)(crossws@0.3.5)(ws@8.21.3)
       '@rakazo/adapter-kit':
         specifier: workspace:*
         version: link:../adapter-kit
@@ -637,6 +640,9 @@ importers:
       jsdom:
         specifier: 30.0.1
         version: 30.0.1(@noble/hashes@2.3.0)
+      jsonc-parser:
+        specifier: 3.3.1
+        version: 3.3.1
       koffi:
         specifier: 3.2.1
         version: 3.2.1

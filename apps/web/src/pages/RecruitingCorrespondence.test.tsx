@@ -954,3 +954,44 @@ it("filters only observed unread mail without treating unknown status as read or
   expect(view.conversation).not.toHaveBeenCalled();
   expect(view.container.querySelector('a[href*="instantly"]')).toBeNull();
 });
+
+it.each([
+  { count: 0, partial: true },
+  { count: 1, partial: true },
+  { count: 0, partial: false },
+])("keeps native Inbox zero/history honest ($count/$partial)", async ({ count, partial }) => {
+  const emails = Array.from({ length: count }, (_, index) => ({
+    id: `saved-${index}`,
+    sourceId: "mail-source",
+    sourceName: "Mailbox",
+    providerMessageId: `provider-${index}`,
+    savedRead: null,
+    direction: "received",
+    sender: "candidate@example.test",
+    recipients: [],
+    subject: "Saved candidate reply",
+    body: "Retained conversation history",
+    snippet: false,
+    date: null,
+    url: null,
+  }));
+  readCorrespondence.mockResolvedValue({
+    roleId: "role",
+    status: count ? "ready" : "empty",
+    checkedAt: null,
+    connections: [],
+    emails,
+    events: [],
+    contacts: [],
+    partial,
+    nextCursor: null,
+  });
+  const view = await mount({ view: "inbox", threadId: "thread" });
+  expect(view.container.textContent?.includes("More results may be available.")).toBe(partial);
+  expect(view.container.textContent?.match(/No replies yet\./g)?.length ?? 0).toBe(
+    !count && !partial ? 1 : 0,
+  );
+  expect(view.container.textContent).not.toContain("No stored emails");
+  if (count) expect(view.container.textContent).toContain("Retained conversation history");
+  expect(readCorrespondence).toHaveBeenCalledTimes(1);
+});

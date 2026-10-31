@@ -4,7 +4,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./recruiting-reads": "./src/recruiting-reads.ts",
+    "./recruiting-campaign-details": "./src/recruiting-campaign-details.ts"
   },
   "scripts": {
     "check": "tsc --noEmit -p tsconfig.json",
@@ -25,6 +27,7 @@
     "@modelcontextprotocol/core": "2.3.0",
     "@mozilla/readability": "0.6.0",
     "@observablehq/plot": "0.6.17",
+    "@orpc/server": "1.15.0",
     "@rakazo/adapter-kit": "workspace:*",
     "@rakazo/contracts": "workspace:*",
     "@rakazo/core": "workspace:*",
@@ -36,6 +39,7 @@
     "d3-dsv": "3.0.1",
     "graphile-worker": "0.17.3",
     "jsdom": "30.0.1",
+    "jsonc-parser": "3.3.1",
     "koffi": "3.2.1",
     "nodemailer": "10.0.3",
     "pg": "8.23.0",

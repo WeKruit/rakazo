@@ -6626,9 +6626,11 @@ describe("role campaign read", () => {
     expect(f.calls.map((call) => [call.route?.toolName, call.args])).toEqual([
       ["native_instantly_get_campaign", { campaign_id: CAMPAIGN }],
       ["native_instantly_list_leads", { campaign_id: CAMPAIGN, limit: 100 }],
+      ["native_instantly_get_campaign_analytics", { campaign_id: CAMPAIGN }],
     ]);
     expect(output).toEqual({
       status: "ready",
+      stats: { sent: null, opened: null, replied: null },
       leadsComplete: true,
       serverId: "instantly",
       campaign: {
