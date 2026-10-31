@@ -57,17 +57,27 @@ export function workCountdownLeftMs(
 
 /**
  * The people count a search request names ("find 500 more", "1,200"), else the default target.
+ * A count of more people ("100 more", "再找 100 个") wins over a running total ("618 total").
  * Years and small numbers inside a brief ("2024", "10+ years") are not counts.
  */
 export function peopleNamedIn(text: unknown): number {
   if (typeof text !== "string") return WORK_DEFAULT_PEOPLE;
   let most = 0;
+  let more = 0;
   for (const match of text.matchAll(/\b\d{1,3}(?:,\d{3})+\b|\b\d{2,5}\b/g)) {
     const value = Number(match[0].replaceAll(",", ""));
     if (value >= 1900 && value <= 2100 && !match[0].includes(",")) continue;
-    const after = text.slice((match.index ?? 0) + match[0].length);
+    const start = match.index ?? 0;
+    const after = text.slice(start + match[0].length);
     if (/^\s*\+?\s*(?:years?|yrs?|年)/i.test(after)) continue;
     most = Math.max(most, value);
+    const before = text.slice(Math.max(0, start - 16), start);
+    if (
+      /^\s*(?:more|additional|new|extra|further)\b/i.test(after) ||
+      /(?:\b(?:more|additional|another|extra|further)|再找|再|多找)\s*$/i.test(before)
+    )
+      more = Math.max(more, value);
   }
-  return most >= 10 ? most : WORK_DEFAULT_PEOPLE;
+  const count = more || most;
+  return count >= 10 ? count : WORK_DEFAULT_PEOPLE;
 }
