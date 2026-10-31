@@ -92,6 +92,7 @@ import {
   boundDirectApprovalDetails,
   boundDirectApprovalRequest,
   CALL_CLIENT_NONCE_PREFIX,
+  COMPUTER_START_FAILED,
   callIdFromClientNonce,
   catalogApprovalDetails,
   catalogApprovalRequest,
@@ -4276,6 +4277,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         deps.events.pauseRunForInput(modelRetries ? { ...input, modelRetries } : input);
       setupMark("lease");
       let leaseValid = true;
+      /** Why this run's computer would not start, if it did not. */
+      let computerStartFailure: unknown;
       let lastLeaseCheckAt = 0;
       let retainComputerLease = false;
       let screenRelease: { computer: ComputerRef; context: AdapterContext } | undefined;
@@ -5093,7 +5096,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             context.signal.throwIfAborted();
             return computer;
           },
-          () => runAbortController?.abort(),
+          (error) => {
+            computerStartFailure = error;
+            runAbortController?.abort();
+          },
         );
         // This marks only the lazy handle; first-use provisioning remains deferred.
         setupMark("computerHandle");
@@ -13726,6 +13732,53 @@ export function createRunExecutor(deps: ExecutorDeps) {
             ),
           );
         }
+        // A computer that keeps failing to start will not fix itself on the next retry: end the
+        // turn with the reset button instead of leaving it queued until the stuck-work reaper.
+        if (
+          !retryForever &&
+          leaseValid &&
+          computerStartFailure !== undefined &&
+          setupError === computerStartFailure &&
+          (await deps.prisma.attempt.count({ where: { runId, status: "setup_failed" } })) >=
+            COMPUTER_START_ATTEMPTS - 1
+        ) {
+          const failed = await deps.events.finalizeRun({
+            spaceId: run.spaceId,
+            threadId: run.threadId,
+            botId: run.botId,
+            runId,
+            taskId: run.taskId,
+            attemptId: attempt.id,
+            leaseOwner: workerId,
+            leaseFence: fence,
+            outcome: "failed",
+            error: COMPUTER_START_FAILED,
+          });
+          if (failed) {
+            if (failed.continuationRunId)
+              await deps.jobs
+                .enqueue(runContinueJob(failed.continuationRunId))
+                .catch((error) => getLogger().error("steering continuation enqueue", error));
+            else if (runSendsFinishNotification(run.trigger)) {
+              try {
+                const owner = await deps.prisma.bot.findUnique({
+                  where: { id: run.botId },
+                  select: { name: true },
+                });
+                await notifyRun(deps, run, {
+                  kind: "failure",
+                  title: `${owner?.name ?? "Your assistant"} failed`,
+                  body: failureNotificationBody(COMPUTER_START_FAILED),
+                  botId: run.botId,
+                  threadId: run.threadId,
+                });
+              } catch (error) {
+                getLogger().error("computer start failure notice", error);
+              }
+            }
+          }
+          return;
+        }
         const released = await writeComputerRunRequeue(
           deps,
           run,
@@ -13964,6 +14017,9 @@ function nativeMessageSourceInstruction(messageId: string, blocks: readonly Mess
 const COMPUTER_LOGIN_TOOLS: ReadonlySet<string> = new Set(RECRUITING_DISABLED_BUILTIN_TOOLS);
 export const COMPUTER_TOOLS_DISABLED_ERROR =
   "Computer and browser tools are disabled for this recruiting agent. Use the connected mail/calendar/CRM service; if it is not connected, report the exact connection that is missing.";
+/** Starts of the run's computer to try before the turn ends with the reset-the-computer button. */
+const COMPUTER_START_ATTEMPTS = 3;
+
 function disabledToolError(name: string): string {
   return COMPUTER_LOGIN_TOOLS.has(name)
     ? COMPUTER_TOOLS_DISABLED_ERROR

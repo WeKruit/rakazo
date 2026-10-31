@@ -161,7 +161,7 @@ describe("authErrorMessage", () => {
   });
 });
 
-import { runRecoveryAction } from "./user-error.js";
+import { COMPUTER_START_FAILED, runRecoveryAction } from "./user-error.js";
 
 it("reconnects a missing model instead of retrying the same missing credential", () => {
   for (const reason of [
@@ -171,4 +171,8 @@ it("reconnects a missing model instead of retrying the same missing credential",
   ])
     expect(runRecoveryAction(reason)).toBe("model_connection");
   expect(runRecoveryAction("The server timed out.")).toBe("retry");
+});
+
+it("offers a fresh computer when the computer would not start", () => {
+  expect(runRecoveryAction(COMPUTER_START_FAILED)).toBe("computer");
 });

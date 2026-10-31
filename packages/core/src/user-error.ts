@@ -2,12 +2,17 @@
 export type UserErrorCopy = { fallback: string; offline: string };
 
 /** These are native model-connection failures, not service or tool error heuristics. */
-export function runRecoveryAction(reason: string): "model_connection" | "retry" {
+/** A run failed because its computer would not start; a fresh computer is the fix. */
+export const COMPUTER_START_FAILED = "The computer could not start. Reset it to continue.";
+
+export function runRecoveryAction(reason: string): "model_connection" | "computer" | "retry" {
+  const text = reason.trim();
+  if (text === COMPUTER_START_FAILED) return "computer";
   return [
     "Connect a model in Settings before running bots.",
     "Model connection changed. Connect it again.",
     "Model connection is no longer available. Connect it again.",
-  ].includes(reason.trim())
+  ].includes(text)
     ? "model_connection"
     : "retry";
 }

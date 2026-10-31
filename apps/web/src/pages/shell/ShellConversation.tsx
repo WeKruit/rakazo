@@ -23,7 +23,7 @@ import { startCall } from "../../lib/call-session";
 import { desktopBridge } from "../../lib/desktop";
 import { withFeatureMessages } from "../../lib/i18n";
 import { clampWidth } from "../../lib/pane-width";
-import { selectedSpaceId } from "../../lib/rpc";
+import { rpc, selectedSpaceId } from "../../lib/rpc";
 import { errorText } from "../../lib/user-error";
 
 const CalibrationRoundCard = lazyPanel(() =>
@@ -211,6 +211,7 @@ export function ShellConversation({
     displayedRunError,
     displayedRunErrorId,
     runErrorNeedsReconnect,
+    runErrorComputerBotId,
     handleRunErrorPresented,
     transcriptMessages,
     queuedMessages,
@@ -952,9 +953,26 @@ export function ShellConversation({
                       openSettings("models");
                       return;
                     }
+                    if (runErrorComputerBotId) {
+                      void rpc.computer
+                        .reset({ botId: runErrorComputerBotId })
+                        .then(() =>
+                          sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), "steer", true),
+                        )
+                        .catch((error: unknown) =>
+                          setSendError(errorText(error, t`Could not reset the computer.`)),
+                        );
+                      return;
+                    }
                     void sendFromComposer(RETRY_TEXT, [], crypto.randomUUID(), "steer", true);
                   }}
-                  retryLabel={runErrorNeedsReconnect ? t`Reconnect` : undefined}
+                  retryLabel={
+                    runErrorNeedsReconnect
+                      ? t`Reconnect`
+                      : runErrorComputerBotId
+                        ? t`Reset computer`
+                        : undefined
+                  }
                   sending={sending}
                   fileInputRef={fileInputRef}
                   onAttachmentPick={

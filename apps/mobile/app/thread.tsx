@@ -1732,6 +1732,15 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
       router.push("/(settings)/models");
       return;
     }
+    const failedRun = snapRef.current.run;
+    if (failedRun.error && runRecoveryAction(failedRun.error) === "computer") {
+      try {
+        await rpc("computer/reset", { botId: failedRun.botId });
+      } catch (err) {
+        Alert.alert(t("Could not reset the computer."), errorText(err, t("Try again.")));
+        return;
+      }
+    }
     const initialBotTarget = botId;
     const initialGroupTarget = groupId;
     const failedRunId = snapRef.current?.run?.id;
@@ -2052,11 +2061,16 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
   const runErrorNeedsReconnect = Boolean(
     snap?.run?.error && runRecoveryAction(snap.run.error) === "model_connection",
   );
+  const runErrorNeedsComputer = Boolean(
+    snap?.run?.error && runRecoveryAction(snap.run.error) === "computer",
+  );
   const runError =
     snap?.run?.status === "failed" && snap.run.error
       ? runErrorNeedsReconnect
         ? t("Reconnect your model to continue.")
-        : t("The reply stopped. Try again.")
+        : runErrorNeedsComputer
+          ? t("The computer could not start. Reset it to continue.")
+          : t("The reply stopped. Try again.")
       : null;
   const separatorIds = useMemo(() => timeSeparatorIds(visibleMessages), [visibleMessages]);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
@@ -2484,7 +2498,11 @@ function Thread({ sessionEpoch }: { sessionEpoch: number }) {
             style={{ minHeight: 44, justifyContent: "center", alignSelf: "flex-start" }}
           >
             <Text style={{ color: tokens.foreground }}>
-              {runErrorNeedsReconnect ? t("Reconnect") : t("Try again")}
+              {runErrorNeedsReconnect
+                ? t("Reconnect")
+                : runErrorNeedsComputer
+                  ? t("Reset computer")
+                  : t("Try again")}
             </Text>
           </Pressable>
         </View>
