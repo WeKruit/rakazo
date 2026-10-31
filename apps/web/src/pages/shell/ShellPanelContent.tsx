@@ -488,6 +488,9 @@ export function ShellPanelContent({
                       ...(armOneShot || routineDraft.active !== targetRoutine.active
                         ? { active: armOneShot ? true : routineDraft.active }
                         : {}),
+                      ...(routineDraft.notify !== targetRoutine.notify
+                        ? { notify: routineDraft.notify }
+                        : {}),
                       webhookEnabled: routineDraft.webhookEnabled,
                       githubEnabled: routineDraft.githubEnabled,
                       messageProvider: routineDraft.messageProvider,
@@ -506,7 +509,9 @@ export function ShellPanelContent({
                       crons,
                       timezone: localTimezone(),
                       active: routineDraft.active,
-                      notify: true,
+                      ...(routineDraft.notify !== targetRoutine.notify
+                        ? { notify: routineDraft.notify }
+                        : {}),
                       webhookEnabled: routineDraft.webhookEnabled,
                       githubEnabled: routineDraft.githubEnabled,
                       messageProvider: routineDraft.messageProvider,

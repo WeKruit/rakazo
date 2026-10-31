@@ -625,6 +625,9 @@ export const AgentSkillCatalogEntrySchema = AgentSkillSchema.pick({
   description: true,
   source: true,
   readOnly: true,
+}).extend({
+  /** A requirement the skill declares that this account is missing, e.g. "needs connection autumn". */
+  unavailable: z.string().optional(),
 });
 export type AgentSkillCatalogEntry = z.infer<typeof AgentSkillCatalogEntrySchema>;
 

@@ -1,13 +1,20 @@
 import { ORPCError } from "@orpc/server";
 import { BUILTIN_AGENT_SKILLS } from "@rakazo/adapters";
-import type { Actor, AgentSkill, AgentSkillSource } from "@rakazo/contracts";
+import type {
+  Actor,
+  AgentSkill,
+  AgentSkillCatalogEntry,
+  AgentSkillSource,
+} from "@rakazo/contracts";
 import {
   buildSkillMd,
   findSkillByName,
   isSkillReadOnly,
   mergeBuiltinSkills,
+  missingSkillRequirement,
   parseSkillMd,
   type SkillSource,
+  skillRequirements,
 } from "@rakazo/core";
 import { IsolationError, Prisma, type PrismaClient } from "@rakazo/db";
 
@@ -131,8 +138,37 @@ export function createAgentSkillsService(prisma: PrismaClient) {
     return row;
   }
 
+  /**
+   * Mark skills whose declared connections or secrets this account does not have. Tools depend on
+   * the bot and run, so the run's own catalog checks those.
+   */
+  async function catalog(actor: Actor, skills: AgentSkill[]): Promise<AgentSkillCatalogEntry[]> {
+    const needs = skills.map((skill) => skillRequirements(skill.content));
+    const checked = needs.some((need) => need.mcp.length > 0 || need.secrets.length > 0);
+    const [servers, secrets] = checked
+      ? await Promise.all([
+          prisma.mcpServer.findMany({
+            where: { spaceId: actor.spaceId, userId: actor.userId, enabled: true },
+            select: { slug: true },
+          }),
+          prisma.agentSecret.findMany({
+            where: { spaceId: actor.spaceId },
+            select: { name: true },
+          }),
+        ])
+      : [[], []];
+    const available = {
+      mcp: new Set(servers.map((row) => row.slug.toLowerCase())),
+      secrets: new Set(secrets.map((row) => row.name.toLowerCase())),
+    };
+    return skills.map(({ content: _content, ...entry }, index) => {
+      const unavailable = checked ? missingSkillRequirement(needs[index]!, available) : undefined;
+      return unavailable ? { ...entry, unavailable } : entry;
+    });
+  }
+
   return {
-    async list(actor: Actor, offset?: number): Promise<Omit<AgentSkill, "content">[]> {
+    async list(actor: Actor, offset?: number): Promise<AgentSkillCatalogEntry[]> {
       const builtins = builtinCatalog();
       if (offset !== undefined) {
         // Builtins precede saved skills, except when an owned saved name overrides them.
@@ -160,17 +196,13 @@ export function createAgentSkillsService(prisma: PrismaClient) {
               skip: Math.max(0, offset - visible.length),
             })
           : [];
-        return [...prefix, ...rows.map(mapAgentSkill)].map(
-          ({ content: _content, ...entry }) => entry,
-        );
+        return catalog(actor, [...prefix, ...rows.map(mapAgentSkill)]);
       }
       const rows = await prisma.agentSkill.findMany({
         where: { spaceId: actor.spaceId, userId: actor.userId },
         orderBy: [{ name: "asc" }, { id: "asc" }],
       });
-      return mergeBuiltinSkills(builtins, rows.map(mapAgentSkill)).map(
-        ({ content: _content, ...entry }) => entry,
-      );
+      return catalog(actor, mergeBuiltinSkills(builtins, rows.map(mapAgentSkill)));
     },
 
     async listWithContent(actor: Actor): Promise<AgentSkill[]> {

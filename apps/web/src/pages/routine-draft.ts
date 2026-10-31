@@ -26,6 +26,8 @@ export type RoutineDraftState = {
   githubEnabled: boolean;
   messageProvider: string | null;
   active: boolean;
+  /** Push a notification when a run finishes. */
+  notify: boolean;
   runAtLocal: string;
   /** Empty runs this routine on the bot's model. */
   modelKey: string;
@@ -41,6 +43,7 @@ export function emptyRoutineDraft(): RoutineDraftState {
     githubEnabled: false,
     messageProvider: null,
     active: true,
+    notify: true,
     runAtLocal: "",
     modelKey: "",
     thinkingLevel: "",
@@ -56,6 +59,7 @@ export function draftFromRoutine(routine: Routine): RoutineDraftState {
     githubEnabled: routine.githubEnabled,
     messageProvider: routine.messageProvider,
     active: routine.active,
+    notify: routine.notify,
     runAtLocal: routineNeedsOneShotArm(routine, routine.crons) ? defaultArmRunAtLocal() : "",
     modelKey:
       routine.modelProvider && routine.modelId
