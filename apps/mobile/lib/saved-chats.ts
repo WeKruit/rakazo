@@ -37,6 +37,13 @@ const ROOT = "saved-chats-v2";
 export const SAVED_CHAT_MAX_BYTES = 1024 * 1024;
 export const SAVED_CHATS_MAX_BYTES = 20 * 1024 * 1024;
 const SAVED_INBOX_ROWS = 200;
+/** A chat nobody opened for this long stops being kept on the device. */
+export const SAVED_CHAT_IDLE_MS = 30 * 24 * 60 * 60 * 1000;
+
+function isIdle(file: File): boolean {
+  const at = file.lastModified;
+  return typeof at === "number" && at > 0 && Date.now() - at > SAVED_CHAT_IDLE_MS;
+}
 
 export function savedChatTarget(target: { botId?: string; groupId?: string }): string {
   return target.groupId ? `group:${target.groupId}` : `bot:${target.botId}`;
@@ -61,7 +68,12 @@ function scopeKey(scope: SavedChatsScope, name: string): string {
 }
 
 function readJson(file: File, key: string): Record<string, unknown> | null {
-  if (!file.exists || file.size > SAVED_CHAT_MAX_BYTES) return null;
+  if (!file.exists) return null;
+  if (isIdle(file)) {
+    file.delete();
+    return null;
+  }
+  if (file.size > SAVED_CHAT_MAX_BYTES) return null;
   const data = JSON.parse(file.textSync());
   return data && typeof data === "object" && data.key === key ? data : null;
 }
@@ -272,7 +284,9 @@ function writeSavedFile(
   const collect = (directory: Directory) => {
     for (const entry of directory.list()) {
       if (entry instanceof File) {
-        if (entry.uri !== file.uri) files.push(entry);
+        if (entry.uri === file.uri) continue;
+        if (isIdle(entry)) entry.delete();
+        else files.push(entry);
       } else collect(entry);
     }
   };
