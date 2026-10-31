@@ -463,6 +463,7 @@ import {
   searchChartCatalog,
 } from "./plot-tool.js";
 import { actorMayUsePrivateEndpoint } from "./private-endpoint.js";
+import { createCreditGuard } from "./provider-credits.js";
 import { RECRUITING_AGENT_RUN_WAIT_MS, runningAgentRunId } from "./recruiting-agent-run-wait.js";
 import {
   executeRecruitingAssessmentTool,
@@ -11555,9 +11556,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
           runId,
           threadId: thread.id,
         });
+        const credits = createCreditGuard();
         const applyTool = (...call: Parameters<typeof applyToolNow>) => {
           const [name, rawArgs, executionId] = call;
-          const applied = applyToolNow(...call).then(
+          const outOfCredits = credits.refusal(name);
+          const applied = (
+            outOfCredits ? Promise.resolve<unknown>(outOfCredits) : applyToolNow(...call)
+          ).then(
             async (result) => {
               if (run.trigger === "recruiting_grade") {
                 const error = toolResultError(result);
@@ -11594,6 +11599,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 typeof failure === "string" ? failure : JSON.stringify(failure),
                 runSecrets,
               );
+              const creditNote = outOfCredits ? undefined : credits.failed(name, errorText);
+              if (creditNote) {
+                getLogger().warn("connector.out_of_credits", { runId, tool: name });
+                return withKnownFix(result, creditNote);
+              }
               const note = await toolFixes.failed(name, rawArgs, errorText);
               return note ? withKnownFix(result, note) : result;
             },
