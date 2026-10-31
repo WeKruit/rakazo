@@ -42,8 +42,8 @@ export type RecruitingAccountReadDeps = {
 };
 
 const ROLE_READ_CONCURRENCY = 2;
-// Interview reads mostly wait on the shared account calendar, so they take Home's source limit.
-const INTERVIEW_READ_CONCURRENCY = 4;
+// Interview reads share the account calendar, so they take Home's limit for the same reads.
+const INTERVIEW_READ_CONCURRENCY = 8;
 
 type RoleStatus = NonNullable<RecruitingAccountViewOutput["items"][number]["status"]>;
 
