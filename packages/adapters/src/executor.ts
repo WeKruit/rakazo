@@ -14100,6 +14100,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ),
                   tools,
                   worked: turnReport.worked(),
+                  read: turnReport.read(),
                   presentedRound: turnReport.presentedRound(),
                   handedIn: Boolean(handedIn),
                   ...(handedIn

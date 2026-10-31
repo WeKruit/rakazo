@@ -358,6 +358,21 @@ describe("declineRetry", () => {
     expect(retry("Book an interview with Ana for Tuesday at 2 pm")?.note).toMatch(/declined/);
   });
 
+  it("keeps an answer read for a question that asks for nothing to be done", () => {
+    const retry = (request: string, read: boolean) =>
+      declineRetry({
+        reply:
+          "No confirmed interviews are booked. Google Calendar is not connected, so I can’t verify your full calendar.",
+        request,
+        tools: [],
+        teammates: [],
+        read,
+      });
+    expect(retry("What interviews do I have coming up?", true)).toBeUndefined();
+    expect(retry("What interviews do I have coming up?", false)?.note).toMatch(/declined/);
+    expect(retry("Find 20 more people for this role", true)?.note).toMatch(/declined/);
+  });
+
   it("keeps a reply that shows the drafted email, whatever its aside", () => {
     expect(
       declineRetry({
