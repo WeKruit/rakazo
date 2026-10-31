@@ -23,6 +23,9 @@ type Request = {
   kind: WorkEstimateKind;
   people: number;
   estimateMs: number | null;
+  /** A search's role and how many people its Results held when the search started. */
+  roleId?: string;
+  saved?: number;
 };
 
 const key = (ref: string) => `${WORK_ESTIMATE_KIND}:${ref}`;
@@ -43,6 +46,7 @@ export async function startWorkEstimate(
     kind: work.kind,
     people: work.people,
     estimateMs: estimateWorkMs(work.kind, work.people),
+    ...(work.kind === "search" ? await savedSoFar(prisma, run.threadId).catch(() => ({})) : {}),
   };
   const row = await prisma.externalEffect
     .create({
@@ -104,6 +108,38 @@ export async function runningSearchEstimates(
   }));
 }
 
+/** The role a search fills and its Results count now, so the countdown can end at the target. */
+async function savedSoFar(prisma: PrismaClient, threadId: string) {
+  const thread = await prisma.thread.findUnique({
+    where: { id: threadId },
+    select: { activeRecruitingRoleId: true },
+  });
+  const roleId = thread?.activeRecruitingRoleId;
+  if (!roleId) return {};
+  return { roleId, saved: await prisma.recruitingCandidate.count({ where: { roleId } }) };
+}
+
+/**
+ * A search whose Results already hold the people asked for is done, even when the provider is
+ * still working: the recruiter got what they asked for and the countdown ends.
+ */
+async function reachedTarget(prisma: PrismaClient, row: { request: unknown }) {
+  const request = row.request as Partial<Request> | null;
+  if (request?.kind !== "search" || !request.roleId || typeof request.saved !== "number")
+    return false;
+  const target = request.saved + (Number(request.people) || 0);
+  return (await prisma.recruitingCandidate.count({ where: { roleId: request.roleId } })) >= target;
+}
+
+async function finishReached(prisma: PrismaClient, row: { id: string; request: unknown }) {
+  if (!(await reachedTarget(prisma, row).catch(() => false))) return false;
+  await prisma.externalEffect.updateMany({
+    where: { id: row.id, status: "running" },
+    data: { status: "done" },
+  });
+  return true;
+}
+
 export async function finishWorkEstimate(prisma: PrismaClient, spaceId: string, ref: string) {
   await prisma.externalEffect.updateMany({
     where: { idempotencyKey: key(ref), spaceId, status: "running" },
@@ -142,7 +178,8 @@ export async function readWorkEstimate(
     where: { idempotencyKey: key(ref), spaceId, status: "running" },
     select: { id: true, request: true, result: true, createdAt: true },
   });
-  return row ? openEstimate(row) : null;
+  if (!row || (await finishReached(prisma, row))) return null;
+  return openEstimate(row);
 }
 
 /**
@@ -187,6 +224,7 @@ export async function currentWorkEstimate(
       }))
     )
       continue;
+    if (await finishReached(prisma, row)) continue;
     const { id: _id, reported: _reported, ...estimate } = open;
     return estimate;
   }

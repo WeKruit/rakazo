@@ -12,7 +12,7 @@ const now = Date.parse("2026-10-30T20:00:00Z");
 const run = { id: "run", spaceId: "space", threadId: "thread" };
 const mcp = (body: unknown) => ({ content: [{ type: "text", text: JSON.stringify(body) }] });
 
-function store(rows: Array<Record<string, unknown>> = []) {
+function store(rows: Array<Record<string, unknown>> = [], saved = 0) {
   const create = vi.fn(async (_args: { data: Record<string, unknown> }) => ({
     createdAt: new Date(now),
   }));
@@ -25,6 +25,8 @@ function store(rows: Array<Record<string, unknown>> = []) {
       create,
       updateMany,
     },
+    thread: { findUnique: vi.fn(async () => ({ activeRecruitingRoleId: "role" })) },
+    recruitingCandidate: { count: vi.fn(async () => saved) },
   };
   return { prisma: prisma as unknown as PrismaClient, create, updateMany };
 }
@@ -44,6 +46,38 @@ describe("countdowns for big work", () => {
       kind: "work_estimate",
       idempotencyKey: "work_estimate:agent_run_1",
       request: { kind: "search", people: 500, estimateMs: 17 * 60_000 },
+    });
+  });
+
+  it("ends a search countdown once Results hold the people asked for", async () => {
+    const row = {
+      id: "e1",
+      idempotencyKey: "work_estimate:agent_run_1",
+      request: { kind: "search", people: 100, estimateMs: 5 * 60_000, roleId: "role", saved: 518 },
+      result: null,
+      createdAt: new Date(now),
+      run: { status: "completed" },
+    };
+    const short = store([row], 600);
+    expect(await currentWorkEstimate(short.prisma, run, now)).toMatchObject({ people: 100 });
+    const reached = store([row], 630);
+    expect(await currentWorkEstimate(reached.prisma, run, now)).toBeNull();
+    expect(reached.updateMany).toHaveBeenCalledWith({
+      where: { id: "e1", status: "running" },
+      data: { status: "done" },
+    });
+  });
+
+  it("records the role's saved count when a search starts", async () => {
+    const test = store([], 518);
+    await workEstimateAfterAgentRun(
+      test.prisma,
+      run,
+      mcp({ id: "agent_run_1", status: "running" }),
+      { query: "Find 100 more" },
+    );
+    expect(test.create.mock.calls[0]?.[0].data).toMatchObject({
+      request: { people: 100, roleId: "role", saved: 518 },
     });
   });
 
