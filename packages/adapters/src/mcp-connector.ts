@@ -856,6 +856,13 @@ export class McpConnector implements ConnectorProvider {
           for (const tool of tools) if (core.has(coreName(tool))) directTools.add(tool);
           return tools;
         };
+        // A grant of no tools (a retired platform service) needs no listing call.
+        if (
+          !assignment.allowAllTools &&
+          Array.isArray(assignment.allowedTools) &&
+          !assignment.allowedTools.length
+        )
+          return withCore([]);
         const startedAt = Date.now();
         const failureKey = this.sessionKey(assignment.server, context);
         // The prewarm retries a remembered failure; success then serves the next run.
