@@ -77,6 +77,9 @@ function peopleSql(actor: Actor, options: PeopleOptions) {
       FROM recruiting_roles r
       JOIN threads t ON t.id = r."sourceThreadId"
       WHERE r."userId" = ${user} AND r."spaceId" = ${space} AND r."archivedAt" IS NULL
+        -- A role whose chat was archived leaves the all-roles lists with it.
+        AND NOT EXISTS (
+          SELECT 1 FROM chat_groups g WHERE g.id = t."groupId" AND g."archivedAt" IS NOT NULL)
     ),
     -- Each role candidate's latest named row and the first time any saved page showed them.
     occ AS (
@@ -405,7 +408,10 @@ export async function recruitingContactFacets(
   const [roles, statuses, tags] = await Promise.all([
     prisma.$queryRaw<{ id: string; title: string }[]>(Prisma.sql`
       SELECT r.id, r.title FROM recruiting_roles r
+      JOIN threads t ON t.id = r."sourceThreadId"
       WHERE r."userId" = ${actor.userId} AND r."spaceId" = ${actor.spaceId} AND r."archivedAt" IS NULL
+        AND NOT EXISTS (
+          SELECT 1 FROM chat_groups g WHERE g.id = t."groupId" AND g."archivedAt" IS NOT NULL)
       UNION ALL
       SELECT 'crm:' || cr.id, cr."roleLabel" FROM recruiting_crm_roles cr
       WHERE cr."userId" = ${actor.userId} AND cr."spaceId" = ${actor.spaceId} AND cr."archivedAt" IS NULL

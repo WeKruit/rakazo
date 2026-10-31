@@ -375,4 +375,28 @@ describePostgres("all-roles contacts (PostgreSQL)", () => {
     ]);
     expect(facets.statuses).toEqual(expect.arrayContaining(["interviewing", "new", "shortlisted"]));
   });
+
+  it("leaves out roles whose chat was archived", async () => {
+    const groupId = `${suffix}-archived-group`;
+    await prisma.chatGroup.create({
+      data: { id: groupId, spaceId, userId, name: "Sales chat", archivedAt: new Date() },
+    });
+    const thread = `${suffix}-sales-thread`;
+    // A thread belongs to a bot or a group, never both.
+    await prisma.thread.update({ where: { id: thread }, data: { groupId, botId: null } });
+    try {
+      const facets = await recruitingContactFacets(prisma, actor);
+      expect(facets.roles.map((role) => role.title)).not.toContain("Sales Lead");
+      const page = await listRecruitingContacts(prisma, actor, {});
+      const titles = page.items.flatMap((item) => item.roles.map((role) => role.title));
+      expect(titles).not.toContain("Sales Lead");
+      expect(titles).toContain("Backend Engineer");
+    } finally {
+      await prisma.thread.update({
+        where: { id: thread },
+        data: { groupId: null, botId: `${suffix}-sales-bot` },
+      });
+      await prisma.chatGroup.delete({ where: { id: groupId } });
+    }
+  });
 });
