@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertReviewerGradingEvidence, checkReviewerGrading } from "./reviewer-grading.mjs";
+import {
+  assertReviewerGradingEvidence,
+  checkReviewerGrading,
+  tracedReviewerGrading,
+} from "./reviewer-grading.mjs";
 
 function evidence() {
   return {
@@ -151,4 +155,37 @@ test("live helper only reads the existing native copy and source-scoped saved ca
     },
   );
   assert.equal(calls.filter(({ route }) => route === "recruiting/listCandidates").length, 1);
+});
+
+test("proves background grading from its ended runs' traces when the chat stream hides its saves", async () => {
+  const events = [{ type: "run.completed", botId: "reviewer", runId: "grade" }];
+  const rpc = async (path) => {
+    if (path === "runs/trace")
+      return { rows: [{ kind: "tool", label: "recruiting_research", status: "completed" }] };
+    return { items: [{ match: { score: 70 } }, { match: null }] };
+  };
+  assert.deepEqual(
+    await tracedReviewerGrading(rpc, { reviewerId: "reviewer", roleId: "role", events }),
+    {
+      gradingRuns: 1,
+      savedGrades: 1,
+      traced: true,
+    },
+  );
+  const failedSave = async (path) =>
+    path === "runs/trace"
+      ? { rows: [{ kind: "tool", label: "recruiting_research", status: "failed" }] }
+      : rpc(path);
+  assert.equal(
+    await tracedReviewerGrading(failedSave, { reviewerId: "reviewer", roleId: "role", events }),
+    null,
+  );
+  assert.equal(
+    await tracedReviewerGrading(rpc, {
+      reviewerId: "reviewer",
+      roleId: "role",
+      events: [{ type: "run.completed", botId: "sourcer", runId: "search" }],
+    }),
+    null,
+  );
 });

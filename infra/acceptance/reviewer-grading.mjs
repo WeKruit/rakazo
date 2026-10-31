@@ -104,8 +104,38 @@ export async function checkReviewerGrading(rpc, groupId, readEvents, { maxWaitMs
     try {
       return assertReviewerGradingEvidence(evidence);
     } catch (error) {
+      // Grading runs in the background, whose start and saves the chat stream leaves out; only
+      // their ends reach it. Their own diagnostics trace then shows each save.
+      const traced = await tracedReviewerGrading(rpc, { reviewerId, roleId, events });
+      if (traced) return traced;
       if (Date.now() >= deadline) throw error;
     }
     await sleep(Math.min(10_000, Math.max(0, deadline - Date.now())));
   }
+}
+
+/** Reviewer runs that ended with a completed grade save, and the role's scored people. */
+export async function tracedReviewerGrading(rpc, { reviewerId, roleId, events }) {
+  const runs = [
+    ...new Set(
+      events
+        .filter((event) => event.botId === reviewerId && event.type === "run.completed")
+        .map((event) => event.runId),
+    ),
+  ];
+  let saved = 0;
+  for (const runId of runs) {
+    const trace = await rpc("runs/trace", { runId, includeDiagnostics: true }).catch(() => null);
+    if (
+      trace?.rows.some(
+        (row) =>
+          row.kind === "tool" && row.label === "recruiting_research" && row.status === "completed",
+      )
+    )
+      saved += 1;
+  }
+  if (!saved) return null;
+  const page = await rpc("recruiting/listCandidates", { roleId, limit: 200 });
+  const scored = page.items.filter((candidate) => Number.isFinite(candidate.match?.score)).length;
+  return scored ? { gradingRuns: saved, savedGrades: scored, traced: true } : null;
 }
