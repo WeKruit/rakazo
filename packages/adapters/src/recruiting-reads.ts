@@ -1272,8 +1272,9 @@ export async function getRecruitingCorrespondence(
             { limit: 200, ...(cursor ? { cursor } : {}) },
             crmReads,
           );
+          // Contacts only pick which calendar events belong to the role. Saved mail is often
+          // incomplete by design (selected Gmail reads), which says nothing about the calendar.
           output.contacts.push(...saved.contacts);
-          if (!saved.nextCursor) output.partial ||= saved.partial;
           cursor = saved.nextCursor;
         } while (cursor);
         if (workspace.crmTarget) {
