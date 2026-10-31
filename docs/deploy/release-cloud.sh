@@ -9,6 +9,8 @@
 #   release-cloud.sh <branch> premerge # unit tests on main merged with the branch, before it is merged;
 #                                      # a pass is reused when the real merge has the same code
 #   RELEASE_ROLLBACK=1 ... deploy   # emergency rollback to a tested SHA: works while live /ready is broken, no gap wait
+#   RELEASE_TEST_DATABASE_URL=postgresql://…@localhost/scratch  # also run the real-Postgres journeys
+#                                   # (pnpm test:integration) after the unit tests; local scratch DB only
 #
 # Rules kept from the runbook: main only, one release at a time, recreate only, no new Modal
 # resources or Secrets, never prints secret values. Needs MODAL_TOKEN_ID/MODAL_TOKEN_SECRET in env.
@@ -126,6 +128,14 @@ run_tests() {
     && pnpm exec vitest run ${base:+--changed "$base" --passWithNoTests} packages apps/api apps/worker apps/web >>"$LOG" 2>&1 ) \
     || { grep -E "FAIL|Tests  " "$LOG" | head -20 >&2; exec 8>&-; die "unit tests failed for $SHORT (log: $LOG)"; }
   grep -E "Tests  |No test files" "$LOG" | tail -1
+  # Real PostgreSQL: migrations, RLS, concurrency and pool behaviour the mocked unit tests cannot see.
+  if [ -n "${RELEASE_TEST_DATABASE_URL:-}" ]; then
+    log "postgres journeys for $SHORT"
+    ( cd "$TREE" && INTEGRATION_DATABASE_URL="$RELEASE_TEST_DATABASE_URL" pnpm test:integration >>"$LOG" 2>&1 ) \
+      || { grep -E "FAIL|Tests  |Error" "$LOG" | tail -20 >&2; exec 8>&-; die "postgres journeys failed for $SHORT (log: $LOG)"; }
+  else
+    log "postgres journeys skipped: set RELEASE_TEST_DATABASE_URL to a local scratch database"
+  fi
   touch "$TESTED"; exec 8>&-
 }
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }

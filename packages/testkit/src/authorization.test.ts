@@ -440,7 +440,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
         messageId: ownerAsk.id,
         answer: "always",
       }),
-    ).resolves.toMatchObject({ status: 500 });
+    ).resolves.toMatchObject({ status: 404 });
 
     const ownerBot2 = await rpc<Bot>(app, owner, "bots/create", botInput("Owner Bot Two"));
     const ownerGroup = await rpc<{ id: string }>(app, owner, "groups/create", {
@@ -465,19 +465,19 @@ describeWithDatabase("API authorization and resource isolation", () => {
     );
     await expect(
       raw(app, intruder, "artifacts/getById", { artifactId: ownerArtifact.id }),
-    ).resolves.toMatchObject({ status: 500 });
+    ).resolves.toMatchObject({ status: 404 });
     await expect(
       raw(app, intruder, "artifacts/get", {
         botId: intruderBot.id,
         artifactId: ownerArtifact.id,
       }),
-    ).resolves.toMatchObject({ status: 500 });
+    ).resolves.toMatchObject({ status: 404 });
     await expect(
       raw(app, owner, "artifacts/get", {
         groupId: ownerGroup.id,
         artifactId: ownerArtifact.id,
       }),
-    ).resolves.toMatchObject({ status: 500 });
+    ).resolves.toMatchObject({ status: 404 });
     expect(artifactReads).not.toHaveBeenCalled();
     artifactReads.mockRestore();
 
@@ -978,7 +978,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
         },
         support.id,
       ),
-    ).resolves.toMatchObject({ status: 500 });
+    ).resolves.toMatchObject({ status: 404 });
     await expect(
       raw(
         app,
@@ -998,7 +998,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
     ).resolves.toMatchObject({ status: 404 });
     await expect(
       raw(app, cookie, "artifacts/getById", { artifactId: originalArtifact.id }, support.id),
-    ).resolves.toMatchObject({ status: 500 });
+    ).resolves.toMatchObject({ status: 404 });
     await expect(
       raw(
         app,
@@ -1007,7 +1007,7 @@ describeWithDatabase("API authorization and resource isolation", () => {
         { botId: supportBot.id, artifactId: originalArtifact.id },
         support.id,
       ),
-    ).resolves.toMatchObject({ status: 500 });
+    ).resolves.toMatchObject({ status: 404 });
     expect(artifactReads).not.toHaveBeenCalled();
     artifactReads.mockRestore();
     expect(await handles.prisma.run.findUniqueOrThrow({ where: { id: originalRun.id } })).toEqual(
@@ -1025,12 +1025,17 @@ describeWithDatabase("API authorization and resource isolation", () => {
       originalEventCount,
     );
 
-    expect(await rpc<Array<{ id: string }>>(app, cookie, "bots/list")).toEqual([
-      expect.objectContaining({ id: originalBot.id }),
-    ]);
-    expect(await rpc<Array<{ id: string }>>(app, cookie, "bots/list", {}, support.id)).toEqual([
-      expect.objectContaining({ id: supportBot.id }),
-    ]);
+    // Each space may also hold its own recruiting crew; only the boundary matters here.
+    const originalIds = (await rpc<Array<{ id: string }>>(app, cookie, "bots/list")).map(
+      (bot) => bot.id,
+    );
+    expect(originalIds).toContain(originalBot.id);
+    expect(originalIds).not.toContain(supportBot.id);
+    const supportIds = (
+      await rpc<Array<{ id: string }>>(app, cookie, "bots/list", {}, support.id)
+    ).map((bot) => bot.id);
+    expect(supportIds).toContain(supportBot.id);
+    expect(supportIds).not.toContain(originalBot.id);
     await expectDenied(app, cookie, "bots/get", { botId: supportBot.id });
     await expectDenied(app, cookie, "bots/get", { botId: originalBot.id }, support.id);
 
@@ -1038,19 +1043,23 @@ describeWithDatabase("API authorization and resource isolation", () => {
     expect(navigation.current).toEqual(
       expect.objectContaining({
         id: original.spaceId,
-        bots: [expect.objectContaining({ id: originalBot.id })],
+        bots: expect.arrayContaining([expect.objectContaining({ id: originalBot.id })]),
       }),
     );
     expect(navigation.spaces).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           id: original.spaceId,
-          bots: [expect.objectContaining({ id: originalBot.id, notifyOnFinish: false })],
+          bots: expect.arrayContaining([
+            expect.objectContaining({ id: originalBot.id, notifyOnFinish: false }),
+          ]),
         }),
         expect.objectContaining({
           id: support.id,
           name: "Customer support",
-          bots: [expect.objectContaining({ id: supportBot.id, notifyOnFinish: false })],
+          bots: expect.arrayContaining([
+            expect.objectContaining({ id: supportBot.id, notifyOnFinish: false }),
+          ]),
         }),
       ]),
     );

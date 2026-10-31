@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadRootEnv } from "@rakazo/core/node/load-root-env";
@@ -45,7 +45,10 @@ async function main() {
   const mode = integration ? "integration" : "e2e";
   const reportDir = path.resolve("test-report", mode);
   await mkdir(reportDir, { recursive: true });
-  const container = await new PostgreSqlContainer("postgres:16-alpine").start();
+  const container =
+    integration && process.env.INTEGRATION_DATABASE_URL
+      ? localDatabase(process.env.INTEGRATION_DATABASE_URL)
+      : await new PostgreSqlContainer("postgres:16-alpine").start();
   try {
     const databaseUrl = container.getConnectionUri();
     const apiPort = Number(process.env.API_PORT ?? 3110);
@@ -91,6 +94,7 @@ async function main() {
         "packages/testkit/src/pi-offline.postgres.test.ts",
         "packages/testkit/src/usage-accounting.postgres.test.ts",
         "packages/db/src/history-retrieval.postgres.test.ts",
+        "packages/db/src/work-metrics.postgres.test.ts",
         "packages/testkit/src/history-retrieval.postgres.test.ts",
         "packages/testkit/src/history-short-product.postgres.test.ts",
         "packages/testkit/src/history-followup-product.postgres.test.ts",
@@ -354,3 +358,34 @@ main().then(
     process.exit(1);
   },
 );
+
+/**
+ * A scratch database on this machine instead of a Docker container, for hosts that have
+ * PostgreSQL but no Docker, such as the release checkout. Refuses anything but localhost so a
+ * shared or production database can never receive the fixtures or the DROP DATABASE calls.
+ */
+function localDatabase(url: string) {
+  const parsed = new URL(url);
+  if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(parsed.hostname))
+    throw new Error("INTEGRATION_DATABASE_URL must point at a local scratch database");
+  const admin = new URL(url);
+  admin.pathname = "/postgres";
+  return {
+    getConnectionUri: () => url,
+    getDatabase: () => decodeURIComponent(parsed.pathname.slice(1)),
+    getUsername: () => decodeURIComponent(parsed.username),
+    async exec(command: string[]) {
+      // Same psql call the container runs, against this server's maintenance database.
+      const statement = command.at(-1)!;
+      try {
+        execFileSync("psql", [admin.toString(), "-v", "ON_ERROR_STOP=1", "-c", statement], {
+          stdio: "ignore",
+        });
+        return { exitCode: 0 };
+      } catch {
+        return { exitCode: 1 };
+      }
+    },
+    stop: async () => undefined,
+  };
+}
