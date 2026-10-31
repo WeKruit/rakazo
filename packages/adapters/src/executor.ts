@@ -77,6 +77,7 @@ import {
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
+  ACTIVE_RUN_STATUSES,
   appendTextSegment,
   appendToolCallSegment,
   applyJudgeDecision,
@@ -371,6 +372,7 @@ import {
 import { checkpointRunComputerWorkspace } from "./computer-workspace.js";
 import { redactConnectorPayload, sanitizeConnectorError } from "./connector-safety.js";
 import { formatCurrentTimeInstruction } from "./current-time.js";
+import { SAVE_WAIT_MS, withinDeadline } from "./deadline.js";
 import { resolveDeploymentModel } from "./deployment-model.js";
 import {
   handoffToGroupBot,
@@ -9767,8 +9769,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 // passage the search returned; the turn then ends on the next-step choice.
                 const recorded = round as { roleId?: unknown; candidateKeys?: unknown } | null;
                 if (typeof recorded?.roleId === "string" && Array.isArray(recorded.candidateKeys)) {
-                  briefSaving ??= saveBriefAfterRound(recorded.roleId).catch((error) =>
-                    getLogger().warn("brief not saved after the round", { error: String(error) }),
+                  // A stuck save never holds the turn: the model's own brief save and the
+                  // next-step card wait for this one.
+                  briefSaving ??= withinDeadline(
+                    saveBriefAfterRound(recorded.roleId).catch((error) =>
+                      getLogger().warn("brief not saved after the round", {
+                        error: String(error),
+                      }),
+                    ),
+                    SAVE_WAIT_MS,
+                    () => getLogger().warn("brief save after the round still running", { runId }),
                   );
                   const text = await recruitingRoundListText(deps.prisma, {
                     threadId: run.threadId,
@@ -12718,7 +12728,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 },
               });
             } else if (event.type === "ask") {
-              await Promise.all(savesInFlight);
+              await withinDeadline<unknown>(Promise.all(savesInFlight), SAVE_WAIT_MS, () =>
+                getLogger().warn("run.ask.saves_still_running", { runId }),
+              );
               if (!(await renewRunLease(deps, runId, workerId, fence))) return;
               if (!event.requestedSchema) {
                 const card = await nextStepCardInstead();
@@ -13335,7 +13347,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             await deps.jobs
               .enqueue(runContinueJob(completed.continuationRunId))
               .catch((error) => getLogger().error("steering continuation enqueue", error));
-          } else if (declineRetried && declineRetried.card === undefined) {
+          } else if (
+            declineRetried &&
+            declineRetried.card === undefined &&
+            // A teammate's handoff run of this bot is already doing the ask; a second run of the
+            // same bot would work the same request twice.
+            !(await deps.prisma.run.findFirst({
+              where: {
+                threadId: thread.id,
+                botId: bot.id,
+                id: { not: run.id },
+                status: { in: [...ACTIVE_RUN_STATUSES] },
+              },
+              select: { id: true },
+            }))
+          ) {
             retryRunId = await sendDeclineRetry(
               deps,
               { ...run, threadId: thread.id, userId: run.userId },
