@@ -20,14 +20,16 @@ import {
   listRecruitingSchedulingPlans,
   listRoutinesDto,
 } from "@rakazo/db";
+import { getLogger } from "@rakazo/logging";
 import type { McpOAuthBroker } from "./mcp-oauth.js";
-import type { CrmMembershipReads, RecruitingThreadTarget } from "./recruiting-reads.js";
+import type { CrmMembershipReads, PhaseTimer, RecruitingThreadTarget } from "./recruiting-reads.js";
 import {
   authenticated,
   getRecruitingCorrespondence,
   getRecruitingCrmData,
   getRecruitingRoleCampaign,
   getRecruitingRoleCandidates,
+  phaseTimer,
 } from "./recruiting-reads.js";
 
 export type RecruitingAccountReadDeps = {
@@ -247,6 +249,23 @@ export async function readRecruitingAccountView(
     const readItem = async (
       row: (typeof page)[number],
     ): Promise<RecruitingAccountViewOutput["items"][number]> => {
+      if (input.view === "roles") return readRole(row, phaseTimer());
+      const timer = phaseTimer();
+      try {
+        return await readRole(row, timer);
+      } finally {
+        // Per-role phase times show which read to speed up on a slow page.
+        getLogger().info("recruiting.role_read.timing", {
+          view: input.view,
+          "recruiting.role_id": row.id,
+          ...timer.phases,
+        });
+      }
+    };
+    const readRole = async (
+      row: (typeof page)[number],
+      timer: PhaseTimer,
+    ): Promise<RecruitingAccountViewOutput["items"][number]> => {
       const thread = row.sourceThread;
       if (thread.userId !== actor.userId || thread.spaceId !== actor.spaceId)
         throw new ORPCError("NOT_FOUND");
@@ -268,9 +287,11 @@ export async function readRecruitingAccountView(
       };
       if (input.view === "roles") return { roleId: row.id, status: statuses.get(row.id) };
       const target = await authorize();
+      timer.mark("authorizeMs");
       const workspace = await getRecruitingWorkspace(deps.prisma, actor, {
         threadId: thread.id,
       });
+      timer.mark("workspaceMs");
       if (workspace?.role.id !== row.id) throw new ORPCError("NOT_FOUND");
       const bound = workspace.crmTarget?.target;
       const crmServer =
@@ -330,8 +351,9 @@ export async function readRecruitingAccountView(
               : {}),
           },
           // These pages list names only, so a role's first CRM page is enough until "Load more".
-          { summary: !input.itemCursor || input.view === "inbox" },
+          { summary: !input.itemCursor || input.view === "inbox", timer },
         );
+      timer.mark("candidatesMs");
       if (input.view === "sequence" && input.campaignLeadCursor) {
         const campaign = await getRecruitingRoleCampaign(reads, actor, target, {
           serverId: input.campaignServerId,
@@ -411,6 +433,7 @@ export async function readRecruitingAccountView(
           if (campaign.campaign) item.campaigns.push(campaign);
         }
       }
+      timer.mark("campaignsMs");
       if (["inbox", "interview", "contacts", "sequence"].includes(input.view)) {
         const view =
           input.view === "sequence"
@@ -434,7 +457,9 @@ export async function readRecruitingAccountView(
               : {}),
           },
           reads,
+          timer,
         );
+        timer.mark("correspondenceMs");
         if (input.since) {
           const since = Date.parse(input.since);
           item.correspondence.emails = item.correspondence.emails.filter(
@@ -449,6 +474,7 @@ export async function readRecruitingAccountView(
         item.scheduling = await listRecruitingSchedulingPlans(deps.prisma, actor, {
           threadId: thread.id,
         });
+      timer.mark("schedulingMs");
       if (input.view === "tasks")
         item.reminders = await listRecruitingReminders(deps.prisma, actor, {
           roleId: row.id,
