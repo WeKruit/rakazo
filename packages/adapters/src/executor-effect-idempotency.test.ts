@@ -1062,6 +1062,42 @@ describe("newer request after the round", () => {
   });
 });
 
+describe("stage report while the person's newest message is being answered", () => {
+  it("does not hand off the newest message from a teammate's stage report", async () => {
+    const f = fixture("report-leaves-newest-message");
+    const report = {
+      id: "stage-report",
+      seq: 2,
+      role: "bot",
+      botId: "bot-2",
+      runId: "teammate-run",
+      createdAt: new Date(1),
+      blocks: [
+        {
+          kind: "handoff",
+          fromBotId: "bot-2",
+          toBotId: "bot-1",
+          text: "Finished the stage you handed me.",
+          hop: 1,
+          report: "completed",
+        },
+      ],
+    };
+    Object.assign(f.runData, { trigger: "follow_up", sourceMessageId: report.id });
+    f.prisma.message.findMany.mockResolvedValue([report]);
+    const findFirst = vi.mocked(f.prisma.message.findFirst);
+    findFirst.mockImplementation((async (query?: { select?: { sourceRuns?: unknown } }) =>
+      query?.select?.sourceRuns
+        ? { blocks: [{ kind: "text", text: "发一下" }], sourceRuns: [{ id: "answering-run" }] }
+        : null) as unknown as typeof findFirst);
+    f.setCalls([
+      { name: "handoff_to_bot", args: { bot: "Outreach", request: "send" }, executionId: "h" },
+    ]);
+    await f.run();
+    expect(f.results[0]).toEqual({ error: newerRequestElsewhere("发一下") });
+  });
+});
+
 describe("computer that will not start", () => {
   it("fails the turn with the reset-the-computer notice instead of the provider error", async () => {
     const f = fixture("computer-start-failed");

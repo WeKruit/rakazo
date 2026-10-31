@@ -6004,6 +6004,30 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
             .join("\n");
         };
+        /** The person's newest message, when another turn that is still working answers it. */
+        const newestMessageAnsweredByActiveTurn = async () => {
+          let newest: { blocks: unknown; sourceRuns: { id: string }[] } | null = null;
+          try {
+            newest = await deps.prisma.message.findFirst({
+              where: { threadId: thread.id, role: "user", botId: null },
+              orderBy: { seq: "desc" },
+              select: {
+                blocks: true,
+                sourceRuns: {
+                  where: { id: { not: runId }, status: { in: [...ACTIVE_RUN_STATUSES] } },
+                  select: { id: true },
+                  take: 1,
+                },
+              },
+            });
+          } catch {
+            // Without the check the tool runs as before.
+          }
+          if (!newest?.sourceRuns?.length) return undefined;
+          return (Array.isArray(newest.blocks) ? (newest.blocks as MessageBlock[]) : [])
+            .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+            .join("\n");
+        };
         /** What the recruiter wrote after this run recorded its round, newest message. */
         const recruiterReplyAfterRound = async () => {
           const round = await roundRecordedThisRun();
@@ -6235,14 +6259,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
             readExternalText = true;
           // Once this turn has recorded its round, a newer request that another turn is answering
           // belongs to that turn: this one neither searches for it nor hands it on again.
+          // A teammate's stage report is checked here, while the person's newest message stays
+          // with the turn already answering it.
           if (
-            (name.endsWith("agent_run") ||
-              name.endsWith("web_search_advanced_exa") ||
-              name === "web_search" ||
-              name === "handoff_to_bot") &&
-            (await roundRecordedThisRun())
+            name.endsWith("agent_run") ||
+            name.endsWith("web_search_advanced_exa") ||
+            name === "web_search" ||
+            name === "handoff_to_bot"
           ) {
-            const moved = await newerMessageAnsweredElsewhere();
+            const moved = quietRun
+              ? await newestMessageAnsweredByActiveTurn()
+              : (await roundRecordedThisRun())
+                ? await newerMessageAnsweredElsewhere()
+                : undefined;
             if (moved !== undefined) return { error: newerRequestElsewhere(moved) };
           }
           // Before the first picks, one step's extra searches are refused once: the model picks
