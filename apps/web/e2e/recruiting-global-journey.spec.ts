@@ -133,6 +133,14 @@ test("fresh ordinary chat creates two product roles and all global pages share t
       await page.getByRole("button", { name: "Show navigation", exact: true }).click();
     await navigation.getByRole("button", { name: label, exact: true }).click();
     await expect(page).toHaveURL(new RegExp(`view=${view}.*role=all`));
+    if (view === "contacts") {
+      // Everyone across roles in one table; the role is a filter, not a page switch.
+      const table = page.getByRole("region", { name: "All contacts", exact: true });
+      await expect(table.getByText(row, { exact: false }).first()).toBeVisible();
+      await expect(table.getByText("Fixture Engineer", { exact: true }).first()).toBeVisible();
+      await captureScreenshot(page, testInfo, "journey-contacts-global-desktop");
+      continue;
+    }
     const picker = page.getByRole("combobox", {
       name: view === "routines" ? "Routine conversation" : "Role",
       exact: true,

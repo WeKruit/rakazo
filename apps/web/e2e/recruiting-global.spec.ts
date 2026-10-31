@@ -28,7 +28,6 @@ for (const width of [1440, 390]) {
       });
     });
     for (const [view, row] of [
-      ["contacts", "Avery Example"],
       ["shortlist", "Avery Example"],
       ["sequence", "Platform outreach"],
       ["inbox", "Tuesday afternoon works"],
@@ -73,5 +72,96 @@ for (const width of [1440, 390]) {
     }
     expect(reads.some((read) => read.roleId === "fixture-role-two")).toBe(true);
     expect(fixture.calls.some((call) => call.method === "threads/answer")).toBe(false);
+  });
+}
+
+for (const width of [1440, 390]) {
+  test(`all contacts lists every role's people with filters and bulk actions at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+    await page.clock.setFixedTime(new Date(checkedAt));
+    await mockRecruitingApp(page, { nativeScheduling: true });
+    const reads: { filters: Record<string, unknown>; cursor?: string }[] = [];
+    const tagged: unknown[] = [];
+    const person = (key: string, name: string, role: (typeof roles)[number], tags: string[]) => ({
+      personKey: key,
+      name,
+      title: "Staff Engineer",
+      company: "Example Labs",
+      location: "Los Angeles, California",
+      school: "University of Example",
+      linkedinUrl: `https://www.linkedin.com/in/${key}`,
+      email: null,
+      status: "shortlisted",
+      noteKey: `autumn:linkedin:/in/${key}`,
+      roles: [
+        {
+          id: role.id,
+          title: role.title,
+          groupId: role.groupId,
+          candidateKey: `linkedin:/in/${key}`,
+          shortlisted: true,
+          threadId: role.threadId,
+          revision: 1,
+        },
+      ],
+      tags,
+      addedAt: checkedAt,
+      lastContactedAt: checkedAt,
+      lastRepliedAt: null,
+    });
+    await page.route("**/rpc/recruiting/contacts/list", async (route) => {
+      const input = route.request().postDataJSON().json;
+      reads.push(input);
+      const items = [
+        person("avery", "Avery Example", roles[0]!, tagged.length ? ["Hot"] : []),
+        person("blake", "Blake Example", roles[1]!, []),
+      ].filter(
+        (item) => !input.filters.roleIds || input.filters.roleIds.includes(item.roles[0]!.id),
+      );
+      await route.fulfill({ json: { json: { items, total: items.length, nextCursor: null } } });
+    });
+    await page.route("**/rpc/recruiting/contacts/facets", (route) =>
+      route.fulfill({
+        json: {
+          json: {
+            roles: roles.map((role) => ({ id: role.id, title: role.title })),
+            statuses: ["shortlisted", "saved"],
+            tags: [],
+          },
+        },
+      }),
+    );
+    await page.route("**/rpc/recruiting/contacts/updateTags", async (route) => {
+      tagged.push(route.request().postDataJSON().json);
+      await route.fulfill({ json: { json: { ok: true } } });
+    });
+    await page.goto("/app?view=contacts&role=all");
+    const list = page.getByRole("region", { name: "All contacts", exact: true });
+    await expect(list.getByText("Avery Example")).toBeVisible();
+    await expect(list.getByText("Blake Example")).toBeVisible();
+    await captureScreenshot(page, testInfo, `all-contacts-${width}`);
+
+    await list.getByRole("button", { name: "Filter", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Role", exact: true }).click();
+    await page.getByRole("menuitemcheckbox", { name: roles[0]!.title, exact: true }).click();
+    // One Escape closes the submenu, the next the menu.
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    // The menu's backdrop blocks the page until its close finishes.
+    await expect(page.locator("[data-base-ui-inert]")).toHaveCount(0);
+    await expect(list.getByText("Blake Example")).toHaveCount(0);
+    expect(reads.at(-1)?.filters).toEqual({ roleIds: [roles[0]!.id] });
+    await captureScreenshot(page, testInfo, `all-contacts-filtered-${width}`);
+
+    await list.getByRole("checkbox", { name: "Select Avery Example", exact: true }).click();
+    await list.getByRole("button", { name: "Actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Add tag", exact: true }).click();
+    await page.getByRole("combobox", { name: "Tag", exact: true }).fill("Hot");
+    await page.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(list.getByText("Tagged 1 contacts.")).toBeVisible();
+    expect(tagged).toEqual([{ personKeys: ["avery"], add: ["Hot"] }]);
+    await expect(list.getByText("Hot", { exact: true })).toBeVisible();
   });
 }

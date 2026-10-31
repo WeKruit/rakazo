@@ -258,10 +258,6 @@ msgstr "Add a model in Settings to use this."
 msgid "Add a name and prompt."
 msgstr "Add a name and prompt."
 
-#: src/pages/RoutineEditor.tsx
-#~ msgid "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-#~ msgstr "Add a schedule, webhook, GitHub, or message trigger to run this routine."
-
 #: src/pages/McpServersOverlay.tsx
 msgid "Add a server name."
 msgstr "Add a server name."
@@ -3290,10 +3286,6 @@ msgstr "Lowercase letters, numbers, hyphens and underscores, starting with a let
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "Mailbox not recorded"
 msgstr "Mailbox not recorded"
-
-#: src/pages/recruiting/HomeDashboard.tsx
-#~ msgid "Main"
-#~ msgstr "Main"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -6407,6 +6399,10 @@ msgstr "Where should bots run?"
 #: src/pages/GroupPanel.tsx
 msgid "Who are you looking for?"
 msgstr "Who are you looking for?"
+
+#: src/pages/SettingsOverlay.tsx
+msgid "Work Metrics"
+msgstr "Work Metrics"
 
 #: src/components/LiveWork.tsx
 msgid "Worked for {duration}"

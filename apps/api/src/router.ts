@@ -233,6 +233,7 @@ import {
   IsolationError,
   issueMessagingLinkCode,
   listBoards,
+  listRecruitingContacts,
   listRoutinesDto,
   listSpaceBackupModels,
   listTicketComments,
@@ -246,6 +247,7 @@ import {
   RECRUITING_PRESET_SOURCE,
   recordClosedAskAnswer,
   recordDesktopActivity,
+  recruitingContactFacets,
   recruitingCrmConversationId,
   recruitingPresetId,
   releaseSpaceDeletionClaim,
@@ -268,6 +270,7 @@ import {
   toTicketCommentDto,
   toTicketDto,
   touchGroupUpdatedAt,
+  updateRecruitingContactTags,
   upgradeRecruitingWorkspace,
   votePoll,
   withDatabaseActor,
@@ -3978,6 +3981,17 @@ export function createRouter(deps: RouterDeps) {
           input,
         ),
       ),
+      contacts: {
+        list: authed.recruiting.contacts.list.handler(({ context, input }) =>
+          listRecruitingContacts(deps.prisma, context.actor, input),
+        ),
+        facets: authed.recruiting.contacts.facets.handler(({ context }) =>
+          recruitingContactFacets(deps.prisma, context.actor),
+        ),
+        updateTags: authed.recruiting.contacts.updateTags.handler(({ context, input }) =>
+          updateRecruitingContactTags(deps.prisma, context.actor, input),
+        ),
+      },
       crmData: authed.recruiting.crmData.handler(async ({ context, input }) =>
         getRecruitingCrmData(
           {

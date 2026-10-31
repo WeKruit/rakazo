@@ -32,6 +32,7 @@ export * from "./queued-messages.js";
 export * from "./recruiting.js";
 export * from "./recruiting-bootstrap.js";
 export * from "./recruiting-candidate-notes.js";
+export * from "./recruiting-contacts.js";
 export * from "./recruiting-crm-sync.js";
 export * from "./recruiting-history-import.js";
 export * from "./recruiting-reminders.js";

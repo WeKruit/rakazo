@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { RecruitingRoleCampaign } from "@rakazo/contracts";
+import { hideVendorNames } from "@rakazo/core";
 import { Badge, Button } from "@rakazo/ui-web";
 import { useEffect, useState } from "react";
 import { rpc } from "../../lib/rpc";
@@ -28,7 +29,7 @@ const campaignStatus = (status: number | null) => (status === null ? "—" : Str
 
 /** Campaign names may carry an internal "[role <id>]" tag; it is not for people. */
 export const campaignName = (name: string) =>
-  name.replace(/\s*\[role [^\]]*\]\s*/gi, " ").trim() || name;
+  hideVendorNames(name.replace(/\s*\[role [^\]]*\]\s*/gi, " ").trim() || name);
 
 /** Instantly's own integer statuses for a campaign and for a lead. */
 export function useInstantlyStatus() {
@@ -360,7 +361,9 @@ export function SequenceTab(props: RecruitingTabProps) {
                     {roleLeadCampaigns.map((lead) => (
                       <li key={lead.leadId}>
                         <Badge variant="secondary">
-                          {lead.campaign?.name ?? t`Campaign not synced`}
+                          {lead.campaign?.name
+                            ? campaignName(lead.campaign.name)
+                            : t`Campaign not synced`}
                           {lead.campaign ? ` · ${campaignStatus(lead.campaign.status)}` : ""}
                         </Badge>
                       </li>

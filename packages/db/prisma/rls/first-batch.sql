@@ -153,6 +153,11 @@ DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_saved_profiles;
 CREATE POLICY rakazo_actor_isolation ON recruiting_saved_profiles FOR ALL
 USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
 WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()) AND EXISTS (SELECT 1 FROM external_effects parent WHERE parent."id"=recruiting_saved_profiles."sourceEffectId"));
+ALTER TABLE recruiting_contact_tags ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_contact_tags;
+CREATE POLICY rakazo_actor_isolation ON recruiting_contact_tags FOR ALL
+USING ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()))
+WITH CHECK ("ownerUserId" = NULLIF(current_setting('app.user_id', true), '') AND "spaceId" = NULLIF(current_setting('app.space_id', true), '') AND (SELECT public.rakazo_actor_member()));
 ALTER TABLE recruiting_research_tasks ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS rakazo_actor_isolation ON recruiting_research_tasks;
 CREATE POLICY rakazo_actor_isolation ON recruiting_research_tasks FOR ALL

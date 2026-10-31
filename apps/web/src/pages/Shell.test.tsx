@@ -76,6 +76,11 @@ const shellApi = vi.hoisted(() => ({
   dropStreams: new Set<(reason: Error) => void>(),
   recruiting: {
     accountView: vi.fn().mockResolvedValue({ roles: [], items: [], nextCursor: null }),
+    contacts: {
+      list: vi.fn().mockResolvedValue({ items: [], total: 0, nextCursor: null }),
+      facets: vi.fn().mockResolvedValue({ roles: [], statuses: [], tags: [] }),
+      updateTags: vi.fn().mockResolvedValue({ ok: true }),
+    },
     profileActivity: { recordView: vi.fn() },
     crmData: vi.fn(),
     correspondence: vi.fn(),

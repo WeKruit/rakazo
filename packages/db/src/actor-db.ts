@@ -37,6 +37,7 @@ export const actorRlsTables = [
   "recruiting_reminders",
   "recruiting_candidate_notes",
   "recruiting_saved_profiles",
+  "recruiting_contact_tags",
   "recruiting_research_tasks",
   "recruiting_assessments",
   "recruiting_candidate_pages",

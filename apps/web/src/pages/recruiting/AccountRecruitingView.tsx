@@ -1,5 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { Bot, Group, RecruitingRoleCampaign } from "@rakazo/contracts";
+import { hideVendorNames } from "@rakazo/core";
 import { Button, NativeSelect, NativeSelectOption } from "@rakazo/ui-web";
 import { PanelLeftOpen } from "lucide-react";
 import type { ReactNode } from "react";
@@ -7,6 +8,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { isAccountRecruitingView } from "../../lib/recruiting-read-view";
 import { rpc } from "../../lib/rpc";
+import { AllContacts } from "./AllContacts";
 import { InterviewCalendar } from "./InterviewCalendar";
 import { RecruitingRoutines } from "./RecruitingRoutines";
 import { RetryNotice } from "./RetryNotice";
@@ -16,7 +18,7 @@ import { formatDate, TabLoading } from "./shared";
 const ROLES_PER_PAGE = 5;
 // The all-roles pages read each role on its own and show it when it arrives, so one role with a
 // large CRM never holds back the others.
-const PER_ROLE_VIEWS = new Set(["contacts", "sequence", "inbox", "interview"]);
+const PER_ROLE_VIEWS = new Set(["sequence", "inbox", "interview"]);
 const ROLE_READS = 2;
 
 type AccountPage = Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
@@ -48,6 +50,8 @@ export function AccountRecruitingView({
   const view = isAccountRecruitingView(requested) ? requested : "shortlist";
   const role = params.get("role") ?? "all";
   const scopedGroupId = params.has("role") ? undefined : groupId;
+  // Every role's people in one list, filtered and paged by the server.
+  const allContacts = view === "contacts" && role === "all" && !scopedGroupId;
   const [read, setRead] = useState<{ key: string; data: AccountPage }>();
   const [failed, setFailed] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -62,7 +66,7 @@ export function AccountRecruitingView({
   const [pendingRoles, setPendingRoles] = useState<{ key: string; ids: string[] }>();
   const pending = pendingRoles?.key === readKey ? pendingRoles.ids : [];
   useEffect(() => {
-    if (view === "routines") return;
+    if (view === "routines" || allContacts) return;
     let cancelled = false;
     setLoading(true);
     setFailed(false);
@@ -141,7 +145,7 @@ export function AccountRecruitingView({
     return () => {
       cancelled = true;
     };
-  }, [accountKey, view, role, scopedGroupId, cursor, reload, refreshSignal, readKey]);
+  }, [accountKey, view, role, scopedGroupId, cursor, reload, refreshSignal, readKey, allContacts]);
   const loadMore = async (roleId: string, itemCursor: string) => {
     if (!page || view === "routines" || loadingMore) return;
     setLoadingMore(roleId);
@@ -347,7 +351,7 @@ export function AccountRecruitingView({
           <PanelLeftOpen size={18} />
         </Button>
         <h1 className="flex-1 text-xl font-semibold">{titles[view]}</h1>
-        {view !== "routines" ? (
+        {view !== "routines" && !allContacts ? (
           <NativeSelect
             aria-label={t`Role`}
             value={
@@ -372,6 +376,8 @@ export function AccountRecruitingView({
       </header>
       {view === "routines" ? (
         <RecruitingRoutines accountKey={accountKey} groups={groups} bots={bots} />
+      ) : allContacts ? (
+        <AllContacts groups={groups} refreshSignal={refreshSignal} />
       ) : (
         <>
           {loading ? <TabLoading /> : null}
@@ -597,7 +603,11 @@ export function AccountRecruitingView({
                           .length ? (
                           (item.campaigns ?? [item.campaign!]).map((campaign) => (
                             <div key={campaign.campaign?.id} className="space-y-2">
-                              <h3 className="text-sm font-medium">{campaign.campaign?.name}</h3>
+                              <h3 className="text-sm font-medium">
+                                {campaign.campaign?.name
+                                  ? hideVendorNames(campaign.campaign.name)
+                                  : null}
+                              </h3>
                               {campaign.status === "unavailable" ? (
                                 <RetryNotice onRetry={() => setReload((value) => value + 1)}>
                                   <Trans>Could not read this campaign.</Trans>
