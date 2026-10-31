@@ -345,15 +345,15 @@ function latencyTable() {
       if (!first10) continue;
       const cell = (value) => (value == null ? "–" : `${value} s`);
       rows.push(
-        `| ${file.replace(/\.json$/, "")} | ${cell(first10.firstQuestionS)} | ${cell(first10.firstPeopleInChatS)} | ${cell(first10.allTenS)} | ${cell(latency?.scale_to_reply_s)} |`,
+        `| ${file.replace(/\.json$/, "")} | ${cell(first10.firstSignS)} | ${cell(first10.firstQuestionS)} | ${cell(first10.firstPeopleInChatS)} | ${cell(first10.allTenS)} | ${cell(latency?.scale_to_reply_s)} |`,
       );
     } catch {}
   }
   return rows.length
     ? [
         "",
-        "| case | first question | first people | all ten | reply to scale |",
-        "|---|---|---|---|---|",
+        "| case | working shown | first question | first people | all ten | reply to scale |",
+        "|---|---|---|---|---|---|",
         ...rows,
       ]
     : [];
