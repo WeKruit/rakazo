@@ -185,6 +185,7 @@ import {
   promptTextForAttachments,
   resolveGroupTargetBotIds,
   routineIntervalError,
+  streamRecruitingOverview,
 } from "@rakazo/core";
 import type { BoardEvents, Board as BoardRow, PrismaClient, ThreadEvents } from "@rakazo/db";
 import {
@@ -4003,6 +4004,76 @@ export function createRouter(deps: RouterDeps) {
           spaceId: context.actor.spaceId,
           threadId: target.threadId,
         });
+      }),
+      overview: authed.recruiting.overview.handler(async function* ({ context }) {
+        const actor = context.actor;
+        const groups = [];
+        for (let offset = 0; ; offset += 200) {
+          const page = await groupRepos.listGroups(actor, { limit: 200, offset });
+          groups.push(...page);
+          if (page.length < 200) break;
+        }
+        const targets = new Map<string, ReturnType<typeof resolveThreadTarget>>();
+        const targetOf = (group: { id: string }) => {
+          let target = targets.get(group.id);
+          if (!target) {
+            target = resolveThreadTarget(deps.prisma, actor, { groupId: group.id });
+            targets.set(group.id, target);
+          }
+          return target;
+        };
+        const readDeps = async (group: { id: string }, signal: AbortSignal) => ({
+          prisma: deps.prisma,
+          artifacts: deps.artifacts,
+          connectors: deps.connectors,
+          firstPartyMcpUrl: deps.env.firstPartyMcpUrl,
+          signal,
+          stillAuthorized: context.stillAuthorized,
+          reauthorize: () => resolveThreadTarget(deps.prisma, actor, { groupId: group.id }),
+          target: await targetOf(group),
+        });
+        yield* streamRecruitingOverview(
+          groups,
+          {
+            roleId: async (group) =>
+              (await targetOf(group)).threadId === group.threadId
+                ? getRecruitingWorkspaceRoleId(deps.prisma, actor, { threadId: group.threadId })
+                : null,
+            shortlistPage: (roleId, cursor) =>
+              listRecruitingCandidates(deps, actor, {
+                roleId,
+                shortlisted: true,
+                sort: "recent",
+                limit: 200,
+                ...(cursor ? { cursor } : {}),
+              }),
+            candidates: async (group, signal) => {
+              const { target, ...read } = await readDeps(group, signal);
+              return getRecruitingRoleCandidates(read, actor, target, {
+                threadId: group.threadId,
+                limit: 1,
+              });
+            },
+            campaign: async (group, signal) => {
+              const { target, artifacts: _, ...read } = await readDeps(group, signal);
+              return getRecruitingRoleCampaign(read, actor, target, {});
+            },
+            calendar: async (group, signal) => {
+              const { target, prisma, artifacts: _, ...read } = await readDeps(group, signal);
+              return getRecruitingCorrespondence(
+                prisma,
+                actor,
+                target,
+                "interview",
+                undefined,
+                mcpOAuth,
+                {},
+                read,
+              );
+            },
+          },
+          context.signal ?? new AbortController().signal,
+        );
       }),
       roleCandidates: authed.recruiting.roleCandidates.handler(async ({ context, input }) =>
         getRecruitingRoleCandidates(

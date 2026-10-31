@@ -152,6 +152,7 @@ import {
   RecruitingCrmSyncInputFields,
   RecruitingCrmSyncOutputSchema,
   RecruitingId,
+  RecruitingOverviewEventSchema,
   RecruitingProfileActivityInput,
   RecruitingProfileActivityOutput,
   RecruitingProfileViewSchema,
@@ -824,6 +825,8 @@ export const appContract = {
         })
         .nullable(),
     ),
+    /** Every active role's Home numbers in one request, streamed as each role is read. */
+    overview: oc.input(z.strictObject({})).output(eventIterator(RecruitingOverviewEventSchema)),
     roleCandidates: oc
       .input(threadTarget.safeExtend(RecruitingRoleCandidatesInputFields))
       .output(RecruitingRoleCandidatesOutputSchema),
