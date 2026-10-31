@@ -3,6 +3,7 @@ import { getLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OAuthMaterial } from "./mcp-oauth.js";
 import {
+  deploymentOAuthClient,
   McpOAuthBroker,
   McpReauthorizationRequiredError,
   oauthMaterialSecrets,
@@ -12,6 +13,7 @@ import { afterSecretCommit } from "./secret-changes.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -864,6 +866,7 @@ describe("MCP OAuth", () => {
       existingGrant: true,
       abortDiscovery: true,
     },
+    { mcpOrigin: "https://mcp.example.test", preRegistered: true, deploymentClient: true },
   ])(
     "drives discovery, registration, PKCE, redirect, and token exchange for %j",
     async ({
@@ -873,6 +876,7 @@ describe("MCP OAuth", () => {
       existingGrant,
       tokenRejected,
       abortDiscovery,
+      deploymentClient,
     }) => {
       const redirects = vi.spyOn(StoredMcpOAuthProvider.prototype, "redirectToAuthorization");
       const verifiers = vi.spyOn(StoredMcpOAuthProvider.prototype, "saveCodeVerifier");
@@ -1041,14 +1045,16 @@ describe("MCP OAuth", () => {
         { put, load: async () => JSON.stringify(existingMaterial) } as never,
         TEST_NETWORK,
       );
-      const oauth = preRegistered
-        ? {
-            clientId: "registered-client-id",
-            clientSecret: "private-client-secret",
-            scopes: ["mail.readonly"],
-            authorizationParams: { access_type: "offline", prompt: "consent" },
-          }
-        : undefined;
+      const client = {
+        clientId: "registered-client-id",
+        clientSecret: "private-client-secret",
+        scopes: ["mail.readonly"],
+        authorizationParams: { access_type: "offline", prompt: "consent" },
+      };
+      // A deployment client reaches begin() from the environment, not from the request.
+      if (deploymentClient)
+        vi.stubEnv("MCP_OAUTH_CLIENTS", JSON.stringify({ [`${mcpOrigin}/mcp/`]: client }));
+      const oauth = preRegistered && !deploymentClient ? client : undefined;
 
       const beginning = broker.begin({
         serverId: "server-1",
@@ -2003,4 +2009,37 @@ describe("MCP setup with an existing access token", () => {
       expect(secrets.put).not.toHaveBeenCalled();
     },
   );
+});
+
+describe("deploymentOAuthClient", () => {
+  const raw = JSON.stringify({
+    "https://mail.example.test/mcp/v1": { clientId: "deployment-client", clientSecret: "s" },
+  });
+  it("matches the MCP endpoint, ignoring a trailing slash", () => {
+    expect(deploymentOAuthClient("https://mail.example.test/mcp/v1/", undefined, raw)).toEqual({
+      clientId: "deployment-client",
+      clientSecret: "s",
+    });
+    expect(deploymentOAuthClient("https://other.example.test/mcp", undefined, raw)).toBeUndefined();
+  });
+  it("keeps a client the user configured themselves", () => {
+    const own = { preRegistered: true, clientInformation: { client_id: "own-client" } };
+    expect(deploymentOAuthClient("https://mail.example.test/mcp/v1", own, raw)).toBeUndefined();
+    const same = { preRegistered: true, clientInformation: { client_id: "deployment-client" } };
+    expect(deploymentOAuthClient("https://mail.example.test/mcp/v1", same, raw)?.clientId).toBe(
+      "deployment-client",
+    );
+  });
+  it("ignores missing or malformed configuration", () => {
+    for (const value of [
+      undefined,
+      "",
+      "not json",
+      "[]",
+      '{"https://mail.example.test/mcp/v1":{}}',
+    ])
+      expect(
+        deploymentOAuthClient("https://mail.example.test/mcp/v1", undefined, value),
+      ).toBeUndefined();
+  });
 });
