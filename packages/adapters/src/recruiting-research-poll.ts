@@ -16,6 +16,7 @@ import {
   scheduleRecruitingGrading,
 } from "./recruiting-grading.js";
 import { classifyRecruitingResearchResult, mcpObject } from "./recruiting-research.js";
+import { finishWorkEstimate, wakeForResearchCountdown } from "./work-estimate.js";
 
 /** How long a foreground status read waits at the provider before the turn moves on. */
 export const RECRUITING_RESEARCH_FOREGROUND_WAIT_SECONDS = 10;
@@ -275,7 +276,13 @@ export async function pollRecruitingResearch(
       },
     },
   });
-  if (task?.state !== "active" || !task.providerTaskId) return;
+  if (!task) return;
+  if (task.state !== "active" || !task.providerTaskId) {
+    await finishWorkEstimate(deps.prisma, task.role.spaceId, `research:${task.id}`).catch(
+      () => undefined,
+    );
+    return;
+  }
   const grading = Boolean(task.createdByRun.clientNonce?.startsWith(RECRUITING_GRADE_NONCE_PREFIX));
   const { role, createdByRun: run } = task;
   // The task's role and creating run must agree on one owner; otherwise it is nobody's to wake.
@@ -334,7 +341,14 @@ export async function pollRecruitingResearch(
   if (!terminal && !grading && observation?.deliveryState === "accepted") {
     const rows = progressRows(result);
     if (rows !== null) await wakeForPartialRows(deps, task, run, nonce, rows);
+    await wakeForResearchCountdown(deps, task, { ...run, userId: role.userId }).catch((error) =>
+      getLogger().warn("research countdown wake", { error: String(error) }),
+    );
   }
+  if (terminal)
+    await finishWorkEstimate(deps.prisma, run.spaceId, `research:${task.id}`).catch(
+      () => undefined,
+    );
   if (!terminal) {
     if (attempt + 1 >= RECRUITING_RESEARCH_POLL_MAX_ATTEMPTS) {
       await deps.onStalled?.(run).catch((error) => {

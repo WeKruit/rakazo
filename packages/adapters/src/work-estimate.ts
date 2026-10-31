@@ -1,3 +1,6 @@
+import type { JobPublisher } from "@rakazo/adapter-kit";
+import { runContinueJob } from "@rakazo/adapter-kit";
+import type { RunTrigger } from "@rakazo/contracts";
 import type { WorkEstimate, WorkEstimateKind } from "@rakazo/core";
 import { estimateWorkMs, peopleNamedIn, workCountdownsElapsed } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
@@ -163,6 +166,7 @@ export async function currentWorkEstimate(
     take: 5,
     select: {
       id: true,
+      idempotencyKey: true,
       request: true,
       result: true,
       createdAt: true,
@@ -172,6 +176,17 @@ export async function currentWorkEstimate(
   for (const row of rows) {
     const open = openEstimate(row);
     if (!open || (open.kind === "emails" && !BUSY.includes(row.run.status))) continue;
+    // Research shows while its task is still active; Stop and the poller close it.
+    const researchTaskId = row.idempotencyKey.startsWith(`${WORK_ESTIMATE_KIND}:research:`)
+      ? row.idempotencyKey.slice(`${WORK_ESTIMATE_KIND}:research:`.length)
+      : null;
+    if (
+      researchTaskId &&
+      !(await prisma.recruitingResearchTask.count({
+        where: { id: researchTaskId, state: "active" },
+      }))
+    )
+      continue;
     const { id: _id, reported: _reported, ...estimate } = open;
     return estimate;
   }
@@ -263,4 +278,88 @@ export function withWorkNote(result: unknown, note: string): unknown {
   return result !== null && typeof result === "object" && !Array.isArray(result)
     ? { ...(result as Record<string, unknown>), countdown: note }
     : { result, countdown: note };
+}
+
+/** Text fields of a research request, where the people count is named. */
+function requestText(args: Record<string, unknown> | undefined): string {
+  return Object.values(args ?? {})
+    .filter((value): value is string => typeof value === "string")
+    .join(" ");
+}
+
+/** Research started in the background: its countdown, and the note the agent hears once. */
+export async function workEstimateForResearch(
+  prisma: PrismaClient,
+  run: Turn,
+  taskId: string,
+  args: Record<string, unknown> | undefined,
+): Promise<string | null> {
+  const started = await startWorkEstimate(prisma, run, {
+    ref: `research:${taskId}`,
+    kind: "search",
+    people: peopleNamedIn(requestText(args)),
+  });
+  return started?.estimateMs ? workStartNote("search", started.estimateMs) : null;
+}
+
+/**
+ * The research poller's tick: once the countdown runs out with the research still going, the
+ * agent that started it is woken once per run-out countdown to tell the recruiter where it
+ * stands. It never waits on the recruiter; a busy conversation is tried again on the next tick.
+ */
+export async function wakeForResearchCountdown(
+  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
+  task: { id: string; roleId: string },
+  run: { spaceId: string; threadId: string; botId: string; userId: string },
+  now = Date.now(),
+): Promise<void> {
+  const estimate = await readWorkEstimate(deps.prisma, run.spaceId, `research:${task.id}`);
+  const due = estimate?.estimateMs ? countdownReportDue(estimate, now) : null;
+  const estimateMs = estimate?.estimateMs;
+  if (!estimate || !estimateMs || !due) return;
+  const nonce = `${WORK_ESTIMATE_KIND}:research:${task.id}:${due}`;
+  const wakeRunId = await deps.prisma.$transaction(async (tx) => {
+    const locked = await tx.thread.updateMany({
+      where: { id: run.threadId, spaceId: run.spaceId },
+      data: { nextEventSeq: { increment: 0 } },
+    });
+    if (!locked.count) return null;
+    const [existing, busy] = await Promise.all([
+      tx.run.findFirst({
+        where: { spaceId: run.spaceId, clientNonce: nonce },
+        select: { id: true },
+      }),
+      tx.run.findFirst({
+        where: { threadId: run.threadId, status: { in: BUSY } },
+        select: { id: true },
+      }),
+    ]);
+    if (existing || busy) return null;
+    const wakeTask = await tx.task.create({
+      data: {
+        spaceId: run.spaceId,
+        botId: run.botId,
+        threadId: run.threadId,
+        userId: run.userId,
+        prompt: `The research you started for recruiting role ${task.roleId} is still running and its estimated ${minutes(estimateMs)} minutes are up; the recruiter's countdown has started over. Nobody asked for this message. Tell the recruiter in one line how many people the role has in Results now and that the research keeps going, about ${minutes(estimateMs)} more minutes. Ask nothing, start nothing, and end the turn; the results are collected when the research finishes.`,
+        status: "queued",
+      },
+    });
+    const wake = await tx.run.create({
+      data: {
+        spaceId: run.spaceId,
+        botId: run.botId,
+        threadId: run.threadId,
+        userId: run.userId,
+        taskId: wakeTask.id,
+        status: "queued",
+        trigger: "recruiting_research" satisfies RunTrigger,
+        clientNonce: nonce,
+      },
+    });
+    return wake.id;
+  });
+  if (!wakeRunId) return;
+  await markCountdownReported(deps.prisma, estimate.id, due);
+  await deps.jobs.enqueue(runContinueJob(wakeRunId)).catch(() => undefined);
 }

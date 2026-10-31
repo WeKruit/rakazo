@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   contactLookupCountdownNote,
   currentWorkEstimate,
+  wakeForResearchCountdown,
   withWorkNote,
   workEstimateAfterAgentRun,
 } from "./work-estimate.js";
@@ -78,6 +79,7 @@ describe("countdowns for big work", () => {
   it("shows a contact lookup only while its turn runs", async () => {
     const row = (status: string) => ({
       id: "e",
+      idempotencyKey: "work_estimate:emails:run",
       request: { threadId: "thread", kind: "emails", people: 400, estimateMs: 20 * 60_000 },
       result: null,
       createdAt: new Date(now - 60_000),
@@ -117,5 +119,66 @@ describe("countdowns for big work", () => {
       "how many emails were found so far",
     );
     expect(withWorkNote({ summary: {} }, "note")).toEqual({ summary: {}, countdown: "note" });
+  });
+});
+
+describe("countdowns for background research", () => {
+  const thread = { spaceId: "space", threadId: "thread", botId: "sourcer", userId: "user" };
+  function research(startedMsAgo: number, options: { busy?: boolean; reported?: number } = {}) {
+    const runCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "wake" }));
+    const taskCreate = vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: "t" }));
+    const updateMany = vi.fn(async (_args: unknown) => ({ count: 1 }));
+    const tx = {
+      thread: { updateMany: vi.fn(async () => ({ count: 1 })) },
+      run: {
+        findFirst: vi.fn(async (args: { where: { clientNonce?: string } }) =>
+          args.where.clientNonce ? null : options.busy ? { id: "busy" } : null,
+        ),
+        create: runCreate,
+      },
+      task: { create: taskCreate },
+    };
+    const prisma = {
+      externalEffect: {
+        findFirst: vi.fn(async () => ({
+          id: "estimate",
+          request: { threadId: "thread", kind: "search", people: 300, estimateMs: 10 * 60_000 },
+          result: options.reported ? { reported: options.reported } : null,
+          createdAt: new Date(now - startedMsAgo),
+        })),
+        updateMany,
+      },
+      $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
+    } as unknown as PrismaClient;
+    const jobs = { enqueue: vi.fn(async () => undefined) };
+    return { prisma, jobs, runCreate, taskCreate, updateMany };
+  }
+
+  it("wakes the agent once to report when the countdown runs out", async () => {
+    const test = research(11 * 60_000);
+    await wakeForResearchCountdown(test, { id: "task", roleId: "role" }, thread, now);
+    expect(test.runCreate.mock.calls[0]?.[0].data).toMatchObject({
+      trigger: "recruiting_research",
+      clientNonce: "work_estimate:research:task:1",
+    });
+    expect(String(test.taskCreate.mock.calls[0]?.[0].data.prompt)).toContain(
+      "estimated 10 minutes are up",
+    );
+    expect(test.updateMany).toHaveBeenCalledWith({
+      where: { id: "estimate", status: "running" },
+      data: { result: { reported: 1 } },
+    });
+  });
+
+  it("does nothing before the countdown ends, after it was reported, or while busy", async () => {
+    for (const test of [
+      research(4 * 60_000),
+      research(11 * 60_000, { reported: 1 }),
+      research(11 * 60_000, { busy: true }),
+    ]) {
+      await wakeForResearchCountdown(test, { id: "task", roleId: "role" }, thread, now);
+      expect(test.runCreate).not.toHaveBeenCalled();
+      expect(test.updateMany).not.toHaveBeenCalled();
+    }
   });
 });
