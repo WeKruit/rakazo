@@ -652,6 +652,7 @@ function measureFirstTen(events, round) {
   const answerAt = users.length ? at(users.at(-1)) : jdAt;
   // Time the recruiter waited before the agent even started, separate from the agent's own time.
   const runStart = events.find((e) => e.type === "run.started" && at(e) >= answerAt);
+  const firstTurn = events.find((e) => e.type === "run.started" && at(e) >= jdAt);
   const bot = events.filter(
     (e) => /^thread\.message\.(created|updated)$/.test(e.type) && e.payload?.role === "bot",
   );
@@ -712,6 +713,8 @@ function measureFirstTen(events, round) {
     from: users.length ? "last_answer" : "jd",
     questions: asks.filter((e) => at(e) < roundAt).length,
     firstQuestionS: seconds(jdAt, asks[0] && at(asks[0]) < roundAt ? at(asks[0]) : null),
+    // The working indicator shows once a turn starts on the JD: the recruiter's first sign of a reply.
+    firstSignS: seconds(jdAt, firstTurn && at(firstTurn)),
     firstPeopleInChatS: seconds(answerAt, firstShown && at(firstShown)),
     tenRecordedS: seconds(answerAt, roundAt),
     allTenS: seconds(answerAt, allTenAt),
@@ -731,6 +734,12 @@ function measureFirstTen(events, round) {
   // The recruiter sees the first people within 20 s of their last answer (or of the JD with no questions).
   if (result.firstPeopleInChatS == null || result.firstPeopleInChatS > 20)
     violation("first_people_slow", `first people at ${result.firstPeopleInChatS ?? "never"} s`);
+  // The recruiter sees the turn working within 3 s of the JD and its first question within 5 s,
+  // whether the JD is pasted, linked or a file.
+  if (result.firstSignS == null || result.firstSignS > 3)
+    violation("first_sign_slow", `working shown at ${result.firstSignS ?? "never"} s`);
+  if (result.firstQuestionS != null && result.firstQuestionS > 5)
+    violation("first_question_slow", `first question at ${result.firstQuestionS} s`);
   if (!result.tenRecordedBeforeCard) violation("card_before_ten", "next-step card came first");
   if (result.questions && !result.plannedSearches)
     violation("no_planned_searches", "the last question carried no planned searches");

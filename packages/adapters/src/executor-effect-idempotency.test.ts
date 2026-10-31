@@ -36,7 +36,8 @@ import {
   recruitingResearchSnapshot,
 } from "@rakazo/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { INTERNAL_ARTIFACT_ERROR } from "./artifact-read.js";
+import type * as ArtifactReadModule from "./artifact-read.js";
+import { artifactReadFromTool, INTERNAL_ARTIFACT_ERROR } from "./artifact-read.js";
 
 import type * as AutoReviewModule from "./auto-review.js";
 import { runAutoReviewJudge } from "./auto-review.js";
@@ -142,6 +143,11 @@ vi.mock("./computer-workspace.js", async (importOriginal) => ({
   checkpointRunComputerWorkspace: checkpointWorkspace,
 }));
 beforeEach(() => checkpointWorkspace.mockClear());
+
+vi.mock("./artifact-read.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof ArtifactReadModule>();
+  return { ...actual, artifactReadFromTool: vi.fn(actual.artifactReadFromTool) };
+});
 
 vi.mock("./bot-secrets.js", async (importOriginal) => {
   const actual = await importOriginal<typeof BotSecretsModule>();
@@ -5458,6 +5464,43 @@ describe("native recruiting assessment effect delivery", () => {
     expect(f.runtimeRun.mock.calls[0]?.[0].prompt).toContain(
       "Do not create, rename or update a role",
     );
+  });
+
+  it("saves an attached JD as the role before the model's first step", async () => {
+    const f = fixture("attached-jd-role");
+    vi.mocked(executeRecruitingRoleTool).mockClear();
+    const jd = `Job title: Simulation Scientist\n\n${"Build simulation for robots. ".repeat(20)}`;
+    vi.mocked(f.prisma.message.findMany).mockImplementation((async () => [
+      {
+        id: "human-1",
+        seq: 1,
+        role: "user",
+        botId: null,
+        runId: "attached-jd-role",
+        blocks: [
+          {
+            kind: "file",
+            artifactId: "jd-file",
+            name: "Simulation Scientist.pdf",
+            mimeType: "application/pdf",
+            size: 100,
+          },
+        ],
+        createdAt: new Date(),
+      },
+    ]) as never);
+    vi.mocked(artifactReadFromTool).mockResolvedValueOnce({ text: jd } as never);
+    f.setCalls([]);
+    await f.run();
+    expect(vi.mocked(executeRecruitingRoleTool).mock.calls[0]?.[2]).toMatchObject({
+      operation: "create",
+      title: "Simulation Scientist",
+      brief: null,
+      sourceRefs: [],
+    });
+    const prompt = f.runtimeRun.mock.calls[0]?.[0].prompt;
+    expect(prompt).toContain("Build simulation for robots.");
+    expect(prompt).toContain("Do not read the file again");
   });
 
   it("reads a candidate key copied as a link or without its prefix as the saved key", () => {

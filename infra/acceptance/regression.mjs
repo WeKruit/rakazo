@@ -335,6 +335,30 @@ const CONTACT_REPORT = new RegExp(
   "i",
 );
 
+/** Agent speed per case that ran a search, from its report: one row each, for every summary. */
+function latencyTable() {
+  const rows = [];
+  for (const file of fs.existsSync(OUT) ? fs.readdirSync(OUT) : []) {
+    if (!file.endsWith(".json") || file.includes(".events.") || file === "results.json") continue;
+    try {
+      const { first10, latency } = JSON.parse(fs.readFileSync(path.join(OUT, file), "utf8"));
+      if (!first10) continue;
+      const cell = (value) => (value == null ? "–" : `${value} s`);
+      rows.push(
+        `| ${file.replace(/\.json$/, "")} | ${cell(first10.firstSignS)} | ${cell(first10.firstQuestionS)} | ${cell(first10.firstPeopleInChatS)} | ${cell(first10.allTenS)} | ${cell(latency?.scale_to_reply_s)} |`,
+      );
+    } catch {}
+  }
+  return rows.length
+    ? [
+        "",
+        "| case | working shown | first question | first people | all ten | reply to scale |",
+        "|---|---|---|---|---|---|",
+        ...rows,
+      ]
+    : [];
+}
+
 /** The test copies this run made, from the reports in <out> and, for first10 suites, one folder down. */
 function ownCopies() {
   const own = new Set();
@@ -1348,6 +1372,7 @@ try {
       (result) =>
         `- ${result.pass ? "PASS" : "FAIL"} ${result.name} (${result.seconds} s)${result.failures.map((failure) => `\n  - ${failure}`).join("")}`,
     ),
+    ...latencyTable(),
   ].join("\n");
   fs.writeFileSync(path.join(OUT, "summary.md"), `${summary}\n`);
   log(summary);
