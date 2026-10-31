@@ -6,6 +6,11 @@
 //
 //   RAKAZO_URL=… RAKAZO_ORIGIN=… (RAKAZO_TOKEN=… | RAKAZO_EMAIL=… RAKAZO_PASSWORD=…) \
 //     node infra/acceptance/archive-test-copies.mjs [--idle-hours 2] [--keep <groupId>,<groupId>] [--dry-run]
+//     [--only <groupId>,…] [--stop]
+// Before a copy is archived, every card still open in it is closed: approvals are denied (never
+// allowed), forms declined, and questions get their "later" choice or a plain "test over" reply.
+// Secret and connection cards are left alone. --stop stops a copy's working run instead of skipping
+// the copy; the harness passes it for the copies it made itself.
 const args = process.argv.slice(2);
 const option = (name, fallback) => {
   const index = args.indexOf(name);
@@ -37,7 +42,36 @@ const IDLE_MS = Number(option("--idle-hours", "2")) * 3_600_000;
 const KEEP = new Set((option("--keep", "") ?? "").split(",").filter(Boolean));
 const DRY = args.includes("--dry-run");
 const ONLY = new Set((option("--only", "") ?? "").split(",").filter(Boolean));
-const COPY = /^测试副本 · /;
+// Copies the harnesses and verification runs make: a "测试副本 · " or "[验证用N]" prefix, or a
+// "（测试副本）" / "（测试 · JD 副本）" suffix. Real roles never carry these marks.
+const COPY = /^测试副本 · |^\[验证用\d+\] |（测试副本）$|（测试 · JD 副本）$/;
+const STOP = args.includes("--stop");
+const DEFER_CHOICE = /(稍后|以后|先不|跳过|暂不|不用|取消|later|skip|not now|cancel)/i;
+const TEST_OVER = "测试结束，不用继续。";
+
+/** The answer that closes an open card without approving anything; undefined leaves it. */
+function closingAnswer(block) {
+  if (block.input === "secret" || block.connection) return undefined;
+  if (block.approvalEffectId) return "deny";
+  if (block.requestedSchema) return { action: "decline" };
+  const later = (block.actions ?? []).find((action) => DEFER_CHOICE.test(action.label));
+  return later?.id ?? TEST_OVER;
+}
+
+async function closeCards(groupId) {
+  const { messages = [] } = await rpc("threads/messages", { groupId, includePeerRuns: true });
+  let closed = 0;
+  for (const message of messages)
+    for (const block of message.blocks ?? []) {
+      if (block.kind !== "ask" || (block.status && block.status !== "pending")) continue;
+      const answer = closingAnswer(block);
+      if (answer === undefined || !message.runId) continue;
+      await rpc("threads/answer", { groupId, runId: message.runId, messageId: message.id, answer })
+        .then(() => (closed += 1))
+        .catch((error) => console.error(`card in ${groupId}: ${error.message}`));
+    }
+  return closed;
+}
 
 async function rpc(route, json) {
   const response = await fetch(`${BASE}/rpc/${route}`, {
@@ -67,9 +101,9 @@ async function activeGroups() {
 const idleCopies = (groups) =>
   groups.filter(
     (group) =>
-      COPY.test(group.name) &&
+      // --only names the caller's own copies by id, whatever they are called.
+      (ONLY.size ? ONLY.has(group.id) : COPY.test(group.name)) &&
       !KEEP.has(group.id) &&
-      (!ONLY.size || ONLY.has(group.id)) &&
       Date.now() - Date.parse(group.updatedAt) >= IDLE_MS,
   );
 const groups = await activeGroups();
@@ -78,12 +112,15 @@ let archived = 0;
 const skipped = [];
 for (const group of idleCopies(groups)) {
   const { activeRuns = [] } = await rpc("threads/get", { groupId: group.id });
-  if (activeRuns.some((run) => run.status !== "waiting_input")) {
+  if (activeRuns.some((run) => run.status !== "waiting_input") && !STOP) {
     skipped.push(`${group.id} (working)`);
     continue;
   }
   if (!DRY) {
     try {
+      const closed = await closeCards(group.id);
+      if (closed) console.log(`closed ${closed} open cards in ${group.id}`);
+      if (activeRuns.length) await rpc("threads/stop", { groupId: group.id, scope: "all" });
       await rpc("groups/archive", { groupId: group.id });
     } catch (error) {
       skipped.push(`${group.id} (${error.message})`);
