@@ -17,9 +17,8 @@ import { formatDate, TabLoading } from "./shared";
 // Each role reads its own CRM, mail and calendar records, so a page shows a few roles at a time.
 const ROLES_PER_PAGE = 5;
 // The all-roles pages read each role on its own and show it when it arrives, so one role with a
-// large CRM never holds back the others.
+// large CRM never holds back the others. The roles on one page read together.
 const PER_ROLE_VIEWS = new Set(["sequence", "inbox", "interview"]);
-const ROLE_READS = 2;
 
 type AccountPage = Awaited<ReturnType<typeof rpc.recruiting.accountView>>;
 
@@ -84,7 +83,7 @@ export function AccountRecruitingView({
         setLoading(false);
         let next = 0;
         await Promise.all(
-          Array.from({ length: Math.min(ROLE_READS, order.length) }, async () => {
+          Array.from({ length: order.length }, async () => {
             while (next < order.length && !cancelled) {
               const roleId = order[next++]!;
               const result = await rpc.recruiting.accountView(
