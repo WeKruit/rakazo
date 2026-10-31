@@ -111,12 +111,27 @@ async function rpc(route, json) {
   return body.json;
 }
 
+// Sign-in is rate limited, so scripts that accept a session token reuse this run's one sign-in.
+const TOKEN_SCRIPTS = new Set([
+  "recruiting-latency.mjs",
+  "first10-suite.mjs",
+  "archive-test-copies.mjs",
+]);
+async function scriptEnv(script) {
+  if (!EMAIL || !TOKEN_SCRIPTS.has(script)) return process.env;
+  if (!cookie) await signIn();
+  const session = cookie.split("; ").find((pair) => pair.includes("session_token"));
+  if (!session) return process.env;
+  const { RAKAZO_EMAIL: _email, RAKAZO_PASSWORD: _password, ...env } = process.env;
+  return { ...env, RAKAZO_TOKEN: decodeURIComponent(session.split(/=(.*)/s)[1]) };
+}
+
 /** Runs one harness script; resolves with its exit code. Output goes to <out>/<name>.log. */
-function run(name, script, scriptArgs) {
+async function run(name, script, scriptArgs) {
   const logFile = fs.openSync(path.join(OUT, `${name}.log`), "w");
   const child = spawn(process.execPath, [path.join(HERE, script), ...scriptArgs], {
     stdio: ["ignore", logFile, logFile],
-    env: process.env,
+    env: await scriptEnv(script),
   });
   return new Promise((resolve) => child.on("exit", (code) => resolve(code ?? 1)));
 }
@@ -434,6 +449,12 @@ if (paid.length && !args.includes("--paid"))
 // Every copy this run made leaves the sidebar, and older idle copies are swept, even when a case
 // or the harness itself stops early. Keeps the booking fixture the t5 case reuses. A sweep that
 // leaves an idle copy unarchived fails the run.
+let cleaning;
+for (const signal of ["SIGINT", "SIGTERM"])
+  process.on(signal, () => {
+    log(`${signal}: archiving this run's test copies before exiting`);
+    cleaning ??= cleanUp().finally(() => process.exit(1));
+  });
 async function cleanUp() {
   // The read-only global case archives only its validated copies in its own finally block.
   if (wanted.size === 1 && wanted.has("global-recruiting")) return;
@@ -441,17 +462,26 @@ async function cleanUp() {
   const keep =
     option("--t5-group") ??
     (t5 && fs.existsSync(t5) ? JSON.parse(fs.readFileSync(t5, "utf8")).groupId : "");
-  for (const file of fs.existsSync(OUT) ? fs.readdirSync(OUT) : []) {
-    if (!file.endsWith(".json")) continue;
-    let groupId;
+  const own = new Set();
+  // Reports sit in <out> and, for first10 suites, one folder down.
+  const files = fs.existsSync(OUT)
+    ? fs.readdirSync(OUT, { recursive: true }).filter((file) => String(file).endsWith(".json"))
+    : [];
+  for (const file of files) {
     try {
-      groupId = JSON.parse(fs.readFileSync(path.join(OUT, file), "utf8")).groupId;
-    } catch {
-      continue;
-    }
-    if (typeof groupId === "string" && groupId && groupId !== keep)
-      await rpc("groups/archive", { groupId }).catch((error) => log(error.message));
+      const { groupId } = JSON.parse(fs.readFileSync(path.join(OUT, String(file)), "utf8"));
+      if (typeof groupId === "string" && groupId && groupId !== keep) own.add(groupId);
+    } catch {}
   }
+  // This run's copies close their open cards, stop and leave the sidebar now, even mid-run.
+  if (own.size)
+    await run("archive-own", "archive-test-copies.mjs", [
+      "--idle-hours",
+      "0",
+      "--stop",
+      "--only",
+      [...own].join(","),
+    ]);
   const code = await run("archive-copies", "archive-test-copies.mjs", [
     "--idle-hours",
     "2",
