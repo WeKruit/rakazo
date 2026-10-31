@@ -237,6 +237,35 @@ describe("streamRecruitingOverview", () => {
     expect(seen).toEqual(["g2", "g1", "done"]);
   });
 
+  it("keeps at most four CRM, campaign and calendar reads in flight across roles", async () => {
+    let running = 0;
+    let peak = 0;
+    const slow = async <T>(value: T) => {
+      running++;
+      peak = Math.max(peak, running);
+      await new Promise((resolve) => setTimeout(resolve, 2));
+      running--;
+      return value;
+    };
+    const base = reads();
+    const many = Array.from({ length: 6 }, (_, index) => ({
+      id: `g${index}`,
+      threadId: `t${index}`,
+    }));
+    const overview = await getRecruitingOverview(
+      many,
+      reads({
+        roleId: async (group) => `role-${group.id}`,
+        candidates: (group, signal) => base.candidates(group, signal).then(slow),
+        campaign: (group, signal) => base.campaign(group, signal).then(slow),
+        calendar: (group, signal) => base.calendar(group, signal).then(slow),
+      }),
+      new AbortController().signal,
+    );
+    expect(overview.roles).toHaveLength(6);
+    expect(peak).toBe(4);
+  });
+
   it("does not show another role's or a past calendar event as a booking", async () => {
     const overview = await getRecruitingOverview(
       groups.slice(0, 2),

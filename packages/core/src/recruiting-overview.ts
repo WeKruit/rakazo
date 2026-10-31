@@ -13,6 +13,11 @@ import type {
 
 /** Roles read at once. Each role is a few database reads plus its CRM, campaign and calendar. */
 const OVERVIEW_CONCURRENCY = 8;
+/**
+ * CRM, campaign and calendar reads in flight at once across all roles. They share connector
+ * services with the rest of the app (the sidebar's CRM list), which must not be crowded out.
+ */
+const EXTERNAL_CONCURRENCY = 4;
 /** A role's optional sources (CRM, campaign, calendar) that take longer are reported partial. */
 export const OVERVIEW_SOURCE_MS = 8_000;
 
@@ -80,11 +85,39 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+/** At most `limit` tasks run at once; the rest wait their turn. */
+function limiter(limit: number) {
+  let running = 0;
+  const waiting: (() => void)[] = [];
+  return async <T>(task: () => Promise<T>): Promise<T> => {
+    if (running >= limit) await new Promise<void>((resolve) => waiting.push(resolve));
+    running++;
+    try {
+      return await task();
+    } finally {
+      running--;
+      waiting.shift()?.();
+    }
+  };
+}
+type Limit = ReturnType<typeof limiter>;
+
+/** An optional source: its time budget starts once it has a turn, and running out means partial. */
 async function optional<T>(
+  external: Limit,
   load: (signal: AbortSignal) => Promise<T>,
   signal: AbortSignal,
   ms: number,
 ): Promise<T | undefined> {
+  return external(() => withBudget(load, signal, ms));
+}
+
+async function withBudget<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+  ms: number,
+): Promise<T | undefined> {
+  if (signal.aborted) return undefined;
   const budget = AbortSignal.any([signal, AbortSignal.timeout(ms)]);
   return Promise.race([
     load(budget),
@@ -98,6 +131,7 @@ async function readRole(
   signal: AbortSignal,
   now: number,
   sourceMs: number,
+  external: Limit,
 ): Promise<RecruitingOverviewRole | null> {
   const roleId = await reads.roleId(group, signal);
   if (!roleId) return null;
@@ -115,9 +149,9 @@ async function readRole(
   };
   const [list, candidates, campaign, calendar] = await Promise.all([
     shortlist(),
-    optional((budget) => reads.candidates(group, budget), signal, sourceMs),
-    optional((budget) => reads.campaign(group, budget), signal, sourceMs),
-    optional((budget) => reads.calendar(group, budget), signal, sourceMs),
+    optional(external, (budget) => reads.candidates(group, budget), signal, sourceMs),
+    optional(external, (budget) => reads.campaign(group, budget), signal, sourceMs),
+    optional(external, (budget) => reads.calendar(group, budget), signal, sourceMs),
   ]);
   const calendarRead =
     calendar?.roleId === roleId && ["ready", "empty"].includes(calendar.status)
@@ -150,6 +184,7 @@ export async function* streamRecruitingOverview(
   signal: AbortSignal,
   { now = Date.now(), sourceMs = OVERVIEW_SOURCE_MS } = {},
 ): AsyncGenerator<RecruitingOverviewEvent> {
+  const external = limiter(EXTERNAL_CONCURRENCY);
   const ready: RecruitingOverviewEvent[] = [];
   let wake: (() => void) | undefined;
   let finished = false;
@@ -159,7 +194,7 @@ export async function* streamRecruitingOverview(
   };
   const run = mapWithConcurrency(groups, OVERVIEW_CONCURRENCY, async (group) => {
     try {
-      const role = await readRole(group, reads, signal, now, sourceMs);
+      const role = await readRole(group, reads, signal, now, sourceMs, external);
       if (role) push({ kind: "role", role });
     } catch {
       if (!signal.aborted) push({ kind: "failed", groupId: group.id });
