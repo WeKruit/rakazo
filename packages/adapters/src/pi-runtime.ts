@@ -108,6 +108,7 @@ import type { RuntimeContextDecision } from "./runtime-context.js";
 import { createRuntimeContextPolicy, VERBATIM_TOOL_RESULTS } from "./runtime-context.js";
 import type { FinishedShellCommand } from "./shell-command-stream.js";
 import { deliverFinishedShells } from "./shell-command-stream.js";
+import { outputSchema, structuredTurn } from "./structured-output.js";
 import type { SubagentSession } from "./subagent-delivery.js";
 import {
   collectSubagentResults,
@@ -1993,6 +1994,8 @@ async function executeSubagent(
     );
   const handle = String(args.handle ?? "").trim();
   const task = String(args.task ?? "").trim();
+  const schema = outputSchema(args.output_schema);
+  if (typeof schema === "string") return schema;
   let helper: SubagentHelper;
   let previous: string | undefined;
   if (handle) {
@@ -2011,11 +2014,14 @@ async function executeSubagent(
     host.subagents.set(helper.handle, helper);
   }
   const withPrevious = (text: string) => (previous ? `${previous}\n\n${text}` : text);
+  const work = schema
+    ? structuredTurn((prompt) => helper.turn(prompt), task, args.output_schema, schema)
+    : helper.turn(task);
   if (args.background !== true) {
-    const result = await helper.turn(task);
+    const result = await work;
     return withPrevious(`${result}\n\n(helper handle: ${helper.handle})`);
   }
-  startBackgroundTurn(helper, helper.turn(task));
+  startBackgroundTurn(helper, work);
   return withPrevious(
     `Started ${helper.name} in the background (handle ${helper.handle}). Its result arrives in this conversation once, when it finishes. Reply to the user or keep working meanwhile; use run_subagent with wait to block on it, or with handle to send it more after it finishes.`,
   );
@@ -2483,6 +2489,7 @@ function builtinParameters(tool: ConnectorTool) {
       handle: Type.Optional(Type.String()),
       wait: Type.Optional(Type.Array(Type.String())),
       timeout_seconds: Type.Optional(Type.Number()),
+      output_schema: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
     });
   }
   if (tool.name === "spawn_bot") {

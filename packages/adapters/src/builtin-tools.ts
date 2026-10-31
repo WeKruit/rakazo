@@ -1255,6 +1255,11 @@ export const builtinAgentTools: ConnectorTool[] = [
           type: "number",
           description: "With wait: stop waiting after this many seconds (default 60, at most 600).",
         },
+        output_schema: {
+          type: "object",
+          description:
+            "Optional JSON Schema the helper's result must match. The result comes back as that JSON; a result that does not match gets one correction turn.",
+        },
       },
     },
   },
