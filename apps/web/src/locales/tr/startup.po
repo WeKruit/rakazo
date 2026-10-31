@@ -1490,7 +1490,7 @@ msgstr ""
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Export"
-msgstr ""
+msgstr "Dışa aktar"
 
 #: src/pages/shell/ShellConversation.tsx
 msgid "Export conversation"
@@ -1516,7 +1516,7 @@ msgstr "başarısız"
 
 #: src/pages/WorkMetricsSettingsPanel.tsx
 msgid "Failed"
-msgstr ""
+msgstr "Başarısız"
 
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Failed to load recruiting data"
@@ -3612,7 +3612,7 @@ msgstr ""
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Thinking"
-msgstr ""
+msgstr "Düşünüyor"
 
 #: src/lib/roster-status.ts
 msgid "Thinking…"

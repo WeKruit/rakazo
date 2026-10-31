@@ -2160,7 +2160,7 @@ msgstr "新岗位"
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Next"
-msgstr "下一页"
+msgstr "下一步"
 
 #. placeholder {0}: stage.nextStep
 #: src/pages/recruiting/RoleSetup.tsx
@@ -2539,7 +2539,7 @@ msgstr "仅为预览。如需阅读完整正文，请索取完整消息。"
 
 #: src/pages/recruiting/AllContacts.tsx
 msgid "Previous"
-msgstr "上一页"
+msgstr "上一步"
 
 #: src/pages/recruiting/CandidateDirectory.tsx
 #: src/pages/recruiting/EmailConversation.tsx
@@ -3612,7 +3612,7 @@ msgstr "工作区已变更，请重新打开岗位。"
 
 #: src/components/ToolActivityDisclosure.tsx
 msgid "Thinking"
-msgstr "思考中"
+msgstr "思考"
 
 #: src/lib/roster-status.ts
 msgid "Thinking…"

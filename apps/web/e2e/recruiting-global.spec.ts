@@ -146,7 +146,11 @@ for (const width of [1440, 390]) {
     await list.getByRole("button", { name: "Filter", exact: true }).click();
     await page.getByRole("menuitem", { name: "Role", exact: true }).click();
     await page.getByRole("menuitemcheckbox", { name: roles[0]!.title, exact: true }).click();
+    // One Escape closes the submenu, the next the menu.
     await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
+    // The menu's backdrop blocks the page until its close finishes.
+    await expect(page.locator("[data-base-ui-inert]")).toHaveCount(0);
     await expect(list.getByText("Blake Example")).toHaveCount(0);
     expect(reads.at(-1)?.filters).toEqual({ roleIds: [roles[0]!.id] });
     await captureScreenshot(page, testInfo, `all-contacts-filtered-${width}`);
@@ -154,10 +158,10 @@ for (const width of [1440, 390]) {
     await list.getByRole("checkbox", { name: "Select Avery Example", exact: true }).click();
     await list.getByRole("button", { name: "Actions", exact: true }).click();
     await page.getByRole("menuitem", { name: "Add tag", exact: true }).click();
-    await page.getByRole("textbox", { name: "Tag", exact: true }).fill("Hot");
+    await page.getByRole("combobox", { name: "Tag", exact: true }).fill("Hot");
     await page.getByRole("button", { name: "Save", exact: true }).click();
     await expect(list.getByText("Tagged 1 contacts.")).toBeVisible();
-    expect(tagged).toEqual([{ personKeys: ["avery"], add: ["Hot"], remove: [] }]);
+    expect(tagged).toEqual([{ personKeys: ["avery"], add: ["Hot"] }]);
     await expect(list.getByText("Hot", { exact: true })).toBeVisible();
   });
 }
