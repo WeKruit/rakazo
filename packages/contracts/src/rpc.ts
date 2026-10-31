@@ -82,6 +82,7 @@ import {
   ServerUpdateRequestSchema,
   ServerUpdateRunSchema,
   ServerUpdateStatusSchema,
+  SharedRoutineSchema,
   SkillPlaybookSchema,
   SpaceMemoryConfigSchema,
   SpaceNavigationSchema,
@@ -980,6 +981,12 @@ export const appContract = {
     create: oc.input(CreateRoutineInput).output(RoutineSchema),
     update: oc.input(UpdateRoutineInput).output(RoutineSchema),
     remove: oc.input(z.object({ routineId: Id })).output(z.object({ ok: z.literal(true) })),
+    /** Routines other members of this Space chose to share; `added` when the caller has a copy. */
+    shared: oc.input(z.object({}).nullish()).output(z.array(SharedRoutineSchema)),
+    /** Copy a shared routine to one of the caller's bots; it runs as the caller. */
+    addShared: oc
+      .input(z.object({ routineId: Id, botId: Id, active: z.boolean().default(true) }))
+      .output(RoutineSchema),
     testRun: oc
       .input(
         z.object({

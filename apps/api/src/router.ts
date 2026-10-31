@@ -121,6 +121,7 @@ import {
   resolveBotWorkspaceCwd,
   resolveBotWorkspacePath,
   revokeScreenControl,
+  routineOptionError,
   routineRunModelPin,
   sanitizeComposioError,
   savePushToken,
@@ -186,6 +187,7 @@ import {
   hasMixedOneShotSchedule,
   isConversationalRun,
   isOneShotRoutineCrons,
+  nextRoutineWakeAt,
   promptTextForAttachments,
   resolveGroupTargetBotIds,
   routineIntervalError,
@@ -374,6 +376,7 @@ import {
   readServerUpdateStatus,
   UpdaterProxyError,
 } from "./server-update.js";
+import { createSharedRoutines } from "./shared-routines.js";
 import { assertTeachingSendAllowed, createTaughtSkillsService } from "./taught-skills.js";
 import {
   isBackgroundRun,
@@ -4381,8 +4384,13 @@ export function createRouter(deps: RouterDeps) {
           if (!target) throw new ORPCError("NOT_FOUND");
         }
         await assertRoutineModel(context.actor, input);
+        const optionError = routineOptionError(input);
+        if (optionError) throw new ORPCError("BAD_REQUEST", { message: optionError });
         // Validate every recurring cron even when inactive; @once and webhook-only have no next date.
-        let nextRunAt: Date | null = null;
+        let nextRunAt: Date | null =
+          input.active && input.recordTrigger
+            ? nextRoutineWakeAt({ ...input, recordTrigger: input.recordTrigger }, new Date())
+            : null;
         if (input.crons.length > 0 && !isOneShotRoutineCrons(input.crons)) {
           const computedNextRunAt = nextRoutineDate(input.crons, input.timezone);
           nextRunAt = input.active ? computedNextRunAt : null;
@@ -4405,6 +4413,11 @@ export function createRouter(deps: RouterDeps) {
             modelProvider: input.modelProvider,
             modelId: input.modelId,
             thinkingLevel: input.thinkingLevel,
+            sessionMode: input.sessionMode,
+            condition: input.condition || null,
+            probeCommand: input.probeCommand || null,
+            recordTrigger: input.recordTrigger ?? null,
+            shared: input.shared ?? false,
             nextRunAt,
           },
         });
@@ -4435,6 +4448,12 @@ export function createRouter(deps: RouterDeps) {
           throw error;
         }
       }),
+      shared: authed.routines.shared.handler(async ({ context }) =>
+        createSharedRoutines(deps).list(context.actor),
+      ),
+      addShared: authed.routines.addShared.handler(async ({ context, input }) =>
+        mapRoutine(await createSharedRoutines(deps).add(context.actor, input)),
+      ),
       remove: authed.routines.remove.handler(async ({ context, input }) => {
         const existing = await deps.prisma.routine.findFirst({
           where: { id: input.routineId, spaceId: context.actor.spaceId },

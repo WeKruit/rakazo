@@ -17,6 +17,12 @@ export function mapRoutine(row: {
   modelProvider: string | null;
   modelId: string | null;
   thinkingLevel: string | null;
+  sessionMode?: string;
+  condition?: string | null;
+  probeCommand?: string | null;
+  recordTrigger?: string | null;
+  shared?: boolean;
+  sharedFromId?: string | null;
   lastRunAt: Date | null;
   nextRunAt: Date | null;
   createdAt: Date;
@@ -37,6 +43,12 @@ export function mapRoutine(row: {
     modelProvider: row.modelProvider ?? null,
     modelId: row.modelId ?? null,
     thinkingLevel: (row.thinkingLevel as Routine["thinkingLevel"]) ?? null,
+    sessionMode: row.sessionMode === "reuse" ? "reuse" : "new",
+    condition: row.condition ?? null,
+    probeCommand: row.probeCommand ?? null,
+    recordTrigger: (row.recordTrigger as Routine["recordTrigger"]) ?? null,
+    shared: row.shared ?? false,
+    sharedFromId: row.sharedFromId ?? null,
     lastRunAt: row.lastRunAt?.toISOString() ?? null,
     nextRunAt: row.nextRunAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),

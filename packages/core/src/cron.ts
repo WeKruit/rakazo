@@ -331,3 +331,19 @@ function isInt(expr: string): boolean {
 function isCronClock(minute: string, hour: string): boolean {
   return isInt(minute) && Number(minute) <= 59 && isInt(hour) && Number(hour) <= 23;
 }
+
+/** How often a record-triggered routine checks for changes; a change wakes it on the next check. */
+export const RECORD_TRIGGER_POLL_MS = 2 * 60_000;
+
+/**
+ * When a routine next wakes after `from`: its next cron occurrence, or the next record check for
+ * a record-triggered routine. Null means no further scheduled wake (one-shot or event-only).
+ */
+export function nextRoutineWakeAt(
+  routine: { crons: string[]; timezone: string; recordTrigger?: string | null },
+  from: Date,
+): Date | null {
+  if (routine.recordTrigger) return new Date(from.getTime() + RECORD_TRIGGER_POLL_MS);
+  if (routine.crons.length === 0 || isOneShotRoutineCrons(routine.crons)) return null;
+  return nextCronDateAcross(routine.crons, from, routine.timezone);
+}
