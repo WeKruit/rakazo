@@ -2943,9 +2943,14 @@ export const listRecruitingCandidates = (
   deps: RecruitingReadDeps,
   actor: Actor,
   input: Parameters<typeof recruiting.listRecruitingCandidates>[2],
+  options: { reports?: false } = {},
 ) =>
   authenticated(async () => {
     const page = await recruiting.listRecruitingCandidates(deps.prisma, actor, input);
+    if (options.reports === false) {
+      for (const candidate of page.items) delete candidate.latestSource?.report;
+      return page;
+    }
     await hydrateRecruitingCandidateReports(
       deps,
       actor,
@@ -4070,9 +4075,15 @@ type RoleCandidatesCrmRow = Extract<
 export type RoleCandidatesSources = {
   autumn(cursor: string | undefined, limit: number): Promise<RoleCandidatesAutumnPage>;
   autumnLinkedinUrls(): Promise<string[]>;
-  crm(
-    target: RecruitingCrmTarget,
-  ): Promise<{ status: "ok"; rows: RoleCandidatesCrmRow[] } | { status: "unavailable" }>;
+  crm(target: RecruitingCrmTarget): Promise<
+    | {
+        status: "ok";
+        rows: RoleCandidatesCrmRow[];
+        /** The CRM's own count when only its first page was read. */
+        total?: number;
+      }
+    | { status: "unavailable" }
+  >;
 };
 
 /** `linkedin.com/in/<slug>` regardless of scheme, subdomain, case, query or trailing slash. */
@@ -4239,13 +4250,23 @@ export async function mergeRoleCandidates(
         shortlisted: false,
         shortlistedAt: null,
       });
-    if (offset + page.length < visibleCrmOnly.length)
+    if (
+      offset + page.length < visibleCrmOnly.length ||
+      (crm.status === "ok" && crm.total !== undefined && crm.rows.length < crm.total)
+    )
       nextCursor = roleCandidatesCursor.write(scope, { o: offset + page.length });
   }
   return {
     items,
     nextCursor,
-    total: autumn.total + visibleCrmOnly.length,
+    // A first-page CRM read counts its unread people as CRM-only, so the total can include a few
+    // people also listed by Autumn.
+    total:
+      autumn.total +
+      visibleCrmOnly.length +
+      (crm.status === "ok" && crm.total !== undefined && !needle
+        ? Math.max(0, crm.total - crm.rows.length)
+        : 0),
     counts: {
       ...outreach,
       shortlisted: input.shortlistedSince ? autumn.total : autumn.counts.shortlisted,
@@ -4301,6 +4322,11 @@ export async function getRecruitingRoleCandidates(
   actor: Actor,
   target: ThreadTarget,
   input: RoleCandidatesInput,
+  /**
+   * `summary` is for lists that show names only: it reads the CRM's first page (the total is the
+   * CRM's own count) and skips match reports. Later pages use the full read.
+   */
+  options: { summary?: boolean } = {},
 ): Promise<RecruitingRoleCandidatesOutput> {
   if (target.threadId !== input.threadId) throw new IsolationError();
   const roleId = await authenticated(() =>
@@ -4318,21 +4344,27 @@ export async function getRecruitingRoleCandidates(
   const sort = input.sort ?? "score";
   return mergeRoleCandidates(input, {
     autumn: (cursor, limit) =>
-      listRecruitingCandidates(deps, actor, {
-        roleId,
-        limit,
-        sort,
-        ...(cursor ? { cursor } : {}),
-        ...(input.query ? { query: input.query } : {}),
-        ...(input.shortlistedOnly ? { shortlisted: true } : {}),
-        ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
-      }),
+      listRecruitingCandidates(
+        deps,
+        actor,
+        {
+          roleId,
+          limit,
+          sort,
+          ...(cursor ? { cursor } : {}),
+          ...(input.query ? { query: input.query } : {}),
+          ...(input.shortlistedOnly ? { shortlisted: true } : {}),
+          ...(input.shortlistedSince ? { shortlistedSince: input.shortlistedSince } : {}),
+        },
+        options.summary ? { reports: false } : {},
+      ),
     autumnLinkedinUrls: () =>
       authenticated(() =>
         recruiting.listRecruitingCandidateLinkedinUrls(deps.prisma, actor, roleId),
       ),
     async crm(binding) {
       const rows: RoleCandidatesCrmRow[] = [];
+      let total: number | undefined;
       try {
         // Read the role's people live from the CRM, so replies and status are current. Each page
         // is a fully authorized read; pages after the first load a few at a time.
@@ -4348,9 +4380,10 @@ export async function getRecruitingRoleCandidates(
             crmRoleId: binding.crmRoleId,
             limit: CRM_PAGE,
           },
-          { allPages: true },
+          options.summary ? {} : { allPages: true },
         );
         if (page.operation !== "candidates") throw new IsolationError();
+        if (options.summary && page.nextOffset !== null) total = page.total;
         const seen = new Set<string>();
         for (const item of page.items) {
           if (seen.has(item.candidateId)) continue;
@@ -4366,7 +4399,7 @@ export async function getRecruitingRoleCandidates(
         if (!(error instanceof ORPCError) && !(error instanceof IsolationError)) throw error;
         return { status: "unavailable" };
       }
-      return { status: "ok", rows };
+      return { status: "ok", rows, ...(total !== undefined ? { total } : {}) };
     },
   });
 }
