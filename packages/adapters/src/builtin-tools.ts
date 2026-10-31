@@ -383,6 +383,51 @@ export const builtinAgentTools: ConnectorTool[] = [
     inputSchema: AskUserInputJsonSchema,
   },
   {
+    name: "create_poll",
+    description:
+      "Put a quick question or vote to the conversation without stopping your work. The card shows the options, a live count and a countdown; you keep working, and when it closes (at the deadline, or as soon as everyone it waits for has voted) you are woken in this conversation with the result. Use it for a preference you can proceed without, or to let the person and the other assistants here vote; use ask_user instead when you cannot continue without the answer. Ask in ordinary business language with two to six short options. To have teammates vote, set includeTeam and tell them about it with message_bot.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: { type: "string", minLength: 1, maxLength: 300 },
+        options: {
+          type: "array",
+          items: { type: "string", minLength: 1, maxLength: 80 },
+          minItems: 2,
+          maxItems: 6,
+        },
+        multiple: { type: "boolean", description: "Allow more than one choice per voter." },
+        closesInMinutes: {
+          type: "integer",
+          minimum: 1,
+          maximum: 1440,
+          description: "How long voting stays open. Default 5.",
+        },
+        includeTeam: {
+          type: "boolean",
+          description:
+            "Also wait for the other assistants in this group conversation before closing early.",
+        },
+      },
+      required: ["question", "options"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "vote_poll",
+    description:
+      "Vote on an open poll another assistant posted in this conversation. Pass the poll id from its message and the option labels you choose. Returns the current count.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        pollId: { type: "string", minLength: 1 },
+        options: { type: "array", items: { type: "string", minLength: 1 }, minItems: 1 },
+      },
+      required: ["pollId", "options"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "request_connection",
     description:
       "When a task needs a service (e.g. HubSpot, Gmail, Instantly, Cal.com) or MCP integration that is not connected to you, show a Connect card and wait; the task resumes after the user connects. Pass serverId for a known server, or provider with the service name when there is none. Use instead of asking the user to open settings.",
@@ -1191,7 +1236,7 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "run_subagent",
     description:
-      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. By default the call waits for the result; set background to keep working while it runs. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
+      "Run a short-lived helper inside this turn only. It is not a bot: no list entry, no thread, no computer of its own, and it disappears when this turn ends. By default the call waits for the result; set background to keep working while it runs. A turn may start up to 32 helpers, at most 8 working at once. Never call this because the user asked to create a bot — that is spawn_bot, and spawn_bot alone.",
     inputSchema: {
       type: "object",
       properties: {

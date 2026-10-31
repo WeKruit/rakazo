@@ -302,6 +302,37 @@ export type AskConnection = z.infer<typeof AskConnectionSchema>;
 export const ConnectionAskAnswer = z.enum(["connected", "not_connected"]);
 export type ConnectionAskAnswer = z.infer<typeof ConnectionAskAnswer>;
 
+/** A vote cast on a poll card, by the person or by a member bot. */
+export const PollVoteSchema = z.object({
+  voter: z.enum(["user", "bot"]),
+  /** The person's user id or the voting bot's id. */
+  voterId: Id,
+  name: z.string(),
+  optionIds: z.array(z.string()).min(1),
+});
+export type PollVote = z.infer<typeof PollVoteSchema>;
+
+/**
+ * A question or vote that does not pause the asking agent: it keeps working, votes count live
+ * until the deadline, and the asker is woken with the result when the poll closes.
+ */
+export const PollBlockSchema = z.object({
+  kind: z.literal("poll"),
+  pollId: Id,
+  question: z.string(),
+  options: z
+    .array(z.object({ id: z.string(), label: z.string() }))
+    .min(2)
+    .max(6),
+  multiple: z.boolean().default(false),
+  /** Also wait for the conversation's other assistants before closing early. */
+  includeTeam: z.boolean().default(false),
+  closesAt: IsoDate,
+  status: z.enum(["open", "closed"]),
+  votes: z.array(PollVoteSchema).default([]),
+});
+export type PollBlock = z.infer<typeof PollBlockSchema>;
+
 export const AskBlockSchema = z
   .object({
     kind: z.literal("ask"),
@@ -496,6 +527,7 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     status: z.enum(["draft", "saved"]),
   }),
   ChartBlock,
+  PollBlockSchema,
   z.object({
     /** Approval card for an agent-created MCP server. The user completes the
         OAuth popup (or confirms no authorization is needed) in the UI. The

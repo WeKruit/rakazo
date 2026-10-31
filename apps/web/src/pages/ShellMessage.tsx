@@ -69,6 +69,9 @@ const ChoiceCard = lazyPanel(() =>
 const McpApprovalCard = lazyPanel(() =>
   withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.McpApprovalCard),
 );
+const PollCard = lazyPanel(() =>
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.PollCard),
+);
 
 const FALLBACK_BOT_COLOR = "#85858A";
 export function MessageHoverActions({
@@ -531,6 +534,13 @@ export const MessageView = memo(function MessageView({
           return (
             <div key={i} className="flex justify-start">
               <ChartBlockView name={block.name} spec={block.spec} data={block.data} />
+            </div>
+          );
+        }
+        if (block.kind === "poll") {
+          return (
+            <div key={i} className="flex justify-start">
+              <PollCard target={artifactTarget} block={block} />
             </div>
           );
         }

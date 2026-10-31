@@ -21,6 +21,7 @@ import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { closePollAndWake } from "./poll-close.js";
 import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import { startRecruitingCheckin } from "./recruiting-checkin.js";
 import { startRecruitingGrading } from "./recruiting-grading.js";
@@ -170,6 +171,12 @@ export function createBackgroundJobHandlers(deps: {
     },
     "recruiting_agent_run.wait": async (payload) => {
       await waitForRecruitingAgentRun({ prisma: deps.prisma, jobs: deps.jobs }, payload);
+    },
+    "poll.close": async (payload) => {
+      await closePollAndWake(
+        { prisma: deps.prisma, jobs: deps.jobs, events: deps.events },
+        payload,
+      );
     },
     "thread.reply_check": async (payload) => {
       await checkThreadReplied(

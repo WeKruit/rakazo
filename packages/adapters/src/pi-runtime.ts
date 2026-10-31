@@ -1150,6 +1150,8 @@ export function describeToolActivity(toolName: string, args: unknown): string {
   if (toolName === "attach_file") return `Attaching ${detail(record.path)}`;
   if (toolName === "open_path") return `Opening ${detail(record.path)}`;
   if (toolName === "render_plot") return "Rendering a chart";
+  if (toolName === "create_poll") return "Posting a poll";
+  if (toolName === "vote_poll") return "Voting on a poll";
   if (toolName === "add_mcp_server") return `Connecting MCP server: ${detail(record.name)}`;
   if (toolName === "computer_observe") return "Looking at the screen";
   if (toolName === "browser_navigate")
@@ -1968,6 +1970,10 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
   };
 }
 
+/** Helpers one turn may start, and how many may work at the same time. */
+export const SUBAGENT_TURN_LIMIT = 32;
+export const SUBAGENT_CONCURRENCY = 8;
+
 /** run_subagent: start a helper, continue one by handle, or wait for background results. */
 async function executeSubagent(
   host: ToolHost,
@@ -1984,6 +1990,11 @@ async function executeSubagent(
     );
   const handle = String(args.handle ?? "").trim();
   const task = String(args.task ?? "").trim();
+  const working = [...host.subagents.values()].filter((existing) => existing.busy).length;
+  if (working >= SUBAGENT_CONCURRENCY)
+    return `${SUBAGENT_CONCURRENCY} helpers are already working. Wait for one with run_subagent wait before starting or continuing another.`;
+  if (!handle && host.subagentCount.value >= SUBAGENT_TURN_LIMIT)
+    return `This turn has used its ${SUBAGENT_TURN_LIMIT} helpers. Continue an existing helper by handle, or finish the remaining work yourself.`;
   let helper: SubagentHelper;
   let previous: string | undefined;
   if (handle) {

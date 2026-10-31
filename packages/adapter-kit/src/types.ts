@@ -741,6 +741,8 @@ export interface BackgroundJobPayloads {
   "recruiting_agent_run.wait": { threadId: string; botId: string; agentRunId: string };
   /** After a conversation goes quiet, make sure the person's newest message got a reply. */
   "thread.reply_check": { threadId: string };
+  /** Close a poll card at its deadline (or early once everyone voted) and wake its asker. */
+  "poll.close": { messageId: string; pollId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

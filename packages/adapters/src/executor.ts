@@ -31,6 +31,7 @@ import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
   MEMORY_REVISION_CONFLICT_ERROR,
+  pollCloseJob,
   recruitingAgentRunWaitJob,
   routineJobKey,
   routineWakeupJob,
@@ -125,7 +126,11 @@ import {
   nextCronDateAcross,
   nextFence,
   oneTimeMcpWriteEndpoint,
+  POLL_DEFAULT_MINUTES,
+  POLL_MAX_MINUTES,
+  POLL_MIN_MINUTES,
   planActionGate,
+  pollResultLines,
   promptInvokesSkill,
   RECRUITER_INSTRUCTED_SEND_TOOLS,
   RECRUITER_LANGUAGE,
@@ -216,6 +221,7 @@ import {
   loadVerifiedRecruitingSchedulingPlan,
   Prisma,
   parseComputerMode,
+  pollOf,
   prepareNativeRecruitingCandidateDecision,
   prepareNativeRecruitingShortlist,
   prepareRecruitingApproval,
@@ -238,6 +244,7 @@ import {
   saveRecruitingCalibrationRound,
   searchHistory,
   skipRateLimitedRun,
+  votePoll,
   withTransactionRetry,
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
@@ -11279,6 +11286,83 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : { ok: true },
             );
           }
+          if (name === "create_poll") {
+            const options = Array.isArray(args.options)
+              ? [...new Set(args.options.map((option) => visible(String(option)).trim()))].filter(
+                  Boolean,
+                )
+              : [];
+            const question = visible(redactSecrets(String(args.question ?? ""), runSecrets)).trim();
+            if (!question) return finish({ error: "question is required" });
+            if (options.length < 2 || options.length > 6)
+              return finish({ error: "Give two to six different options." });
+            const minutes = Math.min(
+              POLL_MAX_MINUTES,
+              Math.max(
+                POLL_MIN_MINUTES,
+                Math.round(Number(args.closesInMinutes) || POLL_DEFAULT_MINUTES),
+              ),
+            );
+            const pollId = createHash("sha256")
+              .update(JSON.stringify([run.id, executionId]))
+              .digest("hex")
+              .slice(0, 24);
+            const closesAt = new Date(Date.now() + minutes * 60_000);
+            const message = await publishMessage(deps, run, "bot", [
+              {
+                kind: "poll",
+                pollId,
+                question,
+                options: options.map((label, index) => ({ id: String(index + 1), label })),
+                multiple: args.multiple === true,
+                includeTeam: args.includeTeam === true,
+                closesAt: closesAt.toISOString(),
+                status: "open",
+                votes: [],
+              },
+            ]);
+            if (!message) return finish({ error: "Polls cannot be posted from this kind of run." });
+            await deps.jobs.enqueue(pollCloseJob({ messageId: message.id, pollId }, closesAt));
+            return finish({
+              ok: true,
+              pollId,
+              closesAt: closesAt.toISOString(),
+              note: "The poll is posted. Keep working; you are woken here with the result when it closes. Do not wait for it or ask the same question again.",
+            });
+          }
+          if (name === "vote_poll") {
+            const pollId = String(args.pollId ?? "");
+            const message = await deps.prisma.message.findFirst({
+              where: {
+                threadId: run.threadId,
+                blocks: { array_contains: [{ kind: "poll", pollId }] },
+              },
+              select: { blocks: true },
+            });
+            const poll = message ? pollOf(message.blocks as MessageBlock[], pollId) : undefined;
+            if (!poll) return finish({ error: "No open poll with that id in this conversation." });
+            const wanted = (Array.isArray(args.options) ? args.options : []).map((option) =>
+              String(option).trim().toLowerCase(),
+            );
+            const optionIds = poll.options
+              .filter(
+                (option) =>
+                  wanted.includes(option.label.trim().toLowerCase()) || wanted.includes(option.id),
+              )
+              .map((option) => option.id);
+            const voted = await votePoll(deps.prisma, {
+              threadId: run.threadId,
+              pollId,
+              vote: { voter: "bot", voterId: bot.id, name: bot.name, optionIds },
+            });
+            if (!voted.ok) return finish({ error: voted.error });
+            await deps.events.notify(voted.threadId, voted.eventSeq).catch((error) => {
+              getLogger().error("poll vote realtime notification", error);
+            });
+            if (voted.complete)
+              await deps.jobs.enqueue(pollCloseJob({ messageId: voted.messageId, pollId }));
+            return finish({ ok: true, result: pollResultLines(voted.block) });
+          }
           if (name === "message_bot") {
             const sent = await messageBot(
               deps,
@@ -13976,7 +14060,14 @@ export function selectBuiltinToolsForRun(options: {
       (options.ticketBoardEnabled ||
         (tool.name !== "board_tickets" && !tool.name.startsWith("ticket_"))) &&
       (!isBackgroundRunTrigger(options.trigger) ||
-        !["message_user", "message_bot", "handoff_to_bot", "message_agent"].includes(tool.name)) &&
+        ![
+          "message_user",
+          "message_bot",
+          "handoff_to_bot",
+          "message_agent",
+          "create_poll",
+          "vote_poll",
+        ].includes(tool.name)) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.historyRetrievalEnabled ||
         !["search_history", "read_history"].includes(tool.name)) &&
@@ -13999,6 +14090,8 @@ export function selectBuiltinToolsForRun(options: {
           "forget_memory",
           "task_catalog",
           "board_tickets",
+          "create_poll",
+          "vote_poll",
         ].includes(tool.name) &&
           !tool.name.startsWith("scratchpad_") &&
           !tool.name.startsWith("ticket_"))),

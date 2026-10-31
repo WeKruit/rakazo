@@ -6344,3 +6344,19 @@ msgstr "你的招聘工作区。"
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "Your tasks"
 msgstr "你的任务"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr "已结束"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr "投票"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr "{time} 后结束"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr "无法记录你的投票"

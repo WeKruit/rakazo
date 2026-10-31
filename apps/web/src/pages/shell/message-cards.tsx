@@ -1,6 +1,6 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import type { MessageBlock } from "@rakazo/contracts";
-import { abortableDelay } from "@rakazo/core";
+import { abortableDelay, formatWorkDuration, pollTally } from "@rakazo/core";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import { X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -588,5 +588,110 @@ export function ArtifactImage({
         </Dialog>
       ) : null}
     </div>
+  );
+}
+
+/** A vote that does not pause the asker: live counts, a countdown, and the person's own pick. */
+export function PollCard({
+  target,
+  block,
+}: {
+  target: ArtifactTarget;
+  block: Extract<MessageBlock, { kind: "poll" }>;
+}) {
+  const { t } = useLingui();
+  const [now, setNow] = useState(Date.now);
+  const [picked, setPicked] = useState<string[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const remaining = Math.max(0, Date.parse(block.closesAt) - now);
+  const open = block.status === "open" && remaining > 0;
+  useEffect(() => {
+    if (!open) return;
+    const timer = setInterval(() => setNow(Date.now()), remaining > 3_600_000 ? 30_000 : 1_000);
+    return () => clearInterval(timer);
+  }, [open, remaining > 3_600_000]);
+  const mine = block.votes.find((vote) => vote.voter === "user")?.optionIds ?? [];
+  const selected = picked ?? mine;
+  const tally = pollTally(block);
+  const total = block.votes.length;
+
+  async function submit(optionIds: string[]) {
+    if (busy || optionIds.length === 0) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const scope = "botId" in target ? { botId: target.botId } : { groupId: target.groupId };
+      await rpc.threads.votePoll({ ...scope, pollId: block.pollId, optionIds });
+      setPicked(null);
+    } catch (err) {
+      setError(errorText(err, t`Could not record your vote`));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function choose(id: string) {
+    if (!open || busy) return;
+    if (!block.multiple) {
+      setPicked([id]);
+      void submit([id]);
+      return;
+    }
+    setPicked(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  }
+
+  const time = formatWorkDuration(remaining);
+  const changed =
+    picked !== null && (picked.length !== mine.length || picked.some((id) => !mine.includes(id)));
+  return (
+    <BuiCard data-testid="poll-card" className="max-w-[74%] p-4">
+      <p className="text-[14.5px] font-medium text-foreground" dir="auto">
+        {block.question}
+      </p>
+      <ul className="mt-3 grid gap-1.5">
+        {tally.map((row) => {
+          const share = total ? Math.round((row.count / total) * 100) : 0;
+          const chosen = selected.includes(row.id);
+          return (
+            <li key={row.id}>
+              <button
+                type="button"
+                aria-pressed={chosen}
+                disabled={!open || busy}
+                title={row.voters.join(", ") || undefined}
+                onClick={() => choose(row.id)}
+                className={`relative flex w-full items-center justify-between overflow-hidden rounded-lg border px-3 py-2 text-left text-[13.5px] ${
+                  chosen ? "border-primary" : "border-border"
+                } disabled:cursor-default`}
+              >
+                <span
+                  aria-hidden
+                  className="absolute inset-y-0 left-0 bg-muted"
+                  style={{ width: `${share}%` }}
+                />
+                <span className="relative text-foreground" dir="auto">
+                  {row.label}
+                </span>
+                <span className="relative tabular-nums text-muted-foreground">{row.count}</span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {block.multiple && open && changed ? (
+        <Button
+          className="mt-3 rounded-full"
+          disabled={busy || selected.length === 0}
+          onClick={() => void submit(selected)}
+        >
+          <Trans>Vote</Trans>
+        </Button>
+      ) : null}
+      {error ? <p className="mt-2 text-xs text-destructive">{error}</p> : null}
+      <time dateTime={block.closesAt} className="mt-2 block text-xs text-muted-foreground">
+        {open ? t`Closes in ${time}` : t`Closed`}
+      </time>
+    </BuiCard>
   );
 }

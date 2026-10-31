@@ -839,4 +839,8 @@ export const RU_MESSAGES: Record<string, string> = {
   "Preparing outreach": "Подготовка рассылки",
   "Scheduling interviews": "Планирование собеседований",
   "Delegated task": "Поручённая задача",
+  Closed: "Завершено",
+  Vote: "Голосовать",
+  "Closes in {time}": "Закроется через {time}",
+  "Could not record your vote": "Не удалось учесть ваш голос",
 };

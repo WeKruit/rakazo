@@ -11,6 +11,7 @@ import {
   isAllowedAttachmentMimeType,
   isAttachmentImageMimeType,
 } from "@rakazo/contracts";
+import { pollResultLines } from "./polls.js";
 
 export class AttachmentValidationError extends Error {
   constructor(message: string) {
@@ -135,6 +136,9 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
           : withRole;
       }
       if (block.kind === "chart") return `[chart: ${block.name}]`;
+      // The id lets another assistant vote; the count tells a later turn how it went.
+      if (block.kind === "poll")
+        return `[poll ${block.pollId}, ${block.status}, closes ${block.closesAt}]\n${pollResultLines(block)}`;
       if (block.kind === "image") return `[image: ${block.name}]`;
       if (block.kind === "file") {
         return `[file: ${block.name} (${block.mimeType}, ${block.size} bytes)]`;

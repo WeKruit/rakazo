@@ -17,6 +17,8 @@ export const BUILTIN_TOOL_NAMES = [
   "launch_app",
   "request_takeover",
   "ask_user",
+  "create_poll",
+  "vote_poll",
   "request_connection",
   "message_user",
   "request_secret",

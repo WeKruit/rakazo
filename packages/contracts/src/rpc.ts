@@ -615,6 +615,15 @@ export const appContract = {
         }),
       )
       .output(z.object({ ok: z.literal(true) })),
+    /** The person's vote on a poll card in this conversation; a new vote replaces theirs. */
+    votePoll: oc
+      .input(
+        threadTarget.safeExtend({
+          pollId: Id,
+          optionIds: z.array(z.string().min(1)).min(1).max(6),
+        }),
+      )
+      .output(z.object({ ok: z.literal(true) })),
     stop: oc
       .input(
         threadTarget.safeExtend({

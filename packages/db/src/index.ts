@@ -23,6 +23,7 @@ export * from "./messaging.js";
 export * from "./model-backups.js";
 export * from "./model-credentials.js";
 export * from "./notifications.js";
+export * from "./polls.js";
 export * from "./queued-messages.js";
 export * from "./recruiting.js";
 export * from "./recruiting-bootstrap.js";
