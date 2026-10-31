@@ -41,10 +41,15 @@ function askCompanySite(name: string): Promise<SiteAnswer> {
         queuedSites = [];
         for (let start = 0; start < batch.length; start += SITE_BATCH) {
           const part = batch.slice(start, start + SITE_BATCH);
-          rpc.links
-            .companySites({ names: part.map((entry) => entry.name) })
-            .then(({ sites }) => part.forEach((entry, index) => entry.resolve(sites[index]!)))
-            .catch((error: unknown) => part.forEach((entry) => entry.reject(error)));
+          // A missing client fails this batch like a failed request, never the timer itself.
+          Promise.resolve()
+            .then(() => rpc.links.companySites({ names: part.map((entry) => entry.name) }))
+            .then(({ sites }) => {
+              for (const [index, entry] of part.entries()) entry.resolve(sites[index]!);
+            })
+            .catch((error: unknown) => {
+              for (const entry of part) entry.reject(error);
+            });
         }
       }, 20);
     queuedSites.push({ name, resolve, reject });
