@@ -11,6 +11,8 @@ import {
   markCountdownReported,
   minutes,
   readWorkEstimate,
+  runningSearchEstimates,
+  workEstimateCancelled,
 } from "./work-estimate.js";
 
 /**
@@ -97,7 +99,13 @@ export async function waitForRecruitingAgentRun(
     select: { id: true, spaceId: true, userId: true, botId: true, groupId: true },
   });
   if (!thread) return skipped("no thread");
-  if (!(await memberOf(deps.prisma, thread, payload.botId))) return skipped("not a member");
+  // The recruiter stopped this search: nobody follows it any more.
+  if (await workEstimateCancelled(deps.prisma, thread.spaceId, payload.agentRunId))
+    return skipped("stopped");
+  if (!(await memberOf(deps.prisma, thread, payload.botId))) {
+    await finishWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
+    return skipped("not a member");
+  }
   // The provider's answers to this conversation's agent_run calls, newest first: the newest
   // says whether the run is still going.
   const effects = await deps.prisma.externalEffect.findMany({
@@ -116,7 +124,10 @@ export async function waitForRecruitingAgentRun(
   const latest = effects.find(
     (effect) => mcpObject(providerResult(effect.result))?.id === payload.agentRunId,
   );
-  if (!latest) return skipped("no answer");
+  if (!latest) {
+    await finishWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
+    return skipped("no answer");
+  }
   if (!runningAgentRunId(providerResult(latest.result))) {
     await finishWorkEstimate(deps.prisma, thread.spaceId, payload.agentRunId);
     return skipped("finished");
@@ -200,4 +211,18 @@ export async function waitForRecruitingAgentRun(
   await deps.jobs.enqueue(runContinueJob(runId)).catch(() => {
     getLogger().warn("recruiting agent run wake deferred to reconciliation");
   });
+}
+
+/** Re-arms the follow-up of every search still running, from the reconciler. Idempotent. */
+export async function rearmRecruitingAgentRunWaits(
+  deps: { prisma: PrismaClient; jobs: Pick<JobPublisher, "enqueue"> },
+  now: Date,
+  batchSize: number,
+): Promise<number> {
+  const waiting = await runningSearchEstimates(deps.prisma, now, batchSize);
+  for (const payload of waiting)
+    await deps.jobs.enqueue(recruitingAgentRunWaitJob(payload, now)).catch((error) => {
+      getLogger().warn("search follow-up not re-armed", { error: String(error) });
+    });
+  return waiting.length;
 }
