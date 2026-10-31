@@ -227,9 +227,11 @@ export async function refreshRecruitingCorrespondence(
         : source.provider?.kind === "instantly"
           ? "list_emails"
           : null;
+    // A source without a credential is not connected yet; reading it only fails unauthenticated.
     if (
       !tool ||
       !source.enabled ||
+      !source.secretId ||
       !source.assignments.some((permission) => allows(permission, tool))
     )
       continue;

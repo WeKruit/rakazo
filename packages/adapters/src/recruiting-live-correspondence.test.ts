@@ -304,4 +304,20 @@ describe("live role correspondence", () => {
     expect(output.connections[0]?.status).toBe("configured");
     expect(output.partial).toBe(true);
   });
+  it("does not read a calendar that has no connection yet", async () => {
+    const { prisma } = fixture();
+    const execute = vi.fn(async function* () {
+      yield { type: "error", message: "unauthenticated" } as const;
+    });
+    const output = empty();
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } },
+      actor,
+      { roleId: "role", threadId: "thread", view: "interview" },
+      [{ ...source("calendar"), secretId: null }],
+      output,
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(output.status).not.toBe("failed");
+  });
 });
