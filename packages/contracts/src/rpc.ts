@@ -373,6 +373,8 @@ export const appContract = {
           botId: Id.optional(),
           groupId: Id.optional(),
           offset: z.number().int().min(0).max(1000000).optional(),
+          /** Leave archived bots and roles for a later read, so first paint skips them. */
+          activeOnly: z.boolean().optional(),
         })
         .refine((input) => !(input.botId && input.groupId), {
           message: "Provide at most one of botId or groupId",

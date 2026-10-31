@@ -154,6 +154,39 @@ it.each([false, undefined])(
   },
 );
 
+it("shows the roles read so far without waiting for the slowest role", async () => {
+  getWorkspace.mockImplementation(({ threadId }: { threadId: string }) =>
+    threadId === "thread-g2"
+      ? new Promise(() => undefined)
+      : Promise.resolve({ role: { id: "r1" } }),
+  );
+  await render();
+  const funnel = container.querySelector('[aria-label="Outreach funnel"]')!;
+  expect(funnel.textContent).toContain("Shortlisted≥3");
+  expect(text()).not.toContain("could not be read");
+});
+
+it("keeps reading when the sidebar only reorders roles, and keeps numbers through a refresh", async () => {
+  const slow = { release: () => undefined as void };
+  getWorkspace.mockImplementation(({ threadId }: { threadId: string }) =>
+    threadId === "thread-g2"
+      ? new Promise((resolve) => {
+          slow.release = () => resolve({ role: { id: "r2" } });
+        })
+      : Promise.resolve({ role: { id: "r1" } }),
+  );
+  await render();
+  await render({ groups: [...groups].reverse() });
+  expect(getWorkspace).toHaveBeenCalledTimes(2);
+  await act(async () => slow.release());
+  const funnel = () => container.querySelector('[aria-label="Outreach funnel"]')!.textContent;
+  expect(funnel()).toContain("Shortlisted6 Contacted");
+  getWorkspace.mockReturnValue(new Promise(() => undefined));
+  await render({ groups: [...groups].reverse(), refreshSignal: 1 });
+  expect(getWorkspace).toHaveBeenCalledTimes(4);
+  expect(funnel()).toContain("Shortlisted6 Contacted");
+});
+
 it("opens a recent role, newest first", async () => {
   await render();
   const recents = [...container.querySelectorAll('[aria-label="Recents"] button')];
