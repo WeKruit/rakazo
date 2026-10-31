@@ -203,6 +203,7 @@ import {
   completedRunBlocks,
   confirmRecruitingBrief,
   createRecruitingSchedulingPlan,
+  createRunHistoryCache,
   createSpaceForMember,
   createThreadMessageInTransaction,
   effectiveMemoryScope,
@@ -3816,6 +3817,8 @@ export function isTerminalModelSetupError(error: unknown): boolean {
 }
 
 export function createRunExecutor(deps: ExecutorDeps) {
+  // Recent conversations stay in this worker's memory; each run re-reads only changed rows.
+  const residentHistory = createRunHistoryCache();
   const contextStrategy = deps.contextStrategy ?? DEFAULT_CONTEXT_STRATEGY;
   const web = deps.web ?? createWebProvider();
   const browser = deps.browser ?? createBrowserProvider(undefined, { sandbox: deps.sandbox });
@@ -4380,7 +4383,13 @@ export function createRunExecutor(deps: ExecutorDeps) {
               },
             },
           }),
-          loadRunHistoryMessages(deps.prisma, run, LEGACY_HISTORY_WINDOW_SIZE, channelId),
+          loadRunHistoryMessages(
+            deps.prisma,
+            run,
+            LEGACY_HISTORY_WINDOW_SIZE,
+            channelId,
+            residentHistory,
+          ),
           run.trigger === "bot_message"
             ? loadBotMessageContext(deps.prisma, run.sourceMessageId)
             : Promise.resolve(undefined),

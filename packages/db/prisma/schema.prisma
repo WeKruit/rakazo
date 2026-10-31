@@ -606,6 +606,8 @@ model Message {
   externalTranscriptFor  ExternalMessage?
   steeringMessages SteeringMessage[]
   createdAt        DateTime  @default(now())
+  /// Bumped on every change, so a resident history copy can tell which rows to re-read.
+  updatedAt        DateTime  @default(now()) @updatedAt
 
   @@unique([threadId, seq])
   @@unique([threadId, clientNonce])
@@ -615,7 +617,7 @@ model Message {
 }
 
 model Event {
-  id        String   @id @default(cuid())
+  id        String   @unique @default(cuid())
   spaceId   String
   space     Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   threadId  String
@@ -627,9 +629,9 @@ model Event {
   runId     String?
   createdAt DateTime @default(now())
 
-  @@unique([threadId, seq])
+  /// A conversation's log is keyed by its own order.
+  @@id([threadId, seq])
   @@index([spaceId, createdAt])
-  @@index([threadId, seq])
   @@index([runId, type, seq])
   @@map("events")
 }

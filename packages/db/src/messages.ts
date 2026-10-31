@@ -151,45 +151,157 @@ export async function loadRunHumanSources(
 }
 
 /** Group turns use channel inputs and their own outputs, never private thread history. */
-export function loadRunHistoryMessages(
+const RUN_HISTORY_SELECT = {
+  id: true,
+  threadId: true,
+  seq: true,
+  role: true,
+  botId: true,
+  runId: true,
+  blocks: true,
+  createdAt: true,
+  updatedAt: true,
+  replyToMessageId: true,
+  replyQuote: true,
+  replyTo: { select: { id: true, threadId: true, role: true, botId: true, blocks: true } },
+} as const;
+
+function runHistoryWhere(run: { id: string; threadId: string }, channelId?: string) {
+  return {
+    threadId: run.threadId,
+    // Persisted follow-ups enter model history only after the current reply finishes.
+    steeringMessages: { none: { originTrigger: "follow_up" } },
+    ...(channelId
+      ? {
+          OR: [
+            {
+              role: "user",
+              blocks: { array_contains: [{ kind: "channel_message", channelId }] },
+            },
+            { role: "bot", runId: run.id },
+          ],
+        }
+      : {}),
+  };
+}
+
+type RunHistoryRow = Awaited<ReturnType<typeof readRunHistory>>[number];
+type CachedHistoryRow = { row: RunHistoryRow; replyToUpdatedAt: number | undefined };
+
+function readRunHistory(
   prisma: PrismaClient,
   run: { id: string; threadId: string },
   limit: number,
   channelId?: string,
 ) {
   return prisma.message.findMany({
-    where: {
-      threadId: run.threadId,
-      // Persisted follow-ups enter model history only after the current reply finishes.
-      steeringMessages: { none: { originTrigger: "follow_up" } },
-      ...(channelId
-        ? {
-            OR: [
-              {
-                role: "user",
-                blocks: { array_contains: [{ kind: "channel_message", channelId }] },
-              },
-              { role: "bot", runId: run.id },
-            ],
-          }
-        : {}),
-    },
+    where: runHistoryWhere(run, channelId),
     orderBy: { seq: "desc" },
     take: limit,
-    select: {
-      id: true,
-      threadId: true,
-      seq: true,
-      role: true,
-      botId: true,
-      runId: true,
-      blocks: true,
-      createdAt: true,
-      replyToMessageId: true,
-      replyQuote: true,
-      replyTo: { select: { id: true, threadId: true, role: true, botId: true, blocks: true } },
-    },
+    select: RUN_HISTORY_SELECT,
   });
+}
+
+/**
+ * Recent conversations a worker keeps in memory between runs. A run still asks the database
+ * which rows belong in its window (ids and change times only) and re-reads in full only the
+ * rows it has not seen or that changed since, so a long conversation is not read again per turn.
+ */
+export function createRunHistoryCache(maxRows = 20_000) {
+  const rows = new Map<string, CachedHistoryRow>();
+  const touch = (entry: CachedHistoryRow) => {
+    rows.delete(entry.row.id);
+    rows.set(entry.row.id, entry);
+    while (rows.size > maxRows) rows.delete(rows.keys().next().value!);
+  };
+  return {
+    async load(
+      prisma: PrismaClient,
+      run: { id: string; threadId: string },
+      limit: number,
+      channelId?: string,
+    ): Promise<RunHistoryRow[]> {
+      const window = await prisma.message.findMany({
+        where: runHistoryWhere(run, channelId),
+        orderBy: { seq: "desc" },
+        take: limit,
+        select: { id: true, updatedAt: true, replyTo: { select: { updatedAt: true } } },
+      });
+      // Without change times nothing can be trusted from memory: read the window as before.
+      if (window.some((entry) => timeOf(entry.updatedAt) === undefined)) {
+        return readRunHistory(prisma, run, limit, channelId);
+      }
+      const fresh = (entry: (typeof window)[number]) => {
+        const kept = rows.get(entry.id);
+        return (
+          kept &&
+          sameTime(kept.row.updatedAt, entry.updatedAt) &&
+          // A reply carries its quoted message; re-read it when that message changed.
+          (!entry.replyTo || kept.replyToUpdatedAt === timeOf(entry.replyTo.updatedAt))
+        );
+      };
+      const missing = window.filter((entry) => !fresh(entry)).map((entry) => entry.id);
+      if (missing.length) {
+        const read = await prisma.message.findMany({
+          where: { id: { in: missing }, threadId: run.threadId },
+          select: {
+            ...RUN_HISTORY_SELECT,
+            replyTo: { select: { ...RUN_HISTORY_SELECT.replyTo.select, updatedAt: true } },
+          },
+        });
+        for (const { replyTo, ...row } of read) {
+          touch({
+            row: {
+              ...row,
+              replyTo: replyTo
+                ? {
+                    id: replyTo.id,
+                    threadId: replyTo.threadId,
+                    role: replyTo.role,
+                    botId: replyTo.botId,
+                    blocks: replyTo.blocks,
+                  }
+                : null,
+            },
+            replyToUpdatedAt: timeOf(replyTo?.updatedAt),
+          });
+        }
+      }
+      const result: RunHistoryRow[] = [];
+      for (const entry of window) {
+        const kept = rows.get(entry.id);
+        // Deleted between the two reads: the window no longer has it either.
+        if (kept) {
+          touch(kept);
+          result.push(kept.row);
+        }
+      }
+      return result;
+    },
+  };
+}
+
+export type RunHistoryCache = ReturnType<typeof createRunHistoryCache>;
+
+function timeOf(value: unknown): number | undefined {
+  return value instanceof Date ? value.getTime() : undefined;
+}
+
+function sameTime(a: unknown, b: unknown): boolean {
+  const time = timeOf(a);
+  return time !== undefined && time === timeOf(b);
+}
+
+export function loadRunHistoryMessages(
+  prisma: PrismaClient,
+  run: { id: string; threadId: string },
+  limit: number,
+  channelId?: string,
+  cache?: RunHistoryCache,
+) {
+  return cache
+    ? cache.load(prisma, run, limit, channelId)
+    : readRunHistory(prisma, run, limit, channelId);
 }
 
 export interface CreateThreadMessageInput {
