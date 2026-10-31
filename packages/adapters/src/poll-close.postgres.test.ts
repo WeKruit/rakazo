@@ -1,7 +1,7 @@
 import type { BackgroundJob } from "@rakazo/adapter-kit";
 import type { MessageBlock, PollBlock } from "@rakazo/contracts";
 import type { PrismaClient, ThreadEvents } from "@rakazo/db";
-import { createDb, pollOf, votePoll } from "@rakazo/db";
+import { canvasOf, changeCanvas, createDb, pollOf, votePoll } from "@rakazo/db";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { closePollAndWake } from "./poll-close.js";
 
@@ -133,5 +133,40 @@ describePostgres("poll votes and close (PostgreSQL)", () => {
       vote: { voter: "user", voterId: userId, name: "Poll tester", optionIds: ["1"] },
     });
     expect(result.ok).toBe(false);
+  });
+
+  it("rewrites a canvas in place and keeps its app's data across revisions", async () => {
+    const f = await fixture(false);
+    const canvas = {
+      kind: "canvas" as const,
+      canvasId: `canvas-${f.thread.id}`,
+      title: "Tracker",
+      html: "<p>v1</p>",
+      revision: 1,
+    };
+    await prisma.message.update({ where: { id: f.message.id }, data: { blocks: [canvas] } });
+    const saved = await changeCanvas(prisma, {
+      threadId: f.thread.id,
+      canvasId: canvas.canvasId,
+      change: { state: { done: ["a"] } },
+    });
+    expect(saved.ok).toBe(true);
+    const rewritten = await changeCanvas(prisma, {
+      threadId: f.thread.id,
+      canvasId: canvas.canvasId,
+      change: { html: "<p>v2</p>", title: "Tracker" },
+    });
+    expect(rewritten.ok && rewritten.block.revision).toBe(2);
+    const stored = await prisma.message.findUniqueOrThrow({ where: { id: f.message.id } });
+    expect(canvasOf(stored.blocks as MessageBlock[], canvas.canvasId)).toMatchObject({
+      html: "<p>v2</p>",
+      state: { done: ["a"] },
+    });
+    const tooBig = await changeCanvas(prisma, {
+      threadId: f.thread.id,
+      canvasId: canvas.canvasId,
+      change: { state: "x".repeat(70_000) },
+    });
+    expect(tooBig.ok).toBe(false);
   });
 });

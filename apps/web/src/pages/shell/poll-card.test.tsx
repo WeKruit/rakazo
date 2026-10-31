@@ -5,7 +5,7 @@ import type { Root } from "react-dom/client";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { rpc } from "../../lib/rpc";
-import { PollCard } from "./message-cards";
+import { PollCard, ViewBlockView } from "./message-cards";
 
 vi.mock("../../lib/rpc", () => ({
   rpc: { threads: { votePoll: vi.fn(async () => ({ ok: true })) } },
@@ -65,4 +65,30 @@ it("stops taking votes once closed", () => {
   );
   expect(container.querySelector("time")?.textContent).toBe("Closed");
   expect([...container.querySelectorAll("button")].every((button) => button.disabled)).toBe(true);
+});
+
+it("lays records out as a board with one lane per value", () => {
+  act(() =>
+    root.render(
+      <ViewBlockView
+        block={{
+          kind: "view",
+          layout: "board",
+          groupBy: "stage",
+          columns: [
+            { key: "name", label: "Name" },
+            { key: "stage", label: "Stage" },
+          ],
+          rows: [
+            { name: "Ada", stage: "Contacted" },
+            { name: "Lin", stage: "Interview" },
+            { name: "Sam", stage: "Contacted" },
+          ],
+          metrics: [],
+        }}
+      />,
+    ),
+  );
+  const lanes = [...container.querySelectorAll("section")].map((lane) => lane.textContent);
+  expect(lanes).toEqual(["Contacted2AdaSam", "Interview1Lin"]);
 });

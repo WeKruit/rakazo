@@ -1292,6 +1292,23 @@ export async function answerWaitingRunWithTextInTransaction(
 }
 
 /**
+ * Whether a typed message can answer this paused run's card. An approval, secret or form card
+ * cannot: a message written while one waits is queued until the card is resolved instead.
+ */
+export async function waitingAskTakesText(
+  tx: Prisma.TransactionClient,
+  input: { threadId: string; runId: string },
+): Promise<boolean> {
+  const found = await findPendingAsk(tx, input);
+  if (!found) return true;
+  return !(
+    isApprovalAskBlock(found.pendingAsk) ||
+    isSecretAskBlock(found.pendingAsk) ||
+    found.pendingAsk.requestedSchema
+  );
+}
+
+/**
  * A connect card cannot be answered by typing. A recruiter who writes past it has moved on, so the
  * card closes as not connected and the run resumes; the caller delivers the message as steering.
  */

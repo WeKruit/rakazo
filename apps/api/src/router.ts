@@ -199,6 +199,7 @@ import {
   CannotDeleteSpaceAsNonOwnerError,
   CannotRenameSpaceAsNonOwnerError,
   ComputerLimitError,
+  changeCanvas,
   claimConversationNotification,
   claimEmptySpaceDeletionForMember,
   createExternalConversationRepos,
@@ -2759,6 +2760,19 @@ export function createRouter(deps: RouterDeps) {
             getLogger().error("thread reaction realtime notification", error);
           });
         }
+        return { ok: true as const };
+      }),
+      saveCanvasState: authed.threads.saveCanvasState.handler(async ({ context, input }) => {
+        const target = await resolveThreadTarget(deps.prisma, context.actor, input);
+        const changed = await changeCanvas(deps.prisma, {
+          threadId: target.threadId,
+          canvasId: input.canvasId,
+          change: { state: input.state },
+        });
+        if (!changed.ok) throw new ORPCError("CONFLICT", { message: changed.error });
+        await deps.events.notify(changed.threadId, changed.eventSeq).catch((error) => {
+          getLogger().error("canvas state realtime notification", error);
+        });
         return { ok: true as const };
       }),
       votePoll: authed.threads.votePoll.handler(async ({ context, input }) => {

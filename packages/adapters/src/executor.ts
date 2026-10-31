@@ -50,6 +50,7 @@ import {
   BOT_TITLE_MAX_LENGTH,
   BotSecretName,
   botSecretSubmissionSchema,
+  CANVAS_HTML_MAX_BYTES,
   CLOUDFLARE_AI_GATEWAY_CONFIG_MESSAGE,
   COMPUTER_COMMAND_OUTPUT_MAX_CHARS,
   disabledBuiltinToolSet,
@@ -75,6 +76,7 @@ import {
   RecruitingShortlistToolInputSchema,
   RetainedRecruitingApprovalRequestSchema,
   UsageRecordedPayloadSchema,
+  ViewBlockSchema,
 } from "@rakazo/contracts";
 import type { ActionApprovalRule, ToolCallStreak } from "@rakazo/core";
 import {
@@ -193,6 +195,8 @@ import {
   backgroundToolRun,
   backgroundToolSourceTrigger,
   bindRecruitingSchedulingOperation,
+  canvasOf,
+  changeCanvas,
   claimRecruitingCrmImport,
   claimRecruitingReply,
   claimRecruitingResearchReadEffect,
@@ -1197,6 +1201,7 @@ const NO_RECRUITING_ROLE_CONTEXT =
 
 const READ_ONLY_AGENT_TOOLS = new Set([
   "recruiting_candidates",
+  "canvas_read",
   "computer_observe",
   "list_files",
   "read_file",
@@ -11286,6 +11291,76 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : { ok: true },
             );
           }
+          if (name === "render_view") {
+            const parsed = ViewBlockSchema.safeParse({ ...args, kind: "view" });
+            if (!parsed.success)
+              return finish({
+                error: `Invalid view: ${parsed.error.issues[0]?.message ?? "check the fields"}`,
+              });
+            const view = parsed.data;
+            if (view.layout === "metrics" ? !view.metrics.length : !view.rows.length)
+              return finish({
+                error: view.layout === "metrics" ? "metrics are required" : "rows are required",
+              });
+            if (view.layout === "board" && !view.groupBy)
+              return finish({ error: "groupBy is required for a board" });
+            if (JSON.stringify(view).length > 200_000)
+              return finish({ error: "This view is too large; show fewer rows or columns." });
+            const message = await publishMessage(deps, run, "bot", [view]);
+            return finish(
+              message ? { ok: true } : { error: "Views cannot be shown from this kind of run." },
+            );
+          }
+          if (name === "canvas_write") {
+            const html = String(args.html ?? "");
+            const title = visible(String(args.title ?? "")).trim() || "Canvas";
+            if (!html.trim()) return finish({ error: "html is required" });
+            if (new TextEncoder().encode(html).length > CANVAS_HTML_MAX_BYTES)
+              return finish({
+                error: `A canvas is limited to ${CANVAS_HTML_MAX_BYTES} bytes of HTML.`,
+              });
+            const existing = args.canvasId ? String(args.canvasId) : undefined;
+            if (existing) {
+              const changed = await changeCanvas(deps.prisma, {
+                threadId: run.threadId,
+                canvasId: existing,
+                change: { html, title },
+              });
+              if (!changed.ok) return finish({ error: changed.error });
+              await deps.events.notify(changed.threadId, changed.eventSeq).catch((error) => {
+                getLogger().error("canvas realtime notification", error);
+              });
+              return finish({ ok: true, canvasId: existing, revision: changed.block.revision });
+            }
+            const canvasId = createHash("sha256")
+              .update(JSON.stringify([run.id, executionId]))
+              .digest("hex")
+              .slice(0, 24);
+            const message = await publishMessage(deps, run, "bot", [
+              { kind: "canvas", canvasId, title, html, revision: 1 },
+            ]);
+            if (!message)
+              return finish({ error: "Canvases cannot be posted from this kind of run." });
+            return finish({ ok: true, canvasId, revision: 1 });
+          }
+          if (name === "canvas_read") {
+            const canvasId = String(args.canvasId ?? "");
+            const found = await deps.prisma.message.findFirst({
+              where: {
+                threadId: run.threadId,
+                blocks: { array_contains: [{ kind: "canvas", canvasId }] },
+              },
+              select: { blocks: true },
+            });
+            const canvas = found ? canvasOf(found.blocks as MessageBlock[], canvasId) : undefined;
+            if (!canvas) return finish({ error: "No canvas with that id in this conversation." });
+            return finish({
+              canvasId,
+              title: canvas.title,
+              revision: canvas.revision,
+              state: canvas.state ?? null,
+            });
+          }
           if (name === "create_poll") {
             const options = Array.isArray(args.options)
               ? [...new Set(args.options.map((option) => visible(String(option)).trim()))].filter(
@@ -14067,6 +14142,8 @@ export function selectBuiltinToolsForRun(options: {
           "message_agent",
           "create_poll",
           "vote_poll",
+          "render_view",
+          "canvas_write",
         ].includes(tool.name)) &&
       (options.voiceCall || tool.name !== "end_call") &&
       (options.historyRetrievalEnabled ||
@@ -14092,6 +14169,9 @@ export function selectBuiltinToolsForRun(options: {
           "board_tickets",
           "create_poll",
           "vote_poll",
+          "render_view",
+          "canvas_write",
+          "canvas_read",
         ].includes(tool.name) &&
           !tool.name.startsWith("scratchpad_") &&
           !tool.name.startsWith("ticket_"))),

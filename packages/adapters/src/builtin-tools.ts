@@ -540,6 +540,79 @@ export const builtinAgentTools: ConnectorTool[] = [
     },
   },
   {
+    name: "render_view",
+    description:
+      "Show records in the chat as a native view the person can read at a glance: a table, a board grouped into lanes by one column (e.g. candidates by stage), or a row of metric cards. Pass the rows you already have; this does not save or change any record. Use render_plot for charts and ask_user for forms.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", maxLength: 120 },
+        layout: { type: "string", enum: ["table", "board", "metrics"] },
+        columns: {
+          type: "array",
+          maxItems: 12,
+          items: {
+            type: "object",
+            properties: { key: { type: "string" }, label: { type: "string" } },
+            required: ["key", "label"],
+          },
+          description: "Table and board: the fields to show, in order.",
+        },
+        rows: {
+          type: "array",
+          maxItems: 500,
+          items: { type: "object" },
+          description: "Table and board: one object per record, keyed by column key.",
+        },
+        groupBy: {
+          type: "string",
+          description: "Board: the column key whose values are the lanes.",
+        },
+        metrics: {
+          type: "array",
+          maxItems: 8,
+          items: {
+            type: "object",
+            properties: {
+              label: { type: "string" },
+              value: { type: "string" },
+              detail: { type: "string" },
+            },
+            required: ["label", "value"],
+          },
+        },
+      },
+      required: ["layout"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "canvas_write",
+    description:
+      "Create or rewrite a small interactive app (a canvas) in this conversation: one self-contained HTML document with inline CSS and JavaScript. It runs in a sandbox with no network and no access to the product, so put the data it needs inline. The app can keep its own data: window.rakazo.state holds what it saved last and window.rakazo.save(data) saves JSON (up to 64 KB), which you read back with canvas_read. Pass canvasId to rewrite an existing canvas in place; omit it to create one. Use it when the person asks for a tool, tracker, checklist, calculator or other interactive page, not for plain answers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        canvasId: { type: "string" },
+        title: { type: "string", minLength: 1, maxLength: 120 },
+        html: { type: "string", minLength: 1 },
+      },
+      required: ["title", "html"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "canvas_read",
+    description:
+      "Read a canvas in this conversation: its title, revision and the data its app saved.",
+    inputSchema: {
+      type: "object",
+      properties: { canvasId: { type: "string", minLength: 1 } },
+      required: ["canvasId"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "add_mcp_server",
     description:
       "Connect an MCP tool server to this Space when the user asks you to add one and provides the details (URL or command, optional token/headers/env). The server is created immediately and assigned to you. If it needs browser OAuth authorization, an approval card appears in the chat for the user to complete — tell them to click Authorize. Do not invent endpoints; only use details the user provided.",

@@ -137,6 +137,10 @@ export function blocksToAgentHistoryText(blocks: MessageBlock[]): string {
       }
       if (block.kind === "chart") return `[chart: ${block.name}]`;
       // The id lets another assistant vote; the count tells a later turn how it went.
+      if (block.kind === "canvas")
+        return `[canvas ${block.canvasId}: ${block.title}, revision ${block.revision}]`;
+      if (block.kind === "view")
+        return `[${block.layout} view${block.title ? `: ${block.title}` : ""}]`;
       if (block.kind === "poll")
         return `[poll ${block.pollId}, ${block.status}, closes ${block.closesAt}]\n${pollResultLines(block)}`;
       if (block.kind === "image") return `[image: ${block.name}]`;

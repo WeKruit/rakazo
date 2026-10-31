@@ -1151,6 +1151,9 @@ export function describeToolActivity(toolName: string, args: unknown): string {
   if (toolName === "open_path") return `Opening ${detail(record.path)}`;
   if (toolName === "render_plot") return "Rendering a chart";
   if (toolName === "create_poll") return "Posting a poll";
+  if (toolName === "render_view") return "Laying out records";
+  if (toolName === "canvas_write") return `Building ${detail(record.title)}`;
+  if (toolName === "canvas_read") return "Reading a canvas";
   if (toolName === "vote_poll") return "Voting on a poll";
   if (toolName === "add_mcp_server") return `Connecting MCP server: ${detail(record.name)}`;
   if (toolName === "computer_observe") return "Looking at the screen";

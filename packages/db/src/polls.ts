@@ -1,16 +1,9 @@
 import type { MessageBlock, PollBlock, PollVote } from "@rakazo/contracts";
 import { applyPollVote, pollEveryoneVoted } from "@rakazo/core";
+import type { CardMessage } from "./card-blocks.js";
+import { lockedCardMessage, rewriteCardMessage } from "./card-blocks.js";
 import type { Prisma, PrismaClient } from "./client.js";
-import { appendEventInTransaction } from "./events.js";
 import { withTransactionRetry } from "./transaction-retry.js";
-
-type PollMessage = {
-  id: string;
-  threadId: string;
-  botId: string | null;
-  blocks: MessageBlock[];
-  thread: { spaceId: string; userId: string; botId: string | null; groupId: string | null };
-};
 
 function isPoll(block: MessageBlock, pollId: string): block is PollBlock {
   return block.kind === "poll" && block.pollId === pollId;
@@ -20,36 +13,15 @@ export function pollOf(blocks: MessageBlock[], pollId: string): PollBlock | unde
   return blocks.find((block): block is PollBlock => isPoll(block, pollId));
 }
 
-async function lockedPollMessage(
+function lockedPollMessage(
   tx: Prisma.TransactionClient,
   where: { messageId?: string; threadId?: string; pollId: string },
-): Promise<PollMessage | null> {
-  const found = await tx.message.findFirst({
-    where: {
-      ...(where.messageId ? { id: where.messageId } : {}),
-      ...(where.threadId ? { threadId: where.threadId } : {}),
-      blocks: { array_contains: [{ kind: "poll", pollId: where.pollId }] },
-    },
-    select: { id: true, threadId: true },
-  });
-  if (!found) return null;
-  // The thread row serializes every vote and the close of one conversation's polls.
-  await tx.$queryRaw`SELECT id FROM threads WHERE id = ${found.threadId} FOR UPDATE`;
-  const message = await tx.message.findUnique({
-    where: { id: found.id },
-    select: {
-      id: true,
-      threadId: true,
-      botId: true,
-      blocks: true,
-      thread: { select: { spaceId: true, userId: true, botId: true, groupId: true } },
-    },
-  });
-  return message ? { ...message, blocks: message.blocks as MessageBlock[] } : null;
+): Promise<CardMessage | null> {
+  return lockedCardMessage(tx, { ...where, match: { kind: "poll", pollId: where.pollId } });
 }
 
 /** The other assistants in the conversation a team poll also waits for. */
-async function teamBotIds(tx: Prisma.TransactionClient, message: PollMessage): Promise<string[]> {
+async function teamBotIds(tx: Prisma.TransactionClient, message: CardMessage): Promise<string[]> {
   if (!message.thread.groupId) return [];
   const members = await tx.chatGroupMember.findMany({
     where: { groupId: message.thread.groupId, bot: { archivedAt: null } },
@@ -58,23 +30,16 @@ async function teamBotIds(tx: Prisma.TransactionClient, message: PollMessage): P
   return members.map((member) => member.botId).filter((id) => id !== message.botId);
 }
 
-async function rewritePoll(
+function rewritePoll(
   tx: Prisma.TransactionClient,
-  message: PollMessage,
+  message: CardMessage,
   next: PollBlock,
 ): Promise<number> {
-  const botId = message.botId ?? message.thread.botId;
-  if (!botId) throw new Error("A poll card always belongs to a bot message.");
-  const blocks = message.blocks.map((block) => (isPoll(block, next.pollId) ? next : block));
-  await tx.message.update({ where: { id: message.id }, data: { blocks } });
-  const event = await appendEventInTransaction(tx, {
-    spaceId: message.thread.spaceId,
-    threadId: message.threadId,
-    botId,
-    type: "thread.message.updated",
-    payload: { messageId: message.id, role: "bot", blocks },
-  });
-  return event.seq;
+  return rewriteCardMessage(
+    tx,
+    message,
+    message.blocks.map((block) => (isPoll(block, next.pollId) ? next : block)),
+  );
 }
 
 export type PollVoteResult =

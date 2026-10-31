@@ -1,10 +1,11 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { MessageBlock } from "@rakazo/contracts";
-import { abortableDelay, formatWorkDuration, pollTally } from "@rakazo/core";
+import type { CanvasJson, MessageBlock } from "@rakazo/contracts";
+import { abortableDelay, canvasDocument, formatWorkDuration, pollTally } from "@rakazo/core";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import { X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BuiCard, SuccessPop } from "../../components/ai/primitives";
+import { SandboxedHtmlViewer } from "../../components/SandboxedHtmlViewer";
 import type { ArtifactTarget } from "../../lib/artifact-open";
 import { chartViewport } from "../../lib/chart-viewport";
 import { connectMcpOauth } from "../../lib/mcp-connect";
@@ -693,5 +694,184 @@ export function PollCard({
         {open ? t`Closes in ${time}` : t`Closed`}
       </time>
     </BuiCard>
+  );
+}
+
+/**
+ * An agent-written app in the sandboxed frame. Its saved data is read once per revision, so
+ * the app's own saves never reload it; a new revision from the agent does.
+ */
+export function CanvasCard({
+  target,
+  block,
+}: {
+  target: ArtifactTarget;
+  block: Extract<MessageBlock, { kind: "canvas" }>;
+}) {
+  const { t } = useLingui();
+  const [expanded, setExpanded] = useState(false);
+  const [document] = useState(() => canvasDocument(block.html, block.state));
+  const [error, setError] = useState<string | null>(null);
+  const pending = useRef<{ state: CanvasJson } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const save = useCallback(
+    (state: CanvasJson) => {
+      pending.current = { state };
+      clearTimeout(timer.current);
+      // An app may save on every keystroke; the latest data wins.
+      timer.current = setTimeout(() => {
+        const next = pending.current;
+        pending.current = null;
+        if (!next) return;
+        const scope = "botId" in target ? { botId: target.botId } : { groupId: target.groupId };
+        rpc.threads
+          .saveCanvasState({ ...scope, canvasId: block.canvasId, state: next.state })
+          .then(() => setError(null))
+          .catch((err) => setError(errorText(err, t`Could not save`)));
+      }, 600);
+    },
+    [target, block.canvasId, t],
+  );
+  return (
+    <>
+      <BuiCard data-testid="canvas-card" className="w-[min(640px,74%)] overflow-hidden p-0">
+        <div className="flex items-center justify-between gap-2 px-4 py-2.5">
+          <span className="truncate text-[14px] font-medium text-foreground" dir="auto">
+            {block.title}
+          </span>
+          <Button variant="ghost" size="xs" onClick={() => setExpanded(true)}>
+            <Trans>Expand</Trans>
+          </Button>
+        </div>
+        <div className="h-[420px] border-t border-border">
+          {expanded ? null : (
+            <SandboxedHtmlViewer html={document} title={block.title} onCanvasSave={save} />
+          )}
+        </div>
+        {error ? <p className="px-4 py-2 text-xs text-destructive">{error}</p> : null}
+      </BuiCard>
+      <Dialog open={expanded} onOpenChange={setExpanded}>
+        <DialogContent
+          showCloseButton={false}
+          className="flex h-[92vh] w-[min(1320px,94vw)] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        >
+          <div className="flex items-center justify-between px-4 py-2">
+            <DialogTitle className="text-[13px] font-normal text-muted-foreground">
+              {block.title}
+            </DialogTitle>
+            <DialogClose aria-label={t`Close`} render={<Button variant="ghost" size="icon-sm" />}>
+              <X />
+            </DialogClose>
+          </div>
+          <div className="min-h-0 flex-1">
+            <SandboxedHtmlViewer html={document} title={block.title} onCanvasSave={save} />
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+/** Records laid out by an agent: a table, a board with one lane per value, or metric cards. */
+export function ViewBlockView({ block }: { block: Extract<MessageBlock, { kind: "view" }> }) {
+  const cell = (value: unknown) => (value === null || value === undefined ? "" : String(value));
+  const title = block.title ? (
+    <p className="mb-2 text-[14px] font-medium text-foreground" dir="auto">
+      {block.title}
+    </p>
+  ) : null;
+  if (block.layout === "metrics")
+    return (
+      <div data-testid="view-block" className="max-w-[74%]">
+        {title}
+        <div className="flex flex-wrap gap-2">
+          {block.metrics.map((metric) => (
+            <div key={metric.label} className="min-w-32 rounded-xl bg-muted px-3.5 py-2.5">
+              <p className="text-[12px] text-muted-foreground" dir="auto">
+                {metric.label}
+              </p>
+              <p className="text-[20px] font-semibold tabular-nums text-foreground" dir="auto">
+                {metric.value}
+              </p>
+              {metric.detail ? (
+                <p className="text-[12px] text-muted-foreground" dir="auto">
+                  {metric.detail}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  const columns = block.columns.length
+    ? block.columns
+    : Object.keys(block.rows[0] ?? {}).map((key) => ({ key, label: key }));
+  if (block.layout === "board") {
+    const groupBy = block.groupBy ?? "";
+    const lanes = [...new Set(block.rows.map((row) => cell(row[groupBy])))];
+    const shown = columns.filter((column) => column.key !== groupBy);
+    return (
+      <div data-testid="view-block" className="max-w-full">
+        {title}
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {lanes.map((lane) => {
+            const rows = block.rows.filter((row) => cell(row[groupBy]) === lane);
+            return (
+              <section key={lane} className="w-60 shrink-0 rounded-xl bg-muted p-2">
+                <h4 className="mb-1.5 flex justify-between px-1 text-[12.5px] font-medium text-foreground">
+                  <span className="truncate" dir="auto">
+                    {lane || "—"}
+                  </span>
+                  <span className="tabular-nums text-muted-foreground">{rows.length}</span>
+                </h4>
+                <ul className="grid gap-1.5">
+                  {rows.map((row, index) => (
+                    <li key={index} className="rounded-lg bg-background px-2.5 py-2 text-[12.5px]">
+                      {shown.map((column, at) => (
+                        <p
+                          key={column.key}
+                          dir="auto"
+                          className={at ? "text-muted-foreground" : "font-medium text-foreground"}
+                        >
+                          {cell(row[column.key])}
+                        </p>
+                      ))}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="view-block" className="max-w-full overflow-x-auto">
+      {title}
+      <table className="w-full border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            {columns.map((column) => (
+              <th key={column.key} className="px-2 py-1.5 font-medium" dir="auto">
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {block.rows.map((row, index) => (
+            <tr key={index} className="border-b border-border last:border-0">
+              {columns.map((column) => (
+                <td key={column.key} className="px-2 py-1.5 text-foreground" dir="auto">
+                  {cell(row[column.key])}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

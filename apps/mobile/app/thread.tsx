@@ -115,6 +115,7 @@ import { FailedSendBubble } from "../components/failed-send-bubble";
 import { GlassSurface } from "../components/glass-surface";
 import type { ImageArtifactPreviewTarget } from "../components/image-artifact-viewer";
 import { InlineImageAttachment } from "../components/inline-image-attachment";
+import { isLiveCardBlock, LiveCards } from "../components/LiveCards";
 import { McpApprovalCard } from "../components/McpApprovalCard";
 import type { MarkdownArtifactPreviewTarget } from "../components/markdown-artifact-preview";
 import { MarkdownArtifactPreview } from "../components/markdown-artifact-preview";
@@ -124,7 +125,6 @@ import { MessageContextMenu } from "../components/message-context-menu";
 import { NativeActionButton } from "../components/native-action-button";
 import { NativeSwitch } from "../components/native-switch";
 import { NativeSymbol } from "../components/native-symbol";
-import { PollCard } from "../components/PollCard";
 import { ReplyDismissButton } from "../components/reply-dismiss-button";
 import { ReplyLine } from "../components/reply-line";
 import { StageTranscript } from "../components/StageTranscript";
@@ -3389,9 +3389,7 @@ const MessageBubble = memo(function MessageBubble({
     (block): block is Extract<MessageBlock, { kind: "mcp_approval" }> =>
       block.kind === "mcp_approval",
   );
-  const pollBlocks = message.blocks.filter(
-    (block): block is Extract<MessageBlock, { kind: "poll" }> => block.kind === "poll",
-  );
+  const liveCards = message.blocks.filter(isLiveCardBlock);
   const attachments = message.blocks.filter(
     (block) => block.kind === "image" || block.kind === "file",
   );
@@ -3535,9 +3533,7 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
-        {pollBlocks.map((block) => (
-          <PollCard key={block.pollId} target={artifactTarget} block={block} />
-        ))}
+        <LiveCards blocks={liveCards} target={artifactTarget} />
         {attachments.map(renderAttachment)}
       </View>
     );
@@ -3691,7 +3687,7 @@ const MessageBubble = memo(function MessageBubble({
       </Pressable>
     );
   }
-  const inlineCardCount = appConnectBlocks.length + mcpApprovalBlocks.length + pollBlocks.length;
+  const inlineCardCount = appConnectBlocks.length + mcpApprovalBlocks.length + liveCards.length;
   if (inlineCardCount > 0 && inlineCardCount === message.blocks.length) {
     return (
       <View style={{ gap: 8, width: "100%" }}>
@@ -3714,9 +3710,7 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
-        {pollBlocks.map((block) => (
-          <PollCard key={block.pollId} target={artifactTarget} block={block} />
-        ))}
+        <LiveCards blocks={liveCards} target={artifactTarget} />
       </View>
     );
   }
@@ -3814,9 +3808,7 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
-        {pollBlocks.map((block) => (
-          <PollCard key={block.pollId} target={artifactTarget} block={block} />
-        ))}
+        <LiveCards blocks={liveCards} target={artifactTarget} />
         {attachments.map(renderAttachment)}
       </View>
     );
@@ -3889,9 +3881,7 @@ const MessageBubble = memo(function MessageBubble({
             onAccessibilityAction={actionProps.onAccessibilityAction}
           />
         ))}
-        {pollBlocks.map((block) => (
-          <PollCard key={block.pollId} target={artifactTarget} block={block} />
-        ))}
+        <LiveCards blocks={liveCards} target={artifactTarget} />
       </View>
     );
   }

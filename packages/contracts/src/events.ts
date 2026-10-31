@@ -333,6 +333,66 @@ export const PollBlockSchema = z.object({
 });
 export type PollBlock = z.infer<typeof PollBlockSchema>;
 
+/** Most a canvas's own saved data may take. */
+export const CANVAS_STATE_MAX_BYTES = 64_000;
+/** Most HTML one canvas may carry. */
+export const CANVAS_HTML_MAX_BYTES = 150_000;
+
+/**
+ * A small interactive app an agent wrote for this conversation. It runs in the sandboxed HTML
+ * frame (no network, no app session); the agent can rewrite it, and the app can save its own
+ * data, which the agent reads back.
+ */
+export type CanvasJson =
+  | string
+  | number
+  | boolean
+  | null
+  | CanvasJson[]
+  | { [key: string]: CanvasJson };
+export const CanvasJsonSchema: z.ZodType<CanvasJson> = z.lazy(() =>
+  z.union([
+    z.string(),
+    z.number(),
+    z.boolean(),
+    z.null(),
+    z.array(CanvasJsonSchema),
+    z.record(z.string(), CanvasJsonSchema),
+  ]),
+);
+
+export const CanvasBlockSchema = z.object({
+  kind: z.literal("canvas"),
+  canvasId: Id,
+  title: z.string(),
+  html: z.string(),
+  revision: z.number().int().positive(),
+  /** The app's own saved data, as JSON. */
+  state: CanvasJsonSchema.optional(),
+});
+export type CanvasBlock = z.infer<typeof CanvasBlockSchema>;
+
+const ViewCell = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+
+/** Records an agent lays out for reading: a table, a board grouped by one column, or metrics. */
+export const ViewBlockSchema = z.object({
+  kind: z.literal("view"),
+  title: z.string().optional(),
+  layout: z.enum(["table", "board", "metrics"]),
+  columns: z
+    .array(z.object({ key: z.string(), label: z.string() }))
+    .max(12)
+    .default([]),
+  rows: z.array(z.record(z.string(), ViewCell)).max(500).default([]),
+  /** Board layout: the column whose values name the lanes. */
+  groupBy: z.string().optional(),
+  metrics: z
+    .array(z.object({ label: z.string(), value: z.string(), detail: z.string().optional() }))
+    .max(8)
+    .default([]),
+});
+export type ViewBlock = z.infer<typeof ViewBlockSchema>;
+
 export const AskBlockSchema = z
   .object({
     kind: z.literal("ask"),
@@ -528,6 +588,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
   }),
   ChartBlock,
   PollBlockSchema,
+  CanvasBlockSchema,
+  ViewBlockSchema,
   z.object({
     /** Approval card for an agent-created MCP server. The user completes the
         OAuth popup (or confirms no authorization is needed) in the UI. The
