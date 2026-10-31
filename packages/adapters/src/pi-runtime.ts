@@ -39,6 +39,7 @@ import type {
   AgentRuntime,
   AgentRuntimeEvent,
   AgentSteeringMessage,
+  AgentThinking,
   AgentToolCompletion,
   AgentToolExecutionResult,
   AgentUsage,
@@ -772,6 +773,8 @@ export class PiAgentRuntime implements AgentRuntime {
             }
           }
           if (event.type === "message_end" && event.message.role === "assistant") {
+            const thinking = messageThinking(event.message);
+            if (thinking) queue.push({ type: "thinking", ...thinking });
             const text = assistantText(event.message);
             const streamedThisMessage = currentMessageStreamed;
             currentMessageStreamed = "";
@@ -1528,7 +1531,10 @@ function toHistory(
         return {
           ...metadata,
           role: "assistant" as const,
-          content: [{ type: "text" as const, text: m.content }],
+          content: [
+            ...replayableThinking(m.thinking, model),
+            { type: "text" as const, text: m.content },
+          ],
           api: model.api,
           provider: model.provider,
           model: model.id,
@@ -1551,6 +1557,52 @@ function toHistory(
           : m.content,
       };
     });
+}
+
+/** A reply's own reasoning goes back only to the model that wrote it; signatures are model-bound. */
+export function replayableThinking(thinking: AgentThinking | undefined, model: Model<Api>) {
+  if (
+    !thinking ||
+    thinking.provider !== model.provider ||
+    thinking.model !== model.id ||
+    thinking.api !== model.api
+  )
+    return [];
+  return thinking.blocks.map((block) => ({ type: "thinking" as const, ...block }));
+}
+
+/** Thinking blocks of one assistant message, or null when it streamed none. */
+export function messageThinking(message: {
+  content: unknown;
+  provider?: string;
+  model?: string;
+  api?: string;
+}): AgentThinking | null {
+  if (!Array.isArray(message.content) || !message.provider || !message.model || !message.api)
+    return null;
+  const blocks = message.content
+    .filter(
+      (
+        block,
+      ): block is {
+        type: "thinking";
+        thinking: string;
+        thinkingSignature?: string;
+        redacted?: boolean;
+      } =>
+        Boolean(block) &&
+        typeof block === "object" &&
+        (block as { type?: unknown }).type === "thinking",
+    )
+    .filter((block) => block.thinking || block.thinkingSignature)
+    .map((block) => ({
+      thinking: block.thinking ?? "",
+      ...(block.thinkingSignature ? { thinkingSignature: block.thinkingSignature } : {}),
+      ...(block.redacted ? { redacted: true } : {}),
+    }));
+  return blocks.length
+    ? { provider: message.provider, model: message.model, api: message.api, blocks }
+    : null;
 }
 
 function withoutSteeringMessages(

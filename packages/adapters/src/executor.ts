@@ -7,6 +7,7 @@ import type {
   AgentRunRequest,
   AgentRuntime,
   AgentRuntimeEvent,
+  AgentThinking,
   AgentToolCompletion,
   AgentToolExecutionObserver,
   ArtifactStore,
@@ -238,6 +239,7 @@ import {
   IsolationError,
   isNativeHumanMessage,
   isTooManyDatabaseConnections,
+  loadMessageThinking,
   loadRunHistoryMessages,
   loadRunHumanSources,
   loadVerifiedRecruitingSchedulingPlan,
@@ -265,6 +267,7 @@ import {
   resolveRecruitingReply,
   SpaceLimitError,
   saveRecruitingCalibrationRound,
+  saveRunThinking,
   searchHistory,
   skipRateLimitedRun,
   unitVector,
@@ -4712,13 +4715,16 @@ export function createRunExecutor(deps: ExecutorDeps) {
           summary: threadContext.summary,
           historyCompactedUpToSeq: threadContext.historyCompactedUpToSeq,
         });
+        // This bot's own recent replies carry the reasoning behind them, for the same model only.
+        const savedThinking = await loadMessageThinking(
+          deps.prisma,
+          compactedHistory.history.flatMap((m) => (m.role === "assistant" && m.id ? [m.id] : [])),
+        ).catch(() => new Map<string, AgentThinking>());
         let history: AgentRunRequest["history"] = compactedHistory.history.map(
-          ({ id, role, content, createdAt }) => ({
-            id,
-            createdAt,
-            role,
-            content,
-          }),
+          ({ id, role, content, createdAt }) => {
+            const thinking = id ? savedThinking.get(id) : undefined;
+            return { id, createdAt, role, content, ...(thinking ? { thinking } : {}) };
+          },
         );
         const historyMessages = [
           ...messages,
@@ -5467,6 +5473,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : "This entire computer workspace is your private home. Relative file paths and shell working directories start at its root.";
 
         let assembled = "";
+        let lastThinking: AgentThinking | undefined;
         let currentTextSegment = "";
         let messageSegments: MessageBlock[] = [];
         // Terminal subagent rows are published as their own messages (not appended to
@@ -13822,6 +13829,9 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 { spaceId: run.spaceId, threadId: run.threadId, botId: run.botId, runId },
                 event,
               );
+            } else if (event.type === "thinking") {
+              const { type: _type, ...thinking } = event;
+              lastThinking = thinking;
             } else if (event.type === "done") {
               if (!assembled && event.text) {
                 if (publishedMidTurnUserMessage || discardedMidTurnNarration) {
@@ -14062,6 +14072,11 @@ export function createRunExecutor(deps: ExecutorDeps) {
           });
           if (!completed) return;
           logRunTiming("completed");
+          // The reasoning behind this reply, for the same model's next turn. Never blocks the run.
+          if (lastThinking)
+            await saveRunThinking(deps.prisma, runId, lastThinking).catch((error) =>
+              getLogger().warn("run thinking save failed", { reason: String(error) }),
+            );
           // Every message a person writes gets a reply: once the conversation goes quiet, check
           // that its newest message was answered.
           await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>
