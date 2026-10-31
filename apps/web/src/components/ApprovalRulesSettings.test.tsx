@@ -100,6 +100,59 @@ it("requires approval for an exact tool and keeps failed edits retryable without
       matchKind: "category",
       matchValue: "purchase",
     });
+    await fill("mcp__service__send_email");
+    await act(async () => button("Block").click());
+    expect(api.set).toHaveBeenLastCalledWith({
+      effect: "block",
+      matchKind: "tool",
+      matchValue: "mcp__service__send_email",
+    });
+    expect(container.textContent).toContain("Block mcp__service__send_email");
+    await fill("mcp__service__delete_record");
+    await act(async () => button("Hide").click());
+    expect(api.set).toHaveBeenLastCalledWith({
+      effect: "hide",
+      matchKind: "tool",
+      matchValue: "mcp__service__delete_record",
+    });
+    expect(container.textContent).toContain("Hide mcp__service__delete_record");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+it("limits the computer to allowed sites and adds a site", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  api.list.mockReset().mockResolvedValue([
+    { id: "lock", effect: "block", matchKind: "egress", matchValue: "*", createdAt: "" },
+  ]);
+  api.autoReview.mockReset().mockResolvedValue({ enabled: false, checkerAvailable: false });
+  api.set.mockReset().mockImplementation(async (input) => ({ id: input.matchValue, ...input }));
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(<ApprovalRulesSettings />));
+    const input = container.querySelector<HTMLInputElement>('input[aria-label="Allowed site"]');
+    if (!input) throw new Error("Missing allowed site input");
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
+        input,
+        "pypi.org",
+      );
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    const allow = [...container.querySelectorAll("button")].find(
+      (item) => item.textContent?.trim() === "Allow",
+    );
+    await act(async () => allow?.click());
+    expect(api.set).toHaveBeenLastCalledWith({
+      effect: "always_allow",
+      matchKind: "egress",
+      matchValue: "pypi.org",
+    });
+    expect(container.textContent).toContain("Computer may reach pypi.org");
   } finally {
     await act(async () => root.unmount());
     container.remove();

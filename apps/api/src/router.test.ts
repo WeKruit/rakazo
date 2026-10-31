@@ -24,6 +24,7 @@ import { ATTACHMENT_MAX_COUNT, REPLY_QUOTE_MAX_LENGTH } from "@rakazo/contracts"
 import { openScreenCapability } from "@rakazo/core/node/screen-capability";
 import type { PrismaClient } from "@rakazo/db";
 import { recruitingPresetId } from "@rakazo/db";
+import { withLatestThreadRows } from "@rakazo/db/test-support";
 import { createLogger, createTestSink, installLogger } from "@rakazo/logging";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RouterDeps } from "./router.js";
@@ -4325,7 +4326,7 @@ describe("bot model auth on save", () => {
       $transaction: vi.fn(async (fn: (client: typeof tx) => unknown) => fn(tx)),
     };
     const deps = {
-      prisma,
+      prisma: withLatestThreadRows(prisma),
       secrets: {
         load: (ciphertext: string) =>
           options.plaintext ?? (ciphertext === "cipher-oauth" ? oauth : apiKey),
@@ -6348,9 +6349,9 @@ describe("spaces.subscribe", () => {
         ),
       },
       run: { findMany: vi.fn(async () => []) },
-    } as unknown as PrismaClient;
+    };
     const deps = {
-      prisma,
+      prisma: withLatestThreadRows(prisma),
       events: { followSidebar: vi.fn(() => follow) },
       env: { webOrigin: "http://127.0.0.1:5173", screenProxySecret: "fake-test-secret" },
       dataDir: "/tmp/rakazo-router-test",

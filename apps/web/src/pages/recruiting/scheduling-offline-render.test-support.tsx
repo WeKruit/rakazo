@@ -47,6 +47,7 @@ export async function renderSchedulingProjection(projected: RecruitingCorrespond
     expect(correspondenceRpc).toHaveBeenCalledWith({
       groupId: "synthetic-group",
       view: "interview",
+      limit: 200,
     });
     const zone = host.querySelector<HTMLSelectElement>('select[aria-label="Display timezone"]')!;
     await act(async () => {

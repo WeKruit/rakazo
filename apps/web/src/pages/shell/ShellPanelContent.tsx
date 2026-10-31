@@ -28,6 +28,8 @@ import {
   RoutineListHeader,
   RoutineListRow,
   routineNeedsOneShotArm,
+  routineOptionInput,
+  SharedRoutineOffers,
 } from "../RoutineList";
 
 const GroupSettings = lazyPanel(() =>
@@ -309,6 +311,10 @@ export function ShellPanelContent({
                   />
                 );
               })}
+              <SharedRoutineOffers
+                botId={active.id}
+                onAdded={() => refreshThread(active.id).catch(() => undefined)}
+              />
             </div>
           ) : null}
           {panel === "recruiting" && activeSnapshot?.threadId ? (
@@ -488,6 +494,10 @@ export function ShellPanelContent({
                       ...(armOneShot || routineDraft.active !== targetRoutine.active
                         ? { active: armOneShot ? true : routineDraft.active }
                         : {}),
+                      ...(routineDraft.notify !== targetRoutine.notify
+                        ? { notify: routineDraft.notify }
+                        : {}),
+                      ...routineOptionInput(routineDraft, targetRoutine),
                       webhookEnabled: routineDraft.webhookEnabled,
                       githubEnabled: routineDraft.githubEnabled,
                       messageProvider: routineDraft.messageProvider,
@@ -506,7 +516,8 @@ export function ShellPanelContent({
                       crons,
                       timezone: localTimezone(),
                       active: routineDraft.active,
-                      notify: true,
+                      notify: routineDraft.notify,
+                      ...routineOptionInput(routineDraft),
                       webhookEnabled: routineDraft.webhookEnabled,
                       githubEnabled: routineDraft.githubEnabled,
                       messageProvider: routineDraft.messageProvider,

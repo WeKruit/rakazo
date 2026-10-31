@@ -10,6 +10,7 @@ import { authClient } from "../../lib/auth";
 import { desktopBridge } from "../../lib/desktop";
 import { withFeatureMessages } from "../../lib/i18n";
 import { clearSpaceSelection } from "../../lib/rpc";
+import { savedThreads } from "../../lib/saved-threads";
 
 import { RecruitingNavigation } from "../shell/RecruitingNavigation";
 import type { useShellController } from "../shell/useShellController";
@@ -242,6 +243,7 @@ export function ShellSidebar({ model }: { model: ReturnType<typeof useShellContr
           onClick={() =>
             void authClient.signOut().then(() => {
               clearSpaceSelection();
+              void savedThreads.clear();
               navigate("/");
             })
           }

@@ -85,7 +85,7 @@ export async function withIsolationTestCopies(clients, run) {
                   artifactId: artifact.id,
                   sha256: createHash("sha256").update(content).digest("hex"),
                 },
-                locator: "full text",
+                locator: "text",
               },
               readState: "read",
               readAt: new Date().toISOString(),

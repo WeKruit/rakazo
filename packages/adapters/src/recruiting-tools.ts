@@ -45,10 +45,12 @@ import {
   readRecruitingResearchContext,
   recordRecruitingResearchObservation,
   recruitingCsvImportReceipt,
+  recruitingGradesReceipt,
   recruitingPeopleSearchReceipt,
   recruitingResearchSnapshot,
   saveNativeRecruitingCandidatePage,
   saveRecruitingCandidateCsvImport,
+  saveRecruitingCandidateGrades,
   saveRecruitingCandidatePeopleSearch,
   scoped,
 } from "@rakazo/db";
@@ -1546,4 +1548,38 @@ export function repairedRoleSave(
       ? {}
       : { intent: { ...intentRecord, ...(quote ? { quote } : {}) } }),
   };
+}
+
+/** The quality check's own grades for saved people: one receipt artifact, then one role page. */
+export async function saveRecruitingGrades(
+  deps: ResearchDeps,
+  trusted: ResearchActor & {
+    leaseOwner: string;
+    leaseFence: number;
+    effectId: string;
+    effectRequest: unknown;
+  },
+  input: Extract<RecruitingResearchToolInput, { operation: "save_grades" }>,
+  context: AdapterContext,
+) {
+  if (
+    context.runId !== trusted.runId ||
+    context.spaceId !== trusted.actor.spaceId ||
+    context.userId !== trusted.actor.userId
+  )
+    throw new IsolationError();
+  const bytes = Buffer.from(stableJsonValue(recruitingGradesReceipt(input)), "utf8");
+  const hash = createHash("sha256").update(bytes).digest("hex");
+  const name = `recruiting-grades-${hash}.json`;
+  const stored = await deps.artifacts.put({ name, mimeType: "application/json", bytes }, context);
+  return saveRecruitingCandidateGrades(deps.prisma, trusted.actor, trusted, input, {
+    outputArtifact: {
+      name,
+      mimeType: "application/json",
+      size: bytes.byteLength,
+      hash,
+      storageKey: stored.id,
+      clientNonce: `recruiting-grades:${trusted.effectId}`,
+    },
+  });
 }

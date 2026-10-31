@@ -6,8 +6,13 @@ import {
   extractRoutineSkillMentions,
   findSkillByName,
   formatSkillsCatalogInstruction,
+  isSkillFilePath,
   mergeBuiltinSkills,
+  missingSkillRequirement,
   parseSkillMd,
+  SKILL_CATALOG_DESCRIPTION_MAX,
+  skillAvailabilityFromTools,
+  skillRequirements,
 } from "./agent-skill.js";
 
 describe("built-in skill merging", () => {
@@ -287,5 +292,58 @@ describe("skill prompt helpers", () => {
     expect(line).toContain("- Daily standup: Prepare standup notes");
     expect(line).toContain("skill_read");
     expect(line).toContain("Prefer matching skills");
+  });
+});
+
+describe("skill requirements", () => {
+  const skill = (frontmatter: string) =>
+    `---\nname: Deploy\ndescription: Ship it\n${frontmatter}\n---\nSteps.\n`;
+
+  it("reads tools, connections and secrets from frontmatter", () => {
+    expect(
+      skillRequirements(
+        skill("requires:\n  tools: [web_search, shell]\n  mcp: autumn\n  secrets: [GITHUB_TOKEN]"),
+      ),
+    ).toEqual({ tools: ["web_search", "shell"], mcp: ["autumn"], secrets: ["GITHUB_TOKEN"] });
+    expect(skillRequirements(skill("requires: [web_search]"))).toEqual({
+      tools: ["web_search"],
+      mcp: [],
+      secrets: [],
+    });
+    expect(skillRequirements(skill(""))).toEqual({ tools: [], mcp: [], secrets: [] });
+  });
+
+  it("names the first missing requirement and checks only what the caller can see", () => {
+    const needs = { tools: ["find_emails"], mcp: ["autumn"], secrets: ["GITHUB_TOKEN"] };
+    const available = skillAvailabilityFromTools(["web_search", "mcp__autumn__find_emails"]);
+    expect(available.mcp.has("autumn")).toBe(true);
+    expect(missingSkillRequirement(needs, available)).toBeUndefined();
+    expect(missingSkillRequirement(needs, { ...available, secrets: new Set() })).toBe(
+      "needs secret GITHUB_TOKEN",
+    );
+    expect(missingSkillRequirement(needs, { mcp: new Set(["hubspot"]) })).toBe(
+      "needs connection autumn",
+    );
+  });
+
+  it("marks unavailable skills and keeps catalog descriptions short", () => {
+    const line = formatSkillsCatalogInstruction([
+      {
+        name: "Deploy",
+        description: "x".repeat(1_000),
+        source: "user",
+        readOnly: false,
+        unavailable: "needs connection autumn",
+      },
+    ]);
+    expect(line).toContain("- Deploy (unavailable: needs connection autumn): ");
+    expect(line).toContain("Do not run it");
+    expect(line).not.toContain("x".repeat(SKILL_CATALOG_DESCRIPTION_MAX));
+  });
+
+  it("recognizes skill files in the workspace", () => {
+    expect(isSkillFilePath("skills/deploy/SKILL.md")).toBe(true);
+    expect(isSkillFilePath("SKILL.md")).toBe(true);
+    expect(isSkillFilePath("notes/skill.md")).toBe(false);
   });
 });

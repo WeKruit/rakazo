@@ -182,6 +182,32 @@ describe("company site", () => {
     await resolver.companySite("Busy Org");
     expect([...saved]).toEqual([["example state university", { host: "esu.edu" }]]);
   }, 15_000);
+
+  it("reads a page's saved answers in one store query and answers in the names' order", async () => {
+    const future = Date.now() + 60_000;
+    const store = {
+      get: vi.fn(async () => null),
+      getMany: vi.fn(
+        async () =>
+          new Map([
+            ["acme", { host: "acme.com", expiresAt: future }],
+            ["globex", { host: null, expiresAt: future }],
+          ]),
+      ),
+      put: vi.fn(async () => undefined),
+    };
+    const searchOrganizations = vi.fn(async () => []);
+    const resolver = createCompanySiteResolver({ store, searchOrganizations });
+    expect(await resolver.companySites(["Globex", "Acme Inc.", "Acme", ""])).toEqual([
+      { host: null },
+      { host: "acme.com" },
+      { host: "acme.com" },
+      { host: null },
+    ]);
+    expect(store.getMany).toHaveBeenCalledExactlyOnceWith(["globex", "acme"]);
+    expect(store.get).not.toHaveBeenCalled();
+    expect(searchOrganizations).not.toHaveBeenCalled();
+  });
 });
 
 async function sharpPng() {

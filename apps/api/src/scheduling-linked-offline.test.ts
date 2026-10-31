@@ -45,6 +45,7 @@ vi.mock("../../../packages/adapters/src/computer-workspace.js", async (original)
 }));
 vi.mock("@rakazo/db", async (original) => ({
   ...(await original<Record<string, unknown>>()),
+  readRecruitingImportedCorrespondence: vi.fn(async () => null),
   getRecruitingWorkspace: vi.fn(),
 }));
 

@@ -558,18 +558,23 @@ function SavedCorrespondenceView({
   const candidateOf = (email: SavedCorrespondence["emails"][number]) =>
     matchesTarget(email)
       ? `candidate:${email.crm!.candidateId}`
-      : email.sourceId && email.eaccount && email.campaignId !== undefined && email.providerThreadId
-        ? JSON.stringify([
-            "unidentified-thread",
-            email.sourceId,
-            email.eaccount,
-            email.campaignId,
-            email.providerThreadId,
-            email.crm?.organizationId,
-            email.crm?.crmRoleId,
-            email.crm?.candidateId,
-          ])
-        : `message:${email.id}`;
+      : email.imported && email.candidateKey
+        ? `imported-candidate:${email.candidateKey}`
+        : email.sourceId &&
+            email.eaccount &&
+            email.campaignId !== undefined &&
+            email.providerThreadId
+          ? JSON.stringify([
+              "unidentified-thread",
+              email.sourceId,
+              email.eaccount,
+              email.campaignId,
+              email.providerThreadId,
+              email.crm?.organizationId,
+              email.crm?.crmRoleId,
+              email.crm?.candidateId,
+            ])
+          : `message:${email.id}`;
   const loadedEmails = data?.emails ?? [];
   const unreadCount = loadedEmails.filter((email) => email.unread === true).length;
   const unknownReadCount = loadedEmails.filter((email) => email.unread == null).length;
@@ -1001,6 +1006,7 @@ function SavedCorrespondenceView({
               {threadEmails.length ||
               (data.emails.length && !data.partial && !data.nextCursor && mailFilter === "all") ? (
                 <EmailConversation
+                  artifactTarget={artifactTarget}
                   candidateName={selectedPerson?.name}
                   candidateTitle={selectedPerson?.title}
                   onOpenProfile={
@@ -1040,7 +1046,7 @@ function SavedCorrespondenceView({
                   }
                 />
               ) : null}
-              {parsed?.success && workspace?.role.revision ? (
+              {parsed?.success && workspace?.role.revision && !selected?.imported ? (
                 <>
                   <Button variant="outline" onClick={() => setPlanningKey(planKey)}>
                     <Trans>Plan interview</Trans>

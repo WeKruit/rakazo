@@ -316,11 +316,14 @@ export function RecruitingDetailPanel({
       }}
     >
       <header className="flex items-center gap-1 border-b border-sidebar-border px-3 py-2">
-        {depth > 1 ? (
-          <Button variant="ghost" size="icon-sm" aria-label={t`Back`} onClick={controller.back}>
-            <ArrowLeft size={18} aria-hidden />
-          </Button>
-        ) : null}
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t`Back`}
+          onClick={depth > 1 ? controller.back : controller.close}
+        >
+          <ArrowLeft size={18} aria-hidden />
+        </Button>
         <span className="flex-1" />
         {current.walk ? (
           <>

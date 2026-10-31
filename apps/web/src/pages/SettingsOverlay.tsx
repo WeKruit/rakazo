@@ -95,7 +95,11 @@ export function SettingsOverlay({
   const { t } = useLingui();
   const panelRef = useRef<HTMLDivElement>(null);
   const usageRef = useRef<HTMLDivElement>(null);
-  const [section, setSection] = useState<SettingsSection>(initialSection);
+  const [requestedSection, setSection] = useState<SettingsSection>(initialSection);
+  const section =
+    !isDeploymentOwner && ["models", "voice", "updates"].includes(requestedSection)
+      ? "general"
+      : requestedSection;
   const [memoryBusy, setMemoryBusy] = useState(false);
   const [voiceBusy, setVoiceBusy] = useState(false);
   const [keepComputerRecovery, setKeepComputerRecovery] = useState(false);
@@ -150,22 +154,24 @@ export function SettingsOverlay({
     }
   }, [section, onUsageOpen]);
 
-  const navItems: NavItem[] = [
-    { id: "general", label: t`General`, icon: Settings },
-    { id: "models", label: t`Models`, icon: Cpu },
-    { id: "memory", label: t`Memory`, icon: Brain },
-    { id: "voice", label: t`Voice`, icon: Volume2 },
-    { id: "usage", label: t`Usage`, icon: Gauge },
-    ...(usage?.canViewInternalCosts
-      ? [
-          { id: "internal-costs" as const, label: t`Internal Costs`, icon: ChartNoAxesCombined },
-          { id: "work-metrics" as const, label: t`Work Metrics`, icon: Activity },
-        ]
-      : []),
-    ...(showComputer ? [{ id: "computer" as const, label: t`Computer`, icon: Monitor }] : []),
-    ...(billingEnabled ? [{ id: "billing" as const, label: t`Billing`, icon: CreditCard }] : []),
-    { id: "updates", label: t`Updates`, icon: CloudDownload },
-  ];
+  const navItems = (
+    [
+      { id: "general", label: t`General`, icon: Settings },
+      { id: "models", label: t`Models`, icon: Cpu },
+      { id: "memory", label: t`Memory`, icon: Brain },
+      { id: "voice", label: t`Voice`, icon: Volume2 },
+      { id: "usage", label: t`Usage`, icon: Gauge },
+      ...(usage?.canViewInternalCosts
+        ? [
+            { id: "internal-costs" as const, label: t`Internal Costs`, icon: ChartNoAxesCombined },
+            { id: "work-metrics" as const, label: t`Work Metrics`, icon: Activity },
+          ]
+        : []),
+      ...(showComputer ? [{ id: "computer" as const, label: t`Computer`, icon: Monitor }] : []),
+      ...(billingEnabled ? [{ id: "billing" as const, label: t`Billing`, icon: CreditCard }] : []),
+      { id: "updates", label: t`Updates`, icon: CloudDownload },
+    ] satisfies NavItem[]
+  ).filter((item) => isDeploymentOwner || !["models", "voice", "updates"].includes(item.id));
 
   const sectionTitle =
     navItems.find((item) => item.id === section)?.label ??

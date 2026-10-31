@@ -249,7 +249,7 @@ it("keeps a back stack and returns focus to the opener on Escape", async () => {
   opener.focus();
   await act(async () => opener.click());
   await settle();
-  expect(button(view, "Back")).toBeUndefined();
+  expect(button(view, "Back")).toBeDefined();
   await act(async () => button(panel(view)!, "Emails")!.click());
   await settle();
   await settle();
@@ -269,6 +269,19 @@ it("keeps a back stack and returns focus to the opener on Escape", async () => {
   expect(location).toBe("/app/g/group-1?view=contacts");
   expect(document.activeElement).toBe(opener);
   expect(setSelectedContact).toHaveBeenLastCalledWith(null);
+});
+
+it("returns from the first detail pane to its list", async () => {
+  const view = await mount(<Workbench />);
+  const opener = button(view, "Ada")!;
+  opener.focus();
+  await act(async () => opener.click());
+  await settle();
+  await act(async () => button(panel(view)!, "Back")!.click());
+  await settle();
+  expect(panel(view)).toBeNull();
+  expect(location).toBe("/app/g/group-1?view=contacts");
+  expect(document.activeElement).toBe(opener);
 });
 
 it("closes on browser Back instead of leaving the conversation", async () => {

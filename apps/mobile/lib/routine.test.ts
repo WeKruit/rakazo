@@ -55,4 +55,16 @@ describe("routineStatusLine", () => {
   it("omits the trigger segment when there are no triggers", () => {
     expect(routineStatusLine(routine({}))).toBe("Active · UTC");
   });
+
+  it("says when an active routine runs next", () => {
+    const now = new Date("2026-01-01T09:00:00.000Z");
+    const at = (minutes: number) => new Date(now.getTime() + minutes * 60_000).toISOString();
+    expect(routineStatusLine(routine({ nextRunAt: at(5) }), now)).toBe("Active · UTC · Next in 5m");
+    expect(routineStatusLine(routine({ nextRunAt: at(180) }), now)).toBe(
+      "Active · UTC · Next in 3h",
+    );
+    expect(routineStatusLine(routine({ active: false, nextRunAt: at(5) }), now)).toBe(
+      "Paused · UTC",
+    );
+  });
 });

@@ -15,6 +15,20 @@ export function activeBotId(page: Page) {
   return id;
 }
 
+/** Present the signed-in user as the deployment owner or a customer, whoever signed up first. */
+export async function setDeploymentOwner(page: Page, isDeploymentOwner: boolean) {
+  for (const procedure of ["me", "bootstrap"]) {
+    await page.route(`**/rpc/${procedure}`, async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { json?: Record<string, unknown> };
+      const me = procedure === "me" ? body.json : body.json?.me;
+      if (me && typeof me === "object")
+        (me as Record<string, unknown>).isDeploymentOwner = isDeploymentOwner;
+      await route.fulfill({ response, json: body });
+    });
+  }
+}
+
 export async function rpc<T>(page: Page, procedure: string, body: unknown): Promise<T> {
   const response = await page.request.post(`/rpc/${procedure}`, { data: { json: body } });
   const parsed = (await response.json()) as { json?: T; error?: { message?: string } };

@@ -198,7 +198,6 @@ msgstr "账户 ID"
 msgid "Account label"
 msgstr "账号名称"
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr "账号"
@@ -412,6 +411,10 @@ msgstr "全部时间"
 msgid "All tools"
 msgstr "全部工具"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr "允许"
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -442,6 +445,10 @@ msgstr "允许购买操作，无需询问"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "已允许一次"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr "允许的网站"
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -547,10 +554,6 @@ msgstr "{0} 操作前询问"
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before {0} connector"
 msgstr "{0} 连接器前询问"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before a specific tool"
-msgstr "使用特定工具前先询问"
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
@@ -708,6 +711,15 @@ msgstr "Bearer token"
 #: src/pages/SettingsOverlay.tsx
 msgid "Billing"
 msgstr "账单"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block"
+msgstr "禁止"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block {0}"
+msgstr "禁止 {0}"
 
 #: src/pages/Board.tsx
 msgid "Board"
@@ -1190,6 +1202,20 @@ msgstr "已完成"
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "电脑"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr "电脑可以访问 {0}"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr "电脑不能访问 {0}"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr "电脑只能访问允许的网站"
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"
@@ -1976,6 +2002,10 @@ msgstr "凭据"
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "凭据已加密，不会发送给模型。"
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Credits"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
 msgstr "标准"
@@ -2466,10 +2496,6 @@ msgstr "请输入两个 IANA 时区名称，例如 Asia/Shanghai 和 America/New
 msgid "Error details"
 msgstr "错误详情"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Estimated cost"
-msgstr "估算成本"
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Event details"
 msgstr "日程详情"
@@ -2784,6 +2810,15 @@ msgstr "帮我修改这个岗位已保存的邮件草稿。修改后先不要发
 msgid "Hi, this is how I'll sound when I read replies out loud."
 msgstr "你好，这是我朗读回复时的声音。"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide"
+msgstr "隐藏"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide {0}"
+msgstr "隐藏 {0}"
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "High"
@@ -2925,6 +2960,10 @@ msgstr "感兴趣"
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Internal assessment"
 msgstr "内部评估"
+
+#: src/pages/SettingsOverlay.tsx
+msgid "Internal Costs"
+msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
 #: src/pages/recruiting/CrmHistory.tsx
@@ -3409,10 +3448,6 @@ msgstr "模型 ID"
 msgid "Model options"
 msgstr "模型选项"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Model tokens"
-msgstr "模型 tokens"
-
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model updated."
 msgstr "模型已更新。"
@@ -3564,6 +3599,7 @@ msgid "Next contact campaigns"
 msgstr "联系人的下一批邮件活动"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/RecruitingRoutines.tsx
 msgid "Next page"
 msgstr "下一页"
 
@@ -3691,6 +3727,7 @@ msgstr "还没有与 {peerBotName} 的消息。"
 msgid "No model catalog is available."
 msgstr "没有可用的模型目录。"
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr "没有待办任务。"
@@ -3698,10 +3735,6 @@ msgstr "没有待办任务。"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No outreach files loaded"
 msgstr "未加载邮件文件"
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "No price"
-msgstr "未定价"
 
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "No providers found."
@@ -3838,10 +3871,6 @@ msgstr "无主题"
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "No supported future interval is recorded. Check availability before choosing a time."
 msgstr "没有记录可用的未来时间段。选择时间前请先查看空闲时间。"
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No tasks yet."
-msgstr "暂无任务。"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 msgid "No team conversations yet."
@@ -4244,6 +4273,10 @@ msgstr "已暂停"
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Pending approval"
 msgstr "待批准"
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Pending usage"
+msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/CrmHistory.tsx
@@ -4957,6 +4990,10 @@ msgstr "例行任务"
 msgid "Routines that run while you're away"
 msgstr "在你离开时运行的自动任务"
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Rules for a specific tool"
+msgstr "单个工具的规则"
+
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Run"
@@ -5252,10 +5289,6 @@ msgstr "搜索候选人记录"
 msgid "Search contacts"
 msgstr "搜索联系人"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Search credits"
-msgstr "搜索额度"
-
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Search Criteria"
 msgstr "搜索标准"
@@ -5310,10 +5343,6 @@ msgstr "搜索更新 {0}"
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
 msgstr "搜索：{0}"
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Searches"
-msgstr "搜索次数"
 
 #: src/components/LiveWork.tsx
 msgid "Searching candidates"
@@ -5449,10 +5478,6 @@ msgstr "服务器 URL"
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
 msgstr "服务连接"
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Services"
-msgstr "服务"
 
 #: src/pages/MessagingSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
@@ -6124,7 +6149,6 @@ msgstr "正在更新 {0} 的电脑"
 msgid "Updating Team Computer"
 msgstr "正在更新团队电脑"
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
 msgid "Usage"
 msgstr "用量"

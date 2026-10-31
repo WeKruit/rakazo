@@ -247,6 +247,19 @@ function MemoryDocumentList({
   );
 }
 
+function SkillUnavailableBadge({ reason }: { reason?: string }) {
+  if (!reason) return null;
+  return (
+    <Badge
+      variant="secondary"
+      title={reason}
+      className="rounded-full px-1.5 py-0 text-[11px] font-normal text-warning"
+    >
+      <Trans>Unavailable</Trans>
+    </Badge>
+  );
+}
+
 function SkillSourceBadge({ source }: { source: AgentSkillCatalogEntry["source"] }) {
   if (source !== "builtin" && source !== "plugin") return null;
   return (
@@ -408,6 +421,7 @@ function AgentSkills({
                   {entry.name}
                 </span>
                 <SkillSourceBadge source={entry.source} />
+                <SkillUnavailableBadge reason={entry.unavailable} />
               </span>
               <span
                 className="mt-0.5 block truncate text-[12.5px] text-muted-foreground"

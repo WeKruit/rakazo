@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   buildMcpCredentialBlob,
   deriveMcpSlug,
+  isMcpConfigPath,
+  mcpConfigFileServers,
   needsOAuthProbe,
   parseMcpServerToolArgs,
 } from "./mcp-server-tool.js";
@@ -113,5 +115,51 @@ describe("needsOAuthProbe", () => {
       false,
     );
     expect(needsOAuthProbe({ transport: "stdio", command: "c" } as never)).toBe(false);
+  });
+});
+
+describe("mcpConfigFileServers", () => {
+  it("maps a .mcp.json file to add_mcp_server arguments", () => {
+    expect(isMcpConfigPath(".mcp.json")).toBe(true);
+    expect(isMcpConfigPath("project/mcp.json")).toBe(true);
+    expect(isMcpConfigPath("notes.json")).toBe(false);
+    const servers = mcpConfigFileServers(
+      JSON.stringify({
+        mcpServers: {
+          files: { command: "npx", args: ["-y", "server-files"], env: { ROOT: "/tmp" } },
+          docs: { type: "http", url: "https://mcp.example.com/mcp" },
+          feed: { type: "sse", url: "https://mcp.example.com/sse" },
+        },
+      }),
+    );
+    expect(servers).toEqual([
+      {
+        name: "files",
+        transport: "stdio",
+        command: "npx",
+        args: ["-y", "server-files"],
+        env: { ROOT: "/tmp" },
+      },
+      {
+        name: "docs",
+        transport: "streamable_http",
+        endpoint: "https://mcp.example.com/mcp",
+        headers: undefined,
+      },
+      {
+        name: "feed",
+        transport: "sse",
+        endpoint: "https://mcp.example.com/sse",
+        headers: undefined,
+      },
+    ]);
+    expect(Array.isArray(servers) && parseMcpServerToolArgs(servers[0]!)?.command).toBe("npx");
+  });
+
+  it("explains a file that is not an MCP config", () => {
+    expect(mcpConfigFileServers("{")).toEqual({ error: "MCP config is not valid JSON." });
+    expect(mcpConfigFileServers("{}")).toEqual({
+      error: 'MCP config needs an "mcpServers" object.',
+    });
   });
 });

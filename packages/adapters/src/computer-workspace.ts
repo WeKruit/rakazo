@@ -98,6 +98,46 @@ export async function ensureComputerWorkspaceLayout(
   }
 }
 
+/** Kept in the workspace, so it survives a replacement computer and runs again on it. */
+export const COMPUTER_SETUP_SCRIPT = ".rakazo/setup.sh";
+const SETUP_TIMEOUT_MS = 5 * 60_000;
+
+/**
+ * Run the workspace's setup script on a computer that was just created or replaced, before any
+ * tool uses it. A failing script is logged and never stops the work.
+ */
+export async function runComputerSetupScript(
+  sandbox: SandboxProvider,
+  computer: ComputerRef,
+  context: AdapterContext,
+): Promise<void> {
+  let exitCode: number | undefined;
+  let stderr = "";
+  try {
+    for await (const event of sandbox.execute(
+      computer,
+      {
+        argv: [
+          "bash",
+          "-c",
+          `if [ -f ${COMPUTER_SETUP_SCRIPT} ]; then bash ${COMPUTER_SETUP_SCRIPT}; fi`,
+        ],
+        timeoutMs: SETUP_TIMEOUT_MS,
+      },
+      context,
+    )) {
+      if (event.type === "stderr") stderr = `${stderr}${event.data}`.slice(-500);
+      if (event.type === "exit") exitCode = event.code;
+    }
+  } catch (error) {
+    getLogger().warn("computer.setup_failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return;
+  }
+  if (exitCode !== 0) getLogger().warn("computer.setup_failed", { exitCode, stderr });
+}
+
 const TEAM_BOT_FOLDER_NAME = /^[A-Za-z0-9_-]+$/;
 
 /** A bot id that names exactly one folder under bots/ on a Team Computer. */

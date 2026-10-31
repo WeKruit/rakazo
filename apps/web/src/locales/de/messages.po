@@ -198,7 +198,6 @@ msgstr "Konto-ID"
 msgid "Account label"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr ""
@@ -412,6 +411,10 @@ msgstr ""
 msgid "All tools"
 msgstr ""
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr ""
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -442,6 +445,10 @@ msgstr "Kaufaktionen ohne Nachfrage erlauben"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "Einmal erlaubt"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -547,10 +554,6 @@ msgstr "Vor {0}-Aktionen nachfragen"
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before {0} connector"
 msgstr "Vor {0}-Connector nachfragen"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before a specific tool"
-msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
@@ -707,6 +710,15 @@ msgstr "Bearer-Token"
 
 #: src/pages/SettingsOverlay.tsx
 msgid "Billing"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block {0}"
 msgstr ""
 
 #: src/pages/Board.tsx
@@ -1190,6 +1202,20 @@ msgstr ""
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "Computer"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"
@@ -1976,6 +2002,10 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "Zugangsdaten werden verschlüsselt und dem Modell nie gesendet."
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Credits"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
 msgstr ""
@@ -2466,10 +2496,6 @@ msgstr ""
 msgid "Error details"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Estimated cost"
-msgstr ""
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Event details"
 msgstr ""
@@ -2784,6 +2810,15 @@ msgstr ""
 msgid "Hi, this is how I'll sound when I read replies out loud."
 msgstr "Hallo, so klinge ich, wenn ich Antworten vorlese."
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide {0}"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "High"
@@ -2924,6 +2959,10 @@ msgstr ""
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Internal assessment"
+msgstr ""
+
+#: src/pages/SettingsOverlay.tsx
+msgid "Internal Costs"
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -3409,10 +3448,6 @@ msgstr "Modell-ID"
 msgid "Model options"
 msgstr "Modelloptionen"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Model tokens"
-msgstr ""
-
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model updated."
 msgstr "Modell aktualisiert."
@@ -3564,6 +3599,7 @@ msgid "Next contact campaigns"
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/RecruitingRoutines.tsx
 msgid "Next page"
 msgstr ""
 
@@ -3691,16 +3727,13 @@ msgstr "Noch keine Nachrichten mit {peerBotName}."
 msgid "No model catalog is available."
 msgstr "Kein Modellkatalog verfügbar."
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No outreach files loaded"
-msgstr ""
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "No price"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -3837,10 +3870,6 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "No supported future interval is recorded. Check availability before choosing a time."
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No tasks yet."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4243,6 +4272,10 @@ msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Pending approval"
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Pending usage"
 msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
@@ -4957,6 +4990,10 @@ msgstr "Routinen"
 msgid "Routines that run while you're away"
 msgstr ""
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Rules for a specific tool"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Run"
@@ -5252,10 +5289,6 @@ msgstr ""
 msgid "Search contacts"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Search credits"
-msgstr ""
-
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Search Criteria"
 msgstr ""
@@ -5309,10 +5342,6 @@ msgstr ""
 #. placeholder {0}: filters.query.trim()
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
-msgstr ""
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Searches"
 msgstr ""
 
 #: src/components/LiveWork.tsx
@@ -5448,10 +5477,6 @@ msgstr "Server-URL"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
-msgstr ""
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Services"
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -6124,7 +6149,6 @@ msgstr ""
 msgid "Updating Team Computer"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
 msgid "Usage"
 msgstr "Nutzung"

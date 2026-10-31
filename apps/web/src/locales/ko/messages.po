@@ -198,7 +198,6 @@ msgstr "계정 ID"
 msgid "Account label"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/PluginsOverlay.tsx
 msgid "Accounts"
 msgstr ""
@@ -412,6 +411,10 @@ msgstr ""
 msgid "All tools"
 msgstr ""
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allow"
+msgstr ""
+
 #. placeholder {0}: rule.matchValue
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Allow {0} actions without asking"
@@ -442,6 +445,10 @@ msgstr "확인 없이 결제 동작 허용"
 #: src/components/AskCard.tsx
 msgid "Allowed once"
 msgstr "한 번 허용됨"
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Allowed site"
+msgstr ""
 
 #: src/pages/McpServersOverlay.tsx
 msgid "Allowed tools"
@@ -547,10 +554,6 @@ msgstr "{0} 동작 전에 확인"
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before {0} connector"
 msgstr "{0} 커넥터 전에 확인"
-
-#: src/components/ApprovalRulesSettings.tsx
-msgid "Ask before a specific tool"
-msgstr ""
 
 #: src/components/ApprovalRulesSettings.tsx
 msgid "Ask before email actions"
@@ -707,6 +710,15 @@ msgstr "Bearer 토큰"
 
 #: src/pages/SettingsOverlay.tsx
 msgid "Billing"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Block {0}"
 msgstr ""
 
 #: src/pages/Board.tsx
@@ -1190,6 +1202,20 @@ msgstr ""
 #: src/pages/shell/bot-panel.tsx
 msgid "Computer"
 msgstr "컴퓨터"
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer may reach {0}"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer never reaches {0}"
+msgstr ""
+
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Computer reaches only allowed sites"
+msgstr ""
 
 #: src/pages/AccountSettingsOverlay.tsx
 msgid "Computers"
@@ -1976,6 +2002,10 @@ msgstr ""
 msgid "Credentials are encrypted and never sent to the model."
 msgstr "인증 정보는 암호화되며 모델에 전송되지 않습니다."
 
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Credits"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Criteria"
 msgstr ""
@@ -2466,10 +2496,6 @@ msgstr ""
 msgid "Error details"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Estimated cost"
-msgstr ""
-
 #: src/pages/recruiting/InterviewCalendar.tsx
 msgid "Event details"
 msgstr ""
@@ -2784,6 +2810,15 @@ msgstr ""
 msgid "Hi, this is how I'll sound when I read replies out loud."
 msgstr "안녕하세요. 답변을 소리 내어 읽을 때 이런 목소리로 들립니다."
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide"
+msgstr ""
+
+#. placeholder {0}: rule.matchValue
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Hide {0}"
+msgstr ""
+
 #: src/pages/ModelSettingsOverlay.tsx
 #: src/pages/Onboarding.tsx
 msgid "High"
@@ -2924,6 +2959,10 @@ msgstr ""
 #: src/pages/recruiting/CandidatePresentation.tsx
 #: src/pages/recruiting/RecruitingLegacyResults.tsx
 msgid "Internal assessment"
+msgstr ""
+
+#: src/pages/SettingsOverlay.tsx
+msgid "Internal Costs"
 msgstr ""
 
 #: src/pages/recruiting/ActivityTab.tsx
@@ -3409,10 +3448,6 @@ msgstr "모델 ID"
 msgid "Model options"
 msgstr "모델 선택지"
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Model tokens"
-msgstr ""
-
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Model updated."
 msgstr "모델이 변경되었습니다."
@@ -3564,6 +3599,7 @@ msgid "Next contact campaigns"
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/recruiting/RecruitingRoutines.tsx
 msgid "Next page"
 msgstr ""
 
@@ -3691,16 +3727,13 @@ msgstr "{peerBotName}와의 메시지가 아직 없습니다."
 msgid "No model catalog is available."
 msgstr "사용 가능한 모델 목록이 없습니다."
 
+#: src/pages/recruiting/AccountRecruitingView.tsx
 #: src/pages/recruiting/HomeDashboard.tsx
 msgid "No open tasks."
 msgstr ""
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "No outreach files loaded"
-msgstr ""
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "No price"
 msgstr ""
 
 #: src/pages/ModelSettingsOverlay.tsx
@@ -3837,10 +3870,6 @@ msgstr ""
 
 #: src/pages/recruiting/SchedulingPlan.tsx
 msgid "No supported future interval is recorded. Check availability before choosing a time."
-msgstr ""
-
-#: src/pages/recruiting/AccountRecruitingView.tsx
-msgid "No tasks yet."
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -4243,6 +4272,10 @@ msgstr "일시 중지됨"
 
 #: src/pages/recruiting/CandidatePresentation.tsx
 msgid "Pending approval"
+msgstr ""
+
+#: src/pages/AccountSettingsOverlay.tsx
+msgid "Pending usage"
 msgstr ""
 
 #: src/pages/recruiting/CandidatePresentation.tsx
@@ -4957,6 +4990,10 @@ msgstr "자동 실행"
 msgid "Routines that run while you're away"
 msgstr ""
 
+#: src/components/ApprovalRulesSettings.tsx
+msgid "Rules for a specific tool"
+msgstr ""
+
 #: src/pages/recruiting/RecruitingSupplementaryTab.tsx
 #: src/pages/recruiting/SourceDocuments.tsx
 msgid "Run"
@@ -5252,10 +5289,6 @@ msgstr ""
 msgid "Search contacts"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Search credits"
-msgstr ""
-
 #: src/pages/recruiting/RecruitingSummary.tsx
 msgid "Search Criteria"
 msgstr ""
@@ -5309,10 +5342,6 @@ msgstr ""
 #. placeholder {0}: filters.query.trim()
 #: src/pages/ActivityList.tsx
 msgid "Search: {0}"
-msgstr ""
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Searches"
 msgstr ""
 
 #: src/components/LiveWork.tsx
@@ -5448,10 +5477,6 @@ msgstr "서버 URL"
 
 #: src/pages/RecruitingCorrespondence.tsx
 msgid "Service connections"
-msgstr ""
-
-#: src/pages/AccountSettingsOverlay.tsx
-msgid "Services"
 msgstr ""
 
 #: src/pages/MessagingSettingsOverlay.tsx
@@ -6124,7 +6149,6 @@ msgstr ""
 msgid "Updating Team Computer"
 msgstr ""
 
-#: src/pages/AccountSettingsOverlay.tsx
 #: src/pages/SettingsOverlay.tsx
 msgid "Usage"
 msgstr "사용량"

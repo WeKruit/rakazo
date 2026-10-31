@@ -8,10 +8,12 @@ import {
   formatWebhookPrompt,
   loadWebhookTarget,
   parseWebhookPayload,
+  routinesMatchingEvent,
   WEBHOOK_MAX_BODY_BYTES,
   type WebhookDeps,
   type WebhookSecretCache,
 } from "./webhook-inbound.js";
+import { hasValidWebhookSignature } from "./webhook-signature.js";
 
 export {
   formatGithubEventPrompt,
@@ -55,8 +57,15 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
       throw error;
     }
 
-    // Same 401 for missing bot, missing secret, and bad bearer so bot ids are not enumerable.
-    if (!target || !hasValidBearerToken(c.req.header("authorization"), target.expected)) {
+    // Same 401 for missing bot, missing secret, and bad bearer or signature so bot ids are not
+    // enumerable.
+    if (
+      !target ||
+      !(
+        hasValidBearerToken(c.req.header("authorization"), target.expected) ||
+        hasValidWebhookSignature(c.req.header("x-rakazo-signature"), target.expected, raw)
+      )
+    ) {
       return unauthorized();
     }
 
@@ -79,6 +88,7 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
         modelProvider: true,
         modelId: true,
         thinkingLevel: true,
+        condition: true,
       },
       orderBy: { updatedAt: "desc" },
     });
@@ -93,7 +103,7 @@ export function mountWebhookHttpRoutes(app: Hono, deps: WebhookDeps) {
     return c.json(
       await deliverWebhookEvent(deps, target, {
         prompt: eventPrompt,
-        routines: webhookRoutines,
+        routines: routinesMatchingEvent(webhookRoutines, { source: "webhook", event: payload }),
         source: "webhook",
         idempotencyKey,
       }),

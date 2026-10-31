@@ -79,9 +79,16 @@ import {
   getOidcAccessToken,
   isBlockedAuthPath,
   loopbackTwinOrigins,
+  withoutBrowserToken,
 } from "@rakazo/auth";
 import type { Actor, AuthCapabilities } from "@rakazo/contracts";
-import { signupAllowlistBootUpdate, signupPolicyFromEnv } from "@rakazo/core";
+import {
+  CREATING_RPC_PER_MINUTE,
+  isCreatingRpcPath,
+  RateWindow,
+  signupAllowlistBootUpdate,
+  signupPolicyFromEnv,
+} from "@rakazo/core";
 import type { Pool, PrismaClient } from "@rakazo/db";
 import {
   closePoolSessions,
@@ -731,7 +738,7 @@ export async function createApp(
     if (isBlockedAuthPath(path)) {
       return c.json({ error: "Not available in version 1" }, 404);
     }
-    return auth.handler(emptyAuthBodyAsJson(c.req.raw));
+    return withoutBrowserToken(c.req.raw, await auth.handler(emptyAuthBodyAsJson(c.req.raw)));
   });
   mountLocalSettings(app, { token: env.desktopStackToken, prisma, rpc });
   const requestSession = async (request: Request, recordAuthTiming = false) => {
@@ -750,6 +757,7 @@ export async function createApp(
     return actor && { actor, sessionId: session.session.id };
   };
   const sessionActor = async (request: Request) => (await requestSession(request))?.actor ?? null;
+  const creatingRpcWindow = new RateWindow(CREATING_RPC_PER_MINUTE, 60_000);
   app.use("/rpc/*", async (c, next) => {
     const authStarted = performance.now();
     if (created.pool) {
@@ -772,6 +780,10 @@ export async function createApp(
     const actor = session?.actor ?? null;
     if (actor) {
       enrichLogContext({ "user.id": actor.userId, "space.id": actor.spaceId });
+      if (isCreatingRpcPath(c.req.path) && !creatingRpcWindow.take(actor.userId)) {
+        getLogger().warn("rate_limit.rpc", { path: c.req.path });
+        return c.json({ error: "Too many requests. Wait a minute and try again." }, 429);
+      }
     }
     const { matched, response } = await rpc.handle(c.req.raw, {
       prefix: "/rpc",

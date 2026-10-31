@@ -29,6 +29,7 @@ import {
   ensureComputerWorkspaceLayout,
   removeDeletedBotWorkspaces,
   restoreComputerWorkspace,
+  runComputerSetupScript,
 } from "./computer-workspace.js";
 import { isSandboxGoneError } from "./e2b-sandbox.js";
 import { resolveAgentHomePath } from "./home.js";
@@ -367,6 +368,7 @@ export async function provisionComputer(
       context.botId,
       context,
     );
+    if (replacement) await runComputerSetupScript(deps.sandbox, ref, context);
     // Bots deleted while this computer was not running could not remove their folders then.
     // Skip only plain reconnects; a provider may start or replace the computer during one.
     if (existing.scope === "team" && (!reconnecting || replacement || ref.started === true)) {

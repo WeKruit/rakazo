@@ -127,6 +127,30 @@ describe("live role correspondence", () => {
     ).rejects.toBeInstanceOf(IsolationError);
     expect(execute).toHaveBeenCalledTimes(2);
   });
+  it("reads the account calendar once for all roles opened together", async () => {
+    const { prisma, assignment } = fixture();
+    const execute = vi.fn(async function* () {
+      yield { type: "result", data: { structuredContent: { items: [] } } } as const;
+    });
+    const deps = { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> };
+    const role = (roleId: string, botId: string) =>
+      refreshRecruitingCorrespondence(
+        deps,
+        { ...actor, userId: "shared-calendar" },
+        { roleId, threadId: `thread-${roleId}`, view: "interview" },
+        [
+          {
+            ...source("calendar"),
+            assignments: [{ botId, allowAllTools: true, allowedTools: [] }],
+          },
+        ],
+        empty(),
+      );
+    await Promise.all([role("a", "main-a"), role("b", "main-b"), role("c", "main-c")]);
+    expect(execute).toHaveBeenCalledTimes(1);
+    // Each role's own access is still checked before and after it uses the shared read.
+    expect(assignment.mock.calls.length).toBeGreaterThanOrEqual(6);
+  });
   it("does not share cached personal calendars across accounts", async () => {
     const { prisma } = fixture();
     const execute = vi.fn(async function* () {

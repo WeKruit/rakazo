@@ -1,7 +1,17 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openUserSettings, rpc, signup } from "./helpers";
+import {
+  captureScreenshot,
+  completeOnboarding,
+  openUserSettings,
+  rpc,
+  setDeploymentOwner,
+  signup,
+} from "./helpers";
+
+// Models, Voice and Updates settings are only shown to the deployment owner.
+test.beforeEach(({ page }) => setDeploymentOwner(page, true));
 
 const LOCAL_MODEL_ID = "rakazo-e2e-local";
 const LOCAL_MODEL_REPLY = "OpenAI-compatible endpoint verified end to end.";
@@ -438,6 +448,7 @@ test("a deployment default on server credentials says so and keeps an own key op
         ...body,
         json: {
           ...body.json,
+          isDeploymentOwner: true,
           defaultProvider: "amazon-bedrock",
           defaultModel: "eu.anthropic.claude-haiku-4-5-20251001-v1:0",
           hostCredentialProvider: "amazon-bedrock",
@@ -481,6 +492,7 @@ test("a key connected in another space can replace server credentials for the sa
   await page.route("**/rpc/me", async (route) => {
     const response = await route.fetch();
     const body = (await response.json()) as { json: Record<string, unknown> };
+    body.json.isDeploymentOwner = true;
     // The offline deployment uses Scripted; expose its untouched default as host Bedrock.
     if (body.json.defaultProvider !== provider) {
       Object.assign(body.json, {
