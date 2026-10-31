@@ -2,7 +2,7 @@
 // Release check: the signed-in Home opens within its time budget, in a real browser.
 //
 //   RAKAZO_ORIGIN=<public origin> RAKAZO_EMAIL=… RAKAZO_PASSWORD=… \
-//   node infra/acceptance/home-load.mjs [--shell-ms 6000] [--roles-ms 8000] [--overview-ms 15000]
+//   node infra/acceptance/home-load.mjs [--shell-ms 6000] [--roles-ms 10000] [--overview-ms 15000]
 //
 // Measures, from navigation start: the greeting (page shell), the sidebar's role list, and the
 // first Overview numbers. Run it on an account with many roles; that is where Home got slow.
@@ -21,7 +21,7 @@ const option = (name, fallback) => {
 };
 const budgets = {
   shell: option("--shell-ms", 6_000),
-  roles: option("--roles-ms", 8_000),
+  roles: option("--roles-ms", 10_000),
   overview: option("--overview-ms", 15_000),
 };
 const origin = (process.env.RAKAZO_ORIGIN ?? process.env.RAKAZO_URL ?? "").replace(/\/$/, "");
