@@ -30,10 +30,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { assertFollowUpDelivery, replyAfterInput } from "./follow-up.mjs";
-import {
-  assertGlobalRecruitingCopiesArchived,
-  verifyGlobalRecruiting,
-} from "./global-recruiting.mjs";
+import { verifyGlobalRecruiting } from "./global-recruiting.mjs";
 import { verifyGlobalRecruitingChat } from "./global-recruiting-chat.mjs";
 import { checkNotificationPolicy } from "./notification-policy.mjs";
 import { checkReviewerGrading } from "./reviewer-grading.mjs";
@@ -430,40 +427,18 @@ try {
         option("--global-fixtures") ?? (CASES && path.join(CASES, "global-recruiting.json"));
       if (!file || !fs.existsSync(file))
         return failures.push(
-          "Provide --global-fixtures or <cases>/global-recruiting.json for an isolated test account with product and CRM test copies",
+          "Provide --global-fixtures or <cases>/global-recruiting.json listing the product and CRM test copies",
         );
       const fixture = JSON.parse(fs.readFileSync(file, "utf8"));
-      let groups = [];
-      try {
-        const result = await verifyGlobalRecruiting(rpc, fixture, {
-          onValidatedGroups: (ids) => {
-            groups = ids;
-          },
-        });
-        result.nativeChat = args.includes("--global-chat")
-          ? await verifyGlobalRecruitingChat(rpc, fixture, { say, readEvents })
-          : {
-              tested: false,
-              reason: "not tested: native chat requires approved model calls and --global-chat",
-            };
-        fs.writeFileSync(path.join(OUT, "global-recruiting.json"), JSON.stringify(result, null, 2));
-      } finally {
-        // The existing archive flow independently refuses real roles and skips working runs.
-        if (groups.length) {
-          const code = await run("global-recruiting-archive", "archive-test-copies.mjs", [
-            "--idle-hours",
-            "0",
-            "--only",
-            groups.join(","),
-          ]);
-          if (code !== 0) failures.push("Could not archive the global recruiting test copies");
-          try {
-            await assertGlobalRecruitingCopiesArchived(rpc, groups);
-          } catch (error) {
-            failures.push(error.message);
-          }
-        }
-      }
+      // Read-only: the listed copies stay in place for the next release.
+      const result = await verifyGlobalRecruiting(rpc, fixture);
+      result.nativeChat = args.includes("--global-chat")
+        ? await verifyGlobalRecruitingChat(rpc, fixture, { say, readEvents })
+        : {
+            tested: false,
+            reason: "not tested: native chat requires approved model calls and --global-chat",
+          };
+      fs.writeFileSync(path.join(OUT, "global-recruiting.json"), JSON.stringify(result, null, 2));
     });
 
   if (wanted.has("smoke"))

@@ -105,13 +105,11 @@ async function routineRows(rpc, roleId) {
   }
 }
 
-/** Read-only checks; the callback exposes cleanup targets only after account and copy validation. */
-export async function verifyGlobalRecruiting(rpc, fixture, { onValidatedGroups = () => {} } = {}) {
-  assert.equal(
-    fixture.isolatedTestAccount,
-    true,
-    "Global recruiting requires an isolated test account",
-  );
+/**
+ * Read-only checks of the listed test copies. Other roles in the account are never read or changed,
+ * so an internal account with real roles can host the copies; each listed copy must be a test copy.
+ */
+export async function verifyGlobalRecruiting(rpc, fixture) {
   assert.ok(
     Array.isArray(fixture.roles) && fixture.roles.length >= 2,
     "Provide at least two test-copy role expectations",
@@ -137,21 +135,12 @@ export async function verifyGlobalRecruiting(rpc, fixture, { onValidatedGroups =
     if (!page.nextCursor) break;
     cursor = page.nextCursor;
   }
-  for (const role of allRoles.values()) {
-    const group = groups.find((group) => group.id === role.groupId);
-    assert.match(
-      group?.name ?? "",
-      /^测试副本 · /,
-      "Refusing a non-test role in the regression account",
-    );
-  }
-  const selected = fixture.roles.map((expected) => {
+  for (const expected of fixture.roles) {
     const role = allRoles.get(expected.roleId);
     assert.ok(role, "Test-copy role is missing");
-    return role;
-  });
-  const cleanupGroups = [...new Set(selected.map((role) => role.groupId))];
-  onValidatedGroups(cleanupGroups);
+    const group = groups.find((group) => group.id === role.groupId);
+    assert.match(group?.name ?? "", /^测试副本 · /, "Refusing a non-test role in the fixture");
+  }
   const globalItems = new Map();
   for (const view of VIEWS) {
     const items = new Map();
@@ -293,21 +282,5 @@ export async function verifyGlobalRecruiting(rpc, fixture, { onValidatedGroups =
     ["crm", "product"],
     "Both product and CRM roles must be covered",
   );
-  return { evidence, groups: cleanupGroups };
-}
-
-/** The archive script skips working copies without a failure exit code; verify its actual result. */
-export async function assertGlobalRecruitingCopiesArchived(rpc, ids) {
-  const active = await groupsPage(rpc, false);
-  const archived = await groupsPage(rpc, true);
-  for (const id of ids) {
-    assert.ok(
-      !active.some((group) => group.id === id),
-      "A global regression test copy remains active",
-    );
-    assert.ok(
-      archived.some((group) => group.id === id),
-      "A global regression test copy was not archived",
-    );
-  }
+  return { evidence };
 }

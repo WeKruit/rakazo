@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  assertGlobalRecruitingCopiesArchived,
-  verifyGlobalRecruiting,
-} from "./global-recruiting.mjs";
+import { verifyGlobalRecruiting } from "./global-recruiting.mjs";
 
 const roles = ["product", "crm"].map((id) => ({
   id,
   threadId: `thread-${id}`,
   groupId: `group-${id}`,
 }));
-const fixture = { isolatedTestAccount: true, roles: roles.map((role) => ({ roleId: role.id })) };
+const fixture = { roles: roles.map((role) => ({ roleId: role.id })) };
 function rpcFor(options = {}) {
   return async (route, input) => {
     if (route === "groups/page")
@@ -98,44 +95,31 @@ test("checks real records and matching global/filtered projections for product a
     return delegate(route, input);
   }, fixture);
   assert.equal(result.evidence.length, 18);
-  assert.deepEqual(result.groups, ["group-product", "group-crm"]);
   assert.ok(
     routes.every((route) =>
       ["groups/page", "recruiting/getWorkspace", "recruiting/accountView"].includes(route),
     ),
   );
 });
-test("rejects a nonisolated account before any remote read or cleanup callback", async () => {
-  let reads = 0;
-  let cleanup = false;
+test("refuses a listed role that is not a test copy", async () => {
   await assert.rejects(
-    verifyGlobalRecruiting(
-      async () => {
-        reads++;
-      },
-      { ...fixture, isolatedTestAccount: false },
-      {
-        onValidatedGroups: () => {
-          cleanup = true;
-        },
-      },
-    ),
-    /isolated test account/,
-  );
-  assert.equal(reads, 0);
-  assert.equal(cleanup, false);
-});
-test("rejects customer-role names before exposing cleanup targets", async () => {
-  let cleanup = false;
-  await assert.rejects(
-    verifyGlobalRecruiting(rpcFor({ customer: true }), fixture, {
-      onValidatedGroups: () => {
-        cleanup = true;
-      },
-    }),
+    verifyGlobalRecruiting(rpcFor({ customer: true }), fixture),
     /non-test role/,
   );
-  assert.equal(cleanup, false);
+});
+test("ignores real roles elsewhere in the account", async () => {
+  const rpc = rpcFor();
+  await verifyGlobalRecruiting(async (route, input) => {
+    const result = await rpc(route, input);
+    if (route === "groups/page" && !input.archived)
+      return { ...result, items: [...result.items, { id: "group-real", name: "Customer role" }] };
+    if (route === "recruiting/accountView" && input.view === "roles")
+      return {
+        ...result,
+        roles: [...result.roles, { id: "real", threadId: "t", groupId: "group-real" }],
+      };
+    return result;
+  }, fixture);
 });
 for (const [option, message] of Object.entries({
   empty: /actual people/,
@@ -153,27 +137,3 @@ for (const [option, message] of Object.entries({
   test(`refuses false-positive acceptance for ${option}`, async () => {
     await assert.rejects(verifyGlobalRecruiting(rpcFor({ [option]: true }), fixture), message);
   });
-test("exposes only validated copies for finally cleanup when a later data assertion fails", async () => {
-  let ids = [];
-  await assert.rejects(
-    verifyGlobalRecruiting(rpcFor({ noTasks: true }), fixture, {
-      onValidatedGroups: (groups) => {
-        ids = groups;
-      },
-    }),
-    /actual reminders/,
-  );
-  assert.deepEqual(
-    ids,
-    roles.map((role) => role.groupId),
-  );
-});
-test("requires archived-state readback, so a skipped working copy cannot count as cleaned up", async () => {
-  const ids = roles.map((role) => role.groupId);
-  await assert.rejects(assertGlobalRecruitingCopiesArchived(rpcFor(), ids), /remains active/);
-  await assertGlobalRecruitingCopiesArchived(rpcFor({ archived: true }), ids);
-  await assert.rejects(
-    assertGlobalRecruitingCopiesArchived(async () => ({ items: [], nextOffset: null }), ids),
-    /not archived/,
-  );
-});

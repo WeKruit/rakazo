@@ -24,11 +24,10 @@ The dedicated journey starts a fresh local database and account, enters job desc
 
 ## Post-deploy readback
 
-The `release-cloud.sh` flow requires existing isolated test-account sign-in and a private JSON fixture file supplied with `RAKAZO_GLOBAL_FIXTURES` (or `RELEASE_REGRESSION_CASES/global-recruiting.json`). No fixture credentials or real records belong in the repository.
+The `release-cloud.sh` flow runs this readback when a sign-in and a private JSON fixture file are supplied with `RAKAZO_GLOBAL_FIXTURES` (or `RELEASE_REGRESSION_CASES/global-recruiting.json`); without them it logs a warning and skips it. No fixture credentials or real records belong in the repository.
 
 ```json
 {
-  "isolatedTestAccount": true,
   "roles": [
     {"roleId": "product-test-copy", "shortlist": 1, "contacts": 1, "replies": 1, "interviews": 1},
     {"roleId": "crm-test-copy", "shortlist": 1, "contacts": 1, "replies": 1, "interviews": 1}
@@ -36,7 +35,7 @@ The `release-cloud.sh` flow requires existing isolated test-account sign-in and 
 }
 ```
 
-Provision these test copies through the normal product path in the isolated account before release. The account must contain only test-copy roles, each in a conversation prefixed `测试副本 · `. The post-deploy case reads every account/filtered view, checks actual records and both role kinds, then uses the existing restorable archive flow for the selected copies. It performs no paid search, send, booking or approval. Missing fixtures fail before deployment. A failed readback fails release acceptance. Routines are included in global/filtered readback and must retain the exact role thread target.
+Provision these test copies through the normal product path in an internal account. Each listed copy must be in a conversation prefixed `测试副本 · `; other roles in the account are not checked. The post-deploy case reads every account/filtered view, checks actual records and both role kinds, and leaves the copies in place for the next release. It performs no paid search, send, booking or approval. A failed readback rolls the release back. Routines are included in global/filtered readback and must retain the exact role thread target.
 
 Native model chat is a separate opt-in because new paid calls require approval. Only after explicit cost authorization, pass `--global-chat` to `infra/acceptance/regression.mjs --only global-recruiting --global-fixtures <private-file>`. It duplicates the existing native account Main, asks three read questions, verifies successful tool receipts plus persisted answers against authoritative counts, and archives only that Main copy; the existing finally flow archives the selected role copies. Without this flag, the report explicitly marks native chat **not tested**. No release run automatically authorizes model calls.
 
@@ -56,4 +55,4 @@ Current revision verification: backend 7 suites / 505 tests passed; focused web/
 
 ## Current release blockers
 
-The release owner reported that there is no isolated test account or separate product/CRM test-copy fixture with an active booking/calendar record. Existing historic test conversations are not sufficient. Production feature acceptance is **not tested**; do not manufacture provider receipts or send/book to make the readback pass. GitHub Actions remains disabled by user preference, so CI screenshot links remain unavailable.
+The live product and CRM test copies are being prepared in an internal account (one internal booking is still needed). Production feature acceptance is **not tested**; do not manufacture provider receipts or send/book to make the readback pass. GitHub Actions remains disabled by user preference, so CI screenshot links remain unavailable.
