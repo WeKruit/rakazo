@@ -417,10 +417,10 @@ async function main() {
       void embedRecentMessages(prisma, embedder, {
         maxTokensPerDay: EMBED_MAX_TOKENS_PER_DAY,
         signal: shutdown.signal,
-        onError: (error) => logger.warn("history.embed failed", { error: String(error) }),
+        onError: (error) => logger.warn("history.embed failed", { reason: String(error) }),
       })
         .then((result) => result.embedded && logger.info("history.embed", result))
-        .catch((error) => logger.warn("history.embed failed", { error: String(error) }))
+        .catch((error) => logger.warn("history.embed failed", { reason: String(error) }))
         .finally(() => {
           embedding = false;
         });

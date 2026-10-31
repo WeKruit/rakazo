@@ -269,6 +269,8 @@ describe("Pi model stream timing", () => {
         cacheReadCount: null,
         cacheWriteCount: null,
         outputCount: 1,
+        reasoningCount: null,
+        thinkingStreamedMs: null,
         costUsd: null,
         cacheHitRatio: null,
       },
