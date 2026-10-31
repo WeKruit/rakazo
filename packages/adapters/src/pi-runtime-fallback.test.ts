@@ -3427,6 +3427,8 @@ it("publishes a safe thinking progress at most once per 5 seconds", async () => 
       summary: "Checking the campaign via",
       thought: "Checking the campaign via",
       at: new Date(1_000_000).toISOString(),
+      // The clock keeps the start of the stretch, not the latest update.
+      thinkingSince: new Date(1_000_000).toISOString(),
     },
     {
       type: "progress",
@@ -3436,6 +3438,8 @@ it("publishes a safe thinking progress at most once per 5 seconds", async () => 
       summary: "Checking the campaign via",
       thought: "Checking the campaign via",
       at: new Date(1_005_000).toISOString(),
+      // The clock keeps the start of the stretch, not the latest update.
+      thinkingSince: new Date(1_000_000).toISOString(),
     },
   ]);
   // Vendor names, tool names and ids never reach the thread; only the first line is shown.

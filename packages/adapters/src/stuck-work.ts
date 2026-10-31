@@ -17,6 +17,7 @@ import { appendEventInTransaction, expireStuckRun, withTransactionRetry } from "
 import { getLogger } from "@rakazo/logging";
 import { ExpoPushProvider } from "./expo-push.js";
 import { reportGroupHandoffOutcome } from "./group-handoff.js";
+import { scheduleReplyCheck } from "./reply-check.js";
 
 type StuckCursor = { at: Date; id: string };
 
@@ -337,6 +338,10 @@ async function expireOne(
       getLogger().error("stuck work continuation", error);
     });
   }
+  // The person whose turn stalled is still owed an answer.
+  await scheduleReplyCheck(deps.jobs, run.threadId).catch((error) =>
+    getLogger().error("stuck work reply check", error),
+  );
   // A handed stage that stopped here still reports to the teammate that handed it over.
   if (run.thread.groupId && deps.events) {
     await reportGroupHandoffOutcome(

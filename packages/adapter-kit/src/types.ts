@@ -640,6 +640,8 @@ export type AgentRuntimeEvent =
       thought?: string;
       /** ISO time the phase update was produced. */
       at?: string;
+      /** ISO time the current thinking stretch began, for a running thinking clock. */
+      thinkingSince?: string;
     }
   | { type: "tool"; name: string; args: Record<string, unknown>; executionId: string }
   | {

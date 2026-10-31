@@ -779,38 +779,44 @@ describe("simulated scheduling approval chain", () => {
 
 describe("model outage on a recruiting turn", () => {
   // "terminated" is what fetch reports when the model's stream connection drops mid-turn.
-  it.each(["Codex stream idle timeout", "terminated"])(
-    "runs the turn once more after %s",
-    async (outage) => {
-      const f = fixture("run-outage");
-      const bot = await f.prisma.bot.findUniqueOrThrow();
-      f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
-        ...bot,
-        spawnKey: "recruiting:user-1:main",
-      } as typeof bot);
-      let retried = 0;
-      Object.assign(f.prisma.attempt, { count: vi.fn(async () => retried) });
-      f.runtimeRun.mockImplementation(async function* () {
-        yield { type: "progress", text: "Working" };
-        throw new Error(outage);
-      });
+  it.each([
+    "Codex stream idle timeout",
+    "terminated",
+    "fetch failed",
+    "timeout exceeded when trying to connect",
+  ])("runs the turn once more after %s", async (outage) => {
+    const f = fixture("run-outage");
+    const bot = await f.prisma.bot.findUniqueOrThrow();
+    f.prisma.bot.findUniqueOrThrow.mockResolvedValue({
+      ...bot,
+      spawnKey: "recruiting:user-1:main",
+    } as typeof bot);
+    let retried = 0;
+    Object.assign(f.prisma.attempt, { count: vi.fn(async () => retried) });
+    f.runtimeRun.mockImplementation(async function* () {
+      yield { type: "progress", text: "Working" };
+      throw new Error(outage);
+    });
 
-      f.runData.status = "queued";
-      await f.executor.continueRun(f.runData.id, "worker-1");
-      expect(f.finalizeRun).not.toHaveBeenCalled();
-      expect(f.runData.status).toBe("queued");
-      expect(f.prisma.attempt.update).toHaveBeenCalledWith(
-        expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }),
-      );
-      expect(f.executorDeps.jobs.enqueue).toHaveBeenCalled();
+    f.runData.status = "queued";
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    expect(f.finalizeRun).not.toHaveBeenCalled();
+    expect(f.runData.status).toBe("queued");
+    expect(f.prisma.attempt.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }),
+    );
+    expect(f.executorDeps.jobs.enqueue).toHaveBeenCalled();
 
-      retried = 1;
-      await f.executor.continueRun(f.runData.id, "worker-1");
-      expect(f.finalizeRun).toHaveBeenCalledWith(
-        expect.objectContaining({ outcome: "failed", error: outage }),
-      );
-    },
-  );
+    retried = 1;
+    await f.executor.continueRun(f.runData.id, "worker-1");
+    expect(f.finalizeRun).toHaveBeenCalledWith(
+      expect.objectContaining({ outcome: "failed", error: outage }),
+    );
+    // The person still gets an answer: the reply check runs once the conversation is quiet.
+    expect(f.executorDeps.jobs.enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "thread.reply_check" }),
+    );
+  });
 });
 
 describe("worker shutdown recovery", () => {

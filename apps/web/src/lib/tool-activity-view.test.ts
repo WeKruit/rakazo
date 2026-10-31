@@ -55,6 +55,21 @@ describe("tool card render decisions", () => {
     expect(shouldRenderToolCard(liveActivity, true)).toBe(false);
   });
 
+  it("shows the thinking clock only in the developer view", () => {
+    const thinking: MessageBlock = {
+      kind: "progress",
+      text: "",
+      activity: true,
+      phase: "thinking",
+      thinkingSince: "2026-01-01T00:00:00.000Z",
+    };
+    expect(shouldRenderToolCard(thinking, true)).toBe(true);
+    expect(shouldRenderToolCard(thinking, false)).toBe(false);
+    expect(shouldRenderToolCard({ ...thinking, thinkingSince: undefined }, true)).toBe(false);
+    expect(isToolOnlyNarration([thinking], true)).toBe(true);
+    expect(messageHasVisibleBlocks([thinking], false)).toBe(false);
+  });
+
   it("keeps text order and drops hidden activity per preference", () => {
     const blocks = [textBlock, stepsBlock, liveActivity, narration];
     expect(renderableMessageBlocks(blocks, true)).toEqual([textBlock, stepsBlock, narration]);

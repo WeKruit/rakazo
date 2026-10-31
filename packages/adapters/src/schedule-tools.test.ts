@@ -393,11 +393,14 @@ describe("resolveScheduleTiming", () => {
 });
 
 describe("filterBuiltinToolsForThread", () => {
-  it("offers role-team delegation only in the account-wide conversation", () => {
+  it("offers role-team delegation, not in-room handoff, only in the account-wide conversation", () => {
     const names = (groupId: string | null) =>
-      filterBuiltinToolsForThread([{ name: "delegate_to_role" }], groupId).map((t) => t.name);
+      filterBuiltinToolsForThread(
+        [{ name: "delegate_to_role" }, { name: "handoff_to_bot" }],
+        groupId,
+      ).map((t) => t.name);
     expect(names("recruiting-global-abc")).toEqual(["delegate_to_role"]);
-    expect(names("role-group")).toEqual([]);
+    expect(names("role-group")).toEqual(["handoff_to_bot"]);
     expect(names(null)).toEqual([]);
   });
   const tools = [

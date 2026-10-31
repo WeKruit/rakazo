@@ -104,6 +104,7 @@ import {
   VoiceCredentialSchema,
   VoiceInfoSchema,
   VoiceStatusSchema,
+  WorkMetricsSchema,
 } from "./domain.js";
 import {
   AskAnswerSchema,
@@ -1393,6 +1394,7 @@ export const appContract = {
     ),
     costs: oc.output(UsageCostsSchema),
     internalCosts: oc.output(InternalUsageCostsSchema),
+    workMetrics: oc.output(WorkMetricsSchema),
   },
   export: {
     bot: oc.input(botId).output(ExportManifestSchema),

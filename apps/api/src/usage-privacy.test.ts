@@ -4,13 +4,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RouterDeps } from "./router.js";
 import { createRouter } from "./router.js";
 
-const { internalCosts, listResearch } = vi.hoisted(() => ({
+const { internalCosts, workMetrics, listResearch } = vi.hoisted(() => ({
   internalCosts: vi.fn(),
+  workMetrics: vi.fn(),
   listResearch: vi.fn(),
 }));
 vi.mock("@rakazo/db", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@rakazo/db")>()),
   summarizeInternalUsageCosts: internalCosts,
+  summarizeWorkMetrics: workMetrics,
   listRecruitingResearch: listResearch,
 }));
 
@@ -50,7 +52,10 @@ function fixture(email: string, emailVerified: boolean, requestActor: Actor | nu
   return { client, prisma, findMany, aggregate };
 }
 
-beforeEach(() => internalCosts.mockReset());
+beforeEach(() => {
+  internalCosts.mockReset();
+  workMetrics.mockReset();
+});
 
 describe("usage diagnostic authorization", () => {
   it.each([
@@ -64,12 +69,14 @@ describe("usage diagnostic authorization", () => {
       () => client.usage.list(),
       () => client.usage.summary(),
       () => client.usage.internalCosts(),
+      () => client.usage.workMetrics(),
     ]) {
       await expect(call()).rejects.toMatchObject({ code: "FORBIDDEN" });
     }
     expect(findMany).not.toHaveBeenCalled();
     expect(aggregate).not.toHaveBeenCalled();
     expect(internalCosts).not.toHaveBeenCalled();
+    expect(workMetrics).not.toHaveBeenCalled();
   });
 
   it("denies unauthenticated diagnostic calls", async () => {
@@ -78,11 +85,13 @@ describe("usage diagnostic authorization", () => {
       () => client.usage.list(),
       () => client.usage.summary(),
       () => client.usage.internalCosts(),
+      () => client.usage.workMetrics(),
     ]) {
       await expect(call()).rejects.toMatchObject({ code: "UNAUTHORIZED" });
     }
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(internalCosts).not.toHaveBeenCalled();
+    expect(workMetrics).not.toHaveBeenCalled();
   });
 
   it("allows verified staff without requiring deployment ownership", async () => {
@@ -108,6 +117,30 @@ describe("usage diagnostic authorization", () => {
     };
     internalCosts.mockResolvedValue(report);
     expect(await client.usage.internalCosts()).toEqual(report);
+    const metrics = {
+      windowDays: 28,
+      since: "2026-02-01T00:00:00.000Z",
+      unrescuedWeeks: [],
+      completion: { completed: 0, failed: 0, cancelled: 0, stoppedByPerson: 0, reasons: [] },
+      longTasks: {
+        runDuration: { count: 0, p50Ms: null, p95Ms: null },
+        taskDuration: { count: 0, p50Ms: null, p95Ms: null },
+        compactions: 0,
+        runsCompacted: 0,
+        resumed: { count: 0, of: 0 },
+      },
+      experience: {
+        firstReply: { count: 0, p50Ms: null, p95Ms: null },
+        interject: { count: 0, p50Ms: null, p95Ms: null },
+        unansweredInputs: 0,
+        inputs: 0,
+      },
+      memory: { correctedAfterCompaction: { count: 0, of: 0 } },
+      collaboration: { handoffs: 0, teammateTurns: 0, replied: 0, silent: 0 },
+      automation: { fired: 0, skipped: 0, completed: 0, failed: 0 },
+    };
+    workMetrics.mockResolvedValue(metrics);
+    expect(await client.usage.workMetrics()).toEqual(metrics);
     await client.usage.list();
     await client.usage.summary();
     expect(internalCosts).toHaveBeenCalledWith(prisma, {

@@ -765,7 +765,10 @@ export function AccountRecruitingView({
               },
             )}
             {view === "interview" && !renderCorrespondence && pending.length ? (
-              <TabLoading />
+              // The calendar already shows the roles read so far; only the rest are loading.
+              <div aria-busy="true">
+                <TabLoading />
+              </div>
             ) : null}
             {view !== "interview" || renderCorrespondence
               ? pending.map((roleId) => {

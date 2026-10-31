@@ -127,6 +127,21 @@ describe("live role correspondence", () => {
     ).rejects.toBeInstanceOf(IsolationError);
     expect(execute).toHaveBeenCalledTimes(2);
   });
+  it("does not read the calendar for a role with nobody to match", async () => {
+    const { prisma } = fixture();
+    vi.mocked(prisma.externalEffect.findMany).mockResolvedValue([] as never);
+    const execute = vi.fn();
+    const output = empty();
+    await refreshRecruitingCorrespondence(
+      { prisma, connectors: { execute } as Pick<ConnectorProvider, "execute"> },
+      actor,
+      { roleId: "role", threadId: "thread", view: "interview" },
+      [source("calendar")],
+      output,
+    );
+    expect(execute).not.toHaveBeenCalled();
+    expect(output).toMatchObject({ status: "empty", events: [], partial: false });
+  });
   it("reads the account calendar once for all roles opened together", async () => {
     const { prisma, assignment } = fixture();
     const execute = vi.fn(async function* () {

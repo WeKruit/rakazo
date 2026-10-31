@@ -1100,7 +1100,7 @@ describe("native cross-role recruiting reads", () => {
         campaignId: undefined,
         campaignServerId: undefined,
         campaignLeadCursor: undefined,
-        limit: 20,
+        limit: operation === "interviews" ? 50 : 20,
       },
     );
     const guard = overview.read.mock.calls[0]![0].stillAuthorized;

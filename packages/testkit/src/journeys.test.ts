@@ -1702,7 +1702,7 @@ describeJourneys("required product journeys", () => {
     const listed = await rpc<Bot[]>(app, cookie, "bots/list");
     const scout = listed.find((bot) => bot.name === "Scout");
     expect(scout).toBeTruthy();
-    expect(listed.map((bot) => bot.name).sort()).toEqual(["Chief", "Scout"]);
+    expect(ownBotNames(listed)).toEqual(["Chief", "Scout"]);
     await waitFor(
       app,
       cookie,
@@ -1716,7 +1716,7 @@ describeJourneys("required product journeys", () => {
     const afterNested = await rpc<Bot[]>(app, cookie, "bots/list");
     const nested = afterNested.find((bot) => bot.name === "Nested");
     expect(nested).toBeTruthy();
-    expect(afterNested.map((bot) => bot.name).sort()).toEqual(["Chief", "Nested", "Scout"]);
+    expect(ownBotNames(afterNested)).toEqual(["Chief", "Nested", "Scout"]);
     await waitFor(
       app,
       cookie,
@@ -1740,7 +1740,7 @@ describeJourneys("required product journeys", () => {
     expect(afterScout.some((bot) => bot.id === nested!.id)).toBe(true);
 
     await rpc(app, cookie, "bots/remove", { botId: parent.id });
-    expect((await rpc<Bot[]>(app, cookie, "bots/list")).map((bot) => bot.name)).toEqual(["Nested"]);
+    expect(ownBotNames(await rpc<Bot[]>(app, cookie, "bots/list"))).toEqual(["Nested"]);
   });
 
   it("12b: a bot can silence and resume its own finish notifications", async () => {
@@ -2937,7 +2937,15 @@ type Bot = {
   unread: boolean;
   computerMode: "team" | "dedicated";
   parentBotId?: string | null;
+  spawnKey?: string | null;
 };
+/** Bots this journey made: every new account also gets the recruiting crew. */
+function ownBotNames(bots: Bot[]) {
+  return bots
+    .filter((bot) => !bot.spawnKey?.startsWith("recruiting:"))
+    .map((bot) => bot.name)
+    .sort();
+}
 type Snap = {
   messages: Array<{
     id: string;

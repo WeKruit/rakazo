@@ -248,6 +248,12 @@ export async function refreshRecruitingCorrespondence(
       !source.assignments.some((permission) => allows(permission, tool))
     )
       continue;
+    // With nobody to match, the calendar cannot hold one of this role's interviews.
+    if (scope.view === "interview" && !contactEmails.size) {
+      output.status = "ready";
+      output.checkedAt = new Date().toISOString();
+      continue;
+    }
     try {
       if (scope.view === "inbox") {
         for (const binding of campaignBindings) {

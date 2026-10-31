@@ -26,11 +26,18 @@ export function toolStepCount(steps: readonly { count: number }[]): number {
 }
 
 /**
- * Only a `steps` block becomes a card, and only when the preference is on.
- * A `progress` block marked `activity: true` never renders, in either mode.
+ * Only a `steps` block becomes a card, and only when the preference is on. Other
+ * `activity: true` progress never renders, except the developer view's thinking clock.
  */
 export function shouldRenderToolCard(block: MessageBlock, showToolActivity: boolean): boolean {
-  return showToolActivity && block.kind === "steps";
+  return showToolActivity && (block.kind === "steps" || isThinkingClockBlock(block));
+}
+
+/** A live thinking phase that knows when it began. */
+export function isThinkingClockBlock(
+  block: MessageBlock,
+): block is Extract<MessageBlock, { kind: "progress" }> & { thinkingSince: string } {
+  return block.kind === "progress" && block.phase === "thinking" && Boolean(block.thinkingSince);
 }
 
 /** Blocks that survive into a message render: everything except hidden tool activity. */
@@ -58,7 +65,10 @@ export function isToolOnlyNarration(
   showToolActivity: boolean,
 ): boolean {
   const visible = renderableMessageBlocks(blocks, showToolActivity);
-  return visible.length > 0 && visible.every((block) => block.kind === "steps");
+  return (
+    visible.length > 0 &&
+    visible.every((block) => block.kind === "steps" || isThinkingClockBlock(block))
+  );
 }
 
 /** True when a message still has at least one block to show under the preference. */

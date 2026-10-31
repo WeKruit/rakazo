@@ -286,6 +286,12 @@ export function reduceLiveMessageBlocks(
       update.payload?.phase === "retrying")
       ? update.payload.phase
       : undefined;
+  const thinkingSince =
+    phase === "thinking" &&
+    update.type === "progress" &&
+    typeof update.payload?.thinkingSince === "string"
+      ? { thinkingSince: update.payload.thinkingSince }
+      : {};
   if (pendingToolNames.length > 0 && endsSentence(tailText)) {
     let next = activity ? [...segments] : appendTextSegment(segments, tailText);
     for (const call of pendingToolCalls) next = appendToolCallSegment(next, call.name, call);
@@ -300,6 +306,7 @@ export function reduceLiveMessageBlocks(
           ...(update.type === "progress" && typeof update.payload?.summary === "string"
             ? { summary: update.payload.summary.slice(0, 80) }
             : {}),
+          ...thinkingSince,
         },
       ];
     return next;
@@ -319,6 +326,7 @@ export function reduceLiveMessageBlocks(
             ...(update.type === "progress" && typeof update.payload?.summary === "string"
               ? { summary: update.payload.summary.slice(0, 80) }
               : {}),
+            ...thinkingSince,
           }
         : {}),
     },

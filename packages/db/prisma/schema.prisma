@@ -605,6 +605,7 @@ model Message {
   sourceRuns            Run[]             @relation("RunSourceMessage")
   externalTranscriptFor  ExternalMessage?
   steeringMessages SteeringMessage[]
+  embedding        MessageEmbedding?
   createdAt        DateTime  @default(now())
   /// Bumped on every change, so a resident history copy can tell which rows to re-read.
   updatedAt        DateTime  @default(now()) @updatedAt
@@ -614,6 +615,20 @@ model Message {
   @@index([threadId, seq])
   @@index([replyToMessageId])
   @@map("messages")
+}
+
+/// Meaning vector of a message's searchable text, for history search when no words match.
+/// Stored unit-length so the dot product is the cosine similarity; plain arrays need no extension.
+model MessageEmbedding {
+  messageId String   @id
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  threadId  String
+  model     String
+  embedding Float[]
+  createdAt DateTime @default(now())
+
+  @@index([threadId])
+  @@map("message_embeddings")
 }
 
 model Event {

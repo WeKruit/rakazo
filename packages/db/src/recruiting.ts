@@ -1975,6 +1975,28 @@ async function requireCurrentHumanSource(
   );
   const latest = (await autoContinuedHumanMessage(tx, run, newest)) ?? newest;
   if (!isNativeHumanMessage(latest)) {
+    const delegator = await requireRoleDelegation(tx, actor, run, latest);
+    if (delegator) {
+      if (
+        steering.some((item) => isNativeHumanMessage(item.message) && item.message.seq > latest.seq)
+      )
+        throw new IsolationError();
+      const human = await requireCurrentHumanSource(
+        tx,
+        actor,
+        delegator,
+        delegator.sourceMessageId,
+        quote,
+        allowOriginalIntent,
+        ancestors,
+      );
+      if (
+        human.message.threadId !== delegator.threadId ||
+        human.message.createdAt.getTime() > latest.createdAt.getTime()
+      )
+        throw new IsolationError();
+      return human;
+    }
     const { sender } = await requireResearchHandoff(tx, actor, run, latest, true);
     const inherited = await loadRunHumanSources(tx, actor, sender);
     const inheritedLatest = [
@@ -5719,6 +5741,74 @@ export function recruitingResearchSnapshot(task: ResearchTaskRow, action: Resear
 function isGroupHandoffNonce(clientNonce: string | null, runId: string) {
   const key = `group-handoff:${runId}`;
   return clientNonce === key || Boolean(clientNonce?.startsWith(`${key}:`));
+}
+
+/**
+ * A request the global agent delegated into a role conversation acts for the person's message in
+ * the global conversation. Returns the delegating run when the source is such a delivery, so the
+ * save cites that message; any other non-human source returns null.
+ */
+async function requireRoleDelegation(
+  tx: Tx,
+  actor: Actor,
+  run: {
+    id: string;
+    botId: string;
+    threadId: string;
+    sourceMessageId: string | null;
+    trigger: string;
+  },
+  source: SourceMessage,
+) {
+  const parsed = MessageBlockSchema.array().safeParse(source.blocks);
+  const block = parsed.success && parsed.data.length === 1 ? parsed.data[0] : null;
+  if (block?.kind !== "bot_message_received" || !block.returnThreadId) return null;
+  if (
+    source.id !== run.sourceMessageId ||
+    run.trigger !== "bot_message" ||
+    source.threadId !== run.threadId ||
+    source.role !== "user" ||
+    source.botId !== null ||
+    source.externalTranscriptFor ||
+    !block.returnToMessageId ||
+    block.returnThreadId === run.threadId
+  )
+    throw new IsolationError();
+  const echo = await tx.message.findFirst({
+    where: {
+      id: block.returnToMessageId,
+      threadId: block.returnThreadId,
+      role: "bot",
+      botId: block.fromBotId,
+    },
+  });
+  const echoBlocks = MessageBlockSchema.array().safeParse(echo?.blocks);
+  const sent = echoBlocks.success && echoBlocks.data.length === 1 ? echoBlocks.data[0] : null;
+  if (
+    !echo?.runId ||
+    sent?.kind !== "bot_message_sent" ||
+    sent.toBotId !== run.botId ||
+    sent.text !== block.text
+  )
+    throw new IsolationError();
+  const sender = await tx.run.findFirst({
+    where: {
+      id: echo.runId,
+      spaceId: actor.spaceId,
+      userId: actor.userId,
+      botId: block.fromBotId,
+      threadId: block.returnThreadId,
+    },
+  });
+  if (!sender) throw new IsolationError();
+  await requireRun(tx, actor, sender.id);
+  const [origin, target] = await Promise.all([
+    requireThread(tx, actor, sender.threadId),
+    requireThread(tx, actor, run.threadId),
+  ]);
+  if (!origin.groupId?.startsWith("recruiting-global-") || !target.groupId)
+    throw new IsolationError();
+  return sender;
 }
 
 async function requireResearchHandoff(

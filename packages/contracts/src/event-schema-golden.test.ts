@@ -19,6 +19,8 @@ const GOLDEN_BY_VERSION: Record<number, string> = {
   3: "fa2f7a5998cb406ab33cf7a0a7c99df8eea287fc1a4a44535c82b8b095c3c910",
   // 4: the stop line's meta block gained an optional resume flag.
   4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
+  // 5: optional thinkingSince on progress blocks and thread.progress, thinkingMs on usage.
+  5: "7003e699db5f8e489fd6539a5bea33fc33f3f18bdbb86d64af36988e91648563",
 };
 
 const OLD_ROWS: unknown[] = [
@@ -46,6 +48,7 @@ const OLD_ROWS: unknown[] = [
     hop: 1,
   },
   { kind: "meta", text: "Dana stopped the assistant" },
+  { kind: "progress", text: "Thinking", phase: "thinking", summary: "Reading the role" },
 ];
 
 describe("stored event shapes", () => {

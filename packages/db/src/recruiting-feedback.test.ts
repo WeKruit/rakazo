@@ -214,6 +214,113 @@ function handoffFixture() {
   };
 }
 
+function delegationFixture() {
+  const f = fixture();
+  f.source.threadId = "global-thread";
+  const text = "Note that Mandarin is a plus for this role.";
+  const echo = {
+    ...f.source,
+    id: "echo",
+    seq: 2,
+    role: "bot",
+    botId: "bot",
+    runId: "sender-run",
+    blocks: [{ kind: "bot_message_sent", toBotId: "bot", toBotName: "Engineer team", text }],
+  };
+  const delivery = {
+    ...f.source,
+    id: "delivery",
+    threadId: "thread",
+    seq: 5,
+    blocks: [
+      {
+        kind: "bot_message_received",
+        fromBotId: "bot",
+        fromBotName: "Kruit",
+        text,
+        intent: "request",
+        returnToMessageId: echo.id,
+        returnThreadId: "global-thread",
+      },
+    ],
+  };
+  const run = {
+    ...actor,
+    id: "run",
+    botId: "bot",
+    bot: actor,
+    threadId: "thread",
+    sourceMessageId: delivery.id,
+    trigger: "bot_message",
+    status: "running",
+  };
+  const sender = {
+    ...run,
+    id: "sender-run",
+    threadId: "global-thread",
+    sourceMessageId: f.source.id,
+    trigger: "user",
+    status: "completed",
+  };
+  f.tx.run.findFirst.mockImplementation(async (query) =>
+    (query as { where: { id: string } }).where.id === sender.id ? sender : run,
+  );
+  const messages = new Map<string, unknown>([
+    [f.source.id, f.source],
+    [echo.id, echo],
+    [delivery.id, delivery],
+  ]);
+  f.tx.message.findFirst.mockImplementation(
+    async ({ where }) => (messages.get(where.id ?? "") ?? null) as never,
+  );
+  const threadRow = (origin: string) => async (query: { where: { id: string } }) => ({
+    ...actor,
+    id: query.where.id,
+    groupId: query.where.id === "global-thread" ? origin : "role-group",
+    activeRecruitingRoleId: "role",
+  });
+  Object.assign(f.tx.thread, { findFirst: vi.fn(threadRow("recruiting-global-owner")) });
+  Object.assign(f.tx, {
+    chatGroup: { findFirst: vi.fn(async () => ({ ...actor })) },
+    chatGroupMember: { findFirst: vi.fn(async () => ({})), count: vi.fn(async () => 1) },
+  });
+  return {
+    ...f,
+    threadRow,
+    echo,
+    delivery,
+    run,
+    sender,
+    input: { ...f.input, sourceMessageId: delivery.id },
+  };
+}
+
+describe("role work delegated by the global agent", () => {
+  it("acts for the person's message in the global conversation", async () => {
+    const f = delegationFixture();
+    const result = await readRecruitingFeedbackContext(f.prisma, actor, f.input);
+    expect(result.source).toMatchObject({
+      id: "human-message:human",
+      anchor: { messageId: f.source.id },
+    });
+  });
+  it.each(["origin", "echo", "text", "trigger", "later"] as const)(
+    "rejects a delegation whose %s does not match",
+    async (boundary) => {
+      const f = delegationFixture();
+      if (boundary === "origin")
+        Object.assign(f.tx.thread, { findFirst: vi.fn(f.threadRow("role-group")) });
+      if (boundary === "echo") f.echo.runId = null as never;
+      if (boundary === "text") f.echo.blocks = [{ ...f.echo.blocks[0]!, text: "Something else" }];
+      if (boundary === "trigger") f.run.trigger = "follow_up";
+      if (boundary === "later") f.source.createdAt = new Date(f.delivery.createdAt.getTime() + 1);
+      await expect(readRecruitingFeedbackContext(f.prisma, actor, f.input)).rejects.toThrow(
+        IsolationError,
+      );
+    },
+  );
+});
+
 describe("native recruiting memory admission", () => {
   const context: AdapterContext = {
     ...actor,

@@ -200,6 +200,7 @@ import type {
   PrismaClient,
   RecruitingRoleToolResult,
   RunTiming,
+  TextEmbedder,
   ThreadEvents,
 } from "@rakazo/db";
 import {
@@ -266,6 +267,7 @@ import {
   saveRecruitingCalibrationRound,
   searchHistory,
   skipRateLimitedRun,
+  unitVector,
   votePoll,
   withTransactionRetry,
 } from "@rakazo/db";
@@ -1135,9 +1137,12 @@ const PLANNED_SEARCHES_NOTE =
 const nextStepAlreadyGiven = (reply: string) =>
   `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines with message_user and end the turn without a question.`;
 
-/** Model failures that a fresh attempt can clear: a silent or dropped stream, a timeout or an outage. */
+/**
+ * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
+ * network blip ("fetch failed" is how fetch reports a connection it could not make).
+ */
 const MODEL_OUTAGE =
-  /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|socket hang up|^terminated$/i;
+  /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|^terminated$|^fetch failed/i;
 const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn once";
 
 /** A JD that states no years leaves the range to ask; round 1 of the playtest skipped it. */
@@ -3534,6 +3539,8 @@ export interface ExecutorDeps {
   listConnectedPluginSlugs?: (userId: string) => Promise<string[]>;
   /** Builtin web_search / web_fetch. Defaults to keyless HTTP when omitted. */
   web?: WebProvider;
+  /** Meaning vectors for history search when no words match; absent keeps word search only. */
+  embedder?: TextEmbedder | null;
   /** Page browser (DOM refs) on the bot computer. Defaults to the sandbox live browser when supported. */
   browser?: BrowserProvider;
   secretHttp?: RemoteTransportDependencies;
@@ -10993,7 +11000,41 @@ export function createRunExecutor(deps: ExecutorDeps) {
             };
             const response =
               name === "search_history"
-                ? await searchHistory(deps.prisma, scope, HistorySearchInputSchema.parse(args))
+                ? await searchHistory(
+                    deps.prisma,
+                    scope,
+                    HistorySearchInputSchema.parse(args),
+                    deps.embedder
+                      ? async (query) => {
+                          const embedder = deps.embedder!;
+                          const result = await embedder.embed([query]);
+                          await recordUsage(
+                            deps.prisma,
+                            {
+                              type: "usage",
+                              provider: embedder.provider,
+                              model: embedder.model,
+                              inputTokens: result.tokens,
+                              outputTokens: 0,
+                              totalTokens: result.tokens,
+                              costUsd: result.costUsd,
+                              costSource: "catalog-estimate",
+                            },
+                            {
+                              spaceId: run.spaceId,
+                              userId: run.userId,
+                              botId: run.botId,
+                              runId,
+                              operationKind: "retrieval",
+                            },
+                          ).catch(() => undefined);
+                          const vector = result.vectors[0];
+                          return vector
+                            ? { model: embedder.model, vector: unitVector(vector) }
+                            : null;
+                        }
+                      : undefined,
+                  )
                 : await readHistory(
                     deps.prisma,
                     scope,
@@ -13365,6 +13406,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   ...(event.summary ? { summary: visible(event.summary) } : {}),
                   ...(event.thought ? { thought: visible(event.thought) } : {}),
                   ...(event.at ? { at: event.at } : {}),
+                  ...(event.thinkingSince ? { thinkingSince: event.thinkingSince } : {}),
                 },
               });
             } else if (event.type === "ask") {
@@ -14225,6 +14267,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             error: message,
           });
           if (!failed) return;
+          // A failed turn still owes the person an answer: the reply check asks once more.
+          await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>
+            getLogger().error("reply check enqueue", error),
+          );
           if (failed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(failed.continuationRunId))

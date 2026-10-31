@@ -38,6 +38,9 @@ const ToolOnlyNarration = lazyPanel(() =>
 const ToolSteps = lazyPanel(() =>
   import("../components/ToolActivityDisclosure").then((m) => m.ToolSteps),
 );
+const ThinkingClock = lazyPanel(() =>
+  import("../components/ToolActivityDisclosure").then((m) => m.ThinkingClock),
+);
 
 const SkillDraftCard = lazyPanel(() =>
   import("../components/teach/SkillDraftCard").then((m) => m.SkillDraftCard),
@@ -47,10 +50,10 @@ import type { ArtifactTarget } from "../lib/artifact-open";
 import { copyableMessageText, previewMessageText } from "../lib/message-text";
 import { messageProviderLabel } from "../lib/messaging";
 import {
+  isThinkingClockBlock,
   isToolOnlyNarration,
   renderableMessageBlocks,
   shouldRenderToolCard,
-  toolStepCount,
 } from "../lib/tool-activity-view";
 import { ReplyLine } from "./shell/chat-context";
 
@@ -309,7 +312,7 @@ export const MessageView = memo(function MessageView({
                   <ToolActivityDisclosure
                     key={i}
                     live={isLive}
-                    stepCount={toolStepCount(block.steps)}
+                    steps={block.steps}
                     durationMs={block.durationMs}
                   >
                     <ToolSteps
@@ -320,6 +323,8 @@ export const MessageView = memo(function MessageView({
                   </ToolActivityDisclosure>
                 );
               }
+              if (isThinkingClockBlock(block))
+                return isLive ? <ThinkingClock key={i} since={block.thinkingSince} /> : null;
               if (block.kind === "text" || block.kind === "progress") {
                 return (
                   <div
@@ -357,7 +362,6 @@ export const MessageView = memo(function MessageView({
               key={i}
               live={isLive}
               steps={block.steps}
-              stepCount={toolStepCount(block.steps)}
               durationMs={block.durationMs}
             />
           );

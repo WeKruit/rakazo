@@ -71,6 +71,30 @@ describe("ConnectorRegistry", () => {
     expect(first.calls).toHaveLength(0);
     expect(second.calls).toHaveLength(1);
   });
+
+  it("keeps the other connectors when one fails, but fails whole when the database is unreachable", async () => {
+    const failing = (message: string) =>
+      Object.assign(new StubConnector("broken", []), {
+        discoverTools: async () => {
+          throw new Error(message);
+        },
+      });
+    const ok = new StubConnector("ok", [tool("ok.tool")]);
+
+    const partial = new ConnectorRegistry(new DestinationEmulator(), [
+      failing("Error POSTing to endpoint"),
+      ok,
+    ]);
+    expect((await partial.discoverTools(context)).map((entry) => entry.name)).toContain("ok.tool");
+
+    const unreachable = new ConnectorRegistry(new DestinationEmulator(), [
+      failing("timeout exceeded when trying to connect"),
+      ok,
+    ]);
+    await expect(unreachable.discoverTools(context)).rejects.toThrow(
+      "timeout exceeded when trying to connect",
+    );
+  });
 });
 
 function tool(name: string): ConnectorTool {

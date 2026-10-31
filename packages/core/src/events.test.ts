@@ -967,6 +967,28 @@ it("projects an audited outcome from saved events", () => {
   ]);
 });
 
+it("keeps when a thinking stretch began for the developer clock", () => {
+  const blocks = reduceLiveMessageBlocks([], {
+    type: "progress",
+    payload: {
+      text: "",
+      activity: true,
+      phase: "thinking",
+      summary: "Reviewing candidates",
+      thinkingSince: "2026-01-01T00:00:00.000Z",
+    },
+  });
+  expect(blocks.at(-1)).toMatchObject({
+    phase: "thinking",
+    thinkingSince: "2026-01-01T00:00:00.000Z",
+  });
+  const retry = reduceLiveMessageBlocks([], {
+    type: "progress",
+    payload: { text: "", activity: true, phase: "retrying", thinkingSince: "2026-01-01" },
+  });
+  expect(retry.at(-1)).not.toHaveProperty("thinkingSince");
+});
+
 it("keeps runtime phase after flushing pending tool names", () => {
   const blocks = reduceLiveMessageBlocks(
     [{ kind: "progress", text: "Done.", pendingToolNames: ["read_file"] }],

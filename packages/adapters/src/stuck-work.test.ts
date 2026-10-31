@@ -367,6 +367,9 @@ describe("reconcileStuckWork", () => {
       payload: { runId: "run-next" },
       replaceKey: "run:run-next",
     });
+    expect(enqueue).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "thread.reply_check", payload: { threadId: "thread-1" } }),
+    );
     expect(send).toHaveBeenCalledTimes(1);
     expect(send).toHaveBeenCalledWith(
       expect.objectContaining({

@@ -1,10 +1,14 @@
-import { Plural, useLingui } from "@lingui/react/macro";
+import { Plural, Trans, useLingui } from "@lingui/react/macro";
 import type { ThreadMessage } from "@rakazo/contracts";
 import { formatWorkClock } from "@rakazo/core";
 import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { formatToolActivityDuration, toolStepCount } from "../lib/tool-activity-view";
+import {
+  formatToolActivityDuration,
+  isThinkingClockBlock,
+  toolStepCount,
+} from "../lib/tool-activity-view";
 
 type ToolStep = Extract<ThreadMessage["blocks"][number], { kind: "steps" }>["steps"][number];
 
@@ -122,6 +126,17 @@ export function ToolSteps({
 }
 
 /**
+ * The tools still running, latest first: every started step without a result, or else the
+ * last step when the runtime has not reported start times.
+ */
+export function runningToolSteps(steps: readonly ToolStep[]): ToolStep[] {
+  const open = steps.filter((step) => !step.status && step.durationMs === undefined);
+  const started = open.filter((step) => step.startedAt);
+  const last = steps.at(-1);
+  return (started.length ? started : open.at(-1) === last && last ? [last] : []).reverse();
+}
+
+/**
  * The tool-activity card. It starts open while the run is live and folds when the run
  * ends: the `key` swap remounts the element, so `open` restarts from `live`. A manual
  * collapse during the run holds, because React only rewrites `open` when the prop
@@ -129,16 +144,18 @@ export function ToolSteps({
  */
 export function ToolActivityDisclosure({
   live,
-  stepCount,
+  steps,
   durationMs,
   children,
 }: {
   live: boolean;
-  stepCount: number;
+  steps: readonly ToolStep[];
   durationMs?: number;
   children: ReactNode;
 }) {
   const duration = formatToolActivityDuration(durationMs);
+  const stepCount = toolStepCount(steps);
+  const running = live ? runningToolSteps(steps) : [];
   return (
     <details
       key={live ? "working" : "actions"}
@@ -158,7 +175,12 @@ export function ToolActivityDisclosure({
           strokeWidth={1.8}
           className="transition-transform duration-150 group-open:rotate-90 motion-reduce:transition-none"
         />
-        {live ? (
+        {running.length ? (
+          <span className="max-w-80 truncate" data-testid="tool-activity-running">
+            {running[0]!.label}
+            {running.length > 1 ? ` +${running.length - 1}` : ""}
+          </span>
+        ) : live ? (
           <Plural value={stepCount} one="Working… · # tool" other="Working… · # tools" />
         ) : (
           <>
@@ -178,18 +200,16 @@ export function ToolActivityDisclosure({
 export function StandaloneToolActivity({
   live,
   steps,
-  stepCount,
   durationMs,
 }: {
   live: boolean;
   steps: readonly ToolStep[];
-  stepCount: number;
   durationMs?: number;
 }) {
   return (
     <div className="flex justify-start" dir="ltr" data-testid="tool-activity-line">
       <div className="max-w-[74%] min-w-0 ps-1">
-        <ToolActivityDisclosure live={live} stepCount={stepCount} durationMs={durationMs}>
+        <ToolActivityDisclosure live={live} steps={steps} durationMs={durationMs}>
           <ToolSteps
             steps={steps}
             currentIndex={live ? steps.length - 1 : undefined}
@@ -198,6 +218,19 @@ export function StandaloneToolActivity({
           />
         </ToolActivityDisclosure>
       </div>
+    </div>
+  );
+}
+
+/** Developer view: how long the model has been reasoning in this stretch. */
+export function ThinkingClock({ since }: { since: string }) {
+  return (
+    <div
+      className="flex min-h-6 items-center gap-1.5 ps-1 text-[13px] text-foreground/75"
+      data-testid="thinking-clock"
+    >
+      <Trans>Thinking</Trans>
+      <ToolStepElapsed startedAt={since} live />
     </div>
   );
 }
@@ -218,9 +251,10 @@ export function ToolOnlyNarration({
             key={i}
             live={live}
             steps={block.steps}
-            stepCount={toolStepCount(block.steps)}
             durationMs={block.durationMs}
           />
+        ) : live && isThinkingClockBlock(block) ? (
+          <ThinkingClock key={i} since={block.thinkingSince} />
         ) : null,
       )}
     </>

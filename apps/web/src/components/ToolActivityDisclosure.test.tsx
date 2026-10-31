@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("@lingui/react/macro", () => ({
   Plural: ({ value, one, other }: { value: number; one: string; other: string }) =>
     (value === 1 ? one : other).replace("#", String(value)),
+  Trans: ({ children }: { children: React.ReactNode }) => children,
   useLingui: () => ({
     t: (parts: TemplateStringsArray, ...values: unknown[]) =>
       parts.reduce(
@@ -32,21 +33,19 @@ function markup(props: {
   live: boolean;
   stepCount: number;
   durationMs?: number;
-  steps?: Array<{ label: string; count: number }>;
+  steps?: Array<{ label: string; count: number; durationMs?: number; startedAt?: string }>;
 }) {
+  const steps = props.steps ?? [{ label: "Shell", count: props.stepCount, durationMs: 100 }];
   return renderToStaticMarkup(
-    <ToolActivityDisclosure
-      live={props.live}
-      stepCount={props.stepCount}
-      durationMs={props.durationMs}
-    >
-      <ToolSteps steps={props.steps ?? [{ label: "Shell", count: props.stepCount }]} />
+    <ToolActivityDisclosure live={props.live} steps={steps} durationMs={props.durationMs}>
+      <ToolSteps steps={steps} />
     </ToolActivityDisclosure>,
   );
 }
 
+/** Finished steps; a live card names only the steps still running. */
 function stepsOf(n: number) {
-  return Array.from({ length: n }, (_, i) => ({ label: `step-${i}`, count: 1 }));
+  return Array.from({ length: n }, (_, i) => ({ label: `step-${i}`, count: 1, durationMs: 10 }));
 }
 
 const OPEN_DETAILS = /<details[^>]* open/;
@@ -57,7 +56,7 @@ function mountCard() {
   const render = (live: boolean, stepCount = 2) =>
     flushSync(() =>
       root.render(
-        <ToolActivityDisclosure live={live} stepCount={stepCount}>
+        <ToolActivityDisclosure live={live} steps={stepsOf(stepCount)}>
           <ToolSteps steps={stepsOf(stepCount)} />
         </ToolActivityDisclosure>,
       ),
@@ -71,6 +70,21 @@ describe("ToolActivityDisclosure", () => {
   it("labels a finished card with the tool count and duration", () => {
     const html = markup({ live: false, stepCount: 2, durationMs: 12000 });
     expect(html).toContain("Done · 2 tools · 12s");
+  });
+
+  it("names the running tool and how many others run beside it", () => {
+    const startedAt = "2026-01-01T00:00:00.000Z";
+    const steps = [
+      { label: "Search people", count: 1, durationMs: 300 },
+      { label: "Run bash", count: 1, startedAt },
+      { label: "Read file", count: 1, startedAt },
+      { label: "Fetch page", count: 1, startedAt },
+    ];
+    expect(markup({ live: true, stepCount: 4, steps })).toContain("Fetch page +2");
+    expect(markup({ live: true, stepCount: 1, steps: [{ label: "Run bash", count: 1 }] })).toMatch(
+      />Run bash</,
+    );
+    expect(markup({ live: false, stepCount: 4, steps })).toContain("Done · 4 tools");
   });
 
   it("uses the singular for one tool", () => {
@@ -177,7 +191,7 @@ describe("ToolSteps", () => {
     }
   });
   it("lists only the last steps and counts the earlier ones when limited", () => {
-    const steps = stepsOf(LIVE_TOOL_STEP_WINDOW + 3);
+    const steps = stepsOf(LIVE_TOOL_STEP_WINDOW + 3).map(({ label, count }) => ({ label, count }));
     const html = renderToStaticMarkup(
       <ToolSteps steps={steps} currentIndex={steps.length - 1} limit={LIVE_TOOL_STEP_WINDOW} />,
     );
@@ -216,7 +230,7 @@ describe("ToolSteps", () => {
 describe("StandaloneToolActivity", () => {
   it("renders as a plain line, not a chat bubble", () => {
     const html = renderToStaticMarkup(
-      <StandaloneToolActivity live={false} steps={stepsOf(2)} stepCount={2} durationMs={4000} />,
+      <StandaloneToolActivity live={false} steps={stepsOf(2)} durationMs={4000} />,
     );
     expect(html).toContain('data-testid="tool-activity-line"');
     expect(html).toContain("Done · 2 tools · 4s");
@@ -226,13 +240,11 @@ describe("StandaloneToolActivity", () => {
 
   it("is open with a windowed list while live, and lists every step once done", () => {
     const steps = stepsOf(9);
-    const live = renderToStaticMarkup(<StandaloneToolActivity live steps={steps} stepCount={9} />);
+    const live = renderToStaticMarkup(<StandaloneToolActivity live steps={steps} />);
     expect(live).toMatch(OPEN_DETAILS);
     expect(live).toContain("+3 earlier steps");
 
-    const done = renderToStaticMarkup(
-      <StandaloneToolActivity live={false} steps={steps} stepCount={9} />,
-    );
+    const done = renderToStaticMarkup(<StandaloneToolActivity live={false} steps={steps} />);
     expect(done).not.toMatch(OPEN_DETAILS);
     expect(done).not.toContain("earlier");
     for (let i = 0; i < 9; i++) expect(done).toContain(`step-${i}<`);
@@ -240,6 +252,20 @@ describe("StandaloneToolActivity", () => {
 });
 
 describe("ToolOnlyNarration", () => {
+  it("shows a ticking thinking clock while live and nothing once done", () => {
+    const thinking = {
+      kind: "progress" as const,
+      text: "",
+      activity: true as const,
+      phase: "thinking" as const,
+      thinkingSince: new Date(Date.now() - 7_000).toISOString(),
+    };
+    const live = renderToStaticMarkup(<ToolOnlyNarration live blocks={[thinking]} />);
+    expect(live).toContain('data-testid="thinking-clock"');
+    expect(live).toMatch(/Thinking.*0:0[78]/);
+    expect(renderToStaticMarkup(<ToolOnlyNarration live={false} blocks={[thinking]} />)).toBe("");
+  });
+
   it("renders a live tools-only message as an open slim line, not a bubble", () => {
     const html = renderToStaticMarkup(
       <ToolOnlyNarration live blocks={[{ kind: "steps", steps: stepsOf(2) }]} />,

@@ -39,14 +39,17 @@ export function filterBuiltinToolsForThread<T extends { name: string }>(
   tools: T[],
   groupId: string | null | undefined,
 ): T[] {
+  const global = Boolean(groupId?.startsWith("recruiting-global-"));
   return tools.filter(
     (tool) =>
       (groupId || (tool.name !== "handoff_to_bot" && tool.name !== "save_group_memory")) &&
+      // Above the role teams, role work goes to that role's team, not to a teammate in this room.
+      (!global || tool.name !== "handoff_to_bot") &&
       // In a group the room is the shared surface: hand the stage to a member
       // rather than starting a private thread off to one side.
       (!groupId || tool.name !== "message_bot") &&
       // Only the account-wide conversation sits above the role teams.
-      (tool.name !== "delegate_to_role" || Boolean(groupId?.startsWith("recruiting-global-"))),
+      (tool.name !== "delegate_to_role" || global),
   );
 }
 
