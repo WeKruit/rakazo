@@ -64,7 +64,7 @@ const host = document.createElement("div");
 const root = createRoot(host);
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
 afterEach(() => vi.clearAllMocks());
-it("uses one account read, one calendar, role labels and a picker that filters without opening chat", async () => {
+it("reads each role on its own, shows one calendar, role labels and a picker that filters without opening chat", async () => {
   read.mockImplementation(async (input: { roleId?: string }) =>
     input.roleId
       ? { ...data, items: data.items.filter((item) => item.roleId === input.roleId) }
@@ -87,8 +87,12 @@ it("uses one account read, one calendar, role labels and a picker that filters w
         </MemoryRouter>,
       ),
     );
-    expect(read).toHaveBeenCalledTimes(1);
-    expect(read.mock.calls[0]![0]).toEqual({ view: "interview", cursor: undefined, limit: 5 });
+    expect(read).toHaveBeenCalledTimes(3);
+    expect(read.mock.calls.map(([input]) => input)).toEqual([
+      { view: "roles", cursor: undefined, limit: 5 },
+      { view: "interview", roleId: "one", limit: 1 },
+      { view: "interview", roleId: "two", limit: 1 },
+    ]);
     expect(host.querySelectorAll('[aria-label="Calendar"]').length).toBe(1);
     expect(host.textContent).toContain("Role one / Role two · Candidate interview");
     const picker = host.querySelector<HTMLSelectElement>('select[aria-label="Role"]')!;
@@ -96,8 +100,8 @@ it("uses one account read, one calendar, role labels and a picker that filters w
       picker.value = "two";
       picker.dispatchEvent(new Event("change", { bubbles: true }));
     });
-    expect(read).toHaveBeenCalledTimes(2);
-    expect(read.mock.calls[1]![0]).toEqual({
+    expect(read).toHaveBeenCalledTimes(4);
+    expect(read.mock.calls[3]![0]).toEqual({
       view: "interview",
       roleId: "two",
       cursor: undefined,
@@ -351,9 +355,9 @@ it.each(["missing", "failed", "unsupported", "not_checked"])(
 
 it("loads the next interview page into the calendar without losing previous events or sibling roles", async () => {
   const event = correspondence("one").events[0]!;
-  read.mockImplementation(async (input: { itemCursor?: string }) => ({
+  read.mockImplementation(async (input: { itemCursor?: string; roleId?: string }) => ({
     roles,
-    items: input.itemCursor
+    items: (input.itemCursor
       ? [
           {
             roleId: "one",
@@ -379,7 +383,8 @@ it("loads the next interview page into the calendar without losing previous even
               events: [{ ...event, id: "sibling-event", title: "Other role interview" }],
             },
           },
-        ],
+        ]
+    ).filter((item) => !input.roleId || item.roleId === input.roleId),
     nextCursor: null,
   }));
   const container = document.createElement("div");
@@ -626,6 +631,59 @@ it("completes an open native reminder and does not offer Done on already complet
     expect(
       [...container.querySelectorAll("button")].some((button) => button.textContent === "Done"),
     ).toBe(false);
+  } finally {
+    await act(async () => pageRoot.unmount());
+  }
+});
+
+it("shows each role as it arrives while a slow role is still loading", async () => {
+  const people = (id: string) => ({
+    items: [],
+    nextCursor: null,
+    total: id === "two" ? 7 : 0,
+    counts: { shortlisted: 0, replied: 0 },
+    crmStatus: "not_bound" as const,
+    crmCountsComplete: false,
+  });
+  read.mockImplementation((input: { view: string; roleId?: string }) =>
+    input.view === "roles"
+      ? Promise.resolve({
+          roles,
+          items: roles.map((role) => ({ roleId: role.id })),
+          nextCursor: null,
+        })
+      : input.roleId === "one"
+        ? new Promise(() => {})
+        : Promise.resolve({
+            roles,
+            items: [{ roleId: "two", candidates: people("two") }],
+            nextCursor: null,
+          }),
+  );
+  const container = document.createElement("div");
+  const pageRoot = createRoot(container);
+  try {
+    await act(async () =>
+      pageRoot.render(
+        <MemoryRouter initialEntries={["/app?view=contacts&role=all"]}>
+          <AccountRecruitingView
+            accountKey="user-space"
+            groups={[]}
+            bots={[]}
+            refreshSignal={0}
+            onOpenNavigation={() => {}}
+            onOpenConnections={() => {}}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    expect(container.querySelector('section[aria-label="Role two"]')?.textContent).toContain(
+      "7 people",
+    );
+    expect(
+      container.querySelector('section[aria-label="Role one"]')?.getAttribute("aria-busy"),
+    ).toBe("true");
+    expect(container.textContent).not.toContain("No roles yet.");
   } finally {
     await act(async () => pageRoot.unmount());
   }
