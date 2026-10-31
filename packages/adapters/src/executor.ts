@@ -5955,6 +5955,21 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined;
           return turnReportText(work, saved);
         };
+        /** Text of the last message this run already put in the conversation. */
+        const lastRunMessageText = async () => {
+          try {
+            const last = await deps.prisma.message.findFirst({
+              where: { threadId: thread.id, runId, botId: run.botId },
+              orderBy: { seq: "desc" },
+              select: { blocks: true },
+            });
+            return (Array.isArray(last?.blocks) ? (last.blocks as MessageBlock[]) : [])
+              .flatMap((block) => (block.kind === "text" && block.text.trim() ? [block.text] : []))
+              .join("\n");
+          } catch {
+            return undefined;
+          }
+        };
         /** The person's newest message since this run began that a different run answers. */
         const newerMessageAnsweredElsewhere = async () => {
           if (!run.createdAt) return undefined;
@@ -14018,11 +14033,14 @@ export function createRunExecutor(deps: ExecutorDeps) {
           ) {
             throw new Error(TOOL_STEPS_WITHOUT_RESPONSE);
           }
-          // The update just sent already said it: no second, near-identical message.
+          // The update just sent already said it: no second, near-identical message. A turn that
+          // went on in the background may have sent that update before it resumed, so the
+          // run's last saved message counts too.
           if (
             run.trigger !== "bot_message" &&
             blocks.every((block) => block.kind === "text") &&
-            restatesUpdate(text, midTurnUserTexts.at(-1))
+            (restatesUpdate(text, midTurnUserTexts.at(-1)) ||
+              restatesUpdate(text, await lastRunMessageText()))
           ) {
             text = "";
             blocks = [];

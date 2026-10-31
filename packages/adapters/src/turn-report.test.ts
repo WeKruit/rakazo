@@ -470,6 +470,13 @@ describe("restatesUpdate", () => {
         update,
       ),
     ).toBe(true);
+    // A first round finished in the background said it once before its final reply.
+    expect(
+      restatesUpdate(
+        "Recorded the first 10-person review set and saved the role brief, including **Chinese preferred; English assumed**. The candidates and their profile passages are shown above.",
+        "Recorded the first 10-person review set for the Atlanta on-site Warehouse Operations Manager role, with Chinese preferred and English assumed. The role brief is saved; the first review set includes the candidates and profile passages shown above.",
+      ),
+    ).toBe(true);
   });
 
   it("keeps a reply with new content or no update before it", () => {
