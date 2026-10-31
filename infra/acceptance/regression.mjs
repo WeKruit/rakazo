@@ -325,9 +325,45 @@ const CONTACT_REPORT = new RegExp(
   "i",
 );
 
-/** Sends one recruiter message and waits until the crew settles. Never answers a card. */
-async function say(groupId, text, { quietMs = 30_000, limitMs = 15 * 60_000, until } = {}) {
+/** The test copies this run made, from the reports in <out> and, for first10 suites, one folder down. */
+function ownCopies() {
+  const own = new Set();
+  const files = fs.existsSync(OUT)
+    ? fs.readdirSync(OUT, { recursive: true }).filter((file) => String(file).endsWith(".json"))
+    : [];
+  for (const file of files) {
+    try {
+      const { groupId } = JSON.parse(fs.readFileSync(path.join(OUT, String(file)), "utf8"));
+      if (typeof groupId === "string" && groupId) own.add(groupId);
+    } catch {}
+  }
+  return own;
+}
+
+/**
+ * Checks a chat is a test copy before work controls or messages touch it. The product renames a
+ * chat after its role, which drops the copy mark, so this run's own copies get the mark back.
+ */
+async function testCopy(groupId) {
+  if (ownCopies().has(groupId)) {
+    const { name } = await rpc("groups/get", { groupId });
+    if (!name.startsWith(COPY_MARK))
+      await rpc("groups/update", { groupId, name: `${COPY_MARK}${name}`.slice(0, 80) });
+  }
   await assertTestCopy(rpc, groupId);
+}
+const COPY_MARK = "测试副本 · ";
+
+/**
+ * Sends one recruiter message and waits until the crew settles. Never answers a card. A named
+ * internal fixture (the booking chat) passes `fixture` instead of being a test copy.
+ */
+async function say(
+  groupId,
+  text,
+  { quietMs = 30_000, limitMs = 15 * 60_000, until, fixture = false } = {},
+) {
+  if (!fixture) await testCopy(groupId);
   const before = new Set((await messagesOf(groupId)).map((message) => message.id));
   const busy = await working(groupId);
   const sentAt = Date.now();
@@ -462,17 +498,8 @@ async function cleanUp() {
   const keep =
     option("--t5-group") ??
     (t5 && fs.existsSync(t5) ? JSON.parse(fs.readFileSync(t5, "utf8")).groupId : "");
-  const own = new Set();
-  // Reports sit in <out> and, for first10 suites, one folder down.
-  const files = fs.existsSync(OUT)
-    ? fs.readdirSync(OUT, { recursive: true }).filter((file) => String(file).endsWith(".json"))
-    : [];
-  for (const file of files) {
-    try {
-      const { groupId } = JSON.parse(fs.readFileSync(path.join(OUT, String(file)), "utf8"));
-      if (typeof groupId === "string" && groupId && groupId !== keep) own.add(groupId);
-    } catch {}
-  }
+  const own = ownCopies();
+  own.delete(keep);
   // This run's copies close their open cards, stop and leave the sidebar now, even mid-run.
   if (own.size)
     await run("archive-own", "archive-test-copies.mjs", [
@@ -574,6 +601,7 @@ try {
           !stoppedCurrent &&
           (await rpc("threads/backgroundTasks", { groupId: report.groupId })).length
         ) {
+          await testCopy(report.groupId);
           await assertStopKeepsBackground(rpc, report.groupId);
           stoppedCurrent = true;
         }
@@ -925,6 +953,7 @@ try {
         .join("\n\n");
       fs.writeFileSync(path.join(OUT, "t1-chat.txt"), `${transcript}\n`);
       commonChecks(await messagesOf(groupId), failures);
+      await testCopy(groupId);
       const pendingTasks = await rpc("threads/backgroundTasks", { groupId });
       const approvalRunId = send.replies.find(sendCard)?.runId;
       const approvalTask = pendingTasks.find(
@@ -1205,7 +1234,7 @@ try {
         return failures.push(
           "pass --t5-group and --t5-say, or <cases>/t5.json, for the booking card case",
         );
-      const { replies } = await say(groupId, text);
+      const { replies } = await say(groupId, text, { fixture: true });
       fs.writeFileSync(path.join(OUT, "t5-replies.txt"), `${replies.map(botText).join("\n")}\n`);
       const card = cards(replies).find((block) => block.approvalEffectId);
       if (!card) failures.push("no booking confirmation card");
