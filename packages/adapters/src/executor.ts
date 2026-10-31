@@ -4921,6 +4921,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
         setupMark("discoveryJoin");
         let currentRecruitingContext: LoadedRecruitingRunContext | undefined;
         let memoryContext = loadedMemoryContext;
+        // How often durable memory outgrows the prompt budget, which decides whether it needs
+        // relevance ranking instead of newest first.
+        setupMarks.memoryDocs = loadedMemoryContext.documents.length;
+        setupMarks.memoryCutDocs = loadedMemoryContext.documents.filter(
+          (document) => document.disposition === "budget" || document.disposition === "truncated",
+        ).length;
         let recruitingSourceMessageId = run.sourceMessageId ?? null;
         // Whether this run has read external text, including on an earlier attempt.
         let readExternalText = false;
