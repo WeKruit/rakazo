@@ -17,6 +17,7 @@ import {
 } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import type { ExecutorDeps } from "./executor.js";
+import { recruitingResearchInFlight } from "./recruiting-research-poll.js";
 
 /**
  * The hop the current run sits at, read back from the message that woke this
@@ -377,6 +378,12 @@ export async function returnBotMessageOutcome(
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
+  // Work delegated from another conversation returns once, when the team's whole chain is done.
+  if (source.returnThreadId && intent === "result") {
+    await markBotOutcomeReturned(deps.prisma, run.id);
+    await returnDelegatedTeamOutcome(deps, run);
+    return true;
+  }
   const sent = await deps.prisma.message.findMany({
     where: { threadId: run.threadId, runId: run.id },
     select: { blocks: true },
@@ -428,6 +435,100 @@ export async function returnBotMessageOutcome(
   if (outcome.ok) await markBotOutcomeReturned(deps.prisma, run.id);
   return outcome.ok;
 }
+
+/**
+ * A role team's conversation went quiet after work another conversation delegated to it: send
+ * the team's latest reply back there, exactly once per delegated request. Waits while a teammate
+ * still has a turn queued, running or waiting on the recruiter, or the role's research is still
+ * running, so a handoff to a specialist returns the specialist's result, not "it's on it".
+ */
+export async function returnDelegatedTeamOutcome(
+  deps: Pick<ExecutorDeps, "prisma" | "events" | "jobs">,
+  run: {
+    id: string;
+    spaceId: string;
+    threadId: string;
+    botId: string;
+    userId: string;
+    sourceMessageId?: string | null;
+  },
+): Promise<void> {
+  const thread = await deps.prisma.thread.findFirst({
+    where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId, groupId: { not: null } },
+    select: { activeRecruitingRoleId: true, group: { select: { name: true } } },
+  });
+  if (!thread?.group) return;
+  const since = new Date(Date.now() - DELEGATION_RETURN_WINDOW_MS);
+  const delegated = await deps.prisma.message.findFirst({
+    where: {
+      threadId: run.threadId,
+      role: "user",
+      createdAt: { gte: since },
+      blocks: { array_contains: [{ kind: "bot_message_received" }] },
+    },
+    orderBy: { seq: "desc" },
+    select: { id: true, seq: true, blocks: true },
+  });
+  const root = botMessageContext(
+    Array.isArray(delegated?.blocks) ? (delegated.blocks as MessageBlock[]) : [],
+  );
+  // Only a request answers back; a returned result never bounces to the team again.
+  if (!delegated || !root?.returnThreadId) return;
+  if (root.intent !== undefined && root.intent !== "request" && root.intent !== "question") return;
+  const busy = await deps.prisma.run.findFirst({
+    where: {
+      threadId: run.threadId,
+      id: { not: run.id },
+      status: { in: ["queued", "running", "waiting_input"] },
+    },
+    select: { id: true },
+  });
+  if (busy) return;
+  if (
+    thread.activeRecruitingRoleId &&
+    (await recruitingResearchInFlight(deps.prisma, thread.activeRecruitingRoleId))
+  )
+    return;
+  // The team's replies since the request, up to the recruiter's next own message there.
+  const later = await deps.prisma.message.findMany({
+    where: { threadId: run.threadId, seq: { gt: delegated.seq } },
+    orderBy: { seq: "asc" },
+    take: 200,
+    select: { role: true, blocks: true },
+  });
+  let text = "";
+  for (const message of later) {
+    const blocks = Array.isArray(message.blocks) ? (message.blocks as MessageBlock[]) : [];
+    if (message.role === "user" && !botMessageContext(blocks)) break;
+    if (message.role !== "bot") continue;
+    const reply = blocks
+      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+      .join("\n")
+      .trim();
+    if (reply) text = reply;
+  }
+  if (!text) return;
+  const sent = await messageBot(
+    deps,
+    run,
+    { id: run.botId, name: thread.group.name },
+    {
+      bot_id: root.fromBotId,
+      thread_id: root.returnThreadId,
+      sender_label: `${thread.group.name} team`,
+      target_label: root.fromBotName,
+      message: clampBotMessage(text),
+      intent: "result",
+      deliveryKey: `delegation-outcome:${delegated.id}`,
+    },
+    { allowTerminalSource: true },
+  );
+  if (!sent.ok)
+    getLogger().warn("delegated team outcome not returned", { runId: run.id, error: sent.error });
+}
+
+/** Only a recent delegation is still waiting for its team's result. */
+const DELEGATION_RETURN_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 async function markBotOutcomeReturned(prisma: PrismaClient, runId: string) {
   await prisma.run.updateMany({

@@ -306,7 +306,12 @@ import {
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
-import { loadBotMessageContext, messageBot, returnBotMessageOutcome } from "./bot-messages.js";
+import {
+  loadBotMessageContext,
+  messageBot,
+  returnBotMessageOutcome,
+  returnDelegatedTeamOutcome,
+} from "./bot-messages.js";
 import {
   allowPrivateHttpSecretOrigins,
   botSecretToolView,
@@ -13772,6 +13777,12 @@ export function createRunExecutor(deps: ExecutorDeps) {
               botMessageOutcome.text,
               botMessageOutcome.intent,
             ).catch((error) => getLogger().error("bot message result return", error));
+          } else if (thread.groupId) {
+            // A teammate's turn may be the last one of work delegated from another conversation.
+            await returnDelegatedTeamOutcome(deps, {
+              ...run,
+              sourceMessageId: run.sourceMessageId,
+            }).catch((error) => getLogger().error("delegated team outcome return", error));
           }
           const notifyBody = completionNotificationPreview(text);
           if (

@@ -5,6 +5,7 @@ import {
   loadBotMessageContext,
   messageBot,
   returnBotMessageOutcome,
+  returnDelegatedTeamOutcome,
 } from "./bot-messages.js";
 import type { ExecutorDeps } from "./executor.js";
 
@@ -490,40 +491,100 @@ describe("delegating to a role team in another conversation", () => {
     expect(sent).toEqual({ ok: false, error: "a bot cannot message itself" });
   });
 
-  it("returns the team's outcome to the global conversation, named after the role", async () => {
-    const harness = deps({
-      bots: mainBot,
-      addressedThread: { id: "thread-global", group: { name: "SUI Engineer" } },
-      hopBlocks: [
-        {
-          kind: "bot_message_received",
-          fromBotId: "bot-main",
-          fromBotName: "Kruit",
-          text: "Find 50 more people",
-          hop: 1,
-          intent: "request",
-          returnToMessageId: "message-echo",
-          returnThreadId: "thread-global",
-        },
+  const delegation = {
+    kind: "bot_message_received",
+    fromBotId: "bot-main",
+    fromBotName: "Kruit",
+    text: "Find 50 more people",
+    hop: 1,
+    intent: "request",
+    returnToMessageId: "message-echo",
+    returnThreadId: "thread-global",
+  };
+  /** A role team's conversation after Kruit's request, with what the team said since. */
+  function team(options: { busy?: boolean; later?: unknown[]; root?: unknown } = {}) {
+    const harness = deps({ bots: mainBot, hopBlocks: [delegation] });
+    const prisma = harness.deps.prisma as unknown as Record<string, Record<string, unknown>>;
+    prisma.thread!.findFirst = vi.fn(async (args: { select?: { group?: unknown } }) =>
+      args.select?.group
+        ? { activeRecruitingRoleId: null, group: { name: "SUI Engineer" } }
+        : { id: "thread-global" },
+    );
+    prisma.message!.findFirst = vi.fn(async () => ({
+      id: "message-delegated",
+      seq: 10,
+      blocks: [options.root ?? delegation],
+    }));
+    prisma.message!.findMany = vi.fn(async () => options.later ?? []);
+    prisma.run!.findFirst = vi.fn(async () => (options.busy ? { id: "run-sourcer" } : null));
+    return harness;
+  }
+  const roleRun = { ...run, botId: "bot-main", threadId: "thread-role", sourceMessageId: "m" };
+  const said = (text: string) => ({ role: "bot", blocks: [{ kind: "text", text }] });
+  const returnedTo = (harness: ReturnType<typeof team>) =>
+    harness.tx.message.create.mock.calls
+      .map(([call]) => call as { data: { threadId: string; blocks: unknown[] } })
+      .filter((call) => call.data.threadId === "thread-global")
+      .map((call) => call.data.blocks[0]);
+
+  it("waits while a teammate the lead handed the work to is still on it", async () => {
+    const harness = team({ busy: true, later: [said("Sourcer is finding 50 more.")] });
+    expect(await returnBotMessageOutcome(harness.deps, roleRun, kruit, "Sourcer is on it.")).toBe(
+      true,
+    );
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
+    expect(harness.deps.prisma.run.updateMany).toHaveBeenCalled();
+  });
+
+  it("returns the team's final result once the conversation is quiet, named after the role", async () => {
+    const harness = team({
+      later: [
+        said("Sourcer is finding 50 more."),
+        { role: "bot", blocks: [{ kind: "handoff", fromBotId: "a", toBotId: "b", text: "go" }] },
+        said("Added 50 people to Results; 12 have emails."),
       ],
     });
-    const roleRun = { ...run, botId: "bot-main", threadId: "thread-role", sourceMessageId: "m" };
-    expect(
-      await returnBotMessageOutcome(harness.deps, roleRun, kruit, "Sourcer is finding 50 more."),
-    ).toBe(true);
-    expect(harness.tx.run.create).toHaveBeenCalledWith(
+    await returnDelegatedTeamOutcome(harness.deps, { ...roleRun, botId: "bot-sourcer" });
+    expect(returnedTo(harness)).toEqual([
       expect.objectContaining({
-        data: expect.objectContaining({ botId: "bot-main", threadId: "thread-global" }),
+        kind: "bot_message_received",
+        fromBotName: "SUI Engineer team",
+        text: "Added 50 people to Results; 12 have emails.",
+        intent: "result",
+      }),
+    ]);
+    // One delivery key per delegated request: a second quiet turn cannot send it again.
+    expect(harness.tx.message.findUnique).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          threadId_clientNonce: {
+            threadId: "thread-global",
+            clientNonce: "bot-message:delegation-outcome:message-delegated",
+          },
+        },
       }),
     );
-    const inbound = harness.tx.message.create.mock.calls
-      .map(([call]) => call as { data: { threadId: string; blocks: unknown[] } })
-      .find((call) => call.data.threadId === "thread-global" && call.data.blocks.length);
-    expect(inbound?.data.blocks[0]).toMatchObject({
-      kind: "bot_message_received",
-      fromBotName: "SUI Engineer team",
-      intent: "result",
+  });
+
+  it("stops at the recruiter's own next message in the role conversation", async () => {
+    const harness = team({
+      later: [
+        said("Added 50 people."),
+        { role: "user", blocks: [{ kind: "text", text: "now draft emails" }] },
+        said("Here is the draft."),
+      ],
     });
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(returnedTo(harness)).toEqual([expect.objectContaining({ text: "Added 50 people." })]);
+  });
+
+  it("never sends a returned result back to the team", async () => {
+    const harness = team({
+      root: { ...delegation, intent: "result" },
+      later: [said("Thanks.")],
+    });
+    await returnDelegatedTeamOutcome(harness.deps, roleRun);
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
   });
 });
 
