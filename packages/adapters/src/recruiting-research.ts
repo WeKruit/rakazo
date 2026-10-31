@@ -28,13 +28,19 @@ async function nativeMcpCreationReceipts(
   actor: Pick<AdapterContext, "userId" | "spaceId">,
   server: Pick<McpServer, "id" | "revision">,
   toolName: string,
+  scope: { threadId?: string; since?: Date } = {},
 ) {
   // ponytail: inspect only native creation receipts, never full saved candidate outputs.
   const effects = await prisma.externalEffect.findMany({
     where: {
       spaceId: actor.spaceId,
       status: "completed",
-      run: { spaceId: actor.spaceId, userId: actor.userId },
+      run: {
+        spaceId: actor.spaceId,
+        userId: actor.userId,
+        ...(scope.threadId ? { threadId: scope.threadId } : {}),
+      },
+      ...(scope.since ? { createdAt: { gte: scope.since } } : {}),
       OR: [["2", "route"], ["3"]].map((path) => ({
         AND: [
           { request: { path: [...path, "connectorId"], equals: "mcp" } },
@@ -262,6 +268,59 @@ function askedPeople(query: unknown): number {
     most = Math.max(most, Number(match[0].replaceAll(",", "")));
   return most;
 }
+/** A grading run of the same people in the same conversation is read again for this long. */
+const GRADING_REUSE_MS = 6 * 60 * 60_000;
+const FAILED_RUN_STATUSES = new Set(["failed", "cancelled", "canceled", "stopped", "expired"]);
+
+/** The people a grading request names, as one comparable key; undefined when one has no profile. */
+function gradedPeopleKey(data: unknown[]): string | undefined {
+  const keys = data.map((person) => {
+    const url = record(person)?.linkedin_url;
+    return typeof url === "string" ? linkedinPersonKey(url) : undefined;
+  });
+  if (keys.some((key) => !key)) return undefined;
+  return [...new Set(keys)].sort().join("\n");
+}
+
+/**
+ * A grading run this conversation already started for exactly these people, unless it failed.
+ * Its grades are read again instead of paying for the same batch twice: a grading turn that
+ * restarts, or repeats its call after the run finished, used to send the identical batch again.
+ */
+async function earlierGradingRun(
+  prisma: PrismaClient,
+  actor: Pick<AdapterContext, "userId" | "spaceId">,
+  server: Pick<McpServer, "id" | "revision">,
+  threadId: string,
+  people: unknown[],
+): Promise<string | undefined> {
+  const wanted = gradedPeopleKey(people);
+  if (!wanted) return undefined;
+  const receipts = await nativeMcpCreationReceipts(prisma, actor, server, "agent_run", {
+    threadId,
+    since: new Date(Date.now() - GRADING_REUSE_MS),
+  });
+  const failed = new Set<string>();
+  for (const receipt of receipts) {
+    const body = mcpObject(receipt.result);
+    if (typeof body?.id === "string" && FAILED_RUN_STATUSES.has(String(body.status)))
+      failed.add(body.id);
+  }
+  for (const receipt of receipts) {
+    const data = record(receipt.args.input)?.data;
+    const id = mcpObject(receipt.result)?.id;
+    if (
+      receipt.args.runId === undefined &&
+      Array.isArray(data) &&
+      typeof id === "string" &&
+      !failed.has(id) &&
+      gradedPeopleKey(data) === wanted
+    )
+      return id;
+  }
+  return undefined;
+}
+
 /** Most saved people sent as one agent run's exclusion list. */
 const AGENT_RUN_EXCLUSION_LIMIT = 500;
 
@@ -302,6 +361,16 @@ export async function prepareAgentRun(
   if (args.runId !== undefined) return args;
   const toGrade = record(args.input)?.data;
   const grading = Array.isArray(toGrade) && toGrade.length > 0;
+  const run = actor.runId
+    ? await prisma.run.findFirst({
+        where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
+        select: { threadId: true, thread: { select: { activeRecruitingRoleId: true } } },
+      })
+    : null;
+  if (grading && run?.threadId) {
+    const earlier = await earlierGradingRun(prisma, actor, server, run.threadId, toGrade);
+    if (earlier) return { runId: earlier };
+  }
   // Ultra is for a wave of a thousand people or more (the recruiter's rule); smaller waves and
   // grading use auto, which finds the same people for less.
   const ultra = args.effort === "ultra" && !grading && askedPeople(args.query) >= 1000;
@@ -339,12 +408,6 @@ export async function prepareAgentRun(
   };
   // People given to grade are already saved; leaving them out would leave nothing to grade.
   if (grading) return prepared;
-  const run = actor.runId
-    ? await prisma.run.findFirst({
-        where: { id: actor.runId, spaceId: actor.spaceId, userId: actor.userId },
-        select: { thread: { select: { activeRecruitingRoleId: true } } },
-      })
-    : null;
   const roleId = run?.thread.activeRecruitingRoleId;
   if (!roleId) return prepared;
   const saved = await prisma.recruitingCandidate.findMany({
