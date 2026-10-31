@@ -10,6 +10,8 @@ import {
   CodexCatalogCache,
   ComputerBusyError,
   ComputerScreenUnavailableError,
+  createCompanySiteResolver,
+  createExaOrganizationSearch,
   EncryptedSecretStore,
   IntegrationProviderSettings,
   LocalAgentHomeStore,
@@ -6208,6 +6210,72 @@ describe("link favicons", () => {
       code: "UNAUTHORIZED",
     });
     expect(favicon).not.toHaveBeenCalled();
+  });
+});
+
+describe("company logos", () => {
+  const reader = {
+    spaceId: "workspace-1",
+    userId: "user-1",
+    email: "user@rakazo.test",
+    isDeploymentOwner: false,
+  } satisfies Actor;
+
+  // A student group's index entry lists only a social page as its site, with its profile logo.
+  it("shows a student group's indexed logo when its only page is a social profile", async () => {
+    const png = Buffer.from(
+      "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEklEQVQYlWPg5OT8jw8zjAwFAADkRoGLne9fAAAAAElFTkSuQmCC",
+      "base64",
+    );
+    const indexAnswer = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      result: {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              results: [
+                {
+                  url: "https://instagram.com/example-kasa",
+                  title: "Example Korean American Student Association (KASA)",
+                  image: "https://logos.example/kasa.png",
+                  entities: [
+                    {
+                      properties: { name: "Example Korean American Student Association (KASA)" },
+                    },
+                  ],
+                },
+              ],
+            }),
+          },
+        ],
+      },
+    });
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.startsWith("https://mcp.exa.ai/"))
+        return new Response(`event: message\ndata: ${indexAnswer}\n\n`);
+      if (url === "https://logos.example/kasa.png")
+        return new Response(png, { headers: { "content-type": "image/png" } });
+      return new Response("", { status: 404 });
+    }) as unknown as typeof globalThis.fetch;
+    const deps = {
+      prisma: {} as PrismaClient,
+      companySites: createCompanySiteResolver({
+        fetch,
+        resolveHostname: async () => [{ address: "203.0.113.10", family: 4 as const }],
+        searchOrganizations: createExaOrganizationSearch({ fetch, apiKey: "fake-test-key" }),
+      }),
+      env: { webOrigin: "http://127.0.0.1:5173", screenProxySecret: "fake-test-secret" },
+      dataDir: "/tmp/rakazo-router-test",
+    } as unknown as RouterDeps;
+    const client = createRouterClient(createRouter(deps), { context: { actor: reader } });
+    const answer = await client.links.companySite({
+      name: "Example Korean American Student Association",
+    });
+    expect(answer.host).toBeNull();
+    expect(answer.icon).toMatch(/^data:image\/png;base64,/);
   });
 });
 

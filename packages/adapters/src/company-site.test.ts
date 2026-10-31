@@ -124,6 +124,44 @@ describe("company site", () => {
     expect(await resolver.companySite("Acme Robotics")).toEqual({ host: null });
     expect(fetch).toHaveBeenCalled();
   });
+
+  it("keeps the index's logo when it lists only a social or directory page", async () => {
+    const png = await sharpPng();
+    const fetch = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input instanceof Request ? input.url : input);
+      return url === "https://logos.example/club.png"
+        ? new Response(png, { headers: { "content-type": "image/png" } })
+        : new Response("", { status: 404 });
+    });
+    const resolver = createCompanySiteResolver({
+      fetch,
+      resolveHostname: async () => [{ address: "203.0.113.10", family: 4 as const }],
+      searchOrganizations: async () => [
+        { url: "https://club.example/", title: "Another Club" },
+        {
+          url: "https://www.linkedin.com/company/example-chess-club",
+          title: "Example Chess Club",
+          image: "https://logos.example/club.png",
+        },
+      ],
+    });
+    const answer = await resolver.companySite("Example Chess Club");
+    expect(answer.host).toBeNull();
+    expect(answer.icon).toMatch(/^data:image\/png;base64,/);
+  });
+
+  it("asks the index again soon when it could not answer, instead of remembering a miss", async () => {
+    let time = 0;
+    const fetch = vi.fn(async () => new Response("", { status: 404 }));
+    const searchOrganizations = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("rate limited"))
+      .mockResolvedValue([{ url: "https://esu.edu/", title: "Example State University" }]);
+    const resolver = createCompanySiteResolver({ fetch, searchOrganizations, now: () => time });
+    expect(await resolver.companySite("Example State University")).toEqual({ host: null });
+    time += 11 * 60 * 1000;
+    expect(await resolver.companySite("Example State University")).toEqual({ host: "esu.edu" });
+  });
 });
 
 async function sharpPng() {
