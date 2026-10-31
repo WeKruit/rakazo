@@ -23,6 +23,7 @@ import { reportStalledGroupStage } from "./group-handoff.js";
 import { compactHistory } from "./history-compaction.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { deliverMessagingOutbound, mirrorMessagingOutbound } from "./messaging-delivery.js";
+import { closePollAndWake } from "./poll-close.js";
 import { waitForRecruitingAgentRun } from "./recruiting-agent-run-wait.js";
 import { startRecruitingCheckin } from "./recruiting-checkin.js";
 import { startRecruitingGrading } from "./recruiting-grading.js";
@@ -184,6 +185,12 @@ export function createBackgroundJobHandlers(deps: {
       if (!run || run.threadId !== payload.message.threadId) return;
       // Throwing hands the retry back to the queue's backoff.
       await sendRunNotification(deps.notifications, run, payload.message);
+    },
+    "poll.close": async (payload) => {
+      await closePollAndWake(
+        { prisma: deps.prisma, jobs: deps.jobs, events: deps.events },
+        payload,
+      );
     },
     "thread.reply_check": async (payload) => {
       await checkThreadReplied(

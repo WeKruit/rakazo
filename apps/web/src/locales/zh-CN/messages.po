@@ -1113,6 +1113,7 @@ msgstr "时钟切换，请查看来源时间"
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Close"
 msgstr "关闭"
 
@@ -1162,6 +1163,14 @@ msgstr "关闭用户设置"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Close voice settings"
 msgstr "关闭语音设置"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr "已结束"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr "{time} 后结束"
 
 #: src/components/AskCard.tsx
 msgid "Code"
@@ -1822,6 +1831,10 @@ msgstr "无法读取这个活动。"
 msgid "Could not read this sequence."
 msgstr "无法读取这个邮件序列。"
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr "无法记录你的投票"
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "无法移除"
@@ -1861,6 +1874,7 @@ msgstr "无法撤销连接"
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Could not save"
 msgstr "无法保存"
 
@@ -3278,8 +3292,8 @@ msgid "Mailbox not recorded"
 msgstr "未记录邮箱"
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Main"
-msgstr "Main"
+#~ msgid "Main"
+#~ msgstr "Main"
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -6312,6 +6326,10 @@ msgstr "查看岗位记录"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Voice"
 msgstr "语音"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr "投票"
 
 #: src/components/LiveWork.tsx
 msgid "Waiting for background work"

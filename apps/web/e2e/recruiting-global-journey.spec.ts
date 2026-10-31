@@ -216,7 +216,7 @@ test("fresh ordinary chat creates two product roles and all global pages share t
   await captureScreenshot(page, testInfo, "journey-role-chat-Send-button-actual-answer");
   await page
     .getByTestId("recruiting-navigation")
-    .getByRole("button", { name: "Main", exact: true })
+    .getByRole("button", { name: "Kruit", exact: true })
     .click();
   await send(page, "what interviews are coming up");
   await expect(

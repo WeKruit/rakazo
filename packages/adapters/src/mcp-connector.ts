@@ -571,6 +571,11 @@ export const CORE_TOOLS: Readonly<Record<string, readonly string[]>> = {
     "cancel_booking",
     "get_booking",
     "get_bookings",
+    "suggest_time",
+    "list_events",
+    "create_event",
+    "update_event",
+    "delete_event",
   ],
 };
 const coreName = (tool: ConnectorTool) =>

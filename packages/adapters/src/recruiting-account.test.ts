@@ -96,6 +96,38 @@ function fixture() {
       ),
     },
     externalEffect: { findMany: vi.fn(async () => []) },
+    run: {
+      findMany: vi.fn(async ({ where }) =>
+        where.threadId.in.includes("thread-a") ? [{ id: "run-waiting-a" }] : [],
+      ),
+    },
+    recruitingCandidate: {
+      groupBy: vi.fn(async ({ where }) =>
+        where.roleId.in
+          .filter((id: string) => id === "a")
+          .map((roleId: string) => ({ roleId, _count: { _all: where.shortlisted ? 3 : 120 } })),
+      ),
+    },
+    message: {
+      groupBy: vi.fn(async ({ where }) =>
+        where.threadId.in
+          .filter((id: string) => id === "thread-a")
+          .map((threadId: string) => ({
+            threadId,
+            _max: { createdAt: new Date("2026-10-30T12:00:00Z") },
+          })),
+      ),
+      findMany: vi.fn(async ({ where }) =>
+        where.runId.in.includes("run-waiting-a")
+          ? [
+              {
+                threadId: "thread-a",
+                blocks: [{ kind: "ask", status: "pending", text: "Approve the first email?" }],
+              },
+            ]
+          : [],
+      ),
+    },
     recruitingRole: {
       findFirst: vi.fn(async ({ where }) => rows.find((row) => match(row, where)) ?? null),
       findMany: vi.fn(async ({ where, take }) =>
@@ -247,6 +279,31 @@ describe("account recruiting reads", () => {
     });
     expect(second.items.map((item) => item.roleId)).toEqual(["c"]);
     expect(second.nextCursor).toBeNull();
+  });
+  it("reports each role's status from saved records for the global agent", async () => {
+    const { deps, prisma } = fixture();
+    const view = await readRecruitingAccountView(deps, actor, { view: "roles", limit: 2 });
+    expect(view.items).toEqual([
+      {
+        roleId: "a",
+        status: {
+          savedPeople: 120,
+          shortlisted: 3,
+          lastActivityAt: "2026-10-30T12:00:00.000Z",
+          waitingOnYou: { kind: "question", text: "Approve the first email?" },
+        },
+      },
+      {
+        roleId: "b",
+        status: { savedPeople: 0, shortlisted: 0, lastActivityAt: null, waitingOnYou: null },
+      },
+    ]);
+    // Every status read stays inside this user's Space.
+    for (const call of vi.mocked(prisma.recruitingCandidate.groupBy).mock.calls)
+      expect(call[0]?.where).toMatchObject({ role: { spaceId: "space-a", userId: "user-a" } });
+    expect(vi.mocked(prisma.run.findMany).mock.calls[0]?.[0]?.where).toMatchObject({
+      thread: { spaceId: "space-a", userId: "user-a" },
+    });
   });
   it("rejects a global role cursor when one role is selected", async () => {
     const { deps } = fixture();

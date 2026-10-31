@@ -290,8 +290,8 @@ msgid "All of"
 msgstr "全部满足"
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "All roles"
-msgstr "全部岗位"
+#~ msgid "All roles"
+#~ msgstr "全部岗位"
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All rounds"
@@ -1794,8 +1794,8 @@ msgid "Low"
 msgstr "低"
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Main"
-msgstr "Main"
+#~ msgid "Main"
+#~ msgstr "Main"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -2711,6 +2711,10 @@ msgstr "岗位对话"
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
 msgstr "岗位阶段"
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role teams"
+msgstr "岗位团队"
 
 #. placeholder {0}: candidate.roleVersion
 #: src/pages/shell/Composer.tsx

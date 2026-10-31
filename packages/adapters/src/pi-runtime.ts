@@ -1160,6 +1160,11 @@ export function describeToolActivity(toolName: string, args: unknown): string {
   if (toolName === "attach_file") return `Attaching ${detail(record.path)}`;
   if (toolName === "open_path") return `Opening ${detail(record.path)}`;
   if (toolName === "render_plot") return "Rendering a chart";
+  if (toolName === "create_poll") return "Posting a poll";
+  if (toolName === "render_view") return "Laying out records";
+  if (toolName === "canvas_write") return `Building ${detail(record.title)}`;
+  if (toolName === "canvas_read") return "Reading a canvas";
+  if (toolName === "vote_poll") return "Voting on a poll";
   if (toolName === "add_mcp_server") return `Connecting MCP server: ${detail(record.name)}`;
   if (toolName === "computer_observe") return "Looking at the screen";
   if (toolName === "browser_navigate")
@@ -1171,6 +1176,7 @@ export function describeToolActivity(toolName: string, args: unknown): string {
   if (toolName === "create_space") return `Creating space: ${detail(record.name)}`;
   if (toolName === "remember") return "Saving a note to memory";
   if (toolName === "save_shared_memory") return `Saving shared memory: ${detail(record.path)}`;
+  if (toolName === "save_group_memory") return `Saving group notes: ${detail(record.path)}`;
   if (toolName === "web_search") return `Searching the web: ${detail(record.query)}`;
   if (toolName === "web_fetch") return `Reading page: ${detail(redactActivityUrl(record.url))}`;
   if (toolName === "skill_read") return `Reading skill: ${detail(record.name)}`;
@@ -1978,6 +1984,10 @@ function toAgentTool(tool: ConnectorTool, host: ToolHost, exposedName: string): 
   };
 }
 
+/** Helpers one turn may start, and how many may work at the same time. */
+export const SUBAGENT_TURN_LIMIT = 32;
+export const SUBAGENT_CONCURRENCY = 8;
+
 /** run_subagent: start a helper, continue one by handle, or wait for background results. */
 async function executeSubagent(
   host: ToolHost,
@@ -1996,6 +2006,11 @@ async function executeSubagent(
   const task = String(args.task ?? "").trim();
   const schema = outputSchema(args.output_schema);
   if (typeof schema === "string") return schema;
+  const working = [...host.subagents.values()].filter((existing) => existing.busy).length;
+  if (working >= SUBAGENT_CONCURRENCY)
+    return `${SUBAGENT_CONCURRENCY} helpers are already working. Wait for one with run_subagent wait before starting or continuing another.`;
+  if (!handle && host.subagentCount.value >= SUBAGENT_TURN_LIMIT)
+    return `This turn has used its ${SUBAGENT_TURN_LIMIT} helpers. Continue an existing helper by handle, or finish the remaining work yourself.`;
   let helper: SubagentHelper;
   let previous: string | undefined;
   if (handle) {

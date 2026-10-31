@@ -1113,6 +1113,7 @@ msgstr ""
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Close"
 msgstr "Cerrar"
 
@@ -1162,6 +1163,14 @@ msgstr "Cerrar configuración de usuario"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Close voice settings"
 msgstr "Cerrar configuración de voz"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr ""
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr ""
 
 #: src/components/AskCard.tsx
 msgid "Code"
@@ -1822,6 +1831,10 @@ msgstr ""
 msgid "Could not read this sequence."
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr ""
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "No se pudo quitar"
@@ -1861,6 +1874,7 @@ msgstr "No se pudo revocar la conexión"
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Could not save"
 msgstr "No se pudo guardar"
 
@@ -3278,8 +3292,8 @@ msgid "Mailbox not recorded"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Main"
-msgstr ""
+#~ msgid "Main"
+#~ msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -6312,6 +6326,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Voice"
 msgstr "Voz"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr ""
 
 #: src/components/LiveWork.tsx
 msgid "Waiting for background work"

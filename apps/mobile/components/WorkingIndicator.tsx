@@ -7,6 +7,7 @@ import {
   workSessionElapsedMs,
   workSessionStages,
   workStageLabel,
+  workTimeline,
 } from "@rakazo/core";
 import { useEffect, useState } from "react";
 import { Pressable, Text, View } from "react-native";
@@ -177,16 +178,78 @@ function Stages({
   onCancelStage?: (botId: string) => void;
 }) {
   const { t } = useI18n();
-  return workSessionStages(session).stages.map((stage) => (
-    <StageRow
-      key={stage.botId}
-      label={t(workStageLabel(stageKind(stage.botId)))}
-      running={stage.running}
-      steps={stage.steps}
-      onOpen={onOpenStage ? () => onOpenStage(stage.botId) : undefined}
-      onCancel={onCancelStage ? () => onCancelStage(stage.botId) : undefined}
-    />
-  ));
+  return (
+    <>
+      {workSessionStages(session).stages.map((stage) => (
+        <StageRow
+          key={stage.botId}
+          label={t(workStageLabel(stageKind(stage.botId)))}
+          running={stage.running}
+          steps={stage.steps}
+          onOpen={onOpenStage ? () => onOpenStage(stage.botId) : undefined}
+          onCancel={onCancelStage ? () => onCancelStage(stage.botId) : undefined}
+        />
+      ))}
+      {session ? <StageTimeline session={session} stageKind={stageKind} /> : null}
+    </>
+  );
+}
+
+/** Where each teammate's part fell within the turn, when two or more worked on it. */
+function StageTimeline({
+  session,
+  stageKind,
+}: {
+  session: WorkSession;
+  stageKind: (botId: string) => WorkStageKind;
+}) {
+  const tokens = useMobileTokens();
+  const { t } = useI18n();
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  const { rows } = workTimeline(session, now);
+  if (rows.length < 2) return null;
+  return (
+    <View style={{ gap: 4, marginTop: 2 }}>
+      {rows.map((row) => (
+        <View key={row.botId} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <Text
+            numberOfLines={1}
+            style={{ color: tokens.mutedForeground, fontSize: 12, width: 112 }}
+          >
+            {t(workStageLabel(stageKind(row.botId)))}
+          </Text>
+          <View style={{ flex: 1, height: 6, borderRadius: 3, backgroundColor: tokens.muted }}>
+            <View
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                borderRadius: 3,
+                left: `${row.start * 100}%`,
+                width: `${Math.max(2, (row.end - row.start) * 100)}%`,
+                backgroundColor: row.running ? tokens.warning : tokens.mutedForeground,
+              }}
+            />
+          </View>
+          <Text
+            style={{
+              color: tokens.mutedForeground,
+              fontSize: 12,
+              fontVariant: ["tabular-nums"],
+              width: 52,
+              textAlign: "right",
+            }}
+          >
+            {formatWorkDuration(row.durationMs)}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
 }
 
 /**

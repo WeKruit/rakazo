@@ -155,7 +155,12 @@ function replyBlockText(block: MessageBlock): string {
     case "bot_message_received":
       return block.text;
     case "choice":
+    case "poll":
       return block.question;
+    case "canvas":
+      return block.title;
+    case "view":
+      return block.title ?? "";
     case "card":
       return block.lines.map((line) => `${line.k}: ${line.v}`).join(" · ");
     case "steps":

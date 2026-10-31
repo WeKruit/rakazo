@@ -14,8 +14,11 @@ import {
 // Earlier versions stay listed so a hash can never be reused under a new number.
 const GOLDEN_BY_VERSION: Record<number, string> = {
   1: "086577d14d7f578e997849d69416dfb8f7d0282c59cfbcf192e2a77c28f047fa",
-  // The stop line's meta block gained an optional resume flag.
-  2: "5c0f6351cc16f64ca7fc0d7cabd44b8de5527e091acb0ab7b22f5a94b3c7bf5f",
+  2: "531ad276e3d4642ccb095e1d219940e85021bb4946c73eac42a3a2afc49c7152",
+  // 3: bot_message_received may name the conversation its outcome returns to (role team delegation).
+  3: "fa2f7a5998cb406ab33cf7a0a7c99df8eea287fc1a4a44535c82b8b095c3c910",
+  // 4: the stop line's meta block gained an optional resume flag.
+  4: "e5fb1f5bdce0327c356b5755665325683a933ca888493349e2f82996a7e1a54d",
 };
 
 const OLD_ROWS: unknown[] = [
@@ -33,6 +36,15 @@ const OLD_ROWS: unknown[] = [
   { kind: "ask", text: "Remote or onsite?", status: "pending" },
   { kind: "ask", text: "Remote or onsite?", status: "answered", answer: "Remote" },
   { kind: "steps", steps: [{ label: "Searching candidates", count: 2 }], durationMs: 4200 },
+  {
+    kind: "bot_message_received",
+    fromBotId: "bot-a",
+    fromBotName: "Main",
+    text: "Find ten people.",
+    intent: "request",
+    returnToMessageId: "message-a",
+    hop: 1,
+  },
   { kind: "meta", text: "Dana stopped the assistant" },
 ];
 

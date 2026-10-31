@@ -280,9 +280,14 @@ export interface ConnectorCapabilities {
 
 export type ConnectorCatalogItem = ConnectionCatalogItem;
 
+/** "group" memory is shared by the assistants in one of the user's group conversations. */
+export type MemoryDocumentScope = "bot" | "user" | "group";
+
 export interface MemoryReadRequest {
-  scope: "bot" | "user";
+  scope: MemoryDocumentScope;
   botId?: string;
+  /** Required for group scope. */
+  groupId?: string;
   path?: string;
 }
 
@@ -313,8 +318,10 @@ export const MEMORY_REVISION_CONFLICT_ERROR =
   "Memory changed since it was read. Read the latest version and save again.";
 
 export interface MemoryCommitRequest {
-  scope: "bot" | "user";
+  scope: MemoryDocumentScope;
   botId?: string;
+  /** Required for group scope. */
+  groupId?: string;
   path: string;
   content: string;
   /** Revision used to prepare this replacement; 0 creates a new document. */
@@ -743,6 +750,8 @@ export interface BackgroundJobPayloads {
   "thread.reply_check": { threadId: string };
   /** Deliver a run notification whose first push failed; the queue retries with backoff. */
   "notification.retry": { runId: string; message: NotificationMessage };
+  /** Close a poll card at its deadline (or early once everyone voted) and wake its asker. */
+  "poll.close": { messageId: string; pollId: string };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

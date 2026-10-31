@@ -290,8 +290,8 @@ msgid "All of"
 msgstr ""
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "All roles"
-msgstr ""
+#~ msgid "All roles"
+#~ msgstr ""
 
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All rounds"
@@ -1794,8 +1794,8 @@ msgid "Low"
 msgstr "Düşük"
 
 #: src/pages/shell/RecruitingNavigation.tsx
-msgid "Main"
-msgstr ""
+#~ msgid "Main"
+#~ msgstr ""
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -2711,6 +2711,10 @@ msgstr ""
 #: src/pages/recruiting/RoleSetup.tsx
 msgid "Role stage"
 msgstr ""
+
+#: src/pages/shell/RecruitingNavigation.tsx
+msgid "Role teams"
+msgstr "Rol ekipleri"
 
 #. placeholder {0}: candidate.roleVersion
 #: src/pages/shell/Composer.tsx

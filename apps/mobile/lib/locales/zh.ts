@@ -818,4 +818,8 @@ export const ZH_MESSAGES: Record<string, string> = {
   "Preparing outreach": "准备联系邮件",
   "Scheduling interviews": "安排面试",
   "Delegated task": "分派的任务",
+  Closed: "已结束",
+  Vote: "投票",
+  "Closes in {time}": "{time} 后结束",
+  "Could not record your vote": "无法记录你的投票",
 };

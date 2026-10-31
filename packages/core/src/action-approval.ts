@@ -135,6 +135,7 @@ const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "remember",
   "save_memory",
   "save_shared_memory",
+  "save_group_memory",
   "write_file",
   "browser_snapshot",
   "cloud_agent_status",
@@ -322,6 +323,7 @@ const EXTERNAL_TEXT_BUILTIN_TOOLS = new Set([
 const DURABLE_MEMORY_TOOLS = new Set([
   "remember",
   "save_shared_memory",
+  "save_group_memory",
   "save_memory",
   "skill_create",
   "skill_update",

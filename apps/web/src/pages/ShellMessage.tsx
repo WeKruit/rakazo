@@ -69,6 +69,15 @@ const ChoiceCard = lazyPanel(() =>
 const McpApprovalCard = lazyPanel(() =>
   withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.McpApprovalCard),
 );
+const PollCard = lazyPanel(() =>
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.PollCard),
+);
+const CanvasCard = lazyPanel(() =>
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.CanvasCard),
+);
+const ViewBlockView = lazyPanel(() =>
+  withFeatureMessages(() => import("./shell/message-cards")).then((m) => m.ViewBlockView),
+);
 
 const FALLBACK_BOT_COLOR = "#85858A";
 export function MessageHoverActions({
@@ -544,6 +553,31 @@ export const MessageView = memo(function MessageView({
           return (
             <div key={i} className="flex justify-start">
               <ChartBlockView name={block.name} spec={block.spec} data={block.data} />
+            </div>
+          );
+        }
+        if (block.kind === "canvas") {
+          return (
+            <div key={i} className="flex justify-start">
+              <CanvasCard
+                key={`${block.canvasId}:${block.revision}`}
+                target={artifactTarget}
+                block={block}
+              />
+            </div>
+          );
+        }
+        if (block.kind === "view") {
+          return (
+            <div key={i} className="flex justify-start">
+              <ViewBlockView block={block} />
+            </div>
+          );
+        }
+        if (block.kind === "poll") {
+          return (
+            <div key={i} className="flex justify-start">
+              <PollCard target={artifactTarget} block={block} />
             </div>
           );
         }

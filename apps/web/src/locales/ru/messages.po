@@ -1113,6 +1113,7 @@ msgstr ""
 #: src/pages/recruiting/DetailPanel.tsx
 #: src/pages/recruiting/SchedulingPlan.tsx
 #: src/pages/RoutineEditor.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Close"
 msgstr "Закрыть"
 
@@ -1162,6 +1163,14 @@ msgstr "Закрыть настройки пользователя"
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Close voice settings"
 msgstr "Закрыть настройки голоса"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closed"
+msgstr "Завершено"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Closes in {time}"
+msgstr "Закроется через {time}"
 
 #: src/components/AskCard.tsx
 msgid "Code"
@@ -1822,6 +1831,10 @@ msgstr ""
 msgid "Could not read this sequence."
 msgstr ""
 
+#: src/pages/shell/message-cards.tsx
+msgid "Could not record your vote"
+msgstr "Не удалось учесть ваш голос"
+
 #: src/pages/ScratchpadSection.tsx
 msgid "Could not remove"
 msgstr "Не удалось удалить"
@@ -1861,6 +1874,7 @@ msgstr "Не удалось отменить соединение"
 #: src/pages/ExternalConversationSettings.tsx
 #: src/pages/KnowledgeSection.tsx
 #: src/pages/shell/bot-panel.tsx
+#: src/pages/shell/message-cards.tsx
 msgid "Could not save"
 msgstr "Не удалось сохранить"
 
@@ -3278,8 +3292,8 @@ msgid "Mailbox not recorded"
 msgstr ""
 
 #: src/pages/recruiting/HomeDashboard.tsx
-msgid "Main"
-msgstr ""
+#~ msgid "Main"
+#~ msgstr ""
 
 #: src/components/ComputerUpdateProgress.tsx
 msgid "Make sure nothing is still running on this computer."
@@ -6312,6 +6326,10 @@ msgstr ""
 #: src/pages/VoiceSettingsOverlay.tsx
 msgid "Voice"
 msgstr "Голос"
+
+#: src/pages/shell/message-cards.tsx
+msgid "Vote"
+msgstr "Голосовать"
 
 #: src/components/LiveWork.tsx
 msgid "Waiting for background work"

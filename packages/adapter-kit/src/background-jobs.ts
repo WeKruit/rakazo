@@ -51,6 +51,7 @@ const payloadSchemas = {
       groupId: z.string().min(1).optional(),
     }),
   }),
+  "poll.close": z.object({ messageId: z.string().min(1), pollId: z.string().min(1) }),
 } satisfies { [Name in BackgroundJobName]: z.ZodType<BackgroundJobPayloads[Name]> };
 
 export function parseBackgroundJob(name: string, payload: unknown): BackgroundJob {
@@ -270,5 +271,18 @@ export function notificationRetryJob(
     replaceKey: `notification.retry:${payload.runId}:${payload.message.kind}`,
     availableAt,
     maxAttempts: NOTIFICATION_RETRY_ATTEMPTS,
+  };
+}
+
+/** One pending close per poll; an early close replaces the deadline job. */
+export function pollCloseJob(
+  payload: BackgroundJobPayloads["poll.close"],
+  availableAt?: Date,
+): BackgroundJob {
+  return {
+    name: "poll.close",
+    payload,
+    replaceKey: `poll.close:${payload.pollId}`,
+    ...(availableAt ? { availableAt } : {}),
   };
 }

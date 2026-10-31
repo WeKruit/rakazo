@@ -23,6 +23,7 @@ const NON_CONVERSATIONAL_RUN_TRIGGERS = new Set([
   "tool_background",
   "recruiting_grade",
   "recruiting_checkin",
+  "poll",
 ]);
 
 /**
@@ -53,6 +54,7 @@ export const AUTOMATION_RUN_TRIGGERS = [
   "recruiting_grade",
   "recruiting_checkin",
   "cloud_agent",
+  "poll",
 ] as const;
 const AUTOMATION_RUN_TRIGGER_SET = new Set<string>(AUTOMATION_RUN_TRIGGERS);
 
