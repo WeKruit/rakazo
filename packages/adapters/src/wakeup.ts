@@ -6,7 +6,7 @@ import {
   type JobWorkerHost,
 } from "@rakazo/adapter-kit";
 import { AUTOMATION_RUN_TRIGGERS } from "@rakazo/core";
-import { isTooManyDatabaseConnections } from "@rakazo/db";
+import { isDatabaseUnreachable } from "@rakazo/db";
 import { getLogger, runCorrelatedJob, unwrapJobPayload, wrapJobPayload } from "@rakazo/logging";
 import { makeWorkerUtils, type Runner, run, type WorkerUtils } from "graphile-worker";
 import type { Pool } from "pg";
@@ -208,7 +208,7 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
       } catch (error) {
         if (this.stopping) return;
         if (this.runner === runner) this.runner = undefined;
-        if (!isTooManyDatabaseConnections(error)) throw error;
+        if (!isDatabaseUnreachable(error)) throw error;
         // Back off after every lifecycle 53300 (runner death or failed relaunch),
         // not only when launchRunner rejects — otherwise a runner that starts then
         // dies again under saturation reconnects with no delay.
@@ -221,7 +221,7 @@ export class GraphileJobWorkerHost implements JobWorkerHost {
             if (this.stopping || !this.runner) return;
             break;
           } catch (startError) {
-            if (!isTooManyDatabaseConnections(startError)) throw startError;
+            if (!isDatabaseUnreachable(startError)) throw startError;
           }
         }
       }

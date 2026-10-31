@@ -336,6 +336,20 @@ describe("GraphileJobWorkerHost runner lifecycle", () => {
     await host.stop();
   });
 
+  it("backs off then restarts when the database stops answering connects", async () => {
+    const first = mockRunner();
+    const second = mockRunner();
+    run.mockResolvedValueOnce(first.runner).mockResolvedValueOnce(second.runner);
+    const host = new GraphileJobWorkerHost({} as Pool, { sleep: async () => undefined });
+
+    await host.start(handlers());
+    first.rejectLife(new Error("timeout exceeded when trying to connect"));
+    await vi.waitFor(() => expect(run).toHaveBeenCalledTimes(2));
+
+    await host.stop();
+    expect(second.runner.stop).toHaveBeenCalled();
+  });
+
   it("backs off then restarts when runner.promise rejects with 53300", async () => {
     const first = mockRunner();
     const second = mockRunner();

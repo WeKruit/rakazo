@@ -77,7 +77,7 @@ import {
   createPool,
   createThreadEvents,
   embedRecentMessages,
-  isTooManyDatabaseConnections,
+  isDatabaseUnreachable,
   parsePositiveInteger,
   pushSessionExpiresAt,
   SESSION_RELEASE_MS,
@@ -373,7 +373,7 @@ async function main() {
       await jobHost.start(jobHandlers);
       break;
     } catch (error) {
-      if (!isTooManyDatabaseConnections(error)) throw error;
+      if (!isDatabaseUnreachable(error)) throw error;
       logger.error("worker job host start waiting on database capacity", error);
       await new Promise((resolve) => setTimeout(resolve, databaseCapacityBackoffMs(attempt)));
     }
@@ -499,7 +499,9 @@ async function main() {
   });
   process.on("unhandledRejection", (reason) => {
     logger.error("unhandledRejection", reason);
-    if (isTooManyDatabaseConnections(reason)) return;
+    // A database that is full or briefly unreachable heals on its own; exiting would stop every
+    // running turn with it.
+    if (isDatabaseUnreachable(reason)) return;
     void stop().finally(() => process.exit(1));
   });
 
