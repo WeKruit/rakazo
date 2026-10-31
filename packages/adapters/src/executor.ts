@@ -134,10 +134,10 @@ import {
   nextFence,
   nextRoutineWakeAt,
   oneTimeMcpWriteEndpoint,
-  parseSkillMd,
   POLL_DEFAULT_MINUTES,
   POLL_MAX_MINUTES,
   POLL_MIN_MINUTES,
+  parseSkillMd,
   planActionGate,
   pollResultLines,
   promptInvokesSkill,
@@ -1131,9 +1131,12 @@ const PLANNED_SEARCHES_NOTE =
 const nextStepAlreadyGiven = (reply: string) =>
   `Not asked: after the ten appeared the recruiter already wrote their next step: "${reply.slice(0, 300)}". Act on it now instead of asking what to do next (a request to find more people accepts the round). Once you have acted, report the result in two or three lines with message_user and end the turn without a question.`;
 
-/** Model failures that a fresh attempt can clear: a silent or dropped stream, a timeout or an outage. */
+/**
+ * Failures that a fresh attempt can clear: a silent or dropped stream, a timeout, an outage, or a
+ * network blip ("fetch failed" is how fetch reports a connection it could not make).
+ */
 const MODEL_OUTAGE =
-  /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|socket hang up|^terminated$/i;
+  /stream idle timeout|timed? out|timeout|overloaded|unavailable|rate limit|\b5\d\d\b|ECONNRESET|ECONNREFUSED|EAI_AGAIN|socket hang up|^terminated$|^fetch failed/i;
 const MODEL_OUTAGE_RETRY = "Model stopped responding; retrying the turn once";
 
 /** A JD that states no years leaves the range to ask; round 1 of the playtest skipped it. */
@@ -14156,6 +14159,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
             error: message,
           });
           if (!failed) return;
+          // A failed turn still owes the person an answer: the reply check asks once more.
+          await scheduleReplyCheck(deps.jobs, thread.id).catch((error) =>
+            getLogger().error("reply check enqueue", error),
+          );
           if (failed.continuationRunId) {
             await deps.jobs
               .enqueue(runContinueJob(failed.continuationRunId))
