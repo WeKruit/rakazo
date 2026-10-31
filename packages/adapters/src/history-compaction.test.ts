@@ -127,7 +127,7 @@ describe("selectCompactedHistory", () => {
     expect(selected.history[0]!.seq).toBe(100);
   });
 
-  it("keeps the fallback when uncompacted messages contain an internal gap", () => {
+  it("keeps the summary when a message after the cursor was deleted", () => {
     const selected = selectCompactedHistory({
       messages: [
         messages(0, 2)[0]!,
@@ -139,8 +139,8 @@ describe("selectCompactedHistory", () => {
       historyCompactedUpToSeq: 0,
     });
 
-    expect(selected.usedLocalSummary).toBe(false);
-    expect(selected.history.map((message) => message.seq)).toEqual([0, 1, 2, 4]);
+    expect(selected.usedLocalSummary).toBe(true);
+    expect(selected.history.map((message) => message.seq)).toEqual([1, 2, 4]);
   });
 
   it("does not use a cursor without its durable summary", () => {
@@ -324,14 +324,15 @@ function compactionHarness(
     message: {
       findMany: vi.fn(
         async (args: {
-          where: { seq: { gt?: number; lte?: number } };
+          where: { seq: { gt?: number; lte?: number; lt?: number } };
           orderBy?: { seq: "asc" | "desc" };
           take?: number;
         }) => {
-          const matching =
+          const matching = (
             args.where.seq.lte !== undefined
               ? messages.filter((message) => message.seq <= args.where.seq.lte!)
-              : messages.filter((message) => message.seq > args.where.seq.gt!);
+              : messages.filter((message) => message.seq > args.where.seq.gt!)
+          ).filter((message) => args.where.seq.lt === undefined || message.seq < args.where.seq.lt);
           const ordered = [...matching].sort((left, right) => left.seq - right.seq);
           if (args.orderBy?.seq === "desc") ordered.reverse();
           return ordered.slice(0, args.take ?? ordered.length);
@@ -905,9 +906,10 @@ describe("compactHistory", () => {
     expect(harness.thread.historyCompactedUpToSeq).toBe(99);
   });
 
-  it("does not advance across a message coverage gap", async () => {
+  it("compacts across a removed queued message", async () => {
     const harness = compactionHarness({
       deploymentModelKey: "openrouter-key",
+      nextMessageSeq: 3,
       messages: [
         { seq: 0, role: "user", blocks: [{ kind: "text", text: "message 0" }] },
         { seq: 2, role: "user", blocks: [{ kind: "text", text: "message 2" }] },
@@ -916,9 +918,24 @@ describe("compactHistory", () => {
 
     await compactHistory(harness.deps, "thread-1");
 
-    expect(harness.runtime.run).not.toHaveBeenCalled();
-    expect(harness.saveMemory).not.toHaveBeenCalled();
-    expect(harness.prisma.thread.updateMany).not.toHaveBeenCalled();
+    expect(harness.runtime.run).toHaveBeenCalledOnce();
+    expect(harness.thread.historyCompactedUpToSeq).toBe(2);
+  });
+
+  it("never compacts a message numbered after the thread's committed count", async () => {
+    const harness = compactionHarness({
+      deploymentModelKey: "openrouter-key",
+      nextMessageSeq: 2,
+      messages: [
+        { seq: 0, role: "user", blocks: [{ kind: "text", text: "message 0" }] },
+        { seq: 1, role: "user", blocks: [{ kind: "text", text: "message 1" }] },
+        { seq: 3, role: "user", blocks: [{ kind: "text", text: "message 3" }] },
+      ],
+    });
+
+    await compactHistory(harness.deps, "thread-1");
+
+    expect(harness.thread.historyCompactedUpToSeq).toBe(1);
   });
 
   it("does not resurrect a summary when clear wins while summarization is running", async () => {
