@@ -487,6 +487,10 @@ export async function mockRecruitingApp(
     } else if (method === "bootstrap") value = bootstrap;
     else if (method === "me") value = bootstrap.me;
     else if (method === "links/companySite") value = { host: null };
+    else if (method === "bots/page")
+      value = { items: input.archived ? [] : bootstrap.bots, nextOffset: null };
+    else if (method === "groups/page")
+      value = { items: input.archived ? [] : bootstrap.groups, nextOffset: null };
     else if (method === "spaces/list")
       value = {
         spaces: bootstrap.spaces,

@@ -86,7 +86,8 @@ export async function readRecruitingAccountView(
       }))
     )
       throw new ORPCError("NOT_FOUND");
-    if (input.itemCursor && !input.roleId) throw new ORPCError("BAD_REQUEST");
+    if ((input.itemCursor && !input.roleId) || (input.cursor && input.roleId))
+      throw new ORPCError("BAD_REQUEST");
     if (
       input.campaignLeadCursor &&
       (!input.roleId || !input.campaignId || !input.campaignServerId || input.view !== "sequence")

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Actor } from "@rakazo/contracts";
-import { memoryTidyRoutineCron } from "@rakazo/core";
+import { memoryTidyRoutineCron, RECRUITING_DEFAULT_BOTS } from "@rakazo/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import * as recruiting from "./recruiting-bootstrap.js";
@@ -1196,7 +1196,9 @@ describe("crews set up before the recruiting preset", () => {
       skipDuplicates: true,
     });
     const main = f.bots.find((bot) => bot.id === "old-main")!;
-    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(main.instructions).toBe(
+      RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!.instructions,
+    );
     expect(main.name).toBe("Main");
     expect(main.disabledBuiltinTools).toContain("request_secret");
     expect(f.skills.map((skill) => skill.name)).toEqual(["My own notes"]);
@@ -1225,7 +1227,9 @@ describe("crews set up before the recruiting preset", () => {
     expect(main.instructions).toBe("Edited");
     f.presets[0]!.digest = "older catalog";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(main.instructions).toBe(
+      RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!.instructions,
+    );
   });
 
   it("upgrades on sign-in too, and waits while a run is active", async () => {
@@ -1243,7 +1247,9 @@ describe("crews set up before the recruiting preset", () => {
     main.instructions = "Older defaults";
     f.presets[0]!.digest = "older catalog";
     await recruiting.upgradeRecruitingWorkspace(f.prisma, actor, options);
-    expect(main.instructions).toMatch(/^You are Main, the recruiting lead/);
+    expect(main.instructions).toBe(
+      RECRUITING_DEFAULT_BOTS.find((bot) => bot.key === "main")!.instructions,
+    );
     expect(f.tx.run.count).toHaveBeenCalledWith({
       where: {
         spaceId: actor.spaceId,

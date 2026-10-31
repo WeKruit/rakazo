@@ -85,7 +85,7 @@ msgstr ""
 msgid "{0} people"
 msgstr ""
 
-#. placeholder {0}: item.correspondence?.emails.filter((email) => (email.direction ?? email.crm?.direction) === "received").length ?? 0
+#. placeholder {0}: repliesIncomplete ? `${replies.length}+` : replies.length
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "{0} replies"
 msgstr ""
@@ -2104,8 +2104,8 @@ msgstr ""
 msgid "Default"
 msgstr "기본값"
 
-#. placeholder {0}: thinkingLevelLabel("medium")
 #. js-lingui-explicit-id
+#. placeholder {0}: thinkingLevelLabel("medium")
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Default ({0})"
 msgstr "기본값 ({0})"
@@ -3704,6 +3704,7 @@ msgid "No recruiter messages were found."
 msgstr ""
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "No replies yet."
 msgstr ""
 
@@ -3808,10 +3809,6 @@ msgstr "아직 스킬이 없습니다"
 #: src/pages/recruiting/CrmHistory.tsx
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "No stored campaign associations were returned for this role."
-msgstr ""
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "No stored emails for this role."
 msgstr ""
 
 #: src/pages/recruiting/CrmHistory.tsx

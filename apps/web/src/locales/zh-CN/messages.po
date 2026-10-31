@@ -85,7 +85,7 @@ msgstr "{0} 分钟"
 msgid "{0} people"
 msgstr "{0} 人"
 
-#. placeholder {0}: item.correspondence?.emails.filter((email) => (email.direction ?? email.crm?.direction) === "received").length ?? 0
+#. placeholder {0}: repliesIncomplete ? `${replies.length}+` : replies.length
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "{0} replies"
 msgstr "{0} 条回复"
@@ -2104,8 +2104,8 @@ msgstr "已拒绝"
 msgid "Default"
 msgstr "默认"
 
-#. placeholder {0}: thinkingLevelLabel("medium")
 #. js-lingui-explicit-id
+#. placeholder {0}: thinkingLevelLabel("medium")
 #: src/pages/ModelSettingsOverlay.tsx
 msgid "Default ({0})"
 msgstr "默认（{0}）"
@@ -3704,6 +3704,7 @@ msgid "No recruiter messages were found."
 msgstr "没有找到招聘方消息。"
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "No replies yet."
 msgstr "尚无回复。"
 
@@ -3809,10 +3810,6 @@ msgstr "暂无技能"
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "No stored campaign associations were returned for this role."
 msgstr "这个岗位没有已保存的邮件活动。"
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "No stored emails for this role."
-msgstr "这个岗位暂无已保存的邮件。"
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No stored messages were returned for this contact."

@@ -1915,6 +1915,10 @@ msgstr "No recorded calls"
 msgid "No remote MCP servers found"
 msgstr "No remote MCP servers found"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "No replies yet."
+msgstr "No replies yet."
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "No role linked"
 msgstr "No role linked"
@@ -1935,7 +1939,6 @@ msgstr "No sequences returned."
 msgid "No steps returned."
 msgstr "No steps returned."
 
-#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No stored emails for this candidate."
 msgstr "No stored emails for this candidate."

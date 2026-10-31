@@ -4742,6 +4742,58 @@ describe("live CRM browser reads", () => {
     };
     return { server, assignment, results, execute, deps, reauthorize, mockPrisma };
   }
+  it("reports no optional CRM sources when the product role has no CRM configured", async () => {
+    const f = browserFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue(null);
+    await expect(
+      api.getRecruitingCrmData({ ...f.deps, firstPartyMcpUrl: undefined }, actor, target, {
+        operation: "memberships",
+      }),
+    ).resolves.toMatchObject({ operation: "memberships", sources: [] });
+    expect(f.reauthorize).toHaveBeenCalledTimes(1);
+    expect(db.getRecruitingWorkspaceCrmTarget).toHaveBeenLastCalledWith(f.deps.prisma, actor, {
+      threadId: target.threadId,
+    });
+    expect(f.mockPrisma.mcpServer.findMany).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("does not hide a missing CRM endpoint for a bound role or an explicit source", async () => {
+    const f = browserFixture();
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue({
+      mcpServerId: "crm",
+      serverRevision: 3,
+      organizationId: org,
+      crmRoleId: roleId,
+      crmClientId: clientId,
+      clientLabel: "Example client",
+      roleLabel: "Example role",
+    });
+    await expect(
+      api.getRecruitingCrmData({ ...f.deps, firstPartyMcpUrl: undefined }, actor, target, {
+        operation: "memberships",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    vi.mocked(db.getRecruitingWorkspaceCrmTarget).mockResolvedValue(null);
+    await expect(
+      api.getRecruitingCrmData({ ...f.deps, firstPartyMcpUrl: undefined }, actor, target, {
+        operation: "memberships",
+        serverId: "crm",
+        serverRevision: 3,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.execute).not.toHaveBeenCalled();
+  });
+  it("keeps target authorization checks when optional CRM configuration is absent", async () => {
+    const f = browserFixture();
+    f.reauthorize.mockResolvedValue({ ...target, threadId: "other-thread" });
+    await expect(
+      api.getRecruitingCrmData({ ...f.deps, firstPartyMcpUrl: undefined }, actor, target, {
+        operation: "memberships",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect(f.mockPrisma.mcpServer.findMany).not.toHaveBeenCalled();
+    expect(f.execute).not.toHaveBeenCalled();
+  });
   it.each([
     "ready",
     "multiple",

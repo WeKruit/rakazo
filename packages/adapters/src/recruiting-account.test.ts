@@ -142,6 +142,17 @@ describe("account recruiting reads", () => {
     expect(second.items.map((item) => item.roleId)).toEqual(["c"]);
     expect(second.nextCursor).toBeNull();
   });
+  it("rejects a global role cursor when one role is selected", async () => {
+    const { deps } = fixture();
+    await expect(
+      readRecruitingAccountView(deps, actor, {
+        view: "roles",
+        roleId: "a",
+        cursor: "a",
+        limit: 20,
+      }),
+    ).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
   it("never exposes another user or Space and rejects an explicit foreign role", async () => {
     const { deps } = fixture();
     for (const roleId of ["foreign", "other-space", "missing"])

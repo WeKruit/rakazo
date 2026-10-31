@@ -105,18 +105,46 @@ test("fresh ordinary chat creates two product roles and all global pages share t
       exact: true,
     });
     await expect(picker).toBeVisible();
-    await expect(page.getByText(row, { exact: false }).first()).toBeVisible();
+    await expect(
+      page.getByText(row, { exact: false }).filter({ visible: true }).first(),
+    ).toBeVisible();
     await captureScreenshot(page, testInfo, `journey-${view}-global-desktop`);
     await picker.selectOption(view === "routines" ? engineer.groupId : engineer.id);
     await expect(page).toHaveURL(
       new RegExp(`role=${view === "routines" ? engineer.groupId : engineer.id}`),
     );
-    await expect(page.getByText(row, { exact: false }).first()).toBeVisible();
+    await expect(
+      page.getByText(row, { exact: false }).filter({ visible: true }).first(),
+    ).toBeVisible();
     await captureScreenshot(page, testInfo, `journey-${view}-role-desktop`);
     await page.setViewportSize({ width: 390, height: 844 });
+    await expect(
+      page.getByText(row, { exact: false }).filter({ visible: true }).first(),
+    ).toBeVisible();
     await captureScreenshot(page, testInfo, `journey-${view}-role-mobile`);
+    if (view === "interview") {
+      const event = page
+        .getByRole("complementary", { name: "Saved calendar events", exact: true })
+        .getByRole("button", { name: /Morgan Reed interview/ })
+        .first();
+      await event.scrollIntoViewIfNeeded();
+      await expect(event).toBeInViewport();
+      await captureScreenshot(page, testInfo, "journey-interview-role-mobile-saved-events");
+    }
     await picker.selectOption("all");
+    await expect(
+      page.getByText(row, { exact: false }).filter({ visible: true }).first(),
+    ).toBeVisible();
     await captureScreenshot(page, testInfo, `journey-${view}-global-mobile`);
+    if (view === "interview") {
+      const event = page
+        .getByRole("complementary", { name: "Saved calendar events", exact: true })
+        .getByRole("button", { name: /Morgan Reed interview/ })
+        .first();
+      await event.scrollIntoViewIfNeeded();
+      await expect(event).toBeInViewport();
+      await captureScreenshot(page, testInfo, "journey-interview-global-mobile-saved-events");
+    }
     await page.setViewportSize({ width: 1440, height: 1000 });
   }
   await page.goto("/app?view=shortlist&role=all");
@@ -186,5 +214,10 @@ test("fresh ordinary chat creates two product roles and all global pages share t
         .map((row: { operation: string }) => row.operation),
     ),
   ).toEqual(new Set(["interviews", "shortlist", "replies"]));
+  await expect(
+    page
+      .getByTestId("recruiting-navigation")
+      .getByText("Could not read candidate records.", { exact: true }),
+  ).toHaveCount(0);
   await captureScreenshot(page, testInfo, "journey-global-Main-actual-tool-answers");
 });

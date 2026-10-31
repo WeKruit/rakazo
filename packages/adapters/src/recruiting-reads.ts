@@ -2886,7 +2886,7 @@ export async function getRecruitingCrmData(
       );
     const botId = coordinator(target);
     const targetScope = targetKey(target);
-    if (!botId || !deps.firstPartyMcpUrl) throw new IsolationError();
+    if (!botId) throw new IsolationError();
     const context: AdapterContext = {
       operationId: randomUUID(),
       traceId: randomUUID(),
@@ -3066,6 +3066,21 @@ export async function getRecruitingCrmData(
       enabled: true,
     };
     await actorFence();
+    if (!deps.firstPartyMcpUrl) {
+      if (
+        input.operation !== "memberships" ||
+        input.serverId ||
+        (await recruiting.getRecruitingWorkspaceCrmTarget(deps.prisma, actor, {
+          threadId: target.threadId,
+        }))
+      )
+        throw new IsolationError();
+      return RecruitingCrmDataOutputSchema.parse({
+        operation: "memberships",
+        checkedAt: new Date().toISOString(),
+        sources: [],
+      });
+    }
     if (input.operation === "memberships") {
       const servers = await deps.prisma.mcpServer.findMany({
         where: { ...where, ...(input.serverId ? { id: input.serverId } : {}) },

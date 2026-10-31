@@ -20,7 +20,7 @@ pnpm exec tsx packages/testkit/src/cli/harness.ts --e2e --spec=recruiting-global
 node --test infra/acceptance/global-recruiting.test.mjs
 ```
 
-The dedicated journey starts a fresh local database and account, enters job descriptions through ordinary recruiting input, persists synthetic provider receipts, opens all global/filtered views and asks Main cross-role questions through native tools. It never answers approval cards or calls paid providers. It is an implementation proof, not live-provider acceptance. CI's Global recruiting workflow retains desktop/mobile screenshots and both HTML reports.
+The dedicated journey starts a fresh local database and account, enters job descriptions through ordinary recruiting input, persists synthetic provider receipts, opens all global/filtered views and asks Main cross-role questions through native tools. It never answers approval cards or calls paid providers. It is an implementation proof, not live-provider acceptance. The configured CI Global recruiting workflow retains desktop/mobile screenshots and both HTML reports. Repository workflow dispatch currently returns HTTP 422 “Actions has been disabled for this repository”, so no CI screenshot artifact is available yet. Local reports are implementation evidence only.
 
 ## Post-deploy readback
 
@@ -45,3 +45,9 @@ Ordinary recruiters can create/edit/pause/resume/run routines and view native ru
 Existing message-trigger provider choices are not populated in the new recruiting entry. Global Tasks lists reminders and marks them done; reminder creation/editing remains in existing chat/profile controls. Native mobile routine management remains its existing bot-oriented surface; the new mobile scope is Main, Interview and Sequence. These limits do not introduce another scheduler or infer an external action.
 
 Live calendar/OAuth, real campaigns, native mobile-device behavior and production backfill must be reported separately from deterministic checks. Do not call them tested from an offline fixture.
+
+## Follow-up UI checks
+
+Contacts hides the visible outer and table scrollbar tracks while preserving scrolling. The CRM/product page checks assert the scoped scrollbar CSS and retain profile keyboard interactions. The real-server journey exercises both the native Send button and Enter, and waits for persisted assistant answers. Main includes the separately owned Workloop read-intent approval fix from PR #608. Production Send/Enter behavior has not been tested with a live isolated account.
+
+Local verification on the PR branch: 18 focused suites / 1,580 tests passed; the additional role-cursor regression and translation checks passed (37 tests); actual-app desktop/mobile screenshot checks passed (11); fresh-account real-server journey passed (1); release/selected-copy archive checks passed (16). Web, API, adapters and direct mobile TypeScript checks passed. The mobile wrapper still reports existing Expo dependency-version recommendations. Production remains not tested.

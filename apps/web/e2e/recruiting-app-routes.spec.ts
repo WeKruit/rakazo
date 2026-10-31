@@ -229,7 +229,9 @@ for (const width of [1440, 390]) {
       const inbox = page.getByTestId("account-recruiting-view");
       const conversation = inbox.getByTestId("email-conversation");
       if (width === 390)
-        await inbox.getByRole("button", { name: "Avery Example", exact: true }).first().click();
+        await inbox
+          .getByRole("button", { name: "Candidate details unavailable", exact: true })
+          .click();
       await expect(
         conversation.getByText("Tuesday afternoon works", { exact: false }).first(),
       ).toBeVisible();
@@ -384,8 +386,15 @@ for (const width of [1440, 390]) {
     await openRoute(page, "inbox");
     const inbox = page.getByTestId("account-recruiting-view");
     if (width === 390)
-      await inbox.getByRole("button", { name: "Avery Example", exact: true }).first().click();
-    await expect(inbox.getByText("Interview availability", { exact: true }).first()).toBeVisible();
+      await inbox
+        .getByRole("button", { name: "Candidate details unavailable", exact: true })
+        .click();
+    await expect(
+      inbox
+        .getByTestId("email-conversation")
+        .getByText("Interview availability", { exact: true })
+        .first(),
+    ).toBeVisible();
     await expect(
       inbox.getByText("Tuesday afternoon works", { exact: false }).first(),
     ).toBeVisible();

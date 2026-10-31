@@ -1915,6 +1915,10 @@ msgstr "没有记录的调用"
 msgid "No remote MCP servers found"
 msgstr "未找到远程 MCP 服务器"
 
+#: src/pages/recruiting/EmailConversation.tsx
+msgid "No replies yet."
+msgstr "尚无回复。"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "No role linked"
 msgstr "未关联岗位"
@@ -1935,7 +1939,6 @@ msgstr "未返回邮件序列。"
 msgid "No steps returned."
 msgstr "未返回步骤。"
 
-#: src/pages/recruiting/EmailConversation.tsx
 #: src/pages/recruiting/InboxTab.tsx
 msgid "No stored emails for this candidate."
 msgstr "这位候选人暂无已保存的邮件。"

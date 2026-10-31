@@ -119,7 +119,7 @@ export class RecruitingGlobalJourneyFixture implements AgentRuntime {
           return item.candidates?.items.map((person) => `${role}: ${person.name}`) ?? [];
         return item.correspondence?.emails.map((email) => `${role}: ${email.sender}`) ?? [];
       });
-      const answer = `${operation === "replies" ? `${output.counts?.messages ?? 0} replies from ${output.counts?.people ?? 0} people. ` : ""}${lines.join("\n")}`;
+      const answer = `${operation === "replies" ? `${output.counts?.messages ?? 0} replies from ${output.counts?.people ?? 0} people.\n\n` : ""}${lines.join("\n\n")}`;
       this.records.push({ kind: "tool", operation });
       yield { type: "done", text: answer };
       return;

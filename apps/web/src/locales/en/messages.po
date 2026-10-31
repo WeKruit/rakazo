@@ -85,7 +85,7 @@ msgstr "{0} minutes"
 msgid "{0} people"
 msgstr "{0} people"
 
-#. placeholder {0}: item.correspondence?.emails.filter((email) => (email.direction ?? email.crm?.direction) === "received").length ?? 0
+#. placeholder {0}: repliesIncomplete ? `${replies.length}+` : replies.length
 #: src/pages/recruiting/AccountRecruitingView.tsx
 msgid "{0} replies"
 msgstr "{0} replies"
@@ -3704,6 +3704,7 @@ msgid "No recruiter messages were found."
 msgstr "No recruiter messages were found."
 
 #: src/pages/recruiting/AccountRecruitingView.tsx
+#: src/pages/RecruitingCorrespondence.tsx
 msgid "No replies yet."
 msgstr "No replies yet."
 
@@ -3809,10 +3810,6 @@ msgstr "No skills yet"
 #: src/pages/recruiting/SequenceTab.tsx
 msgid "No stored campaign associations were returned for this role."
 msgstr "No stored campaign associations were returned for this role."
-
-#: src/pages/RecruitingCorrespondence.tsx
-msgid "No stored emails for this role."
-msgstr "No stored emails for this role."
 
 #: src/pages/recruiting/CrmHistory.tsx
 msgid "No stored messages were returned for this contact."
