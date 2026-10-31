@@ -20,7 +20,10 @@ export function assertFollowUpDelivery(events, messageId, previousRunId) {
   }
 }
 
-/** A reply must follow this exact input's claim, or its own newly started source run. */
+/**
+ * A reply must follow this exact input's claim, or its own newly started source run, or come from
+ * the teammate that run handed the request to.
+ */
 export function replyAfterInput(events, messages, inputSeq) {
   const input = messages.find((message) => message.role === "user" && message.seq === inputSeq);
   if (!input) return null;
@@ -46,18 +49,36 @@ export function replyAfterInput(events, messages, inputSeq) {
           event.type === "run.started" && event.runId === source.runId && event.seq > source.seq,
       ));
   if (!delivered) return null;
+  // A turn that hands the request to a teammate is answered by the turn its handoff starts.
+  const handoff = events.find(
+    (event) =>
+      event.type === "agent.tool.called" &&
+      event.runId === delivered.runId &&
+      event.payload?.name === "handoff_to_bot" &&
+      event.seq > delivered.seq,
+  );
+  const handedTo = handoff
+    ? events.find(
+        (event) =>
+          event.type === "run.started" &&
+          event.payload?.trigger === "follow_up" &&
+          event.runId !== delivered.runId &&
+          event.seq > handoff.seq,
+      )?.runId
+    : undefined;
+  const answering = new Set([delivered.runId, handedTo].filter(Boolean));
   return (
     messages.find(
       (message) =>
         message.role !== "user" &&
         !message.internal &&
-        message.runId === delivered.runId &&
+        answering.has(message.runId) &&
         (message.blocks ?? []).some((block) => block.kind === "text" && block.text?.trim()) &&
         events.some(
           (event) =>
             event.type === "thread.message.created" &&
             event.payload?.messageId === message.id &&
-            event.runId === delivered.runId &&
+            event.runId === message.runId &&
             event.seq > delivered.seq,
         ),
     ) ?? null
