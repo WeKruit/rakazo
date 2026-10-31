@@ -355,12 +355,36 @@ export function useSavedCorrespondence(
   return useKeyedRead<RecruitingCorrespondence>(
     conversation ? JSON.stringify([spaceId, roleId, conversation, view, refreshSignal]) : null,
     async () => {
-      // ponytail: pass `limit`/`cursor` here once the correspondence read accepts them (emails only).
-      const value = await rpc.recruiting.correspondence({ ...conversation!, view });
+      const value = await rpc.recruiting.correspondence({ ...conversation!, view, limit: 200 });
       // A conversation bound to a different role must not leak into this role's tab.
-      return value.roleId === null || value.roleId === roleId
-        ? value
-        : { ...value, emails: [], events: [], contacts: [], status: "empty" as const };
+      if (value.roleId !== null && value.roleId !== roleId)
+        return {
+          ...value,
+          emails: [],
+          events: [],
+          contacts: [],
+          history: [],
+          status: "empty" as const,
+        };
+      const cursors = new Set<string>();
+      while (value.nextCursor) {
+        const cursor = value.nextCursor;
+        if (cursors.has(cursor)) throw new Error("Correspondence cursor did not advance");
+        cursors.add(cursor);
+        const page = await rpc.recruiting.correspondence({
+          ...conversation!,
+          view,
+          limit: 200,
+          cursor,
+        });
+        if (page.roleId !== value.roleId) throw new Error("Correspondence role changed");
+        value.emails.push(...page.emails);
+        value.events.push(...page.events);
+        value.contacts.push(...page.contacts);
+        value.nextCursor = page.nextCursor;
+        value.partial = page.partial;
+      }
+      return value;
     },
     tabCacheSlot(props, ["correspondence", spaceId, roleId, conversation, view]),
   );
