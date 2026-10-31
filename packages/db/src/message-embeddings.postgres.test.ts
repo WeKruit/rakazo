@@ -60,6 +60,7 @@ postgres("message embeddings (PostgreSQL)", () => {
       ["m3", "thread-a", 3, "bot", JSON.stringify([{ kind: "tool_call", name: "x" }])],
       ["m4", "thread-a2", 1, "bot", text("Shortlisted five candidates to hire")],
       ["m5", "thread-b", 1, "user", text("Another person's hiring plan")],
+      ["m6", "thread-a2", 2, "user", text("Lunch order for today")],
     ];
     for (const [id, threadId, seq, role, blocks] of rows)
       await pool.query(
@@ -94,13 +95,13 @@ postgres("message embeddings (PostgreSQL)", () => {
     const result = await embedRecentMessages(prisma, fakeEmbedder(calls), {
       maxTokensPerDay: 1_000,
     });
-    expect(result).toMatchObject({ embedded: 4, tokens: 40, failed: 0 });
+    expect(result).toMatchObject({ embedded: 5, tokens: 50, failed: 0 });
     const stored = await prisma.messageEmbedding.findMany({ orderBy: { messageId: "asc" } });
-    expect(stored.map((row) => row.messageId)).toEqual(["m1", "m2", "m4", "m5"]);
+    expect(stored.map((row) => row.messageId)).toEqual(["m1", "m2", "m4", "m5", "m6"]);
     expect(Math.hypot(...stored[0]!.embedding)).toBeCloseTo(1);
     const usage = await prisma.usageRecord.findMany({ orderBy: { userId: "asc" } });
     expect(usage.map((row) => [row.userId, row.operationKind, row.inputTokens])).toEqual([
-      ["user-a", "retrieval", 30],
+      ["user-a", "retrieval", 40],
       ["user-b", "retrieval", 10],
     ]);
     // Nothing left, and the next pass spends nothing.
@@ -132,6 +133,15 @@ postgres("message embeddings (PostgreSQL)", () => {
     const mine = await searchHistory(prisma, scope, { query: "recruiting", scope: "mine" }, embed);
     expect(mine).toMatchObject({ match: "meaning_ranked" });
     expect(mine.messages.map((m) => m.messageId)).toEqual(["m4"]);
+    // A stray shared word ("today") must not hide the message that means the same.
+    const paraphrase = await searchHistory(
+      prisma,
+      scope,
+      { query: "recruiting today", scope: "mine" },
+      embed,
+    );
+    expect(paraphrase).toMatchObject({ match: "meaning_ranked" });
+    expect(paraphrase.messages.map((m) => m.messageId)).toEqual(["m4", "m6"]);
 
     // A failing embedder falls back to the empty word result.
     const failing = await searchHistory(prisma, scope, { query: "recruiting" }, async () => {

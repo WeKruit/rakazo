@@ -263,14 +263,38 @@ async function searchMine(
       AND to_tsvector('simple', ${searchableText}) @@ plainto_tsquery('simple', ${query})
     ORDER BY m."createdAt" DESC, m.id DESC LIMIT ${limit + 1}
   `);
-  // Every word missed: a paraphrase usually still shares some words, so rank messages by
-  // how many of them they contain (first page only; ranked results have no cursor).
-  const anyWord = !rows.length && !before && /\s/.test(query);
-  if (anyWord) {
-    rows.push(
-      ...(await prisma.$queryRaw<
+  // Every word missed. Rank by meaning first, then by how many of the words a message shares: a
+  // paraphrase often shares a stray word with an unrelated message, which must not hide the one
+  // that means the same (first page only; ranked results have no cursor).
+  const fullMiss = !rows.length && !before;
+  const vector = fullMiss ? await queryVector(embed, query) : null;
+  const meaningRows = vector
+    ? await prisma.$queryRaw<
         Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
       >(Prisma.sql`
+        SELECT * FROM (
+          SELECT ${columns}, m."threadId" AS "threadId",
+            (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
+            (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName",
+            ${similarity(vector.vector)} AS "similarity"
+          FROM message_embeddings e JOIN messages m ON m.id = e."messageId"
+          JOIN threads t ON t.id = m."threadId"
+          WHERE e.model = ${vector.model} AND ${visible(scope, { mine: null })}
+            ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
+        ) ranked WHERE "similarity" >= ${MEANING_MIN_SIMILARITY}
+        ORDER BY "similarity" DESC LIMIT ${limit}
+      `)
+    : [];
+  const meaning = meaningRows.length > 0;
+  rows.push(...meaningRows);
+  const anyWord = fullMiss && /\s/.test(query);
+  if (anyWord && rows.length < limit) {
+    const seen = new Set(rows.map((row) => row.id));
+    rows.push(
+      ...(
+        await prisma.$queryRaw<
+          Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
+        >(Prisma.sql`
         SELECT ${columns}, m."threadId" AS "threadId",
           (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
           (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName"
@@ -281,31 +305,11 @@ async function searchMine(
         ORDER BY ts_rank_cd(to_tsvector('simple', ${searchableText}), replace(plainto_tsquery('simple', ${query})::text, '&', '|')::tsquery) DESC,
           m."createdAt" DESC, m.id DESC
         LIMIT ${limit}
-      `)),
+      `)
+      ).filter((row) => !seen.has(row.id)),
     );
   }
-  // No shared words at all: rank by meaning (first page only, like the word ranking).
-  const meaning = !rows.length && !before ? await queryVector(embed, query) : null;
-  if (meaning) {
-    rows.push(
-      ...(await prisma.$queryRaw<
-        Array<HistoryRow & { threadId: string; botName: string | null; groupName: string | null }>
-      >(Prisma.sql`
-        SELECT * FROM (
-          SELECT ${columns}, m."threadId" AS "threadId",
-            (SELECT owner.name FROM bots owner WHERE owner.id = t."botId") AS "botName",
-            (SELECT g.name FROM chat_groups g WHERE g.id = t."groupId") AS "groupName",
-            ${similarity(meaning.vector)} AS "similarity"
-          FROM message_embeddings e JOIN messages m ON m.id = e."messageId"
-          JOIN threads t ON t.id = m."threadId"
-          WHERE e.model = ${meaning.model} AND ${visible(scope, { mine: null })}
-            ${after ? Prisma.sql`AND m."createdAt" >= ${after}` : Prisma.empty}
-        ) ranked WHERE "similarity" >= ${MEANING_MIN_SIMILARITY}
-        ORDER BY "similarity" DESC LIMIT ${limit}
-      `)),
-    );
-  }
-  const ranked = anyWord || Boolean(meaning);
+  const ranked = anyWord || meaning;
   const page = rows.slice(0, limit);
   const last = !ranked && rows.length > limit ? page.at(-1)! : undefined;
   return {
