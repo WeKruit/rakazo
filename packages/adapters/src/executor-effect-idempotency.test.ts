@@ -58,6 +58,7 @@ import {
   nearCandidateKey,
   newerRequestElsewhere,
   pastedJobTitle,
+  REPORT_IN_FINAL_REPLY,
   REVISIONED_RESEARCH_OPERATIONS,
   resumeBriefForRun,
   STEERING_ACK,
@@ -1063,9 +1064,12 @@ describe("newer request after the round", () => {
         : null) as unknown as typeof findFirst);
     f.setCalls([
       { name: "handoff_to_bot", args: { bot: "Sourcer", request: "scale" }, executionId: "h" },
+      { name: "message_user", args: { message: "Round recorded." }, executionId: "m" },
     ]);
     await f.run();
     expect(f.results[0]).toEqual({ error: newerRequestElsewhere("找 100 个类似的人") });
+    // Its report goes in the final reply only, so the person sees it once.
+    expect(f.results[1]).toEqual({ error: REPORT_IN_FINAL_REPLY });
   });
 });
 

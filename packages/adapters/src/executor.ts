@@ -1166,7 +1166,11 @@ export const newerRequestElsewhere = (text: string) =>
   `Not run: the person's newer message ("${text.slice(0, 200)}") is being answered in another turn, which does that work. Finish only what this turn started and end with a short report of what it did; do not act on, mention or answer the newer message, and do not say that anything was not run.`;
 /** Model-facing: a backgrounded turn must not question the person after they moved on. */
 export const askAfterNewerMessage = (text: string) =>
-  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. Report what this work did in one or two lines with message_user, without mentioning or answering that message, then end the turn with an empty reply.`;
+  `Not asked: the recruiter has written since this work started ("${text.slice(0, 300)}"), and another reply is already answering it. Do not ask them anything now. End the turn with a final reply of one or two lines on what this work did, without mentioning or answering that message.`;
+
+/** Work behind a newer message reports once, in its final reply, never also mid-turn. */
+export const REPORT_IN_FINAL_REPLY =
+  "Not sent: another turn is answering the person's newer message. Give this report once, as this turn's final reply.";
 
 /** A message that arrives mid-turn is acknowledged within seconds, not after the work ends. */
 export const STEERING_ACK =
@@ -5562,6 +5566,8 @@ export function createRunExecutor(deps: ExecutorDeps) {
         let terminalCheckpointComplete = false;
         let approvalPausePending = false;
         let handedOff = false;
+        // A newer message another turn answers: this turn reports once, in its final reply.
+        let movedElsewhere = false;
         const newProgressRedactor = () => {
           const secrets = createStreamingRedactor(runSecrets);
           if (!hideVendors) return secrets;
@@ -6284,7 +6290,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
               : (await roundRecordedThisRun())
                 ? await newerMessageAnsweredElsewhere()
                 : undefined;
-            if (moved !== undefined) return { error: newerRequestElsewhere(moved) };
+            if (moved !== undefined) {
+              movedElsewhere = true;
+              return { error: newerRequestElsewhere(moved) };
+            }
           }
           // Before the first picks, one step's extra searches are refused once: the model picks
           // from the planned rows first, and may search again only if the answer changed the role.
@@ -11705,6 +11714,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             });
           }
           if (name === "message_user") {
+            if (movedElsewhere) return finish({ error: REPORT_IN_FINAL_REPLY });
             const rawMessage = visible(redactSecrets(String(args.message ?? ""), runSecrets));
             const text = clampUserProgressMessage(rawMessage);
             if (!text) return finish({ error: "message is required" });
@@ -13283,7 +13293,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                     // Workloop: work running behind the conversation never asks the person after
                     // they moved on; a newer message another reply answers wins.
                     const moved = await newerMessageAnsweredElsewhere();
-                    if (moved !== undefined) return { instead: askAfterNewerMessage(moved) };
+                    if (moved !== undefined) {
+                      movedElsewhere = true;
+                      return { instead: askAfterNewerMessage(moved) };
+                    }
                     if (!askDeclineBounced && declinedSentence(question)?.kind === "decline") {
                       askDeclineBounced = true;
                       return { instead: ASK_DECLINES };
@@ -14507,6 +14520,10 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 : String(setupError),
               runSecrets,
             ),
+            // The stack names the lookup that failed; the message alone ("Resource not found") does not.
+            setupError instanceof Error && setupError.stack
+              ? { stack: redactSecrets(setupError.stack.slice(0, 2000), runSecrets) }
+              : undefined,
           );
         }
         // A thread, role or member that is gone (an archived chat) never comes back on a retry,

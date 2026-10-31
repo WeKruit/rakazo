@@ -243,6 +243,9 @@ export function authRateLimitOptions(nodeEnv = process.env.NODE_ENV) {
     storage: "database" as const,
     customRules: {
       ...Object.fromEntries(CREDENTIAL_PATHS.map((path) => [path, rule])),
+      // Sign-in allows 100 tries per 15 minutes, so repeated sign-ins (such as acceptance runs)
+      // are not locked out; sign-up and password reset keep the tighter limit.
+      "/sign-in/email": { window: 15 * 60, max: 100 },
       "/request-account-deletion": { window: 600, max: 3 },
     },
   };
