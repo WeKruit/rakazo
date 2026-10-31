@@ -565,6 +565,8 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     intent: BotMessageIntent.optional(),
     /** Sender-thread echo this delivery answers, when applicable. */
     returnToMessageId: Id.optional(),
+    /** Conversation the outcome returns to when it differs from the sender's own chat. */
+    returnThreadId: Id.optional(),
     /** Links in a bot-started chain; absent when a person started it. */
     hop: z.number().int().nonnegative().optional(),
   }),
@@ -718,7 +720,7 @@ export const PRODUCT_EVENT_PAYLOAD_SCHEMAS: Partial<Record<ProductEventType, z.Z
 };
 
 /** Version of the stored event and message format. Bump it with every shape change. */
-export const EVENT_FORMAT_VERSION = 1;
+export const EVENT_FORMAT_VERSION = 2;
 
 export const ProductEventSchema = z
   .object({

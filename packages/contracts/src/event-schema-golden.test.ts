@@ -14,6 +14,8 @@ import {
 // Earlier versions stay listed so a hash can never be reused under a new number.
 const GOLDEN_BY_VERSION: Record<number, string> = {
   1: "086577d14d7f578e997849d69416dfb8f7d0282c59cfbcf192e2a77c28f047fa",
+  // 2: bot_message_received may name the conversation its outcome returns to (role team delegation).
+  2: "2fb696c032cd0f8fb9948704e15638f57aa37bc22b8240eb5ad0aac369166a2c",
 };
 
 const OLD_ROWS: unknown[] = [
@@ -31,6 +33,15 @@ const OLD_ROWS: unknown[] = [
   { kind: "ask", text: "Remote or onsite?", status: "pending" },
   { kind: "ask", text: "Remote or onsite?", status: "answered", answer: "Remote" },
   { kind: "steps", steps: [{ label: "Searching candidates", count: 2 }], durationMs: 4200 },
+  {
+    kind: "bot_message_received",
+    fromBotId: "bot-a",
+    fromBotName: "Main",
+    text: "Find ten people.",
+    intent: "request",
+    returnToMessageId: "message-a",
+    hop: 1,
+  },
 ];
 
 describe("stored event shapes", () => {

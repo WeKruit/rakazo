@@ -79,6 +79,11 @@ export async function messageBot(
     message: string;
     intent?: BotMessageIntent;
     deliveryKey?: string;
+    /** Another conversation of this user that the target bot belongs to (a role team's chat). */
+    thread_id?: string;
+    /** Names shown for each side when they differ from the bots' own names. */
+    sender_label?: string;
+    target_label?: string;
   },
   options?: { allowTerminalSource?: boolean; forceUnread?: boolean },
 ) {
@@ -104,9 +109,25 @@ export async function messageBot(
     name: input.confirm_name,
   });
   if (!target) return { ok: false as const, error: "no bot found with that id or name" };
-  if (target.id === sender.id) return { ok: false as const, error: "a bot cannot message itself" };
-  if (!target.thread)
-    return { ok: false as const, error: `${target.name} has no chat to deliver to` };
+  // The same bot may work in another conversation (Kruit and a role team's coordinator).
+  const crossThread = Boolean(input.thread_id && input.thread_id !== run.threadId);
+  if (target.id === sender.id && !crossThread)
+    return { ok: false as const, error: "a bot cannot message itself" };
+  const targetName = input.target_label ?? target.name;
+  const senderName = input.sender_label ?? sender.name;
+  const addressedThread = input.thread_id
+    ? await deps.prisma.thread.findFirst({
+        where: {
+          id: input.thread_id,
+          spaceId: run.spaceId,
+          userId: run.userId,
+          group: { archivedAt: null, members: { some: { botId: target.id } } },
+        },
+        select: { id: true },
+      })
+    : target.thread;
+  if (!addressedThread)
+    return { ok: false as const, error: `${targetName} has no chat to deliver to` };
   const returnsToSender =
     options?.allowTerminalSource === true &&
     (intent === "result" || intent === "status") &&
@@ -122,7 +143,7 @@ export async function messageBot(
     };
   }
 
-  const targetThreadId = target.thread.id;
+  const targetThreadId = addressedThread.id;
 
   // A tool call can be re-executed after a lease expiry, so a delivery has to be
   // replayable: without this the recipient is messaged twice and woken twice.
@@ -131,17 +152,21 @@ export async function messageBot(
     ({
       ok: true as const,
       botId: target.id,
-      name: target.name,
+      name: targetName,
       delivered: message,
       replayed: true as const,
-      note: `Already sent to ${target.name} in this turn; it was not sent again.`,
+      note: `Already sent to ${targetName} in this turn; it was not sent again.`,
     }) as const;
 
-  const wakePrompt = buildBotMessageWakePrompt({ from: sender, text: message, intent });
+  const wakePrompt = buildBotMessageWakePrompt({
+    from: { ...sender, name: senderName },
+    text: message,
+    intent,
+  });
   const outboundBlock: MessageBlock = {
     kind: "bot_message_sent",
     toBotId: target.id,
-    toBotName: target.name,
+    toBotName: targetName,
     text: message,
     intent,
   };
@@ -205,7 +230,7 @@ export async function messageBot(
           select: { id: true },
         });
         if (!stillAddressable)
-          return { ok: false as const, error: `${target.name} is no longer available` };
+          return { ok: false as const, error: `${targetName} is no longer available` };
 
         // Echo into the sender's chat in the same transaction so a failed notify
         // cannot leave one side delivered and the other blank.
@@ -221,18 +246,22 @@ export async function messageBot(
         const inboundBlock: MessageBlock = {
           kind: "bot_message_received",
           fromBotId: sender.id,
-          fromBotName: sender.name,
+          fromBotName: senderName,
           text: message,
           hop,
           intent,
           returnToMessageId: outbound.id,
+          ...(crossThread ? { returnThreadId: run.threadId } : {}),
         };
         const inbound = await createThreadMessageInTransaction(tx, {
           threadId: targetThreadId,
           role: "user",
           blocks: [inboundBlock],
           replyToMessageId:
-            sourceContext?.fromBotId === target.id && intent !== "fyi"
+            sourceContext?.fromBotId === target.id &&
+            intent !== "fyi" &&
+            // The echo being answered must live in the conversation receiving this reply.
+            (!crossThread || sourceContext.returnThreadId === targetThreadId)
               ? sourceContext.returnToMessageId
               : undefined,
           clientNonce: deliveryKey,
@@ -315,9 +344,9 @@ export async function messageBot(
   return {
     ok: true as const,
     botId: target.id,
-    name: target.name,
+    name: targetName,
     delivered: message,
-    note: `Sent to ${target.name}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
+    note: `Sent to ${targetName}. Delivery is async; a reply wakes you later as a new message. Continue independent work; send another update later only if it adds something new.`,
   };
 }
 
@@ -366,6 +395,13 @@ export async function returnBotMessageOutcome(
     await markBotOutcomeReturned(deps.prisma, run.id);
     return true;
   }
+  // A request delegated from another conversation returns there, named after this one.
+  const returnThread = source.returnThreadId
+    ? await deps.prisma.thread.findFirst({
+        where: { id: run.threadId, spaceId: run.spaceId, userId: run.userId },
+        select: { group: { select: { name: true } } },
+      })
+    : null;
   const outcome = await messageBot(
     deps,
     run,
@@ -374,6 +410,13 @@ export async function returnBotMessageOutcome(
       bot_id: source.fromBotId,
       message: clampBotMessage(text),
       intent,
+      ...(source.returnThreadId
+        ? {
+            thread_id: source.returnThreadId,
+            target_label: source.fromBotName,
+            ...(returnThread?.group ? { sender_label: `${returnThread.group.name} team` } : {}),
+          }
+        : {}),
       // One key per run so status vs result (executor vs reconciler) cannot double-deliver.
       deliveryKey: `auto-outcome:${run.id}`,
     },

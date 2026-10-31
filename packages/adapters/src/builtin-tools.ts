@@ -89,6 +89,7 @@ export const DELEGATION_TOOL_NAMES = new Set([
   "delete_bot",
   "handoff_to_bot",
   "message_bot",
+  "delegate_to_role",
 ]);
 
 const scheduleCreateProperties = {
@@ -1365,6 +1366,19 @@ export const builtinAgentTools: ConnectorTool[] = [
         },
       },
       required: ["message"],
+    },
+  },
+  {
+    name: "delegate_to_role",
+    description:
+      "Global conversation only. Hand the recruiter's request for one role to that role's team in its own conversation, the way a chief of staff delegates: pass the roleId from recruiting_candidates operation roles and the request in the recruiter's own words with any context they gave. The team works in the background in the role's conversation, with its usual approval cards there, and its result comes back here as a new message for you to relay. Delivery is async and does not end your turn: tell the recruiter in one line which team took it, and never wait or poll. Read-only questions (status, interviews, shortlist, replies) you answer yourself; never delegate them.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        role_id: { type: "string", description: "Role id from recruiting_candidates roles." },
+        message: { type: "string", description: "The request, in the recruiter's words." },
+      },
+      required: ["role_id", "message"],
     },
   },
   {

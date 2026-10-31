@@ -28,6 +28,8 @@ function deps(
     /** Simulate a unique (threadId, clientNonce) race after both retries miss. */
     uniqueConflictOnCommit?: boolean;
     transactionConflictOnce?: boolean;
+    /** What a scoped lookup of another conversation returns. */
+    addressedThread?: unknown;
   } = {},
 ) {
   const enqueue = vi.fn().mockResolvedValue(undefined);
@@ -73,6 +75,7 @@ function deps(
     },
     message: { findUnique: messageFindUnique, findMany: vi.fn().mockResolvedValue([]) },
     run: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
+    thread: { findFirst: vi.fn().mockResolvedValue(options.addressedThread ?? null) },
     $transaction: vi.fn(async (fn: (client: unknown) => unknown) => {
       transactionAttempts += 1;
       if (options.transactionConflictOnce && transactionAttempts === 1) {
@@ -419,6 +422,108 @@ describe("messaging another bot", () => {
       { bot_id: "bot-target", message: "carry on" },
     );
     expect(sent.ok).toBe(true);
+  });
+});
+
+describe("delegating to a role team in another conversation", () => {
+  const kruit = { id: "bot-main", name: "Main" };
+  const globalRun = { ...run, botId: "bot-main", threadId: "thread-global" };
+  const mainBot = [{ id: "bot-main", name: "Main", title: "", thread: null }];
+
+  it("lets the same agent hand a request into the role team's conversation", async () => {
+    const harness = deps({ bots: mainBot, addressedThread: { id: "thread-role" } });
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-role",
+      sender_label: "Kruit",
+      target_label: "SUI Engineer team",
+      message: "Find 50 more people",
+    });
+    expect(sent).toMatchObject({ ok: true, name: "SUI Engineer team" });
+    expect(harness.deps.prisma.thread.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: "thread-role",
+        spaceId: run.spaceId,
+        userId: run.userId,
+        group: { archivedAt: null, members: { some: { botId: "bot-main" } } },
+      },
+      select: { id: true },
+    });
+    expect(harness.tx.run.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ botId: "bot-main", threadId: "thread-role" }),
+      }),
+    );
+    const blocks = harness.tx.message.create.mock.calls.map(
+      ([call]) => (call as { data: { blocks: unknown[] } }).data.blocks[0],
+    );
+    expect(blocks).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "bot_message_sent", toBotName: "SUI Engineer team" }),
+        expect.objectContaining({
+          kind: "bot_message_received",
+          fromBotName: "Kruit",
+          returnThreadId: "thread-global",
+        }),
+      ]),
+    );
+  });
+
+  it("refuses a conversation outside this user's active role teams", async () => {
+    const harness = deps({ bots: mainBot, addressedThread: null });
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-foreign",
+      message: "Find 50 more people",
+    });
+    expect(sent).toMatchObject({ ok: false });
+    expect(harness.tx.run.create).not.toHaveBeenCalled();
+  });
+
+  it("still refuses messaging itself in the same conversation", async () => {
+    const harness = deps({ bots: mainBot, addressedThread: { id: "thread-global" } });
+    const sent = await messageBot(harness.deps, globalRun, kruit, {
+      bot_id: "bot-main",
+      thread_id: "thread-global",
+      message: "loop",
+    });
+    expect(sent).toEqual({ ok: false, error: "a bot cannot message itself" });
+  });
+
+  it("returns the team's outcome to the global conversation, named after the role", async () => {
+    const harness = deps({
+      bots: mainBot,
+      addressedThread: { id: "thread-global", group: { name: "SUI Engineer" } },
+      hopBlocks: [
+        {
+          kind: "bot_message_received",
+          fromBotId: "bot-main",
+          fromBotName: "Kruit",
+          text: "Find 50 more people",
+          hop: 1,
+          intent: "request",
+          returnToMessageId: "message-echo",
+          returnThreadId: "thread-global",
+        },
+      ],
+    });
+    const roleRun = { ...run, botId: "bot-main", threadId: "thread-role", sourceMessageId: "m" };
+    expect(
+      await returnBotMessageOutcome(harness.deps, roleRun, kruit, "Sourcer is finding 50 more."),
+    ).toBe(true);
+    expect(harness.tx.run.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ botId: "bot-main", threadId: "thread-global" }),
+      }),
+    );
+    const inbound = harness.tx.message.create.mock.calls
+      .map(([call]) => call as { data: { threadId: string; blocks: unknown[] } })
+      .find((call) => call.data.threadId === "thread-global" && call.data.blocks.length);
+    expect(inbound?.data.blocks[0]).toMatchObject({
+      kind: "bot_message_received",
+      fromBotName: "SUI Engineer team",
+      intent: "result",
+    });
   });
 });
 
