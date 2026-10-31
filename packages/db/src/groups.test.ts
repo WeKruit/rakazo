@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PrismaClient } from "./client.js";
 import { createGroupRepos } from "./groups.js";
+import { withLatestThreadRows } from "./latest-rows.test-support.js";
 import { IsolationError } from "./scope.js";
 
 describe("listSpaceGroupsForSpaces", () => {
@@ -14,6 +15,7 @@ describe("listSpaceGroupsForSpaces", () => {
         sectionId: null,
         updatedAt: new Date("2026-08-20T00:00:00.000Z"),
         thread: {
+          id: "thread-1",
           unread: true,
           messages: [{ blocks: [{ kind: "text", text: "Escalation pending" }] }],
         },
@@ -30,7 +32,7 @@ describe("listSpaceGroupsForSpaces", () => {
         ],
       },
     ]);
-    const repos = createGroupRepos({ chatGroup: { findMany } } as unknown as PrismaClient);
+    const repos = createGroupRepos(withLatestThreadRows({ chatGroup: { findMany } }));
     const actor = {
       spaceId: "workspace-1",
       userId: "user-1",
@@ -589,7 +591,10 @@ describe("createGroup", () => {
     const updated = await repo.updateGroup(actor, { groupId: first.id, name: "Renamed role" });
     expect(updated.group).toMatchObject({ name: "Renamed role", crmRoleReference: reference });
     expect(await repo.mapGroup(actor, row)).toMatchObject({ crmRoleReference: reference });
-    expect(readLocator).toHaveBeenCalledTimes(2);
+    const locatorReads = readLocator.mock.calls.filter(
+      (call) => !JSON.stringify(call).includes('FROM \\"messages\\"'),
+    );
+    expect(locatorReads).toHaveLength(2);
   });
   it("keeps the caller's member order instead of the insert order", async () => {
     const createMany = vi.fn();
