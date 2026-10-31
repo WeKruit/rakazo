@@ -1855,6 +1855,37 @@ export const RecruitingCorrespondenceSchema = z.strictObject({
 });
 export type RecruitingCorrespondence = z.infer<typeof RecruitingCorrespondenceSchema>;
 
+/** One role's Home numbers. `null` means no source reported the number. */
+export const RecruitingOverviewRoleSchema = z.strictObject({
+  groupId: Id,
+  roleId: RecruitingId,
+  shortlisted: z.number().int().min(0),
+  /** Recorded shortlist dates; unknown historic dates remain null. */
+  shortlistedDates: z.array(IsoDate.nullable()),
+  /** Confirmed sent-contact count; campaign enrollment alone cannot establish it. */
+  contacted: z.number().int().min(0).nullable(),
+  /** CRM contacts whose outreach status is replied; null without complete CRM coverage. */
+  replied: z.number().int().min(0).nullable(),
+  /** Campaign leads marked interested or further; null without a complete campaign read. */
+  interested: z.number().int().min(0).nullable(),
+  interestedPartial: z.boolean(),
+  /** Some optional source (CRM, campaign) could not be read in time. */
+  incomplete: z.boolean(),
+  /** Future confirmed calendar events from the role's saved checks. */
+  bookings: RecruitingCorrespondenceSchema.shape.events,
+  bookingUnknown: z.boolean(),
+});
+export type RecruitingOverviewRole = z.infer<typeof RecruitingOverviewRoleSchema>;
+/** The overview streams one event per role as it is read, then `done`. */
+export const RecruitingOverviewEventSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("role"), role: RecruitingOverviewRoleSchema }),
+  /** An active role whose own numbers could not be read. */
+  z.strictObject({ kind: z.literal("failed"), groupId: Id }),
+  /** Every active role has been reported; roles not reported have no bound role. */
+  z.strictObject({ kind: z.literal("done") }),
+]);
+export type RecruitingOverviewEvent = z.infer<typeof RecruitingOverviewEventSchema>;
+
 /** A retained native operation record, never delivery confirmation or permission to retry. */
 export const RecruitingNativeCorrespondenceSchema = z
   .strictObject({

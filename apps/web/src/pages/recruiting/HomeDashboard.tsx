@@ -1,5 +1,5 @@
 import { Trans, useLingui } from "@lingui/react/macro";
-import type { Group, RecruitingCorrespondence } from "@rakazo/contracts";
+import type { Group, RecruitingOverviewRole } from "@rakazo/contracts";
 import {
   Badge,
   Button,
@@ -21,136 +21,61 @@ import {
   bucketByWeek,
   dashboardStageView,
   firstName,
-  mapWithConcurrency,
   openTasks,
   outreachFunnel,
-  readShortlistPages,
   recentRoles,
-  roleSummary,
   weekStart,
 } from "./dashboard";
 import type { ShortlistWeekFilter } from "./dashboard-drilldown";
 import { RetryNotice } from "./RetryNotice";
 import { useKeyedRead } from "./shared";
 
-type ObservedBooking = { groupId: string; event: RecruitingCorrespondence["events"][number] };
+type ObservedBooking = { groupId: string; event: RecruitingOverviewRole["bookings"][number] };
 type Overview = {
   roles: RoleSummary[];
   incompleteGroups: string[];
   missingGroups: string[];
-  /** Roles whose first read has not come back yet; their numbers join as they arrive. */
+  /** Active roles the current read has not reported yet; totals stay partial until it ends. */
   pendingGroups: string[];
   bookings: ObservedBooking[];
   bookingUnknownGroups: string[];
 };
-type RoleRead = {
-  summary: RoleSummary | null;
-  incomplete: boolean;
-  failed?: boolean;
-  bookings: ObservedBooking[];
-  bookingUnknown: boolean;
-};
-type RoleReads = ReadonlyMap<string, RoleRead>;
+/** Each reported role's latest read, or "failed" when its own numbers could not be read. */
+type RoleReads = ReadonlyMap<string, RecruitingOverviewRole | "failed">;
+type OverviewState = { scope?: string; reads: RoleReads; done: boolean; failed?: boolean };
 
-/** How many roles are read at once. Each role is a handful of small requests. */
-const OVERVIEW_CONCURRENCY = 6;
-
-/** The overview of the roles read so far; undefined until at least one role has come back. */
-function overviewFrom(roles: readonly Group[], reads: RoleReads): Overview | undefined {
-  const known = roles.flatMap((group) => {
-    const read = reads.get(group.id);
-    return read ? [[group.id, read] as const] : [];
+function overviewFrom(groupIds: readonly string[], state: OverviewState): Overview | undefined {
+  const known = groupIds.flatMap((id) => {
+    const read = state.reads.get(id);
+    return read ? [read] : [];
   });
-  if (roles.length && !known.length) return undefined;
-  const pendingGroups = roles.filter((group) => !reads.has(group.id)).map((group) => group.id);
+  if (!known.length && !state.done) return undefined;
+  const roles = known.filter((read) => read !== "failed");
+  const missingGroups = groupIds.filter((id) => state.reads.get(id) === "failed");
+  const pendingGroups = state.done ? [] : groupIds.filter((id) => !state.reads.has(id));
   return {
-    roles: known.flatMap(([, read]) => (read.summary ? [read.summary] : [])),
-    bookings: known.flatMap(([, read]) => read.bookings),
+    roles,
+    missingGroups,
+    pendingGroups,
+    incompleteGroups: [
+      ...roles.filter((role) => role.incomplete).map((role) => role.groupId),
+      ...missingGroups,
+    ],
+    bookings: roles.flatMap((role) =>
+      role.bookings.map((event) => ({ groupId: role.groupId, event })),
+    ),
     bookingUnknownGroups: [
-      ...known.filter(([, read]) => read.bookingUnknown).map(([id]) => id),
+      ...roles.filter((role) => role.bookingUnknown).map((role) => role.groupId),
+      ...missingGroups,
       ...pendingGroups,
     ],
-    incompleteGroups: known.filter(([, read]) => read.incomplete).map(([id]) => id),
-    missingGroups: known.filter(([, read]) => read.failed).map(([id]) => id),
-    pendingGroups,
   };
 }
 
-async function readRole(group: Group, signal: AbortSignal): Promise<RoleRead> {
-  const optional = <T,>(load: () => Promise<T>) =>
-    retryTransientRead(load, signal).catch(() => undefined);
-  try {
-    const workspace = await retryTransientRead(
-      () => rpc.recruiting.getWorkspace({ threadId: group.threadId }, { signal }),
-      signal,
-    );
-    if (!workspace)
-      return { summary: null, incomplete: false, bookings: [], bookingUnknown: false };
-    const conversation = { groupId: group.id };
-    const [shortlist, candidates, campaign, calendar] = await Promise.all([
-      readShortlistPages((cursor) =>
-        retryTransientRead(
-          () =>
-            rpc.recruiting.listCandidates(
-              {
-                roleId: workspace.role.id,
-                shortlisted: true,
-                sort: "recent",
-                limit: 200,
-                ...(cursor ? { cursor } : {}),
-              },
-              { signal },
-            ),
-          signal,
-        ),
-      ),
-      optional(() =>
-        rpc.recruiting.roleCandidates(
-          { ...conversation, threadId: group.threadId, limit: 1 },
-          { signal },
-        ),
-      ),
-      optional(() => rpc.recruiting.roleCampaign(conversation, { signal })),
-      optional(() =>
-        rpc.recruiting.correspondence({ ...conversation, view: "interview" }, { signal }),
-      ),
-    ]);
-    return {
-      summary: roleSummary(
-        group.id,
-        workspace.role.id,
-        shortlist,
-        candidates ?? null,
-        campaign ?? null,
-      ),
-      incomplete: !candidates || !campaign,
-      bookings:
-        calendar?.roleId === workspace.role.id && ["ready", "empty"].includes(calendar.status)
-          ? calendar.events
-              .filter(
-                (event) =>
-                  event.kind === "event" &&
-                  (event.status === "confirmed" || event.status === "accepted") &&
-                  Date.parse(event.start) > Date.now(),
-              )
-              .map((event) => ({ groupId: group.id, event }))
-          : [],
-      bookingUnknown:
-        !calendar ||
-        calendar.roleId !== workspace.role.id ||
-        !["ready", "empty"].includes(calendar.status) ||
-        calendar.partial,
-    };
-  } catch (error) {
-    if (signal.aborted) throw error;
-    return { summary: null, incomplete: true, failed: true, bookings: [], bookingUnknown: true };
-  }
-}
-
 /**
- * Every role's numbers, shown as each role comes back and kept in the Shell's display cache.
- * A refresh re-reads in place: roles not read yet go first, and the numbers already shown stay
- * until their role's new read replaces them, so a busy account never falls back to skeletons.
+ * Every role's numbers from one streamed server read, shown as each role arrives and kept in the
+ * Shell's display cache. A refresh keeps the numbers on screen until each role's new read
+ * replaces them.
  */
 function useOverview(
   groups: readonly Group[],
@@ -159,49 +84,52 @@ function useOverview(
   refreshSignal: number,
 ) {
   const [retry, setRetry] = useState(0);
-  const roles = groups.filter((group) => !group.archivedAt);
   // The sidebar reorders roles as they get busy; only which roles exist matters here.
-  const roleIds = roles.map((group) => group.id).sort();
-  const key = JSON.stringify([scope, roleIds, refreshSignal, retry]);
+  const groupIds = groups
+    .filter((group) => !group.archivedAt)
+    .map((group) => group.id)
+    .sort();
+  const key = JSON.stringify([scope, groupIds, refreshSignal, retry]);
   const slot = scope ? `${scope}:home` : undefined;
-  const savedReads = () =>
-    (slot ? (savedRecruitingRead(cache, slot) as RoleReads | undefined) : undefined) ?? new Map();
-  const [state, setState] = useState<{ scope?: string; reads: RoleReads; failed?: boolean }>(
-    () => ({ scope, reads: savedReads() }),
-  );
-  // The latest reads of this scope, which a restarted read starts from.
+  const saved = (): OverviewState => ({
+    scope,
+    reads:
+      (slot ? (savedRecruitingRead(cache, slot) as RoleReads | undefined) : undefined) ?? new Map(),
+    done: false,
+  });
+  const [state, setState] = useState<OverviewState>(saved);
   const latest = useRef(state);
   latest.current = state;
-  const reads: RoleReads = state.scope === scope ? state.reads : savedReads();
   useEffect(() => {
     let cancelled = false;
     const abort = new AbortController();
-    let current = new Map(latest.current.scope === scope ? latest.current.reads : savedReads());
-    setState({ scope, reads: current });
-    const order = [
-      ...roles.filter((group) => !current.has(group.id)),
-      ...roles.filter((group) => current.has(group.id)),
-    ];
-    let failures = 0;
-    void mapWithConcurrency(order, OVERVIEW_CONCURRENCY, async (group) => {
-      const read = await readRole(group, abort.signal).catch(() => undefined);
-      if (cancelled || !read) return;
-      if (read.failed) {
-        failures++;
+    const previous = latest.current.scope === scope ? latest.current.reads : saved().reads;
+    let reads = new Map(previous);
+    const fresh = new Set<string>();
+    setState({ scope, reads, done: false });
+    void (async () => {
+      const events = await retryTransientRead(
+        () => rpc.recruiting.overview({}, { signal: abort.signal }),
+        abort.signal,
+      );
+      for await (const event of events) {
+        if (cancelled) return;
+        if (event.kind === "done") {
+          // Roles this read did not report are no longer bound to a role.
+          reads = new Map([...reads].filter(([id]) => fresh.has(id)));
+          rememberRecruitingRead(cache, slot, reads, cache?.epoch);
+          setState({ scope, reads, done: true });
+          return;
+        }
+        const id = event.kind === "role" ? event.role.groupId : event.groupId;
+        fresh.add(id);
         // A failed refresh keeps the numbers that were already read.
-        if (current.has(group.id) && !current.get(group.id)?.failed) return;
+        if (event.kind === "failed" && reads.has(id) && reads.get(id) !== "failed") continue;
+        reads = new Map(reads).set(id, event.kind === "role" ? event.role : "failed");
+        setState({ scope, reads, done: false });
       }
-      current = new Map(current).set(group.id, read);
-      rememberRecruitingRead(cache, slot, current, cache?.epoch);
-      setState({ scope, reads: current });
-    }).then(() => {
-      if (cancelled) return;
-      if (
-        order.length &&
-        failures === order.length &&
-        ![...current.values()].some((read) => !read.failed)
-      )
-        setState({ scope, reads: current, failed: true });
+    })().catch(() => {
+      if (!cancelled) setState({ scope, reads, done: true, failed: reads.size === 0 });
     });
     return () => {
       cancelled = true;
@@ -209,10 +137,11 @@ function useOverview(
     };
     // The key is the read's identity.
   }, [key]);
-  const data = overviewFrom(roles, reads);
-  const failed = state.scope === scope && Boolean(state.failed);
+  const current = state.scope === scope ? state : saved();
+  const failed = Boolean(current.failed);
+  const data = failed ? undefined : overviewFrom(groupIds, current);
   return {
-    data: failed ? undefined : data,
+    data,
     loading: !data && !failed,
     failed,
     retry: () => setRetry((value) => value + 1),

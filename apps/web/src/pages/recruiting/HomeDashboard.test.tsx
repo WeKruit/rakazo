@@ -11,6 +11,7 @@ const listCandidates = vi.hoisted(() => vi.fn());
 const roleCandidates = vi.hoisted(() => vi.fn());
 const roleCampaign = vi.hoisted(() => vi.fn());
 const correspondence = vi.hoisted(() => vi.fn());
+const overview = vi.hoisted(() => vi.fn());
 const listReminders = vi.hoisted(() => vi.fn());
 const updateReminder = vi.hoisted(() => vi.fn());
 vi.mock("../../lib/rpc", () => ({
@@ -21,6 +22,7 @@ vi.mock("../../lib/rpc", () => ({
       roleCandidates,
       roleCampaign,
       correspondence,
+      overview,
       reminders: { list: listReminders, update: updateReminder },
     },
   },
@@ -37,6 +39,7 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 
+import { streamRecruitingOverview } from "@rakazo/core";
 import { HomeDashboard } from "./HomeDashboard";
 
 const group = (id: string, name: string, updatedAt: string) =>
@@ -52,6 +55,8 @@ const groups = [
   group("g2", "Product Designer", "2026-10-22T00:00:00Z"),
 ];
 
+// The server's overview, composed from the per-role reads mocked above.
+let serverGroups: readonly Group[] = groups;
 let container: HTMLDivElement;
 let root: ReturnType<typeof createRoot>;
 const onOpenRole = vi.fn();
@@ -81,6 +86,35 @@ beforeEach(() => {
   });
   roleCampaign.mockResolvedValue({ status: "none", serverId: null, campaign: null, leads: [] });
   listReminders.mockResolvedValue({ items: [], overdueCount: 0 });
+  overview.mockImplementation(async (_input: unknown, options: unknown) =>
+    streamRecruitingOverview(
+      serverGroups.filter((group) => !group.archivedAt),
+      {
+        roleId: async (group) =>
+          (
+            (await getWorkspace({ threadId: group.threadId }, options)) as {
+              role: { id: string };
+            } | null
+          )?.role.id ?? null,
+        shortlistPage: (roleId, cursor) =>
+          listCandidates(
+            {
+              roleId,
+              shortlisted: true,
+              sort: "recent",
+              limit: 200,
+              ...(cursor ? { cursor } : {}),
+            },
+            options,
+          ),
+        candidates: (group) =>
+          roleCandidates({ groupId: group.id, threadId: group.threadId, limit: 1 }, options),
+        campaign: (group) => roleCampaign({ groupId: group.id }, options),
+        calendar: (group) => correspondence({ groupId: group.id, view: "interview" }, options),
+      },
+      new AbortController().signal,
+    ),
+  );
 });
 
 afterEach(async () => {
@@ -91,6 +125,7 @@ afterEach(async () => {
 });
 
 async function render(props: Partial<Parameters<typeof HomeDashboard>[0]> = {}) {
+  serverGroups = props.groups ?? groups;
   await act(async () => {
     root.render(
       <HomeDashboard userName="Ada Lovelace" groups={groups} onOpenRole={onOpenRole} {...props} />,
@@ -154,37 +189,41 @@ it.each([false, undefined])(
   },
 );
 
-it("shows the roles read so far without waiting for the slowest role", async () => {
-  getWorkspace.mockImplementation(({ threadId }: { threadId: string }) =>
-    threadId === "thread-g2"
-      ? new Promise(() => undefined)
-      : Promise.resolve({ role: { id: "r1" } }),
-  );
+it("reads every role in one request and keeps the numbers on screen through a refresh", async () => {
+  await render();
+  expect(overview).toHaveBeenCalledTimes(1);
+  const funnel = () => container.querySelector('[aria-label="Outreach funnel"]')!.textContent;
+  expect(funnel()).toContain("Shortlisted6\u00a0Contacted");
+  await render({ groups: [...groups].reverse() });
+  expect(overview).toHaveBeenCalledTimes(1);
+  overview.mockReturnValue(new Promise(() => undefined));
+  await render({ groups: [...groups].reverse(), refreshSignal: 1 });
+  expect(overview).toHaveBeenCalledTimes(2);
+  expect(funnel()).toContain("Shortlisted6\u00a0Contacted");
+});
+
+it("shows each role as it streams in, with partial totals until the read ends", async () => {
+  const role = {
+    groupId: "g1",
+    roleId: "r1",
+    shortlisted: 3,
+    shortlistedDates: [],
+    contacted: null,
+    replied: null,
+    interested: null,
+    interestedPartial: false,
+    incomplete: false,
+    bookings: [],
+    bookingUnknown: false,
+  };
+  overview.mockImplementation(async function* () {
+    yield { kind: "role", role };
+    await new Promise(() => undefined);
+  });
   await render();
   const funnel = container.querySelector('[aria-label="Outreach funnel"]')!;
   expect(funnel.textContent).toContain("Shortlisted≥3");
   expect(text()).not.toContain("could not be read");
-});
-
-it("keeps reading when the sidebar only reorders roles, and keeps numbers through a refresh", async () => {
-  const slow = { release: () => undefined as void };
-  getWorkspace.mockImplementation(({ threadId }: { threadId: string }) =>
-    threadId === "thread-g2"
-      ? new Promise((resolve) => {
-          slow.release = () => resolve({ role: { id: "r2" } });
-        })
-      : Promise.resolve({ role: { id: "r1" } }),
-  );
-  await render();
-  await render({ groups: [...groups].reverse() });
-  expect(getWorkspace).toHaveBeenCalledTimes(2);
-  await act(async () => slow.release());
-  const funnel = () => container.querySelector('[aria-label="Outreach funnel"]')!.textContent;
-  expect(funnel()).toContain("Shortlisted6 Contacted");
-  getWorkspace.mockReturnValue(new Promise(() => undefined));
-  await render({ groups: [...groups].reverse(), refreshSignal: 1 });
-  expect(getWorkspace).toHaveBeenCalledTimes(4);
-  expect(funnel()).toContain("Shortlisted6 Contacted");
 });
 
 it("opens a recent role, newest first", async () => {

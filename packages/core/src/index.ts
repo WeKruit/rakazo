@@ -55,6 +55,8 @@ export * from "./recruiting.js";
 export * from "./recruiting-candidates.js";
 export * from "./recruiting-crm.js";
 export * from "./recruiting-defaults.js";
+export type { OverviewGroup, OverviewReads } from "./recruiting-overview.js";
+export { streamRecruitingOverview } from "./recruiting-overview.js";
 export * from "./recruiting-playbook.js";
 export * from "./recruiting-reply-sorting.js";
 export * from "./remote-images.js";
