@@ -1,5 +1,14 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openUserSettings, signup } from "./helpers";
+import {
+  captureScreenshot,
+  completeOnboarding,
+  openUserSettings,
+  setDeploymentOwner,
+  signup,
+} from "./helpers";
+
+// Models, Voice and Updates settings are only shown to the deployment owner.
+test.beforeEach(({ page }) => setDeploymentOwner(page, true));
 
 test("desktop update can be checked, deferred, and installed from settings", async ({
   page,

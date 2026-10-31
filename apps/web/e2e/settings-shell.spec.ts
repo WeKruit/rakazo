@@ -1,5 +1,11 @@
 import { expect, test } from "@playwright/test";
-import { captureScreenshot, completeOnboarding, openUserSettings, signup } from "./helpers";
+import {
+  captureScreenshot,
+  completeOnboarding,
+  openUserSettings,
+  setDeploymentOwner,
+  signup,
+} from "./helpers";
 
 test("usage shows spend per role and calibration round", async ({ page }, testInfo) => {
   const amounts = { credits: 228, pending: false };
@@ -26,10 +32,15 @@ test("usage shows spend per role and calibration round", async ({ page }, testIn
       },
     }),
   );
+  await setDeploymentOwner(page, false);
   const stamp = Date.now();
   await signup(page, `usage-total-${stamp}@rakazo.test`, "password12", "Usage totals");
   await completeOnboarding(page);
-  await openUserSettings(page, "usage");
+  const settings = await openUserSettings(page);
+  // Customers do not manage models, voice or app updates.
+  for (const section of ["models", "voice", "updates"])
+    await expect(settings.getByTestId(`settings-nav-${section}`)).toHaveCount(0);
+  await settings.getByTestId("settings-nav-usage").click();
   const usage = page.getByTestId("usage-settings");
   await expect(usage).toContainText("Credits");
   await expect(usage).not.toContainText(/tokens|cost|\$/i);
@@ -42,6 +53,7 @@ test("usage shows spend per role and calibration round", async ({ page }, testIn
 test("settings shell is two-pane and deep-links Models Memory Voice Usage", async ({
   page,
 }, testInfo) => {
+  await setDeploymentOwner(page, true);
   const stamp = Date.now();
   const userName = `Settings shell ${stamp}`;
   await signup(page, `settings-shell-${stamp}@rakazo.test`, "password12", userName);
