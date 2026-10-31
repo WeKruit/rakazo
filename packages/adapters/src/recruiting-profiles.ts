@@ -16,6 +16,10 @@ import {
 import { getLogger } from "@rakazo/logging";
 import { inlineProfilePhotos, linkedinPhotoUrl } from "./profile-photo.js";
 
+/** Calls read per page when looking for a person's lookup, and how far back a save looks. */
+const LOOKUP_PAGE = 20;
+const LOOKUP_CALLS_MAX = 200;
+
 type Facts = Omit<RecruitingSavedProfile, "personKey" | "provider" | "fetchedAt">;
 type Record_ = Record<string, unknown>;
 
@@ -655,16 +659,31 @@ export async function executeRecruitingProfilesTool(
     throw new RecruitingProfileError(
       "This person has no LinkedIn profile on record, so there is nothing to look up.",
     );
-  const calls = await listRunToolResults(prisma, actor, runId, 200);
+  // A search result can be large, so the run's calls are read a page at a time, newest first,
+  // and only as far back as the people being saved need.
+  const calls: Awaited<ReturnType<typeof listRunToolResults>> = [];
+  let readAll = false;
+  const findLookup = async (candidateKey: string) => {
+    for (let index = 0; ; index += 1) {
+      if (index === calls.length) {
+        if (readAll || calls.length >= LOOKUP_CALLS_MAX) return undefined;
+        const page = await listRunToolResults(prisma, actor, runId, LOOKUP_PAGE, calls.length);
+        calls.push(...page);
+        readAll = page.length < LOOKUP_PAGE;
+        if (index === calls.length) return undefined;
+      }
+      const call = calls[index]!;
+      const found = profileFromLookup(call.result, call.endpoint, candidateKey);
+      if (found) return { call, found };
+    }
+  };
   const items = [];
   for (const candidateKey of keys) {
     if (!candidateKey.startsWith("linkedin:")) {
       items.push({ candidateKey, saved: false, reason: "no LinkedIn profile on record" });
       continue;
     }
-    const match = calls
-      .map((call) => ({ call, found: profileFromLookup(call.result, call.endpoint, candidateKey) }))
-      .find((entry) => entry.found);
+    const match = await findLookup(candidateKey);
     if (!match?.found) {
       items.push({ candidateKey, saved: false });
       continue;
@@ -867,42 +886,4 @@ export async function fillRecruitingRoleProfiles(
     }
   }
   return { people: personKeys.length, filled: filled.size, photos, missing: incomplete() };
-}
-
-/**
- * Fill every recruiter's roles from their own saved searches, once per worker start, so a
- * history the searches already returned reaches existing people too. Free and idempotent:
- * people whose saved profile is complete are skipped, and one role's failure never stops the rest.
- */
-export async function fillAllRecruitingRoleProfiles(
-  prisma: PrismaClient,
-  signal?: AbortSignal,
-  fetchPhoto?: Parameters<typeof inlineProfilePhotos>[1],
-) {
-  const roles = await prisma.recruitingRole.findMany({
-    where: { candidates: { some: { candidateKey: { startsWith: "linkedin:" } } } },
-    select: { id: true, spaceId: true, userId: true, user: { select: { email: true } } },
-    orderBy: { id: "asc" },
-  });
-  const total = { roles: 0, filled: 0, photos: 0, missing: 0, failed: 0 };
-  for (const role of roles) {
-    if (signal?.aborted) break;
-    const actor = {
-      userId: role.userId,
-      spaceId: role.spaceId,
-      email: role.user.email,
-      isDeploymentOwner: false,
-    };
-    try {
-      const result = await fillRecruitingRoleProfiles(prisma, actor, role.id, fetchPhoto);
-      total.roles += 1;
-      total.filled += result.filled;
-      total.photos += result.photos;
-      total.missing += result.missing;
-    } catch (error) {
-      total.failed += 1;
-      getLogger().warn("recruiting.profiles.fill_all.role_failed", { error: String(error) });
-    }
-  }
-  return total;
 }

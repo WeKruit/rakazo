@@ -55,7 +55,6 @@ export * from "./cursor-cloud-agent.js";
 export * from "./daytona-emulator.js";
 export * from "./daytona-sandbox.js";
 export * from "./deployment-model.js";
-export * from "./embeddings.js";
 export * from "./desktop-sandbox.js";
 export * from "./destination-emulator.js";
 export * from "./discovery-prewarm.js";
@@ -64,6 +63,7 @@ export * from "./e2b-emulator.js";
 export * from "./e2b-sandbox.js";
 export * from "./elevenlabs-voice.js";
 export * from "./email-emulator.js";
+export * from "./embeddings.js";
 export * from "./exa-organization-search.js";
 export * from "./exa-page-reader.js";
 export * from "./executor.js";
@@ -129,10 +129,7 @@ export {
   RECRUITING_AGENT_RUN_WAIT_NONCE_PREFIX,
 } from "./recruiting-agent-run-wait.js";
 export { scheduleRecruitingGrading } from "./recruiting-grading.js";
-export {
-  fillAllRecruitingRoleProfiles,
-  fillRecruitingRoleProfiles,
-} from "./recruiting-profiles.js";
+export { fillRecruitingRoleProfiles } from "./recruiting-profiles.js";
 export {
   classifyRecruitingResearchResult,
   createRecruitingCandidateReportReader,

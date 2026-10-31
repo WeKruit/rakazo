@@ -155,6 +155,52 @@ describe("executeRecruitingProfilesTool", () => {
     });
   });
 
+  it("reads the run's calls a page at a time and stops at the page with the lookup", async () => {
+    const createdAt = new Date("2026-10-24T22:00:00Z");
+    const empty = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({
+        effectId: `e-${i}`,
+        toolName: "entity_fetch",
+        endpoint: ENDPOINT,
+        result: {},
+        createdAt,
+      }));
+    db.listRunToolResults.mockReset();
+    db.listRunToolResults
+      .mockResolvedValueOnce(empty(20))
+      .mockResolvedValueOnce([
+        {
+          effectId: "e1",
+          toolName: "entity_fetch",
+          endpoint: ENDPOINT,
+          result: mcpResult,
+          createdAt,
+        },
+        ...empty(19),
+      ])
+      .mockResolvedValue(empty(20));
+    db.saveRecruitingSavedProfile.mockImplementation(async (_p, _a, _r, input) => ({
+      ...input.profile,
+      personKey: input.personKey,
+      provider: input.provider,
+      fetchedAt: input.fetchedAt.toISOString(),
+    }));
+    await executeRecruitingProfilesTool(prisma, actor, "run1", {
+      operation: "save",
+      candidateKey: KEY,
+    });
+    expect(db.listRunToolResults.mock.calls.map((call) => call.slice(3))).toEqual([
+      [20, 0],
+      [20, 20],
+    ]);
+    expect(db.saveRecruitingSavedProfile).toHaveBeenCalledWith(
+      prisma,
+      actor,
+      "run1",
+      expect.objectContaining({ sourceEffectId: "e1" }),
+    );
+  });
+
   it("refuses to save without a lookup or a LinkedIn identity", async () => {
     db.listRunToolResults.mockResolvedValue([]);
     await expect(

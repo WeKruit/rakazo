@@ -36,7 +36,6 @@ import {
   DISCOVERY_PREWARM_REFRESH_MS,
   databaseCapacityBackoffMs,
   ExpoPushProvider,
-  fillAllRecruitingRoleProfiles,
   fillOrganizationLogos,
   firstPartyMcpUrl,
   GraphileJobPublisher,
@@ -86,8 +85,8 @@ import { SERVICE_NAMES } from "@rakazo/logging";
 import { createRootLogger } from "@rakazo/logging/axiom";
 import { MarkdownMemoryStore } from "@rakazo/memory";
 
-/** The one-time profile fill waits for boot and the first queued jobs to settle. */
-const PROFILE_FILL_DELAY_MS = 60_000;
+/** The logo fill waits for boot and the first queued jobs to settle. */
+const LOGO_FILL_DELAY_MS = 60_000;
 // Organization lookups per start for logos not saved yet; each is one company-index search.
 const LOGO_FILL_MAX_LOOKUPS = 6_000;
 // Recent messages get meaning vectors for history search; about US$0.10 a day at most.
@@ -389,26 +388,17 @@ async function main() {
     reconcileComputerUpdates: () => reconcileComputerUpdates({ prisma, jobs }),
   });
   reconciler.start();
-  // Education and work history the saved searches already returned reach existing people too.
+  // Every saved person's companies and schools get a saved logo, for all users at once.
   setTimeout(() => {
-    void fillAllRecruitingRoleProfiles(prisma, shutdown.signal)
-      .then((result) => logger.info("recruiting.profiles.fill_all", result))
-      .catch((error) =>
-        logger.warn("recruiting.profiles.fill_all failed", { error: String(error) }),
-      )
-      // Every saved person's companies and schools get a saved logo, for all users at once.
-      .then(() =>
-        fillOrganizationLogos(
-          prisma,
-          createCompanySiteResolver({
-            searchOrganizations: createExaOrganizationSearch(),
-            store: createPrismaOrganizationLogoStore(prisma),
-          }),
-          { signal: shutdown.signal, maxLookups: LOGO_FILL_MAX_LOOKUPS },
-        ),
-      )
-      .catch((error) => logger.warn("organization.logos.fill failed", { error: String(error) }));
-  }, PROFILE_FILL_DELAY_MS).unref();
+    void fillOrganizationLogos(
+      prisma,
+      createCompanySiteResolver({
+        searchOrganizations: createExaOrganizationSearch(),
+        store: createPrismaOrganizationLogoStore(prisma),
+      }),
+      { signal: shutdown.signal, maxLookups: LOGO_FILL_MAX_LOOKUPS },
+    ).catch((error) => logger.warn("organization.logos.fill failed", { error: String(error) }));
+  }, LOGO_FILL_DELAY_MS).unref();
   if (embedder) {
     let embedding = false;
     setInterval(() => {
