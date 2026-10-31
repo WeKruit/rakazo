@@ -6,6 +6,8 @@
 #   release-cloud.sh <SHA> test     # unit tests only, no prod access; run while prod is busy so the deploy skips them
 #   release-cloud.sh <SHA> prebuild # build the Modal image for SHA only, nothing deployed
 #   release-cloud.sh main watch     # keep running: test and prebuild each new origin/main head as it lands (background)
+#   release-cloud.sh <branch> premerge # unit tests on main merged with the branch, before it is merged;
+#                                      # a pass is reused when the real merge has the same code
 #   RELEASE_ROLLBACK=1 ... deploy   # emergency rollback to a tested SHA: works while live /ready is broken, no gap wait
 #
 # Rules kept from the runbook: main only, one release at a time, recreate only, no new Modal
@@ -72,10 +74,18 @@ if [ "$MODE" = watch ]; then
   done
 fi
 
-# 1) Resolve the SHA on main.
+# 1) Resolve the SHA on main. A premerge run tests the merge of main and the branch instead, so a
+# branch that breaks main with its merge is caught before it is merged.
 git -C "$REPO" fetch -q origin main
-SHA=$(git -C "$REPO" rev-parse --verify "$SHA_IN^{commit}") || die "unknown SHA $SHA_IN"
-git -C "$REPO" merge-base --is-ancestor "$SHA" origin/main || die "$SHA is not on origin/main"
+if [ "$MODE" = premerge ]; then
+  git -C "$REPO" fetch -q origin "$SHA_IN"
+  TREE_ID=$(git -C "$REPO" merge-tree --write-tree origin/main FETCH_HEAD) || die "$SHA_IN does not merge cleanly into main"
+  SHA=$(git -C "$REPO" commit-tree "$TREE_ID" -p origin/main -p FETCH_HEAD -m "premerge $SHA_IN")
+  git -C "$REPO" update-ref "refs/premerge/$SHA" "$SHA"
+else
+  SHA=$(git -C "$REPO" rev-parse --verify "$SHA_IN^{commit}") || die "unknown SHA $SHA_IN"
+  git -C "$REPO" merge-base --is-ancestor "$SHA" origin/main || die "$SHA is not on origin/main"
+fi
 SHORT=${SHA:0:8}
 # Keep the whole timestamped run on disk; wrappers often show only the tail.
 case "$MODE" in check|deploy) mkdir -p "$WORK"; exec > >(tee -a "$WORK/release-$SHORT.log") 2>&1 ;; esac
@@ -103,7 +113,7 @@ run_tests() {
   done
   [ -n "$base" ] && [ "${RELEASE_FULL_TESTS:-}" != 1 ] && module_only "$base" "$SHA" || base=""
   [ -d "$TREE/.git" ] || git clone -q --no-checkout "$REPO" "$TREE"
-  git -C "$TREE" fetch -q "$REPO" +refs/remotes/origin/main:refs/remotes/origin/main
+  git -C "$TREE" fetch -q "$REPO" +refs/remotes/origin/main:refs/remotes/origin/main '+refs/premerge/*:refs/premerge/*'
   git -C "$TREE" checkout -q -f --detach "$SHA"
   git -C "$TREE" clean -qfdx -e node_modules -e packages/db/src/generated
   scope=${base:+"tests affected since tested ${base:0:8}"}
@@ -119,6 +129,7 @@ run_tests() {
   touch "$TESTED"; exec 8>&-
 }
 [ "$MODE" = test ] && { run_tests; log "TESTS OK $SHORT (nothing deployed)"; exit 0; }
+[ "$MODE" = premerge ] && { run_tests; log "PREMERGE OK $SHA_IN on main ${SHORT} (safe to merge)"; exit 0; }
 if [ "$MODE" = prebuild ]; then
   P="$WORK/prebuild/$SHA"; rm -rf "$P"; mkdir -p "$P" "$WORK/prebuilt"
   git -C "$REPO" archive --format=tar "$SHA" | tar -x -C "$P"
@@ -197,7 +208,7 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
     node "$DIR/infra/acceptance/smoke.mjs" --wait 60 > "$WORK/smoke-$SHORT.log" 2>&1 \
     || { tail -15 "$WORK/smoke-$SHORT.log"; rollback "smoke check failed (log: $WORK/smoke-$SHORT.log)"; }
   log "smoke ok: $(tail -1 "$WORK/smoke-$SHORT.log")"
-  # Signed-in Home must open within its budget (greeting, role list, first Overview numbers).
+  # Signed-in Home and the left-nav pages (Contacts, Sequence, Inbox, Interview) must open within budget.
   # A fresh container may be cold, so it gets a second try. Needs RAKAZO_EMAIL/RAKAZO_PASSWORD.
   if [ -f "$DIR/infra/acceptance/home-load.mjs" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; then
     home=1
