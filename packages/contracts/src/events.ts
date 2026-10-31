@@ -414,7 +414,12 @@ export const MessageBlock = z.discriminatedUnion("kind", [
     title: z.string(),
     farewell: z.string(),
   }),
-  z.object({ kind: z.literal("meta"), text: z.string() }),
+  z.object({
+    kind: z.literal("meta"),
+    text: z.string(),
+    /** Set on the line a stop leaves, so the newest one offers to continue the stopped work. */
+    resume: z.literal(true).optional(),
+  }),
   z.object({
     kind: z.literal("progress"),
     text: z.string(),

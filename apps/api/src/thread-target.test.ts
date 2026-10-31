@@ -4889,7 +4889,7 @@ describe("stopThreadRuns", () => {
     expect(messages).toEqual([
       expect.objectContaining({
         role: "system",
-        blocks: [{ kind: "meta", text: "Dana stopped the assistant" }],
+        blocks: [{ kind: "meta", text: "Dana stopped the assistant", resume: true }],
       }),
     ]);
     expect(events.map((event) => event.type)).toEqual(["run.cancelled", "thread.message.created"]);

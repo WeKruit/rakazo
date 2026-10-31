@@ -73,6 +73,7 @@ const NO_ITEMS: never[] = [];
 
 /** What the Try again button sends after a failed run; the bot picks up from the history. */
 const RETRY_TEXT = "Try again";
+const CONTINUE_TEXT = "Continue where you left off.";
 
 export function ShellConversation({
   model,
@@ -844,6 +845,9 @@ export function ShellConversation({
                   onRefresh={refreshActiveThread}
                   onBotChanged={refreshBots}
                   onAddRoutine={addSkillRoutine}
+                  onContinue={() =>
+                    void sendFromComposer(CONTINUE_TEXT, [], crypto.randomUUID(), "steer", true)
+                  }
                   voiceReady={Boolean(voiceStatus?.ready)}
                   speakingMessageId={speakingMessageId}
                   onSpeak={speakMessage}

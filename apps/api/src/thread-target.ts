@@ -1754,7 +1754,9 @@ export async function stopThreadRuns(
         where: { id: actor.userId },
         select: { name: true },
       });
-      const blocks: MessageBlock[] = [{ kind: "meta", text: stoppedNotice(user?.name) }];
+      const blocks: MessageBlock[] = [
+        { kind: "meta", text: stoppedNotice(user?.name), resume: true },
+      ];
       const message = await createThreadMessageInTransaction(tx, {
         threadId: target.threadId,
         role: "system",

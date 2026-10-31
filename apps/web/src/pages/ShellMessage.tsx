@@ -200,6 +200,7 @@ export const MessageView = memo(function MessageView({
   onSpeak,
   onOpenComputer,
   showToolActivity,
+  onContinue,
 }: {
   artifactTarget: ArtifactTarget;
   canAnswer: boolean;
@@ -221,6 +222,8 @@ export const MessageView = memo(function MessageView({
   onSpeak: () => void;
   onOpenComputer: (botId?: string) => void;
   showToolActivity: boolean;
+  /** Only on the newest message: continues work a stop ended. */
+  onContinue?: () => void;
 }) {
   const { t } = useLingui();
   const isNarration =
@@ -403,6 +406,16 @@ export const MessageView = memo(function MessageView({
             >
               <span className="text-warning">◷</span>
               <span>{block.text}</span>
+              {block.resume && onContinue ? (
+                <button
+                  type="button"
+                  data-testid="stopped-continue"
+                  onClick={onContinue}
+                  className="font-medium text-foreground underline-offset-2 hover:underline"
+                >
+                  {t`Continue`}
+                </button>
+              ) : null}
             </div>
           );
         }
