@@ -1810,6 +1810,7 @@ it.each(["results", "shortlist", "contacts"] as const)(
         [...view.container.querySelectorAll("thead th")].map((cell) => cell.textContent),
       ).toEqual(["Name", "Current role", "Location", "Status", "Actions"]);
       expect(api.correspondence).toHaveBeenCalledExactlyOnceWith({
+        limit: 200,
         groupId: "group-1",
         view: "contacts",
       });
@@ -2013,7 +2014,11 @@ it("refreshes contacts from native receipts and ignores a late response from ano
     view: "contacts",
     groupId: "group-2",
   });
-  expect(api.correspondence).toHaveBeenLastCalledWith({ groupId: "group-2", view: "contacts" });
+  expect(api.correspondence).toHaveBeenLastCalledWith({
+    limit: 200,
+    groupId: "group-2",
+    view: "contacts",
+  });
   await act(async () => finish(saved));
   expect(view.container.textContent).not.toContain("current@example.test");
   api.correspondence.mockResolvedValueOnce(saved);

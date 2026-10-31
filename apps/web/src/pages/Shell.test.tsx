@@ -3512,6 +3512,7 @@ it("opens a normal recruiting role on native candidate results and restores coll
   await view.navigate("/app/g/group-1?view=contacts");
   expect(container?.querySelector("h1")?.textContent).toBe("Contacts");
   expect(shellApi.recruiting.correspondence).toHaveBeenLastCalledWith({
+    limit: 200,
     groupId: "group-1",
     view: "contacts",
   });
