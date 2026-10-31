@@ -2,6 +2,7 @@ import { useLingui } from "@lingui/react/macro";
 import type { AvatarStyle, SpaceMemoryConfig, UsageCosts } from "@rakazo/contracts";
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle } from "@rakazo/ui-web";
 import {
+  Activity,
   Brain,
   ChartNoAxesCombined,
   CloudDownload,
@@ -28,6 +29,7 @@ import { BillingSettingsPanel } from "./BillingSettingsPanel";
 import { InternalCostsSettingsPanel } from "./InternalCostsSettingsPanel";
 import { MemorySettingsOverlay } from "./MemorySettingsOverlay";
 import { VoiceSettingsOverlay } from "./VoiceSettingsOverlay";
+import { WorkMetricsSettingsPanel } from "./WorkMetricsSettingsPanel";
 
 const ModelSettingsOverlay = lazyPanel(() =>
   withFeatureMessages(() => import("./ModelSettingsOverlay")).then(
@@ -42,6 +44,7 @@ export type SettingsSection =
   | "voice"
   | "usage"
   | "internal-costs"
+  | "work-metrics"
   | "computer"
   | "billing"
   | "updates";
@@ -127,7 +130,12 @@ export function SettingsOverlay({
   }, [billingEnabled, section]);
 
   useEffect(() => {
-    if (usage && !usage.canViewInternalCosts && section === "internal-costs") setSection("usage");
+    if (
+      usage &&
+      !usage.canViewInternalCosts &&
+      (section === "internal-costs" || section === "work-metrics")
+    )
+      setSection("usage");
   }, [usage, section]);
 
   useEffect(() => {
@@ -149,7 +157,10 @@ export function SettingsOverlay({
     { id: "voice", label: t`Voice`, icon: Volume2 },
     { id: "usage", label: t`Usage`, icon: Gauge },
     ...(usage?.canViewInternalCosts
-      ? [{ id: "internal-costs" as const, label: t`Internal Costs`, icon: ChartNoAxesCombined }]
+      ? [
+          { id: "internal-costs" as const, label: t`Internal Costs`, icon: ChartNoAxesCombined },
+          { id: "work-metrics" as const, label: t`Work Metrics`, icon: Activity },
+        ]
       : []),
     ...(showComputer ? [{ id: "computer" as const, label: t`Computer`, icon: Monitor }] : []),
     ...(billingEnabled ? [{ id: "billing" as const, label: t`Billing`, icon: CreditCard }] : []),
@@ -279,6 +290,9 @@ export function SettingsOverlay({
               ) : null}
               {section === "internal-costs" && usage?.canViewInternalCosts ? (
                 <InternalCostsSettingsPanel />
+              ) : null}
+              {section === "work-metrics" && usage?.canViewInternalCosts ? (
+                <WorkMetricsSettingsPanel />
               ) : null}
               {section === "computer" && showComputer ? (
                 <ComputerSettingsPanel
