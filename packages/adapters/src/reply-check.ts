@@ -75,8 +75,10 @@ export async function checkThreadReplied(
       role: true,
       blocks: true,
       createdAt: true,
-      sourceRuns: { select: { botId: true, trigger: true }, take: 1 },
-      steeringMessages: { select: { botId: true, claimedAt: true } },
+      sourceRuns: { select: { botId: true, trigger: true, status: true, error: true }, take: 1 },
+      steeringMessages: {
+        select: { botId: true, claimedAt: true, run: { select: { status: true, error: true } } },
+      },
     },
   });
   if (latest?.role !== "user") return skipped("replied");
@@ -87,6 +89,12 @@ export async function checkThreadReplied(
   // Still being worked on: a turn is running, queued or waiting on a card, or the message waits
   // to be picked up. That turn ending schedules this check again.
   if (latest.steeringMessages.some((row) => !row.claimedAt)) return skipped("pending");
+  // The person stopped the turn that had their message: answering anyway would undo the stop.
+  // A stuck turn the server cancelled carries an error and is still answered.
+  const stopped = (run: { status: string; error: string | null } | null | undefined) =>
+    run?.status === "cancelled" && !run.error;
+  if (stopped(source) || latest.steeringMessages.some((row) => stopped(row.run)))
+    return skipped("stopped");
   const busy = await deps.prisma.run.findFirst({
     where: { threadId: thread.id, status: { in: [...ACTIVE_RUN_STATUSES] } },
     select: { id: true },
