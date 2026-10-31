@@ -194,6 +194,10 @@ msgstr "Accepted. Finding more people."
 msgid "Access token"
 msgstr "Access token"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Accounts"
+msgstr "Accounts"
+
 #: src/pages/recruiting/CandidateDirectory.tsx
 msgid "Actions"
 msgstr "Actions"
@@ -261,6 +265,14 @@ msgstr "Agent"
 msgid "Agent computer"
 msgstr "Agent computer"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All account totals"
+msgstr "All account totals"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All accounts"
+msgstr "All accounts"
+
 #: src/pages/recruiting/RecruitingEvidenceTab.tsx
 msgid "All internal assessments"
 msgstr "All internal assessments"
@@ -284,6 +296,10 @@ msgstr "All rounds"
 #: src/pages/recruiting/InboxTab.tsx
 msgid "All statuses"
 msgstr "All statuses"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "All time"
+msgstr "All time"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Allow writing"
@@ -372,6 +388,15 @@ msgstr "Available time"
 #: src/pages/shell/avatar-studio-popover.tsx
 msgid "Avatar Studio"
 msgstr "Avatar Studio"
+
+#. placeholder {0}: model.unit
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Average / {0}"
+msgstr "Average / {0}"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Average / 1M tokens"
+msgstr "Average / 1M tokens"
 
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Avg tenure"
@@ -465,6 +490,22 @@ msgstr "Brain label"
 #: src/components/computer/ComputerWorkspace.tsx
 msgid "Browser"
 msgstr "Browser"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "By vendor"
+msgstr "By vendor"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache read"
+msgstr "Cache read"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache write"
+msgstr "Cache write"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cache write (1h)"
+msgstr "Cache write (1h)"
 
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Calibration round"
@@ -799,6 +840,10 @@ msgstr "Copy"
 msgid "Copy .env example"
 msgstr "Copy .env example"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Cost"
+msgstr "Cost"
+
 #: src/lib/model-connection-preflight.ts
 msgid "Could not check stored credentials."
 msgstr "Could not check stored credentials."
@@ -889,6 +934,10 @@ msgstr "Could not load contact details"
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Could not load integrations"
 msgstr "Could not load integrations"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Could not load internal costs"
+msgstr "Could not load internal costs"
 
 #: src/pages/recruiting/NotesTab.tsx
 msgid "Could not load notes."
@@ -1050,6 +1099,14 @@ msgstr "Create reminder"
 #: src/pages/Auth.tsx
 msgid "Create your WeKruit Headhunter account"
 msgstr "Create your WeKruit Headhunter account"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "credits"
+msgstr "credits"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Credits"
+msgstr "Credits"
 
 #: src/pages/recruiting/AssessmentCard.tsx
 #: src/pages/recruiting/CandidateDirectory.tsx
@@ -1512,6 +1569,10 @@ msgstr "In review"
 msgid "Inbox"
 msgstr "Inbox"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Input"
+msgstr "Input"
+
 #: src/components/teach/SkillDraftCard.tsx
 msgid "Inputs"
 msgstr "Inputs"
@@ -1645,6 +1706,10 @@ msgstr "Load earlier messages"
 #: src/pages/recruiting/shared.tsx
 msgid "Load more"
 msgstr "Load more"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Loading costs…"
+msgstr "Loading costs…"
 
 #: src/components/ArtifactFileCard.tsx
 msgid "Loading preview…"
@@ -1884,6 +1949,10 @@ msgstr "New Role"
 msgid "Next: {0}"
 msgstr "Next: {0}"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No accounts"
+msgstr "No accounts"
+
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "No apps found"
 msgstr "No apps found"
@@ -1903,10 +1972,6 @@ msgstr "No bots"
 #: src/pages/shell/bot-picker.tsx
 msgid "No bots match"
 msgstr "No bots match"
-
-#: src/pages/recruiting/shared.tsx
-msgid "No candidate records for this role yet."
-msgstr "No candidate records for this role yet."
 
 #: src/pages/recruiting/ContactsTab.tsx
 #: src/pages/recruiting/InboxTab.tsx
@@ -1937,6 +2002,10 @@ msgstr "No loaded candidates match these filters."
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "No loaded candidates match this date filter."
 msgstr "No loaded candidates match this date filter."
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No matching accounts"
+msgstr "No matching accounts"
 
 #: src/components/StageTranscript.tsx
 msgid "No messages yet."
@@ -1999,6 +2068,10 @@ msgstr "No subject"
 #: src/pages/recruiting/SkillEvidence.tsx
 msgid "No supporting detail in the saved profile."
 msgstr "No supporting detail in the saved profile."
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "No usage yet"
+msgstr "No usage yet"
 
 #: src/lib/ticket-priority.ts
 msgid "Normal"
@@ -2130,6 +2203,10 @@ msgstr "Original recipients: {0}"
 #: src/pages/shell/useShellRecruiting.ts
 msgid "Original sender: {0}"
 msgstr "Original sender: {0}"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Output"
+msgstr "Output"
 
 #: src/pages/recruiting/CrmWorkbench.tsx
 #: src/pages/shell/ShellConversation.tsx
@@ -2283,6 +2360,10 @@ msgstr "Reason"
 #: src/pages/recruiting/CalibrationRound.tsx
 msgid "Reason: {name}"
 msgstr "Reason: {name}"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Reasoning"
+msgstr "Reasoning"
 
 #: src/pages/memory-providers/SerenitySettingsForm.tsx
 msgid "Recall and write"
@@ -2556,6 +2637,7 @@ msgstr "Resume: {0}"
 #: src/components/BackgroundTasks.tsx
 #: src/components/StageTranscript.tsx
 #: src/pages/Auth.tsx
+#: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/recruiting/RetryNotice.tsx
 msgid "Retry"
 msgstr "Retry"
@@ -2705,6 +2787,10 @@ msgstr "Scheduled"
 #: src/pages/shell/DeveloperSidebar.tsx
 msgid "Search"
 msgstr "Search"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Search accounts"
+msgstr "Search accounts"
 
 #: src/components/integrations/IntegrationSetup.tsx
 msgid "Search apps"
@@ -3183,6 +3269,10 @@ msgstr "This file is not valid UTF-8 text."
 msgid "This filter belongs to another role."
 msgstr "This filter belongs to another role."
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "This month"
+msgstr "This month"
+
 #: src/components/AccountAccess.tsx
 msgid "This permanently deletes your account and data."
 msgstr "This permanently deletes your account and data."
@@ -3232,9 +3322,17 @@ msgstr "To:"
 msgid "Today"
 msgstr "Today"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Tokens"
+msgstr "Tokens"
+
 #: src/pages/recruiting/ProfileTimeline.tsx
 msgid "Total experience"
 msgstr "Total experience"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Total tokens"
+msgstr "Total tokens"
 
 #: src/components/RunTrace.tsx
 msgid "Trace unavailable"
@@ -3286,6 +3384,10 @@ msgstr "Unmute"
 #: src/pages/recruiting/ContactsTab.tsx
 msgid "Unnamed candidate"
 msgstr "Unnamed candidate"
+
+#: src/pages/InternalCostsSettingsPanel.tsx
+msgid "Unpriced usage"
+msgstr "Unpriced usage"
 
 #: src/pages/shell/RecruitingNavigation.tsx
 msgid "Unread"
@@ -3350,6 +3452,7 @@ msgstr "Upload"
 msgid "Urgent"
 msgstr "Urgent"
 
+#: src/pages/InternalCostsSettingsPanel.tsx
 #: src/pages/shell/ShellSidebar.tsx
 msgid "Usage"
 msgstr "Usage"

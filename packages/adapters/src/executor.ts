@@ -86,6 +86,8 @@ import {
   asksToSendTo,
   assertTransition,
   attachmentExtensionForMimeType,
+  BLOCKED_TOOL_REFUSAL,
+  blockedToolEffect,
   blocksToAgentHistoryText,
   botMessageAllowsSilence,
   boundDirectApprovalDetails,
@@ -162,6 +164,7 @@ import {
   unattendedMemoryWriteRefusal,
   unattendedTriggerToolRequiresApproval,
   userTurnMessageForRun,
+  withoutHiddenTools,
   workActivityForTool,
 } from "@rakazo/core";
 import {
@@ -5231,6 +5234,18 @@ export function createRunExecutor(deps: ExecutorDeps) {
             .then((rules) => rules as ActionApprovalRule[]);
           return approvalRulesPromise;
         };
+        // The owner's block and hide rules. A failed read lists every tool and blocks none: the
+        // approval gate still reads the same rules before any consequential call.
+        const loadOwnerToolRules = () =>
+          Promise.resolve()
+            .then(loadApprovalRules)
+            .catch((error: unknown) => {
+              getLogger().warn("tool_rules.load_failed", {
+                runId: run.id,
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return [] as ActionApprovalRule[];
+            });
         let autoReviewPreferencePromise: Promise<boolean> | undefined;
         const loadAutoReviewPreference = () => {
           autoReviewPreferencePromise ??= deps.prisma.actionAutoReviewPreference
@@ -5249,14 +5264,19 @@ export function createRunExecutor(deps: ExecutorDeps) {
         // The intro turn confirms how a bot read its own role before anyone hands it
         // real work — it must not be able to act on that reading (shell, computer,
         // scheduling, spawning another bot, ...) before the user has assigned any task.
+        const listedTools = withoutHiddenTools(
+          [...builtins, ...exposedConnectorTools],
+          await loadOwnerToolRules(),
+          connectedPlugins.map((plugin) => plugin.provider),
+        );
         const tools =
           run.trigger === "created"
             ? []
             : run.trigger === "recruiting_grade"
-              ? gradingTools([...builtins, ...exposedConnectorTools], run.clientNonce)
+              ? gradingTools(listedTools, run.clientNonce)
               : run.trigger === "recruiting_checkin"
-                ? checkinTools([...builtins, ...exposedConnectorTools])
-                : [...builtins, ...exposedConnectorTools];
+                ? checkinTools(listedTools)
+                : listedTools;
         if (run.trigger === "recruiting_grade")
           getLogger().info("recruiting.grade.tools", {
             runId: run.id,
@@ -5844,6 +5864,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
             const refusal = checkinToolRefusal(name);
             if (refusal) return { error: refusal };
           }
+          if (
+            blockedToolEffect({
+              toolName: name,
+              connectorKind: connectorKindFromToolName(
+                name,
+                connectedPlugins.map((plugin) => plugin.provider),
+              ),
+              rules: await loadOwnerToolRules(),
+            })
+          )
+            return { error: BLOCKED_TOOL_REFUSAL };
           if (toolReadsExternalText(name, !BUILTIN_AGENT_TOOL_NAMES.has(name)))
             readExternalText = true;
           // Before the first picks, one step's extra searches are refused once: the model picks
@@ -7530,6 +7561,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
                   policyToolName,
                   connectedPlugins.map((plugin) => plugin.provider),
                 );
+          // The owner's "off" rule beats every other gate, including a recruiter's "send".
+          const ownerRules = await loadOwnerToolRules();
+          if (
+            [
+              { toolName: policyToolName, connectorKind: policyConnectorKind },
+              { toolName: name, connectorKind },
+            ].some((target) =>
+              blockedToolEffect({ ...target, readOnly: declaredReadOnly, rules: ownerRules }),
+            )
+          )
+            return { error: BLOCKED_TOOL_REFUSAL };
           let approvalResolved = requiresMandatoryApproval
             ? {
                 decision: "ask" as const,
