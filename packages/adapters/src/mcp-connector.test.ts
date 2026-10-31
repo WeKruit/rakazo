@@ -1622,6 +1622,56 @@ describe("MCP connector session cache", () => {
     }
   });
 
+  it("keeps the shared session when the caller stops waiting for a call", async () => {
+    const state = {
+      failNext: false,
+      initializations: 0,
+      hang: true,
+      tools: [{ name: "echo", inputSchema: { type: "object" } }],
+    };
+    vi.stubGlobal("fetch", mcpFetch(state));
+    const connector = new McpConnector(
+      {
+        botMcpServer: {
+          findMany: vi.fn().mockResolvedValue([ASSIGNMENT]),
+          findFirst: vi.fn().mockResolvedValue(ASSIGNMENT),
+        },
+      } as never,
+      {} as never,
+      { network: TEST_NETWORK },
+    );
+    const contextWith = (signal: AbortSignal) =>
+      ({ spaceId: "w1", userId: "u1", botId: "bot-1", signal }) as never;
+    try {
+      const tool = (await connector.discoverTools(contextWith(new AbortController().signal)))[0]!;
+      const caller = new AbortController();
+      const events: unknown[] = [];
+      const cancelled = (async () => {
+        for await (const event of connector.execute(
+          { tool: tool.name, args: {}, route: tool.route, executionId: "cancelled" },
+          contextWith(caller.signal),
+        ))
+          events.push(event);
+      })();
+      await vi.waitFor(() => expect(state.initializations).toBe(1));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      caller.abort();
+      await cancelled;
+      expect(events).toMatchObject([{ type: "error" }]);
+      state.hang = false;
+      const next: unknown[] = [];
+      for await (const event of connector.execute(
+        { tool: tool.name, args: {}, route: tool.route, executionId: "next" },
+        contextWith(new AbortController().signal),
+      ))
+        next.push(event);
+      expect(next).toMatchObject([{ type: "result" }]);
+      expect(state.initializations).toBe(1);
+    } finally {
+      await connector.close();
+    }
+  });
+
   it.each(["assignment", "authorization", "session", "cancellation"])(
     "keeps a pre-dispatch %s failure an ordinary error",
     async (failure) => {
