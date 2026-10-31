@@ -5,6 +5,7 @@ import type {
   MemorySnapshot,
   MemoryStore,
 } from "@rakazo/adapter-kit";
+import type { TextJudge } from "./judge.js";
 
 const MAX_AGENT_MEMORY_BYTES = 32 * 1024;
 const MEMORY_CUT_NOTICE_MAX_BYTES = 1024;
@@ -158,4 +159,29 @@ function updatedLabel(updatedAt: string | undefined): string {
 function memoryTimestamp(updatedAt: string | undefined): number {
   const timestamp = Date.parse(updatedAt ?? "");
   return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+const LASTING_PREFERENCE_QUESTION =
+  "A recruiter wrote `message` to their recruiting assistant. Does it state a lasting preference, rule, fact or role requirement the assistant should remember for future conversations? Answer no for a one-off request, a question, a reaction or a decision about a single candidate.";
+const LASTING_PREFERENCE_AT = 0.6;
+// Read beside the run's other setup loads, so a quick judge adds no wait.
+const LASTING_PREFERENCE_TIMEOUT_MS = 1_500;
+
+/**
+ * A nudge for the turn context when the recruiter's message reads as something to remember.
+ * The agent still decides: it checks memory first and saves the recruiter's own words.
+ */
+export async function lastingPreferenceNote(
+  judge: TextJudge | undefined,
+  message: string,
+): Promise<string | undefined> {
+  if (!judge || !message.trim()) return undefined;
+  const p = await judge.yes(
+    LASTING_PREFERENCE_QUESTION,
+    { message },
+    AbortSignal.timeout(LASTING_PREFERENCE_TIMEOUT_MS),
+  );
+  return p !== undefined && p >= LASTING_PREFERENCE_AT
+    ? 'The recruiter\'s latest message reads as a lasting preference, rule or role requirement. If memory does not already hold it, save their exact words in this turn (recruiting_feedback target "preference" for a recruiting preference or role requirement, otherwise remember), then do what they asked.'
+    : undefined;
 }

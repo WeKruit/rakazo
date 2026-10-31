@@ -471,7 +471,7 @@ import {
   needsOAuthProbe,
   parseMcpServerToolArgs,
 } from "./mcp-server-tool.js";
-import { loadAgentMemoryContext } from "./memory-context.js";
+import { lastingPreferenceNote, loadAgentMemoryContext } from "./memory-context.js";
 import type { MemoryProviderResolver } from "./memory-provider-factory.js";
 import { applyMemoryEdit, nativeMemorySaveError, selectMemoryTools } from "./memory-tools.js";
 import {
@@ -4806,6 +4806,27 @@ export function createRunExecutor(deps: ExecutorDeps) {
                 context,
               )
             : Promise.resolve(null),
+        );
+        // A recruiter's own message that reads as a lasting preference gets a nudge to save it.
+        const preferenceNotePromise = ownTime(
+          "preferenceNote",
+          !messagingChannelRun &&
+            (run.trigger === "user" || run.trigger === "follow_up") &&
+            currentTurnMessage?.role === "user" &&
+            currentTurnMessage.botId === null &&
+            deps.judge
+            ? deps.judge
+                .resolve()
+                .then((judge) =>
+                  lastingPreferenceNote(
+                    judge,
+                    (currentTurnMessage.blocks as MessageBlock[])
+                      .flatMap((block) => (block.kind === "text" ? [block.text] : []))
+                      .join("\n"),
+                  ),
+                )
+                .catch(() => undefined)
+            : Promise.resolve(undefined),
         );
         const memoryContextPromise = ownTime(
           "memoryContext",
@@ -12884,6 +12905,7 @@ export function createRunExecutor(deps: ExecutorDeps) {
             : undefined,
           stoppedRunNotice,
           resumeBrief,
+          preferenceNote: await preferenceNotePromise,
           sourceInstructions,
         });
         const runtimeHistory: AgentRunRequest["history"] = [
@@ -15279,6 +15301,7 @@ export function userTurnContext(parts: {
   redactedTicketContext?: string | undefined;
   stoppedRunNotice?: string | undefined;
   resumeBrief?: string | undefined;
+  preferenceNote?: string | undefined;
   sourceInstructions?: readonly string[];
 }): string | undefined {
   const sections = [
@@ -15287,6 +15310,7 @@ export function userTurnContext(parts: {
     parts.redactedTicketContext,
     parts.stoppedRunNotice,
     parts.resumeBrief,
+    parts.preferenceNote,
     ...(parts.sourceInstructions ?? []),
   ].filter((section): section is string => Boolean(section));
   if (sections.length === 0) return undefined;
