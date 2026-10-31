@@ -509,9 +509,7 @@ export function ShellPanelContent({
                       crons,
                       timezone: localTimezone(),
                       active: routineDraft.active,
-                      ...(routineDraft.notify !== targetRoutine.notify
-                        ? { notify: routineDraft.notify }
-                        : {}),
+                      notify: routineDraft.notify,
                       webhookEnabled: routineDraft.webhookEnabled,
                       githubEnabled: routineDraft.githubEnabled,
                       messageProvider: routineDraft.messageProvider,
