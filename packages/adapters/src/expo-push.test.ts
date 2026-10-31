@@ -658,6 +658,27 @@ describe("expo push", () => {
     ).rejects.toThrow("boom");
   });
 
+  it("gives the claim back when Expo fails, so the retry delivers", async () => {
+    const dataDir = memoryPushTokens();
+    await savePushToken(dataDir, "user-1", "ExponentPushToken[test]");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse({ errors: [{ message: "boom" }] }, 500))
+      .mockResolvedValue(jsonResponse({ data: { status: "ok", id: "ticket" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const push = new ExpoPushProvider(dataDir);
+    const message = {
+      kind: "completion" as const,
+      title: "done",
+      body: "ok",
+      botId: "b",
+      threadId: "t",
+    };
+    await expect(push.send(message, notifyContext)).rejects.toThrow("boom");
+    await push.send(message, notifyContext);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("rejects and cancels a declared oversized response", async () => {
     const dataDir = memoryPushTokens();
     await savePushToken(dataDir, "user-1", "ExponentPushToken[test]");

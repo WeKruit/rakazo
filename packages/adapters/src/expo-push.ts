@@ -5,7 +5,7 @@ import type {
   NotificationProvider,
 } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
-import { claimConversationNotification } from "@rakazo/db";
+import { claimConversationNotification, releaseConversationNotification } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
 import { combineSignals } from "./connector-safety.js";
 import { readBodyCapped, withAbort } from "./web-ssrf.js";
@@ -27,7 +27,7 @@ export function expoPushData(message: NotificationMessage, spaceId: string, deli
   };
 }
 
-export type PushTokenDb = Pick<PrismaClient, "pushToken" | "$transaction">;
+export type PushTokenDb = Pick<PrismaClient, "pushToken" | "$transaction" | "event">;
 
 /** Registration found that its session was already gone. */
 export class PushSessionEndedError extends Error {
@@ -180,7 +180,25 @@ export class ExpoPushProvider implements NotificationProvider {
       kind: message.kind,
     });
     if (!claim) return "suppressed";
-    if ((await this.deliverableToken(context.userId)) !== token) return "undeliverable";
+    try {
+      return await this.post(token, claim, message, context);
+    } catch (error) {
+      // An undelivered push gives its claim back, so the retry job can send it.
+      await releaseConversationNotification(this.prisma, claim).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  private async post(
+    token: string,
+    claim: string,
+    message: NotificationMessage,
+    context: AdapterContext,
+  ): Promise<ExpoPushDelivery> {
+    if ((await this.deliverableToken(context.userId)) !== token) {
+      await releaseConversationNotification(this.prisma, claim).catch(() => undefined);
+      return "undeliverable";
+    }
     const signal = combineSignals(context.signal, AbortSignal.timeout(EXPO_PUSH_TIMEOUT_MS));
     let response: Response;
     try {

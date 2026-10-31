@@ -147,6 +147,7 @@ const UNATTENDED_SAFE_BUILTIN_TOOLS = new Set([
   "request_takeover",
   "run_subagent",
   "task_catalog",
+  "wait_for_work",
   "schedule_list",
   "scratchpad_list",
   "skill_read",

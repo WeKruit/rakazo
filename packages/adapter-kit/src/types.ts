@@ -741,6 +741,8 @@ export interface BackgroundJobPayloads {
   "recruiting_agent_run.wait": { threadId: string; botId: string; agentRunId: string };
   /** After a conversation goes quiet, make sure the person's newest message got a reply. */
   "thread.reply_check": { threadId: string };
+  /** Deliver a run notification whose first push failed; the queue retries with backoff. */
+  "notification.retry": { runId: string; message: NotificationMessage };
 }
 
 export type BackgroundJobName = keyof BackgroundJobPayloads;

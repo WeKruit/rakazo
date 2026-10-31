@@ -70,6 +70,11 @@ export function memoryPushTokens(
     },
   };
   const event = {
+    deleteMany: async ({ where }: { where: { id: string; type: string } }) => {
+      const index = events.findIndex((row) => row.id === where.id && row.type === where.type);
+      if (index >= 0) events.splice(index, 1);
+      return { count: index >= 0 ? 1 : 0 };
+    },
     create: async ({ data }: { data: Omit<(typeof events)[number], "id" | "createdAt"> }) => {
       const saved = { ...data, id: `notice-${events.length}`, createdAt: new Date() };
       events.push(saved);
@@ -146,6 +151,7 @@ export function memoryPushTokens(
   };
   const db = {
     pushToken,
+    event,
     $transaction: async (body: (tx: unknown) => Promise<unknown>) => {
       const result = transactionTail.then(() =>
         body({ pushToken, thread, event, run, $queryRaw: async () => [{ id: "live" }] }),

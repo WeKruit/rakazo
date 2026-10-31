@@ -5,6 +5,8 @@ import {
   historyCompactJob,
   historyCompactJobKey,
   messagingDeliverJob,
+  NOTIFICATION_RETRY_ATTEMPTS,
+  notificationRetryJob,
   parseBackgroundJob,
 } from "./background-jobs.js";
 import type { BackgroundJobHandlers } from "./types.js";
@@ -25,6 +27,7 @@ function handlers(): BackgroundJobHandlers {
     "recruiting_checkin.start": vi.fn(async () => undefined),
     "recruiting_agent_run.wait": vi.fn(async () => undefined),
     "thread.reply_check": vi.fn(async () => undefined),
+    "notification.retry": vi.fn(async () => undefined),
   };
 }
 
@@ -116,5 +119,25 @@ describe("historyCompactJob", () => {
 
   it("keys different threads differently", () => {
     expect(historyCompactJobKey("thread-1")).not.toBe(historyCompactJobKey("thread-2"));
+  });
+});
+
+describe("notificationRetryJob", () => {
+  it("retries a failed run notification a few times and dispatches it intact", async () => {
+    const message = {
+      kind: "completion" as const,
+      title: "Main finished",
+      body: "Found 12 people",
+      botId: "bot-1",
+      threadId: "thread-1",
+    };
+    const job = notificationRetryJob({ runId: "run-1", message }, new Date(0));
+    expect(job).toMatchObject({
+      replaceKey: "notification.retry:run-1:completion",
+      maxAttempts: NOTIFICATION_RETRY_ATTEMPTS,
+    });
+    const handlers = { "notification.retry": vi.fn(async () => undefined) };
+    await dispatchBackgroundJob(handlers as never, job.name, job.payload);
+    expect(handlers["notification.retry"]).toHaveBeenCalledWith({ runId: "run-1", message });
   });
 });

@@ -31,6 +31,7 @@ import {
   DEFAULT_CONTEXT_STRATEGY,
   historyCompactJob,
   MEMORY_REVISION_CONFLICT_ERROR,
+  notificationRetryJob,
   recruitingAgentRunWaitJob,
   routineJobKey,
   routineWakeupJob,
@@ -291,6 +292,7 @@ import {
   resolveAutoReviewProviderKind,
 } from "./auto-review.js";
 import { createAutoReviewProvider } from "./auto-review-factory.js";
+import { waitForBackgroundWork } from "./background-wait.js";
 import { attachedImageArtifactIds, resolveUpdateBotAvatar } from "./bot-avatar.js";
 import { loadBotMessageContext, messageBot, returnBotMessageOutcome } from "./bot-messages.js";
 import {
@@ -1211,6 +1213,7 @@ const READ_ONLY_AGENT_TOOLS = new Set([
   "browser_snapshot",
   "list_secrets",
   "cloud_agent_status",
+  "wait_for_work",
 ]);
 /** Added to the turn prompt when the user spoke this message on a live voice call. */
 const VOICE_CALL_BASE_INSTRUCTION =
@@ -10303,6 +10306,17 @@ export function createRunExecutor(deps: ExecutorDeps) {
               ),
             );
           }
+          if (name === "wait_for_work") {
+            return waitForBackgroundWork(deps.prisma, {
+              threadId: run.threadId,
+              selfRunId: run.id,
+              ids: Array.isArray(args.ids) ? args.ids.map(String) : undefined,
+              mode: args.mode === "any" ? "any" : "all",
+              timeoutSeconds:
+                typeof args.timeout_seconds === "number" ? args.timeout_seconds : undefined,
+              signal: context.signal,
+            });
+          }
           if (name === "task_catalog") {
             return taskCatalogFromTool(deps, {
               spaceId: run.spaceId,
@@ -13887,19 +13901,37 @@ async function notifyRun(
     return null;
   });
   if (!notice?.enabled) return;
-  await deps.notifications
-    .send(notice.groupId ? { ...message, groupId: notice.groupId } : message, {
-      operationId: "notify",
-      traceId: run.botId,
-      runId: run.id,
-      spaceId: run.spaceId,
-      userId: run.userId,
-      botId: run.botId,
-      signal: new AbortController().signal,
-    })
-    .catch((error) => {
-      getLogger().error("run notification", error);
-    });
+  const routed = notice.groupId ? { ...message, groupId: notice.groupId } : message;
+  await sendRunNotification(deps.notifications, run, routed).catch(async (error) => {
+    getLogger().error("run notification", error);
+    // A failed push is retried by the job queue instead of being lost.
+    await deps.jobs
+      .enqueue(
+        notificationRetryJob(
+          { runId: run.id, message: routed },
+          new Date(Date.now() + NOTIFICATION_RETRY_DELAY_MS),
+        ),
+      )
+      .catch((enqueueError) => getLogger().error("run notification retry", enqueueError));
+  });
+}
+
+const NOTIFICATION_RETRY_DELAY_MS = 30_000;
+
+export function sendRunNotification(
+  notifications: NotificationProvider,
+  run: { id: string; spaceId: string; userId: string; botId: string },
+  message: NotificationMessage,
+): Promise<void> {
+  return notifications.send(message, {
+    operationId: "notify",
+    traceId: run.botId,
+    runId: run.id,
+    spaceId: run.spaceId,
+    userId: run.userId,
+    botId: run.botId,
+    signal: AbortSignal.timeout(30_000),
+  });
 }
 
 async function renewRunLease(

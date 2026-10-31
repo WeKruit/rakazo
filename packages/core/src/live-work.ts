@@ -24,6 +24,7 @@ export type WorkActivity =
   | "crm"
   | "question"
   | "specialist"
+  | "waiting"
   | "working";
 
 const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
@@ -58,6 +59,7 @@ const BUILTIN_ACTIVITIES: Record<string, WorkActivity> = {
   recruiting_request_approval: "question",
   ask_user: "question",
   run_subagent: "specialist",
+  wait_for_work: "waiting",
   message_bot: "specialist",
   handoff_to_bot: "specialist",
   message_agent: "specialist",
@@ -709,6 +711,7 @@ const STATUS_LABELS: Record<WorkActivity, string> = {
   crm: "checking candidate records",
   question: "preparing a question",
   specialist: "asking a specialist",
+  waiting: "waiting for background work",
   working: "working on it",
 };
 
