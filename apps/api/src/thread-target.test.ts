@@ -2165,7 +2165,8 @@ describe("sendThreadMessage", () => {
     expect(tx.task.create).not.toHaveBeenCalled();
   });
 
-  it.each(["created", "bot_message"] as const)(
+  // A teammate's report, a routine or grading run beside the person's turn instead (below).
+  it.each(["created"] as const)(
     "keeps human input for its own reply while a %s turn is active",
     async (trigger) => {
       const tx = {
@@ -2632,7 +2633,7 @@ describe("sendThreadMessage", () => {
     });
   });
 
-  it("keeps a message pending instead of steering into an active routine run", async () => {
+  it("starts the person's own turn beside an active routine run", async () => {
     let messageSeq = 0;
     let eventSeq = 0;
     const tx = {
@@ -2697,25 +2698,16 @@ describe("sendThreadMessage", () => {
         target,
         { text: "what are the alternatives?", clientNonce: "nonce-routine" },
       ),
-    ).resolves.toMatchObject({
-      runId: "run-routine",
-      taskId: "task-routine",
-      runIds: ["run-routine"],
+    ).resolves.toMatchObject({ runId: "run-user", taskId: "task-user" });
+    // No work makes the person wait: the routine keeps running and the message starts its own
+    // turn at once instead of waiting as steering until the routine ends.
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ trigger: "user", sourceMessageId: "msg-1" }),
     });
-    // Pending steering (no run): the routine's turn never claims it, and the continuation
-    // that starts when the routine finishes answers with the full thread.
-    expect(tx.steeringMessage.create).toHaveBeenCalledWith({
-      data: { messageId: "msg-1", botId: "bot-1", userId: "user-1", runId: null },
-    });
-    expect(tx.task.create).not.toHaveBeenCalled();
-    expect(tx.run.create).not.toHaveBeenCalled();
-    expect(tx.message.update).toHaveBeenCalledWith({
-      where: { id: "msg-1" },
-      data: { runId: "run-routine" },
-    });
-    expect(enqueue).not.toHaveBeenCalled();
+    expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ name: "run.continue" }));
   });
-  it("keeps a group message pending instead of steering into a member's webhook run", async () => {
+  it("starts a group member's own turn beside its webhook run", async () => {
     let messageSeq = 0;
     let eventSeq = 0;
     const tx = {
@@ -2798,11 +2790,11 @@ describe("sendThreadMessage", () => {
       { text: "and the Dallas ones?", clientNonce: "nonce-group-webhook" },
     );
 
-    expect(result).toMatchObject({ runId: "run-webhook", taskId: "task-webhook" });
-    expect(tx.steeringMessage.create).toHaveBeenCalledWith({
-      data: { messageId: "msg-1", botId: "bot-a", userId: "user-1", runId: null },
+    expect(result).toMatchObject({ runId: "run-a", taskId: "task-a" });
+    expect(tx.steeringMessage.create).not.toHaveBeenCalled();
+    expect(tx.run.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ botId: "bot-a", trigger: "user" }),
     });
-    expect(tx.run.create).not.toHaveBeenCalled();
   });
   it("answers a progress question from a working teammate without interrupting it", async () => {
     let messageSeq = 0;
