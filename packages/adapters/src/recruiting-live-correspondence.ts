@@ -310,6 +310,8 @@ export async function refreshRecruitingCorrespondence(
           output.partial ||= !!cursor;
           output.status = "ready";
         }
+        // Instantly was checked: a role without a campaign has no replies, not an unknown count.
+        if (output.status === "not_checked") output.status = "ready";
       } else {
         const day = Math.floor(Date.now() / 86400000) * 86400000;
         const from = new Date(day - 30 * 86400000).toISOString();
