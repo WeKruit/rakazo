@@ -180,6 +180,15 @@ while [ "$ACTIVE" != "[]" ] && [ "${RELEASE_ALLOW_ACTIVE:-}" != "$SHORT" ] && [ 
   log "waiting for gap, active: $([ "$ACTIVE" = unknown ] && echo unknown || echo "$ACTIVE" | grep -o '"status"' | wc -l)"
 done
 
+# Left-nav pages that already fail on the live build do not block a release; only regressions do.
+BASE_VIEWS=unknown
+if [ -f "$DIR/infra/acceptance/home-load.mjs" ] && [ -n "${RAKAZO_EMAIL:-}" ] && [ -n "${RAKAZO_PASSWORD:-}" ]; then
+  RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
+    node "$DIR/infra/acceptance/home-load.mjs" > "$WORK/home-base-$SHORT.log" 2>&1 && BASE_VIEWS=ok || {
+      [ $? = 3 ] || BASE_VIEWS=failing; }
+  log "live build left-nav pages: $BASE_VIEWS"
+fi
+
 [ -z "$PREBUILD" ] || { wait "$PREBUILD" && mkdir -p "$WORK/prebuilt" && touch "$WORK/prebuilt/$SHA" && log "image prebuilt" || log "image prebuild failed (log: $WORK/prebuild-$SHORT.log); deploy builds it"; }
 
 # 5) Deploy, sampling public /health every 2 s to measure the outage window.
@@ -215,12 +224,15 @@ if [ -f "$DIR/infra/acceptance/smoke.mjs" ]; then
     for attempt in 1 2; do
       RAKAZO_ORIGIN="${RAKAZO_ORIGIN:-https://headhunter.wekruit.com}" RAKAZO_SESSION_FILE="$WORK/home-session.json" \
         node "$DIR/infra/acceptance/home-load.mjs" > "$WORK/home-$SHORT.log" 2>&1 && home=0 || home=$?
-      [ "$home" = 1 ] || break
+      [ "$home" = 1 ] || [ "$home" = 4 ] || break
       sleep 10
     done
     case "$home" in
       0) log "home load ok: $(grep -o 'overview [0-9]* ms' "$WORK/home-$SHORT.log")" ;;
       1) cat "$WORK/home-$SHORT.log"; rollback "home page too slow (log: $WORK/home-$SHORT.log)" ;;
+      4) cat "$WORK/home-$SHORT.log"
+         [ "$BASE_VIEWS" = failing ] || rollback "left-nav pages broken (log: $WORK/home-$SHORT.log)"
+         log "WARN left-nav pages still fail, as on the live build before this release" ;;
       *) log "WARN home load check not run: $(head -1 "$WORK/home-$SHORT.log")" ;;
     esac
   else
